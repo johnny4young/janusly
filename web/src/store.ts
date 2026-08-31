@@ -329,6 +329,28 @@ function clearedRunProjection(runTransitionGeneration: number) {
   }
 }
 
+/** One canonical blank editor projection for new, signed-out, and switched workspaces. */
+function clearedWorkflowProjection(workflowRevision: number) {
+  return {
+    currentWorkflowId: `workflow_${crypto.randomUUID().slice(0, 8)}`,
+    currentWorkflowName: t('workflow.defaultName'),
+    currentWorkflowSaved: false,
+    workflowDirty: false,
+    workflowRevision: workflowRevision + 1,
+    historyPast: [],
+    historyFuture: [],
+    currentWorkflowInputs: undefined,
+    currentWorkflowOutputs: undefined,
+    currentWorkflowTemplatePolicy: undefined,
+    currentWorkflowMetadata: undefined,
+    currentWorkflowRecovery: undefined,
+    nodes: [],
+    edges: [],
+    selectedNodeId: null,
+    selectedEdgeId: null,
+  }
+}
+
 function graphToWorkflow(
   id: string,
   name: string,
@@ -430,6 +452,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           toasts: [],
           activeRecoveryCaseId: null,
           activeTab: state.activeTab === 'recoveryCase' ? 'home' : state.activeTab,
+          // Canvas state is tenant data. Carrying it across an identity or
+          // workspace switch can both display stale content and let the draft
+          // autosave persist org A's prompts/URLs under org B's storage key.
+          ...clearedWorkflowProjection(state.workflowRevision),
           ...clearedRunProjection(state.runTransitionGeneration),
           recoveryIntroDismissedThisSession: false,
         }
@@ -449,6 +475,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     activeRecoveryCaseId: null,
     activeTab: state.activeTab === 'recoveryCase' ? 'home' : state.activeTab,
     recoveryIntroDismissedThisSession: false,
+    ...clearedWorkflowProjection(state.workflowRevision),
     ...clearedRunProjection(state.runTransitionGeneration),
   })),
   setAuthReady: (authReady) => set({ authReady }),
@@ -544,26 +571,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   newWorkflow: () => {
-    const id = `workflow_${crypto.randomUUID().slice(0, 8)}`
     set((state) => ({
-      currentWorkflowId: id,
-      currentWorkflowName: t('workflow.defaultName'),
-      currentWorkflowSaved: false,
-      workflowDirty: false,
-      currentWorkflowInputs: undefined,
-      currentWorkflowOutputs: undefined,
-      currentWorkflowTemplatePolicy: undefined,
-      currentWorkflowMetadata: undefined,
-      currentWorkflowRecovery: undefined,
-      nodes: [],
-      edges: [],
-      selectedNodeId: null,
-      selectedEdgeId: null,
-      historyPast: [],
-      historyFuture: [],
+      ...clearedWorkflowProjection(state.workflowRevision),
       ...clearedRunProjection(state.runTransitionGeneration),
       activeTab: 'inspector',
-      workflowRevision: state.workflowRevision + 1,
     }))
   },
 

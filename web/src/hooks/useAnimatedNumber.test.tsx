@@ -131,4 +131,35 @@ describe('useAnimatedNumber', () => {
       raf.restore()
     }
   })
+
+  it('settles at the target even when requestAnimationFrame never fires', () => {
+    vi.useFakeTimers()
+    const request = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
+    const captured: Captured = { value: -1 }
+
+    render(<Harness target={71} durationMs={800} snap={false} captured={captured} />)
+    expect(captured.value).toBe(0)
+    expect(request).toHaveBeenCalled()
+
+    act(() => vi.advanceTimersByTime(950))
+    expect(captured.value).toBe(71)
+    vi.useRealTimers()
+  })
+
+  it('clears the settle timer when unmounted', () => {
+    vi.useFakeTimers()
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
+    const clear = vi.spyOn(window, 'clearTimeout')
+    const captured: Captured = { value: -1 }
+
+    const { unmount } = render(
+      <Harness target={42} durationMs={600} snap={false} captured={captured} />,
+    )
+    unmount()
+    expect(clear).toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(5_000))
+    vi.useRealTimers()
+  })
 })

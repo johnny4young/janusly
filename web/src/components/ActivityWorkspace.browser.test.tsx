@@ -87,6 +87,42 @@ describe('<ActivityWorkspace /> (browser smoke)', () => {
     expect(screen.getByTestId('activity-feed-list')).toBeVisible()
   })
 
+  it('focuses newly opened recovery evidence without adding a tab stop', async () => {
+    const view = render(<ActivityWorkspace {...props()} />)
+    fireEvent.click(screen.getByTestId('activity-row-recovery:recovery-browser').querySelector('button')!)
+    const updated = props()
+    updated.activeRecoveryId = 'recovery-browser'
+    view.rerender(<ActivityWorkspace {...updated} />)
+
+    const panel = await screen.findByTestId('activity-detail')
+    await waitFor(() => expect(document.activeElement).toBe(panel))
+    expect(panel).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('scrolls offscreen detail into view but leaves visible detail in place', async () => {
+    const originalRect = Element.prototype.getBoundingClientRect
+    const originalScroll = Element.prototype.scrollIntoView
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    Element.prototype.getBoundingClientRect = function () {
+      const bounds = originalRect.call(this) as DOMRect
+      if ((this as HTMLElement).dataset?.testid === 'activity-detail') {
+        return { ...bounds, top: window.innerHeight + 200, bottom: window.innerHeight + 900 } as DOMRect
+      }
+      return bounds
+    }
+    try {
+      const view = render(<ActivityWorkspace {...props()} />)
+      const updated = props()
+      updated.activeRecoveryId = 'recovery-browser'
+      view.rerender(<ActivityWorkspace {...updated} />)
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce())
+    } finally {
+      Element.prototype.getBoundingClientRect = originalRect
+      Element.prototype.scrollIntoView = originalScroll
+    }
+  })
+
   it('keeps every activity row field inside the fixed virtualized card on mobile', () => {
     render(
       <div style={{ width: 430 }}>

@@ -38,6 +38,7 @@ const CREDENTIAL_KINDS = [
   'postgres',
   'pagerduty_api_token',
   'pagerduty_webhook_secret',
+  'external_runtime_signing_secret',
 ] as const
 
 type CreateCredential = (credential: {
@@ -51,9 +52,11 @@ type CreateCredential = (credential: {
 function CredentialCreateDialog({
   onClose,
   onCreate,
+  managedStorageAvailable,
 }: {
   onClose: () => void
   onCreate: CreateCredential
+  managedStorageAvailable: boolean
 }) {
   const { t } = useT()
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -66,6 +69,14 @@ function CredentialCreateDialog({
   const [expiresAt, setExpiresAt] = useState('')
   const [submitting, setSubmitting] = useState(false)
   useDialogFocusTrap(dialogRef, { initialFocus: nameRef })
+
+  useEffect(() => {
+    if (managedStorageAvailable || storage !== 'managed') return
+    // A late health response may arrive after the dialog opened. Move away
+    // from the unavailable path and erase a value that can no longer submit.
+    setStorage('environment')
+    setSecretValue('')
+  }, [managedStorageAvailable, storage])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -155,14 +166,24 @@ function CredentialCreateDialog({
                   </select>
                 )}
               </FormField>
-              <FormField id="credential-storage" label={t('rightPanel.credentials.storageLabel')}>
+              <FormField
+                id="credential-storage"
+                label={t('rightPanel.credentials.storageLabel')}
+                hint={!managedStorageAvailable
+                  ? t('rightPanel.credentials.storage.managedUnavailableHint')
+                  : undefined}
+              >
                 {(controlProps) => (
                   <select
                     {...controlProps}
                     value={storage}
                     onChange={(event) => setStorage(event.target.value as 'managed' | 'environment')}
                   >
-                    <option value="managed">{t('rightPanel.credentials.storage.managed')}</option>
+                    <option value="managed" disabled={!managedStorageAvailable}>
+                      {managedStorageAvailable
+                        ? t('rightPanel.credentials.storage.managed')
+                        : t('rightPanel.credentials.storage.managedUnavailable')}
+                    </option>
                     <option value="environment">{t('rightPanel.credentials.storage.environment')}</option>
                   </select>
                 )}
@@ -255,6 +276,7 @@ export function ConnectionsPanel({
   const [rotating, setRotating] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<string | null>(null)
   const [healthByName, setHealthByName] = useState<Map<string, CredentialHealthSnapshot>>(new Map())
+  const [managedStorageAvailable, setManagedStorageAvailable] = useState(true)
   const [healthUnavailable, setHealthUnavailable] = useState(false)
   const [expiryNowMs, setExpiryNowMs] = useState(() => Date.now())
 
@@ -264,22 +286,29 @@ export function ConnectionsPanel({
   }, [])
 
   useEffect(() => {
-    if (credentials.length === 0) return
     let cancelled = false
     setHealthUnavailable(false)
     setHealthByName(new Map())
+    setManagedStorageAvailable(true)
     api('/credentials/health')
       .then((response) => {
         if (cancelled) return
-        const raw = (response ?? {}) as { credentials?: CredentialHealthSnapshot[] }
+        const raw = (response ?? {}) as {
+          credentials?: CredentialHealthSnapshot[]
+          managedStorageAvailable?: boolean
+        }
         const map = new Map<string, CredentialHealthSnapshot>()
         for (const entry of Array.isArray(raw.credentials) ? raw.credentials : []) {
           if (entry && typeof entry.name === 'string') map.set(entry.name, entry)
         }
         setHealthByName(map)
+        setManagedStorageAvailable(raw.managedStorageAvailable === true)
       })
       .catch(() => {
-        if (!cancelled) setHealthUnavailable(true)
+        if (!cancelled) {
+          setHealthUnavailable(true)
+          setManagedStorageAvailable(false)
+        }
     })
     return () => { cancelled = true }
   }, [credentials, platformVersion])
@@ -370,7 +399,7 @@ export function ConnectionsPanel({
           </label>
         </div>
 
-        {credentials.length > 0 && healthUnavailable && (
+        {healthUnavailable && (
           <p className="we-connections-inventory__notice" role="status">
             <AlertCircle size={14} aria-hidden="true" />
             {t('rightPanel.credentials.healthUnavailable')}
@@ -509,6 +538,7 @@ export function ConnectionsPanel({
         <CredentialCreateDialog
           onClose={() => setCreating(false)}
           onCreate={onCreateCredential}
+          managedStorageAvailable={managedStorageAvailable}
         />
       )}
       {rotating && canWrite && (

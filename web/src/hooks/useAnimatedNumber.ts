@@ -17,9 +17,13 @@
  * - Cleanup on unmount cancels the pending `requestAnimationFrame`.
  * - `snap=true` returns `target` synchronously on the next render; no rAF
  *   is scheduled.
+ * - A settle timer guarantees convergence when a hidden document receives no
+ *   animation frames.
  */
 
 import { useEffect, useRef, useState } from 'react'
+
+const SETTLE_GRACE_MS = 150
 
 export function useAnimatedNumber(target: number, durationMs: number, snap: boolean): number {
   const [value, setValue] = useState(snap ? target : 0)
@@ -54,9 +58,20 @@ export function useAnimatedNumber(target: number, durationMs: number, snap: bool
       }
     }
     rafRef.current = requestAnimationFrame(step)
+    // Browsers suspend requestAnimationFrame for hidden documents. Without a
+    // timer, a partially animated operational value remains wrong forever
+    // because this effect does not re-run until the target changes.
+    const settle = window.setTimeout(() => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+      setValue(target)
+    }, Math.max(0, durationMs) + SETTLE_GRACE_MS)
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
+      window.clearTimeout(settle)
     }
   }, [target, durationMs, snap])
 

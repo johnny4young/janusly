@@ -11,7 +11,7 @@ describe('<RunExplainChat />', () => {
   it('shows fallback mode returned by explain-run', async () => {
     vi.mocked(api).mockResolvedValueOnce({
       mode: 'fallback',
-      answer: 'Run summary: all steps finished.',
+      explanation: 'Run summary: all steps finished.',
     })
 
     render(<RunExplainChat runId="run_1" />)
@@ -25,6 +25,38 @@ describe('<RunExplainChat />', () => {
       expect(screen.getByText('Run summary: all steps finished.')).toBeInTheDocument()
     })
     expect(screen.getByText('Local mode')).toBeInTheDocument()
+  })
+
+  it('renders the explanation field from the real endpoint contract', async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      explanation: '# Summary\n\nThe fetch node failed because DNS did not resolve demo-ingest.invalid.',
+      mode: 'ai',
+      model: 'claude-haiku-4-5-20251001',
+      provider: 'anthropic',
+      report: { failedNode: { nodeId: 'fetch', status: 'failed' } },
+      evidence: [{ kind: 'recent_error', snippet: 'ENOTFOUND' }],
+    })
+
+    render(<RunExplainChat runId="run_1" />)
+    fireEvent.change(screen.getByPlaceholderText(/Ask:/), { target: { value: 'What happened?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Janusly' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/DNS did not resolve demo-ingest.invalid/)).toBeInTheDocument()
+    })
+    expect(screen.queryByText('No explanation available.')).not.toBeInTheDocument()
+  })
+
+  it('uses the empty state only when the endpoint returned no prose', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ mode: 'fallback', report: {} })
+
+    render(<RunExplainChat runId="run_1" />)
+    fireEvent.change(screen.getByPlaceholderText(/Ask:/), { target: { value: 'What happened?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Janusly' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('No explanation available.')).toBeInTheDocument()
+    })
   })
 
   it('lets users pick a plain-language starter question', () => {

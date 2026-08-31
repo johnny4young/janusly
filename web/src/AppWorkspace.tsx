@@ -72,6 +72,7 @@ const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then((mo
 
 type WorkspaceEnvironment = 'sandbox' | 'production'
 type RecoveryPosture = 'blocked' | 'attention' | 'clear'
+export type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
 
 type CanvasModel = {
   activated: boolean
@@ -97,7 +98,7 @@ type HeaderModel = {
   workflowVersion: number | null
   workflowRunsCount: number
   aiHealth: AiHealth | null
-  streamStatus: 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
+  streamStatus: StreamStatus
   recoveryPosture: RecoveryPosture
   recoveryBlockerCount: number
   openRecoveryCount: number
@@ -359,11 +360,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
           <div className="bottom-status-bar__group">
             <span className={`bottom-status-bar__item ${header.streamStatus === 'connected' ? 'bottom-status-bar__item--live' : ''}`}>
               <span className="bottom-status-bar__dot" />
-              <span>
-                {header.streamStatus === 'connected'
-                  ? t('statusBar.operatorOnline')
-                  : t('statusBar.operatorOffline')}
-              </span>
+              <span>{t(streamStatusLabelKey(header.streamStatus))}</span>
             </span>
             {canReadDlq && (
               <>
@@ -426,6 +423,20 @@ function WorkspaceContent(props: AppWorkspaceProps) {
       </I18nNamespaceGate>
     </Suspense>
   )
+}
+
+/** Keep a resting stream distinct from a real transport outage. */
+export function streamStatusLabelKey(status: StreamStatus): string {
+  switch (status) {
+    case 'connected':
+      return 'statusBar.operatorOnline'
+    case 'connecting':
+      return 'statusBar.operatorConnecting'
+    case 'idle':
+      return 'statusBar.operatorIdle'
+    default:
+      return 'statusBar.operatorOffline'
+  }
 }
 
 export function AppWorkspace(props: AppWorkspaceProps) {

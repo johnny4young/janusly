@@ -132,4 +132,18 @@ describe('useDraftAutosave (local drafts)', () => {
     })
     expect(readDraft('wf_corrupt')).toBeNull()
   })
+
+  it('does not write an armed draft timer under a newly selected organization', () => {
+    window.localStorage.setItem('janusly:activeOrg', 'org-a')
+    renderHook(() => useDraftAutosave())
+
+    useWorkflowStore.getState().addNode('http')
+    window.localStorage.setItem('janusly:activeOrg', 'org-b')
+    vi.advanceTimersByTime(5_000)
+
+    expect(Object.keys(window.localStorage).filter((key) => (
+      key.startsWith('janusly:draft:org-b')
+    ))).toEqual([])
+    expect(window.localStorage.getItem('janusly:draft:org-a:wf_draft_test')).toBeNull()
+  })
 })

@@ -248,7 +248,15 @@ func (s *V1Server) credentialHealthCore(r *http.Request, rc v1Request) opResult 
 			"secretRefsPresent": refsPresent,
 		})
 	}
-	return opOK(map[string]any{"credentials": entries, "mcpConnections": mcpEntries})
+	// Managed writes cannot work without a usable external root key. Surface
+	// only that boolean posture so a clean-install UI can offer the environment
+	// reference path before an operator pastes a secret into a doomed request.
+	managedAvailable, managedErr := secretstore.AssertCredentialRootKeyUsable()
+	return opOK(map[string]any{
+		"credentials":             entries,
+		"mcpConnections":          mcpEntries,
+		"managedStorageAvailable": managedAvailable && managedErr == nil,
+	})
 }
 
 func (s *V1Server) createCredentialCore(r *http.Request, rc v1Request) opResult {

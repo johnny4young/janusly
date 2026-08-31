@@ -572,6 +572,59 @@ describe('useWorkflowStore', () => {
     expect(state.events).toEqual([])
   })
 
+  it('clears every tenant-owned canvas field when the workspace changes', () => {
+    useWorkflowStore.setState({
+      userId: 'user-a',
+      orgId: 'org-a',
+      currentWorkflowId: 'wf-private-a',
+      currentWorkflowName: 'Private A',
+      currentWorkflowSaved: true,
+      workflowDirty: true,
+      workflowRevision: 7,
+      currentWorkflowInputs: { type: 'object' },
+      currentWorkflowOutputs: { result: '{{nodes.private.output}}' },
+      currentWorkflowTemplatePolicy: 'strict',
+      currentWorkflowMetadata: { owner: 'a@example.com' },
+      currentWorkflowRecovery: { circuitBreaker: 3 },
+      nodes: [{
+        id: 'private',
+        type: 'default',
+        position: { x: 0, y: 0 },
+        data: { label: 'Tenant A secret', type: 'noop', config: { prompt: 'private' } },
+      }],
+      edges: [],
+      selectedNodeId: 'private',
+      historyPast: [{ nodes: [], edges: [] }],
+      historyFuture: [{ nodes: [], edges: [] }],
+    })
+
+    useWorkflowStore.getState().setAuth({
+      session: null,
+      user: null,
+      userId: 'user-a',
+      orgId: 'org-b',
+    })
+
+    const state = useWorkflowStore.getState()
+    expect(state.currentWorkflowId).not.toBe('wf-private-a')
+    expect(state).toMatchObject({
+      currentWorkflowSaved: false,
+      workflowDirty: false,
+      workflowRevision: 8,
+      nodes: [],
+      edges: [],
+      selectedNodeId: null,
+      selectedEdgeId: null,
+      historyPast: [],
+      historyFuture: [],
+    })
+    expect(state.currentWorkflowInputs).toBeUndefined()
+    expect(state.currentWorkflowOutputs).toBeUndefined()
+    expect(state.currentWorkflowTemplatePolicy).toBeUndefined()
+    expect(state.currentWorkflowMetadata).toBeUndefined()
+    expect(state.currentWorkflowRecovery).toBeUndefined()
+  })
+
   it('does not carry notifications across sign-in or workspace ownership changes', () => {
     useWorkflowStore.setState({
       userId: null,
@@ -647,7 +700,18 @@ describe('useWorkflowStore', () => {
   })
 
   it('preserves the active run when only the auth session refreshes', () => {
-    useWorkflowStore.setState({ userId: 'user-a', orgId: 'org-a', runId: 'run-a' })
+    useWorkflowStore.setState({
+      userId: 'user-a',
+      orgId: 'org-a',
+      runId: 'run-a',
+      currentWorkflowId: 'wf-a',
+      nodes: [{
+        id: 'a',
+        type: 'default',
+        position: { x: 0, y: 0 },
+        data: { label: '', type: 'noop', config: {} },
+      }],
+    })
     const generation = useWorkflowStore.getState().runTransitionGeneration
 
     useWorkflowStore.getState().setAuth({
@@ -659,6 +723,8 @@ describe('useWorkflowStore', () => {
 
     expect(useWorkflowStore.getState().runId).toBe('run-a')
     expect(useWorkflowStore.getState().runTransitionGeneration).toBe(generation)
+    expect(useWorkflowStore.getState().currentWorkflowId).toBe('wf-a')
+    expect(useWorkflowStore.getState().nodes).toHaveLength(1)
   })
 
   it('switches active runs atomically and clears the prior projection', () => {

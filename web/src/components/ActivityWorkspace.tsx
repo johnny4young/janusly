@@ -29,6 +29,7 @@ import {
 } from '../activity-feed'
 import { api } from '../api'
 import { formatStatusLabel, getNodeLabel } from '../constants'
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { getResolvedLocale, useT } from '../i18n'
 import type { DeadLetter } from './dead-letter-types'
@@ -168,6 +169,8 @@ export function ActivityWorkspace({
   const [offListRecovery, setOffListRecovery] = useState<DeadLetter | null>(null)
   const [showDetailedHistory, setShowDetailedHistory] = useState(false)
   const feedHeadingRef = useRef<HTMLHeadingElement | null>(null)
+  const detailRef = useRef<HTMLElement | null>(null)
+  const reducedMotion = usePrefersReducedMotion()
   const previousRunIdRef = useRef(runWorkspaceProps.activeRunId)
   const selectedRunId = pendingRunId ?? runWorkspaceProps.activeRunId
   const selection: ActivitySelection | null = activeRecoveryId
@@ -175,6 +178,7 @@ export function ActivityWorkspace({
     : selectedRunId
       ? { kind: 'run', id: selectedRunId }
       : null
+  const selectionKey = selection ? `${selection.kind}:${selection.id}` : null
   const feed = useMemo(
     () => buildActivityFeed(runWorkspaceProps.runs, deadLetters, runWorkspaceProps.workflows),
     [deadLetters, runWorkspaceProps.runs, runWorkspaceProps.workflows],
@@ -197,6 +201,25 @@ export function ActivityWorkspace({
     rowHeight: ACTIVITY_ROW_HEIGHT,
     resetScrollKey: filter,
   })
+
+  useEffect(() => {
+    if (!selectionKey) return
+    const panel = detailRef.current
+    if (!panel) return
+    const bounds = panel.getBoundingClientRect()
+    const offscreen = bounds.top >= window.innerHeight || bounds.bottom <= 0
+    // Revealing detail is a courtesy, not a content dependency. Embedded or
+    // simulated browsers without scrollIntoView must still retain the panel.
+    if (offscreen && typeof panel.scrollIntoView === 'function') {
+      panel.scrollIntoView({
+        block: 'nearest',
+        behavior: reducedMotion ? 'auto' : 'smooth',
+      })
+    }
+    // Move assistive-technology context to the newly opened evidence without
+    // adding another stop to the normal tab order.
+    panel.focus({ preventScroll: true })
+  }, [reducedMotion, selectionKey])
 
   const selectRun = useCallback((runId: string) => {
     setShowDetailedHistory(false)
@@ -414,7 +437,12 @@ export function ActivityWorkspace({
         </section>
 
         {selection && (
-          <aside className="we-card we-activity-detail" data-testid="activity-detail">
+          <aside
+            ref={detailRef}
+            tabIndex={-1}
+            className="we-card we-activity-detail"
+            data-testid="activity-detail"
+          >
             <Suspense fallback={<p className="helper-text">{t('common.working')}</p>}>
               {selection.kind === 'run' ? (
                 runWorkspaceProps.activeRunId === selection.id ? (

@@ -33,6 +33,7 @@ const initialStore = useWorkflowStore.getState()
 beforeEach(() => {
   vi.mocked(api).mockReset()
   vi.mocked(api).mockResolvedValue({
+    managedStorageAvailable: true,
     credentials: [
       {
         name: 'pagerduty-primary',
@@ -120,6 +121,29 @@ describe('<ConnectionsPanel />', () => {
     })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.queryByDisplayValue('secret-value')).not.toBeInTheDocument()
+  })
+
+  it('offers a usable first-credential path when managed storage has no root key', async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      credentials: [],
+      mcpConnections: [],
+      managedStorageAvailable: false,
+    })
+    render(
+      <ConnectionsPanel
+        credentials={[]}
+        onCreateCredential={vi.fn(async () => true)}
+        canWrite
+      />,
+    )
+
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/credentials/health'))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add connection' })[0]!)
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByLabelText('Secret storage')).toHaveValue('environment')
+    expect(within(dialog).getByRole('option', { name: /Managed by Janusly \(unavailable\)/i })).toBeDisabled()
+    expect(within(dialog).getByText(/JANUSLY_CREDENTIAL_MASTER_KEY/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('option', { name: 'external_runtime_signing_secret' })).toBeInTheDocument()
   })
 
   it('keeps mutations absent for credential readers', async () => {

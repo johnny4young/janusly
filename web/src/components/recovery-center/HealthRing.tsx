@@ -23,7 +23,10 @@ export function HealthRing({ score }: { score: number | null }) {
   const reducedMotion = usePrefersReducedMotion()
   const target = score ?? 0
   const animated = useAnimatedNumber(target, 800, reducedMotion)
-  const ratio = score === null ? 0 : Math.max(0, Math.min(100, score)) / 100
+  // Digits and arc are one gauge; animate both from the same value so they do
+  // not briefly contradict each other or leave a frozen number beside a final
+  // arc when the document was hidden.
+  const ratio = score === null ? 0 : Math.max(0, Math.min(100, animated)) / 100
   const dashoffset = HEALTH_RING_CIRCUMFERENCE * (1 - ratio)
   const radius = (HEALTH_RING_SIZE - HEALTH_RING_STROKE) / 2
   const ariaLabel = score === null

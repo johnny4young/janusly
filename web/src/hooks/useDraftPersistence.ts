@@ -36,12 +36,12 @@ const DRAFT_WRITE_DEBOUNCE_MS = 1_000
 /** Skip absurdly large drafts instead of hitting the localStorage quota. */
 const DRAFT_MAX_BYTES = 512 * 1024
 
-function draftKey(workflowId: string): string {
-  return `janusly:draft:${getActiveOrg()}:${workflowId}`
+function draftKey(workflowId: string, orgId = getActiveOrg()): string {
+  return `janusly:draft:${orgId}:${workflowId}`
 }
 
-function latestPointerKey(): string {
-  return `janusly:draft:latest:${getActiveOrg()}`
+function latestPointerKey(orgId = getActiveOrg()): string {
+  return `janusly:draft:latest:${orgId}`
 }
 
 function safeStorage(): Storage | null {
@@ -103,14 +103,18 @@ export function clearDraft(workflowId: string): void {
   }
 }
 
-function writeDraft(workflowId: string, workflow: WorkflowDefinition): void {
+function writeDraft(workflowId: string, workflow: WorkflowDefinition, armedOrg: string): void {
+  // The active organization is resolved at write time. Refuse an already
+  // armed timer after a workspace switch so tenant A's draft can never be
+  // written under tenant B's key during the in-flight debounce window.
+  if (getActiveOrg() !== armedOrg) return
   const storage = safeStorage()
   if (!storage) return
   try {
     const payload = JSON.stringify({ workflow, savedAt: new Date().toISOString() } satisfies CanvasDraft)
     if (payload.length > DRAFT_MAX_BYTES) return
-    storage.setItem(draftKey(workflowId), payload)
-    storage.setItem(latestPointerKey(), workflowId)
+    storage.setItem(draftKey(workflowId, armedOrg), payload)
+    storage.setItem(latestPointerKey(armedOrg), workflowId)
   } catch {
     // Quota / disabled storage — losing the autosave must never break editing.
   }
@@ -142,10 +146,14 @@ export function useDraftAutosave(): void {
           || currentWorkflowId !== prevWorkflowId
         if (draftChanged) {
           if (timer) clearTimeout(timer)
+          const armedOrg = getActiveOrg()
+          const armedWorkflowId = currentWorkflowId
           timer = setTimeout(() => {
+            timer = null
             const current = useWorkflowStore.getState()
             if (!current.workflowDirty) return // saved while the debounce was pending
-            writeDraft(current.currentWorkflowId, current.getWorkflowJson())
+            if (current.currentWorkflowId !== armedWorkflowId) return
+            writeDraft(armedWorkflowId, current.getWorkflowJson(), armedOrg)
           }, DRAFT_WRITE_DEBOUNCE_MS)
         }
       } else if (prevDirty && currentWorkflowId === prevWorkflowId) {

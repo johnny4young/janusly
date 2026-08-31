@@ -23,11 +23,36 @@ type Message = {
 }
 
 type ExplainRunResponse = {
-  answer?: string
+  explanation?: string
   mode?: AiMode
   model?: string
   error?: string
   aiError?: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+/**
+ * Parse the bounded projection actually returned by `/ai/explain-run`.
+ * Keeping the response as `unknown` prevents a client-only field rename from
+ * making a paid provider reply silently look empty again.
+ */
+function parseExplainRun(value: unknown): ExplainRunResponse {
+  if (!isRecord(value)) return {}
+  const mode = value.mode
+  return {
+    explanation: readString(value.explanation),
+    mode: mode === 'ai' || mode === 'fallback' ? mode : undefined,
+    model: readString(value.model),
+    error: readString(value.error),
+    aiError: readString(value.aiError),
+  }
 }
 
 /** Conversational explainer for the active run. Shows mode chip + aiError when present. */
@@ -59,14 +84,14 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
     setLoading(true)
 
     try {
-      const response = await api('/ai/explain-run', {
+      const response = parseExplainRun(await api('/ai/explain-run', {
         method: 'POST',
         body: JSON.stringify({ runId, question: userMessage.content }),
-      }) as ExplainRunResponse
+      }))
 
       if (response.error) throw new Error(response.error)
 
-      const baseAnswer = response.answer ?? (t('runExplain.noAnswer'))
+      const baseAnswer = response.explanation ?? t('runExplain.noAnswer')
       const body = response.aiError
         ? `${baseAnswer}\n\n${t('runExplain.noteFailed', { detail: describeAiError(response.aiError) })}`
         : baseAnswer
