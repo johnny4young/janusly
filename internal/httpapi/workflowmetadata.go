@@ -203,19 +203,23 @@ func (s *V1Server) mountWorkflowMetadataRoutes(mux *http.ServeMux) {
 			return
 		}
 		var body struct {
-			Tags []string `json:"tags"`
+			Tags *[]string `json:"tags"`
 		}
-		if err := decodeBody(r, &body); err != nil || len(body.Tags) > 30 {
-			writeUnversioned(w, opError(http.StatusBadRequest, "workflow_metadata_invalid", "invalid tags body", nil))
+		// This route replaces the entire tag set. Requiring an explicit array
+		// distinguishes "clear every tag" from a caller that sent the wrong
+		// shape and would otherwise decode to a nil slice.
+		if err := decodeBody(r, &body); err != nil || body.Tags == nil || len(*body.Tags) > 30 {
+			writeUnversioned(w, opError(http.StatusBadRequest, "workflow_metadata_invalid",
+				"body must carry a tags array; this route replaces the whole list", nil))
 			return
 		}
-		for _, tag := range body.Tags {
+		for _, tag := range *body.Tags {
 			if strings.TrimSpace(tag) == "" || len(tag) > 60 {
 				writeUnversioned(w, opError(http.StatusBadRequest, "workflow_metadata_invalid", "tags must be 1..60 characters", nil))
 				return
 			}
 		}
-		tags, _ := json.Marshal(orEmptySlice(body.Tags))
+		tags, _ := json.Marshal(orEmptySlice(*body.Tags))
 		row, err := store.New(s.pool).SetWorkflowTagsOnly(r.Context(), store.SetWorkflowTagsOnlyParams{
 			ID: s.newID(), OrgID: rc.orgID, WorkflowID: workflowID,
 			Tags:      tags,
@@ -227,7 +231,7 @@ func (s *V1Server) mountWorkflowMetadataRoutes(mux *http.ServeMux) {
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tag.set", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,
-			Metadata: map[string]any{"workflowId": workflowID, "tags": body.Tags},
+			Metadata: map[string]any{"workflowId": workflowID, "tags": *body.Tags},
 		})
 		writeUnversioned(w, opOK(map[string]any{"metadata": workflowMetadataView(row)}))
 	}))

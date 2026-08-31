@@ -923,7 +923,7 @@ describe('<WorkflowsDashboard />', () => {
     )
   })
 
-  it('bulk-adds a tag to the selected flows (POST op:add)', async () => {
+  it('bulk-adds a tag to the selected flows', async () => {
     const calls: Array<{ url: string; body: unknown }> = []
     mockListWithFolderPost(FOLDERED, calls)
     render(<WorkflowsDashboard onOpen={() => {}} />)
@@ -935,11 +935,11 @@ describe('<WorkflowsDashboard />', () => {
     fireEvent.click(screen.getByTestId('workflows-bulk-tag-add'))
     await waitFor(() => {
       const assign = calls.find((c) => c.url === '/workflows/tags/assign')
-      expect(assign?.body).toEqual({ workflowIds: ['wf1', 'wf2'], tag: 'urgent', op: 'add' })
+      expect(assign?.body).toEqual({ workflowIds: ['wf1', 'wf2'], tag: 'urgent', remove: false })
     })
   })
 
-  it('bulk-removes a tag from the selected flows (POST op:remove)', async () => {
+  it('bulk-removes a tag from the selected flows', async () => {
     const calls: Array<{ url: string; body: unknown }> = []
     mockListWithFolderPost(FOLDERED, calls)
     render(<WorkflowsDashboard onOpen={() => {}} />)
@@ -950,7 +950,7 @@ describe('<WorkflowsDashboard />', () => {
     fireEvent.click(screen.getByTestId('workflows-bulk-tag-remove'))
     await waitFor(() => {
       const assign = calls.find((c) => c.url === '/workflows/tags/assign')
-      expect(assign?.body).toEqual({ workflowIds: ['wf1'], tag: 'billing', op: 'remove' })
+      expect(assign?.body).toEqual({ workflowIds: ['wf1'], tag: 'billing', remove: true })
     })
   })
 
@@ -1060,7 +1060,7 @@ describe('<WorkflowsDashboard />', () => {
     expect(within(screen.getByTestId('workflows-row-wf1')).getByText('billing')).toBeInTheDocument()
   })
 
-  it('adds a tag to a single row via the per-row "+ tag" picker (POST /workflows/:id/tags op:add)', async () => {
+  it('adds a tag to a single row by replacing the complete tag list', async () => {
     const calls: Array<{ url: string; body: unknown }> = []
     vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
       if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); return { workflowId: url } }
@@ -1074,11 +1074,11 @@ describe('<WorkflowsDashboard />', () => {
     fireEvent.change(screen.getByTestId('workflows-row-tag-add-wf1'), { target: { value: 'finance' } })
     await waitFor(() => {
       const post = calls.find((c) => c.url === '/workflows/wf1/tags')
-      expect(post?.body).toEqual({ tag: 'finance', op: 'add' })
+      expect(post?.body).toEqual({ tags: ['billing', 'urgent', 'finance'] })
     })
   })
 
-  it('removes a tag from a single row via the pill ✕ (POST /workflows/:id/tags op:remove)', async () => {
+  it('removes a tag from a single row by replacing the complete tag list', async () => {
     const calls: Array<{ url: string; body: unknown }> = []
     vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
       if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); return { workflowId: url } }
@@ -1091,7 +1091,7 @@ describe('<WorkflowsDashboard />', () => {
     fireEvent.click(screen.getByTestId('workflows-row-tag-remove-wf1-billing'))
     await waitFor(() => {
       const post = calls.find((c) => c.url === '/workflows/wf1/tags')
-      expect(post?.body).toEqual({ tag: 'billing', op: 'remove' })
+      expect(post?.body).toEqual({ tags: ['urgent'] })
     })
   })
 

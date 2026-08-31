@@ -235,4 +235,25 @@ func TestBulkTagAndFolderAssignmentSemantics(t *testing.T) {
 			t.Fatalf("%s folder: %q %v", id, folder, err)
 		}
 	}
+
+	// The narrow route replaces the list and therefore requires the caller to
+	// name the complete list explicitly. A wrong or absent shape must never be
+	// interpreted as "clear all".
+	res = h.call("POST", "/workflows/"+wfA+"/tags", map[string]any{
+		"tags": []any{"finance", "urgent"},
+	}, "")
+	if res.status != 200 || !strings.Contains(tagsOf(wfA), `"finance"`) || !strings.Contains(tagsOf(wfA), `"urgent"`) {
+		t.Fatalf("replace tags: %d %+v stored=%s", res.status, res.body, tagsOf(wfA))
+	}
+	before := tagsOf(wfA)
+	res = h.call("POST", "/workflows/"+wfA+"/tags", map[string]any{}, "")
+	if res.status != 400 || tagsOf(wfA) != before {
+		t.Fatalf("missing tags array must fail without mutation: %d %+v stored=%s", res.status, res.body, tagsOf(wfA))
+	}
+	res = h.call("POST", "/workflows/"+wfA+"/tags", map[string]any{
+		"tags": []any{},
+	}, "")
+	if res.status != 200 || tagsOf(wfA) != "[]" {
+		t.Fatalf("explicit empty list must clear tags: %d %+v stored=%s", res.status, res.body, tagsOf(wfA))
+	}
 }

@@ -303,7 +303,9 @@ function useWorkflowsDashboardController({
       try {
         await api(`/workflows/${encodeURIComponent(workflowId)}/tags`, {
           method: 'POST',
-          body: JSON.stringify({ tag, op }),
+          // This route replaces the whole tag set; `next` is the intended
+          // complete value, not a per-tag command.
+          body: JSON.stringify({ tags: next }),
         })
         addToast(
           op === 'add'
@@ -528,8 +530,8 @@ function useWorkflowsDashboardController({
         const result = (await api('/workflows/folders/assign', {
           method: 'POST',
           body: JSON.stringify({ workflowIds: ids, folder }),
-        })) as { count?: number }
-        const count = typeof result?.count === 'number' ? result.count : ids.length
+        })) as { affected?: number }
+        const count = typeof result?.affected === 'number' ? result.affected : ids.length
         addToast(
           folder
             ? (t('workflowsDashboard.bulkMoved', { folder, count }))
@@ -572,9 +574,9 @@ function useWorkflowsDashboardController({
       try {
         const result = (await api('/workflows/tags/assign', {
           method: 'POST',
-          body: JSON.stringify({ workflowIds: ids, tag, op }),
-        })) as { count?: number }
-        const count = typeof result?.count === 'number' ? result.count : ids.length
+          body: JSON.stringify({ workflowIds: ids, tag, remove: op === 'remove' }),
+        })) as { affected?: number }
+        const count = typeof result?.affected === 'number' ? result.affected : ids.length
         addToast(
           op === 'add'
             ? (t('workflowsDashboard.bulkTagAdded', { tag, count }))
