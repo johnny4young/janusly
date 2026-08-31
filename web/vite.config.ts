@@ -25,7 +25,7 @@ function buildId(): string {
   }
 }
 
-const apiRoutePattern = '^/(?:v1|health|auth|ai|workflows|runs|run|start|status|cancel|resume|dlq|validate|org|members|roles|credentials|mcp|recovery|reports|billing|usage|memory|triggers|webhooks|pagerduty|solution-packs|templates|packs|eval|experiments|causal|system|prompts|audit|scim|upstream|integrations|tools|directories|browser-session|identity|sso|external-runtime|rollouts|alerts|replay)(?:/|$|\\?)'
+const apiRoutePattern = '^/(?:v1|health|auth|ai|workflows|runs|run|start|status|cancel|resume|dlq|validate|org|organizations|members|roles|credentials|mcp|recovery|auto-healing|reports|billing|usage|memory|triggers|webhooks|pagerduty|solution-packs|templates|packs|plugins|snippets|onboarding|users|eval|experiments|causal|system|prompts|audit|scim|upstream|integrations|tools|directories|browser-session|identity|sso|external-runtime|rollouts|alerts|replay)(?:/|$|\\?)'
 
 export default defineConfig(({ mode }) => ({
   plugins: [

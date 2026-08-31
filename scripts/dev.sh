@@ -62,7 +62,20 @@ web_pid=$!
 printf 'Janusly API: http://127.0.0.1:3001\n'
 printf 'Janusly web: http://127.0.0.1:5173\n'
 
-while kill -0 "$api_pid" 2>/dev/null && kill -0 "$web_pid" 2>/dev/null; do
+while :; do
+  if ! kill -0 "$api_pid" 2>/dev/null; then
+    set +e
+    wait "$api_pid"
+    status=$?
+    set -e
+    exit "$status"
+  fi
+  if ! kill -0 "$web_pid" 2>/dev/null; then
+    set +e
+    wait "$web_pid"
+    status=$?
+    set -e
+    exit "$status"
+  fi
   sleep 1
 done
-wait "$api_pid" "$web_pid"

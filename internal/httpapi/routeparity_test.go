@@ -39,6 +39,11 @@ const webSrcDir = "../../web/src"
 // apiContractFile declares which GET paths the client rewrites to /v1.
 const apiContractFile = "../../web/src/lib/api-contract.ts"
 
+// viteConfigFile owns the development proxy namespace. Production mounts API
+// routes before webdist, but Vite otherwise answers an unproxied API path with
+// index.html and a misleading 200.
+const viteConfigFile = "../../web/vite.config.ts"
+
 // allowedUnresolvable lists call sites whose path genuinely cannot be
 // resolved to one route at compile time, with the reason. Keep it short: an
 // entry here is a hole in the guard.
@@ -210,6 +215,51 @@ func TestEveryWebPathResolvesToARegisteredRoute(t *testing.T) {
 			"index.html with a 200, so the caller sees an empty object rather than an\n"+
 			"error. Register the route, fix the call, or add an allowlist entry with a\n"+
 			"reason.\n\n   %s", len(missing), strings.Join(missing, "\n   "))
+	}
+}
+
+// TestEveryWebPathTraversesViteDevProxy closes the development-only half of
+// route parity. A backend route can be perfectly registered and still be
+// unreachable from `make dev` when its top-level namespace is missing from
+// Vite's proxy matcher; Vite then returns the SPA HTML shell as status 200.
+func TestEveryWebPathTraversesViteDevProxy(t *testing.T) {
+	raw, err := os.ReadFile(viteConfigFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", viteConfigFile, err)
+	}
+	match := regexp.MustCompile(`const apiRoutePattern = '\^/\(\?:([^)]*)\)`).FindStringSubmatch(string(raw))
+	if len(match) != 2 {
+		t.Fatal("apiRoutePattern not found in Vite config — cannot verify development route parity")
+	}
+	prefixes := map[string]bool{}
+	for _, prefix := range strings.Split(match[1], "|") {
+		if prefix == "" || strings.ContainsAny(prefix, `\\?*+[]{}()`) {
+			t.Fatalf("Vite API prefix %q is not a literal top-level path segment", prefix)
+		}
+		prefixes[prefix] = true
+	}
+
+	versioned := v1ReadPaths(t)
+	seen := map[string]bool{}
+	var missing []string
+	for _, call := range collectWebCalls(t) {
+		path := strings.TrimPrefix(wirePath(call, versioned), "/")
+		prefix, _, _ := strings.Cut(path, "/")
+		key := call.method + " " + prefix
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if !prefixes[prefix] {
+			missing = append(missing, call.method+" /"+prefix+"/…\n      called from "+call.file+":"+itoa(call.line))
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Errorf("%d web API namespace(s) bypass the Vite development proxy.\n"+
+			"In make dev these requests receive index.html with status 200 instead of\n"+
+			"reaching Go. Add the literal namespace to apiRoutePattern.\n\n   %s",
+			len(missing), strings.Join(missing, "\n   "))
 	}
 }
 
