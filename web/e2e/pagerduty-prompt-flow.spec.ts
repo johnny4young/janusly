@@ -1,4 +1,5 @@
 import { openWorkflowAiAction, openWorkspaceSection } from './_helpers/workspace-navigation'
+import { applyBuiltWorkflowProposal, buildWorkflowProposal } from './_helpers/workflow-authoring'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -32,10 +33,9 @@ test('a prompt creates the deterministic PagerDuty flow in the normal editor', a
   ).fill(
     'When PagerDuty alerts user PLOCALUSER outside working hours 09:00 to 17:00 in America/Bogota, acknowledge it and snooze it for 12 hours. Use API credential pagerduty-api and webhook credential pagerduty-webhook for operator@example.com.',
   )
-  await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
-
-  await expect(page.getByText('Starter flow loaded locally').first()).toBeVisible()
-  await expect(page.getByText(/PagerDuty off-hours incident handling is now on the canvas/)).toBeVisible()
+  const proposal = await buildWorkflowProposal(page)
+  await expect(proposal.getByText('Deterministic local proposal')).toBeVisible()
+  await applyBuiltWorkflowProposal(page)
 
   await openWorkspaceSection(page, 'Workflows', 'Build')
   const canvas = page.locator('.canvas-frame')

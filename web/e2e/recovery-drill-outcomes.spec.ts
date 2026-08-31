@@ -1,4 +1,7 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import {
+  openActivityRecoveryDetail,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -110,11 +113,8 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   await page.goto('/')
   await openWorkspaceSection(page, 'Workflows', 'Templates')
   const drill = await startRuntimeDrill(page, 'Start recovery drill')
-  await openWorkspaceSection(page, 'Activity', 'Recover')
-
-  const focusedFailure = page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)
-  await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
-  const initialOutcome = page.getByTestId('dlq-recovery-drill-outcome')
+  const focusedFailure = await openActivityRecoveryDetail(page, drill.deadLetterId)
+  const initialOutcome = focusedFailure.getByTestId('dlq-recovery-drill-outcome')
   await expect(initialOutcome.getByRole('status')).toHaveText('Action needed')
   await expect(initialOutcome).toContainText('No terminal recovery evidence yet.')
 
@@ -136,14 +136,10 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   expect(replayResponse.ok()).toBe(true)
   await waitForRunStatus(request, orgId, detail.runId, 'succeeded')
 
-  // Remount the queue after the API-driven replay so its detail read observes
-  // the immutable terminal-impact row written by the worker.
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
-  await openWorkspaceSection(page, 'Activity', 'Recover')
-  await page.locator('#dlq-filter').selectOption('all')
-  await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
-  await focusedFailure.click()
-  const recoveredOutcome = page.getByTestId('dlq-recovery-drill-outcome')
+  // Re-open the exact immutable evidence after the API-driven replay so the
+  // Activity detail observes the terminal-impact row written by the worker.
+  const refreshedFailure = await openActivityRecoveryDetail(page, drill.deadLetterId)
+  const recoveredOutcome = refreshedFailure.getByTestId('dlq-recovery-drill-outcome')
   await expect(recoveredOutcome.getByRole('status')).toHaveText('Recovered', { timeout: 30_000 })
   await expect(recoveredOutcome).toContainText('Verified by generation-matched terminal success.')
   await expect(recoveredOutcome).toContainText('Recovery time')
@@ -180,10 +176,8 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
   await page.getByRole('button', { name: 'Navegación' }).click()
   await openWorkspaceSection(page, 'Flujos', 'Plantillas')
   const drill = await startRuntimeDrill(page, 'Iniciar ejercicio de recuperación')
-  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
-
-  await expect(page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)).toBeVisible({ timeout: 30_000 })
-  const outcome = page.getByTestId('dlq-recovery-drill-outcome')
+  const focusedFailure = await openActivityRecoveryDetail(page, drill.deadLetterId)
+  const outcome = focusedFailure.getByTestId('dlq-recovery-drill-outcome')
   await expect(outcome.getByRole('status')).toHaveText('Requiere acción')
   await expect(outcome).toContainText('Todavía no hay evidencia de recuperación terminal.')
 
@@ -191,14 +185,11 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
     new URL(response.url()).pathname === '/dlq/resolve'
     && response.request().method() === 'POST'
   ))
-  await page.getByRole('button', { name: 'Resolver', exact: true }).click()
+  await focusedFailure.getByRole('button', { name: 'Resolver', exact: true }).click()
   expect((await resolveResponse).status()).toBe(200)
 
-  await page.locator('#dlq-filter').selectOption('all')
-  const resolvedRow = page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)
-  await expect(resolvedRow).toBeVisible({ timeout: 30_000 })
-  await resolvedRow.click()
-  const resolvedOutcome = page.getByTestId('dlq-recovery-drill-outcome')
+  const resolvedDetail = await openActivityRecoveryDetail(page, drill.deadLetterId)
+  const resolvedOutcome = resolvedDetail.getByTestId('dlq-recovery-drill-outcome')
   await expect(resolvedOutcome.getByRole('status')).toHaveText('Pérdida aceptada', { timeout: 30_000 })
   await expect(resolvedOutcome).toContainText('Registrado a partir de la decisión del operador de aceptar la pérdida.')
   await expect(resolvedOutcome).toContainText('Tiempo de recuperación')

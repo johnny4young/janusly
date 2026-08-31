@@ -22,12 +22,18 @@ async function captureDialog(page: Page, name: string): Promise<void> {
 
 test('credential rotation owns focus, traps both Tab directions, and restores its trigger', async ({ page, request }) => {
   const browserErrors = installConsoleErrorGuards(page)
-  const credentialName = `e2e-focus-${Date.now()}`
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const orgId = `credential-focus-${stamp}`
+  const credentialName = `e2e-focus-${stamp}`
   await seedCredential(request, {
     name: credentialName,
     kind: 'generic',
     secretRef: 'E2E_ROTATION_FOCUS_SECRET',
-  })
+  }, orgId)
+
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+  }, { activeOrg: orgId })
 
   await page.goto('/')
   await openWorkspaceSection(page, 'Settings', 'Connections')

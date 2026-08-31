@@ -5,8 +5,10 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001'
-const API_METRICS_URL = process.env.E2E_API_METRICS_URL
-const WORKER_METRICS_URL = process.env.E2E_WORKER_METRICS_URL
+// Janusly is one executable: API and worker metrics share the private
+// listener unless an isolated qualification profile overrides either URL.
+const API_METRICS_URL = process.env.E2E_API_METRICS_URL ?? 'http://127.0.0.1:9464/metrics'
+const WORKER_METRICS_URL = process.env.E2E_WORKER_METRICS_URL ?? API_METRICS_URL
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 type QueueState = {
@@ -113,11 +115,9 @@ test('queue pressure stays private, observable, and clear in English and Spanish
   expect(adminBody.active).toBeGreaterThanOrEqual(0)
   expect(adminBody.maintenance).toMatchObject({ warnSeconds: 300 })
 
-  expect(API_METRICS_URL).toBeTruthy()
-  expect(WORKER_METRICS_URL).toBeTruthy()
   const [apiMetrics, workerMetrics] = await Promise.all([
-    request.get(API_METRICS_URL as string),
-    request.get(WORKER_METRICS_URL as string),
+    request.get(API_METRICS_URL),
+    request.get(WORKER_METRICS_URL),
   ])
   expect(apiMetrics.ok()).toBe(true)
   expect(workerMetrics.ok()).toBe(true)

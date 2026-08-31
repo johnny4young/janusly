@@ -5,17 +5,13 @@
  * product intentionally has no endpoint that can forge historical run events.
  */
 
-import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
 import { pollUntilTerminal, startRun } from './_helpers/demo-helpers'
 import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { execPostgresSql } from './_helpers/postgres'
 
-const execFileAsync = promisify(execFile)
-const COMPOSE_FILE = fileURLToPath(new URL('../../docker-compose.yml', import.meta.url))
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 
@@ -48,11 +44,7 @@ function sqlLiteral(value: string): string {
 }
 
 async function seedMemoryRecallEvent(runId: string, nodeId: string, stamp: string): Promise<void> {
-  await execFileAsync('docker', [
-    'compose', '-f', COMPOSE_FILE,
-    'exec', '-T', 'postgres',
-    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
+  await execPostgresSql(`INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
       VALUES (
         ${sqlLiteral(`e2e-memory-recall-${stamp}`)},
         ${sqlLiteral(runId)},
@@ -60,8 +52,7 @@ async function seedMemoryRecallEvent(runId: string, nodeId: string, stamp: strin
         'agent.memory.recalled',
         '{"count":2,"fingerprints":["a1b2c3d4e5f6","0f1e2d3c4b5a"]}'::jsonb,
         now()
-      );`,
-  ])
+      );`)
 }
 
 async function openRunFromHistory(page: Page, runId: string, locale: 'en' | 'es'): Promise<void> {
@@ -152,7 +143,8 @@ async function proveLocale(
 
 test('run diagnostics expose decisions and content-free memory influence in both locales', async ({ page, request }) => {
   const browserErrors = installConsoleErrorGuards(page)
-  const stamp = String(Date.now())
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const orgId = `run-explainability-${stamp}`
   const routeNodeId = `route_${stamp}`
   const fastNodeId = `fast_${stamp}`
   const safeNodeId = `safe_${stamp}`
@@ -179,8 +171,8 @@ test('run diagnostics expose decisions and content-free memory influence in both
       { from: routeNodeId, to: fastNodeId },
       { from: routeNodeId, to: safeNodeId },
     ],
-  }, { source: 'explainability-smoke' })
-  const terminal = await pollUntilTerminal(request, started.runId)
+  }, { source: 'explainability-smoke' }, orgId)
+  const terminal = await pollUntilTerminal(request, started.runId, 30_000, orgId)
   expect(terminal.status).toBe('succeeded')
   const decisionEvent = terminal.events.find(event => event.type === 'decision.made' && event.nodeId === routeNodeId)
   const decisionEventId = typeof decisionEvent?.id === 'string' ? decisionEvent.id : null
@@ -188,13 +180,16 @@ test('run diagnostics expose decisions and content-free memory influence in both
   await seedMemoryRecallEvent(started.runId, routeNodeId, stamp)
 
   const causalResponse = await request.get(`${API_URL}/causal?runId=${encodeURIComponent(started.runId)}&eventId=${encodeURIComponent(decisionEventId!)}&nodeId=${encodeURIComponent(routeNodeId)}`, {
-    headers: { 'x-org-id': 'default', 'x-user-id': 'dev-user' },
+    headers: { 'x-org-id': orgId, 'x-user-id': 'dev-user' },
   })
   expect(causalResponse.ok()).toBe(true)
   const causalPayload = await causalResponse.json() as { chosen?: { nodeId?: string }; best?: { nodeId?: string } }
   expect(causalPayload.chosen?.nodeId).toBe(fastNodeId)
   expect(causalPayload.best?.nodeId).toBe(fastNodeId)
 
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+  }, { activeOrg: orgId })
   await page.goto('/')
   await hideUnrelatedOverlays(page)
   await openRunFromHistory(page, started.runId, 'en')

@@ -120,6 +120,9 @@ for (const contract of LOCALES) {
       window.localStorage.setItem('janusly:locale', locale)
     }, { activeOrg: orgId, locale: contract.locale })
 
+    const processStatus = await getJson(request, orgId, '/memory/consent-status')
+    test.skip(processStatus.processEnabled !== true, 'requires JANUSLY_MEMORY_ENABLED=true')
+
     await setConfig(request, orgId, 'memory.enabled', true)
     await expect.poll(async () => getJson(request, orgId, '/memory/consent-status')).toMatchObject({
       enabled: true,

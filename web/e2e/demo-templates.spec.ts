@@ -48,8 +48,8 @@ test.describe("Demo templates", () => {
   });
 
   test("F1 incident-triage runs to succeeded with seeded credentials", async ({ request }) => {
-    await seedCredential(request, { name: "bot-github", kind: "github_token", secretRef: "JANUSLY_DEMO_GITHUB_TOKEN" });
-    await seedCredential(request, { name: "incidents-slack", kind: "slack_webhook", secretRef: "JANUSLY_DEMO_SLACK_WEBHOOK" });
+    await seedCredential(request, { name: "bot-github", kind: "github_token", secretRef: "JANUSLY_CRED_DEMO_GITHUB_TOKEN" });
+    await seedCredential(request, { name: "incidents-slack", kind: "slack_webhook", secretRef: "JANUSLY_CRED_DEMO_SLACK_WEBHOOK" });
 
     const workflow = await loadTemplate(request, "incident-triage");
     const payload = {
@@ -70,7 +70,7 @@ test.describe("Demo templates", () => {
   });
 
   test("F2 refund-triage-approval pauses on approval, resumes, and reaches succeeded", async ({ request }) => {
-    await seedCredential(request, { name: "partner-webhook", kind: "webhook_secret", secretRef: "JANUSLY_DEMO_WEBHOOK_SECRET" });
+    await seedCredential(request, { name: "partner-webhook", kind: "webhook_secret", secretRef: "JANUSLY_CRED_DEMO_WEBHOOK_SECRET" });
 
     const workflow = await loadTemplate(request, "refund-triage-approval");
     const payload = {

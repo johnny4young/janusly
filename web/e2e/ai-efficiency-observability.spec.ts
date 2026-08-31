@@ -1,14 +1,11 @@
 import { openWorkflowAiAction, openWorkspaceSection } from './_helpers/workspace-navigation'
+import { buildWorkflowProposal, mockWorkflowProposal } from './_helpers/workflow-authoring'
 /** Real-stack proof for AI/run efficiency in Settings, Reasoning, and AI Studio. */
 
-import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { execPostgresSql } from './_helpers/postgres'
 
-const execFileAsync = promisify(execFile)
-const COMPOSE_FILE = fileURLToPath(new URL('../../docker-compose.yml', import.meta.url))
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001'
 
@@ -92,11 +89,7 @@ async function startObservedRun(request: APIRequestContext, orgId: string, stamp
 }
 
 async function seedRunUsage(orgId: string, runId: string, stamp: string): Promise<void> {
-  await execFileAsync('docker', [
-    'compose', '-f', COMPOSE_FILE,
-    'exec', '-T', 'postgres',
-    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `
+  await execPostgresSql(`
       INSERT INTO usage_events (id, org_id, run_id, metric, quantity, metadata, created_at)
       VALUES
         (${sqlLiteral(`efficiency-llm-a-${stamp}`)}, ${sqlLiteral(orgId)}, ${sqlLiteral(runId)}, 'llm.completion', 10000,
@@ -107,8 +100,7 @@ async function seedRunUsage(orgId: string, runId: string, stamp: string): Promis
           '{"kind":"agent_episode","ok":true}'::jsonb, now() - interval '2 seconds'),
         (${sqlLiteral(`efficiency-memory-b-${stamp}`)}, ${sqlLiteral(orgId)}, ${sqlLiteral(runId)}, 'memory.commit', 1,
           '{"kind":"workflow_vector","ok":false}'::jsonb, now() - interval '1 second');
-    `,
-  ])
+    `)
 }
 
 function installErrorGuards(page: Page): string[] {
@@ -265,22 +257,13 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
     if (!window.localStorage.getItem('janusly:locale')) window.localStorage.setItem('janusly:locale', 'en')
     window.localStorage.setItem('janusly:recovery:hideIntro', 'true')
   }, { activeOrg: orgId })
-  await page.route('**/ai/generate-workflow', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      mode: 'ai',
-      model: 'claude-haiku-4-5-20251001',
-      provider: 'anthropic',
-      candidateCount: 1,
-      bonBackoff: { from: 4, to: 1 },
-      dslVersion: '1.0',
-      id: `budget-aware-${stamp}`,
-      name: `Budget-aware flow ${stamp}`,
-      nodes: [{ id: 'start', type: 'noop', config: {} }],
-      edges: [],
-    }),
-  }))
+  await mockWorkflowProposal(page, {
+    dslVersion: '1.0',
+    id: `budget-aware-${stamp}`,
+    name: `Budget-aware flow ${stamp}`,
+    nodes: [{ id: 'start', type: 'noop', config: {} }],
+    edges: [],
+  }, { mode: 'ai', bonBackoff: { from: 4, to: 1 } })
 
   for (const locale of ['en', 'es'] as const) {
     await page.goto('/')
@@ -331,7 +314,7 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
     await page.locator('.ai-studio-prompt').fill(locale === 'en'
       ? 'Draft a budget-aware approval flow.'
       : 'Arma un flujo de aprobación ajustado al presupuesto.')
-    await page.getByRole('button', { name: copy[locale].draft, exact: true }).click()
+    await buildWorkflowProposal(page, locale)
     const backoff = page.getByTestId('ai-candidate-backoff')
     await expect(backoff).toContainText(copy[locale].backoff)
     await hideUnrelatedOverlays(page)

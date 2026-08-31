@@ -12,7 +12,8 @@
 import type { APIRequestContext } from "@playwright/test";
 
 const API_URL = process.env.E2E_API_URL ?? "http://localhost:3001";
-const ORG_ID = "default";
+const ORG_ID = process.env.JANUSLY_DEMO_E2E_ORG_ID
+  ?? `demo-templates-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const USER_ID = "dev-user";
 
 export const DEMO_TEMPLATE_IDS = {
@@ -156,8 +157,9 @@ export async function resumeApproval(
   request: APIRequestContext,
   runId: string,
   nodeId: string,
+  orgId = ORG_ID,
 ): Promise<void> {
-  await apiPost(request, "/resume", { runId, nodeId });
+  await apiPost(request, "/resume", { runId, nodeId }, orgId);
 }
 
 /**
@@ -193,8 +195,9 @@ export async function findDeadLetterForRun(
 export async function fetchReadiness(
   request: APIRequestContext,
   workflow: Json,
+  orgId = ORG_ID,
 ): Promise<{ status: string; issues: Array<{ code: string; message: string }> }> {
-  return (await apiPost(request, "/workflows/readiness", { workflow })) as {
+  return (await apiPost(request, "/workflows/readiness", { workflow }, orgId)) as {
     status: string;
     issues: Array<{ code: string; message: string }>;
   };
@@ -210,8 +213,9 @@ export async function validateFix(
   request: APIRequestContext,
   deadLetterId: string,
   suggestedWorkflow: Json,
+  orgId = ORG_ID,
 ): Promise<string> {
-  const result = (await apiPost(request, "/dlq/validate-fix", { deadLetterId, suggestedWorkflow })) as { runId: string };
+  const result = (await apiPost(request, "/dlq/validate-fix", { deadLetterId, suggestedWorkflow }, orgId)) as { runId: string };
   return result.runId;
 }
 
@@ -225,14 +229,19 @@ export async function replayDeadLetter(
   request: APIRequestContext,
   deadLetterId: string,
   suggestedWorkflow?: Json,
+  orgId = ORG_ID,
 ): Promise<void> {
   const body: Json = suggestedWorkflow ? { deadLetterId, suggestedWorkflow } : { deadLetterId };
-  await apiPost(request, "/dlq/replay", body);
+  await apiPost(request, "/dlq/replay", body, orgId);
 }
 
 /** Read a dead letter's current status (`open` / `replayed` / `resolved`), or null if gone. */
-export async function deadLetterStatus(request: APIRequestContext, deadLetterId: string): Promise<string | null> {
-  const rows = (await apiGet(request, "/dlq?limit=200")) as Array<{ id: string; status?: string }>;
+export async function deadLetterStatus(
+  request: APIRequestContext,
+  deadLetterId: string,
+  orgId = ORG_ID,
+): Promise<string | null> {
+  const rows = (await apiGet(request, "/dlq?limit=200", orgId)) as Array<{ id: string; status?: string }>;
   return rows.find((r) => r.id === deadLetterId)?.status ?? null;
 }
 

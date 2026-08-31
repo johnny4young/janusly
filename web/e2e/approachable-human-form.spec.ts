@@ -238,7 +238,7 @@ for (const locale of ['en', 'es'] as const) {
     await expectNoBlockingAccessibilityViolations(page, `${locale} guided human form editor`)
     await capture(page.locator('.app-shell'), `web-${locale}-human-form-fields`)
 
-    const advanced = inspector.locator('details.advanced-config')
+    const advanced = inspector.locator('details.ui-inspector-json')
     await advanced.getByText(copy.advanced, { exact: true }).click()
     const exactConfig = JSON.parse(await advanced.locator('textarea').inputValue()) as {
       schema?: unknown

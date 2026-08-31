@@ -1,4 +1,20 @@
-import type { Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
+
+/**
+ * Open one recovery artifact through the same bounded external deep link used
+ * by alerts. Validation drills are intentionally absent from the operator
+ * queue, so exact-id Activity detail is their truthful inspection surface.
+ */
+export async function openActivityRecoveryDetail(
+  page: Page,
+  deadLetterId: string,
+): Promise<Locator> {
+  await page.goto(`/?deadLetterId=${encodeURIComponent(deadLetterId)}`)
+  const detail = page.getByTestId('activity-recovery-detail')
+  await expect(detail).toBeVisible({ timeout: 30_000 })
+  await expect(detail).toHaveAttribute('data-dead-letter-id', deadLetterId)
+  return detail
+}
 
 export async function openWorkspaceDestination(
   page: Page,
@@ -82,7 +98,7 @@ export async function openWorkflowAiAction(
 ): Promise<void> {
   const spanish = destination === 'Flujos'
   await page.locator('.app-shell').waitFor({ state: 'visible' })
-  const aiStudio = page.locator('.aiStudio-hero')
+  const aiStudio = page.locator('.ai-studio-hero')
   const directLabels = spanish
     ? {
         generate: 'Crear borrador',

@@ -250,6 +250,10 @@ async function createHttpFixture(): Promise<{
 }
 
 test('HTTP JSON and unresolved templates stay explicit from runtime through the bilingual UI', async ({ page, request }) => {
+  test.skip(
+    process.env.JANUSLY_E2E_PRIVATE_HTTP !== '1',
+    'requires an isolated API started with ALLOW_PRIVATE_HTTP_TARGETS=true',
+  )
   test.setTimeout(120_000)
   const stamp = Date.now()
   const orgId = `data-contracts-${stamp}`

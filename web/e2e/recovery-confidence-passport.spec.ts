@@ -1,12 +1,12 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
-import { expect, test, type Page, type Response } from '@playwright/test'
+import { openActivityRecoveryDetail, openWorkspaceSection } from './_helpers/workspace-navigation'
+import { expect, test, type APIRequestContext, type Page, type Response } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 function authHeaders(orgId: string): Record<string, string> {
-  return { 'x-org-id': orgId, 'x-user-id': 'dev-user' }
+  return { 'Content-Type': 'application/json', 'x-org-id': orgId, 'x-user-id': 'dev-user' }
 }
 
 async function captureEvidence(page: Page, name: string) {
@@ -21,15 +21,6 @@ async function captureElement(locator: import('@playwright/test').Locator, name:
   await locator.screenshot({ path: `${EVIDENCE_DIR}/${name}.png` })
 }
 
-async function selectWorkerInterruptedFailure(
-  pack: import('@playwright/test').Locator,
-  locale: 'en' | 'es',
-) {
-  await pack
-    .getByLabel(locale === 'es' ? 'Escenario de fallo' : 'Failure scenario')
-    .selectOption('worker_interrupted_during_page')
-}
-
 function installConsoleErrorGuards(page: Page) {
   const errors: string[] = []
   page.on('console', (message) => {
@@ -42,22 +33,55 @@ function installConsoleErrorGuards(page: Page) {
   return errors
 }
 
-async function selectedDeadLetterTestId(page: Page) {
-  const selected = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').first()
-  return await selected.count() > 0 ? selected.getAttribute('data-testid') : null
+type WorkflowDocument = {
+  id: string
+  name: string
+  dslVersion: string
+  nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>
+  edges: Array<{ from: string; to: string }>
 }
 
-async function waitForNewSelectedFailure(page: Page, previousTestId: string | null, nodeId?: string) {
-  const selected = page.locator('[data-testid^="dlq-row-"][data-selected="true"]')
-    .filter(nodeId ? { hasText: nodeId } : {})
-    .first()
+async function startFailure(
+  request: APIRequestContext,
+  orgId: string,
+  workflow: WorkflowDocument,
+): Promise<{ runId: string; deadLetterId: string }> {
+  const headers = authHeaders(orgId)
+  const started = await request.post(`${API_URL}/start`, { headers, data: workflow })
+  if (!started.ok()) {
+    throw new Error(`POST /start failed: ${started.status()} ${await started.text()}`)
+  }
+  const { runId } = await started.json() as { runId?: string }
+  if (!runId) throw new Error('POST /start did not return runId')
+
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const response = await request.get(`${API_URL}/dlq?limit=100`, { headers })
+    if (!response.ok()) {
+      throw new Error(`GET /dlq failed: ${response.status()} ${await response.text()}`)
+    }
+    const rows = await response.json() as Array<{ id: string; runId: string }>
+    const deadLetter = rows.find((row) => row.runId === runId)
+    if (deadLetter) return { runId, deadLetterId: deadLetter.id }
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+  throw new Error(`Run ${runId} did not create a dead letter`)
+}
+
+async function currentActivityRecoveryId(page: Page) {
+  const detail = page.getByTestId('activity-recovery-detail')
+  return await detail.count() > 0 ? detail.getAttribute('data-dead-letter-id') : null
+}
+
+async function waitForNewActivityRecovery(page: Page, previousId: string | null) {
+  const detail = page.getByTestId('activity-recovery-detail')
   await expect.poll(async () => {
-    if (await selected.count() === 0) return null
-    const testId = await selected.getAttribute('data-testid')
-    return testId && testId !== previousTestId ? testId : null
+    if (await detail.count() === 0) return null
+    const id = await detail.getAttribute('data-dead-letter-id')
+    return id && id !== previousId ? id : null
   }, { timeout: 60_000 }).not.toBeNull()
-  await expect(selected).toBeVisible()
-  return selected
+  await expect(detail).toBeVisible()
+  return detail
 }
 
 function recordPlaybookMatches(page: Page): Map<string, Response> {
@@ -89,6 +113,18 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const orgId = process.env.JANUSLY_RECOVERY_PASSPORT_ORG_ID
     ?? `recovery-passport-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const headers = authHeaders(orgId)
+  const workflowId = `passport-local-tool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const failingWorkflow: WorkflowDocument = {
+    id: workflowId,
+    name: 'Provider-free recovery passport',
+    dslVersion: '1.0',
+    nodes: [{
+      id: 'normalize',
+      type: 'tool',
+      config: { tool: 'text.uppercase', resultPolicy: 'require_ok', input: {} },
+    }],
+    edges: [],
+  }
   let saveRequests = 0
   page.on('request', (outgoing) => {
     if (new URL(outgoing.url()).pathname === '/workflows/save') saveRequests += 1
@@ -98,30 +134,20 @@ test('recovery passport requires sandbox success and a separate apply decision',
     window.localStorage.setItem('janusly:activeOrg', activeOrg)
   }, { activeOrg: orgId })
   await page.goto('/')
-  const onboarding = page.getByTestId('onboarding-banner')
-  await expect(onboarding).toBeVisible()
-  expect(await onboarding.evaluate((node) => getComputedStyle(node).position)).not.toBe('fixed')
-  await captureEvidence(page, '01-contextual-onboarding-en')
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
-  const pack = page.getByTestId('solution-pack-incident-triage')
-  await pack.getByRole('button', { name: 'Install', exact: true }).click()
-  await expect(page.getByText(/Pack installed/)).toBeVisible()
-  // The success toast precedes the async refresh + workflow-open handoff. Wait
-  // for that final destination before navigating back, otherwise the handoff
-  // can replace the catalog DOM while Playwright is clicking its action button.
-  await expect(page.getByRole('heading', { name: 'Build', exact: true })).toBeVisible()
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
-  await selectWorkerInterruptedFailure(pack, 'en')
-  const selectedBeforeInitialFailure = await selectedDeadLetterTestId(page)
-  await pack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
-  await openWorkspaceSection(page, 'Activity', 'Recover')
+  const homeHero = page.locator('.we-recovery-center-hero')
+  await expect(homeHero).toBeVisible()
+  await expect(page.getByTestId('home-priority-clear')).toBeVisible()
+  await captureEvidence(page, '01-home-context-en')
+  const saved = await request.post(`${API_URL}/workflows/save`, {
+    headers,
+    data: failingWorkflow,
+  })
+  expect(saved.ok(), await saved.text()).toBe(true)
+  const initialFailure = await startFailure(request, orgId, failingWorkflow)
+  const deadLetterId = initialFailure.deadLetterId
+  await openActivityRecoveryDetail(page, deadLetterId)
 
-  const failedRow = await waitForNewSelectedFailure(page, selectedBeforeInitialFailure, 'page_oncall')
-  const rowTestId = await failedRow.getAttribute('data-testid')
-  const deadLetterId = rowTestId?.replace('dlq-row-', '')
-  expect(deadLetterId).toBeTruthy()
-
-  const detailResponse = await request.get(`${API_URL}/dlq?id=${encodeURIComponent(deadLetterId!)}`, { headers })
+  const detailResponse = await request.get(`${API_URL}/dlq?id=${encodeURIComponent(deadLetterId)}`, { headers })
   expect(detailResponse.ok()).toBe(true)
   const detail = await detailResponse.json() as {
     nodeId: string
@@ -129,7 +155,13 @@ test('recovery passport requires sandbox success and a separate apply decision',
   }
   const fixedWorkflow = structuredClone(detail.workflowJson)
   fixedWorkflow.nodes = fixedWorkflow.nodes.map((node) => node.id === detail.nodeId
-    ? { id: node.id, type: 'noop', config: {} }
+    ? {
+        ...node,
+        config: {
+          ...node.config,
+          input: { value: 'recovered locally' },
+        },
+      }
     : node)
 
   await page.route('**/ai/patch-workflow', async (route) => {
@@ -139,10 +171,10 @@ test('recovery passport requires sandbox success and a separate apply decision',
       body: JSON.stringify({
         mode: 'ai',
         suggestedWorkflow: fixedWorkflow,
-        rationale: 'Replace the deterministic demo failure with a safe no-op.',
+        rationale: 'Provide the required local-tool input without changing the node or tool identity.',
         suggestions: [{
           workflow: fixedWorkflow,
-          rationale: 'Replace the deterministic demo failure with a safe no-op.',
+          rationale: 'Provide the required local-tool input without changing the node or tool identity.',
           approachLabel: 'other',
           confidence: 100,
           calibratedConfidence: 100,
@@ -150,7 +182,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
         }],
         evidence: [{ kind: 'signature_rule', sourceRef: 'demo_failure', snippet: 'Matched deterministic demo failure' }],
         recoveryPassport: {
-          failureSignature: 'Deterministic demo failure on tool node',
+          failureSignature: 'Invalid tool input: text.uppercase',
           priorSameSignatureOutcome: null,
         },
       }),
@@ -197,18 +229,11 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // Explicit use returns the immutable source, then the normal sandbox and
   // production Apply gates run again against the fresh failure.
   await page.getByRole('button', { name: 'Close', exact: true }).click()
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
-  const repeatPack = page.getByTestId('solution-pack-incident-triage')
-  await selectWorkerInterruptedFailure(repeatPack, 'en')
-  const selectedBeforeRepeatedFailure = await selectedDeadLetterTestId(page)
-  await repeatPack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
-  await openWorkspaceSection(page, 'Activity', 'Recover')
-  const repeatedFailure = await waitForNewSelectedFailure(page, selectedBeforeRepeatedFailure, 'page_oncall')
-  const repeatedTestId = await repeatedFailure.getAttribute('data-testid')
-  const repeatedDeadLetterId = repeatedTestId?.replace('dlq-row-', '')
-  expect(repeatedDeadLetterId).toBeTruthy()
+  const repeated = await startFailure(request, orgId, failingWorkflow)
+  const repeatedDeadLetterId = repeated.deadLetterId
+  await openActivityRecoveryDetail(page, repeatedDeadLetterId)
   const repeatedDetailResponse = await request.get(
-    `${API_URL}/dlq?id=${encodeURIComponent(repeatedDeadLetterId!)}`,
+    `${API_URL}/dlq?id=${encodeURIComponent(repeatedDeadLetterId)}`,
     { headers },
   )
   expect(repeatedDetailResponse.ok()).toBe(true)
@@ -248,7 +273,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   }, { timeout: 30_000 }).toBe('succeeded')
 
   const matchResponse = await request.get(
-    `${API_URL}/recovery/playbooks/match?deadLetterId=${encodeURIComponent(repeatedDeadLetterId!)}`,
+    `${API_URL}/recovery/playbooks/match?deadLetterId=${encodeURIComponent(repeatedDeadLetterId)}`,
     { headers },
   )
   expect(matchResponse.ok()).toBe(true)
@@ -274,25 +299,18 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // Locale consistency on the playbook's own live surface (not only a unit render).
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
-  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
-  const spanishPlaybookPack = page.getByTestId('solution-pack-incident-triage')
-  await selectWorkerInterruptedFailure(spanishPlaybookPack, 'es')
-  const selectedBeforeSpanishFailure = await selectedDeadLetterTestId(page)
-  await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
-  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
-  const spanishPlaybookFailure = await waitForNewSelectedFailure(page, selectedBeforeSpanishFailure, 'page_oncall')
-  const spanishFailureTestId = await spanishPlaybookFailure.getAttribute('data-testid')
-  const spanishFailureId = spanishFailureTestId?.replace('dlq-row-', '')
-  expect(spanishFailureId).toBeTruthy()
+  const spanishOccurrence = await startFailure(request, orgId, failingWorkflow)
+  const spanishFailureId = spanishOccurrence.deadLetterId
+  await openActivityRecoveryDetail(page, spanishFailureId)
   const spanishFailureDetailResponse = await request.get(
-    `${API_URL}/dlq?id=${encodeURIComponent(spanishFailureId!)}`,
+    `${API_URL}/dlq?id=${encodeURIComponent(spanishFailureId)}`,
     { headers },
   )
   expect(spanishFailureDetailResponse.ok()).toBe(true)
   const spanishFailureDetail = await spanishFailureDetailResponse.json() as {
     runId: string
   }
-  const spanishMatchResponsePromise = waitForPlaybookMatch(playbookMatches, spanishFailureId!)
+  const spanishMatchResponsePromise = waitForPlaybookMatch(playbookMatches, spanishFailureId)
   await page.getByRole('button', { name: /Sugerir corrección/i }).click()
   const spanishMatchResponse = await spanishMatchResponsePromise
   expect(spanishMatchResponse.ok()).toBe(true)
@@ -332,20 +350,10 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // A separate occurrence drives the regression state so the successful-use
   // smoke above and the failed-validation smoke below remain causally honest.
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click()
-  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
-  await selectWorkerInterruptedFailure(spanishPlaybookPack, 'es')
-  const selectedBeforeSpanishRegression = await selectedDeadLetterTestId(page)
-  await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
-  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
-  const spanishRegressionFailure = await waitForNewSelectedFailure(
-    page,
-    selectedBeforeSpanishRegression,
-    'page_oncall',
-  )
-  const spanishRegressionTestId = await spanishRegressionFailure.getAttribute('data-testid')
-  const spanishRegressionId = spanishRegressionTestId?.replace('dlq-row-', '')
-  expect(spanishRegressionId).toBeTruthy()
-  const spanishRegressionMatchPromise = waitForPlaybookMatch(playbookMatches, spanishRegressionId!)
+  const spanishRegression = await startFailure(request, orgId, failingWorkflow)
+  const spanishRegressionId = spanishRegression.deadLetterId
+  await openActivityRecoveryDetail(page, spanishRegressionId)
+  const spanishRegressionMatchPromise = waitForPlaybookMatch(playbookMatches, spanishRegressionId)
   await page.getByRole('button', { name: /Sugerir corrección/i }).click()
   const spanishRegressionMatch = await spanishRegressionMatchPromise
   expect(spanishRegressionMatch.ok()).toBe(true)
@@ -366,7 +374,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
       contentType: 'application/json',
       body: JSON.stringify({
         run: { id: runId, status: 'failed' },
-        nodes: [{ nodeId: 'page_oncall', status: 'failed', errorJson: { message: 'El timeout volvió a superar el límite.' } }],
+        nodes: [{ nodeId: 'normalize', status: 'failed', errorJson: { message: 'La validación volvió a fallar.' } }],
       }),
     })
   })
@@ -395,12 +403,10 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(page.getByText(/Pack instalado/)).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Crear', exact: true })).toBeVisible()
   await openWorkspaceSection(page, 'Flujos', 'Plantillas')
-  const selectedBeforeFallbackFailure = await selectedDeadLetterTestId(page)
+  const selectedBeforeFallbackFailure = await currentActivityRecoveryId(page)
   await spanishPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
-  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
-  const spanishFailure = await waitForNewSelectedFailure(page, selectedBeforeFallbackFailure)
-  const spanishRowTestId = await spanishFailure.getAttribute('data-testid')
-  const spanishDeadLetterId = spanishRowTestId?.replace('dlq-row-', '')
+  const spanishFailure = await waitForNewActivityRecovery(page, selectedBeforeFallbackFailure)
+  const spanishDeadLetterId = await spanishFailure.getAttribute('data-dead-letter-id')
   expect(spanishDeadLetterId).toBeTruthy()
   const spanishDetailResponse = await request.get(
     `${API_URL}/dlq?id=${encodeURIComponent(spanishDeadLetterId!)}`,

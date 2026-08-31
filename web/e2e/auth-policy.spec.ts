@@ -2,6 +2,10 @@ import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { expect, test } from '@playwright/test'
 
 test('Settings auth policy panel validates and saves org settings', async ({ page }) => {
+  const orgId = `auth-policy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+  }, { activeOrg: orgId })
   await page.goto('/')
   await openWorkspaceSection(page, 'Settings', 'Workspace')
   await page.getByTestId('operations-rail-tab-access').click()

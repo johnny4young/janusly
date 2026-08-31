@@ -94,15 +94,17 @@ for (const contract of LOCALES) {
     const confirmButton = dialog.getByRole('button', { name: contract.confirm, exact: true })
     const cancelButton = dialog.getByRole('button', { name: contract.cancel, exact: true })
     await expect(dialog.getByRole('heading', { name: contract.dialogTitle, exact: true })).toBeVisible()
-    await expect(confirmButton).toBeFocused()
+    // Destructive confirmations deliberately land on Cancel. A stray Enter
+    // must never discard an operator's unsaved canvas.
+    await expect(cancelButton).toBeFocused()
     await hideUnrelatedOverlays(page)
     await captureDialog(dialog, `web-${contract.locale}-confirm-dialog-initial-focus`)
 
     await page.keyboard.press('Tab')
-    await expect(cancelButton).toBeFocused()
+    await expect(confirmButton).toBeFocused()
     await captureDialog(dialog, `web-${contract.locale}-confirm-dialog-tab-wrap`)
     await page.keyboard.press('Shift+Tab')
-    await expect(confirmButton).toBeFocused()
+    await expect(cancelButton).toBeFocused()
 
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)

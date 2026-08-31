@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 import { expectNoBlockingAccessibilityViolations } from './_helpers/accessibility'
 import { openWorkflowAiAction } from './_helpers/workspace-navigation'
+import { applyBuiltWorkflowProposal, buildWorkflowProposal } from './_helpers/workflow-authoring'
 
 const enabled = process.env.JANUSLY_LOCAL_OCI_E2E === '1'
 const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
@@ -80,16 +81,11 @@ test('production OCI works without Anthropic and explains local mode in both loc
   await expect(hero).toContainText('Configure ANTHROPIC_API_KEY for the API and worker')
   await expect(page.getByText('Root .env has ANTHROPIC_API_KEY')).toBeVisible()
   await page.locator('.ai-studio-prompt').fill('Create a flow with human approval before writing')
-  await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
-  const discard = page.getByRole('button', { name: 'Discard changes', exact: true })
-  if (await discard.isVisible().catch(() => false)) await discard.click()
-  await expect(page.getByText('Starter flow loaded locally').first()).toBeVisible()
-  await expect(page.locator('.result-panel')).not.toContainText('AI request failed')
+  const englishProposal = await buildWorkflowProposal(page)
+  await expect(englishProposal.getByText('Deterministic local proposal')).toBeVisible()
+  await applyBuiltWorkflowProposal(page)
   await expectHealthySurface(page, 'English production OCI AI Studio without provider')
   await capture(page, 'oci-no-key-ai-studio-en')
-  await page
-    .getByRole('button', { name: 'Starter flow loaded locally', exact: true })
-    .click()
 
   // Use the product control rather than mutating storage behind the running
   // i18n store. This proves the operator-visible switch and preserves the
@@ -99,10 +95,9 @@ test('production OCI works without Anthropic and explains local mode in both loc
   await expect(hero).toContainText('Configura ANTHROPIC_API_KEY para la API y el worker')
   await expect(page.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeVisible()
   await page.locator('.ai-studio-prompt').fill('Crea un flujo con aprobación humana antes de escribir')
-  await page.getByRole('button', { name: 'Armar flujo', exact: true }).click()
-  const spanishDiscard = page.getByRole('button', { name: 'Descartar cambios', exact: true })
-  if (await spanishDiscard.isVisible().catch(() => false)) await spanishDiscard.click()
-  await expect(page.getByText('Flujo inicial cargado localmente').first()).toBeVisible()
+  const spanishProposal = await buildWorkflowProposal(page, 'es')
+  await expect(spanishProposal.getByText('Propuesta local determinista')).toBeVisible()
+  await applyBuiltWorkflowProposal(page, 'es')
   await expectHealthySurface(page, 'Spanish production OCI AI Studio without provider')
   await capture(page, 'oci-no-key-ai-studio-es')
 

@@ -52,14 +52,15 @@ async function createFailedRecovery(
   request: APIRequestContext,
   workflow: WorkflowJson,
   sequence: number,
+  orgId: string,
 ): Promise<string> {
   const payload = { customer: `campaign-${sequence}@example.com`, amountUsd: 100 + sequence }
-  const { runId } = await startRun(request, workflow, payload)
-  await pollUntilWaitingOrTerminal(request, runId, 'trigger')
-  await resumeWebhook(request, runId, 'trigger', payload)
-  const failed = await pollUntilTerminal(request, runId)
+  const { runId } = await startRun(request, workflow, payload, orgId)
+  await pollUntilWaitingOrTerminal(request, runId, 'trigger', 30_000, orgId)
+  await resumeWebhook(request, runId, 'trigger', payload, orgId)
+  const failed = await pollUntilTerminal(request, runId, 30_000, orgId)
   expect(failed.status).toBe('failed')
-  const deadLetter = await findDeadLetterForRun(request, runId)
+  const deadLetter = await findDeadLetterForRun(request, runId, orgId)
   expect(deadLetter).not.toBeNull()
   return deadLetter!.id
 }
@@ -116,19 +117,20 @@ test('creates, observes, and stops a paced campaign in English and Spanish', asy
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
 
-  const workflow = scopeFailureNode(await loadTemplate(request, 'failed-workflow-recovery'))
+  const orgId = `replay-campaign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const workflow = scopeFailureNode(await loadTemplate(request, 'failed-workflow-recovery', orgId))
   const deadLetterIds: string[] = []
   for (let index = 0; index < 4; index += 1) {
-    deadLetterIds.push(await createFailedRecovery(request, workflow, index + 1))
+    deadLetterIds.push(await createFailedRecovery(request, workflow, index + 1, orgId))
   }
 
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.addInitScript(() => {
-    window.localStorage.setItem('janusly:activeOrg', 'default')
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
     if (!window.localStorage.getItem('janusly:locale')) {
       window.localStorage.setItem('janusly:locale', 'en')
     }
-  })
+  }, { activeOrg: orgId })
   await page.goto('/')
   await openWorkspaceSection(page, 'Activity', 'Recover')
   await openRecoveryAutomation(page)

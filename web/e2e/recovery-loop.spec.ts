@@ -34,8 +34,10 @@ import {
 
 type WorkflowJson = { nodes: Array<{ id: string; type: string; config: Record<string, unknown> }> };
 const API_URL = process.env.E2E_API_URL ?? "http://localhost:3001";
-const AUTH = { "x-org-id": "default", "x-user-id": "dev-user" };
-const OTHER_AUTH = { "x-org-id": "recovery-loop-other", "x-user-id": "other-user" };
+const STAMP = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const ORG_ID = `recovery-loop-${STAMP}`;
+const AUTH = { "x-org-id": ORG_ID, "x-user-id": "dev-user" };
+const OTHER_AUTH = { "x-org-id": `recovery-loop-other-${STAMP}`, "x-user-id": "other-user" };
 
 /** Deep-clone F3 and replace the failing `charge` http node with a `noop` of
  *  the same id — a real fix that succeeds in the sandbox AND a real replay. */
@@ -61,32 +63,32 @@ test.describe("Recovery loop", () => {
     const otherLedgerBaseline = await otherLedgerBefore.json() as { totalRecovered: number };
 
     // 1. Run F3 to failure — `charge` throws "Missing secret" → DLQ.
-    const workflow = (await loadTemplate(request, "failed-workflow-recovery")) as unknown as WorkflowJson;
+    const workflow = (await loadTemplate(request, "failed-workflow-recovery", ORG_ID)) as unknown as WorkflowJson;
     const payload = { customer: "leah@example.com", amountUsd: 49 };
-    const { runId } = await startRun(request, workflow, payload);
+    const { runId } = await startRun(request, workflow, payload, ORG_ID);
 
-    await pollUntilWaitingOrTerminal(request, runId, "trigger");
-    await resumeWebhook(request, runId, "trigger", payload);
+    await pollUntilWaitingOrTerminal(request, runId, "trigger", 30_000, ORG_ID);
+    await resumeWebhook(request, runId, "trigger", payload, ORG_ID);
 
-    const failed = await pollUntilTerminal(request, runId);
+    const failed = await pollUntilTerminal(request, runId, 30_000, ORG_ID);
     expect(failed.status, "F3 is intentionally broken — the run must fail").toBe("failed");
 
-    const dl = await findDeadLetterForRun(request, runId);
+    const dl = await findDeadLetterForRun(request, runId, ORG_ID);
     expect(dl, "F3 must produce a DLQ entry").not.toBeNull();
     expect(dl!.nodeId, "the failing node is `charge`").toBe("charge");
 
     // 2. Sandbox REJECTS the still-broken workflow — the missing-secret template
     //    error is a read-side failure the writes-skipped sandbox still hits.
-    const rejectRunId = await validateFix(request, dl!.id, workflow);
-    const rejected = await pollUntilTerminal(request, rejectRunId);
+    const rejectRunId = await validateFix(request, dl!.id, workflow, ORG_ID);
+    const rejected = await pollUntilTerminal(request, rejectRunId, 30_000, ORG_ID);
     expect(rejected.status, "sandbox must REJECT a workflow whose failing node is unchanged").toBe("failed");
     expect(rejected.nodes.find((n) => n.nodeId === "charge")?.status).toBe("failed");
 
     // 3. Sandbox ACCEPTS the real fix (charge → noop) — the failing node now
     //    resolves, so the writes-skipped sandbox replay reaches succeeded.
     const fixed = fixChargeToNoop(workflow);
-    const acceptRunId = await validateFix(request, dl!.id, fixed);
-    const accepted = await pollUntilTerminal(request, acceptRunId);
+    const acceptRunId = await validateFix(request, dl!.id, fixed, ORG_ID);
+    const accepted = await pollUntilTerminal(request, acceptRunId, 30_000, ORG_ID);
     expect(accepted.status, "sandbox must ACCEPT a workflow whose failing node now resolves").toBe("succeeded");
     expect(accepted.nodes.find((n) => n.nodeId === "charge")?.status).toBe("succeeded");
 
@@ -94,11 +96,11 @@ test.describe("Recovery loop", () => {
     //    the replay un-terminates the run + re-queues the failed node, then
     //    re-runs it against the applied fix. (Regression guard for the recovery
     //    bug where replay re-ran the original broken snapshot and stayed failed.)
-    expect(await deadLetterStatus(request, dl!.id)).toBe("open");
-    await replayDeadLetter(request, dl!.id, fixed);
-    expect(await deadLetterStatus(request, dl!.id), "replay must flip the DLQ entry to replayed").toBe("replayed");
+    expect(await deadLetterStatus(request, dl!.id, ORG_ID)).toBe("open");
+    await replayDeadLetter(request, dl!.id, fixed, ORG_ID);
+    expect(await deadLetterStatus(request, dl!.id, ORG_ID), "replay must flip the DLQ entry to replayed").toBe("replayed");
 
-    const recovered = await pollUntilTerminal(request, runId);
+    const recovered = await pollUntilTerminal(request, runId, 30_000, ORG_ID);
     expect(recovered.status, "replaying against the applied fix must recover the run").toBe("succeeded");
     expect(recovered.nodes.find((n) => n.nodeId === "charge")?.status).toBe("succeeded");
 

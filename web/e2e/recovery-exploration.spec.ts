@@ -4,18 +4,14 @@
  * the product API intentionally cannot forge historical recovery timestamps.
  */
 
-import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { execPostgresSql } from './_helpers/postgres'
 import {
   openRecoveryAutomation,
   openWorkspaceSection,
 } from './_helpers/workspace-navigation'
 
-const execFileAsync = promisify(execFile)
-const COMPOSE_FILE = fileURLToPath(new URL('../../docker-compose.yml', import.meta.url))
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 type LocaleContract = {
@@ -100,11 +96,7 @@ async function seedRecoveryHistory(orgId: string): Promise<{ days: string[]; ids
     ${(index + 1) * 5 * 60_000}
   )`).join(',')
 
-  await execFileAsync('docker', [
-    'compose', '-f', COMPOSE_FILE,
-    'exec', '-T', 'postgres',
-    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `INSERT INTO runs (
+  await execPostgresSql(`INSERT INTO runs (
       id, org_id, workflow_version_id, status, created_at
     ) VALUES ${runValues};
     INSERT INTO dead_letters (
@@ -113,8 +105,7 @@ async function seedRecoveryHistory(orgId: string): Promise<{ days: string[]; ids
     ) VALUES ${values};
     INSERT INTO recovery_impact_events (
       dead_letter_id, org_id, run_id, node_id, user_id, recovered_at, downtime_ended_ms
-    ) VALUES ${impactValues};`,
-  ])
+    ) VALUES ${impactValues};`)
 
   return { days: days.map((day) => day.toISOString().slice(0, 10)), ids }
 }
@@ -125,11 +116,7 @@ async function seedAutoHealingEvidence(
 ): Promise<void> {
   const suffix = orgId.replaceAll(/[^a-zA-Z0-9]/g, '').slice(-24)
   const now = new Date().toISOString()
-  await execFileAsync('docker', [
-    'compose', '-f', COMPOSE_FILE,
-    'exec', '-T', 'postgres',
-    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `INSERT INTO auto_healing_runs (
+  await execPostgresSql(`INSERT INTO auto_healing_runs (
       id, org_id, dead_letter_id, signature, status, approach_label,
       confidence, validation_evidence_level, loop_attempt_count, created_at, updated_at
     ) VALUES (
@@ -156,8 +143,7 @@ async function seedAutoHealingEvidence(
       1,
       ${sqlLiteral(now)}::timestamptz,
       ${sqlLiteral(now)}::timestamptz
-    );`,
-  ])
+    );`)
 }
 
 async function prepareSession(page: Page, locale: 'en' | 'es'): Promise<string> {

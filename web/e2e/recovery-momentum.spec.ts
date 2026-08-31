@@ -1,9 +1,9 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openActivityRecoveryDetail } from './_helpers/workspace-navigation'
 /**
- * Real-browser proof for recovery momentum and truthful replay feedback.
+ * Real-browser proof for validation-drill inspection and truthful replay feedback.
  * Each case uses a private dev-header org and the product's own demo-failure
- * injection, so all queue, heatmap, metrics, and replay states are
- * backed by the live API, worker, and Postgres stack.
+ * injection, so exact evidence and replay states are backed by the live API,
+ * worker, and Postgres stack without fabricating operator-queue work.
  */
 
 import { mkdir } from 'node:fs/promises'
@@ -17,7 +17,7 @@ type LocaleContract = {
   homeName: RegExp
   retryName: string
   recoveringText: string
-  longestDowntime: RegExp
+  cleanPosture: string
   queuedToast: string
 }
 
@@ -25,8 +25,8 @@ const ENGLISH: LocaleContract = {
   locale: 'en',
   homeName: /^Home\b/,
   retryName: 'Retry',
-  recoveringText: 'Recovering…',
-  longestDowntime: /^Longest downtime:/,
+  recoveringText: 'Replaying',
+  cleanPosture: 'Recovery posture is clean',
   queuedToast: 'Replay queued',
 }
 
@@ -34,8 +34,8 @@ const SPANISH: LocaleContract = {
   locale: 'es',
   homeName: /^Inicio\b/,
   retryName: 'Reintentar',
-  recoveringText: 'Recuperando…',
-  longestDowntime: /^Inactividad más larga:/,
+  recoveringText: 'Reintentando',
+  cleanPosture: 'La postura de recuperación está limpia',
   queuedToast: 'Reintento en cola',
 }
 
@@ -84,7 +84,7 @@ async function prepareIsolatedSession(page: Page, locale: 'en' | 'es', reducedMo
   return orgId
 }
 
-async function injectDemoFailure(request: APIRequestContext, orgId: string): Promise<void> {
+async function injectDemoFailure(request: APIRequestContext, orgId: string): Promise<string> {
   const response = await request.post(`${API_URL}/solution-packs/failed-payment-recovery/inject-failure`, {
     headers: {
       'Content-Type': 'application/json',
@@ -94,6 +94,7 @@ async function injectDemoFailure(request: APIRequestContext, orgId: string): Pro
     data: {},
   })
   expect(response.ok()).toBe(true)
+  return ((await response.json()) as { deadLetterId: string }).deadLetterId
 }
 
 async function runRecoveryCycle(
@@ -114,37 +115,30 @@ async function runRecoveryCycle(
 
   const drillButton = page.getByTestId('recovery-center-empty-cta-drill')
   await expect(drillButton).toBeVisible()
+  const drillResponsePromise = page.waitForResponse((response) => (
+    response.url().includes('/solution-packs/')
+    && response.url().endsWith('/inject-failure')
+    && response.request().method() === 'POST'
+  ))
   await drillButton.click()
-  await openWorkspaceSection(
-    page,
-    contract.locale === 'en' ? 'Activity' : 'Actividad',
-    contract.locale === 'en' ? 'Recover' : 'Recuperar',
-  )
-
-  const queue = page.getByTestId('recovery-queue')
-  await expect(queue).toBeVisible()
-  const row = queue.locator('[data-dead-letter-id]').first()
-  await expect(row).toBeVisible()
+  const drillResponse = await drillResponsePromise
+  expect(drillResponse.ok()).toBe(true)
+  const drill = await drillResponse.json() as { deadLetterId: string }
+  let detail = page.getByTestId('activity-recovery-detail')
+  await expect(detail).toHaveAttribute('data-dead-letter-id', drill.deadLetterId, { timeout: 30_000 })
+  await expect(detail.getByTestId('dlq-recovery-drill-context')).toBeVisible()
 
   await page.getByRole('button', { name: contract.homeName }).click()
   const hero = page.locator('.we-recovery-center-hero')
-  await expect(hero.getByTestId('recovery-center-longest-downtime')).toHaveText(contract.longestDowntime)
   await waitForHealthRingToSettle(hero)
+  await expect(hero).toContainText(contract.cleanPosture)
+  await expect(page.getByTestId('recovery-center-action-triage_failures')).toHaveCount(0)
   await hideUnrelatedOverlays(page)
-  await captureElement(hero, `web-${contract.locale}-recovery-hero-action`)
-  await captureElement(page.locator('.workspace-main'), `web-${contract.locale}-home-action-workspace`)
+  await captureElement(hero, `web-${contract.locale}-recovery-hero-drill-isolated`)
+  await captureElement(page.locator('.workspace-main'), `web-${contract.locale}-home-drill-isolated-workspace`)
 
-  await page.getByTestId('recovery-center-action-cta-triage_failures').click()
-  await openWorkspaceSection(
-    page,
-    contract.locale === 'en' ? 'Activity' : 'Actividad',
-    contract.locale === 'en' ? 'Recover' : 'Recuperar',
-  )
-  await expect(queue).toBeVisible()
-  const activeRow = queue.locator('[data-dead-letter-id]').first()
-  await activeRow.click()
-  const detail = queue.locator('.detail-box')
-  const retry = detail.getByRole('button', { name: contract.retryName })
+  detail = await openActivityRecoveryDetail(page, drill.deadLetterId)
+  const retry = detail.getByRole('button', { name: contract.retryName, exact: true })
   await expect(retry).toBeVisible()
 
   let releaseReplay: (() => void) | undefined
@@ -154,22 +148,25 @@ async function runRecoveryCycle(
     await route.continue()
   }, { times: 1 })
 
+  const replayResponse = page.waitForResponse((response) => (
+    response.url().endsWith('/dlq/replay') && response.request().method() === 'POST'
+  ))
+  let replayRequested = false
   try {
     await retry.click()
-    const recovering = queue.locator('[data-testid^="dlq-recovering-"]')
+    replayRequested = true
+    const recovering = detail.locator('.status-pill')
     await expect(recovering).toHaveText(contract.recoveringText)
     await expect(retry).toBeDisabled()
     await expect(detail.getByRole('button', { name: /Resolve|Resolver/ })).toBeDisabled()
     await hideUnrelatedOverlays(page)
-    await captureElement(detail, `web-${contract.locale}-recovery-queue-loading`, { finishAnimations: false })
+    await captureElement(detail, `web-${contract.locale}-activity-recovery-loading`, { finishAnimations: false })
 
-    const replayResponse = page.waitForResponse((response) => (
-      response.url().endsWith('/dlq/replay') && response.request().method() === 'POST'
-    ))
     releaseReplay?.()
     expect((await replayResponse).ok()).toBe(true)
   } finally {
     releaseReplay?.()
+    if (replayRequested) await replayResponse.catch(() => undefined)
     await page.unroute('**/dlq/replay')
   }
 
@@ -178,56 +175,61 @@ async function runRecoveryCycle(
   await captureElement(queuedToast.locator('..'), `web-${contract.locale}-recovery-toast-queued`)
 
   await page.getByRole('button', { name: contract.homeName }).click()
-  await expect(hero).not.toHaveAttribute('data-all-clear', 'true')
-  await expect(hero.getByTestId('celebration-burst')).toHaveCount(0)
-  await expect(hero.getByTestId('recovery-center-all-clear-summary')).toHaveCount(0)
+  await expect(hero).toContainText(contract.cleanPosture)
+  await expect(page.getByTestId('recovery-center-action-triage_failures')).toHaveCount(0)
   await waitForHealthRingToSettle(hero)
   await hideUnrelatedOverlays(page)
-  await captureElement(hero, `web-${contract.locale}-recovery-hero-replay-queued`, { finishAnimations: false })
+  await captureElement(hero, `web-${contract.locale}-recovery-hero-drill-replayed`, { finishAnimations: false })
 
   return { consoleErrors, pageErrors }
 }
 
 test.describe.configure({ mode: 'serial' })
 
-test('English recovery momentum shows action, optimistic replay, and truthful queued feedback', async ({ page }) => {
+test('English validation drill keeps optimistic replay and queue isolation truthful', async ({ page }) => {
   test.setTimeout(90_000)
   const errors = await runRecoveryCycle(page, ENGLISH, { reducedMotion: false })
   expect(errors.consoleErrors).toEqual([])
   expect(errors.pageErrors).toEqual([])
 })
 
-test('Spanish recovery momentum keeps queued feedback truthful with reduced motion', async ({ page }) => {
+test('Spanish validation drill keeps queued feedback truthful with reduced motion', async ({ page }) => {
   test.setTimeout(90_000)
   const errors = await runRecoveryCycle(page, SPANISH, { reducedMotion: true })
   expect(errors.consoleErrors).toEqual([])
   expect(errors.pageErrors).toEqual([])
 })
 
-test('replaying one of two failures never publishes a false all-clear', async ({ page, request }) => {
+test('two validation drills stay inspectable without fabricating operator work', async ({ page, request }) => {
   test.setTimeout(90_000)
   const orgId = await prepareIsolatedSession(page, 'en', false)
   await page.goto('/')
 
   await page.getByTestId('home-insights-toggle').click()
+  const firstDrillResponse = page.waitForResponse((response) => (
+    response.url().includes('/solution-packs/')
+    && response.url().endsWith('/inject-failure')
+    && response.request().method() === 'POST'
+  ))
   await page.getByTestId('recovery-center-empty-cta-drill').click()
-  await openWorkspaceSection(page, 'Activity', 'Recover')
-  await expect(page.getByTestId('recovery-queue')).toBeVisible()
-  await injectDemoFailure(request, orgId)
-  await page.reload()
-  await openWorkspaceSection(page, 'Activity', 'Recover')
+  const firstId = ((await (await firstDrillResponse).json()) as { deadLetterId: string }).deadLetterId
+  const secondId = await injectDemoFailure(request, orgId)
 
-  const queue = page.getByTestId('recovery-queue')
-  await expect(queue.locator('[data-dead-letter-id]')).toHaveCount(2)
-  await queue.locator('[data-dead-letter-id]').first().click()
-  await queue.locator('.detail-box').getByRole('button', { name: ENGLISH.retryName }).click()
+  const countsResponse = await request.get(`${API_URL}/dlq/counts`, {
+    headers: { 'x-org-id': orgId, 'x-user-id': 'dev-user' },
+  })
+  expect(countsResponse.ok()).toBe(true)
+  await expect(countsResponse.json()).resolves.toMatchObject({ total: 0, open: 0 })
+
+  const firstDetail = await openActivityRecoveryDetail(page, firstId)
+  await firstDetail.getByRole('button', { name: ENGLISH.retryName, exact: true }).click()
   await expect(page.getByText(ENGLISH.queuedToast)).toBeVisible()
+
+  const secondDetail = await openActivityRecoveryDetail(page, secondId)
+  await expect(secondDetail.getByTestId('dlq-recovery-drill-context')).toBeVisible()
 
   await page.getByRole('button', { name: ENGLISH.homeName }).click()
   const hero = page.locator('.we-recovery-center-hero')
-  // A retry can fail again and replace the claimed dead letter with a fresh
-  // one. The truthful contract is that recovery work remains visible, not
-  // that the transient open count must fall from two to exactly one.
-  await expect(page.getByTestId('recovery-center-action-triage_failures')).toBeVisible()
-  await expect(hero.getByTestId('celebration-burst')).toHaveCount(0)
+  await expect(hero).toContainText(ENGLISH.cleanPosture)
+  await expect(page.getByTestId('recovery-center-action-triage_failures')).toHaveCount(0)
 })

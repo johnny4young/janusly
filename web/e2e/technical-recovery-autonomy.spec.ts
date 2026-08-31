@@ -1,15 +1,11 @@
-import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { execPostgresSql } from './_helpers/postgres'
 import {
   openRecoveryAutomation,
   openWorkspaceSection,
 } from './_helpers/workspace-navigation'
 
-const execFileAsync = promisify(execFile)
-const COMPOSE_FILE = fileURLToPath(new URL('../../docker-compose.yml', import.meta.url))
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 const LOCALES = [
@@ -161,11 +157,7 @@ async function seedAutonomyEvidence(orgId: string): Promise<void> {
     1000
   )`).join(',')
 
-  await execFileAsync('docker', [
-    'compose', '-f', COMPOSE_FILE,
-    'exec', '-T', 'postgres',
-    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `INSERT INTO dead_letters (
+  await execPostgresSql(`INSERT INTO dead_letters (
       id, org_id, run_id, node_id, attempt, workflow_json, node_json,
       error_json, status, created_at
     ) VALUES ${deadLetterRows};
@@ -203,8 +195,7 @@ async function seedAutonomyEvidence(orgId: string): Promise<void> {
     INSERT INTO recovery_impact_events (
       dead_letter_id, org_id, run_id, node_id, user_id,
       recovered_at, downtime_ended_ms
-    ) VALUES ${impactRows};`,
-  ])
+    ) VALUES ${impactRows};`)
 }
 
 async function prepareSession(

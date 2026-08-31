@@ -1,4 +1,5 @@
 import { openWorkflowAiAction } from './_helpers/workspace-navigation'
+import { applyWorkflowProposal, mockWorkflowProposal } from './_helpers/workflow-authoring'
 import { expect, test, type Page } from '@playwright/test'
 
 function captureBrowserErrors(page: Page) {
@@ -13,39 +14,33 @@ function captureBrowserErrors(page: Page) {
 test('Problems and graph context guide an author to a valid branch expression', async ({ page }) => {
   const browserErrors = captureBrowserErrors(page)
   let reviewRequestCount = 0
-  await page.route('**/ai/generate-workflow', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        mode: 'fallback',
-        id: 'guided-authoring-e2e',
-        name: 'Guided authoring',
-        inputs: {
-          type: 'object',
-          properties: { amount: { type: 'number' } },
+  await mockWorkflowProposal(page, {
+    mode: 'fallback',
+    id: 'guided-authoring-e2e',
+    name: 'Guided authoring',
+    inputs: {
+      type: 'object',
+      properties: { amount: { type: 'number' } },
+    },
+    nodes: [
+      { id: 'start', type: 'noop', config: {} },
+      {
+        id: 'fetch',
+        type: 'http',
+        config: {
+          url: 'https://example.com/data',
+          timeoutMs: 5000,
+          maxResponseBytes: 65536,
+          retry: { maxAttempts: 2 },
         },
-        nodes: [
-          { id: 'start', type: 'noop', config: {} },
-          {
-            id: 'fetch',
-            type: 'http',
-            config: {
-              url: 'https://example.com/data',
-              timeoutMs: 5000,
-              maxResponseBytes: 65536,
-              retry: { maxAttempts: 2 },
-            },
-          },
-          { id: 'gate', type: 'condition', config: { expression: 'context.fetch.output.ok === true' } },
-          { id: 'isolated', type: 'noop', config: {} },
-        ],
-        edges: [
-          { from: 'start', to: 'fetch' },
-          { from: 'fetch', to: 'gate' },
-        ],
-      }),
-    })
+      },
+      { id: 'gate', type: 'condition', config: { expression: 'context.fetch.output.ok === true' } },
+      { id: 'isolated', type: 'noop', config: {} },
+    ],
+    edges: [
+      { from: 'start', to: 'fetch' },
+      { from: 'fetch', to: 'gate' },
+    ],
   })
   await page.route('**/ai/review-workflow', async (route) => {
     reviewRequestCount += 1
@@ -72,7 +67,7 @@ test('Problems and graph context guide an author to a valid branch expression', 
 
   await page.goto('/')
   await openWorkflowAiAction(page, 'Workflows')
-  await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
+  await applyWorkflowProposal(page)
   await page.getByRole('button', { name: 'Review this flow', exact: true }).click()
   await page.locator('.workflow-node').filter({ hasText: 'Branch rule' }).click()
 

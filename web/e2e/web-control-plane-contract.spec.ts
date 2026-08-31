@@ -87,13 +87,15 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 1000 })
   const browserErrors = installBrowserErrorGuards(page)
-  const stamp = Date.now()
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const orgId = `control-plane-${stamp}`
 
-  await page.addInitScript(() => {
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
     if (!window.localStorage.getItem('janusly:locale')) {
       window.localStorage.setItem('janusly:locale', 'en')
     }
-  })
+  }, { activeOrg: orgId })
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
 

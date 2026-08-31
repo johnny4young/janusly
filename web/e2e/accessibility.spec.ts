@@ -16,6 +16,11 @@ import {
   openWorkflowAiAction,
   openWorkspaceSection,
 } from './_helpers/workspace-navigation'
+import {
+  applyBuiltWorkflowProposal,
+  buildWorkflowProposal,
+  mockWorkflowProposal,
+} from './_helpers/workflow-authoring'
 
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
@@ -94,40 +99,31 @@ test('AI-generated workflow result meets the accessibility floor', async ({ page
   await page.setViewportSize({ width: 1440, height: 1000 })
   const errors = installBrowserErrorGuards(page)
   await prepareIsolatedSession(page, 'en')
-  await page.route('**/ai/generate-workflow', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      mode: 'ai',
-      provider: 'anthropic',
-      model: 'claude-haiku-4-5-20251001',
-      dslVersion: '1.0',
-      id: 'accessible-generated-flow',
-      name: 'Accessible approval flow',
-      nodes: [
-        {
-          id: 'fetch',
-          type: 'http',
-          config: { method: 'GET', url: 'https://api.github.com' },
-        },
-        {
-          id: 'approval',
-          type: 'approval',
-          config: { message: 'Review the API result.' },
-        },
-      ],
-      edges: [{ from: 'fetch', to: 'approval' }],
-    }),
-  }))
+  await mockWorkflowProposal(page, {
+    dslVersion: '1.0',
+    id: 'accessible-generated-flow',
+    name: 'Accessible approval flow',
+    nodes: [
+      {
+        id: 'fetch',
+        type: 'http',
+        config: { method: 'GET', url: 'https://api.github.com' },
+      },
+      {
+        id: 'approval',
+        type: 'approval',
+        config: { message: 'Review the API result.' },
+      },
+    ],
+    edges: [{ from: 'fetch', to: 'approval' }],
+  }, { mode: 'ai' })
   await page.goto('/')
 
   await openWorkflowAiAction(page, 'Workflows')
   await page.locator('.ai-studio-prompt').fill('Draft an API flow with human approval.')
-  await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
-
-  const result = page.locator('.result-panel')
-  await expect(result).toContainText('Flow drafted by AI')
-  await expect(result.locator('.mode-pill-ai')).toBeVisible()
+  const proposal = await buildWorkflowProposal(page)
+  await expect(proposal.getByTestId('workflow-assurance-summary').locator('.mode-pill-ai')).toHaveCount(3)
+  await applyBuiltWorkflowProposal(page)
   await expect(page.locator('.workflow-node').filter({ hasText: 'Ask approval' })).toBeVisible()
   await expectNoBlockingAccessibilityViolations(page, 'AI-generated workflow result')
   await capture(page.locator('.app-shell'), 'accessibility-en-ai-generated-result')

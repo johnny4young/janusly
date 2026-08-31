@@ -4,14 +4,10 @@
  * refuse caller-supplied timestamps and actor identities.
  */
 
-import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { execPostgresSql } from './_helpers/postgres'
 
-const execFileAsync = promisify(execFile)
-const COMPOSE_FILE = fileURLToPath(new URL('../../docker-compose.yml', import.meta.url))
 const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
@@ -76,11 +72,7 @@ async function seedImpact(orgId: string): Promise<void> {
   )`).join(',')
   const firstRecoveredAt = new Date(Math.min(...records.filter((record) => record.org === orgId).map((record) => record.recoveredAt)))
 
-  await execFileAsync('docker', [
-    'compose', '-f', COMPOSE_FILE,
-    'exec', '-T', 'postgres',
-    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `
+  await execPostgresSql(`
       INSERT INTO runs (id, org_id, workflow_version_id, status, created_by, created_at)
       VALUES ${runValues};
       INSERT INTO run_nodes (
@@ -105,8 +97,7 @@ async function seedImpact(orgId: string): Promise<void> {
         ${sqlLiteral(new Date(now - 86_400_000).toISOString())}::timestamptz,
         ${sqlLiteral(new Date(now).toISOString())}::timestamptz
       );
-    `,
-  ])
+    `)
 }
 
 type BackgroundImpactFixture = {
@@ -125,11 +116,7 @@ async function seedPendingBackgroundRecovery(orgId: string): Promise<BackgroundI
   const recoveredAt = new Date()
   const durationMs = 10 * 60_000
 
-  await execFileAsync('docker', [
-    'compose', '-f', COMPOSE_FILE,
-    'exec', '-T', 'postgres',
-    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `
+  await execPostgresSql(`
       INSERT INTO runs (id, org_id, workflow_version_id, status, created_by, created_at)
       VALUES (
         ${sqlLiteral(runId)}, ${sqlLiteral(orgId)}, ${sqlLiteral(`${runId}-version`)},
@@ -152,18 +139,13 @@ async function seedPendingBackgroundRecovery(orgId: string): Promise<BackgroundI
         'open', NULL,
         ${sqlLiteral(new Date(recoveredAt.getTime() - durationMs).toISOString())}::timestamptz
       );
-    `,
-  ])
+    `)
 
   return { deadLetterId, runId, nodeId, recoveredAtIso: recoveredAt.toISOString(), durationMs }
 }
 
 async function completeBackgroundRecovery(orgId: string, fixture: BackgroundImpactFixture): Promise<void> {
-  await execFileAsync('docker', [
-    'compose', '-f', COMPOSE_FILE,
-    'exec', '-T', 'postgres',
-    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `
+  await execPostgresSql(`
       UPDATE runs SET status = 'succeeded' WHERE id = ${sqlLiteral(fixture.runId)};
       UPDATE run_nodes
       SET status = 'succeeded',
@@ -186,8 +168,7 @@ async function completeBackgroundRecovery(orgId: string, fixture: BackgroundImpa
           downtime_ended_ms = downtime_ended_ms + ${fixture.durationMs},
           updated_at = ${sqlLiteral(fixture.recoveredAtIso)}::timestamptz
       WHERE org_id = ${sqlLiteral(orgId)};
-    `,
-  ])
+    `)
 }
 
 async function prepareSession(page: Page, orgId: string): Promise<void> {

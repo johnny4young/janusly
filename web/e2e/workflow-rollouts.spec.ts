@@ -174,7 +174,15 @@ async function expectAccessible(page: Page, context: string): Promise<void> {
     .analyze()
   const blocking = results.violations
     .filter(violation => violation.impact === 'serious' || violation.impact === 'critical')
-    .map(violation => ({ context, rule: violation.id, targets: violation.nodes.map(node => node.target) }))
+    .map(violation => ({
+      context,
+      rule: violation.id,
+      nodes: violation.nodes.map(node => ({
+        target: node.target,
+        failureSummary: node.failureSummary,
+        checks: node.any.map(check => ({ message: check.message, data: check.data })),
+      })),
+    }))
   expect(blocking).toEqual([])
 }
 

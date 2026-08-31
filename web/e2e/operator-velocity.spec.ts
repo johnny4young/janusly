@@ -69,14 +69,15 @@ async function createFailedRecovery(
   request: APIRequestContext,
   workflow: WorkflowJson,
   sequence: number,
+  orgId: string,
 ): Promise<{ id: string; runId: string }> {
   const payload = { customer: `operator-${sequence}@example.com`, amountUsd: 40 + sequence }
-  const { runId } = await startRun(request, workflow, payload)
-  await pollUntilWaitingOrTerminal(request, runId, 'trigger')
-  await resumeWebhook(request, runId, 'trigger', payload)
-  const failed = await pollUntilTerminal(request, runId)
+  const { runId } = await startRun(request, workflow, payload, orgId)
+  await pollUntilWaitingOrTerminal(request, runId, 'trigger', 30_000, orgId)
+  await resumeWebhook(request, runId, 'trigger', payload, orgId)
+  const failed = await pollUntilTerminal(request, runId, 30_000, orgId)
   expect(failed.status).toBe('failed')
-  const deadLetter = await findDeadLetterForRun(request, runId)
+  const deadLetter = await findDeadLetterForRun(request, runId, orgId)
   expect(deadLetter).not.toBeNull()
   return { id: deadLetter!.id, runId }
 }
@@ -96,12 +97,16 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
 
-  const workflow = scopeFailureNode(await loadTemplate(request, 'failed-workflow-recovery'))
-  const firstFailure = await createFailedRecovery(request, workflow, 1)
-  const secondFailure = await createFailedRecovery(request, workflow, 2)
-  const thirdFailure = await createFailedRecovery(request, workflow, 3)
+  const orgId = `operator-velocity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const workflow = scopeFailureNode(await loadTemplate(request, 'failed-workflow-recovery', orgId))
+  const firstFailure = await createFailedRecovery(request, workflow, 1, orgId)
+  const secondFailure = await createFailedRecovery(request, workflow, 2, orgId)
+  const thirdFailure = await createFailedRecovery(request, workflow, 3, orgId)
 
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+  }, { activeOrg: orgId })
   await page.goto('/')
   await openWorkspaceSection(page, 'Activity', 'Recover')
 

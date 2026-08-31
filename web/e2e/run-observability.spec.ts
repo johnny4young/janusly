@@ -138,11 +138,20 @@ async function createHeldHttpTarget(): Promise<{
 }
 
 test('a real running node pulses, honors reduced motion, and cannot mutate the authoring canvas', async ({ page, request }) => {
+  test.skip(
+    process.env.JANUSLY_E2E_PRIVATE_HTTP !== '1',
+    'requires an isolated API started with ALLOW_PRIVATE_HTTP_TARGETS=true',
+  )
   const browserErrors = installConsoleErrorGuards(page)
   const target = await createHeldHttpTarget()
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const orgId = `run-observation-active-${stamp}`
   let runId: string | null = null
 
   try {
+    await page.addInitScript(({ activeOrg }) => {
+      window.localStorage.setItem('janusly:activeOrg', activeOrg)
+    }, { activeOrg: orgId })
     await page.goto('/')
     await hideUnrelatedOverlays(page)
     await openWorkspaceSection(page, 'Workflows', 'Build')
@@ -163,7 +172,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     await openWorkspaceDestination(page, 'Activity')
     await expect(page.getByTestId('activity-filter-running')).toBeVisible()
     const running = await startRun(request, {
-      id: `e2e-observation-running-${Date.now()}`,
+      id: `e2e-observation-running-${stamp}`,
       name: 'E2E held running node',
       nodes: [{
         id: 'held_request',
@@ -171,7 +180,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
         config: { url: target.url, timeoutMs: 120_000, maxResponseBytes: 4096 },
       }],
       edges: [],
-    }, { source: 'running-map-smoke' })
+    }, { source: 'running-map-smoke' }, orgId)
     runId = running.runId
     await target.connected
 
@@ -212,6 +221,10 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
     await page.reload()
     await hideUnrelatedOverlays(page)
+    const restoreDraft = page.getByRole('alertdialog', { name: '¿Restaurar borrador local?' })
+    await expect(restoreDraft).toBeVisible()
+    await restoreDraft.getByRole('button', { name: 'Eliminar borrador', exact: true }).click()
+    await expect(restoreDraft).toHaveCount(0)
     await openWorkspaceDestination(page, 'Actividad')
     await page.getByTestId('activity-filter-running').click()
     await openRunFromHistory(page, runId, 'activity-feed-list')
@@ -220,7 +233,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     await captureElement(spanishMap, 'web-es-run-map-running-pulse')
 
     target.release()
-    expect((await pollUntilTerminal(request, runId)).status).toBe('succeeded')
+    expect((await pollUntilTerminal(request, runId, 30_000, orgId)).status).toBe('succeeded')
     expect(browserErrors).toEqual([])
   } finally {
     target.release()
@@ -230,7 +243,8 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
 
 test('active runs explain identity, trigger, chronology, and waits in both locales', async ({ page, request }) => {
   const browserErrors = installConsoleErrorGuards(page)
-  const stamp = Date.now()
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const orgId = `run-observability-${stamp}`
   const failedName = `E2E Failed invoice ${stamp}`
   const waitingName = `E2E Approval ${stamp}`
   const longName = `E2E Long timeline ${stamp}`
@@ -244,8 +258,8 @@ test('active runs explain identity, trigger, chronology, and waits in both local
       config: { url: '{{secret.E2E_OBSERVABILITY_MISSING_URL}}' },
     }],
     edges: [],
-  }, { invoiceId: `inv-${stamp}`, source: 'billing-webhook' })
-  expect((await pollUntilTerminal(request, failed.runId)).status).toBe('failed')
+  }, { invoiceId: `inv-${stamp}`, source: 'billing-webhook' }, orgId)
+  expect((await pollUntilTerminal(request, failed.runId, 30_000, orgId)).status).toBe('failed')
 
   const waiting = await startRun(request, {
     id: `e2e-observability-waiting-${stamp}`,
@@ -260,8 +274,8 @@ test('active runs explain identity, trigger, chronology, and waits in both local
       },
     }],
     edges: [],
-  }, { invoiceId: `inv-${stamp}`, amountUsd: 49 })
-  const waitingSnapshot = await pollUntilWaitingOrTerminal(request, waiting.runId, 'approve_refund')
+  }, { invoiceId: `inv-${stamp}`, amountUsd: 49 }, orgId)
+  const waitingSnapshot = await pollUntilWaitingOrTerminal(request, waiting.runId, 'approve_refund', 30_000, orgId)
   expect(waitingSnapshot.status).toBe('running')
   expect(waitingSnapshot.nodes.find(node => node.nodeId === 'approve_refund')?.status).toBe('waiting')
 
@@ -280,9 +294,12 @@ test('active runs explain identity, trigger, chronology, and waits in both local
       from: `step_${String(index).padStart(2, '0')}`,
       to: `step_${String(index + 1).padStart(2, '0')}`,
     })),
-  }, { source: 'long-run-smoke' })
-  expect((await pollUntilTerminal(request, long.runId)).status).toBe('succeeded')
+  }, { source: 'long-run-smoke' }, orgId)
+  expect((await pollUntilTerminal(request, long.runId, 30_000, orgId)).status).toBe('succeeded')
 
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+  }, { activeOrg: orgId })
   await page.goto('/')
   await hideUnrelatedOverlays(page)
   await openRuns(page, 'en')
@@ -424,7 +441,8 @@ test('active runs explain identity, trigger, chronology, and waits in both local
 
 test('run history filters and compares a failure with its strictly preceding success in both locales', async ({ page, request }) => {
   const browserErrors = installConsoleErrorGuards(page)
-  const stamp = Date.now()
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const orgId = `run-history-${stamp}`
   const workflowId = `e2e-history-diagnostic-${stamp}`
   const workflowName = `E2E Billing diagnostic ${stamp}`
   const noBaselineWorkflowId = `e2e-history-no-baseline-${stamp}`
@@ -435,8 +453,8 @@ test('run history filters and compares a failure with its strictly preceding suc
     name: workflowName,
     nodes: [{ id: 'process_invoice', type: 'noop', config: {} }],
     edges: [],
-  }, { invoiceId: `inv-green-${stamp}` })
-  expect((await pollUntilTerminal(request, successful.runId)).status).toBe('succeeded')
+  }, { invoiceId: `inv-green-${stamp}` }, orgId)
+  expect((await pollUntilTerminal(request, successful.runId, 30_000, orgId)).status).toBe('succeeded')
 
   const failed = await startRun(request, {
     id: workflowId,
@@ -447,8 +465,8 @@ test('run history filters and compares a failure with its strictly preceding suc
       config: { url: '{{secret.E2E_HISTORY_DIAGNOSTIC_MISSING_URL}}' },
     }],
     edges: [],
-  }, { invoiceId: `inv-failed-${stamp}` })
-  expect((await pollUntilTerminal(request, failed.runId)).status).toBe('failed')
+  }, { invoiceId: `inv-failed-${stamp}` }, orgId)
+  expect((await pollUntilTerminal(request, failed.runId, 30_000, orgId)).status).toBe('failed')
 
   const noBaselineFailure = await startRun(request, {
     id: noBaselineWorkflowId,
@@ -459,9 +477,12 @@ test('run history filters and compares a failure with its strictly preceding suc
       config: { url: '{{secret.E2E_HISTORY_NO_BASELINE_MISSING_URL}}' },
     }],
     edges: [],
-  }, { invoiceId: `inv-no-baseline-${stamp}` })
-  expect((await pollUntilTerminal(request, noBaselineFailure.runId)).status).toBe('failed')
+  }, { invoiceId: `inv-no-baseline-${stamp}` }, orgId)
+  expect((await pollUntilTerminal(request, noBaselineFailure.runId, 30_000, orgId)).status).toBe('failed')
 
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+  }, { activeOrg: orgId })
   await page.goto('/')
   await hideUnrelatedOverlays(page)
   await openRuns(page, 'en')

@@ -1,14 +1,10 @@
 /** Real-stack and bilingual UI proof for recovery reaction time and fix durability. */
 
-import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { normalizeErrorSignature } from '../src/lib/error-signature.ts'
+import { execPostgresSql } from './_helpers/postgres'
 
-const execFileAsync = promisify(execFile)
-const COMPOSE_FILE = fileURLToPath(new URL('../../docker-compose.yml', import.meta.url))
 const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -67,11 +63,7 @@ async function seedEffectiveness(orgId: string): Promise<{ recurrentSignature: s
     )`
   }).join(',')
 
-  await execFileAsync('docker', [
-    'compose', '-f', COMPOSE_FILE,
-    'exec', '-T', 'postgres',
-    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `
+  await execPostgresSql(`
       INSERT INTO runs (id, org_id, workflow_version_id, status, created_by, created_at)
       VALUES ${runValues};
       INSERT INTO dead_letters (
@@ -146,8 +138,7 @@ async function seedEffectiveness(orgId: string): Promise<{ recurrentSignature: s
         'effectiveness-node-held-base', 'dev-user',
         ${sqlLiteral(heldRecoveredAt.toISOString())}::timestamptz, 60000
       );
-    `,
-  ])
+    `)
 
   return { recurrentSignature }
 }
