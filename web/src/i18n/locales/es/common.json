@@ -2828,6 +2828,7 @@
   "rightPanel.credentials.expiry.expiresInDays_one": "Vence en {{count}} día",
   "rightPanel.credentials.expiry.expiresInDays_other": "Vence en {{count}} días",
   "rightPanel.credentials.revoke": "Revocar",
+  "rightPanel.credentials.revokeTitle": "Revocar conexión",
   "rightPanel.credentials.revokeConfirm": "¿Revocar {{name}}? Los flujos de trabajo que lo usan dejarán de resolver el secreto.",
   "rightPanel.credentials.revokeDone": "Se revocó {{name}}",
   "rightPanel.credentials.revokeFailed": "No se pudo revocar la credencial.",

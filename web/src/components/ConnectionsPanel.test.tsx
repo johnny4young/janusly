@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { Credential } from '../types'
+import { ConfirmProvider } from './ConfirmDialog'
 import { ConnectionsPanel } from './ConnectionsPanel'
 
 vi.mock('../api', () => ({
@@ -159,6 +160,37 @@ describe('<ConnectionsPanel />', () => {
     expect(screen.queryByRole('button', { name: 'Add connection' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Rotate secret' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument()
+  })
+
+  it('uses the focus-managed confirmation dialog before revoking a connection', async () => {
+    render(
+      <ConfirmProvider>
+        <ConnectionsPanel
+          credentials={credentials}
+          onCreateCredential={vi.fn(async () => true)}
+          canWrite
+        />
+      </ConfirmProvider>,
+    )
+
+    await screen.findByText('pagerduty-primary')
+    const trigger = screen.getAllByRole('button', { name: 'Revoke' })[0]!
+    trigger.focus()
+    fireEvent.click(trigger)
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Revoke connection' })
+    expect(within(dialog).getByText(/Workflows using it will stop resolving the secret/)).toBeInTheDocument()
+    expect(api).not.toHaveBeenCalledWith('/credentials/pagerduty-primary', { method: 'DELETE' })
+
+    fireEvent.click(within(dialog).getByTestId('confirm-dialog-cancel'))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'))
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/credentials/pagerduty-primary', { method: 'DELETE' })
+    })
   })
 
   it('refreshes health when an equal-sized inventory comes from a new scope', async () => {

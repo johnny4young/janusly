@@ -22,9 +22,10 @@ import { getResolvedLocale, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import type { Credential } from '../types'
 import { CredentialRotateModal } from './CredentialRotateModal'
+import { useConfirm } from './ConfirmDialog'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { Button } from './ui/Button'
-import { FieldStack, FormField , SelectControl, TextInput} from './ui/Form'
+import { FieldStack, FormField, SelectControl, TextInput } from './ui/Form'
 
 const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 const CONNECTION_ROW_HEIGHT = 166
@@ -270,6 +271,7 @@ export function ConnectionsPanel({
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
+  const confirm = useConfirm()
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState('')
   const [creating, setCreating] = useState(false)
@@ -331,7 +333,13 @@ export function ConnectionsPanel({
   })
 
   const revoke = async (credential: Credential) => {
-    if (!window.confirm(t('rightPanel.credentials.revokeConfirm', { name: credential.name }))) return
+    const accepted = await confirm({
+      title: t('rightPanel.credentials.revokeTitle'),
+      body: t('rightPanel.credentials.revokeConfirm', { name: credential.name }),
+      confirmLabel: t('rightPanel.credentials.revoke'),
+      tone: 'danger',
+    })
+    if (!accepted) return
     setRevoking(credential.name)
     try {
       await api(`/credentials/${encodeURIComponent(credential.name)}`, { method: 'DELETE' })

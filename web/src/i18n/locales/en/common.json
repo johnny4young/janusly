@@ -2828,6 +2828,7 @@
   "rightPanel.credentials.expiry.expiresInDays_one": "Expires in {{count}} day",
   "rightPanel.credentials.expiry.expiresInDays_other": "Expires in {{count}} days",
   "rightPanel.credentials.revoke": "Revoke",
+  "rightPanel.credentials.revokeTitle": "Revoke connection",
   "rightPanel.credentials.revokeConfirm": "Revoke {{name}}? Workflows using it will stop resolving the secret.",
   "rightPanel.credentials.revokeDone": "Revoked {{name}}",
   "rightPanel.credentials.revokeFailed": "The credential could not be revoked.",
