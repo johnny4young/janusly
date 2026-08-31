@@ -14,6 +14,11 @@ current contract; new public reads should prefer explicit `/v1` metadata.
 Run `make generate` after contract changes and require a clean diff on a second
 run.
 
+Structured request bodies are strict: `decodeBody` refuses unknown fields.
+This prevents a client rename from silently decoding to a zero value and then
+persisting an unintended empty update. Routes that must distinguish an absent
+field from an explicit empty value use a pointer in their request contract.
+
 Public workflow status pages use a 256-bit bearer token at
 `/public/status/{token}`. The token is revealed only by the enable/rotate
 response; PostgreSQL stores its SHA-256 digest, so a later admin read can report

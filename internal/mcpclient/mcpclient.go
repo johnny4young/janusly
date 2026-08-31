@@ -43,6 +43,7 @@ import (
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/ratelimit"
+	"github.com/johnny4young/janusly/internal/secretstore"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -330,6 +331,9 @@ func (c *Client) callTransport(
 // lookupEnvRef resolves one env-ref value with the generic error posture:
 // the env-var NAME never reaches an error message.
 func lookupEnvRef(name string) (string, string) {
+	if !secretstore.EnvRefAllowed(name) {
+		return "", "credential secret missing"
+	}
 	value := os.Getenv(name)
 	if value == "" {
 		return "", "credential secret missing"

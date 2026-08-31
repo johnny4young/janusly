@@ -12,7 +12,9 @@ Janusly templates are deterministic data projection, not executable code.
 Ordinary `context.*` paths read run input and completed task output. Secret
 references resolve through the organization credential boundary and fail when
 missing. Environment references are restricted by the credential environment
-policy.
+policy. Reserved platform names read as unset rather than revealing whether a
+secret exists; tenant-owned process values should use the `JANUSLY_CRED_`
+prefix or an explicitly allowlisted ordinary variable.
 
 Condition expressions support a bounded set of boolean, equality, ordered, and
 membership operators. They do not execute functions or arbitrary code.

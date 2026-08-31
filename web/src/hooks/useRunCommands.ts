@@ -329,7 +329,9 @@ export function useRunCommands(
     await runPlatformMutation({
       request: () => api('/run/cancel', {
         method: 'POST',
-        body: JSON.stringify({ runId, reason: { source: 'ui' } }),
+        // The optional reason is operator prose, not provenance. The audit
+        // boundary already records who initiated the cancellation.
+        body: JSON.stringify({ runId }),
       }),
       failureMessage: t('toasts.runCancelFailed'),
       successToast: { message: t('toasts.runCancelled'), tone: 'success' },

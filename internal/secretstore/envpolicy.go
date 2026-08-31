@@ -81,6 +81,16 @@ func EnvRefAllowed(name string) bool {
 	return matchesAllowlist(name, allowlist)
 }
 
+// LookupAllowedEnv adapts the credential environment policy to template
+// renderers. Refused names look exactly like unset variables so the boundary
+// does not become an oracle for platform configuration.
+func LookupAllowedEnv(name string) (string, bool) {
+	if !EnvRefAllowed(name) {
+		return "", false
+	}
+	return os.LookupEnv(name)
+}
+
 func isReservedEnvName(name string) bool {
 	if strings.HasPrefix(name, TenantCredentialPrefix) {
 		return false

@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/johnny4young/janusly/internal/memory"
 	"github.com/johnny4young/janusly/internal/prompts"
 	"github.com/johnny4young/janusly/internal/ratelimit"
+	"github.com/johnny4young/janusly/internal/secretstore"
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/tools"
 )
@@ -45,11 +45,12 @@ type RouterExecution struct {
 }
 
 // NewDispatcher wires the executor registry over this engine. Env access
-// defaults to the process environment; secrets default to none (every
-// {{secret.X}} is a hard failure) until a secret source is configured.
+// defaults to the process environment filtered through the credential policy;
+// secrets default to none (every {{secret.X}} is a hard failure) until a
+// secret source is configured. Callers may still provide an explicit lookup.
 func (e *Engine) NewDispatcher(opts grammar.RenderOptions) *Dispatcher {
 	if opts.LookupEnv == nil {
-		opts.LookupEnv = os.LookupEnv
+		opts.LookupEnv = secretstore.LookupAllowedEnv
 	}
 	return &Dispatcher{
 		engine: e, registry: executors.Registry(), renderOpts: opts,

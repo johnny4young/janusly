@@ -28,7 +28,10 @@ import (
 
 // HTTP bounds mirror the contract defaults.
 const (
-	httpDefaultTimeoutMs   = 30_000
+	httpDefaultTimeoutMs = 30_000
+	// A node-level override may lower the resolved tenant bound, but it may
+	// never remove the deadline or hold a worker through an entire deploy.
+	httpMaxTimeoutMs       = 600_000
 	httpDefaultMaxBytes    = 1_000_000
 	httpDefaultMaxRedirect = 5
 	httpJSONProjectionMax  = 64 * 1024
@@ -263,8 +266,8 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 		maxBytes = in.HTTPBounds.MaxResponseBytes
 		maxRedirects = in.HTTPBounds.MaxRedirects
 	}
-	if v, ok := in.Config["timeoutMs"].(float64); ok {
-		timeoutMs = v
+	if v, ok := in.Config["timeoutMs"].(float64); ok && v >= 1 {
+		timeoutMs = min(v, float64(httpMaxTimeoutMs))
 	}
 	if v, ok := in.Config["maxResponseBytes"].(float64); ok {
 		maxBytes = int(v)

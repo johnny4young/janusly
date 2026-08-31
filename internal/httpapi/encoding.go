@@ -41,7 +41,9 @@ func writeV1Error(w http.ResponseWriter, requestID string, status int, code, mes
 }
 
 func decodeBody(r *http.Request, into any) error {
-	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 2<<20)).Decode(into)
+	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 2<<20))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(into)
 }
 
 // decodeJSONRecord mirrors the contract's readJson + asRecord pair: it

@@ -59,11 +59,19 @@ func TestRecoveryFeedbackDerivesSavedWorkflowAndRecordsDurableProjection(t *test
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM usage_events
 		WHERE org_id = $1 AND metric = 'memory.commit'`, h.org).Scan(&memoryUsageBefore)
 	secretComment := "operator pasted sk-" + strings.Repeat("a", 24)
-	res := h.call("POST", "/recovery/feedback", map[string]any{
-		"deadLetterId": deadLetterID,
-		// Client input is deliberately hostile: the server must derive the
-		// aggregation key from the tenant-scoped DLQ snapshot instead.
+	hostile := h.call("POST", "/recovery/feedback", map[string]any{
+		"deadLetterId":   deadLetterID,
 		"workflowId":     "wf-client-must-not-control",
+		"suggestionMode": "ai",
+		"approachLabel":  "add_retry",
+		"accepted":       true,
+	}, "")
+	if hostile.status != http.StatusBadRequest {
+		t.Fatalf("unknown workflowId must be refused, got %d %+v", hostile.status, hostile.body)
+	}
+
+	res := h.call("POST", "/recovery/feedback", map[string]any{
+		"deadLetterId":   deadLetterID,
 		"suggestionMode": "ai",
 		"approachLabel":  "add_retry",
 		"accepted":       true,
