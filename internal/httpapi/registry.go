@@ -134,6 +134,7 @@ var routeAuthz = map[string]routeGate{
 	"GET /recovery/calibrations":                   {auth.RoleViewer, "recovery.read"},
 	"GET /recovery/items":                          {auth.RoleViewer, "recovery.read"},
 	"GET /recovery/items/{id}":                     {auth.RoleViewer, "recovery.read"},
+	"GET /recovery/items/{id}/children":            {auth.RoleViewer, "recovery.read"},
 	"GET /recovery/home":                           {auth.RoleViewer, "recovery.read"},
 	"GET /integrations/slack/interactions":         {auth.RoleAdmin, "credentials.write"},
 	"POST /integrations/slack/interactions":        {auth.RoleAdmin, "credentials.write"},
@@ -203,6 +204,8 @@ var routeAuthz = map[string]routeGate{
 	"DELETE /credentials/{name}":                                  {auth.RoleAdmin, "credentials.write"},
 	"POST /credentials/{name}/expiry":                             {auth.RoleAdmin, "credentials.write"},
 	"GET /reports/run-explain":                                    {auth.RoleViewer, "reports.read"},
+	"GET /v1/reports/run-explain":                                 {auth.RoleViewer, "reports.read"},
+	"GET /reports/value-dashboard":                                {auth.RoleViewer, "reports.read"},
 	"GET /workflows/{workflowId}/rollout":                         {auth.RoleViewer, "workflows.read"},
 	"POST /workflows/{workflowId}/rollout":                        {auth.RoleAdmin, "workflows.write"},
 	"POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}": {auth.RoleAdmin, "workflows.write"},
@@ -244,7 +247,12 @@ var routeAuthz = map[string]routeGate{
 
 	// MCP connections admin surface (reference pairs verbatim).
 	"POST /mcp/connections":                          {auth.RoleAdmin, "mcp.connections.write"},
+	"GET /mcp/connections/{alias}/tools":             {auth.RoleViewer, "mcp.connections.read"},
+	"POST /mcp/connections/{alias}":                  {auth.RoleAdmin, "mcp.connections.write"},
+	"DELETE /mcp/connections/{alias}":                {auth.RoleAdmin, "mcp.connections.write"},
+	"POST /mcp/connections/{alias}/rediscover":       {auth.RoleAdmin, "mcp.connections.write"},
 	"POST /mcp/connections/{alias}/tools/{toolName}": {auth.RoleAdmin, "mcp.connections.write"},
+	"POST /workflows/{workflowId}/slo":               {auth.RoleAdmin, "workflows.write"},
 
 	// PromptOps registry (reference pairs: read for all, write editor+).
 	"GET /prompts":                                {auth.RoleViewer, "prompts.read"},

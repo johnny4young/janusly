@@ -711,6 +711,48 @@ CREATE TABLE public.rate_limit_windows (
 
 
 --
+-- Name: recovery_approval_grants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.recovery_approval_grants (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    case_id text NOT NULL,
+    candidate_artifact_id text NOT NULL,
+    validation_artifact_id text NOT NULL,
+    case_revision bigint NOT NULL,
+    granted_by text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    consumed_at timestamp with time zone,
+    consumed_by text,
+    revoked_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT recovery_approval_grants_revision_check CHECK ((case_revision > 0)),
+    CONSTRAINT recovery_approval_grants_expiry_check CHECK ((expires_at > created_at))
+);
+
+
+--
+-- Name: recovery_case_artifacts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.recovery_case_artifacts (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    case_id text NOT NULL,
+    kind text NOT NULL,
+    payload_json jsonb NOT NULL,
+    payload_sha256 text NOT NULL,
+    actor_kind text NOT NULL,
+    actor_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT recovery_case_artifacts_kind_check CHECK ((kind = ANY (ARRAY['diagnosis'::text, 'candidate'::text, 'validation'::text, 'publication'::text, 'verification'::text]))),
+    CONSTRAINT recovery_case_artifacts_actor_check CHECK ((actor_kind = ANY (ARRAY['system'::text, 'user'::text, 'agent'::text]))),
+    CONSTRAINT recovery_case_artifacts_sha_check CHECK ((payload_sha256 ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
 -- Name: recovery_case_transitions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -746,6 +788,7 @@ CREATE TABLE public.recovery_cases (
     message text NOT NULL,
     details_json jsonb,
     state text NOT NULL,
+    revision bigint DEFAULT 1 NOT NULL,
     created_by text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -1841,6 +1884,22 @@ ALTER TABLE ONLY public.recovery_case_transitions
 
 
 --
+-- Name: recovery_approval_grants recovery_approval_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recovery_approval_grants
+    ADD CONSTRAINT recovery_approval_grants_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: recovery_case_artifacts recovery_case_artifacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recovery_case_artifacts
+    ADD CONSTRAINT recovery_case_artifacts_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: recovery_cases recovery_cases_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2629,10 +2688,38 @@ CREATE INDEX recovery_case_transitions_case_created_idx ON public.recovery_case_
 
 
 --
--- Name: recovery_case_transitions_case_to_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: recovery_approval_grants_active_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX recovery_case_transitions_case_to_idx ON public.recovery_case_transitions USING btree (case_id, to_state);
+CREATE INDEX recovery_approval_grants_active_idx ON public.recovery_approval_grants USING btree (org_id, case_id, candidate_artifact_id, validation_artifact_id, expires_at) WHERE ((consumed_at IS NULL) AND (revoked_at IS NULL));
+
+
+--
+-- Name: recovery_approval_grants_binding_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX recovery_approval_grants_binding_idx ON public.recovery_approval_grants USING btree (org_id, case_id, candidate_artifact_id, validation_artifact_id, case_revision, created_at DESC);
+
+
+--
+-- Name: recovery_case_artifacts_case_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX recovery_case_artifacts_case_created_idx ON public.recovery_case_artifacts USING btree (org_id, case_id, created_at, id);
+
+
+--
+-- Name: recovery_case_artifacts_content_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX recovery_case_artifacts_content_idx ON public.recovery_case_artifacts USING btree (org_id, case_id, kind, payload_sha256);
+
+
+--
+-- Name: recovery_case_transitions_case_history_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX recovery_case_transitions_case_history_idx ON public.recovery_case_transitions USING btree (case_id, occurred_at, to_state);
 
 
 --

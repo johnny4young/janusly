@@ -28,9 +28,13 @@ controls, or write suppression.
 ## Server posture
 
 The server publishes a deterministic catalog of inspect, AI, and write tools.
-Descriptors include input validation, stable structured results, risk
-annotations, and static write capability. Write dispatch requires
-`JANUSLY_MCP_WRITES_ENABLED` plus tenant `mcp.writeConsent`.
+Descriptors include input validation, stable structured results, truthful
+read-only/destructive annotations, and static write capability. Every call is
+permission-checked, rate-limited and audited. `JANUSLY_MCP_PERMISSIONS` is the
+explicit stdio service-account ceiling; when omitted it grants only
+`workflows.read`, `runs.read`, `dlq.read`, and `recovery.read`. Write dispatch
+also requires `JANUSLY_MCP_WRITES_ENABLED=true` plus tenant
+`mcp.writeConsent=true`.
 
 The server uses durable Janusly run IDs for asynchronous work. It does not keep
 a second task database and never exposes secrets, identity configuration, or
@@ -40,6 +44,16 @@ The read-only `workflows.assure` tool projects the latest version's Intent,
 Recovery, and Qualification contract evidence plus deterministic validation and
 readiness status. The projection is bounded and excludes the workflow DAG,
 configs, credentials, templates, and fixture contents.
+
+`operations.brief` is the same deterministic top-three read model used by Home.
+`workflows.propose` performs exact CapabilityCatalog binding without saving a
+workflow or returning its complete DAG. Semantic recovery is exposed as bounded
+inspect/diagnose/validate/apply tools; apply requires a separately created,
+unexpired human approval and the immutable candidate's additional permissions.
+Diagnose is deterministic without a provider and can use bounded AI enrichment
+only when the explicit MCP permission ceiling includes `ai.write`; candidate
+authority remains deterministic. MCP never exposes an approval tool, provider
+diagnosis prose, stable evidence identifiers, or active approval grants.
 
 See [MCP client architecture](architecture/mcp-client.md) and
 [MCP server architecture](architecture/mcp-server.md).

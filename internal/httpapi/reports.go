@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -558,7 +560,62 @@ func renderEvidenceMarkdown(report map[string]any) string {
 
 func (s *V1Server) mountReportRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /reports/run-explain", s.auth(s.runExplainHandler))
+	mux.HandleFunc("GET /v1/reports/run-explain", s.auth(s.runExplainHandler))
 	s.route(mux, "GET /reports/recovery-validation", routeGate{role: "viewer", permission: "reports.read"}, s.recoveryValidationReportHandler)
 	mux.HandleFunc("POST /reports/run-explain/deliver", s.auth(s.runExplainDeliveryHandler))
 	mux.HandleFunc("POST /recovery/items/{id}/evidence", s.auth(s.recoveryEvidenceHandler))
+	mux.HandleFunc("GET /reports/value-dashboard", s.auth(s.valueDashboardReportHandler))
+}
+
+func (s *V1Server) valueDashboardReportHandler(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	format := strings.ToLower(r.URL.Query().Get("format"))
+	if format == "" {
+		format = "markdown"
+	}
+	if format != "markdown" && format != "json" {
+		writeUnversioned(w, opError(http.StatusBadRequest, "invalid_format",
+			`Unknown format. Use "markdown" or "json".`, map[string]any{"format": format}))
+		return
+	}
+	windowDays := 30
+	if raw := r.URL.Query().Get("windowDays"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			windowDays = min(90, max(1, parsed))
+		}
+	}
+	metrics, err := s.recoveryMetricsValue(r.Context(), rc.orgID, windowDays)
+	if err != nil {
+		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+		return
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "report.value_dashboard.exported", audit.Options{
+		TargetType: "org", TargetID: rc.orgID,
+		Metadata: map[string]any{"format": format, "windowDays": windowDays},
+	})
+	filename := reportAttachmentName("value-dashboard", rc.orgID, fmt.Sprintf("%dd", windowDays), format)
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition, X-Request-Id")
+	if format == "json" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"windowDays": windowDays, "metrics": metrics})
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	_, _ = w.Write([]byte(renderValueDashboardMarkdown(windowDays, metrics)))
+}
+
+func renderValueDashboardMarkdown(windowDays int, metrics map[string]any) string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "# Janusly value dashboard\n\nWindow: last %d days\n\n", windowDays)
+	keys := make([]string, 0, len(metrics))
+	for key := range metrics {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	fmt.Fprintln(&builder, "| Metric | Value |")
+	fmt.Fprintln(&builder, "| --- | --- |")
+	for _, key := range keys {
+		fmt.Fprintf(&builder, "| %s | %v |\n", key, metrics[key])
+	}
+	return builder.String()
 }

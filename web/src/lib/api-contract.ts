@@ -6,6 +6,8 @@
  */
 
 export const V1_READ_PATHS = {
+  authoringCapabilities: "/authoring/capabilities",
+  operationsBrief: "/operations/brief",
   memoryConsentStatus: "/memory/consent-status",
   recoveryMetrics: "/recovery/metrics",
   recoveryLedger: "/recovery/ledger",
@@ -32,6 +34,8 @@ export type V1ReadPath = typeof V1_READ_PATHS[keyof typeof V1_READ_PATHS];
 
 /** Stable mutation paths exposed to first-party and SDK callers. */
 export const V1_WRITE_PATHS = {
+  compileWorkflowBrief: "/ai/workflow-briefs/compile",
+  proposeWorkflow: "/ai/workflow-proposals",
   generateWorkflow: "/ai/generate-workflow",
   patchWorkflow: "/ai/patch-workflow",
   validateWorkflow: "/validate",
@@ -44,7 +48,11 @@ export const V1_WRITE_PATHS = {
   cancelRun: "/run/cancel",
   resumeWorkflow: "/workflows/{workflowId}/resume",
   replayDeadLetter: "/dlq/replay",
-  recoverSemanticCase: "/recovery/cases/{caseId}/resolve",
+  diagnoseRecoveryCase: "/recovery/cases/{caseId}/diagnose",
+  createRecoveryCandidates: "/recovery/cases/{caseId}/candidates",
+  validateRecoveryCandidate: "/recovery/cases/{caseId}/validate",
+  approveRecoveryCandidate: "/recovery/cases/{caseId}/approve",
+  applyRecoveryCandidate: "/recovery/cases/{caseId}/apply",
 } as const;
 
 export type V1WritePath = typeof V1_WRITE_PATHS[keyof typeof V1_WRITE_PATHS];

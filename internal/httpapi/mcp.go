@@ -9,8 +9,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/orgconfig"
+	"github.com/johnny4young/janusly/internal/secretstore"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -76,6 +79,16 @@ func (s *V1Server) createMcpConnectionCore(r *http.Request, rc v1Request) opResu
 	argsJSON, _ := json.Marshal(body.Args)
 	if body.Args == nil {
 		argsJSON = []byte("[]")
+	}
+	// Refuse reserved platform variables at the door. The resolver refuses
+	// them too, but a row that names one is a stored request to exfiltrate:
+	// it survives restarts, reads as a valid connection in the list, and
+	// costs a discovery round trip to fail. Rejecting at write keeps the
+	// tenant's own mistake visible to them instead of turning into an
+	// opaque "credential secret missing" later.
+	if reserved := reservedEnvRefName(body.EnvRefs); reserved != "" {
+		return opError(http.StatusBadRequest, "mcp_env_ref_reserved",
+			"env ref "+reserved+" names a reserved platform variable", nil)
 	}
 	refsJSON, _ := json.Marshal(body.EnvRefs)
 	if body.EnvRefs == nil {
@@ -251,4 +264,168 @@ func (s *V1Server) mountMcpRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /mcp/connections/{alias}/tools/{toolName}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.setMcpToolFlagsCore(r, rc, r.PathValue("alias"), r.PathValue("toolName")))
 	}))
+	// The admin panel and the mcp_tool step picker both read this to list a
+	// connection's cached descriptors. It was never registered, so both
+	// resolved the SPA shell and rendered a fabricated "no tools" state that
+	// blamed the admin for a route that did not exist.
+	mux.HandleFunc("GET /mcp/connections/{alias}/tools", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.listMcpToolsCore(r, rc, r.PathValue("alias")))
+	}))
+	// Connection-level enable/disable and delete. Without these the panel's
+	// kill switch was inert and a created connection could never be removed.
+	mux.HandleFunc("POST /mcp/connections/{alias}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.setMcpConnectionEnabledCore(r, rc, r.PathValue("alias")))
+	}))
+	mux.HandleFunc("DELETE /mcp/connections/{alias}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.deleteMcpConnectionCore(r, rc, r.PathValue("alias")))
+	}))
+	mux.HandleFunc("POST /mcp/connections/{alias}/rediscover", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.rediscoverMcpConnectionCore(r, rc, r.PathValue("alias")))
+	}))
+}
+
+// mcpToolDescriptorView projects a stored descriptor into the camelCase shape
+// web/src/types.ts declares. Kept in one place so the tools-list read and any
+// future descriptor surface cannot drift into two different wire shapes.
+func mcpToolDescriptorView(row store.McpToolDescriptor) map[string]any {
+	return map[string]any{
+		"id": row.ID, "connectionId": row.ConnectionID, "name": row.Name,
+		"description": textOrNull(row.Description), "inputSchema": rawOrNull(row.InputSchema),
+		"writeSide": row.WriteSide, "enabled": row.Enabled, "exposeToAi": row.ExposeToAi,
+		"rateLimitPerMin": nullableInt(row.RateLimitPerMin),
+	}
+}
+
+func (s *V1Server) listMcpToolsCore(r *http.Request, rc v1Request, alias string) opResult {
+	q := store.New(s.pool)
+	connection, err := q.GetMcpConnectionByAlias(r.Context(), store.GetMcpConnectionByAliasParams{
+		OrgID: rc.orgID, Alias: alias,
+	})
+	if err != nil {
+		return opError(http.StatusNotFound, "mcp_connection_not_found", "connection not found", nil)
+	}
+	rows, err := q.ListMcpToolDescriptorsByConnection(r.Context(), connection.ID)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	tools := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		tools = append(tools, mcpToolDescriptorView(row))
+	}
+	return opOK(map[string]any{"connection": map[string]any{
+		"id": connection.ID, "alias": connection.Alias, "transport": connection.Transport,
+		"enabled": connection.Enabled, "status": connection.Status,
+	}, "tools": tools})
+}
+
+func (s *V1Server) setMcpConnectionEnabledCore(r *http.Request, rc v1Request, alias string) opResult {
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := decodeBody(r, &body); err != nil || body.Enabled == nil {
+		return opError(http.StatusBadRequest, "mcp_body_invalid", "enabled must be a boolean", nil)
+	}
+	id, err := store.New(s.pool).SetMcpConnectionEnabled(r.Context(), store.SetMcpConnectionEnabledParams{
+		OrgID: rc.orgID, Alias: alias, Enabled: *body.Enabled,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "mcp_connection_not_found", "connection not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "mcp.connection.updated", audit.Options{
+		TargetType: "mcp_connection", TargetID: id,
+		Metadata: map[string]any{"alias": alias, "enabled": *body.Enabled},
+	})
+	return opOK(map[string]any{"alias": alias, "enabled": *body.Enabled})
+}
+
+func (s *V1Server) deleteMcpConnectionCore(r *http.Request, rc v1Request, alias string) opResult {
+	ctx := r.Context()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := store.New(tx)
+	// Discovery takes a key-share lock before each descriptor upsert. Holding
+	// this row FOR UPDATE makes deletion linearizable with a concurrent network
+	// discovery: either discovery commits first and these deletes remove its
+	// rows, or it observes the committed deletion and inserts nothing.
+	connection, err := q.GetMcpConnectionByAliasForUpdate(ctx, store.GetMcpConnectionByAliasForUpdateParams{
+		OrgID: rc.orgID, Alias: alias,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "mcp_connection_not_found", "connection not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	if err := q.DeleteMcpToolDescriptorsForConnection(ctx, connection.ID); err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	id, err := q.DeleteMcpConnection(ctx, store.DeleteMcpConnectionParams{OrgID: rc.orgID, Alias: alias})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "mcp_connection_not_found", "connection not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	if err := audit.WriteInTx(ctx, tx, rc.authContext, "mcp.connection.deleted", audit.Options{
+		TargetType: "mcp_connection", TargetID: id, Metadata: map[string]any{"alias": alias},
+	}); err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	return opOK(map[string]any{"alias": alias, "deleted": true})
+}
+
+func (s *V1Server) rediscoverMcpConnectionCore(r *http.Request, rc v1Request, alias string) opResult {
+	q := store.New(s.pool)
+	if _, err := q.GetMcpConnectionByAlias(r.Context(), store.GetMcpConnectionByAliasParams{
+		OrgID: rc.orgID, Alias: alias,
+	}); err != nil {
+		return opError(http.StatusNotFound, "mcp_connection_not_found", "connection not found", nil)
+	}
+	// Network I/O, so no surrounding transaction — the same posture as create.
+	discovery := s.mcp.RunDiscovery(r.Context(), rc.orgID, alias)
+	audit.Write(r.Context(), s.pool, rc.authContext, "mcp.connection.rediscovered", audit.Options{
+		TargetType: "mcp_connection", TargetID: alias,
+		Metadata: map[string]any{"alias": alias, "discoveryOk": discovery.OK, "tools": discovery.Tools},
+	})
+	return opOK(map[string]any{"discovery": map[string]any{
+		"ok": discovery.OK, "tools": discovery.Tools, "error": discovery.Error,
+	}})
+}
+
+// reservedEnvRefName returns the first env-ref name the platform refuses to
+// resolve, or "" when every entry is acceptable. Names are sorted so a
+// document with several offenders always reports the same one — an error
+// that changes between identical requests is impossible to act on.
+//
+// Only kind=="env" entries are inspected: other kinds resolve through the
+// managed secret store, which carries its own tenant scoping.
+func reservedEnvRefName(refs map[string]any) string {
+	var offenders []string
+	for _, raw := range refs {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if kind, _ := entry["kind"].(string); kind != "env" {
+			continue
+		}
+		name, _ := entry["name"].(string)
+		if !secretstore.EnvRefAllowed(name) {
+			offenders = append(offenders, name)
+		}
+	}
+	if len(offenders) == 0 {
+		return ""
+	}
+	slices.Sort(offenders)
+	return offenders[0]
 }

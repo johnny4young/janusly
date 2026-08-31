@@ -21,6 +21,7 @@ import (
 	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/mcpserver"
 	"github.com/johnny4young/janusly/internal/migrate"
 	"github.com/johnny4young/janusly/internal/ratelimit"
@@ -75,13 +76,20 @@ func run() error {
 	if org == "" {
 		org = "default"
 	}
+	permissions, err := mcpserver.ParsePermissionCeiling(os.Getenv("JANUSLY_MCP_PERMISSIONS"))
+	if err != nil {
+		return err
+	}
 	tracker := ratelimit.NewTracker(pool)
+	limiter := ratelimit.New(pool, ratelimit.Hooks{
+		OnError: tracker.RecordError, OnSuccess: tracker.RecordRecovery,
+	})
 	server := mcpserver.NewServer(mcpserver.Deps{
 		Engine: eng, Pool: pool, OrgID: org, UserID: "mcp", NewID: uuid.NewString,
-		Limiter: ratelimit.New(pool, ratelimit.Hooks{
-			OnError: tracker.RecordError, OnSuccess: tracker.RecordRecovery,
-		}),
+		Permissions: permissions, CatalogSource: mcpclient.New(pool, limiter), Limiter: limiter,
 	})
-	logger.Info("mcp server ready", "org", org, "startup", time.Now().UTC().Format(time.RFC3339))
+	logger.Info("mcp server ready", "org", org,
+		"permissions", mcpserver.PermissionKeys(permissions),
+		"startup", time.Now().UTC().Format(time.RFC3339))
 	return server.Run(ctx, &mcp.StdioTransport{})
 }

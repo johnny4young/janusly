@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/auth"
@@ -148,6 +149,27 @@ func SystemWrite(ctx context.Context, pool *pgxpool.Pool, orgID, actor string, a
 
 // TxAudit is the tx-bound audit function handed to WithAuditTx handlers.
 type TxAudit func(action Action, opts Options) error
+
+// TxExecer is the narrow transaction surface required by WriteInTx. Keeping
+// the interface independent of pgx.Tx preserves the engine's fault-injection
+// seam while making the audit receipt mandatory for governed mutations.
+type TxExecer interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+// WriteInTx appends a mandatory audit row through a caller-owned transaction.
+// Unlike Write, an error is returned so the business mutation rolls back
+// instead of committing without its forensic receipt.
+func WriteInTx(ctx context.Context, tx TxExecer, authCtx *auth.Context, action Action, opts Options) error {
+	orgID, userID := "", ""
+	if authCtx != nil {
+		orgID, userID = authCtx.OrgID, authCtx.UserID
+	}
+	return insert(ctx, func(ctx context.Context, sql string, args ...any) error {
+		_, err := tx.Exec(ctx, sql, args...)
+		return err
+	}, orgID, userID, action, opts, authCtx)
+}
 
 // IdentityTxAudit binds the provider-verified actor while allowing the
 // transaction to supply the organization it just proved or created. This is

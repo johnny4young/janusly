@@ -58,7 +58,7 @@ func TestMcpWriteRateLimit(t *testing.T) {
 
 	deps := Deps{
 		Engine: engine.New(pool), Pool: pool, OrgID: org, UserID: "mcp-test",
-		NewID:   uuid.NewString,
+		NewID: uuid.NewString, Permissions: fullMCPTestPermissions(),
 		Limiter: ratelimit.New(pool, ratelimit.Hooks{}),
 	}
 	server := NewServer(deps)

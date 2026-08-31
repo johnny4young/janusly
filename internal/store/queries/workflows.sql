@@ -250,6 +250,17 @@ WHERE wv.org_id = $1 AND w.deleted_at IS NULL
 ORDER BY wv.workflow_id, wv.version DESC
 LIMIT 1000;
 
+-- Exact saved workflows eligible for subworkflow authoring. Unsaved,
+-- deleted and versionless workflows cannot be bound by a proposal.
+-- name: ListAuthoringSubworkflowCapabilities :many
+SELECT w.id, w.name, w.status, max(wv.version)::int AS latest_version
+FROM workflows w
+JOIN workflow_versions wv ON wv.workflow_id = w.id AND wv.org_id = w.org_id
+WHERE w.org_id = $1 AND w.deleted_at IS NULL
+GROUP BY w.id, w.name, w.status
+ORDER BY w.name, w.id
+LIMIT 200;
+
 -- name: ListExternalWorkflows :many
 SELECT * FROM external_workflows
 WHERE org_id = $1
@@ -273,6 +284,15 @@ WHERE wv.workflow_id = $1 AND wv.org_id = $2 AND wv.version = $3
 
 -- name: ListScheduleEntriesForWorkflow :many
 SELECT * FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2 ORDER BY node_id;
+
+-- name: SetLatestWorkflowSlo :one
+UPDATE workflow_versions AS wv SET slo_json = $3
+WHERE wv.id = (
+  SELECT latest.id FROM workflow_versions AS latest
+  WHERE latest.org_id = $1 AND latest.workflow_id = $2
+  ORDER BY latest.version DESC LIMIT 1
+)
+RETURNING wv.id;
 
 -- name: GetLatestWorkflowSlo :one
 SELECT slo_json FROM workflow_versions

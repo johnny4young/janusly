@@ -1062,6 +1062,50 @@ func (q *Queries) InsertWorkflowVersion(ctx context.Context, arg InsertWorkflowV
 	return err
 }
 
+const listAuthoringSubworkflowCapabilities = `-- name: ListAuthoringSubworkflowCapabilities :many
+SELECT w.id, w.name, w.status, max(wv.version)::int AS latest_version
+FROM workflows w
+JOIN workflow_versions wv ON wv.workflow_id = w.id AND wv.org_id = w.org_id
+WHERE w.org_id = $1 AND w.deleted_at IS NULL
+GROUP BY w.id, w.name, w.status
+ORDER BY w.name, w.id
+LIMIT 200
+`
+
+type ListAuthoringSubworkflowCapabilitiesRow struct {
+	ID            string
+	Name          string
+	Status        string
+	LatestVersion int32
+}
+
+// Exact saved workflows eligible for subworkflow authoring. Unsaved,
+// deleted and versionless workflows cannot be bound by a proposal.
+func (q *Queries) ListAuthoringSubworkflowCapabilities(ctx context.Context, orgID string) ([]ListAuthoringSubworkflowCapabilitiesRow, error) {
+	rows, err := q.db.Query(ctx, listAuthoringSubworkflowCapabilities, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuthoringSubworkflowCapabilitiesRow
+	for rows.Next() {
+		var i ListAuthoringSubworkflowCapabilitiesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Status,
+			&i.LatestVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDeletedWorkflowRows = `-- name: ListDeletedWorkflowRows :many
 SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        w.paused_reason, w.deleted_at,
@@ -2136,6 +2180,29 @@ func (q *Queries) RestoreWorkflow(ctx context.Context, arg RestoreWorkflowParams
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const setLatestWorkflowSlo = `-- name: SetLatestWorkflowSlo :one
+UPDATE workflow_versions AS wv SET slo_json = $3
+WHERE wv.id = (
+  SELECT latest.id FROM workflow_versions AS latest
+  WHERE latest.org_id = $1 AND latest.workflow_id = $2
+  ORDER BY latest.version DESC LIMIT 1
+)
+RETURNING wv.id
+`
+
+type SetLatestWorkflowSloParams struct {
+	OrgID      string
+	WorkflowID string
+	SloJson    json.RawMessage
+}
+
+func (q *Queries) SetLatestWorkflowSlo(ctx context.Context, arg SetLatestWorkflowSloParams) (string, error) {
+	row := q.db.QueryRow(ctx, setLatestWorkflowSlo, arg.OrgID, arg.WorkflowID, arg.SloJson)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const setWorkflowFolderBulk = `-- name: SetWorkflowFolderBulk :execrows

@@ -35,6 +35,20 @@ type Definition struct {
 	Execute   func(ctx context.Context, input map[string]any) (map[string]any, error)
 }
 
+// CatalogEntry is the executable registry's safe, typed projection for
+// authoring surfaces. It deliberately omits Execute so the same value can be
+// shared by the API, AI binding checks and MCP without accidentally exposing
+// runtime callbacks or credential material.
+type CatalogEntry struct {
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	Required     []string       `json:"required"`
+	Optional     []string       `json:"optional,omitempty"`
+	InputFields  []Field        `json:"inputFields"`
+	InputExample map[string]any `json:"inputExample,omitempty"`
+	WriteSide    bool           `json:"writeSide"`
+}
+
 // Registry holds the tool set for one process.
 type Registry struct {
 	byName map[string]Definition
@@ -89,20 +103,40 @@ func NewRegistry() *Registry {
 
 // Catalog is the public listTools() projection, name-sorted for stability.
 func (r *Registry) Catalog() []map[string]any {
+	entries := r.CatalogEntries()
+	out := make([]map[string]any, 0, len(entries))
+	for _, catalogEntry := range entries {
+		projected := map[string]any{
+			"name": catalogEntry.Name, "description": catalogEntry.Description,
+			"required": catalogEntry.Required, "inputFields": catalogEntry.InputFields,
+			"writeSide": catalogEntry.WriteSide,
+		}
+		if len(catalogEntry.Optional) > 0 {
+			projected["optional"] = catalogEntry.Optional
+		}
+		if catalogEntry.InputExample != nil {
+			projected["inputExample"] = catalogEntry.InputExample
+		}
+		out = append(out, projected)
+	}
+	return out
+}
+
+// CatalogEntries returns a name-sorted, copy-owned catalog. Slice and map
+// fields are cloned so callers cannot mutate the process-wide runtime
+// definitions while preparing an authoring response.
+func (r *Registry) CatalogEntries() []CatalogEntry {
 	names := slices.Sorted(maps.Keys(r.byName))
-	out := make([]map[string]any, 0, len(names))
+	out := make([]CatalogEntry, 0, len(names))
 	for _, name := range names {
 		definition := r.byName[name]
-		entry := map[string]any{
-			"name": definition.Name, "description": definition.Description,
-			"required": definition.Required, "inputFields": definition.Fields,
-			"writeSide": definition.WriteSide,
-		}
-		if len(definition.Optional) > 0 {
-			entry["optional"] = definition.Optional
+		entry := CatalogEntry{
+			Name: definition.Name, Description: definition.Description,
+			Required: slices.Clone(definition.Required), Optional: slices.Clone(definition.Optional),
+			InputFields: slices.Clone(definition.Fields), WriteSide: definition.WriteSide,
 		}
 		if definition.InputExample != nil {
-			entry["inputExample"] = definition.InputExample
+			entry.InputExample = maps.Clone(definition.InputExample)
 		}
 		out = append(out, entry)
 	}

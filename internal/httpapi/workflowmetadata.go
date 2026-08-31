@@ -161,6 +161,10 @@ func (s *V1Server) mountWorkflowMetadataRoutes(mux *http.ServeMux) {
 		writeUnversioned(w, opOK(map[string]any{"metadata": view}))
 	}))
 
+	mux.HandleFunc("POST /workflows/{workflowId}/slo", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.setWorkflowSloCore(r, rc, r.PathValue("workflowId")))
+	}))
+
 	// The NARROW folder route: only the folder column moves.
 	mux.HandleFunc("POST /workflows/{workflowId}/folder", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		workflowID := r.PathValue("workflowId")
@@ -407,4 +411,72 @@ func (s *V1Server) mountWorkflowMetadataRoutes(mux *http.ServeMux) {
 		})
 		writeUnversioned(w, opOK(map[string]any{"ok": true, "affected": changed}))
 	}))
+}
+
+// workflowSloBody mirrors the closed Reliability declaration. Pointer fields
+// preserve the distinction between an unset threshold and zero.
+type workflowSloBody struct {
+	SuccessRatePercent    *float64 `json:"successRatePercent"`
+	MttrSeconds           *int     `json:"mttrSeconds"`
+	P95DurationMs         *int     `json:"p95DurationMs"`
+	BudgetBlocksPerWindow *int     `json:"budgetBlocksPerWindow"`
+	StuckWaitingNodesMax  *int     `json:"stuckWaitingNodesMax"`
+	WindowDays            int      `json:"windowDays"`
+}
+
+func validWorkflowSlo(slo workflowSloBody) bool {
+	if slo.WindowDays != 7 && slo.WindowDays != 14 && slo.WindowDays != 30 {
+		return false
+	}
+	if slo.SuccessRatePercent != nil && (*slo.SuccessRatePercent < 0 || *slo.SuccessRatePercent > 100) {
+		return false
+	}
+	for _, value := range []*int{slo.MttrSeconds, slo.P95DurationMs, slo.BudgetBlocksPerWindow, slo.StuckWaitingNodesMax} {
+		if value != nil && *value < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *V1Server) setWorkflowSloCore(r *http.Request, rc v1Request, workflowID string) opResult {
+	if !s.ownsActiveWorkflow(r, rc.orgID, workflowID) {
+		return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+	}
+	var body struct {
+		Slo *workflowSloBody `json:"slo"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusUnprocessableEntity, "workflow_slo_invalid", "Invalid SLO body", nil)
+	}
+	var sloJSON json.RawMessage = []byte("null")
+	if body.Slo != nil {
+		if !validWorkflowSlo(*body.Slo) {
+			return opError(http.StatusUnprocessableEntity, "workflow_slo_invalid",
+				"windowDays must be 7, 14 or 30 and every threshold non-negative", nil)
+		}
+		encoded, err := json.Marshal(body.Slo)
+		if err != nil {
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+		sloJSON = encoded
+	}
+	versionID, err := store.New(s.pool).SetLatestWorkflowSlo(r.Context(), store.SetLatestWorkflowSloParams{
+		OrgID: rc.orgID, WorkflowID: workflowID, SloJson: sloJSON,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "workflow_not_found", "Workflow has no saved version", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.slo.set", audit.Options{
+		TargetType: "workflow", TargetID: workflowID,
+		Metadata: map[string]any{"workflowId": workflowID, "versionId": versionID, "cleared": body.Slo == nil},
+	})
+	var declared any
+	if body.Slo != nil {
+		declared = body.Slo
+	}
+	return opOK(map[string]any{"workflowId": workflowID, "slo": declared, "versionId": versionID})
 }

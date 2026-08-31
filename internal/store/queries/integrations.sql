@@ -27,6 +27,9 @@ WHERE org_id = $1 AND id = $2 AND status = 'received';
 -- name: GetMcpConnectionByAlias :one
 SELECT * FROM mcp_connections WHERE org_id = $1 AND alias = $2;
 
+-- name: GetMcpConnectionByAliasForUpdate :one
+SELECT * FROM mcp_connections WHERE org_id = $1 AND alias = $2 FOR UPDATE;
+
 -- name: InsertMcpConnection :exec
 INSERT INTO mcp_connections (id, org_id, alias, transport, command, args, url, env_refs, enabled, status, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
@@ -35,8 +38,16 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 SELECT * FROM mcp_tool_descriptors WHERE connection_id = $1 AND name = $2;
 
 -- name: UpsertMcpToolDescriptor :exec
+WITH locked_connection AS (
+  SELECT mcp_connections.id
+  FROM mcp_connections
+  WHERE mcp_connections.id = sqlc.arg(connection_id)
+  FOR KEY SHARE
+)
 INSERT INTO mcp_tool_descriptors (id, connection_id, name, description, input_schema, write_side, enabled, rate_limit_per_min)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+SELECT sqlc.arg(id), locked_connection.id, sqlc.arg(name), sqlc.arg(description),
+       sqlc.arg(input_schema), sqlc.arg(write_side), sqlc.arg(enabled), sqlc.arg(rate_limit_per_min)
+FROM locked_connection
 ON CONFLICT (connection_id, name) DO UPDATE SET
   description = EXCLUDED.description,
   input_schema = EXCLUDED.input_schema,
@@ -59,6 +70,17 @@ GROUP BY d.connection_id;
 UPDATE mcp_connections
 SET status = $3, status_reason = $4, last_discovery_at = $5, updated_at = now()
 WHERE org_id = $1 AND id = $2;
+
+-- name: SetMcpConnectionEnabled :one
+UPDATE mcp_connections SET enabled = $3, updated_at = now()
+WHERE org_id = $1 AND alias = $2
+RETURNING id;
+
+-- name: DeleteMcpToolDescriptorsForConnection :exec
+DELETE FROM mcp_tool_descriptors WHERE connection_id = $1;
+
+-- name: DeleteMcpConnection :one
+DELETE FROM mcp_connections WHERE org_id = $1 AND alias = $2 RETURNING id;
 
 -- name: ListExposedMcpToolsForAi :many
 SELECT c.alias, d.name, d.description, d.input_schema, d.write_side
@@ -113,6 +135,16 @@ WHERE org_id = $1 AND id = $2;
 -- name: ListCredentials :many
 SELECT id, org_id, name, kind, secret_ref, metadata, created_by, created_at, updated_at, expires_at
 FROM credentials WHERE org_id = $1 ORDER BY name LIMIT 500;
+
+-- The authoring catalog is intentionally incapable of reading secret_ref or
+-- arbitrary credential metadata. It exposes only exact non-secret binding
+-- identifiers plus lifecycle posture.
+-- name: ListAuthoringCredentialCapabilities :many
+SELECT id, name, kind, (secret_ref <> '')::bool AS configured, expires_at, updated_at
+FROM credentials
+WHERE org_id = $1
+ORDER BY name, id
+LIMIT 200;
 
 -- name: GetCredentialByOrgName :one
 SELECT id, org_id, name, kind, secret_ref, updated_at, expires_at

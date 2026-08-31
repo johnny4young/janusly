@@ -52,8 +52,13 @@ func TestRecoveryCaseReads(t *testing.T) {
 
 	// Detail: full shape; foreign/unknown → 404.
 	detail := h.call("GET", "/recovery/cases/case-open-"+suffix, nil, "")
-	if detail.status != 200 || detail.body["state"] != "detected" || detail.body["detectorKind"] != "expression" {
+	caseView, _ := detail.body["case"].(map[string]any)
+	autonomy, _ := detail.body["autonomy"].(map[string]any)
+	if detail.status != 200 || caseView["state"] != "detected" || caseView["detectorKind"] != "expression" {
 		t.Fatalf("detail: %d %+v", detail.status, detail.body)
+	}
+	if autonomy["source"] != "unavailable" || autonomy["unavailableReason"] != "contract_missing" {
+		t.Fatalf("missing run must degrade autonomy without hiding the case: %+v", autonomy)
 	}
 	if res := h.call("GET", "/recovery/cases/case-foreign-"+suffix, nil, ""); res.status != 404 {
 		t.Fatalf("foreign case must 404: %d", res.status)

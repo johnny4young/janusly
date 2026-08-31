@@ -13,6 +13,62 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const advanceRecoveryCaseStateAtRevision = `-- name: AdvanceRecoveryCaseStateAtRevision :one
+UPDATE recovery_cases
+SET state = $1, revision = revision + 1,
+    updated_at = $2,
+    resolved_at = CASE WHEN $3::boolean THEN $2 ELSE resolved_at END
+WHERE org_id = $4 AND id = $5
+  AND state = $6 AND revision = $7
+RETURNING id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at
+`
+
+type AdvanceRecoveryCaseStateAtRevisionParams struct {
+	ToState          string
+	OccurredAt       time.Time
+	Terminal         bool
+	OrgID            string
+	ID               string
+	FromState        string
+	ExpectedRevision int64
+}
+
+// Governed recovery mutations carry both the state and monotonic revision so
+// a stale browser or MCP caller cannot approve or apply a different artifact.
+func (q *Queries) AdvanceRecoveryCaseStateAtRevision(ctx context.Context, arg AdvanceRecoveryCaseStateAtRevisionParams) (RecoveryCase, error) {
+	row := q.db.QueryRow(ctx, advanceRecoveryCaseStateAtRevision,
+		arg.ToState,
+		arg.OccurredAt,
+		arg.Terminal,
+		arg.OrgID,
+		arg.ID,
+		arg.FromState,
+		arg.ExpectedRevision,
+	)
+	var i RecoveryCase
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.RunID,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.Source,
+		&i.DetectorID,
+		&i.SourceNodeID,
+		&i.DetectorKind,
+		&i.Action,
+		&i.Message,
+		&i.DetailsJson,
+		&i.State,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ResolvedAt,
+	)
+	return i, err
+}
+
 const appendRecoveryItemComment = `-- name: AppendRecoveryItemComment :execrows
 UPDATE recovery_items
 SET comments = comments || $3::jsonb, updated_at = now()
@@ -50,6 +106,39 @@ func (q *Queries) BumpRecoveryItemOccurrence(ctx context.Context, arg BumpRecove
 	var occurrence_count int32
 	err := row.Scan(&occurrence_count)
 	return occurrence_count, err
+}
+
+const consumeRecoveryApprovalGrant = `-- name: ConsumeRecoveryApprovalGrant :execrows
+UPDATE recovery_approval_grants
+SET consumed_at = $1, consumed_by = $2
+WHERE id = $3 AND org_id = $4
+  AND case_id = $5 AND case_revision = $6
+  AND consumed_at IS NULL AND revoked_at IS NULL
+  AND expires_at > $1
+`
+
+type ConsumeRecoveryApprovalGrantParams struct {
+	ConsumedAt   *time.Time
+	ConsumedBy   pgtype.Text
+	ID           string
+	OrgID        string
+	CaseID       string
+	CaseRevision int64
+}
+
+func (q *Queries) ConsumeRecoveryApprovalGrant(ctx context.Context, arg ConsumeRecoveryApprovalGrantParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeRecoveryApprovalGrant,
+		arg.ConsumedAt,
+		arg.ConsumedBy,
+		arg.ID,
+		arg.OrgID,
+		arg.CaseID,
+		arg.CaseRevision,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const convergeDeadLetterReplayed = `-- name: ConvergeDeadLetterReplayed :exec
@@ -116,6 +205,31 @@ func (q *Queries) CountDeadLettersByStatus(ctx context.Context, orgID string) ([
 	return items, nil
 }
 
+const countOpenSemanticRecoveryCases = `-- name: CountOpenSemanticRecoveryCases :one
+SELECT count(*)::int AS total_open,
+       count(*) FILTER (WHERE action = 'quarantine')::int AS open_quarantines
+FROM recovery_cases
+WHERE org_id = $1 AND run_id = $2
+  AND state NOT IN ('verified_recovered', 'recurred', 'accepted_loss', 'abandoned')
+`
+
+type CountOpenSemanticRecoveryCasesParams struct {
+	OrgID string
+	RunID string
+}
+
+type CountOpenSemanticRecoveryCasesRow struct {
+	TotalOpen       int32
+	OpenQuarantines int32
+}
+
+func (q *Queries) CountOpenSemanticRecoveryCases(ctx context.Context, arg CountOpenSemanticRecoveryCasesParams) (CountOpenSemanticRecoveryCasesRow, error) {
+	row := q.db.QueryRow(ctx, countOpenSemanticRecoveryCases, arg.OrgID, arg.RunID)
+	var i CountOpenSemanticRecoveryCasesRow
+	err := row.Scan(&i.TotalOpen, &i.OpenQuarantines)
+	return i, err
+}
+
 const countOperatorRecoveries = `-- name: CountOperatorRecoveries :one
 SELECT count(*)::int
 FROM recovery_impact_events e
@@ -139,6 +253,59 @@ func (q *Queries) CountOperatorRecoveries(ctx context.Context, arg CountOperator
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const findActiveRecoveryApprovalGrant = `-- name: FindActiveRecoveryApprovalGrant :one
+SELECT grant_row.id, grant_row.org_id, grant_row.case_id, grant_row.candidate_artifact_id, grant_row.validation_artifact_id, grant_row.case_revision, grant_row.granted_by, grant_row.expires_at, grant_row.consumed_at, grant_row.consumed_by, grant_row.revoked_at, grant_row.created_at
+FROM recovery_approval_grants grant_row
+JOIN recovery_cases case_row
+  ON case_row.org_id = grant_row.org_id AND case_row.id = grant_row.case_id
+WHERE grant_row.org_id = $1
+  AND grant_row.case_id = $2
+  AND grant_row.candidate_artifact_id = $3
+  AND grant_row.validation_artifact_id = $4
+  AND grant_row.case_revision = $5
+  AND case_row.revision = grant_row.case_revision
+  AND grant_row.consumed_at IS NULL AND grant_row.revoked_at IS NULL
+  AND grant_row.expires_at > $6
+ORDER BY grant_row.created_at DESC
+LIMIT 1
+`
+
+type FindActiveRecoveryApprovalGrantParams struct {
+	OrgID                string
+	CaseID               string
+	CandidateArtifactID  string
+	ValidationArtifactID string
+	CaseRevision         int64
+	NowAt                time.Time
+}
+
+func (q *Queries) FindActiveRecoveryApprovalGrant(ctx context.Context, arg FindActiveRecoveryApprovalGrantParams) (RecoveryApprovalGrant, error) {
+	row := q.db.QueryRow(ctx, findActiveRecoveryApprovalGrant,
+		arg.OrgID,
+		arg.CaseID,
+		arg.CandidateArtifactID,
+		arg.ValidationArtifactID,
+		arg.CaseRevision,
+		arg.NowAt,
+	)
+	var i RecoveryApprovalGrant
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.CaseID,
+		&i.CandidateArtifactID,
+		&i.ValidationArtifactID,
+		&i.CaseRevision,
+		&i.GrantedBy,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.ConsumedBy,
+		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const findOpenRecoveryItemForDebounce = `-- name: FindOpenRecoveryItemForDebounce :one
@@ -307,7 +474,7 @@ func (q *Queries) GetDeadLetterForImpact(ctx context.Context, arg GetDeadLetterF
 }
 
 const getRecoveryCase = `-- name: GetRecoveryCase :one
-SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, created_by, created_at, updated_at, resolved_at FROM recovery_cases WHERE org_id = $1 AND id = $2
+SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at FROM recovery_cases WHERE org_id = $1 AND id = $2
 `
 
 type GetRecoveryCaseParams struct {
@@ -332,6 +499,70 @@ func (q *Queries) GetRecoveryCase(ctx context.Context, arg GetRecoveryCaseParams
 		&i.Message,
 		&i.DetailsJson,
 		&i.State,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ResolvedAt,
+	)
+	return i, err
+}
+
+const getRecoveryCaseArtifact = `-- name: GetRecoveryCaseArtifact :one
+SELECT id, org_id, case_id, kind, payload_json, payload_sha256, actor_kind, actor_id, created_at FROM recovery_case_artifacts
+WHERE org_id = $1 AND case_id = $2 AND id = $3
+`
+
+type GetRecoveryCaseArtifactParams struct {
+	OrgID  string
+	CaseID string
+	ID     string
+}
+
+func (q *Queries) GetRecoveryCaseArtifact(ctx context.Context, arg GetRecoveryCaseArtifactParams) (RecoveryCaseArtifact, error) {
+	row := q.db.QueryRow(ctx, getRecoveryCaseArtifact, arg.OrgID, arg.CaseID, arg.ID)
+	var i RecoveryCaseArtifact
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.CaseID,
+		&i.Kind,
+		&i.PayloadJson,
+		&i.PayloadSha256,
+		&i.ActorKind,
+		&i.ActorID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRecoveryCaseForUpdate = `-- name: GetRecoveryCaseForUpdate :one
+SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at FROM recovery_cases WHERE org_id = $1 AND id = $2 FOR UPDATE
+`
+
+type GetRecoveryCaseForUpdateParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetRecoveryCaseForUpdate(ctx context.Context, arg GetRecoveryCaseForUpdateParams) (RecoveryCase, error) {
+	row := q.db.QueryRow(ctx, getRecoveryCaseForUpdate, arg.OrgID, arg.ID)
+	var i RecoveryCase
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.RunID,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.Source,
+		&i.DetectorID,
+		&i.SourceNodeID,
+		&i.DetectorKind,
+		&i.Action,
+		&i.Message,
+		&i.DetailsJson,
+		&i.State,
+		&i.Revision,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -451,6 +682,57 @@ func (q *Queries) InsertDeadLetter(ctx context.Context, arg InsertDeadLetterPara
 	return err
 }
 
+const insertRecoveryApprovalGrant = `-- name: InsertRecoveryApprovalGrant :one
+INSERT INTO recovery_approval_grants
+  (id, org_id, case_id, candidate_artifact_id, validation_artifact_id,
+   case_revision, granted_by, expires_at, created_at)
+VALUES
+  ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, org_id, case_id, candidate_artifact_id, validation_artifact_id, case_revision, granted_by, expires_at, consumed_at, consumed_by, revoked_at, created_at
+`
+
+type InsertRecoveryApprovalGrantParams struct {
+	ID                   string
+	OrgID                string
+	CaseID               string
+	CandidateArtifactID  string
+	ValidationArtifactID string
+	CaseRevision         int64
+	GrantedBy            string
+	ExpiresAt            time.Time
+	CreatedAt            time.Time
+}
+
+func (q *Queries) InsertRecoveryApprovalGrant(ctx context.Context, arg InsertRecoveryApprovalGrantParams) (RecoveryApprovalGrant, error) {
+	row := q.db.QueryRow(ctx, insertRecoveryApprovalGrant,
+		arg.ID,
+		arg.OrgID,
+		arg.CaseID,
+		arg.CandidateArtifactID,
+		arg.ValidationArtifactID,
+		arg.CaseRevision,
+		arg.GrantedBy,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+	)
+	var i RecoveryApprovalGrant
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.CaseID,
+		&i.CandidateArtifactID,
+		&i.ValidationArtifactID,
+		&i.CaseRevision,
+		&i.GrantedBy,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.ConsumedBy,
+		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertRecoveryCase = `-- name: InsertRecoveryCase :exec
 INSERT INTO recovery_cases (id, org_id, run_id, workflow_id, workflow_version_id, source,
   detector_id, source_node_id, detector_kind, action, message, details_json, state, created_by)
@@ -495,10 +777,61 @@ func (q *Queries) InsertRecoveryCase(ctx context.Context, arg InsertRecoveryCase
 	return err
 }
 
+const insertRecoveryCaseArtifact = `-- name: InsertRecoveryCaseArtifact :one
+INSERT INTO recovery_case_artifacts
+  (id, org_id, case_id, kind, payload_json, payload_sha256, actor_kind, actor_id, created_at)
+VALUES
+  ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (org_id, case_id, kind, payload_sha256)
+DO UPDATE SET id = recovery_case_artifacts.id
+RETURNING id, org_id, case_id, kind, payload_json, payload_sha256, actor_kind, actor_id, created_at
+`
+
+type InsertRecoveryCaseArtifactParams struct {
+	ID            string
+	OrgID         string
+	CaseID        string
+	Kind          string
+	PayloadJson   json.RawMessage
+	PayloadSha256 string
+	ActorKind     string
+	ActorID       pgtype.Text
+	CreatedAt     time.Time
+}
+
+// Artifacts are content-addressed and append-only. Retrying an identical
+// operation returns the original immutable row rather than duplicating it.
+func (q *Queries) InsertRecoveryCaseArtifact(ctx context.Context, arg InsertRecoveryCaseArtifactParams) (RecoveryCaseArtifact, error) {
+	row := q.db.QueryRow(ctx, insertRecoveryCaseArtifact,
+		arg.ID,
+		arg.OrgID,
+		arg.CaseID,
+		arg.Kind,
+		arg.PayloadJson,
+		arg.PayloadSha256,
+		arg.ActorKind,
+		arg.ActorID,
+		arg.CreatedAt,
+	)
+	var i RecoveryCaseArtifact
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.CaseID,
+		&i.Kind,
+		&i.PayloadJson,
+		&i.PayloadSha256,
+		&i.ActorKind,
+		&i.ActorID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertRecoveryCaseTransition = `-- name: InsertRecoveryCaseTransition :execrows
 INSERT INTO recovery_case_transitions (id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-ON CONFLICT (case_id, to_state) DO NOTHING
+ON CONFLICT (id) DO NOTHING
 `
 
 type InsertRecoveryCaseTransitionParams struct {
@@ -1131,6 +1464,48 @@ func (q *Queries) ListOrgsWithFeedback(ctx context.Context, windowDays int32) ([
 	return items, nil
 }
 
+const listRecoveryCaseArtifacts = `-- name: ListRecoveryCaseArtifacts :many
+SELECT id, org_id, case_id, kind, payload_json, payload_sha256, actor_kind, actor_id, created_at FROM recovery_case_artifacts
+WHERE org_id = $1 AND case_id = $2
+ORDER BY created_at, id
+LIMIT 100
+`
+
+type ListRecoveryCaseArtifactsParams struct {
+	OrgID  string
+	CaseID string
+}
+
+func (q *Queries) ListRecoveryCaseArtifacts(ctx context.Context, arg ListRecoveryCaseArtifactsParams) ([]RecoveryCaseArtifact, error) {
+	rows, err := q.db.Query(ctx, listRecoveryCaseArtifacts, arg.OrgID, arg.CaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecoveryCaseArtifact
+	for rows.Next() {
+		var i RecoveryCaseArtifact
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.CaseID,
+			&i.Kind,
+			&i.PayloadJson,
+			&i.PayloadSha256,
+			&i.ActorKind,
+			&i.ActorID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecoveryCaseTransitions = `-- name: ListRecoveryCaseTransitions :many
 SELECT id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at FROM recovery_case_transitions
 WHERE org_id = $1 AND case_id = $2
@@ -1175,7 +1550,7 @@ func (q *Queries) ListRecoveryCaseTransitions(ctx context.Context, arg ListRecov
 }
 
 const listRecoveryCases = `-- name: ListRecoveryCases :many
-SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, created_by, created_at, updated_at, resolved_at FROM recovery_cases
+SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at FROM recovery_cases
 WHERE org_id = $1
   AND ($2::text IS NULL OR run_id = $2)
   AND (NOT $3::boolean OR state NOT IN ('verified_recovered','recurred','accepted_loss','abandoned'))
@@ -1218,11 +1593,51 @@ func (q *Queries) ListRecoveryCases(ctx context.Context, arg ListRecoveryCasesPa
 			&i.Message,
 			&i.DetailsJson,
 			&i.State,
+			&i.Revision,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ResolvedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecoveryItemChildren = `-- name: ListRecoveryItemChildren :many
+SELECT id, dead_letter_id, occurred_at
+FROM recovery_item_children
+WHERE org_id = $1 AND recovery_item_id = $2
+ORDER BY occurred_at DESC
+LIMIT 200
+`
+
+type ListRecoveryItemChildrenParams struct {
+	OrgID          string
+	RecoveryItemID string
+}
+
+type ListRecoveryItemChildrenRow struct {
+	ID           string
+	DeadLetterID string
+	OccurredAt   time.Time
+}
+
+func (q *Queries) ListRecoveryItemChildren(ctx context.Context, arg ListRecoveryItemChildrenParams) ([]ListRecoveryItemChildrenRow, error) {
+	rows, err := q.db.Query(ctx, listRecoveryItemChildren, arg.OrgID, arg.RecoveryItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecoveryItemChildrenRow
+	for rows.Next() {
+		var i ListRecoveryItemChildrenRow
+		if err := rows.Scan(&i.ID, &i.DeadLetterID, &i.OccurredAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1358,6 +1773,153 @@ func (q *Queries) ListResolvedRecoveryFailureRows(ctx context.Context, arg ListR
 	for rows.Next() {
 		var i ListResolvedRecoveryFailureRowsRow
 		if err := rows.Scan(&i.NodeID, &i.NodeJson, &i.ErrorJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockOpenSemanticRecoveryCases = `-- name: LockOpenSemanticRecoveryCases :many
+SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at FROM recovery_cases
+WHERE org_id = $1 AND run_id = $2 AND source_node_id = $3
+  AND state NOT IN ('verified_recovered', 'recurred', 'accepted_loss', 'abandoned')
+ORDER BY id
+FOR UPDATE
+`
+
+type LockOpenSemanticRecoveryCasesParams struct {
+	OrgID        string
+	RunID        string
+	SourceNodeID string
+}
+
+func (q *Queries) LockOpenSemanticRecoveryCases(ctx context.Context, arg LockOpenSemanticRecoveryCasesParams) ([]RecoveryCase, error) {
+	rows, err := q.db.Query(ctx, lockOpenSemanticRecoveryCases, arg.OrgID, arg.RunID, arg.SourceNodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecoveryCase
+	for rows.Next() {
+		var i RecoveryCase
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.RunID,
+			&i.WorkflowID,
+			&i.WorkflowVersionID,
+			&i.Source,
+			&i.DetectorID,
+			&i.SourceNodeID,
+			&i.DetectorKind,
+			&i.Action,
+			&i.Message,
+			&i.DetailsJson,
+			&i.State,
+			&i.Revision,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ResolvedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockRunForSemanticResolution = `-- name: LockRunForSemanticResolution :one
+SELECT id, org_id, status, input_json, replay_mode, semantic_violation_count
+FROM runs
+WHERE id = $1 AND org_id = $2
+FOR UPDATE
+`
+
+type LockRunForSemanticResolutionParams struct {
+	ID    string
+	OrgID string
+}
+
+type LockRunForSemanticResolutionRow struct {
+	ID                     string
+	OrgID                  string
+	Status                 string
+	InputJson              json.RawMessage
+	ReplayMode             pgtype.Text
+	SemanticViolationCount int32
+}
+
+func (q *Queries) LockRunForSemanticResolution(ctx context.Context, arg LockRunForSemanticResolutionParams) (LockRunForSemanticResolutionRow, error) {
+	row := q.db.QueryRow(ctx, lockRunForSemanticResolution, arg.ID, arg.OrgID)
+	var i LockRunForSemanticResolutionRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Status,
+		&i.InputJson,
+		&i.ReplayMode,
+		&i.SemanticViolationCount,
+	)
+	return i, err
+}
+
+const lockRunNodesForSemanticResolution = `-- name: LockRunNodesForSemanticResolution :many
+SELECT node.id, node.run_id, node.node_id, node.status, node.state_json,
+       node.attempts, node.started_at, node.finished_at, node.error_json
+FROM run_nodes node
+JOIN runs run ON run.id = node.run_id
+WHERE node.run_id = $1 AND run.org_id = $2
+ORDER BY node.id
+FOR UPDATE OF node
+`
+
+type LockRunNodesForSemanticResolutionParams struct {
+	RunID string
+	OrgID string
+}
+
+type LockRunNodesForSemanticResolutionRow struct {
+	ID         string
+	RunID      string
+	NodeID     string
+	Status     string
+	StateJson  json.RawMessage
+	Attempts   pgtype.Int4
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	ErrorJson  json.RawMessage
+}
+
+// Semantic resolution follows the runtime lock hierarchy: node rows first,
+// then the run, then sibling cases. These queries are deliberately explicit.
+func (q *Queries) LockRunNodesForSemanticResolution(ctx context.Context, arg LockRunNodesForSemanticResolutionParams) ([]LockRunNodesForSemanticResolutionRow, error) {
+	rows, err := q.db.Query(ctx, lockRunNodesForSemanticResolution, arg.RunID, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LockRunNodesForSemanticResolutionRow
+	for rows.Next() {
+		var i LockRunNodesForSemanticResolutionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Status,
+			&i.StateJson,
+			&i.Attempts,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.ErrorJson,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1972,6 +2534,58 @@ func (q *Queries) RecordRecoveryFeedback(ctx context.Context, arg RecordRecovery
 	return err
 }
 
+const replaceSemanticRunNodeOutput = `-- name: ReplaceSemanticRunNodeOutput :execrows
+UPDATE run_nodes AS node
+SET state_json = $1
+FROM runs AS run
+WHERE node.run_id = $2
+  AND node.node_id = $3
+  AND node.status = 'succeeded'
+  AND run.id = node.run_id
+  AND run.org_id = $4
+`
+
+type ReplaceSemanticRunNodeOutputParams struct {
+	StateJson json.RawMessage
+	RunID     string
+	NodeID    string
+	OrgID     string
+}
+
+func (q *Queries) ReplaceSemanticRunNodeOutput(ctx context.Context, arg ReplaceSemanticRunNodeOutputParams) (int64, error) {
+	result, err := q.db.Exec(ctx, replaceSemanticRunNodeOutput,
+		arg.StateJson,
+		arg.RunID,
+		arg.NodeID,
+		arg.OrgID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeRecoveryApprovalGrants = `-- name: RevokeRecoveryApprovalGrants :execrows
+UPDATE recovery_approval_grants
+SET revoked_at = $1
+WHERE org_id = $2 AND case_id = $3
+  AND consumed_at IS NULL AND revoked_at IS NULL
+`
+
+type RevokeRecoveryApprovalGrantsParams struct {
+	RevokedAt *time.Time
+	OrgID     string
+	CaseID    string
+}
+
+func (q *Queries) RevokeRecoveryApprovalGrants(ctx context.Context, arg RevokeRecoveryApprovalGrantsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeRecoveryApprovalGrants, arg.RevokedAt, arg.OrgID, arg.CaseID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setAutoHealingValidating = `-- name: SetAutoHealingValidating :execrows
 UPDATE auto_healing_runs
 SET status = 'validating', validation_run_id = $3, updated_at = now()
@@ -2020,7 +2634,7 @@ func (q *Queries) SetAutoHealingValidationOutcome(ctx context.Context, arg SetAu
 
 const transitionRecoveryCaseState = `-- name: TransitionRecoveryCaseState :execrows
 UPDATE recovery_cases
-SET state = $3, updated_at = now(),
+SET state = $3, revision = revision + 1, updated_at = now(),
     resolved_at = CASE WHEN $4::boolean THEN now() ELSE resolved_at END
 WHERE org_id = $1 AND id = $2 AND state = $5
 `
@@ -2081,6 +2695,36 @@ func (q *Queries) TransitionRecoveryItem(ctx context.Context, arg TransitionReco
 		arg.ResolutionReason,
 		arg.Actor,
 		arg.FromStatuses,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateRunSemanticResolution = `-- name: UpdateRunSemanticResolution :execrows
+UPDATE runs
+SET status = CASE WHEN $1::boolean THEN 'running' ELSE status END,
+    outcome_status = $2
+WHERE id = $3 AND org_id = $4
+  AND status = $5
+`
+
+type UpdateRunSemanticResolutionParams struct {
+	Resume         bool
+	OutcomeStatus  pgtype.Text
+	ID             string
+	OrgID          string
+	ExpectedStatus string
+}
+
+func (q *Queries) UpdateRunSemanticResolution(ctx context.Context, arg UpdateRunSemanticResolutionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateRunSemanticResolution,
+		arg.Resume,
+		arg.OutcomeStatus,
+		arg.ID,
+		arg.OrgID,
+		arg.ExpectedStatus,
 	)
 	if err != nil {
 		return 0, err

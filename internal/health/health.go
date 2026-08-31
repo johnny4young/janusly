@@ -101,6 +101,12 @@ type Score struct {
 type Slo struct {
 	SuccessRatePercent *float64 `json:"successRatePercent"`
 	P95DurationMs      *float64 `json:"p95DurationMs"`
+	// Persisted thresholds not yet evaluated by the v1 score must still round
+	// trip so the Reliability form never silently resets operator policy.
+	MttrSeconds           *float64 `json:"mttrSeconds"`
+	BudgetBlocksPerWindow *float64 `json:"budgetBlocksPerWindow"`
+	StuckWaitingNodesMax  *float64 `json:"stuckWaitingNodesMax"`
+	WindowDays            *int     `json:"windowDays"`
 }
 
 // SloBreaches carries per-metric booleans + the rollup.

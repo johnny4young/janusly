@@ -49,7 +49,9 @@ type secretShape struct {
 }
 
 var secretShapes = []secretShape{
-	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(sk-[A-Za-z0-9]{20,})`)},
+	// Modern OpenAI and Anthropic keys contain internal separators. Match the
+	// whole token and retain the real boundary rather than leaking a suffix.
+	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9_])(sk-(?:(?:ant|proj)-)?[A-Za-z0-9_-]{20,})($|[^A-Za-z0-9_-])`), hasTrailing: true},
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(ghp_[A-Za-z0-9]{20,})`)},
 	// Fine-grained GitHub PAT: `_` in the body spans the internal separator
 	// so the WHOLE token redacts, exactly like the contract.

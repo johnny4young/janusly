@@ -5,6 +5,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -21,7 +23,7 @@ func recoveryCaseView(row store.RecoveryCase) map[string]any {
 		"workflowId": textOrNull(row.WorkflowID), "workflowVersionId": row.WorkflowVersionID,
 		"source": row.Source, "detectorId": row.DetectorID, "sourceNodeId": row.SourceNodeID,
 		"detectorKind": row.DetectorKind, "action": row.Action, "message": row.Message,
-		"detailsJson": rawOrNull(row.DetailsJson), "state": row.State,
+		"detailsJson": rawOrNull(row.DetailsJson), "state": row.State, "revision": row.Revision,
 		"createdBy": textOrNull(row.CreatedBy),
 		"createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
 		"resolvedAt": row.ResolvedAt,
@@ -56,13 +58,31 @@ func (s *V1Server) recoveryCaseCore(r *http.Request, rc v1Request) opResult {
 	if caseID == "" {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid recovery case id", nil)
 	}
-	row, err := store.New(s.pool).GetRecoveryCase(r.Context(), store.GetRecoveryCaseParams{
-		OrgID: rc.orgID, ID: caseID,
-	})
+	detail, err := s.engine.GetRecoveryCaseDetail(r.Context(), rc.orgID, caseID)
 	if err != nil {
-		return opError(http.StatusNotFound, "recovery_case_not_found", "Recovery case not found", nil)
+		if errors.Is(err, engine.ErrRecoveryCaseNotFound) {
+			return opError(http.StatusNotFound, "recovery_case_not_found", "Recovery case not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	return opOK(recoveryCaseView(row))
+	transitions := make([]map[string]any, 0, len(detail.Transitions))
+	for _, row := range detail.Transitions {
+		transitions = append(transitions, map[string]any{
+			"id": row.ID, "orgId": row.OrgID, "caseId": row.CaseID,
+			"fromState": row.FromState, "toState": row.ToState,
+			"actorKind": row.ActorKind, "actorId": textOrNull(row.ActorID),
+			"evidenceJson": rawOrNull(row.EvidenceJson), "reason": textOrNull(row.Reason),
+			"occurredAt": row.OccurredAt,
+		})
+	}
+	artifacts := make([]map[string]any, 0, len(detail.Artifacts))
+	for _, row := range detail.Artifacts {
+		artifacts = append(artifacts, recoveryArtifactView(row))
+	}
+	return opOK(map[string]any{
+		"case": recoveryCaseView(detail.Case), "transitions": transitions,
+		"artifacts": artifacts, "autonomy": detail.Autonomy,
+	})
 }
 
 func (s *V1Server) recoveryLedgerCore(r *http.Request, rc v1Request) opResult {

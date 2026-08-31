@@ -52,6 +52,7 @@ migrate:
 generate:
 	go tool sqlc generate
 	go run ./cmd/contract
+	cd web && node scripts/generate-api-types.mjs
 
 contract:
 	go run ./cmd/contract

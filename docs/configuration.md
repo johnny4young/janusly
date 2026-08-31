@@ -90,6 +90,9 @@ Outbound safety and integration settings include:
 - `JANUSLY_MCP_WRITES_ENABLED` (server-side write tools) and
   `JANUSLY_MCP_CLIENT_WRITES_ENABLED` (`mcp_tool` steps against external
   servers)
+- `JANUSLY_MCP_PERMISSIONS`, a comma/space-separated explicit permission
+  ceiling for `cmd/mcp`; omission is read-only and write consent never expands
+  this set
 - `JANUSLY_PUBLIC_APP_URL` for shareable report links
 - `JANUSLY_RETENTION_ARCHIVE_RUN_EVENTS` exports expiring run events as
   JSONL to the object store before the retention sweep deletes them; rows

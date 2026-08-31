@@ -3,10 +3,10 @@
 // and its append-only receipt commit or roll back TOGETHER — a transition
 // without a receipt is impossible by construction: the CAS UPDATE
 // (state = from) and the receipt INSERT run in one transaction, receipt
-// ids are deterministic (`sct_<sha256(caseId, toState)>`), and the
-// baseline's unique (case_id, to_state) index makes replays no-ops
-// instead of duplicates. The legality of every transition is validated by
-// the pure domain ladder BEFORE any write.
+// ids are deterministic over case + edge + revision, and the primary key
+// makes a retry of the same revision a no-op without forbidding the legal
+// validating -> candidates_ready revision loop. The legality of every
+// transition is validated by the pure domain ladder BEFORE any write.
 package engine
 
 import (
@@ -92,7 +92,7 @@ func (e *Engine) TransitionRecoveryCase(
 	if problems := domain.ValidateRecoveryCaseTransitionReceipt(receipt); len(problems) > 0 {
 		return fmt.Errorf("invalid transition receipt: %s", strings.Join(problems, "; "))
 	}
-	occurredAt := time.Now().UTC()
+	occurredAt := e.now().UTC().Truncate(time.Millisecond)
 	evidenceJSON, err := json.Marshal(receipt.Evidence)
 	if err != nil {
 		return fmt.Errorf("marshal evidence: %w", err)
@@ -104,13 +104,19 @@ func (e *Engine) TransitionRecoveryCase(
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(tx)
 
-	if _, err := q.GetRecoveryCase(ctx, store.GetRecoveryCaseParams{
+	current, err := q.GetRecoveryCase(ctx, store.GetRecoveryCaseParams{
 		OrgID: orgID, ID: receipt.CaseID,
-	}); err != nil {
+	})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrRecoveryCaseNotFound
 		}
 		return fmt.Errorf("read case: %w", err)
+	}
+	if _, err := q.RevokeRecoveryApprovalGrants(ctx, store.RevokeRecoveryApprovalGrantsParams{
+		RevokedAt: &occurredAt, OrgID: orgID, CaseID: receipt.CaseID,
+	}); err != nil {
+		return fmt.Errorf("revoke stale recovery approvals: %w", err)
 	}
 	moved, err := q.TransitionRecoveryCaseState(ctx, store.TransitionRecoveryCaseStateParams{
 		OrgID: orgID, ID: receipt.CaseID,
@@ -124,7 +130,7 @@ func (e *Engine) TransitionRecoveryCase(
 		return ErrRecoveryCaseConflict
 	}
 	inserted, err := q.InsertRecoveryCaseTransition(ctx, store.InsertRecoveryCaseTransitionParams{
-		ID:    StableSemanticID("sct", receipt.CaseID, receipt.To),
+		ID:    StableSemanticID("sct", receipt.CaseID, receipt.From, receipt.To, fmt.Sprint(current.Revision)),
 		OrgID: orgID, CaseID: receipt.CaseID,
 		FromState: receipt.From, ToState: receipt.To,
 		ActorKind:    receipt.ActorKind,
@@ -137,10 +143,8 @@ func (e *Engine) TransitionRecoveryCase(
 		return fmt.Errorf("insert receipt: %w", err)
 	}
 	if inserted == 0 {
-		// The unique (case_id, to_state) index refused a re-entry: this
-		// state was already reached once. The contract's single-visit
-		// posture — roll the state change back rather than advance a case
-		// without its receipt.
+		// A retry of the same revision was already recorded. Roll the state
+		// change back rather than advance without a distinct receipt.
 		return ErrRecoveryCaseReceiptGone
 	}
 	return tx.Commit(ctx)

@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/packs"
@@ -28,7 +31,22 @@ import (
 // An SDK client drives the failure→redrive cycle through the in-process
 // server — the same loop an agent would run from Claude.
 
+func anthropicMCPReply(text string) string {
+	payload, _ := json.Marshal(map[string]any{
+		"id": "msg_mcp", "type": "message", "role": "assistant",
+		"model":       "claude-haiku-4-5-20251001",
+		"content":     []map[string]any{{"type": "text", "text": text}},
+		"stop_reason": "end_turn",
+		"usage":       map[string]any{"input_tokens": 10, "output_tokens": 5},
+	})
+	return string(payload)
+}
+
 func newMCPSession(t *testing.T) (*mcp.ClientSession, string) {
+	return newMCPSessionWithPermissions(t, fullMCPTestPermissions())
+}
+
+func newMCPSessionWithPermissions(t *testing.T, permissions map[string]bool) (*mcp.ClientSession, string) {
 	t.Helper()
 	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
@@ -64,7 +82,10 @@ func newMCPSession(t *testing.T) (*mcp.ClientSession, string) {
 		org+"-consent", org); err != nil {
 		t.Fatalf("seed consent: %v", err)
 	}
-	server := NewServer(Deps{Engine: eng, Pool: pool, OrgID: org, UserID: "mcp-test", NewID: uuid.NewString})
+	server := NewServer(Deps{
+		Engine: eng, Pool: pool, OrgID: org, UserID: "mcp-test", NewID: uuid.NewString,
+		Permissions: permissions,
+	})
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverDone := make(chan struct{})
@@ -80,6 +101,330 @@ func newMCPSession(t *testing.T) (*mcp.ClientSession, string) {
 	}
 	t.Cleanup(func() { _ = session.Close(); <-serverDone })
 	return session, org
+}
+
+func mcpSemanticWorkflow(id string) *domain.Workflow {
+	contract := &domain.RecoveryContract{Version: "2"}
+	contract.Failure.Technical.TerminalNodeFailure = true
+	contract.Failure.Semantic.Mode = "deterministic"
+	contract.Failure.Semantic.Detectors = []domain.RecoverySemanticDetector{{
+		ID: "det-total", SourceNodeID: "calc", Kind: "expression",
+		PassWhen: "context.calc.output.total === '10'", Action: "quarantine",
+		Message: "total out of bounds",
+	}}
+	contract.Failure.Semantic.EvaluationFixtures = []domain.RecoverySemanticFixture{
+		{ID: "fx-pass", SourceNodeID: "calc", Output: map[string]any{"total": "10"}, Expected: "pass"},
+		{ID: "fx-violation", SourceNodeID: "calc", Output: map[string]any{"total": "900"}, Expected: "violation"},
+	}
+	contract.Evidence.Required = []string{"failure_snapshot", "audit_trail", "terminal_outcome"}
+	contract.Repairs.Allowed = []string{"retry"}
+	contract.Validation.MinimumEvidenceLevel = "static"
+	contract.Approval.ProductionMutation = "required"
+	contract.Approval.Permission = "recovery.write"
+	contract.AutonomyLevel = 3
+	contract.Verification.Kind = "generation_bound_terminal_success"
+	contract.Recurrence.WindowDays = 7
+	return &domain.Workflow{
+		ID: id, Name: "MCP semantic", DSLVersion: "1.0",
+		Recovery: &domain.WorkflowRecovery{Contract: contract},
+		Nodes: []domain.Node{
+			{ID: "calc", Type: "transform", Config: map[string]any{"mapping": map[string]any{"total": "{{context.input.total}}"}}},
+			{ID: "after", Type: "noop", Config: map[string]any{}},
+		},
+		Edges: []domain.Edge{{From: "calc", To: "after"}},
+	}
+}
+
+func waitMCPRunStatus(t *testing.T, pool *pgxpool.Pool, runID, want string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var status string
+		if err := pool.QueryRow(t.Context(), `SELECT status FROM runs WHERE id=$1`, runID).Scan(&status); err == nil && status == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %s did not reach %s", runID, want)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestMcpPermissionCeilingKeepsViewerReadOnlyAndTenantScoped(t *testing.T) {
+	permissions, err := ParsePermissionCeiling("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, orgID := newMCPSessionWithPermissions(t, permissions)
+	pool := poolForTest(t)
+	wf := mcpSemanticWorkflow("viewer-workflow")
+	wire, _ := json.Marshal(map[string]any{"workflow": wf, "input": map[string]any{"total": "900"}})
+	caseID := "viewer-case-" + uuid.NewString()
+	runID := "viewer-run-" + uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO runs (id,org_id,workflow_version_id,status,input_json)
+		VALUES ($1,$2,'viewer-version','waiting',$3)`, runID, orgID, wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO recovery_cases
+		(id,org_id,run_id,workflow_id,workflow_version_id,source,detector_id,source_node_id,detector_kind,action,message,details_json,state,revision)
+		VALUES ($1,$2,$3,'viewer-workflow','viewer-version','semantic_violation','det-total','calc','expression','quarantine',$4,$5,'contained',1)`,
+		caseID, orgID, runID, "malicious sk-abcdefghijklmnopqrstuv", json.RawMessage(`{"private":"must-not-return"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	inspect, payload := callTool(t, session, "recovery.cases.inspect", map[string]any{"caseId": caseID})
+	if inspect.IsError || payload["case"].(map[string]any)["id"] != caseID {
+		t.Fatalf("viewer inspect failed: %+v", payload)
+	}
+	raw, _ := json.Marshal(payload)
+	if strings.Contains(string(raw), "must-not-return") || strings.Contains(string(raw), "sk-abcdefghijklmnopqrstuv") {
+		t.Fatalf("inspect leaked case evidence: %s", raw)
+	}
+	for name, args := range map[string]map[string]any{
+		"runs.start":              {"workflow": map[string]any{}},
+		"workflows.propose":       {"prompt": "Create a workflow"},
+		"recovery.cases.diagnose": {"caseId": caseID, "expectedRevision": 1},
+		"recovery.cases.validate": {"caseId": caseID, "expectedRevision": 1, "candidateArtifactId": "candidate"},
+		"recovery.cases.apply":    {"caseId": caseID, "expectedRevision": 1, "candidateArtifactId": "candidate", "validationArtifactId": "validation"},
+	} {
+		res, _ := callTool(t, session, name, args)
+		if !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "lacks permission") {
+			t.Fatalf("viewer mutation %s was not permission denied: %+v", name, res)
+		}
+	}
+
+	foreignCaseID := "foreign-case-" + uuid.NewString()
+	foreignRunID := "foreign-run-" + uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO runs (id,org_id,workflow_version_id,status,input_json)
+		VALUES ($1,$2,'foreign-version','waiting',$3)`, foreignRunID, orgID+"-foreign", wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO recovery_cases
+		(id,org_id,run_id,workflow_version_id,source,detector_id,source_node_id,detector_kind,action,message,state,revision)
+		VALUES ($1,$2,$3,'foreign-version','semantic_violation','det-total','calc','expression','quarantine','foreign','contained',1)`,
+		foreignCaseID, orgID+"-foreign", foreignRunID); err != nil {
+		t.Fatal(err)
+	}
+	foreign, _ := callTool(t, session, "recovery.cases.inspect", map[string]any{"caseId": foreignCaseID})
+	if !foreign.IsError || foreign.Content[0].(*mcp.TextContent).Text != "recovery case not found" {
+		t.Fatal("foreign recovery case must be invisible")
+	}
+}
+
+func TestMcpGovernedSemanticRecoveryRequiresIndependentApproval(t *testing.T) {
+	session, orgID := newMCPSession(t)
+	pool := poolForTest(t)
+	eng := engine.New(pool)
+	wf := mcpSemanticWorkflow("mcp-governed-" + uuid.NewString())
+	runID, err := eng.StartRun(t.Context(), engine.StartInput{
+		OrgID: orgID, Workflow: wf, Input: map[string]any{"total": "900"}, CreatedBy: "mcp-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitMCPRunStatus(t, pool, runID, "waiting")
+	var caseID, state string
+	var revision int64
+	if err := pool.QueryRow(t.Context(), `SELECT id,state,revision FROM recovery_cases WHERE org_id=$1 AND run_id=$2`, orgID, runID).
+		Scan(&caseID, &state, &revision); err != nil {
+		t.Fatal(err)
+	}
+	if state != "contained" {
+		t.Fatalf("case state = %s", state)
+	}
+
+	diagnose, diagnosed := callTool(t, session, "recovery.cases.diagnose", map[string]any{
+		"caseId": caseID, "expectedRevision": revision,
+		"manualReplacement": map[string]any{
+			"output": map[string]any{"total": "10"},
+			"reason": "restore the contractually valid total sk-abcdefghijklmnopqrstuv",
+		},
+	})
+	if diagnose.IsError {
+		t.Fatalf("diagnose: %s", diagnose.Content[0].(*mcp.TextContent).Text)
+	}
+	candidates := diagnosed["candidates"].([]any)
+	if len(candidates) < 1 || len(candidates) > 3 {
+		t.Fatalf("candidate count must be bounded: %+v", diagnosed)
+	}
+	var candidateID, repairCandidateID string
+	for _, item := range candidates {
+		candidate := item.(map[string]any)
+		projection, _ := candidate["candidate"].(map[string]any)
+		if projection["kind"] == "replace_output" {
+			candidateID, _ = candidate["id"].(string)
+		}
+		if projection["kind"] == "repair_workflow" {
+			repairCandidateID, _ = candidate["id"].(string)
+		}
+	}
+	if candidateID == "" || repairCandidateID == "" {
+		t.Fatalf("replacement candidate missing: %+v", candidates)
+	}
+	rawDiagnosed, _ := json.Marshal(diagnosed)
+	for _, forbidden := range []string{"contractually valid", "sk-abcdefghijklmnopqrstuv", `"total":"10"`} {
+		if strings.Contains(string(rawDiagnosed), forbidden) {
+			t.Fatalf("diagnose leaked candidate evidence %q: %s", forbidden, rawDiagnosed)
+		}
+	}
+	revision = int64(diagnosed["case"].(map[string]any)["revision"].(float64))
+	followUpValidation, followUp := callTool(t, session, "recovery.cases.validate", map[string]any{
+		"caseId": caseID, "expectedRevision": revision, "candidateArtifactId": repairCandidateID,
+	})
+	if followUpValidation.IsError || followUp["passed"] != false ||
+		followUp["case"].(map[string]any)["state"] != "candidates_ready" {
+		t.Fatalf("manual follow-up must validate visibly but remain unappliable: error=%v payload=%+v", followUpValidation.IsError, followUp)
+	}
+	revision = int64(followUp["case"].(map[string]any)["revision"].(float64))
+
+	validate, validated := callTool(t, session, "recovery.cases.validate", map[string]any{
+		"caseId": caseID, "expectedRevision": revision, "candidateArtifactId": candidateID,
+	})
+	if validate.IsError || validated["passed"] != true {
+		t.Fatalf("validate: error=%v payload=%+v", validate.IsError, validated)
+	}
+	validationID := validated["validation"].(map[string]any)["id"].(string)
+	revision = int64(validated["case"].(map[string]any)["revision"].(float64))
+
+	withoutApproval, _ := callTool(t, session, "recovery.cases.apply", map[string]any{
+		"caseId": caseID, "expectedRevision": revision,
+		"candidateArtifactId": candidateID, "validationArtifactId": validationID,
+	})
+	if !withoutApproval.IsError {
+		t.Fatal("MCP apply must fail without an independent human grant")
+	}
+
+	human := &auth.Context{OrgID: orgID, UserID: "human-approver", Mode: auth.ModeDevHeaders, Source: auth.SourceWeb}
+	grant, err := eng.ApproveRecoveryCandidate(t.Context(), engine.ApproveRecoveryCandidateInput{
+		Auth: human, CaseID: caseID, ExpectedRevision: revision,
+		CandidateArtifactID: candidateID, ValidationArtifactID: validationID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspect, inspected := callTool(t, session, "recovery.cases.inspect", map[string]any{"caseId": caseID})
+	if inspect.IsError {
+		t.Fatal("inspect after approval failed")
+	}
+	rawInspect, _ := json.Marshal(inspected)
+	if strings.Contains(string(rawInspect), grant.ID) || strings.Contains(string(rawInspect), "human-approver") {
+		t.Fatalf("inspect exposed active grant: %s", rawInspect)
+	}
+
+	apply, applied := callTool(t, session, "recovery.cases.apply", map[string]any{
+		"caseId": caseID, "expectedRevision": revision,
+		"candidateArtifactId": candidateID, "validationArtifactId": validationID,
+	})
+	if apply.IsError || applied["resumed"] != true || applied["decision"] != "replace" {
+		t.Fatalf("approved apply failed: error=%v payload=%+v", apply.IsError, applied)
+	}
+	waitMCPRunStatus(t, pool, runID, "succeeded")
+
+	reused, _ := callTool(t, session, "recovery.cases.apply", map[string]any{
+		"caseId": caseID, "expectedRevision": revision,
+		"candidateArtifactId": candidateID, "validationArtifactId": validationID,
+	})
+	if !reused.IsError {
+		t.Fatal("one-use approval/candidate apply must not be reusable")
+	}
+	var invoked int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id=$1 AND action='mcp.tool.invoked' AND target_id LIKE 'recovery.cases.%'`, orgID).Scan(&invoked); err != nil {
+		t.Fatal(err)
+	}
+	if invoked < 6 {
+		t.Fatalf("every recovery MCP invocation must be audited, got %d", invoked)
+	}
+}
+
+func TestMcpRecoveryDiagnosisAIRespectsExplicitPermissionCeiling(t *testing.T) {
+	var calls atomic.Int64
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("content-type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicMCPReply(`{"summary":"The bounded evidence points to a contract mismatch.","hypotheses":[{"id":"contract_mismatch","cause":"The deterministic detector rejected the source outcome.","confidence":0.8,"evidence":["The detector recorded a semantic violation."],"counterEvidence":["No retained comparable case confirms recurrence."]}]}`))
+	}))
+	t.Cleanup(provider.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", provider.URL)
+
+	seed := func(orgID, prefix string) string {
+		t.Helper()
+		pool := poolForTest(t)
+		runID := prefix + "-run-" + uuid.NewString()
+		caseID := prefix + "-case-" + uuid.NewString()
+		if _, err := pool.Exec(t.Context(), `INSERT INTO runs
+			(id,org_id,workflow_version_id,status,input_json) VALUES ($1,$2,'version','waiting','{}')`, runID, orgID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), `INSERT INTO recovery_cases
+			(id,org_id,run_id,workflow_id,workflow_version_id,source,detector_id,source_node_id,detector_kind,action,message,state,revision)
+			VALUES ($1,$2,$3,'workflow','version','semantic_violation','detector','source','expression','quarantine','bounded mismatch','contained',1)`,
+			caseID, orgID, runID); err != nil {
+			t.Fatal(err)
+		}
+		return caseID
+	}
+
+	aiSession, aiOrg := newMCPSession(t)
+	aiCase := seed(aiOrg, "ai")
+	result, payload := callTool(t, aiSession, "recovery.cases.diagnose", map[string]any{
+		"caseId": aiCase, "expectedRevision": 1,
+	})
+	if result.IsError || payload["mode"] != "ai_enriched" || calls.Load() != 1 {
+		t.Fatalf("MCP AI diagnosis: error=%v calls=%d payload=%+v", result.IsError, calls.Load(), payload)
+	}
+	diagnosis := payload["diagnosis"].(map[string]any)["diagnosis"].(map[string]any)
+	if diagnosis["mode"] != "ai_enriched" {
+		t.Fatalf("bounded diagnosis projection lost mode: %+v", diagnosis)
+	}
+	raw, _ := json.Marshal(payload)
+	for _, forbidden := range []string{"contract mismatch", "deterministic detector", "bounded mismatch"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("MCP must withhold diagnosis prose %q: %s", forbidden, raw)
+		}
+	}
+
+	withoutAI := map[string]bool{"recovery.read": true, "recovery.write": true}
+	deterministicSession, deterministicOrg := newMCPSessionWithPermissions(t, withoutAI)
+	deterministicCase := seed(deterministicOrg, "deterministic")
+	before := calls.Load()
+	result, payload = callTool(t, deterministicSession, "recovery.cases.diagnose", map[string]any{
+		"caseId": deterministicCase, "expectedRevision": 1,
+	})
+	if result.IsError || payload["mode"] != "deterministic_fallback" || calls.Load() != before {
+		t.Fatalf("MCP permission fallback: error=%v calls=%d payload=%+v", result.IsError, calls.Load()-before, payload)
+	}
+}
+
+func TestMcpWorkflowProposalBindsExactCatalogWithoutReturningDAG(t *testing.T) {
+	session, _ := newMCPSession(t)
+	res, proposed := callTool(t, session, "workflows.propose", map[string]any{
+		"prompt": "Send an incident notification",
+		"workflow": map[string]any{
+			"id": "invented-proposal", "name": "Invented",
+			"nodes": []any{map[string]any{
+				"id": "notify", "type": "tool",
+				"config": map[string]any{"tool": "invented.send", "apiKey": "must-not-return"},
+			}},
+			"edges": []any{},
+		},
+	})
+	if res.IsError || proposed["applicable"] != false {
+		t.Fatalf("invented proposal should be a safe incomplete result: error=%v %+v", res.IsError, proposed)
+	}
+	raw, _ := json.Marshal(proposed)
+	for _, forbidden := range []string{`"config"`, "must-not-return", `"apiKey"`, `"nodes":[{"config"`} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("proposal returned full DAG/config %q: %s", forbidden, raw)
+		}
+	}
+	if !strings.Contains(string(raw), "exact_tool_not_found") {
+		t.Fatalf("missing binding not explicit: %s", raw)
+	}
 }
 
 func callTool(t *testing.T, session *mcp.ClientSession, name string, args map[string]any) (*mcp.CallToolResult, map[string]any) {
@@ -108,7 +453,12 @@ func TestAgentDrivesFailureRedriveCycleOverMCP(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"workflows.save", "workflows.assure", "runs.start", "runs.status", "runs.inspect", "runs.list", "workflows.list", "dlq.list", "dlq.redrive"} {
+	for _, want := range []string{
+		"workflows.save", "workflows.assure", "workflows.propose",
+		"runs.start", "runs.status", "runs.inspect", "runs.list", "workflows.list",
+		"dlq.list", "dlq.redrive", "operations.brief",
+		"recovery.cases.inspect", "recovery.cases.diagnose", "recovery.cases.validate", "recovery.cases.apply",
+	} {
 		if !names[want] {
 			t.Fatalf("tool %s missing; got %v", want, names)
 		}
@@ -222,6 +572,16 @@ func TestAgentDrivesFailureRedriveCycleOverMCP(t *testing.T) {
 	ghost, _ := callTool(t, session, "runs.status", map[string]any{"runId": "ghost"})
 	if !ghost.IsError {
 		t.Fatal("unknown run must be an isError result")
+	}
+}
+
+func fullMCPTestPermissions() map[string]bool {
+	return map[string]bool{
+		"workflows.read": true, "workflows.write": true,
+		"runs.read": true, "runs.start": true,
+		"dlq.read": true, "dlq.replay": true,
+		"recovery.read": true, "recovery.write": true,
+		"ai.write": true,
 	}
 }
 

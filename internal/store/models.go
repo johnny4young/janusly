@@ -469,6 +469,21 @@ type RateLimitWindow struct {
 	ExpiresAt   time.Time
 }
 
+type RecoveryApprovalGrant struct {
+	ID                   string
+	OrgID                string
+	CaseID               string
+	CandidateArtifactID  string
+	ValidationArtifactID string
+	CaseRevision         int64
+	GrantedBy            string
+	ExpiresAt            time.Time
+	ConsumedAt           *time.Time
+	ConsumedBy           pgtype.Text
+	RevokedAt            *time.Time
+	CreatedAt            time.Time
+}
+
 type RecoveryCase struct {
 	ID                string
 	OrgID             string
@@ -483,10 +498,23 @@ type RecoveryCase struct {
 	Message           string
 	DetailsJson       json.RawMessage
 	State             string
+	Revision          int64
 	CreatedBy         pgtype.Text
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	ResolvedAt        *time.Time
+}
+
+type RecoveryCaseArtifact struct {
+	ID            string
+	OrgID         string
+	CaseID        string
+	Kind          string
+	PayloadJson   json.RawMessage
+	PayloadSha256 string
+	ActorKind     string
+	ActorID       pgtype.Text
+	CreatedAt     time.Time
 }
 
 type RecoveryCaseTransition struct {

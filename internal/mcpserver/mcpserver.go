@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -21,10 +20,10 @@ import (
 
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
-	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
@@ -37,6 +36,12 @@ type Deps struct {
 	OrgID  string
 	UserID string
 	NewID  func() string
+	// Permissions is the explicit stdio service-account ceiling. Nil or an
+	// absent key denies that authority; write consent never implies a grant.
+	Permissions map[string]bool
+	// CatalogSource supplies tenant-opted-in external MCP tools to the exact
+	// authoring CapabilityCatalog. Nil degrades that category to empty.
+	CatalogSource authoring.McpCatalogSource
 	// Limiter bounds MCP writes per the contract's guardMcpWrite: bucket
 	// `mcp.<actionKey>`, org key, 60/min. Nil skips the check (tests).
 	Limiter *ratelimit.Limiter
@@ -50,8 +55,11 @@ func (d Deps) auditContext() *auth.Context {
 		Mode: auth.ModeServiceToken, Source: auth.SourceMcp}
 }
 
-// NewServer builds the MCP server with the runtime's nine tools registered.
+// NewServer builds the MCP server with the runtime's bounded operator tools.
 func NewServer(deps Deps) *mcp.Server {
+	if deps.Limiter == nil && deps.Pool != nil {
+		deps.Limiter = ratelimit.New(deps.Pool, ratelimit.Hooks{})
+	}
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "janusly",
 		Title:   "Janusly",
@@ -61,10 +69,10 @@ func NewServer(deps Deps) *mcp.Server {
 	type saveArgs struct {
 		Workflow map[string]any `json:"workflow" jsonschema:"the full workflow document to save as a new immutable version"`
 	}
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "workflows.save",
-		Description: "Validate a workflow document and save it as a new immutable version.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args saveArgs) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, writeTool(
+		"workflows.save", "Save workflow",
+		"Validate a workflow document and save it as a new immutable version.", false, false,
+	), func(ctx context.Context, req *mcp.CallToolRequest, args saveArgs) (*mcp.CallToolResult, any, error) {
 		raw, err := json.Marshal(args.Workflow)
 		if err != nil {
 			return nil, nil, err
@@ -76,10 +84,10 @@ func NewServer(deps Deps) *mcp.Server {
 		Workflow map[string]any `json:"workflow" jsonschema:"the workflow document to execute"`
 		Input    map[string]any `json:"input,omitempty" jsonschema:"optional run input payload"`
 	}
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "runs.start",
-		Description: "Start a run for the given workflow document; returns the run id.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args startArgs) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, writeTool(
+		"runs.start", "Start run",
+		"Start a run for the given workflow document; returns the run id.", false, false,
+	), func(ctx context.Context, req *mcp.CallToolRequest, args startArgs) (*mcp.CallToolResult, any, error) {
 		raw, err := json.Marshal(args.Workflow)
 		if err != nil {
 			return nil, nil, err
@@ -90,16 +98,16 @@ func NewServer(deps Deps) *mcp.Server {
 	type runArgs struct {
 		RunID string `json:"runId" jsonschema:"the run to read"`
 	}
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "runs.status",
-		Description: "Read a run's status projection: final status plus per-node state and attempts.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args runArgs) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, readTool(
+		"runs.status", "Run status",
+		"Read a bounded run status projection: final status plus per-node status and attempts.",
+	), func(ctx context.Context, req *mcp.CallToolRequest, args runArgs) (*mcp.CallToolResult, any, error) {
 		return deps.runStatus(ctx, args.RunID)
 	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "runs.inspect",
-		Description: "Read a run in depth: row, nodes with state and errors, and the recent timeline.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args runArgs) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, readTool(
+		"runs.inspect", "Inspect run",
+		"Read a bounded run projection with node status, redacted error summaries, and recent event types; never returns the workflow DAG or raw payloads.",
+	), func(ctx context.Context, req *mcp.CallToolRequest, args runArgs) (*mcp.CallToolResult, any, error) {
 		return deps.runInspect(ctx, args.RunID)
 	})
 
@@ -113,49 +121,50 @@ func NewServer(deps Deps) *mcp.Server {
 		WorkflowID string `json:"workflowId,omitempty" jsonschema:"only runs of this workflow"`
 		Status     string `json:"status,omitempty" jsonschema:"only runs with this status (running, succeeded, failed, cancelled)"`
 	}
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "runs.list",
-		Description: "List the org's runs newest first, keyset-paginated; optional workflowId and status filters.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args runsListArgs) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, readTool(
+		"runs.list", "List runs",
+		"List the organization's runs newest first, keyset-paginated; optional workflowId and status filters.",
+	), func(ctx context.Context, req *mcp.CallToolRequest, args runsListArgs) (*mcp.CallToolResult, any, error) {
 		return deps.runsList(ctx, args.Limit, args.Cursor, args.WorkflowID, args.Status)
 	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "workflows.list",
-		Description: "List the org's active workflows newest first, keyset-paginated.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args pageArgs) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, readTool(
+		"workflows.list", "List workflows",
+		"List the organization's active workflows newest first, keyset-paginated.",
+	), func(ctx context.Context, req *mcp.CallToolRequest, args pageArgs) (*mcp.CallToolResult, any, error) {
 		return deps.workflowsList(ctx, args.Limit, args.Cursor)
 	})
 
 	type assureArgs struct {
 		WorkflowID string `json:"workflowId" jsonschema:"the active workflow whose latest immutable version should be inspected"`
 	}
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "workflows.assure",
-		Description: "Inspect the latest workflow version's Intent, Recovery, Qualification, validation, and readiness evidence without exposing its DAG or credentials.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args assureArgs) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, readTool(
+		"workflows.assure", "Assure workflow",
+		"Inspect the latest workflow version's Intent, Recovery, Qualification, validation, and readiness evidence without exposing its DAG or credentials.",
+	), func(ctx context.Context, req *mcp.CallToolRequest, args assureArgs) (*mcp.CallToolResult, any, error) {
 		return deps.assureWorkflow(ctx, args.WorkflowID)
 	})
 
 	type dlqListArgs struct {
 		Limit int `json:"limit,omitempty" jsonschema:"maximum rows to return (default 20, max 100)"`
 	}
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "dlq.list",
-		Description: "List dead letters for the org, newest first.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args dlqListArgs) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, readTool(
+		"dlq.list", "List dead letters",
+		"List bounded dead-letter summaries for the organization, newest first.",
+	), func(ctx context.Context, req *mcp.CallToolRequest, args dlqListArgs) (*mcp.CallToolResult, any, error) {
 		return deps.dlqList(ctx, args.Limit)
 	})
 
 	type redriveArgs struct {
 		DeadLetterID string `json:"deadLetterId" jsonschema:"the dead letter whose run should be revived"`
 	}
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "dlq.redrive",
-		Description: "Claim one dead letter and revive its run: the failed node requeues and workers take over.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args redriveArgs) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, writeTool(
+		"dlq.redrive", "Redrive dead letter",
+		"Claim one dead letter and revive its run: the failed node requeues and workers take over.", true, false,
+	), func(ctx context.Context, req *mcp.CallToolRequest, args redriveArgs) (*mcp.CallToolResult, any, error) {
 		return deps.redrive(ctx, args.DeadLetterID)
 	})
 
+	registerOperatorTools(server, deps)
 	return server
 }
 
@@ -180,7 +189,7 @@ func expected(message string) (*mcp.CallToolResult, any, error) {
 }
 
 func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallToolResult, any, error) {
-	if allowed, message := d.guardWrite(ctx, "workflows.save"); !allowed {
+	if allowed, message := d.guardTool(ctx, "workflows.save", "workflows.write", true); !allowed {
 		return expected(message)
 	}
 	wf, issues := domain.Parse(raw)
@@ -240,7 +249,7 @@ func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallT
 }
 
 func (d Deps) startRun(ctx context.Context, raw json.RawMessage, input map[string]any) (*mcp.CallToolResult, any, error) {
-	if allowed, message := d.guardWrite(ctx, "runs.start"); !allowed {
+	if allowed, message := d.guardTool(ctx, "runs.start", "runs.start", true); !allowed {
 		return expected(message)
 	}
 	wf, issues := domain.Parse(raw)
@@ -272,6 +281,9 @@ func (d Deps) startRun(ctx context.Context, raw json.RawMessage, input map[strin
 }
 
 func (d Deps) runStatus(ctx context.Context, runID string) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardTool(ctx, "runs.status", "runs.read", false); !allowed {
+		return expected(message)
+	}
 	q := store.New(d.Pool)
 	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
 	if err != nil {
@@ -294,11 +306,14 @@ func (d Deps) runStatus(ctx context.Context, runID string) (*mcp.CallToolResult,
 	}
 	return ok(map[string]any{
 		"runId": run.ID, "status": run.Status, "nodes": nodeViews,
-		"outputJson": json.RawMessage(orEmptyObject(run.OutputJson)),
+		"outputAvailable": len(run.OutputJson) > 0,
 	})
 }
 
 func (d Deps) runInspect(ctx context.Context, runID string) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardTool(ctx, "runs.inspect", "runs.read", false); !allowed {
+		return expected(message)
+	}
 	q := store.New(d.Pool)
 	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
 	if err != nil {
@@ -325,8 +340,8 @@ func (d Deps) runInspect(ctx context.Context, runID string) (*mcp.CallToolResult
 		}
 		nodeViews = append(nodeViews, map[string]any{
 			"nodeId": node.NodeID, "status": node.Status, "attempts": attempts,
-			"stateJson": json.RawMessage(orEmptyObject(node.StateJson)),
-			"errorJson": json.RawMessage(orEmptyObject(node.ErrorJson)),
+			"stateAvailable": len(node.StateJson) > 0,
+			"error":          safeErrorProjection(node.ErrorJson),
 		})
 	}
 	eventViews := make([]map[string]any, 0, len(events))
@@ -337,18 +352,19 @@ func (d Deps) runInspect(ctx context.Context, runID string) (*mcp.CallToolResult
 		}
 		eventViews = append(eventViews, map[string]any{
 			"type": event.Type, "nodeId": nodeID,
-			"payload": json.RawMessage(orEmptyObject(event.Payload)),
 		})
 	}
 	return ok(map[string]any{
 		"runId": run.ID, "status": run.Status,
-		"inputJson":  json.RawMessage(orEmptyObject(run.InputJson)),
-		"outputJson": json.RawMessage(orEmptyObject(run.OutputJson)),
-		"nodes":      nodeViews, "recentEvents": eventViews,
+		"inputAvailable": len(run.InputJson) > 0, "outputAvailable": len(run.OutputJson) > 0,
+		"nodes": nodeViews, "recentEvents": eventViews,
 	})
 }
 
 func (d Deps) dlqList(ctx context.Context, limit int) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardTool(ctx, "dlq.list", "dlq.read", false); !allowed {
+		return expected(message)
+	}
 	if limit <= 0 {
 		limit = 20
 	}
@@ -366,14 +382,14 @@ func (d Deps) dlqList(ctx context.Context, limit int) (*mcp.CallToolResult, any,
 		items = append(items, map[string]any{
 			"id": row.ID, "runId": row.RunID, "nodeId": row.NodeID,
 			"attempt": row.Attempt, "status": row.Status,
-			"errorJson": json.RawMessage(orEmptyObject(row.ErrorJson)),
+			"error": safeErrorProjection(row.ErrorJson),
 		})
 	}
 	return ok(map[string]any{"deadLetters": items})
 }
 
 func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolResult, any, error) {
-	if allowed, message := d.guardWrite(ctx, "dlq.redrive"); !allowed {
+	if allowed, message := d.guardTool(ctx, "dlq.redrive", "dlq.replay", true); !allowed {
 		return expected(message)
 	}
 	if deadLetterID == "" {
@@ -410,13 +426,6 @@ func farFuture() time.Time {
 	return time.Now().Add(24 * time.Hour)
 }
 
-func orEmptyObject(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return json.RawMessage(`{}`)
-	}
-	return raw
-}
-
 // pageBounds normalizes the shared limit contract (default 20, max 100)
 // and decodes the `<iso>|<id>` keyset cursor; a malformed cursor means
 // page one, never an error — same posture as the HTTP list surfaces.
@@ -438,6 +447,9 @@ func pageBounds(limit int, cursor string) (int32, time.Time, string) {
 }
 
 func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, status string) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardTool(ctx, "runs.list", "runs.read", false); !allowed {
+		return expected(message)
+	}
 	pageLimit, before, beforeID := pageBounds(limit, cursor)
 	rows, err := store.New(d.Pool).ListRunSummaries(ctx, store.ListRunSummariesParams{
 		OrgID: d.OrgID, BeforeCreatedAt: before, BeforeID: beforeID,
@@ -470,6 +482,9 @@ func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, statu
 }
 
 func (d Deps) workflowsList(ctx context.Context, limit int, cursor string) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardTool(ctx, "workflows.list", "workflows.read", false); !allowed {
+		return expected(message)
+	}
 	pageLimit, before, beforeID := pageBounds(limit, cursor)
 	rows, err := store.New(d.Pool).ListWorkflowRows(ctx, store.ListWorkflowRowsParams{
 		OrgID: d.OrgID, BeforeCreatedAt: before, BeforeID: beforeID,
@@ -510,31 +525,4 @@ func createdAtISO(at *time.Time) string {
 		return ""
 	}
 	return at.UTC().Format(time.RFC3339Nano)
-}
-
-// guardWrite is the two-flag write consent, implements the contract's
-// guardMcpWrite: process-wide env opt-in AND the tenant's org-config
-// consent row must BOTH be true before any MCP write tool acts. Denials
-// return the contract's verbatim messages as expected (isError) results
-// — the runtime's MCP is in-process, so the contract's HTTP 403 surfaces
-// as a tool error instead. The per-action rate limit mirrors the
-// contract's guardMcpWrite: bucket `mcp.<actionKey>`, org key, 60/min.
-func (d Deps) guardWrite(ctx context.Context, actionKey string) (bool, string) {
-	if os.Getenv("JANUSLY_MCP_WRITES_ENABLED") != "true" {
-		return false, "MCP writes are disabled at the process level (JANUSLY_MCP_WRITES_ENABLED is not 'true')."
-	}
-	// The tenant consent reads through the catalog snapshot — the same
-	// layer chain as every governed setting. mcp.writeConsent has NO env
-	// fallback by design, which the catalog's empty EnvKeys encodes.
-	if !orgconfig.LoadBool(ctx, d.Pool, d.OrgID, "mcp.writeConsent") {
-		return false, "MCP writes are not consented for this organization (mcp.writeConsent is false)."
-	}
-	if d.Limiter != nil {
-		if err := d.Limiter.Enforce(ctx, d.OrgID, ratelimit.Options{
-			Name: "mcp." + actionKey, Max: 60, Window: time.Minute,
-		}); err != nil {
-			return false, err.Error()
-		}
-	}
-	return true, ""
 }

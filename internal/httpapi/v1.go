@@ -135,8 +135,25 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 		}
 	}()
 	mux := http.NewServeMux()
+	server.mountAPIRoutes(mux)
+
+	// The embedded Vite bundle rides the mux's own catch-all: every unmatched
+	// GET serves a static asset or the SPA shell. API patterns above always win
+	// by specificity, and static content is public by design.
+	mux.Handle("GET /", webdist.Handler())
+	shutdown := func() {
+		cancelServer()
+		server.backgroundWG.Wait()
+	}
+	return WithBrowserHeaders(mux), shutdown
+}
+
+// mountAPIRoutes registers every API pattern without the SPA catch-all.
+// Tests can therefore ask the real ServeMux whether a browser call resolves;
+// the production handler mounts the static catch-all only after this method.
+func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", healthzHandler)
-	mux.HandleFunc("GET /readyz", readyzHandler(readinessTimeout, pool.Ping))
+	mux.HandleFunc("GET /readyz", readyzHandler(readinessTimeout, s.pool.Ping))
 	// Public generated contract. Exact mux patterns win before the embedded
 	// SPA catch-all and the bytes are the same artifact `make ci` drift-checks.
 	mux.HandleFunc("GET /v1/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
@@ -153,136 +170,130 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 		w.Header().Set("Content-Type", "application/json")
 		payload, _ := json.Marshal(map[string]any{
 			"ok":          true,
-			"rateLimiter": server.limiterTracker.Public(),
-			"queue":       server.publicQueueHealth(ctx),
+			"rateLimiter": s.limiterTracker.Public(),
+			"queue":       s.publicQueueHealth(ctx),
 		})
 		_, _ = w.Write(payload)
 	})
 	// Org-config read: the full closed catalog with layered effective
 	// values (tenant row → env → default) and provenance per key.
-	mux.HandleFunc("GET /org/config", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, server.listOrgConfigCore(r, rc))
+	mux.HandleFunc("GET /org/config", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.listOrgConfigCore(r, rc))
 	}))
-	mux.HandleFunc("POST /v1/workflows/save", server.auth(server.saveWorkflow))
-	mux.HandleFunc("POST /v1/workflows/rollback", server.auth(server.rollbackWorkflow))
-	mux.HandleFunc("POST /v1/workflows/readiness", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeVersioned(w, rc.id, server.readinessCore(r, rc))
+	mux.HandleFunc("POST /v1/workflows/save", s.auth(s.saveWorkflow))
+	mux.HandleFunc("POST /v1/workflows/rollback", s.auth(s.rollbackWorkflow))
+	mux.HandleFunc("POST /v1/workflows/readiness", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.readinessCore(r, rc))
 	}))
-	mux.HandleFunc("POST /workflows/readiness", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, server.readinessCore(r, rc))
+	mux.HandleFunc("POST /workflows/readiness", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.readinessCore(r, rc))
 	}))
-	mux.HandleFunc("POST /v1/validate", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeVersioned(w, rc.id, server.validateCore(r, rc))
+	mux.HandleFunc("POST /v1/validate", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.validateCore(r, rc))
 	}))
-	mux.HandleFunc("POST /validate", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, server.validateCore(r, rc))
+	mux.HandleFunc("POST /validate", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.validateCore(r, rc))
 	}))
-	mux.HandleFunc("POST /workflows/{id}/resume", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, server.resumeWorkflowCore(r, rc, r.PathValue("id")))
+	mux.HandleFunc("POST /workflows/{id}/resume", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.resumeWorkflowCore(r, rc, r.PathValue("id")))
 	}))
-	mux.HandleFunc("POST /v1/workflows/{id}/resume", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeVersioned(w, rc.id, server.resumeWorkflowCore(r, rc, r.PathValue("id")))
+	mux.HandleFunc("POST /v1/workflows/{id}/resume", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.resumeWorkflowCore(r, rc, r.PathValue("id")))
 	}))
-	mux.HandleFunc("GET /v1/workflows", server.auth(server.listWorkflows))
-	mux.HandleFunc("GET /v1/workflows/latest", server.auth(server.latestWorkflowVersion))
-	mux.HandleFunc("GET /v1/workflows/versions", server.auth(server.listWorkflowVersions))
-	mux.HandleFunc("POST /v1/start", server.auth(server.startRun))
-	mux.HandleFunc("POST /triggers/webhook/ingest", server.auth(server.ingestWebhookBySelector))
-	mux.HandleFunc("POST /v1/webhooks/{workflowId}", server.auth(server.ingestWebhook))
-	mux.HandleFunc("POST /v1/triggers/email/ingest", server.auth(server.ingestEmail))
-	mux.HandleFunc("POST /v1/triggers/file/ingest", server.auth(server.ingestFileDropped))
-	mux.HandleFunc("POST /v1/triggers/mcp/ingest", server.auth(server.ingestMcpEvent))
-	mux.HandleFunc("GET /v1/run", server.auth(server.getRun))
-	mux.HandleFunc("GET /v1/status", server.auth(server.getRun))
-	mux.HandleFunc("GET /v1/runs", server.auth(server.listRuns))
-	mux.HandleFunc("POST /v1/resume", server.auth(server.resumeRun))
-	mux.HandleFunc("POST /v1/run/cancel", server.auth(server.cancelRun))
-	mux.HandleFunc("GET /v1/dlq", server.auth(server.listDeadLetters))
-	mux.HandleFunc("POST /runs/redrive", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, server.runsRedriveCore(r, rc))
+	mux.HandleFunc("GET /v1/workflows", s.auth(s.listWorkflows))
+	mux.HandleFunc("GET /v1/workflows/latest", s.auth(s.latestWorkflowVersion))
+	mux.HandleFunc("GET /v1/workflows/versions", s.auth(s.listWorkflowVersions))
+	mux.HandleFunc("POST /v1/start", s.auth(s.startRun))
+	mux.HandleFunc("POST /triggers/webhook/ingest", s.auth(s.ingestWebhookBySelector))
+	mux.HandleFunc("POST /v1/webhooks/{workflowId}", s.auth(s.ingestWebhook))
+	mux.HandleFunc("POST /v1/triggers/email/ingest", s.auth(s.ingestEmail))
+	mux.HandleFunc("POST /v1/triggers/file/ingest", s.auth(s.ingestFileDropped))
+	mux.HandleFunc("POST /v1/triggers/mcp/ingest", s.auth(s.ingestMcpEvent))
+	mux.HandleFunc("GET /v1/run", s.auth(s.getRun))
+	mux.HandleFunc("GET /v1/status", s.auth(s.getRun))
+	mux.HandleFunc("GET /v1/runs", s.auth(s.listRuns))
+	mux.HandleFunc("POST /v1/resume", s.auth(s.resumeRun))
+	mux.HandleFunc("POST /v1/run/cancel", s.auth(s.cancelRun))
+	mux.HandleFunc("GET /v1/dlq", s.auth(s.listDeadLetters))
+	mux.HandleFunc("POST /runs/redrive", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.runsRedriveCore(r, rc))
 	}))
-	mux.HandleFunc("POST /v1/runs/redrive", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeVersioned(w, rc.id, server.runsRedriveCore(r, rc))
+	mux.HandleFunc("POST /v1/runs/redrive", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.runsRedriveCore(r, rc))
 	}))
-	mux.HandleFunc("GET /v1/recovery/metrics", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeVersioned(w, rc.id, server.recoveryMetricsCore(r, rc))
+	mux.HandleFunc("GET /v1/recovery/metrics", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.recoveryMetricsCore(r, rc))
 	}))
-	mux.HandleFunc("GET /recovery/metrics", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, server.recoveryMetricsCore(r, rc))
+	mux.HandleFunc("GET /recovery/metrics", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.recoveryMetricsCore(r, rc))
 	}))
-	mux.HandleFunc("GET /v1/dlq/clusters", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeVersioned(w, rc.id, server.clustersCore(r, rc))
+	mux.HandleFunc("GET /v1/dlq/clusters", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.clustersCore(r, rc))
 	}))
-	mux.HandleFunc("GET /dlq/clusters", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, server.clustersCore(r, rc))
+	mux.HandleFunc("GET /dlq/clusters", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.clustersCore(r, rc))
 	}))
-	mux.HandleFunc("POST /v1/dlq/redrive", server.auth(server.redrive))
-	mux.HandleFunc("POST /v1/dlq/replay", server.auth(server.replayAlias))
-	mux.HandleFunc("GET /runs/{runId}/stream", server.auth(server.streamRun))
-	mux.HandleFunc("GET /auth/context", server.identity(server.authContext))
+	mux.HandleFunc("POST /v1/dlq/redrive", s.auth(s.redrive))
+	mux.HandleFunc("POST /v1/dlq/replay", s.auth(s.replayAlias))
+	mux.HandleFunc("GET /runs/{runId}/stream", s.auth(s.streamRun))
+	mux.HandleFunc("GET /auth/context", s.identity(s.authContext))
 	// The AI Studio's tool catalog; the web calls it through /v1.
-	mux.HandleFunc("GET /v1/tools", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	mux.HandleFunc("GET /v1/tools", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeV1Data(w, rc.id, executors.NewToolRegistry().Catalog())
 	}))
-	mux.HandleFunc("GET /tools", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	mux.HandleFunc("GET /tools", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(executors.NewToolRegistry().Catalog())
 	}))
-	server.unversionedRoutes(mux)
-	server.mountCampaignRoutes(mux)
-	server.mountMemberRoutes(mux)
-	server.mountRoleRoutes(mux)
-	server.mountAuditRoutes(mux)
-	server.mountOrgConfigRoutes(mux)
-	server.mountRunUsageRoutes(mux)
-	server.mountRunComparisonRoutes(mux)
-	server.mountSystemHealthRoutes(mux)
-	server.mountAiGenerateRoutes(mux)
-	server.mountPromptRoutes(mux)
-	server.mountMcpRoutes(mux)
-	server.mountValidateFixRoutes(mux)
-	server.mountPlaybookRoutes(mux)
-	server.mountDrillRoutes(mux)
-	server.mountFeedbackRoutes(mux)
-	server.mountRecoveryItemRoutes(mux)
-	server.mountRecoveryQueueRoutes(mux)
-	server.mountBulkRecoveryRoutes(mux)
-	server.mountRecoveryHomeRoutes(mux)
-	server.mountAlertRoutes(mux)
-	server.mountReportRoutes(mux)
-	server.mountRolloutRoutes(mux)
-	server.mountCredentialRoutes(mux)
-	server.mountSlackInteractionRoutes(mux)
-	server.mountExternalRuntimeRoutes(mux)
-	server.mountUpstreamHealthRoutes(mux)
-	server.mountAutoHealingRoutes(mux)
-	server.mountProductSurfaceRoutes(mux)
-	server.mountWorkflowHealthRoutes(mux)
-	server.mountWorkflowMetadataRoutes(mux)
-	server.mountInputPresetRoutes(mux)
-	server.mountEvalRoutes(mux)
-	server.mountScimRoutes(mux)
-	server.mountF1SweepRoutes(mux)
-	server.mountRunSearchRoutes(mux)
-	server.mountStatusPageRoutes(mux)
-	server.mountAiPatchRoutes(mux)
-	server.mountAiSurfaceRoutes(mux)
-	server.mountBillingRoutes(mux)
-	server.mountReplayLabRoutes(mux)
-	server.mountRecoveryReadRoutes(mux)
-	server.mountSsoRoutes(mux)
-	server.mountBrowserSessionRoutes(mux)
-	server.mountIdentityRoutes(mux)
-	server.mountCausalRoutes(mux)
-	// The embedded Vite bundle rides the mux's own catch-all: every unmatched
-	// GET serves a static asset or the SPA shell. API patterns above always win
-	// by specificity, and static content is public by design.
-	mux.Handle("GET /", webdist.Handler())
-	shutdown := func() {
-		cancelServer()
-		server.backgroundWG.Wait()
-	}
-	return WithBrowserHeaders(mux), shutdown
+	s.unversionedRoutes(mux)
+	s.mountCampaignRoutes(mux)
+	s.mountMemberRoutes(mux)
+	s.mountRoleRoutes(mux)
+	s.mountAuditRoutes(mux)
+	s.mountOrgConfigRoutes(mux)
+	s.mountRunUsageRoutes(mux)
+	s.mountRunComparisonRoutes(mux)
+	s.mountSystemHealthRoutes(mux)
+	s.mountAiGenerateRoutes(mux)
+	s.mountAuthoringRoutes(mux)
+	s.mountOperationsRoutes(mux)
+	s.mountPromptRoutes(mux)
+	s.mountMcpRoutes(mux)
+	s.mountValidateFixRoutes(mux)
+	s.mountPlaybookRoutes(mux)
+	s.mountDrillRoutes(mux)
+	s.mountFeedbackRoutes(mux)
+	s.mountRecoveryItemRoutes(mux)
+	s.mountRecoveryQueueRoutes(mux)
+	s.mountBulkRecoveryRoutes(mux)
+	s.mountRecoveryHomeRoutes(mux)
+	s.mountAlertRoutes(mux)
+	s.mountReportRoutes(mux)
+	s.mountRolloutRoutes(mux)
+	s.mountCredentialRoutes(mux)
+	s.mountSlackInteractionRoutes(mux)
+	s.mountExternalRuntimeRoutes(mux)
+	s.mountUpstreamHealthRoutes(mux)
+	s.mountAutoHealingRoutes(mux)
+	s.mountProductSurfaceRoutes(mux)
+	s.mountWorkflowHealthRoutes(mux)
+	s.mountWorkflowMetadataRoutes(mux)
+	s.mountInputPresetRoutes(mux)
+	s.mountEvalRoutes(mux)
+	s.mountScimRoutes(mux)
+	s.mountF1SweepRoutes(mux)
+	s.mountRunSearchRoutes(mux)
+	s.mountStatusPageRoutes(mux)
+	s.mountAiPatchRoutes(mux)
+	s.mountAiSurfaceRoutes(mux)
+	s.mountBillingRoutes(mux)
+	s.mountReplayLabRoutes(mux)
+	s.mountRecoveryReadRoutes(mux)
+	s.mountSemanticRecoveryRoutes(mux)
+	s.mountSsoRoutes(mux)
+	s.mountBrowserSessionRoutes(mux)
+	s.mountIdentityRoutes(mux)
+	s.mountCausalRoutes(mux)
 }
 
 // runBackground owns fire-and-forget route work under the server lifetime.

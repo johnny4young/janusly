@@ -150,6 +150,9 @@ func assuranceProjection(wf *domain.Workflow, validation domain.ValidationResult
 // returns the persisted DAG, node configs, templates, credential references,
 // fixture contents, or provider outputs.
 func (d Deps) assureWorkflow(ctx context.Context, workflowID string) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardTool(ctx, "workflows.assure", "workflows.read", false); !allowed {
+		return expected(message)
+	}
 	if workflowID == "" {
 		return expected("workflowId is required")
 	}

@@ -140,6 +140,31 @@ func (q *Queries) DeleteCredential(ctx context.Context, arg DeleteCredentialPara
 	return result.RowsAffected(), nil
 }
 
+const deleteMcpConnection = `-- name: DeleteMcpConnection :one
+DELETE FROM mcp_connections WHERE org_id = $1 AND alias = $2 RETURNING id
+`
+
+type DeleteMcpConnectionParams struct {
+	OrgID string
+	Alias string
+}
+
+func (q *Queries) DeleteMcpConnection(ctx context.Context, arg DeleteMcpConnectionParams) (string, error) {
+	row := q.db.QueryRow(ctx, deleteMcpConnection, arg.OrgID, arg.Alias)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteMcpToolDescriptorsForConnection = `-- name: DeleteMcpToolDescriptorsForConnection :exec
+DELETE FROM mcp_tool_descriptors WHERE connection_id = $1
+`
+
+func (q *Queries) DeleteMcpToolDescriptorsForConnection(ctx context.Context, connectionID string) error {
+	_, err := q.db.Exec(ctx, deleteMcpToolDescriptorsForConnection, connectionID)
+	return err
+}
+
 const deleteSlackInteractionConnection = `-- name: DeleteSlackInteractionConnection :execrows
 DELETE FROM slack_interaction_connections WHERE org_id = $1 AND id = $2
 `
@@ -357,6 +382,39 @@ type GetMcpConnectionByAliasParams struct {
 
 func (q *Queries) GetMcpConnectionByAlias(ctx context.Context, arg GetMcpConnectionByAliasParams) (McpConnection, error) {
 	row := q.db.QueryRow(ctx, getMcpConnectionByAlias, arg.OrgID, arg.Alias)
+	var i McpConnection
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Alias,
+		&i.Transport,
+		&i.Command,
+		&i.Args,
+		&i.Url,
+		&i.EnvRefs,
+		&i.Enabled,
+		&i.Status,
+		&i.StatusReason,
+		&i.ExposeToAi,
+		&i.LastDiscoveryAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMcpConnectionByAliasForUpdate = `-- name: GetMcpConnectionByAliasForUpdate :one
+SELECT id, org_id, alias, transport, command, args, url, env_refs, enabled, status, status_reason, expose_to_ai, last_discovery_at, created_by, created_at, updated_at FROM mcp_connections WHERE org_id = $1 AND alias = $2 FOR UPDATE
+`
+
+type GetMcpConnectionByAliasForUpdateParams struct {
+	OrgID string
+	Alias string
+}
+
+func (q *Queries) GetMcpConnectionByAliasForUpdate(ctx context.Context, arg GetMcpConnectionByAliasForUpdateParams) (McpConnection, error) {
+	row := q.db.QueryRow(ctx, getMcpConnectionByAliasForUpdate, arg.OrgID, arg.Alias)
 	var i McpConnection
 	err := row.Scan(
 		&i.ID,
@@ -811,6 +869,53 @@ func (q *Queries) InsertUpstreamHealthSource(ctx context.Context, arg InsertUpst
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listAuthoringCredentialCapabilities = `-- name: ListAuthoringCredentialCapabilities :many
+SELECT id, name, kind, (secret_ref <> '')::bool AS configured, expires_at, updated_at
+FROM credentials
+WHERE org_id = $1
+ORDER BY name, id
+LIMIT 200
+`
+
+type ListAuthoringCredentialCapabilitiesRow struct {
+	ID         string
+	Name       string
+	Kind       string
+	Configured bool
+	ExpiresAt  *time.Time
+	UpdatedAt  time.Time
+}
+
+// The authoring catalog is intentionally incapable of reading secret_ref or
+// arbitrary credential metadata. It exposes only exact non-secret binding
+// identifiers plus lifecycle posture.
+func (q *Queries) ListAuthoringCredentialCapabilities(ctx context.Context, orgID string) ([]ListAuthoringCredentialCapabilitiesRow, error) {
+	rows, err := q.db.Query(ctx, listAuthoringCredentialCapabilities, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuthoringCredentialCapabilitiesRow
+	for rows.Next() {
+		var i ListAuthoringCredentialCapabilitiesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Kind,
+			&i.Configured,
+			&i.ExpiresAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCredentialUsageRows = `-- name: ListCredentialUsageRows :many
@@ -1395,6 +1500,25 @@ func (q *Queries) SetCredentialExpiry(ctx context.Context, arg SetCredentialExpi
 	return updated_at, err
 }
 
+const setMcpConnectionEnabled = `-- name: SetMcpConnectionEnabled :one
+UPDATE mcp_connections SET enabled = $3, updated_at = now()
+WHERE org_id = $1 AND alias = $2
+RETURNING id
+`
+
+type SetMcpConnectionEnabledParams struct {
+	OrgID   string
+	Alias   string
+	Enabled bool
+}
+
+func (q *Queries) SetMcpConnectionEnabled(ctx context.Context, arg SetMcpConnectionEnabledParams) (string, error) {
+	row := q.db.QueryRow(ctx, setMcpConnectionEnabled, arg.OrgID, arg.Alias, arg.Enabled)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const setMcpConnectionStatus = `-- name: SetMcpConnectionStatus :exec
 UPDATE mcp_connections
 SET status = $3, status_reason = $4, last_discovery_at = $5, updated_at = now()
@@ -1563,8 +1687,16 @@ func (q *Queries) UpdateUpstreamHealthSource(ctx context.Context, arg UpdateUpst
 }
 
 const upsertMcpToolDescriptor = `-- name: UpsertMcpToolDescriptor :exec
+WITH locked_connection AS (
+  SELECT mcp_connections.id
+  FROM mcp_connections
+  WHERE mcp_connections.id = $8
+  FOR KEY SHARE
+)
 INSERT INTO mcp_tool_descriptors (id, connection_id, name, description, input_schema, write_side, enabled, rate_limit_per_min)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+SELECT $1, locked_connection.id, $2, $3,
+       $4, $5, $6, $7
+FROM locked_connection
 ON CONFLICT (connection_id, name) DO UPDATE SET
   description = EXCLUDED.description,
   input_schema = EXCLUDED.input_schema,
@@ -1573,25 +1705,25 @@ ON CONFLICT (connection_id, name) DO UPDATE SET
 
 type UpsertMcpToolDescriptorParams struct {
 	ID              string
-	ConnectionID    string
 	Name            string
 	Description     pgtype.Text
 	InputSchema     json.RawMessage
 	WriteSide       bool
 	Enabled         bool
 	RateLimitPerMin pgtype.Int4
+	ConnectionID    string
 }
 
 func (q *Queries) UpsertMcpToolDescriptor(ctx context.Context, arg UpsertMcpToolDescriptorParams) error {
 	_, err := q.db.Exec(ctx, upsertMcpToolDescriptor,
 		arg.ID,
-		arg.ConnectionID,
 		arg.Name,
 		arg.Description,
 		arg.InputSchema,
 		arg.WriteSide,
 		arg.Enabled,
 		arg.RateLimitPerMin,
+		arg.ConnectionID,
 	)
 	return err
 }

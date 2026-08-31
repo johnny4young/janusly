@@ -201,6 +201,7 @@ export type RecoveryCase = {
   action: 'observe' | 'quarantine'
   message: string
   detailsJson: unknown
+  revision: number
   state:
     | 'detected'
     | 'contained'
@@ -218,6 +219,16 @@ export type RecoveryCase = {
   createdAt: string
   updatedAt: string
   resolvedAt: string | null
+}
+export type RecoveryCaseArtifact = {
+  id: string
+  caseId: string
+  kind: 'diagnosis' | 'candidate' | 'validation' | 'publication' | 'verification'
+  payload: unknown
+  sha256: string
+  actorKind: 'system' | 'user' | 'agent'
+  actorId: string | null
+  createdAt: string
 }
 export type RecoveryCaseTransition = {
   id: string
@@ -288,6 +299,83 @@ export type AiAuthoringActionRequest = {
 
 /** Budget-driven reduction of Best-of-N candidates for one AI generation. */
 export type AiCandidateBackoff = { from: number; to: number }
+
+export type WorkflowIntentBrief = {
+  version: '1' | string
+  objective: string
+  trigger: string
+  inputs: string[]
+  expectedOutcome: string
+  externalEffects: string[]
+  approvals: string[]
+  failurePolicy: string
+  examples: string[]
+  language: 'en' | 'es'
+}
+
+export type WorkflowBriefCompilation = {
+  brief: WorkflowIntentBrief
+  clarifyingQuestions: string[]
+  complete: boolean
+  mode: 'deterministic'
+}
+
+export type WorkflowCapabilityBinding = {
+  kind: string
+  nodeId: string
+  field: string
+  requested?: string
+  resolvedId?: string
+  alternatives: string[]
+  reason?: string
+}
+
+export type WorkflowBindingReport = {
+  catalogVersion: string
+  resolved: WorkflowCapabilityBinding[]
+  missing: WorkflowCapabilityBinding[]
+  complete: boolean
+}
+
+export type WorkflowProposalReadiness = {
+  status: 'pass' | 'warn' | 'fail'
+  issues: Array<{
+    code: string
+    severity: 'info' | 'warn' | 'fail'
+    message: string
+    nodeId?: string
+    edgeId?: string
+    suggestion?: string
+  }>
+}
+
+export type WorkflowProposalResponse = {
+  mode: AiMode
+  aiError?: string
+  bonBackoff?: AiCandidateBackoff
+  brief: WorkflowIntentBrief
+  clarifyingQuestions: string[]
+  bindings: WorkflowBindingReport
+  proposal: {
+    workflow: WorkflowDefinition
+    intentContract: Record<string, string>
+    recoveryContract: unknown
+    qualification: { intent: boolean; recovery: boolean; semantic: boolean }
+    assumptions: string[]
+    risks: string[]
+    readiness: WorkflowProposalReadiness
+    diff: {
+      nodesAdded: string[]
+      nodesRemoved: string[]
+      nodesChanged: string[]
+      edgesBefore: number
+      edgesAfter: number
+    }
+    applicable: boolean
+  }
+}
+
+export type AuthoringCapabilityCatalog = import('./lib/api-types.generated').ApiResponse<'GET /authoring/capabilities'>
 
 /** Validate optional Best-of-N metadata before user-facing interpolation. */
 export function parseAiCandidateBackoff(value: unknown): AiCandidateBackoff | undefined {

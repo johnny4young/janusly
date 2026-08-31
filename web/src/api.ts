@@ -34,6 +34,7 @@ import {
   resetApiRequestLifecycleForTests,
 } from './api-request-lifecycle'
 import { isV1ReadPath } from '@/lib/api-contract'
+import type { ApiOperation, ApiRequest, ApiResponse } from '@/lib/api-types.generated'
 import { getResolvedLocale, t } from './i18n/runtime'
 import { useWorkflowStore } from './store'
 
@@ -204,6 +205,42 @@ export async function api(path: string, options: RequestInit = {}): Promise<unkn
   }
 
   return promise
+}
+
+type ContractRequestOptions = Omit<RequestInit, 'method' | 'body'>
+
+function matchesContractPath(template: string, actualPath: string): boolean {
+  const queryIndex = actualPath.indexOf('?')
+  const pathname = queryIndex === -1 ? actualPath : actualPath.slice(0, queryIndex)
+  if (!pathname.startsWith('/') || pathname.includes('#')) return false
+  const expected = template.split('/')
+  const actual = pathname.split('/')
+  return expected.length === actual.length && expected.every((segment, index) => {
+    if (/^\{[^/{}]+\}$/.test(segment)) return (actual[index]?.length ?? 0) > 0
+    return segment === actual[index]
+  })
+}
+
+/**
+ * Typed JSON operation boundary generated from the Go-owned OpenAPI manifest.
+ * The concrete path may add encoded path values or query parameters, but it
+ * must match the declared operation template before any request is sent.
+ */
+export async function contractApi<Operation extends ApiOperation>(
+  operation: Operation,
+  path: string,
+  request: ApiRequest<Operation>,
+  options: ContractRequestOptions = {},
+): Promise<ApiResponse<Operation>> {
+  const separator = operation.indexOf(' ')
+  const method = operation.slice(0, separator)
+  const template = operation.slice(separator + 1)
+  if (separator <= 0 || !matchesContractPath(template, path)) {
+    throw new TypeError(`Path ${path} does not match contract operation ${operation}`)
+  }
+  const init: RequestInit = { ...options, method }
+  if (request !== undefined) init.body = JSON.stringify(request)
+  return await api(path, init) as ApiResponse<Operation>
 }
 
 /**

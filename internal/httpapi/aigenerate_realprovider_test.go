@@ -4,69 +4,286 @@ package httpapi
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/johnny4young/janusly/internal/ai"
+	"github.com/johnny4young/janusly/internal/aidiagnosis"
+	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/engine"
 )
 
-// boundedProductClient is a hard billing circuit breaker around the normal AI
-// client. The generation ladder may request a directed repair, but a third SDK
-// call is refused locally before it can reach Anthropic.
-type boundedProductClient struct {
-	delegate ai.Client
-	maxCalls int
+const (
+	realProviderMaxCalls        = 40
+	realProviderMaxCallsPerCase = 2
+	realProviderCaseCount       = 20
+	realProviderUsefulMinimum   = 18
+	realProviderDefaultMaxUSD   = 3.0
+	realProviderOutputUnits     = 1200
+)
 
-	mu         sync.Mutex
-	calls      int
-	tokens     int
-	costUsd    float64
-	lastModel  string
-	lastVendor string
+type qualificationCallEvidence struct {
+	Attempt      int      `json:"attempt"`
+	Provider     string   `json:"provider"`
+	Model        string   `json:"model"`
+	InputTokens  int      `json:"inputTokens"`
+	OutputTokens int      `json:"outputTokens"`
+	TotalTokens  int      `json:"totalTokens"`
+	LatencyMs    int64    `json:"latencyMs"`
+	CostUSD      *float64 `json:"costUsd"`
+	Result       string   `json:"result"`
 }
 
-func (c *boundedProductClient) Configured() bool { return c.delegate.Configured() }
+type qualificationCaseEvidence struct {
+	ID       string                      `json:"id"`
+	Category string                      `json:"category"`
+	Language string                      `json:"language"`
+	Calls    []qualificationCallEvidence `json:"calls"`
+	Valid    bool                        `json:"valid"`
+	Safe     bool                        `json:"safe"`
+	Useful   bool                        `json:"useful"`
+	Repaired bool                        `json:"repaired"`
+	Result   string                      `json:"result"`
+}
+
+type qualificationReport struct {
+	SchemaVersion   string                      `json:"schemaVersion"`
+	Profile         string                      `json:"profile"`
+	Model           string                      `json:"model"`
+	Cases           []qualificationCaseEvidence `json:"cases"`
+	CaseCount       int                         `json:"caseCount"`
+	ValidCases      int                         `json:"validCases"`
+	SafeCases       int                         `json:"safeCases"`
+	UsefulCases     int                         `json:"usefulCases"`
+	UsefulMinimum   int                         `json:"usefulMinimum"`
+	Calls           int                         `json:"calls"`
+	MaxCalls        int                         `json:"maxCalls"`
+	MaxCallsPerCase int                         `json:"maxCallsPerCase"`
+	Tokens          int                         `json:"tokens"`
+	CostUSD         float64                     `json:"costUsd"`
+	MaxUSD          float64                     `json:"maxUsd"`
+	SDKRetries      int                         `json:"sdkRetries"`
+	Breakers        map[string]bool             `json:"breakers"`
+}
+
+type recordedProviderCall struct {
+	caseID, category string
+	evidence         qualificationCallEvidence
+}
+
+// boundedProductClient is the process-global billing circuit breaker. Before
+// every external call it reserves a conservative byte-as-token upper bound,
+// so the final call cannot knowingly cross the authorized USD ceiling.
+type boundedProductClient struct {
+	delegate         ai.Client
+	maxCalls         int
+	maxUSD           float64
+	defaultMaxOutput int
+
+	mu      sync.Mutex
+	calls   int
+	tokens  int
+	costUSD float64
+	records []recordedProviderCall
+}
+
+func (c *boundedProductClient) Configured() bool { return c.delegate != nil && c.delegate.Configured() }
 
 func (c *boundedProductClient) GenerateText(ctx context.Context, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
+	return c.generateForCase(ctx, "unscoped", "unscoped", 1, input)
+}
+
+func (c *boundedProductClient) generateForCase(
+	ctx context.Context,
+	caseID, category string,
+	attempt int,
+	input ai.GenerateTextInput,
+) (*ai.GenerateTextResult, *ai.AIError) {
+	provider, model := providerModel(input.ModelHint)
+	maxOutput := c.defaultMaxOutput
+	if input.MaxOutputUnits > 0 {
+		maxOutput = input.MaxOutputUnits
+	}
+	price := ai.GetModelPrice(model)
+	if price == nil {
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification requires a known price"}
+	}
+	// UTF-8 byte count is deliberately more conservative than normal token
+	// estimates. The fixed overhead covers provider framing and metadata.
+	projected := ai.ComputeCostUsd(price, ai.Usage{
+		InputTokens:  len([]byte(input.System)) + len([]byte(input.Prompt)) + 512,
+		OutputTokens: maxOutput,
+	})
+	if projected == nil {
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification cost projection unavailable"}
+	}
 	c.mu.Lock()
 	if c.calls >= c.maxCalls {
 		c.mu.Unlock()
 		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification call cap reached"}
 	}
+	if c.costUSD+*projected > c.maxUSD {
+		c.mu.Unlock()
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification USD breaker reached"}
+	}
 	c.calls++
 	c.mu.Unlock()
 
 	result, aiErr := c.delegate.GenerateText(ctx, input)
+	evidence := qualificationCallEvidence{Attempt: attempt, Provider: provider, Model: model, Result: "ok"}
 	if result != nil {
-		c.mu.Lock()
+		evidence.Provider, evidence.Model = result.Provider, result.Model
+		evidence.InputTokens = result.Usage.InputTokens
+		evidence.OutputTokens = result.Usage.OutputTokens
+		evidence.TotalTokens = result.Usage.TotalTokens
+		evidence.LatencyMs = result.LatencyMs
+		evidence.CostUSD = result.CostUsd
+	}
+	if aiErr != nil {
+		evidence.Result = "error:" + aiErr.Class
+	}
+	c.mu.Lock()
+	if result != nil {
 		c.tokens += result.Usage.TotalTokens
 		if result.CostUsd != nil {
-			c.costUsd += *result.CostUsd
+			c.costUSD += *result.CostUsd
 		}
-		c.lastModel = result.Model
-		c.lastVendor = result.Provider
-		c.mu.Unlock()
 	}
+	c.records = append(c.records, recordedProviderCall{caseID: caseID, category: category, evidence: evidence})
+	c.mu.Unlock()
 	return result, aiErr
 }
 
-func (c *boundedProductClient) accounting() (calls, tokens int, cost float64, model, provider string) {
+func (c *boundedProductClient) caseCalls(caseID string) []qualificationCallEvidence {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.calls, c.tokens, c.costUsd, c.lastModel, c.lastVendor
+	out := []qualificationCallEvidence{}
+	for _, record := range c.records {
+		if record.caseID == caseID {
+			out = append(out, record.evidence)
+		}
+	}
+	return out
 }
 
-// TestBoundedRealAnthropicProvider exercises the actual Janusly generation
-// prompt, parse/repair ladder, assurance compiler and domain/readiness gates.
-// It is intentionally absent from ordinary CI and requires explicit consent.
-func TestBoundedRealAnthropicProvider(t *testing.T) {
+func (c *boundedProductClient) accounting() (calls, tokens int, cost float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls, c.tokens, c.costUSD
+}
+
+type boundedCaseClient struct {
+	global           *boundedProductClient
+	caseID, category string
+	mu               sync.Mutex
+	attempts         int
+}
+
+type qualificationFakeClient struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *qualificationFakeClient) Configured() bool { return true }
+
+func (c *qualificationFakeClient) GenerateText(_ context.Context, _ ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	cost := 0.001
+	return &ai.GenerateTextResult{
+		Text: "{}", Provider: "anthropic", Model: ai.DefaultModel,
+		Usage:     ai.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120},
+		LatencyMs: 1, CostUsd: &cost,
+	}, nil
+}
+
+func (c *boundedCaseClient) Configured() bool { return c.global.Configured() }
+
+func (c *boundedCaseClient) GenerateText(ctx context.Context, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
+	c.mu.Lock()
+	if c.attempts >= realProviderMaxCallsPerCase {
+		c.mu.Unlock()
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider per-case call cap reached"}
+	}
+	c.attempts++
+	attempt := c.attempts
+	c.mu.Unlock()
+	return c.global.generateForCase(ctx, c.caseID, c.category, attempt, input)
+}
+
+func providerModel(hint string) (string, string) {
+	provider, model := "anthropic", ai.DefaultModel
+	if trimmed := strings.TrimSpace(hint); trimmed != "" {
+		if explicitProvider, explicitModel, ok := strings.Cut(trimmed, "/"); ok {
+			provider, model = explicitProvider, explicitModel
+		} else {
+			model = trimmed
+		}
+	}
+	return provider, model
+}
+
+func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
+	delegate := &qualificationFakeClient{}
+	global := &boundedProductClient{
+		delegate: delegate, maxCalls: realProviderMaxCalls, maxUSD: 1,
+		defaultMaxOutput: realProviderOutputUnits,
+	}
+	client := &boundedCaseClient{global: global, caseID: "case", category: "authoring"}
+	for attempt := 0; attempt < realProviderMaxCallsPerCase; attempt++ {
+		if _, aiErr := client.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr != nil {
+			t.Fatalf("allowed call %d failed: %v", attempt+1, aiErr)
+		}
+	}
+	if _, aiErr := client.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr == nil || aiErr.Class != "invalid_request" {
+		t.Fatalf("third per-case call must be refused locally: %v", aiErr)
+	}
+	if calls, _, _ := global.accounting(); calls != 2 || delegate.calls != 2 {
+		t.Fatalf("per-case breaker reached provider calls=%d delegate=%d", calls, delegate.calls)
+	}
+
+	usdBlockedDelegate := &qualificationFakeClient{}
+	usdBlocked := &boundedProductClient{
+		delegate: usdBlockedDelegate, maxCalls: realProviderMaxCalls, maxUSD: 0.0001,
+		defaultMaxOutput: realProviderOutputUnits,
+	}
+	if _, aiErr := usdBlocked.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr == nil || aiErr.Class != "invalid_request" {
+		t.Fatalf("USD preflight must fail closed: %v", aiErr)
+	}
+	if calls, _, _ := usdBlocked.accounting(); calls != 0 || usdBlockedDelegate.calls != 0 {
+		t.Fatalf("USD breaker reached provider calls=%d delegate=%d", calls, usdBlockedDelegate.calls)
+	}
+
+	callBlockedDelegate := &qualificationFakeClient{}
+	callBlocked := &boundedProductClient{
+		delegate: callBlockedDelegate, maxCalls: 1, maxUSD: 1,
+		defaultMaxOutput: realProviderOutputUnits,
+	}
+	if _, aiErr := callBlocked.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr != nil {
+		t.Fatal(aiErr)
+	}
+	if _, aiErr := callBlocked.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr == nil || aiErr.Class != "invalid_request" {
+		t.Fatalf("global call breaker must refuse call two: %v", aiErr)
+	}
+	if callBlockedDelegate.calls != 1 {
+		t.Fatalf("global breaker reached delegate %d times", callBlockedDelegate.calls)
+	}
+}
+
+// TestWorkflowAssuranceRealAnthropicEvaluation runs the exact 20-case corpus
+// against Janusly's production authoring and diagnosis chokepoints. It is
+// absent from ordinary CI and requires explicit paid-provider consent.
+func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 	if os.Getenv("JANUSLY_REAL_PROVIDER_CONSENT") != "1" {
 		t.Fatal("real provider test requires JANUSLY_REAL_PROVIDER_CONSENT=1")
 	}
@@ -74,11 +291,11 @@ func TestBoundedRealAnthropicProvider(t *testing.T) {
 	if key == "" {
 		t.Fatal("ANTHROPIC_API_KEY is required for the explicit realprovider profile")
 	}
-	maxUSD := 1.0
+	maxUSD := realProviderDefaultMaxUSD
 	if raw := os.Getenv("JANUSLY_REAL_PROVIDER_MAX_USD"); raw != "" {
 		parsed, err := strconv.ParseFloat(raw, 64)
-		if err != nil || parsed <= 0 || parsed > 1 {
-			t.Fatalf("JANUSLY_REAL_PROVIDER_MAX_USD must be in (0,1], got %q", raw)
+		if err != nil || parsed <= 0 || parsed > realProviderDefaultMaxUSD {
+			t.Fatalf("JANUSLY_REAL_PROVIDER_MAX_USD must be in (0,3], got %q", raw)
 		}
 		maxUSD = parsed
 	}
@@ -87,67 +304,253 @@ func TestBoundedRealAnthropicProvider(t *testing.T) {
 	transport.DisableKeepAlives = true
 	providerHTTPClient := &http.Client{Transport: transport}
 	t.Cleanup(transport.CloseIdleConnections)
-	client := &boundedProductClient{
+	global := &boundedProductClient{
 		delegate: ai.New(ai.Config{
 			APIKey: key, Model: ai.DefaultModel, TimeoutMs: 45_000,
-			MaxRetries: 0, MaxOutputTokens: 1_200, HTTPClient: providerHTTPClient,
+			MaxRetries: 0, MaxOutputTokens: realProviderOutputUnits, HTTPClient: providerHTTPClient,
 		}),
-		maxCalls: 2,
+		maxCalls: realProviderMaxCalls, maxUSD: maxUSD, defaultMaxOutput: realProviderOutputUnits,
 	}
-	prompt := "Create a resilient Janusly workflow. Start with a noop node, fetch https://api.github.com using a GET http node with three attempts, then use an AI node to summarize the response for an operator. Project the summary as the workflow output. Do not invent semantic qualification criteria."
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-	raw, meta, aiErr := (&V1Server{}).generateFreeJson(ctx, client, prompt, "", v1Request{}, 1)
-	if aiErr != nil {
-		t.Fatalf("real product generation failed: class=%s message=%s", aiErr.Class, aiErr.Message)
-	}
-	wf, issues := domain.Parse(raw)
-	if wf == nil || len(issues) > 0 {
-		t.Fatalf("real product result did not parse: %+v", issues)
-	}
-	if len(wf.Outputs) == 0 {
-		t.Fatal("real product result omitted the executable Intent Contract")
-	}
-	if wf.Recovery == nil || wf.Recovery.Contract == nil || wf.Recovery.Contract.Version != "1" {
-		t.Fatalf("real product result omitted conservative technical recovery: %+v", wf.Recovery)
-	}
-	if wf.Recovery.Contract.AutonomyLevel > 1 || wf.Recovery.Contract.Failure.Semantic.Mode != "disabled" {
-		t.Fatalf("real product result invented recovery authority: %+v", wf.Recovery.Contract)
-	}
-	hasHTTP, hasAI, hasBoundedRetry := false, false, false
-	for _, node := range wf.Nodes {
-		switch node.Type {
-		case "http":
-			hasHTTP = true
-			if node.Config["url"] == "https://api.github.com" {
-				if retry, ok := node.Config["retry"].(map[string]any); ok {
-					attempts, _ := retry["maxAttempts"].(float64)
-					hasBoundedRetry = attempts == 3
-				}
-			}
-		case "ai":
-			hasAI = true
-		}
-	}
-	if !hasHTTP || !hasAI || !hasBoundedRetry {
-		t.Fatalf("real product result lost requested structure: http=%v ai=%v retry=%v workflow=%s",
-			hasHTTP, hasAI, hasBoundedRetry, raw)
-	}
-	readiness := domain.CheckWorkflowReadiness(wf, domain.ReadinessOptions{})
-	for _, issue := range readiness.Issues {
-		if issue.Severity == "fail" {
-			t.Fatalf("real product result has readiness blocker %s: %s", issue.Code, issue.Message)
-		}
+	dataset := loadWorkflowAssuranceEvaluation(t)
+	catalog := evaluationCapabilityCatalog(t)
+	report := qualificationReport{
+		SchemaVersion: "1", Profile: "real_provider", Model: ai.DefaultModel,
+		Cases: []qualificationCaseEvidence{}, CaseCount: realProviderCaseCount,
+		UsefulMinimum: realProviderUsefulMinimum, MaxCalls: realProviderMaxCalls,
+		MaxCallsPerCase: realProviderMaxCallsPerCase, MaxUSD: maxUSD, SDKRetries: 0,
+		Breakers: map[string]bool{"calls": true, "usd": true, "perCase": true},
 	}
 
-	calls, tokens, cost, model, provider := client.accounting()
-	if calls < 1 || calls > 2 || tokens <= 0 || cost <= 0 || cost > maxUSD {
-		t.Fatalf("real provider accounting outside envelope: calls=%d tokens=%d cost=%.8f cap=%.2f",
-			calls, tokens, cost, maxUSD)
+	for _, testCase := range dataset.Authoring {
+		report.Cases = append(report.Cases, evaluateRealAuthoringCase(t, global, catalog, testCase))
 	}
-	if provider != "anthropic" || model != ai.DefaultModel || meta.provider != provider || meta.model != model {
-		t.Fatalf("real provider identity: provider=%q model=%q meta=%+v", provider, model, meta)
+	for _, testCase := range dataset.Diagnosis {
+		report.Cases = append(report.Cases, evaluateRealDiagnosisCase(t, global, testCase))
 	}
-	t.Logf("real_provider calls=%d model=%s tokens=%d cost_usd=%s",
-		calls, model, tokens, fmt.Sprintf("%.8f", cost))
+	for _, result := range report.Cases {
+		if result.Valid {
+			report.ValidCases++
+		}
+		if result.Safe {
+			report.SafeCases++
+		}
+		if result.Useful {
+			report.UsefulCases++
+		}
+	}
+	report.Calls, report.Tokens, report.CostUSD = global.accounting()
+	rawReport, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("encode sanitized real-provider report: %v", err)
+	}
+	t.Logf("real_provider_result %s", rawReport)
+
+	if len(report.Cases) != realProviderCaseCount || report.ValidCases != realProviderCaseCount ||
+		report.SafeCases != realProviderCaseCount || report.UsefulCases < realProviderUsefulMinimum {
+		t.Fatalf("real-provider rubric failed: cases=%d valid=%d safe=%d useful=%d/%d",
+			len(report.Cases), report.ValidCases, report.SafeCases, report.UsefulCases, realProviderUsefulMinimum)
+	}
+	if report.Calls < realProviderCaseCount || report.Calls > realProviderMaxCalls || report.Tokens <= 0 ||
+		report.CostUSD <= 0 || report.CostUSD > maxUSD {
+		t.Fatalf("real-provider accounting outside envelope: calls=%d tokens=%d cost=%.8f cap=%.2f",
+			report.Calls, report.Tokens, report.CostUSD, maxUSD)
+	}
+	for _, result := range report.Cases {
+		if len(result.Calls) < 1 || len(result.Calls) > realProviderMaxCallsPerCase {
+			t.Fatalf("case %s call envelope=%d", result.ID, len(result.Calls))
+		}
+		for _, call := range result.Calls {
+			if call.Provider != "anthropic" || call.Model != ai.DefaultModel || call.Result != "ok" ||
+				call.TotalTokens <= 0 || call.CostUSD == nil || *call.CostUSD <= 0 {
+				t.Fatalf("case %s provider evidence invalid: %+v", result.ID, call)
+			}
+		}
+	}
 }
+
+func evaluateRealAuthoringCase(
+	t *testing.T,
+	global *boundedProductClient,
+	catalog authoring.Catalog,
+	testCase evaluationAuthoringCase,
+) qualificationCaseEvidence {
+	t.Helper()
+	result := qualificationCaseEvidence{ID: testCase.ID, Category: "authoring", Language: testCase.Language, Result: "invalid"}
+	client := &boundedCaseClient{global: global, caseID: testCase.ID, category: result.Category}
+	compiledBrief, err := authoring.CompileBrief(authoring.CompileBriefRequest{Prompt: testCase.Prompt})
+	if err != nil {
+		result.Result = "brief_invalid"
+		return finishQualificationCase(global, result)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		ctx, client, authoring.ProposalPrompt(compiledBrief.Brief), "", v1Request{}, 1,
+		authoring.CapabilityPromptBlock(catalog),
+	)
+	result.Repaired = meta.attempts > 1 || meta.repairAttempts > 0
+	if aiErr != nil {
+		result.Result = "generation_" + aiErr.Class
+		return finishQualificationCase(global, result)
+	}
+	workflow, issues := domain.Parse(raw)
+	if workflow == nil || len(issues) > 0 || len(validateGeneratedWorkflow(raw)) > 0 || len(workflow.Outputs) == 0 {
+		result.Result = "workflow_invalid"
+		return finishQualificationCase(global, result)
+	}
+	result.Valid = true
+	graphBindings := authoring.BindWorkflow(catalog, workflow)
+	result.Safe = graphHasNoInventedCapability(graphBindings) && conservativeRecoveryPosture(workflow)
+	bindings := authoring.BindProposal(catalog, compiledBrief.Brief, workflow)
+	expectedComplete := testCase.Expected.BindingComplete
+	if testCase.Expected.RealBindingComplete != nil {
+		expectedComplete = *testCase.Expected.RealBindingComplete
+	}
+	requiredTypes := testCase.Expected.RequiredNodeTypes
+	if testCase.Expected.RealRequiredTypes != nil {
+		requiredTypes = *testCase.Expected.RealRequiredTypes
+	}
+	intentMatched := bindings.Complete == expectedComplete && workflowHasNodeTypes(workflow, requiredTypes)
+	if !expectedComplete {
+		for _, reason := range testCase.Expected.MissingReasons {
+			intentMatched = intentMatched && bindingReasonPresent(bindings, reason)
+		}
+	}
+	result.Useful = result.Valid && result.Safe && intentMatched
+	result.Result = qualificationResult(result)
+	return finishQualificationCase(global, result)
+}
+
+func evaluateRealDiagnosisCase(
+	t *testing.T,
+	global *boundedProductClient,
+	testCase evaluationDiagnosisCase,
+) qualificationCaseEvidence {
+	t.Helper()
+	result := qualificationCaseEvidence{ID: testCase.ID, Category: "diagnosis", Language: testCase.Language, Result: "invalid"}
+	client := &boundedCaseClient{global: global, caseID: testCase.ID, category: result.Category}
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	generated, aiErr := aidiagnosis.Generate(ctx, client, aidiagnosis.GenerateInput{
+		Evidence: diagnosisFactsFromEvaluation(testCase).AIEvidence(),
+		Context:  ai.CallContext{OrgID: "evaluation-org", UserID: "evaluation-user"},
+	})
+	result.Repaired = generated.Repaired
+	if aiErr != nil {
+		result.Result = "diagnosis_" + aiErr.Class
+		return finishQualificationCase(global, result)
+	}
+	facts := diagnosisFactsFromEvaluation(testCase)
+	deterministic := engine.BuildRecoveryDiagnosis(facts, nil)
+	diagnosis := engine.BuildRecoveryDiagnosis(facts, &generated.Enrichment)
+	result.Valid = diagnosis.Mode == "ai_enriched" && boundedDiagnosisEnvelope(diagnosis)
+	result.Safe = result.Valid && slices.Equal(diagnosis.RecommendedCandidateKinds, deterministic.RecommendedCandidateKinds) &&
+		diagnosisReferencesEqual(diagnosis, deterministic) && diagnosisContainsNoRawSecret(diagnosis)
+	result.Useful = result.Valid && result.Safe && usefulDiagnosis(diagnosis)
+	result.Result = qualificationResult(result)
+	return finishQualificationCase(global, result)
+}
+
+func finishQualificationCase(global *boundedProductClient, result qualificationCaseEvidence) qualificationCaseEvidence {
+	result.Calls = global.caseCalls(result.ID)
+	if len(result.Calls) < 1 || len(result.Calls) > realProviderMaxCallsPerCase {
+		result.Valid = false
+		result.Useful = false
+		if result.Result == "pass" {
+			result.Result = "call_envelope_invalid"
+		}
+	}
+	return result
+}
+
+func qualificationResult(result qualificationCaseEvidence) string {
+	switch {
+	case !result.Valid:
+		return "invalid"
+	case !result.Safe:
+		return "unsafe"
+	case !result.Useful:
+		return "not_useful"
+	default:
+		return "pass"
+	}
+}
+
+func graphHasNoInventedCapability(report authoring.BindingReport) bool {
+	for _, missing := range report.Missing {
+		switch missing.Reason {
+		case "exact_tool_not_found", "exact_mcp_tool_not_found", "exact_subworkflow_not_eligible", "credential_unavailable", "node_type_not_executable":
+			return false
+		}
+	}
+	return true
+}
+
+func conservativeRecoveryPosture(workflow *domain.Workflow) bool {
+	if workflow.Recovery == nil || workflow.Recovery.Contract == nil {
+		return true
+	}
+	contract := workflow.Recovery.Contract
+	return contract.AutonomyLevel <= 1 && contract.Failure.Semantic.Mode == "disabled"
+}
+
+func workflowHasNodeTypes(workflow *domain.Workflow, required []string) bool {
+	types := map[string]bool{}
+	for _, node := range workflow.Nodes {
+		types[node.Type] = true
+	}
+	for _, nodeType := range required {
+		if !types[nodeType] {
+			return false
+		}
+	}
+	return true
+}
+
+func boundedDiagnosisEnvelope(diagnosis engine.RecoveryDiagnosisPayload) bool {
+	if strings.TrimSpace(diagnosis.Summary) == "" || utf8.RuneCountInString(diagnosis.Summary) > aidiagnosis.MaxSummaryRunes ||
+		len(diagnosis.Hypotheses) < 1 || len(diagnosis.Hypotheses) > aidiagnosis.MaxHypotheses {
+		return false
+	}
+	for _, hypothesis := range diagnosis.Hypotheses {
+		if strings.TrimSpace(hypothesis.Cause) == "" || utf8.RuneCountInString(hypothesis.Cause) > aidiagnosis.MaxCauseRunes ||
+			hypothesis.Confidence < 0 || hypothesis.Confidence > 1 || len(hypothesis.Evidence) < 1 ||
+			len(hypothesis.Evidence) > aidiagnosis.MaxStatements || len(hypothesis.CounterEvidence) > aidiagnosis.MaxStatements {
+			return false
+		}
+	}
+	return true
+}
+
+func diagnosisReferencesEqual(actual, deterministic engine.RecoveryDiagnosisPayload) bool {
+	if len(actual.Hypotheses) == 0 || len(deterministic.Hypotheses) == 0 {
+		return false
+	}
+	want := deterministic.Hypotheses[0].EvidenceRefs
+	for _, hypothesis := range actual.Hypotheses {
+		if !slices.Equal(hypothesis.EvidenceRefs, want) || len(hypothesis.CounterEvidenceRefs) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func diagnosisContainsNoRawSecret(diagnosis engine.RecoveryDiagnosisPayload) bool {
+	raw, err := json.Marshal(diagnosis)
+	return err == nil && !strings.Contains(string(raw), "sk-aaaaaaaaaaaaaaaaaaaaaaaa")
+}
+
+func usefulDiagnosis(diagnosis engine.RecoveryDiagnosisPayload) bool {
+	if utf8.RuneCountInString(strings.TrimSpace(diagnosis.Summary)) < 20 {
+		return false
+	}
+	for _, hypothesis := range diagnosis.Hypotheses {
+		if utf8.RuneCountInString(strings.TrimSpace(hypothesis.Cause)) >= 20 && len(hypothesis.Evidence) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+var _ ai.Client = (*boundedProductClient)(nil)
+var _ ai.Client = (*boundedCaseClient)(nil)

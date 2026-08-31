@@ -113,10 +113,17 @@ func (s *V1Server) generateWorkflowCore(r *http.Request, rc v1Request) opResult 
 		Model  string `json:"model"`
 	}
 	_ = decodeBody(r, &body)
-	ctx := r.Context()
+	return s.generateWorkflowFromPrompt(r.Context(), rc, body.Prompt, body.Model, "")
+}
+
+// generateWorkflowFromPrompt is the shared generation ladder used by both
+// the compatibility endpoint and contract-first proposals. systemData is a
+// bounded, DATA-framed capability catalog; it never changes request gates or
+// the deterministic fallback path.
+func (s *V1Server) generateWorkflowFromPrompt(ctx context.Context, rc v1Request, prompt, model, systemData string) opResult {
 	client, settings := aiconfig.Resolve(ctx, s.pool, rc.orgID)
 
-	if settings.PromptMaxChars > 0 && len(body.Prompt) > settings.PromptMaxChars {
+	if settings.PromptMaxChars > 0 && len(prompt) > settings.PromptMaxChars {
 		return opError(http.StatusRequestEntityTooLarge, "ai_prompt_too_long",
 			"prompt exceeds {{maxChars}} characters",
 			map[string]any{"maxChars": settings.PromptMaxChars})
@@ -146,7 +153,7 @@ func (s *V1Server) generateWorkflowCore(r *http.Request, rc v1Request) opResult 
 	// the evals harness reads that as "no key reachable" and skips ai-mode
 	// cases, keeping a keyless run green at zero cost.
 	if !client.Configured() {
-		fallback, compilation := compiledFallbackForPrompt(body.Prompt)
+		fallback, compilation := compiledFallbackForPrompt(prompt)
 		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 			TargetType: "ai", TargetID: templateID(fallback),
 			Metadata: map[string]any{
@@ -169,9 +176,9 @@ func (s *V1Server) generateWorkflowCore(r *http.Request, rc v1Request) opResult 
 			Metadata:   map[string]any{"from": configuredN, "to": 1, "reason": "budget_warning_threshold"},
 		})
 	}
-	workflowJSON, meta, aiErr := s.generateFreeJson(ctx, client, body.Prompt, body.Model, rc, candidateTarget)
+	workflowJSON, meta, aiErr := s.generateFreeJsonWithSystemData(ctx, client, prompt, model, rc, candidateTarget, systemData)
 	if aiErr != nil {
-		fallback, compilation := compiledFallbackForPrompt(body.Prompt)
+		fallback, compilation := compiledFallbackForPrompt(prompt)
 		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 			TargetType: "ai", TargetID: templateID(fallback),
 			Metadata: map[string]any{
@@ -208,11 +215,7 @@ type generationMeta struct {
 	recoveryContractAdded bool
 }
 
-// generateFreeJson runs the contract's free-JSON ladder: up to two
-// generation attempts (a parse failure or dropped operator references
-// nudge the retry), then up to two REPAIR attempts fed the domain
-// validator's actual issues. Returns the raw workflow JSON that passed.
-func (s *V1Server) generateFreeJson(ctx context.Context, client ai.Client, prompt, modelHint string, rc v1Request, candidateTarget int) ([]byte, generationMeta, *ai.AIError) {
+func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai.Client, prompt, modelHint string, rc v1Request, candidateTarget int, systemData string) ([]byte, generationMeta, *ai.AIError) {
 	meta := generationMeta{}
 	callContext := ai.CallContext{OrgID: rc.orgID, UserID: rc.userID}
 	userPrompt := prompt
@@ -220,6 +223,9 @@ func (s *V1Server) generateFreeJson(ctx context.Context, client ai.Client, promp
 	// Operator guidance (janusly.md) appends as a fenced DATA section —
 	// empty guidance leaves the base prompt byte-for-byte unchanged.
 	systemPrompt := s.resolvedGenerateSystemPrompt(ctx, rc.orgID)
+	if systemData != "" {
+		systemPrompt += "\n\n" + systemData
+	}
 
 	generate := func(currentPrompt string) (string, *ai.AIError) {
 		result, aiErr := client.GenerateText(ctx, ai.GenerateTextInput{
@@ -240,7 +246,7 @@ func (s *V1Server) generateFreeJson(ctx context.Context, client ai.Client, promp
 	// touches this branch, so the simple path stays byte-identical.
 	var workflowJSON []byte
 	if candidateTarget > 1 {
-		if winner, valid := s.selectBestOfN(ctx, client, prompt, modelHint, callContext, candidateTarget, &meta); winner != nil {
+		if winner, valid := s.selectBestOfNWithSystemData(ctx, client, prompt, modelHint, callContext, candidateTarget, &meta, systemData); winner != nil {
 			workflowJSON = winner
 			meta.validCandidates = valid
 		}
@@ -409,15 +415,12 @@ func clampCandidateCount(n int) int {
 	return n
 }
 
-// selectBestOfN fires n independent samples in parallel and keeps the
-// best by the contract's deterministic readiness score (fails*10 +
-// warns, lower wins, first-wins ties). A candidate that fails the
-// validity gate still counts as a last-resort winner so the repair tail
-// gets a chance; zero PARSED candidates returns nil and the caller falls
-// to the single-shot ladder.
-func (s *V1Server) selectBestOfN(ctx context.Context, client ai.Client, prompt, modelHint string,
-	callContext ai.CallContext, n int, meta *generationMeta) ([]byte, int) {
+func (s *V1Server) selectBestOfNWithSystemData(ctx context.Context, client ai.Client, prompt, modelHint string,
+	callContext ai.CallContext, n int, meta *generationMeta, systemData string) ([]byte, int) {
 	systemPrompt := s.resolvedGenerateSystemPrompt(ctx, callContext.OrgID)
+	if systemData != "" {
+		systemPrompt += "\n\n" + systemData
+	}
 	type candidate struct {
 		raw      []byte
 		model    string

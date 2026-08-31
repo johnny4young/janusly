@@ -246,6 +246,9 @@ func (s *V1Server) mountRecoveryItemRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /recovery/items/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recoveryItemDetailCore(r, rc, r.PathValue("id")))
 	}))
+	mux.HandleFunc("GET /recovery/items/{id}/children", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.recoveryItemChildrenCore(r, rc, r.PathValue("id")))
+	}))
 	mux.HandleFunc("POST /recovery/items/{id}/{action}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		action := r.PathValue("action")
 		if action == "handoff" {
@@ -254,4 +257,29 @@ func (s *V1Server) mountRecoveryItemRoutes(mux *http.ServeMux) {
 		}
 		writeUnversioned(w, s.recoveryItemActionCore(r, rc, r.PathValue("id"), action))
 	}))
+}
+
+func (s *V1Server) recoveryItemChildrenCore(r *http.Request, rc v1Request, id string) opResult {
+	q := store.New(s.pool)
+	if _, err := q.GetRecoveryItemByID(r.Context(), store.GetRecoveryItemByIDParams{
+		OrgID: rc.orgID, ID: id,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "recovery_item_not_found", "Recovery item not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	rows, err := q.ListRecoveryItemChildren(r.Context(), store.ListRecoveryItemChildrenParams{
+		OrgID: rc.orgID, RecoveryItemID: id,
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	children := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		children = append(children, map[string]any{
+			"id": row.ID, "deadLetterId": row.DeadLetterID, "occurredAt": isoMillis(row.OccurredAt),
+		})
+	}
+	return opOK(map[string]any{"children": children, "total": len(children)})
 }

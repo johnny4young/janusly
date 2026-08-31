@@ -220,20 +220,141 @@ LIMIT sqlc.arg(page_limit);
 
 -- name: TransitionRecoveryCaseState :execrows
 UPDATE recovery_cases
-SET state = sqlc.arg(to_state), updated_at = now(),
+SET state = sqlc.arg(to_state), revision = revision + 1, updated_at = now(),
     resolved_at = CASE WHEN sqlc.arg(terminal)::boolean THEN now() ELSE resolved_at END
 WHERE org_id = $1 AND id = $2 AND state = sqlc.arg(from_state);
+
+-- Governed recovery mutations carry both the state and monotonic revision so
+-- a stale browser or MCP caller cannot approve or apply a different artifact.
+-- name: AdvanceRecoveryCaseStateAtRevision :one
+UPDATE recovery_cases
+SET state = sqlc.arg(to_state), revision = revision + 1,
+    updated_at = sqlc.arg(occurred_at),
+    resolved_at = CASE WHEN sqlc.arg(terminal)::boolean THEN sqlc.arg(occurred_at) ELSE resolved_at END
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id)
+  AND state = sqlc.arg(from_state) AND revision = sqlc.arg(expected_revision)
+RETURNING *;
 
 -- name: InsertRecoveryCaseTransition :execrows
 INSERT INTO recovery_case_transitions (id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-ON CONFLICT (case_id, to_state) DO NOTHING;
+ON CONFLICT (id) DO NOTHING;
 
 -- name: ListRecoveryCaseTransitions :many
 SELECT * FROM recovery_case_transitions
 WHERE org_id = $1 AND case_id = $2
 ORDER BY occurred_at, id
 LIMIT 100;
+
+-- name: GetRecoveryCaseForUpdate :one
+SELECT * FROM recovery_cases WHERE org_id = $1 AND id = $2 FOR UPDATE;
+
+-- Artifacts are content-addressed and append-only. Retrying an identical
+-- operation returns the original immutable row rather than duplicating it.
+-- name: InsertRecoveryCaseArtifact :one
+INSERT INTO recovery_case_artifacts
+  (id, org_id, case_id, kind, payload_json, payload_sha256, actor_kind, actor_id, created_at)
+VALUES
+  ($1, $2, $3, $4, $5, $6, $7, $8, sqlc.arg(created_at))
+ON CONFLICT (org_id, case_id, kind, payload_sha256)
+DO UPDATE SET id = recovery_case_artifacts.id
+RETURNING *;
+
+-- name: GetRecoveryCaseArtifact :one
+SELECT * FROM recovery_case_artifacts
+WHERE org_id = $1 AND case_id = $2 AND id = $3;
+
+-- name: ListRecoveryCaseArtifacts :many
+SELECT * FROM recovery_case_artifacts
+WHERE org_id = $1 AND case_id = $2
+ORDER BY created_at, id
+LIMIT 100;
+
+-- name: InsertRecoveryApprovalGrant :one
+INSERT INTO recovery_approval_grants
+  (id, org_id, case_id, candidate_artifact_id, validation_artifact_id,
+   case_revision, granted_by, expires_at, created_at)
+VALUES
+  ($1, $2, $3, $4, $5, $6, $7, sqlc.arg(expires_at), sqlc.arg(created_at))
+RETURNING *;
+
+-- name: FindActiveRecoveryApprovalGrant :one
+SELECT grant_row.*
+FROM recovery_approval_grants grant_row
+JOIN recovery_cases case_row
+  ON case_row.org_id = grant_row.org_id AND case_row.id = grant_row.case_id
+WHERE grant_row.org_id = sqlc.arg(org_id)
+  AND grant_row.case_id = sqlc.arg(case_id)
+  AND grant_row.candidate_artifact_id = sqlc.arg(candidate_artifact_id)
+  AND grant_row.validation_artifact_id = sqlc.arg(validation_artifact_id)
+  AND grant_row.case_revision = sqlc.arg(case_revision)
+  AND case_row.revision = grant_row.case_revision
+  AND grant_row.consumed_at IS NULL AND grant_row.revoked_at IS NULL
+  AND grant_row.expires_at > sqlc.arg(now_at)
+ORDER BY grant_row.created_at DESC
+LIMIT 1;
+
+-- name: ConsumeRecoveryApprovalGrant :execrows
+UPDATE recovery_approval_grants
+SET consumed_at = sqlc.arg(consumed_at), consumed_by = sqlc.arg(consumed_by)
+WHERE id = sqlc.arg(id) AND org_id = sqlc.arg(org_id)
+  AND case_id = sqlc.arg(case_id) AND case_revision = sqlc.arg(case_revision)
+  AND consumed_at IS NULL AND revoked_at IS NULL
+  AND expires_at > sqlc.arg(consumed_at);
+
+-- name: RevokeRecoveryApprovalGrants :execrows
+UPDATE recovery_approval_grants
+SET revoked_at = sqlc.arg(revoked_at)
+WHERE org_id = sqlc.arg(org_id) AND case_id = sqlc.arg(case_id)
+  AND consumed_at IS NULL AND revoked_at IS NULL;
+
+-- Semantic resolution follows the runtime lock hierarchy: node rows first,
+-- then the run, then sibling cases. These queries are deliberately explicit.
+-- name: LockRunNodesForSemanticResolution :many
+SELECT node.id, node.run_id, node.node_id, node.status, node.state_json,
+       node.attempts, node.started_at, node.finished_at, node.error_json
+FROM run_nodes node
+JOIN runs run ON run.id = node.run_id
+WHERE node.run_id = sqlc.arg(run_id) AND run.org_id = sqlc.arg(org_id)
+ORDER BY node.id
+FOR UPDATE OF node;
+
+-- name: LockRunForSemanticResolution :one
+SELECT id, org_id, status, input_json, replay_mode, semantic_violation_count
+FROM runs
+WHERE id = $1 AND org_id = $2
+FOR UPDATE;
+
+-- name: LockOpenSemanticRecoveryCases :many
+SELECT * FROM recovery_cases
+WHERE org_id = $1 AND run_id = $2 AND source_node_id = $3
+  AND state NOT IN ('verified_recovered', 'recurred', 'accepted_loss', 'abandoned')
+ORDER BY id
+FOR UPDATE;
+
+-- name: ReplaceSemanticRunNodeOutput :execrows
+UPDATE run_nodes AS node
+SET state_json = sqlc.arg(state_json)
+FROM runs AS run
+WHERE node.run_id = sqlc.arg(run_id)
+  AND node.node_id = sqlc.arg(node_id)
+  AND node.status = 'succeeded'
+  AND run.id = node.run_id
+  AND run.org_id = sqlc.arg(org_id);
+
+-- name: CountOpenSemanticRecoveryCases :one
+SELECT count(*)::int AS total_open,
+       count(*) FILTER (WHERE action = 'quarantine')::int AS open_quarantines
+FROM recovery_cases
+WHERE org_id = $1 AND run_id = $2
+  AND state NOT IN ('verified_recovered', 'recurred', 'accepted_loss', 'abandoned');
+
+-- name: UpdateRunSemanticResolution :execrows
+UPDATE runs
+SET status = CASE WHEN sqlc.arg(resume)::boolean THEN 'running' ELSE status END,
+    outcome_status = sqlc.arg(outcome_status)
+WHERE id = sqlc.arg(id) AND org_id = sqlc.arg(org_id)
+  AND status = sqlc.arg(expected_status);
 
 -- name: GetDeadLetterForImpact :one
 SELECT d.org_id, d.created_at, d.replay_claimed_at, d.replayed_at, r.replay_mode
@@ -569,6 +690,13 @@ WHERE org_id = $1 AND workflow_id = $2 AND error_signature = $3
   AND status <> 'resolved' AND last_occurred_at >= $4
 ORDER BY last_occurred_at DESC
 LIMIT 1;
+
+-- name: ListRecoveryItemChildren :many
+SELECT id, dead_letter_id, occurred_at
+FROM recovery_item_children
+WHERE org_id = $1 AND recovery_item_id = $2
+ORDER BY occurred_at DESC
+LIMIT 200;
 
 -- name: InsertRecoveryItemChild :execrows
 INSERT INTO recovery_item_children (id, org_id, recovery_item_id, dead_letter_id, occurred_at)

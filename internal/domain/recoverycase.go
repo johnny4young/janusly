@@ -6,7 +6,10 @@
 // INSIDE the same CAS transaction that writes the receipt.
 package domain
 
-import "slices"
+import (
+	"slices"
+	"unicode/utf8"
+)
 
 // RecoveryCaseStates is the closed lifecycle vocabulary, in order.
 var RecoveryCaseStates = []string{
@@ -58,7 +61,7 @@ var RecoveryCaseEvidenceKinds = map[string]bool{
 	"run": true, "run_node": true, "run_event": true,
 	"semantic_detector": true, "dead_letter": true, "validation": true,
 	"publication": true, "effect": true, "audit": true,
-	"operator_decision": true,
+	"operator_decision": true, "case_artifact": true,
 }
 
 // RecoveryCaseEvidenceRef is one receipt evidence entry.
@@ -114,7 +117,7 @@ func ValidateRecoveryCaseTransitionReceipt(receipt RecoveryCaseTransitionReceipt
 			problems = append(problems, "evidence sha256 must be 64 lowercase hex chars")
 		}
 	}
-	if len(receipt.Reason) > 1000 {
+	if utf8.RuneCountInString(receipt.Reason) > 1000 {
 		problems = append(problems, "reason must be at most 1000 chars")
 	}
 	if receipt.CaseID == "" || len(receipt.CaseID) > 200 {
