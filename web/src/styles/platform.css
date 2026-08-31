@@ -8386,8 +8386,13 @@ button.we-recovery-heatmap__cell:focus-visible {
 }
 
 .ui-button--primary .ai-studio-cost-chip {
-  background: color-mix(in srgb, var(--we-surface-1) 24%, transparent);
-  color: var(--we-surface-1);
+  background: color-mix(in srgb, var(--we-primary) 62%, black);
+  color: var(--we-brand-glyph);
+}
+
+.ui-button--primary:disabled .ai-studio-cost-chip {
+  background: var(--we-surface-1);
+  color: var(--we-ink-soft);
 }
 
 @media (max-width: 640px) {

@@ -21,7 +21,10 @@
   font-weight: 680;
   line-height: 1;
   white-space: nowrap;
-  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease;
+  /* Enabled/disabled state changes must not tween foreground and background
+     independently: midway colors can fall below 4.5:1 even when both settled
+     states pass. Keep motion on non-contrast properties only. */
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 .ui-button:hover:not(:disabled) {
@@ -42,6 +45,17 @@
 .ui-button--primary:hover:not(:disabled) {
   border-color: var(--we-primary-strong);
   background: var(--we-primary-strong);
+}
+
+/* Disabled semantic buttons keep explicit token contrast instead of inheriting
+   the global 50% opacity treatment used by legacy/raw buttons. Opacity blends
+   every descendant into its backdrop and can make small status text fail AA. */
+.ui-button:disabled {
+  opacity: 1;
+  border-color: var(--we-line);
+  background: var(--we-surface-muted);
+  color: var(--we-muted);
+  box-shadow: none;
 }
 
 .ui-button--ghost { border-color: transparent; background: transparent; box-shadow: none; }
