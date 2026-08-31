@@ -203,13 +203,25 @@ test('ai studio against Go: $0 fallback generate, save, run, approve', async ({ 
   const { openWorkflowAiAction, openWorkspaceSection } = await import('./_helpers/workspace-navigation')
   await openWorkflowAiAction(page, 'Workflows')
 
-  // Generate through the AI Studio: with no key the Go backend answers
-  // the deterministic $0 fallback (approval-gate template for this prompt).
+  // Build the contract-first proposal through every authoring stage. With no
+  // key the Go backend answers with the deterministic $0 approval template,
+  // but it must still compile the brief and bind the exact tenant catalog
+  // before an explicit Apply may touch the local canvas.
   await page.locator('.ai-studio-prompt').fill('necesito un flujo con approval humano antes de escribir')
-  await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
+  await page.getByRole('button', { name: 'Compile intent brief', exact: true }).click()
+  await expect(page.getByTestId('intent-brief')).toBeVisible()
+  await page.getByRole('button', { name: 'Build proposal', exact: true }).click()
+  await expect(page.getByTestId('workflow-proposal')).toBeVisible()
+  await expect(page.getByText('Deterministic local proposal')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Apply proposal to draft', exact: true }).click()
   const discard = page.getByRole('button', { name: 'Discard changes', exact: true })
-  if (await discard.isVisible().catch(() => false)) await discard.click()
-  await expect(page.getByText('Starter flow loaded locally').first()).toBeVisible()
+  const replaceConfirmationVisible = await discard
+    .waitFor({ state: 'visible', timeout: 1_500 })
+    .then(() => true)
+    .catch(() => false)
+  if (replaceConfirmationVisible) await discard.click()
+  await expect(page.getByText('Proposal applied to the unsaved draft').first()).toBeVisible()
 
   // The drafted canvas carries the fallback template; save + run it.
   await page.getByRole('button', { name: 'Validate', exact: true }).click()
@@ -473,10 +485,16 @@ test('first kilometer against Go: Home cluster CTA lands on an actionable recove
   await preparePage(page, orgId)
   await page.getByRole('button', { name: 'Home', exact: true }).click()
 
-  // The CTA promises action on the cluster; it must land where the
-  // Recovery dialog lives, never on a read-only copy of the data.
-  await page.getByRole('button', { name: 'Open clusters', exact: true }).click()
-  await expect(page.getByText('Recovery case').first()).toBeVisible()
+  // The shared Operator Brief now routes a failure cluster to the governed
+  // recovery queue instead of a second client-ranked cluster surface. The
+  // target must still lead to a real incident and its actionable dialog.
+  await page.getByRole('button', { name: 'Open recovery queue', exact: true }).click()
+  await expect(page.getByTestId('activity-workspace')).toBeVisible()
+  await expect(page.getByTestId('activity-filter-needs_action')).toHaveAttribute('aria-pressed', 'true')
+  const recoveryRow = page.locator('[data-testid^="activity-row-recovery:"]').first()
+  await expect(recoveryRow).toBeVisible()
+  await recoveryRow.click()
+  await expect(page.getByTestId('activity-recovery-detail')).toBeVisible()
 
   await page.getByRole('button', { name: 'Suggest fix', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Generate suggestion' })).toBeVisible()

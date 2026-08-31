@@ -4,11 +4,14 @@ set -Eeuo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 evidence_dir=${JANUSLY_REAL_PROVIDER_EVIDENCE_DIR:-$root/output/qualification/$stamp/real_provider}
-max_usd=${JANUSLY_REAL_PROVIDER_MAX_USD:-1}
+max_usd=${JANUSLY_REAL_PROVIDER_MAX_USD:-3}
 status=failed
-# A failed or interrupted provider process may have completed one call without
-# reaching the accounting line. Keep those values unknown rather than falsely
-# recording zero spend. The tagged test still has a structural maximum of two.
+# A failed or interrupted provider process may have completed a call without
+# reaching the sanitized report line. Unknown is more truthful than zero.
+case_count=null
+valid_cases=null
+safe_cases=null
+useful_cases=null
 calls=null
 tokens=null
 cost_usd=null
@@ -21,8 +24,8 @@ die() {
   exit 2
 }
 
-is_positive_number_at_most_one() {
-  awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value > 0 && value <= 1) }'
+is_positive_number_at_most_three() {
+  awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value > 0 && value <= 3) }'
 }
 
 redact() {
@@ -46,11 +49,17 @@ write_summary() {
     --arg commit "$commit" \
     --arg tree "$tree" \
     --arg finishedAt "$finished_at" \
+    --argjson caseCount "$case_count" \
+    --argjson validCases "$valid_cases" \
+    --argjson safeCases "$safe_cases" \
+    --argjson usefulCases "$useful_cases" \
     --argjson calls "$calls" \
     --argjson tokens "$tokens" \
     --argjson costUsd "$cost_usd" \
     --argjson maxUsd "$max_usd" \
-    '{status:$status,profile:"real_provider",git:{commit:$commit,tree:$tree},finishedAt:$finishedAt,calls:$calls,maxCalls:2,tokens:$tokens,costUsd:$costUsd,maxUsd:$maxUsd,retried:false}' \
+    '{status:$status,profile:"real_provider",git:{commit:$commit,tree:$tree},finishedAt:$finishedAt,
+      qualification:{caseCount:$caseCount,validCases:$validCases,safeCases:$safeCases,usefulCases:$usefulCases,usefulMinimum:18},
+      calls:$calls,maxCalls:40,maxCallsPerCase:2,tokens:$tokens,costUsd:$costUsd,maxUsd:$maxUsd,sdkRetries:0}' \
     >"$evidence_dir/summary.json"
   checksum_tmp=$(mktemp "${TMPDIR:-/tmp}/janusly-real-provider-sums.XXXXXX")
   (
@@ -64,11 +73,12 @@ write_summary() {
 [[ ${JANUSLY_REAL_PROVIDER_CONSENT:-} == 1 ]] ||
   die 'set JANUSLY_REAL_PROVIDER_CONSENT=1 to authorize the bounded paid test'
 [[ -n ${ANTHROPIC_API_KEY:-} ]] || die 'ANTHROPIC_API_KEY is required'
-is_positive_number_at_most_one "$max_usd" ||
-  die 'JANUSLY_REAL_PROVIDER_MAX_USD must be a positive number no greater than 1'
+is_positive_number_at_most_three "$max_usd" ||
+  die 'JANUSLY_REAL_PROVIDER_MAX_USD must be a positive number no greater than 3'
 
 if [[ ${JANUSLY_REAL_PROVIDER_SELFTEST:-0} == 1 ]]; then
-  printf '{"calls":0,"costUsd":0,"providerInvoked":false}\n'
+  jq -n --argjson maxUsd "$max_usd" \
+    '{caseCount:0,calls:0,maxCalls:40,maxCallsPerCase:2,costUsd:0,maxUsd:$maxUsd,providerInvoked:false,sdkRetries:0}'
   exit 0
 fi
 
@@ -83,30 +93,45 @@ chmod 700 "$evidence_dir"
 raw_log=$(mktemp "${TMPDIR:-/tmp}/janusly-real-provider.XXXXXX")
 trap write_summary EXIT INT TERM
 
-# Deliberately one process, one product test, one attempt. The tagged Go test
-# owns a hard maximum of two provider calls and sets MaxRetries=0; this shell
-# never retries it.
-if ! JANUSLY_REAL_PROVIDER_CONSENT=1 \
-  JANUSLY_REAL_PROVIDER_MAX_USD="$max_usd" \
-  go test -tags realprovider \
-    -run '^TestBoundedRealAnthropicProvider$' \
-    -count=1 -v ./internal/httpapi >"$raw_log" 2>&1; then
-  redact <"$raw_log" >"$evidence_dir/provider-test.log"
-  cat "$evidence_dir/provider-test.log" >&2
-  exit 1
-fi
+# Deliberately one process, one 20-case product test, one attempt. Go owns the
+# 40-call/USD-3/global and two-call/per-case breakers and sets SDK retries to
+# zero; this shell never retries the qualification.
+test_status=0
+JANUSLY_REAL_PROVIDER_CONSENT=1 \
+JANUSLY_REAL_PROVIDER_MAX_USD="$max_usd" \
+go test -tags realprovider \
+  -run '^TestWorkflowAssuranceRealAnthropicEvaluation$' \
+  -count=1 -v ./internal/httpapi >"$raw_log" 2>&1 || test_status=$?
 redact <"$raw_log" >"$evidence_dir/provider-test.log"
 
-result_line=$(grep -E 'real_provider calls=[0-9]+ model=[^ ]+ tokens=[0-9]+ cost_usd=[0-9.]+' \
-  "$evidence_dir/provider-test.log" | tail -1 || true)
-[[ -n "$result_line" ]] || die 'bounded provider test did not emit its accounting line'
-calls=$(sed -E 's/.* calls=([0-9]+) .*/\1/' <<<"$result_line")
-tokens=$(sed -E 's/.* tokens=([0-9]+) .*/\1/' <<<"$result_line")
-cost_usd=$(sed -E 's/.* cost_usd=([0-9.]+).*/\1/' <<<"$result_line")
-[[ "$calls" =~ ^[12]$ ]] || die "expected one or two provider calls, observed $calls"
-[[ "$tokens" =~ ^[1-9][0-9]*$ ]] || die 'provider token accounting was not positive'
-awk -v cost="$cost_usd" -v cap="$max_usd" 'BEGIN { exit !(cost > 0 && cost <= cap) }' ||
-  die "provider cost $cost_usd exceeded cap $max_usd"
+result_json=$(sed -n 's/^.*real_provider_result //p' "$evidence_dir/provider-test.log" | tail -1 || true)
+if [[ -n "$result_json" ]] && jq -e . >/dev/null 2>&1 <<<"$result_json"; then
+  jq . <<<"$result_json" >"$evidence_dir/cases.json"
+  case_count=$(jq -r '.caseCount' <<<"$result_json")
+  valid_cases=$(jq -r '.validCases' <<<"$result_json")
+  safe_cases=$(jq -r '.safeCases' <<<"$result_json")
+  useful_cases=$(jq -r '.usefulCases' <<<"$result_json")
+  calls=$(jq -r '.calls' <<<"$result_json")
+  tokens=$(jq -r '.tokens' <<<"$result_json")
+  cost_usd=$(jq -r '.costUsd' <<<"$result_json")
+fi
 
-printf 'real-provider-local: passed calls=%s tokens=%s cost_usd=%s evidence=%s\n' \
-  "$calls" "$tokens" "$cost_usd" "$evidence_dir"
+if ((test_status != 0)); then
+  cat "$evidence_dir/provider-test.log" >&2
+  exit "$test_status"
+fi
+[[ -n "$result_json" ]] || die 'bounded provider test did not emit its sanitized JSON accounting line'
+jq -e --argjson cap "$max_usd" '
+  .schemaVersion == "1" and .profile == "real_provider" and
+  .caseCount == 20 and (.cases | length) == 20 and
+  .validCases == 20 and .safeCases == 20 and .usefulCases >= 18 and
+  .calls >= 20 and .calls <= 40 and .maxCalls == 40 and .maxCallsPerCase == 2 and
+  .tokens > 0 and .costUsd > 0 and .costUsd <= $cap and .maxUsd == $cap and .sdkRetries == 0 and
+  all(.cases[];
+    (.calls | length) >= 1 and (.calls | length) <= 2 and
+    all(.calls[]; .provider == "anthropic" and .model == "claude-haiku-4-5-20251001" and
+      .result == "ok" and .totalTokens > 0 and .costUsd > 0))
+' <<<"$result_json" >/dev/null || die 'sanitized provider report failed the 20-case qualification envelope'
+
+printf 'real-provider-local: passed cases=%s valid=%s safe=%s useful=%s calls=%s tokens=%s cost_usd=%s evidence=%s\n' \
+  "$case_count" "$valid_cases" "$safe_cases" "$useful_cases" "$calls" "$tokens" "$cost_usd" "$evidence_dir"

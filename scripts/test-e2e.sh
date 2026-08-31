@@ -55,10 +55,16 @@ curl --fail --silent "$origin/healthz" >/dev/null
 (cd "$root" && JANUSLY_SEED_API="$origin" JANUSLY_SEED_ORG=default go run ./cmd/seed)
 
 cd "$root/web"
+playwright=(./node_modules/.bin/playwright)
+if [[ ! -x ${playwright[0]} ]]; then
+  # Installation remains pnpm-owned; this fallback only preserves the
+  # documented nested-worktree command when node_modules is not materialized.
+  read -r -a playwright <<<"$pnpm_command exec playwright"
+fi
 PLAYWRIGHT_SKIP_WEB_SERVER=1 \
 JANUSLY_SMOKE=1 \
 JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
 E2E_API_URL="$origin" \
 E2E_UPSTREAM_HOST=host.docker.internal \
 E2E_UPSTREAM_BIND=0.0.0.0 \
-  $pnpm_command exec playwright test e2e/janusly-smoke.spec.ts --project=chromium
+  "${playwright[@]}" test e2e/janusly-smoke.spec.ts --project=chromium
