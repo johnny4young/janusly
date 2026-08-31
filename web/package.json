@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "node scripts/build.mjs",
     "preview": "vite preview",
-    "lint": "oxlint --max-warnings 0 src e2e performance vite.config.ts vitest.browser.config.ts playwright.config.ts playwright.performance.config.ts && node scripts/check-i18n-casts.mjs && node scripts/check-css-classes.mjs && node scripts/check-ui-legacy.mjs",
+    "lint": "oxlint --max-warnings 0 src e2e performance vite.config.ts vitest.browser.config.ts playwright.config.ts playwright.performance.config.ts && node scripts/check-i18n-casts.mjs && node scripts/check-css-classes.mjs && node scripts/check-ui-legacy.mjs && node scripts/check-e2e-selectors.mjs",
     "typecheck:app": "tsc --noEmit -p tsconfig.app.json",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit",
     "test": "vitest run",

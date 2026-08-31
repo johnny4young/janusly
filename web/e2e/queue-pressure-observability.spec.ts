@@ -62,7 +62,7 @@ async function hideUnrelatedOverlays(page: Page): Promise<void> {
       '.toast-stack',
       '.toast',
       '.we-onboarding-banner',
-      '.we-budget-blocked-banner',
+      '.we-budget-banner',
       '[data-testid="command-palette"]',
     ]) {
       for (const element of document.querySelectorAll<HTMLElement>(selector)) {
