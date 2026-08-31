@@ -15,6 +15,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -36,7 +37,13 @@ var (
 	errOrganizationOwnerRequired  = errors.New("organization owner required")
 	errOrganizationOwnerSame      = errors.New("organization owner unchanged")
 	errOwnerTargetNotFound        = errors.New("owner target not found")
+	errPendingInvitationExists    = errors.New("pending invitation exists")
+	errInvitationMemberExists     = errors.New("invitation member exists")
 )
+
+func invitationLifecycleLockKey(orgID, email string) string {
+	return strconv.Itoa(len(orgID)) + ":" + orgID + ":" + strings.ToLower(strings.TrimSpace(email))
+}
 
 // roleDefinedForOrg accepts built-ins or org-defined custom roles.
 func (s *V1Server) roleDefinedForOrg(r *http.Request, orgID, roleName string) (bool, error) {
@@ -118,37 +125,42 @@ func (s *V1Server) inviteMemberCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusBadRequest, "email_invalid", "email format is invalid", nil)
 	}
 	ctx := r.Context()
-	q := store.New(s.pool)
-	if _, err := q.FindPendingInvitation(ctx, store.FindPendingInvitationParams{
-		OrgID: rc.orgID, Email: email,
-	}); err == nil {
-		return opError(http.StatusConflict, "invitation_pending_exists",
-			"Invitation already pending for this email", map[string]any{"email": email})
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
-	}
-	if _, err := q.FindOrgMemberRowByEmail(ctx, store.FindOrgMemberRowByEmailParams{
-		OrgID: rc.orgID, Email: pgtype.Text{String: email, Valid: true},
-	}); err == nil {
-		return opError(http.StatusConflict, "member_exists",
-			"Member already exists for this org", map[string]any{"email": email})
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
-	}
-
 	inviteID := s.newID()
 	err = audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
-		if err := store.New(tx).InsertInvitation(ctx, store.InsertInvitationParams{
+		q := store.New(tx)
+		if err := q.LockInvitationLifecycle(ctx, invitationLifecycleLockKey(rc.orgID, email)); err != nil {
+			return err
+		}
+		if _, err := q.FindOrgMemberRowByEmail(ctx, store.FindOrgMemberRowByEmailParams{
+			OrgID: rc.orgID, Email: pgtype.Text{String: email, Valid: true},
+		}); err == nil {
+			return errInvitationMemberExists
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		rows, err := q.CreateOrReactivateInvitation(ctx, store.CreateOrReactivateInvitationParams{
 			ID: inviteID, OrgID: rc.orgID, Email: email, Role: roleName,
 			InvitedBy: pgtype.Text{String: rc.userID, Valid: true},
-		}); err != nil {
+		})
+		if err != nil {
 			return err
+		}
+		if rows != 1 {
+			return errPendingInvitationExists
 		}
 		return txAudit("invitation.created", audit.Options{
 			TargetType: "invitation", TargetID: inviteID,
 			Metadata: map[string]any{"email": email, "role": roleName},
 		})
 	})
+	if errors.Is(err, errPendingInvitationExists) {
+		return opError(http.StatusConflict, "invitation_pending_exists",
+			"Invitation already pending for this email", map[string]any{"email": email})
+	}
+	if errors.Is(err, errInvitationMemberExists) {
+		return opError(http.StatusConflict, "member_exists",
+			"Member already exists for this org", map[string]any{"email": email})
+	}
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
@@ -161,7 +173,20 @@ func (s *V1Server) revokeInvitationCore(r *http.Request, rc v1Request, id string
 	}
 	var revoked int64
 	err := audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
-		rows, err := store.New(tx).RevokePendingInvitation(r.Context(), store.RevokePendingInvitationParams{
+		q := store.New(tx)
+		target, err := q.GetOrgInvitationLockTarget(r.Context(), store.GetOrgInvitationLockTargetParams{
+			ID: id, OrgID: rc.orgID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errInvitationUnavailable
+		}
+		if err != nil {
+			return err
+		}
+		if err := q.LockInvitationLifecycle(r.Context(), invitationLifecycleLockKey(target.OrgID, target.Email)); err != nil {
+			return err
+		}
+		rows, err := q.RevokePendingInvitation(r.Context(), store.RevokePendingInvitationParams{
 			ID: id, OrgID: rc.orgID,
 		})
 		if err != nil {
@@ -169,10 +194,13 @@ func (s *V1Server) revokeInvitationCore(r *http.Request, rc v1Request, id string
 		}
 		revoked = rows
 		if rows == 0 {
-			return nil // 404 outside the tx; nothing to audit
+			return errInvitationUnavailable
 		}
 		return txAudit("invitation.revoked", audit.Options{TargetType: "invitation", TargetID: id})
 	})
+	if errors.Is(err, errInvitationUnavailable) {
+		return opError(http.StatusNotFound, "members_invitation_not_found", "invitation not found or not pending", nil)
+	}
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}

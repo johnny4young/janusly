@@ -3,9 +3,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -52,6 +54,23 @@ func TestMemberLifecycle(t *testing.T) {
 	}
 	if res := h.call("POST", "/members/invitations/"+inviteID+"/revoke", nil, ""); res.status != 404 {
 		t.Fatalf("double revoke must 404: %+v", res.body)
+	}
+	reactivated := h.call("POST", "/members/invite", map[string]any{
+		"email": "ada@x.com", "role": "viewer",
+	}, "")
+	if reactivated.status != 200 || reactivated.body["status"] != "pending" || reactivated.body["id"] == inviteID {
+		t.Fatalf("revoked invitation must reactivate with a new id: %d %+v", reactivated.status, reactivated.body)
+	}
+	var currentInvitationID, currentInvitationRole, currentInvitationStatus string
+	if err := pool.QueryRow(ctx, `SELECT id, role, status FROM invitations
+		WHERE org_id = $1 AND email = 'ada@x.com'`, h.org).Scan(
+		&currentInvitationID, &currentInvitationRole, &currentInvitationStatus,
+	); err != nil {
+		t.Fatalf("read reactivated invitation: %v", err)
+	}
+	if currentInvitationID != reactivated.body["id"] || currentInvitationRole != "viewer" || currentInvitationStatus != "pending" {
+		t.Fatalf("reactivated invitation mismatch: id=%s role=%s status=%s body=%+v",
+			currentInvitationID, currentInvitationRole, currentInvitationStatus, reactivated.body)
 	}
 
 	// Role change: self-block (audited), phantom member 404, success.
@@ -107,6 +126,73 @@ func TestMemberLifecycle(t *testing.T) {
 		if row["userId"] == "u-existing" {
 			t.Fatal("removed member still listed")
 		}
+	}
+}
+
+func TestConcurrentMemberInvitesHaveOneAtomicWinner(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	type inviteResult struct {
+		status int
+		body   map[string]any
+		err    error
+	}
+	results := make(chan inviteResult, 2)
+	start := make(chan struct{})
+	var group sync.WaitGroup
+	for range 2 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			raw, _ := json.Marshal(map[string]any{"email": "race@example.com", "role": "editor"})
+			req, err := http.NewRequest(http.MethodPost, h.server.URL+"/members/invite", bytes.NewReader(raw))
+			if err != nil {
+				results <- inviteResult{err: err}
+				return
+			}
+			req.Header.Set("content-type", "application/json")
+			req.Header.Set("x-org-id", h.org)
+			req.Header.Set("x-user-id", "api-tester")
+			response, err := h.server.Client().Do(req)
+			if err != nil {
+				results <- inviteResult{err: err}
+				return
+			}
+			defer response.Body.Close()
+			var body map[string]any
+			err = json.NewDecoder(response.Body).Decode(&body)
+			results <- inviteResult{status: response.StatusCode, body: body, err: err}
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(results)
+
+	statuses := map[int]int{}
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent invite request: %v", result.err)
+		}
+		statuses[result.status]++
+		if result.status == http.StatusConflict && result.body["code"] != "invitation_pending_exists" {
+			t.Fatalf("loser must expose the bounded conflict: %+v", result.body)
+		}
+	}
+	if statuses[http.StatusOK] != 1 || statuses[http.StatusConflict] != 1 {
+		t.Fatalf("expected one invite winner and one conflict: %+v", statuses)
+	}
+	var pendingRows, auditRows int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM invitations
+		WHERE org_id = $1 AND email = 'race@example.com' AND status = 'pending'`, h.org).Scan(&pendingRows); err != nil {
+		t.Fatalf("count pending invitations: %v", err)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND action = 'invitation.created'`, h.org).Scan(&auditRows); err != nil {
+		t.Fatalf("count invitation audits: %v", err)
+	}
+	if pendingRows != 1 || auditRows != 1 {
+		t.Fatalf("atomic invite winner not preserved: pending=%d audits=%d", pendingRows, auditRows)
 	}
 }
 

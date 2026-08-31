@@ -29,6 +29,44 @@ func (q *Queries) CountMembersInRole(ctx context.Context, arg CountMembersInRole
 	return column_1, err
 }
 
+const createOrReactivateInvitation = `-- name: CreateOrReactivateInvitation :execrows
+INSERT INTO invitations (id, org_id, email, role, invited_by)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (org_id, email) DO UPDATE
+SET id = EXCLUDED.id,
+    role = EXCLUDED.role,
+    invited_by = EXCLUDED.invited_by,
+    status = 'pending',
+    accepted_at = NULL,
+    created_at = now()
+WHERE invitations.status <> 'pending'
+`
+
+type CreateOrReactivateInvitationParams struct {
+	ID        string
+	OrgID     string
+	Email     string
+	Role      string
+	InvitedBy pgtype.Text
+}
+
+// One current row exists per org/email. A revoked or accepted row can be
+// reactivated with a new opaque id; an already-pending row produces zero
+// affected rows so concurrent inviters have one deterministic winner.
+func (q *Queries) CreateOrReactivateInvitation(ctx context.Context, arg CreateOrReactivateInvitationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, createOrReactivateInvitation,
+		arg.ID,
+		arg.OrgID,
+		arg.Email,
+		arg.Role,
+		arg.InvitedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteOrgMember = `-- name: DeleteOrgMember :execrows
 DELETE FROM org_members WHERE org_id = $1 AND user_id = $2
   AND user_id <> coalesce((SELECT owner_user_id FROM organizations WHERE id = $1), '')
@@ -112,21 +150,50 @@ func (q *Queries) FindOrgMemberRowByEmail(ctx context.Context, arg FindOrgMember
 	return id, err
 }
 
-const findPendingInvitation = `-- name: FindPendingInvitation :one
-SELECT id FROM invitations
-WHERE org_id = $1 AND email = $2 AND status = 'pending'
+const getIdentityInvitationLockTarget = `-- name: GetIdentityInvitationLockTarget :one
+SELECT org_id, email FROM invitations
+WHERE id = $1 AND lower(email) = lower($2::text)
 `
 
-type FindPendingInvitationParams struct {
+type GetIdentityInvitationLockTargetParams struct {
+	ID    string
+	Email string
+}
+
+type GetIdentityInvitationLockTargetRow struct {
 	OrgID string
 	Email string
 }
 
-func (q *Queries) FindPendingInvitation(ctx context.Context, arg FindPendingInvitationParams) (string, error) {
-	row := q.db.QueryRow(ctx, findPendingInvitation, arg.OrgID, arg.Email)
-	var id string
-	err := row.Scan(&id)
-	return id, err
+// Non-locking targets let every lifecycle operation derive the same advisory
+// key before taking the row lock, preventing lock-order inversions.
+func (q *Queries) GetIdentityInvitationLockTarget(ctx context.Context, arg GetIdentityInvitationLockTargetParams) (GetIdentityInvitationLockTargetRow, error) {
+	row := q.db.QueryRow(ctx, getIdentityInvitationLockTarget, arg.ID, arg.Email)
+	var i GetIdentityInvitationLockTargetRow
+	err := row.Scan(&i.OrgID, &i.Email)
+	return i, err
+}
+
+const getOrgInvitationLockTarget = `-- name: GetOrgInvitationLockTarget :one
+SELECT org_id, email FROM invitations
+WHERE id = $1 AND org_id = $2
+`
+
+type GetOrgInvitationLockTargetParams struct {
+	ID    string
+	OrgID string
+}
+
+type GetOrgInvitationLockTargetRow struct {
+	OrgID string
+	Email string
+}
+
+func (q *Queries) GetOrgInvitationLockTarget(ctx context.Context, arg GetOrgInvitationLockTargetParams) (GetOrgInvitationLockTargetRow, error) {
+	row := q.db.QueryRow(ctx, getOrgInvitationLockTarget, arg.ID, arg.OrgID)
+	var i GetOrgInvitationLockTargetRow
+	err := row.Scan(&i.OrgID, &i.Email)
+	return i, err
 }
 
 const getOrgMembership = `-- name: GetOrgMembership :one
@@ -273,30 +340,6 @@ func (q *Queries) InsertInstalledPlugin(ctx context.Context, arg InsertInstalled
 		arg.PluginID,
 		arg.ConfigJson,
 		arg.InstalledBy,
-	)
-	return err
-}
-
-const insertInvitation = `-- name: InsertInvitation :exec
-INSERT INTO invitations (id, org_id, email, role, invited_by)
-VALUES ($1, $2, $3, $4, $5)
-`
-
-type InsertInvitationParams struct {
-	ID        string
-	OrgID     string
-	Email     string
-	Role      string
-	InvitedBy pgtype.Text
-}
-
-func (q *Queries) InsertInvitation(ctx context.Context, arg InsertInvitationParams) error {
-	_, err := q.db.Exec(ctx, insertInvitation,
-		arg.ID,
-		arg.OrgID,
-		arg.Email,
-		arg.Role,
-		arg.InvitedBy,
 	)
 	return err
 }
@@ -628,6 +671,18 @@ func (q *Queries) ListUserMemberships(ctx context.Context, userID string) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockInvitationLifecycle = `-- name: LockInvitationLifecycle :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Invitation create, accept, and revoke take this transaction-scoped lock
+// before touching the row. The length-prefixed org/email key is constructed by
+// the HTTP boundary, and hashtextextended turns it into the bigint lock id.
+func (q *Queries) LockInvitationLifecycle(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockInvitationLifecycle, lockKey)
+	return err
 }
 
 const lockOrganizationOwner = `-- name: LockOrganizationOwner :one

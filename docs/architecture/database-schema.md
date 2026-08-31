@@ -32,6 +32,12 @@ triggers protect the matching `org_members` row from role/user-id mutation or
 deletion across every write path; the HTTP layer adds owner-specific errors and
 an audited transactional transfer operation.
 
+`invitations (org_id, email)` is one current lifecycle row, not the immutable
+history. The unique key plus a shared transaction advisory lock serializes
+create, accept, and revoke. Reactivating an accepted or revoked invitation
+replaces its opaque id and resets it to pending; audit rows retain prior
+transitions.
+
 ## Tenant-scoped substring search
 
 Active workflow name/id and non-validation recovery node id/run id/error-message

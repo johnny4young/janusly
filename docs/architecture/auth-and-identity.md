@@ -20,5 +20,13 @@ owner can transfer ownership to an existing member; transfer promotes that
 member to built-in `admin` in the same audited transaction and leaves the
 previous owner as an admin.
 
+Member invitations are one governed lifecycle per organization and normalized
+email. Create, accept, and revoke derive the same transaction-scoped PostgreSQL
+advisory key before taking row locks, so concurrent requests have one winner.
+An accepted or revoked row may be reactivated with a fresh opaque invitation id
+after membership checks pass; an already-pending row remains a bounded `409`.
+The current-row record is replaced on reactivation while immutable audit events
+preserve the lifecycle history.
+
 WorkOS SSO and SCIM webhook handling are signed, idempotent, and audited.
 Production behavior is selected only by `JANUSLY_ENV=production`.

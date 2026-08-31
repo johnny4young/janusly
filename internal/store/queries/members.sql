@@ -58,13 +58,26 @@ SELECT id, org_id, email, role, invited_by, status, accepted_at, created_at
 FROM invitations WHERE org_id = $1
 ORDER BY created_at DESC, id;
 
--- name: FindPendingInvitation :one
-SELECT id FROM invitations
-WHERE org_id = $1 AND email = $2 AND status = 'pending';
+-- Invitation create, accept, and revoke take this transaction-scoped lock
+-- before touching the row. The length-prefixed org/email key is constructed by
+-- the HTTP boundary, and hashtextextended turns it into the bigint lock id.
+-- name: LockInvitationLifecycle :exec
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
 
--- name: InsertInvitation :exec
+-- One current row exists per org/email. A revoked or accepted row can be
+-- reactivated with a new opaque id; an already-pending row produces zero
+-- affected rows so concurrent inviters have one deterministic winner.
+-- name: CreateOrReactivateInvitation :execrows
 INSERT INTO invitations (id, org_id, email, role, invited_by)
-VALUES ($1, $2, $3, $4, $5);
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (org_id, email) DO UPDATE
+SET id = EXCLUDED.id,
+    role = EXCLUDED.role,
+    invited_by = EXCLUDED.invited_by,
+    status = 'pending',
+    accepted_at = NULL,
+    created_at = now()
+WHERE invitations.status <> 'pending';
 
 -- Identity surfaces: the caller's memberships with org names,
 -- profile upsert, the invitation-accept CAS, and the plugin stub row.
@@ -137,6 +150,16 @@ WHERE id = $1
   AND lower(email) = lower(sqlc.arg(email)::text)
   AND status = 'pending'
 FOR UPDATE;
+
+-- Non-locking targets let every lifecycle operation derive the same advisory
+-- key before taking the row lock, preventing lock-order inversions.
+-- name: GetIdentityInvitationLockTarget :one
+SELECT org_id, email FROM invitations
+WHERE id = $1 AND lower(email) = lower(sqlc.arg(email)::text);
+
+-- name: GetOrgInvitationLockTarget :one
+SELECT org_id, email FROM invitations
+WHERE id = $1 AND org_id = $2;
 
 -- name: MarkIdentityInvitationAccepted :execrows
 UPDATE invitations

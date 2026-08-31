@@ -180,11 +180,24 @@ func (s *V1Server) invitationAcceptCore(r *http.Request, rc identityRequest) opR
 	}
 	invitationID = strings.TrimSpace(invitationID)
 	ctx := r.Context()
+	normalizedEmail := strings.ToLower(strings.TrimSpace(identity.Email))
 	acceptedOrgID := ""
 	err := audit.WithIdentityAuditTx(ctx, s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
 		q := store.New(tx)
+		target, err := q.GetIdentityInvitationLockTarget(ctx, store.GetIdentityInvitationLockTargetParams{
+			ID: invitationID, Email: normalizedEmail,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errInvitationUnavailable
+		}
+		if err != nil {
+			return err
+		}
+		if err := q.LockInvitationLifecycle(ctx, invitationLifecycleLockKey(target.OrgID, target.Email)); err != nil {
+			return err
+		}
 		invitation, err := q.LockPendingIdentityInvitation(ctx, store.LockPendingIdentityInvitationParams{
-			ID: invitationID, Email: strings.ToLower(strings.TrimSpace(identity.Email)),
+			ID: invitationID, Email: normalizedEmail,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errInvitationUnavailable
@@ -200,13 +213,13 @@ func (s *V1Server) invitationAcceptCore(r *http.Request, rc identityRequest) opR
 			return errInvitationUnavailable
 		}
 		if _, err := q.UpsertIdentityProfile(ctx, store.UpsertIdentityProfileParams{
-			ID: identity.UserID, Name: pgtype.Text{}, Email: identityText(strings.ToLower(strings.TrimSpace(identity.Email))),
+			ID: identity.UserID, Name: pgtype.Text{}, Email: identityText(normalizedEmail),
 		}); err != nil {
 			return err
 		}
 		if err := q.UpsertInvitedIdentityMembership(ctx, store.UpsertInvitedIdentityMembershipParams{
 			ID: s.newID(), OrgID: invitation.OrgID, UserID: identity.UserID,
-			Email: identityText(strings.ToLower(strings.TrimSpace(identity.Email))), Role: invitation.Role,
+			Email: identityText(normalizedEmail), Role: invitation.Role,
 			InvitedBy: invitation.InvitedBy,
 		}); err != nil {
 			return err
