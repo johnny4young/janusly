@@ -232,7 +232,7 @@ func TestEveryWebPathTraversesViteDevProxy(t *testing.T) {
 		t.Fatal("apiRoutePattern not found in Vite config — cannot verify development route parity")
 	}
 	prefixes := map[string]bool{}
-	for _, prefix := range strings.Split(match[1], "|") {
+	for prefix := range strings.SplitSeq(match[1], "|") {
 		if prefix == "" || strings.ContainsAny(prefix, `\\?*+[]{}()`) {
 			t.Fatalf("Vite API prefix %q is not a literal top-level path segment", prefix)
 		}
