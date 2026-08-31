@@ -61,3 +61,84 @@ groups:
         annotations:
           summary: Workflow task failures were observed
           description: Janusly recorded one or more task failures during the last five minutes.
+
+  - name: janusly-background-loops
+    rules:
+      # A supervised loop can die without making the HTTP process unhealthy.
+      # Alert on the age of its last successful whole pass, with thresholds
+      # grouped by the runtime cadence rather than one misleading global age.
+      - alert: JanuslyFastSweepStalled
+        expr: |
+          time() - janusly_sweep_last_success_timestamp_seconds{job="janusly",sweep=~"replay-campaign-pump|run-summary-memory|schedule-sweep|subworkflow-terminal-reconciler|upstream-health|stalled-node-reaper"} > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: A frequent Janusly background loop stopped completing passes
+          description: '{{ $labels.sweep }} has not completed a successful pass in five minutes.'
+
+      - alert: JanuslyAutoHealingSweepStalled
+        expr: |
+          time() - janusly_sweep_last_success_timestamp_seconds{job="janusly",sweep="auto-healing"} > 1200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: The Janusly auto-healing loop stopped completing passes
+          description: Auto-healing has not completed a successful pass in twenty minutes.
+
+      - alert: JanuslyHourlySweepStalled
+        expr: |
+          time() - janusly_sweep_last_success_timestamp_seconds{job="janusly",sweep=~"retention|memory-consent-purge"} > 10800
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: An hourly Janusly background loop stopped completing passes
+          description: '{{ $labels.sweep }} has not completed a successful pass in three hours.'
+
+      # It is legitimate for an hourly loop to have no success series just
+      # after a deploy. Once uptime exceeds the slowest cadence plus margin,
+      # each scrape target must publish all nine closed-catalog labels. Keep
+      # instance in the vector match so multiple replicas do not false-page.
+      - alert: JanuslySweepNeverRan
+        expr: |
+          (time() - process_start_time_seconds{job="janusly"} > 5400)
+          unless on(job, instance)
+          count by (job, instance) (janusly_sweep_last_success_timestamp_seconds{job="janusly"}) == 9
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: A Janusly background loop never reported a successful pass
+          description: The process has been up long enough for every loop to tick, but fewer than nine supervised loops publish liveness.
+
+      - alert: JanuslySweepFailing
+        expr: sum by (instance, sweep) (increase(janusly_sweep_failures_total{job="janusly"}[15m])) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: A Janusly background loop keeps failing
+          description: '{{ $labels.sweep }} returned an error on more than three passes in fifteen minutes.'
+
+  - name: janusly-queue-latency
+    rules:
+      # Depth says how much work exists; eligible-to-claim wait says whether
+      # workers keep up. Retry backoff is excluded by the durable queue clock.
+      - alert: JanuslyQueueWaitDegraded
+        expr: histogram_quantile(0.95, sum by (le) (rate(janusly_queue_wait_seconds_bucket{job="janusly"}[5m]))) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Janusly work waits too long for a worker
+          description: Eligible-to-claimed p95 queue wait exceeded thirty seconds for five minutes.
+
+      - alert: JanuslyQueueWaitCritical
+        expr: histogram_quantile(0.95, sum by (le) (rate(janusly_queue_wait_seconds_bucket{job="janusly"}[5m]))) > 300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Janusly work is not being claimed promptly
+          description: Eligible-to-claimed p95 queue wait exceeded five minutes; workers may be saturated or unavailable.

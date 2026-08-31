@@ -183,6 +183,9 @@ func (e *Engine) claimBatch(ctx context.Context, batch int32) ([]ClaimedNode, er
 		return nil, err
 	}
 	metricClaims.Add(float64(len(rows)))
+	for _, row := range rows {
+		metricQueueWait.Observe(row.QueueWaitSeconds)
+	}
 	// The contract appends node.running right after the claim wins
 	// (runtime.ts). Best-effort like its await-outside-tx posture: event
 	// telemetry never blocks execution, and the executor's own terminal

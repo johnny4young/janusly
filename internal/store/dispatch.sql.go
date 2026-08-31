@@ -592,6 +592,7 @@ SELECT rn.id
 FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id
 WHERE rn.status = 'queued' AND r.status = 'running'
+  AND rn.enqueued_at <= now()
   AND NOT EXISTS (
     SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = rn.id AND w.wake_at > now()
@@ -627,18 +628,22 @@ SET status = 'running', started_at = now(),
     queue_publication_repair_after = NULL
 WHERE id = ANY($1::text[])
   AND status = 'queued'
+  AND enqueued_at <= now()
   AND NOT EXISTS (
     SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = run_nodes.id AND w.wake_at > now()
   )
-RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt
+RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt,
+  GREATEST(EXTRACT(EPOCH FROM clock_timestamp() - enqueued_at), 0)::float8
+    AS queue_wait_seconds
 `
 
 type MarkLockedNodesRunningRow struct {
-	ID      string
-	RunID   string
-	NodeID  string
-	Attempt int32
+	ID               string
+	RunID            string
+	NodeID           string
+	Attempt          int32
+	QueueWaitSeconds float64
 }
 
 // A successful Go claim consumes this generation's rollback marker.
@@ -656,6 +661,7 @@ func (q *Queries) MarkLockedNodesRunning(ctx context.Context, ids []string) ([]M
 			&i.RunID,
 			&i.NodeID,
 			&i.Attempt,
+			&i.QueueWaitSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -678,11 +684,12 @@ func (q *Queries) NotifyRunEvents(ctx context.Context, runID string) error {
 
 const queryQueueHealth = `-- name: QueryQueueHealth :one
 WITH eligible AS (
-  SELECT rn.id, GREATEST(rn.enqueued_at, COALESCE(w.wake_at, rn.enqueued_at)) AS eligible_at
+  SELECT rn.id, rn.enqueued_at AS eligible_at
   FROM run_nodes rn
   JOIN runs r ON r.id = rn.run_id
   LEFT JOIN run_wakeups w ON w.run_node_id = rn.id
   WHERE rn.status = 'queued' AND r.status = 'running'
+    AND rn.enqueued_at <= now()
     AND (w.wake_at IS NULL OR w.wake_at <= now())
 )
 SELECT
@@ -697,9 +704,9 @@ type QueryQueueHealthRow struct {
 	OldestEligibleAt interface{}
 }
 
-// enqueued_at is the durable queue clock. A retry remains in `queued` while
-// its wake-up gates eligibility, so queue age starts from whichever instant
-// is later: entry into the queue or the due clock.
+// enqueued_at is the durable eligibility clock. Retry requeues persist their
+// wake_at there, so cleanup of a due run_wakeups row cannot make queue age
+// regress to the beginning of backoff.
 func (q *Queries) QueryQueueHealth(ctx context.Context) (QueryQueueHealthRow, error) {
 	row := q.db.QueryRow(ctx, queryQueueHealth)
 	var i QueryQueueHealthRow

@@ -9,11 +9,13 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -68,34 +70,47 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 			return
 		case <-ticker.C:
 		}
+		started := time.Now()
 		deleted, err := e.ProcessRetentionSweep(ctx, retentionDays)
 		if err != nil {
+			observability.ObserveSweepPass(observability.SweepRetention, started, err)
 			if ctx.Err() == nil {
 				logger.Error("retention sweep failed", "error", err)
 			}
 			continue
 		}
+		var passErr error
 		if deleted > 0 {
 			logger.Info("retention sweep purged tombstoned workflows", "count", deleted, "windowDays", retentionDays)
 		}
 		// Expired limiter windows ride the same maintenance cadence: their
 		// expiry is in the row, so the delete is safe at any interval.
-		if _, err := store.New(e.pool).CleanupExpiredRateWindows(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("rate-window cleanup failed", "error", err)
+		if _, err := store.New(e.pool).CleanupExpiredRateWindows(ctx); err != nil {
+			passErr = errors.Join(passErr, err)
+			if ctx.Err() == nil {
+				logger.Error("rate-window cleanup failed", "error", err)
+			}
 		}
 		// Expired SSO nonces authorize nothing and only accumulate — the
 		// unauthenticated /auth/sso/start writes one row per request.
-		if _, err := store.New(e.pool).CleanupExpiredSsoNonces(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("sso-nonce cleanup failed", "error", err)
+		if _, err := store.New(e.pool).CleanupExpiredSsoNonces(ctx); err != nil {
+			passErr = errors.Join(passErr, err)
+			if ctx.Err() == nil {
+				logger.Error("sso-nonce cleanup failed", "error", err)
+			}
 		}
 		// Heartbeat rows silent for a day belong to long-dead instances.
-		if _, err := store.New(e.pool).DeleteSilentWorkerInstances(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("worker-instance cleanup failed", "error", err)
+		if _, err := store.New(e.pool).DeleteSilentWorkerInstances(ctx); err != nil {
+			passErr = errors.Join(passErr, err)
+			if ctx.Err() == nil {
+				logger.Error("worker-instance cleanup failed", "error", err)
+			}
 		}
 		// Per-org data retention (run_events / audit_logs / usage_events).
 		e.runDataRetention(ctx, logger)
 		// Weekly digests ride the same cadence; the state-row claim keeps
 		// them weekly and single-sender regardless of replica count.
 		e.processWeeklyDigests(ctx, logger)
+		observability.ObserveSweepPass(observability.SweepRetention, started, passErr)
 	}
 }

@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/observability"
 )
 
 // End to end against the REAL binary: compile cmd/api, boot it on ephemeral
@@ -462,14 +464,27 @@ func TestAlertsAndDashboardOnlyNameMetricsTheBinaryExposes(t *testing.T) {
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(res.Body)
+	rawMetrics := string(raw)
 	exposed := map[string]bool{}
-	for _, line := range strings.Split(string(raw), "\n") {
+	for _, line := range strings.Split(rawMetrics, "\n") {
 		if fields := strings.Fields(line); len(fields) >= 3 && fields[0] == "#" && fields[1] == "TYPE" {
 			exposed[fields[2]] = true
 		}
 	}
 	if len(exposed) == 0 {
 		t.Fatal("scrape exposed no metric families")
+	}
+	for _, sweep := range observability.SweepNames() {
+		if !strings.Contains(rawMetrics, `janusly_sweep_failures_total{sweep="`+sweep+`"} 0`) {
+			t.Errorf("scrape did not preinitialize the bounded failure series for %q", sweep)
+		}
+	}
+	if !strings.Contains(rawMetrics,
+		`janusly_sweep_last_success_timestamp_seconds{sweep="`+observability.SweepRunSummaryMemory+`"}`) {
+		t.Error("the immediate run-summary sweep did not publish a liveness sample")
+	}
+	if !strings.Contains(rawMetrics, "janusly_queue_wait_seconds_count 1") {
+		t.Errorf("the driven workflow did not produce exactly one queue-wait sample")
 	}
 
 	family := func(name string) string {

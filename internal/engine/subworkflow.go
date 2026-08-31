@@ -44,6 +44,7 @@ import (
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -532,7 +533,9 @@ func (e *Engine) RunSubworkflowTerminalReconciler(ctx context.Context, every tim
 			return
 		case <-ticker.C:
 		}
+		started := time.Now()
 		scanned, repaired := e.ReconcileSubworkflowTerminals(ctx)
+		observability.ObserveSweepPass(observability.SweepSubworkflowReconciler, started, nil)
 		if scanned > 0 {
 			logger.Info("subworkflow terminal reconciler sweep",
 				"scanned", scanned, "repaired", repaired)

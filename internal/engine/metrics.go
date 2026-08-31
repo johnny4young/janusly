@@ -48,6 +48,15 @@ var (
 		Help:    "Executor wall time per claimed node.",
 		Buckets: prometheus.ExponentialBuckets(0.001, 2.5, 12),
 	}, []string{"node_type"})
+	// Depth cannot distinguish a healthy busy queue from a shallow queue that
+	// workers stopped consuming. This measures only eligible-to-claim time:
+	// retry backoff is represented by the durable eligibility clock and is not
+	// charged to worker latency.
+	metricQueueWait = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "janusly_queue_wait_seconds",
+		Help:    "Time a workflow node spent eligible but unclaimed.",
+		Buckets: prometheus.ExponentialBuckets(0.001, 3, 14),
+	})
 )
 
 // QueueDepthCollector exposes janusly_queue_depth{state} from one bounded

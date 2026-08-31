@@ -8,6 +8,8 @@ address is `127.0.0.1:9464`; it is not part of the public API.
 Important series include:
 
 - `janusly_queue_depth`
+- `janusly_queue_wait_seconds` (histogram from durable eligibility to claim;
+  retry backoff is excluded)
 - `janusly_runs_terminal_total`
 - `janusly_rate_limit_degraded_buckets`
 - `workflow_queue_waiting_jobs`
@@ -15,6 +17,10 @@ Important series include:
 - `maintenance_queue_waiting_jobs`
 - `maintenance_queue_active_jobs`
 - workflow task duration, retry, and failure metrics
+- `janusly_sweep_pass_seconds`,
+  `janusly_sweep_last_success_timestamp_seconds`, and
+  `janusly_sweep_failures_total`, labeled from a closed catalog of the nine
+  supervised maintenance loops
 - `target_info` with service and instance identity
 
 The public `/health` response exposes only bounded safe status. Detailed
@@ -77,6 +83,9 @@ without contacting Grafana Cloud.
 ## Alerting
 
 `deploy/observability/prometheus/rules.yml` alerts on missing runtime metrics,
-durable queue delay, terminal failures, task failures, maintenance delay, and
-degraded rate limiting. Alerts describe current single-runtime conditions and
-do not infer state from another process.
+eligible queue-wait latency, terminal/task failures, maintenance delay,
+degraded rate limiting, repeated sweep failures, and sweep liveness grouped by
+cadence. The never-ran rule waits for the slowest hourly loop plus margin and
+counts each scrape instance independently, so startup and multiple replicas do
+not create false pages. Dashboard and alert metric families are checked against
+a scrape from the exact executable by the executable E2E suite.

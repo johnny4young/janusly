@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -137,17 +138,21 @@ func (e *Engine) RunReplayCampaignPump(ctx context.Context, poll time.Duration, 
 			return
 		case <-ticker.C:
 		}
+		started := time.Now()
+		var passErr error
 		for {
 			dispatched, err := e.ProcessDueReplayCampaignStep(ctx)
 			if err != nil {
 				if ctx.Err() == nil {
 					logger.Error("replay campaign step failed", "error", err)
 				}
+				passErr = err
 				break
 			}
 			if !dispatched {
 				break
 			}
 		}
+		observability.ObserveSweepPass(observability.SweepReplayCampaignPump, started, passErr)
 	}
 }

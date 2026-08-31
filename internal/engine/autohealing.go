@@ -42,6 +42,7 @@ import (
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
@@ -353,7 +354,9 @@ func (e *Engine) RunAutoHealingSweep(ctx context.Context, every time.Duration, l
 			return
 		case <-ticker.C:
 		}
+		started := time.Now()
 		result := e.SweepAutoHealing(ctx)
+		observability.ObserveSweepPass(observability.SweepAutoHealing, started, nil)
 		if result.Proposed > 0 || result.Promoted > 0 || result.Rejected > 0 {
 			logger.Info("auto-healing sweep", "orgs", result.OrgsScanned,
 				"proposed", result.Proposed, "promoted", result.Promoted, "rejected", result.Rejected)

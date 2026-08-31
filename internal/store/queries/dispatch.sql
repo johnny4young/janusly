@@ -15,6 +15,7 @@ SELECT rn.id
 FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id
 WHERE rn.status = 'queued' AND r.status = 'running'
+  AND rn.enqueued_at <= now()
   AND NOT EXISTS (
     SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = rn.id AND w.wake_at > now()
@@ -30,11 +31,14 @@ SET status = 'running', started_at = now(),
     queue_publication_repair_after = NULL
 WHERE id = ANY(sqlc.arg(ids)::text[])
   AND status = 'queued'
+  AND enqueued_at <= now()
   AND NOT EXISTS (
     SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = run_nodes.id AND w.wake_at > now()
   )
-RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt;
+RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt,
+  GREATEST(EXTRACT(EPOCH FROM clock_timestamp() - enqueued_at), 0)::float8
+    AS queue_wait_seconds;
 
 -- name: AcquireRunCompletionLock :exec
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(run_id)::text, 0));
@@ -158,15 +162,16 @@ VALUES ($1, $2, $3)
 ON CONFLICT (org_id, idempotency_key) DO NOTHING;
 
 -- name: QueryQueueHealth :one
--- enqueued_at is the durable queue clock. A retry remains in `queued` while
--- its wake-up gates eligibility, so queue age starts from whichever instant
--- is later: entry into the queue or the due clock.
+-- enqueued_at is the durable eligibility clock. Retry requeues persist their
+-- wake_at there, so cleanup of a due run_wakeups row cannot make queue age
+-- regress to the beginning of backoff.
 WITH eligible AS (
-  SELECT rn.id, GREATEST(rn.enqueued_at, COALESCE(w.wake_at, rn.enqueued_at)) AS eligible_at
+  SELECT rn.id, rn.enqueued_at AS eligible_at
   FROM run_nodes rn
   JOIN runs r ON r.id = rn.run_id
   LEFT JOIN run_wakeups w ON w.run_node_id = rn.id
   WHERE rn.status = 'queued' AND r.status = 'running'
+    AND rn.enqueued_at <= now()
     AND (w.wake_at IS NULL OR w.wake_at <= now())
 )
 SELECT

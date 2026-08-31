@@ -143,7 +143,11 @@ SELECT status, org_id, replay_mode FROM runs WHERE id = $1;
 -- reconciler therefore cannot publish the rollback delivery before backoff.
 -- name: RequeueRunNodeForRetry :execrows
 UPDATE run_nodes
-SET status = 'queued', attempts = sqlc.arg(attempt), enqueued_at = clock_timestamp(),
+SET status = 'queued', attempts = sqlc.arg(attempt),
+    -- A retry is present in the durable queue during backoff, but it is not
+    -- eligible work yet. Persist the due clock as the queue clock so wait
+    -- latency remains correct even after the wake-up sweeper removes its row.
+    enqueued_at = COALESCE(sqlc.arg(wake_at), clock_timestamp()),
     queue_publication_repair_after = sqlc.arg(wake_at),
     queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)

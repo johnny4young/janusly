@@ -104,6 +104,7 @@ func TestEveryTransitionIntoQueuedRefreshesEnqueuedAt(t *testing.T) {
 	ctx := context.Background()
 	runID := fmt.Sprintf("run-queue-stamp-%d", time.Now().UnixNano())
 	seedQueueOrderRun(t, pool, runID)
+	started := time.Now().Add(-time.Second)
 
 	for _, seed := range []struct {
 		node   string
@@ -141,7 +142,7 @@ func TestEveryTransitionIntoQueuedRefreshesEnqueuedAt(t *testing.T) {
 	}
 
 	rows, err := pool.Query(ctx,
-		`SELECT node_id, extract(epoch FROM clock_timestamp() - enqueued_at)::float8
+		`SELECT node_id, enqueued_at
 		 FROM run_nodes WHERE run_id = $1 AND status = 'queued'`, runID)
 	if err != nil {
 		t.Fatalf("read queue clocks: %v", err)
@@ -150,12 +151,16 @@ func TestEveryTransitionIntoQueuedRefreshesEnqueuedAt(t *testing.T) {
 	seen := 0
 	for rows.Next() {
 		var node string
-		var age float64
-		if err := rows.Scan(&node, &age); err != nil {
+		var enqueuedAt time.Time
+		if err := rows.Scan(&node, &enqueuedAt); err != nil {
 			t.Fatalf("scan queue clock: %v", err)
 		}
-		if age < 0 || age > 60 {
-			t.Fatalf("%s kept a stale queue clock: %.3fs", node, age)
+		if node == "from-running" {
+			if delta := enqueuedAt.Sub(wakeAt); delta < -100*time.Millisecond || delta > 100*time.Millisecond {
+				t.Fatalf("retry queue clock = %s, want wake time %s", enqueuedAt, wakeAt)
+			}
+		} else if enqueuedAt.Before(started) || enqueuedAt.After(time.Now().Add(time.Second)) {
+			t.Fatalf("%s kept a stale queue clock: %s", node, enqueuedAt)
 		}
 		seen++
 	}
@@ -167,6 +172,44 @@ func TestEveryTransitionIntoQueuedRefreshesEnqueuedAt(t *testing.T) {
 	}
 }
 
+func TestClaimReturnsEligibleQueueWait(t *testing.T) {
+	pool := queueOrderTestPool(t)
+	ctx := context.Background()
+	runID := fmt.Sprintf("run-queue-wait-%d", time.Now().UnixNano())
+	seedQueueOrderRun(t, pool, runID)
+	id := "queue-wait-" + runID
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO run_nodes (id, run_id, node_id, status, enqueued_at)
+		 VALUES ($1, $2, 'waited', 'queued', clock_timestamp() - interval '2 seconds')`,
+		id, runID); err != nil {
+		t.Fatalf("seed waited node: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin claim: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := store.New(tx)
+	ids, err := q.LockClaimableRunNodes(ctx, 100)
+	if err != nil {
+		t.Fatalf("lock waited node: %v", err)
+	}
+	if !slices.Contains(ids, id) {
+		t.Fatalf("eligible node %q was not claimable: %v", id, ids)
+	}
+	claimed, err := q.MarkLockedNodesRunning(ctx, []string{id})
+	if err != nil {
+		t.Fatalf("mark waited node running: %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("marked rows = %d, want 1", len(claimed))
+	}
+	if got := claimed[0].QueueWaitSeconds; got < 1.5 || got > 10 {
+		t.Fatalf("eligible queue wait = %.3fs, want about 2s", got)
+	}
+}
+
 func TestClaimPlanUsesFIFOQueueIndex(t *testing.T) {
 	pool := queueOrderTestPool(t)
 	ctx := context.Background()
@@ -175,6 +218,7 @@ func TestClaimPlanUsesFIFOQueueIndex(t *testing.T) {
 		FROM run_nodes rn
 		JOIN runs r ON r.id = rn.run_id
 		WHERE rn.status = 'queued' AND r.status = 'running'
+		  AND rn.enqueued_at <= now()
 		  AND NOT EXISTS (
 		    SELECT 1 FROM run_wakeups w
 		    WHERE w.run_node_id = rn.id AND w.wake_at > now()

@@ -21,6 +21,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -72,7 +73,10 @@ func (e *Engine) RunMemoryConsentPurgeSweep(ctx context.Context, every time.Dura
 			return
 		case <-ticker.C:
 		}
-		if purged := e.SweepMemoryConsentPurges(ctx); purged > 0 {
+		started := time.Now()
+		purged := e.SweepMemoryConsentPurges(ctx)
+		observability.ObserveSweepPass(observability.SweepMemoryConsentPurge, started, nil)
+		if purged > 0 {
 			logger.Info("memory consent purge sweep", "orgsPurged", purged)
 		}
 	}

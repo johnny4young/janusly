@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/johnny4young/janusly/internal/memory"
+	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -172,6 +173,7 @@ func (e *Engine) RunRunSummaryMemorySweep(ctx context.Context, interval time.Dur
 		logger = slog.Default()
 	}
 	for ctx.Err() == nil {
+		started := time.Now()
 		job, err := e.claimRunSummaryMemoryJob(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -189,8 +191,10 @@ func (e *Engine) RunRunSummaryMemorySweep(ctx context.Context, interval time.Dur
 			if err != nil {
 				logger.Error("run summary memory finalize failed", "runId", job.RunID, "error", err)
 			}
+			observability.ObserveSweepPass(observability.SweepRunSummaryMemory, started, err)
 			continue
 		}
+		observability.ObserveSweepPass(observability.SweepRunSummaryMemory, started, err)
 		select {
 		case <-ctx.Done():
 			return

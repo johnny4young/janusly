@@ -254,32 +254,32 @@ func run() error {
 	runner.Go("worker-heartbeat", func(ctx context.Context) {
 		eng.RunWorkerHeartbeat(ctx, instanceID, cfg.WorkerConcurrency, identity.Commit, logger)
 	})
-	runner.Go("replay-campaign-pump", func(ctx context.Context) {
+	runner.Go(observability.SweepReplayCampaignPump, func(ctx context.Context) {
 		eng.RunReplayCampaignPump(ctx, cfg.PollInterval, logger)
 	})
-	runner.Go("retention", func(ctx context.Context) {
+	runner.Go(observability.SweepRetention, func(ctx context.Context) {
 		eng.RunRetentionSweep(ctx, time.Hour, engine.RetentionDays(), logger)
 	})
-	runner.Go("upstream-health", func(ctx context.Context) {
+	runner.Go(observability.SweepUpstreamHealth, func(ctx context.Context) {
 		upstream.RunSweep(ctx, pool, time.Minute, logger)
 	})
-	runner.Go("subworkflow-terminal-reconciler", func(ctx context.Context) {
+	runner.Go(observability.SweepSubworkflowReconciler, func(ctx context.Context) {
 		eng.RunSubworkflowTerminalReconciler(ctx, time.Minute, logger)
 	})
-	runner.Go("schedule-sweep", func(ctx context.Context) {
+	runner.Go(observability.SweepSchedule, func(ctx context.Context) {
 		eng.RunScheduleSweep(ctx, 15*time.Second, logger)
 	})
-	runner.Go("auto-healing", func(ctx context.Context) {
+	runner.Go(observability.SweepAutoHealing, func(ctx context.Context) {
 		eng.RunAutoHealingSweep(ctx, 5*time.Minute, logger)
 	})
-	runner.Go("memory-consent-purge", func(ctx context.Context) {
+	runner.Go(observability.SweepMemoryConsentPurge, func(ctx context.Context) {
 		eng.RunMemoryConsentPurgeSweep(ctx, time.Hour, logger)
 	})
-	runner.Go("run-summary-memory", func(ctx context.Context) {
+	runner.Go(observability.SweepRunSummaryMemory, func(ctx context.Context) {
 		eng.RunRunSummaryMemorySweep(ctx, time.Second, logger)
 	})
 	// Reaper cadence/threshold are env-tunable for HA deployments.
-	runner.Go("stalled-node-reaper", func(ctx context.Context) {
+	runner.Go(observability.SweepStalledNodeReaper, func(ctx context.Context) {
 		eng.StartReaper(ctx,
 			envDurationMs("JANUSLY_REAPER_INTERVAL_MS", time.Minute),
 			envDurationMs("JANUSLY_REAPER_THRESHOLD_MS", time.Hour), logger)

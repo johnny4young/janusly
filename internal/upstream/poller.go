@@ -31,6 +31,7 @@ import (
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/executors"
+	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -202,6 +203,8 @@ func RunSweep(ctx context.Context, pool *pgxpool.Pool, every time.Duration, logg
 			return
 		case <-ticker.C:
 		}
+		started := time.Now()
 		Sweep(ctx, pool, DefaultFetcher, logger)
+		observability.ObserveSweepPass(observability.SweepUpstreamHealth, started, nil)
 	}
 }

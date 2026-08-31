@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -146,6 +147,8 @@ func (e *Engine) StartReaper(ctx context.Context, interval, threshold time.Durat
 		case <-ctx.Done():
 			return
 		}
+		started := time.Now()
 		e.ReapStalledNodes(ctx, threshold, 50, logger)
+		observability.ObserveSweepPass(observability.SweepStalledNodeReaper, started, nil)
 	}
 }

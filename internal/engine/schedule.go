@@ -30,6 +30,7 @@ import (
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/cron"
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -220,7 +221,9 @@ func (e *Engine) RunScheduleSweep(ctx context.Context, every time.Duration, logg
 			return
 		case <-ticker.C:
 		}
+		started := time.Now()
 		fired, dropped := e.SweepDueSchedules(ctx)
+		observability.ObserveSweepPass(observability.SweepSchedule, started, nil)
 		if fired > 0 || dropped > 0 {
 			logger.Info("schedule sweep", "fired", fired, "dropped", dropped)
 		}

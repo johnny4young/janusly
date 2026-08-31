@@ -2191,7 +2191,11 @@ func (q *Queries) RedriveFailedRunNode(ctx context.Context, arg RedriveFailedRun
 
 const requeueRunNodeForRetry = `-- name: RequeueRunNodeForRetry :execrows
 UPDATE run_nodes
-SET status = 'queued', attempts = $1, enqueued_at = clock_timestamp(),
+SET status = 'queued', attempts = $1,
+    -- A retry is present in the durable queue during backoff, but it is not
+    -- eligible work yet. Persist the due clock as the queue clock so wait
+    -- latency remains correct even after the wake-up sweeper removes its row.
+    enqueued_at = COALESCE($2, clock_timestamp()),
     queue_publication_repair_after = $2,
     queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = $3 AND node_id = $4
