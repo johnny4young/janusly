@@ -55,7 +55,7 @@ groups:
           description: Traffic is still allowed while at least one rate-limit bucket is degraded.
 
       - alert: JanuslyWorkflowTaskFailures
-        expr: sum(increase(workflow_node_failures_total{job="janusly"}[5m])) > 0
+        expr: sum(increase(janusly_node_completions_total{job="janusly",outcome="failed"}[5m])) > 0
         labels:
           severity: warning
         annotations:

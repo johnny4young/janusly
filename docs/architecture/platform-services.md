@@ -14,6 +14,10 @@ When a separate collector runs on a managed platform, bind the listener to
 host/public route for `9464`. The listener also carries build identity and
 pprof, so peers able to reach it belong to the privileged operator plane.
 
+Alert rules and the bundled Grafana dashboard name only metric families
+scraped from the exact executable during E2E. Node execution latency is
+reported in seconds and carries only the bounded `node_type` catalog label.
+
 ## Local load and soak qualification
 
 `make qualify-local PROFILE=load CONFIRM=reset` runs the deliberately long,

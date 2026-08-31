@@ -41,11 +41,13 @@ var (
 		Name: "janusly_redrives_total",
 		Help: "Dead letters successfully redriven.",
 	})
-	metricNodeExecution = promauto.NewHistogram(prometheus.HistogramOpts{
+	// Node type is a closed runtime catalog, so this answers which executor is
+	// slow without introducing traffic-derived cardinality.
+	metricNodeExecution = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "janusly_node_execution_seconds",
 		Help:    "Executor wall time per claimed node.",
 		Buckets: prometheus.ExponentialBuckets(0.001, 2.5, 12),
-	})
+	}, []string{"node_type"})
 )
 
 // QueueDepthCollector exposes janusly_queue_depth{state} from one bounded

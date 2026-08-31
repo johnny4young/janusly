@@ -241,7 +241,7 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 
 	executionStart := time.Now()
 	output, execErr := runExecutor(ctx, claim, *node, wf, runInput, execute)
-	metricNodeExecution.Observe(time.Since(executionStart).Seconds())
+	metricNodeExecution.WithLabelValues(node.Type).Observe(time.Since(executionStart).Seconds())
 	if execErr != nil {
 		if err := e.RetryOrFail(ctx, claim, *node, execErr); err != nil {
 			logger.Error("retry-or-fail failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)

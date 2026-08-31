@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -348,6 +349,9 @@ func TestEngineMetricsExposeOnTheInternalPort(t *testing.T) {
 			t.Fatalf("metric series %s missing from scrape", series)
 		}
 	}
+	if !strings.Contains(body, `node_type="noop"`) || !strings.Contains(body, `node_type="transform"`) {
+		t.Fatalf("execution histogram must retain the bounded node_type dimension")
+	}
 }
 
 func TestInternalBuildIdentityMatchesTheFinishedBinary(t *testing.T) {
@@ -434,5 +438,67 @@ func TestMetricsConsistencyNamesAndBindConflict(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		_ = conflict.Process.Kill()
 		t.Fatalf("bind conflict must abort the boot; logs:\n%s", out.String())
+	}
+}
+
+// A valid PromQL query against a renamed/nonexistent family fails silently:
+// Grafana says "no data" and the alert never fires. Compare every configured
+// Janusly family with a scrape from the exact executable instead.
+func TestAlertsAndDashboardOnlyNameMetricsTheBinaryExposes(t *testing.T) {
+	api := bootBinary(t)
+	workflow := map[string]any{
+		"nodes": []any{map[string]any{
+			"id": "a", "type": "transform",
+			"config": map[string]any{"mapping": map[string]any{"ok": true}},
+		}},
+		"edges": []any{},
+	}
+	runID := api.data(t, "POST", "/v1/start", map[string]any{"workflow": workflow})["runId"].(string)
+	api.waitRun(t, runID, "succeeded")
+
+	res, err := http.Get(api.internal + "/metrics")
+	if err != nil {
+		t.Fatalf("scrape: %v", err)
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+	exposed := map[string]bool{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if fields := strings.Fields(line); len(fields) >= 3 && fields[0] == "#" && fields[1] == "TYPE" {
+			exposed[fields[2]] = true
+		}
+	}
+	if len(exposed) == 0 {
+		t.Fatal("scrape exposed no metric families")
+	}
+
+	family := func(name string) string {
+		for _, suffix := range []string{"_bucket", "_sum", "_count"} {
+			if trimmed, ok := strings.CutSuffix(name, suffix); ok {
+				return trimmed
+			}
+		}
+		return name
+	}
+	referenced := regexp.MustCompile(`\b(?:janusly|workflow|maintenance)_[a-z_]+`)
+	for _, path := range []string{
+		"../deploy/observability/prometheus/rules.yml",
+		"../deploy/observability/grafana/dashboards/janusly-operations.json",
+	} {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		seen := map[string]bool{}
+		for _, match := range referenced.FindAllString(string(source), -1) {
+			name := family(match)
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			if !exposed[name] {
+				t.Errorf("%s names %q, which the executable does not expose", path, name)
+			}
+		}
 	}
 }
