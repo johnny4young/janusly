@@ -232,11 +232,27 @@ func TestDelayedRetryIsNotClaimableUntilDue(t *testing.T) {
 		t.Fatalf("delayed retry ran early: %d executions", n)
 	}
 
-	// Move the backoff clock: the wake-up becomes due and the poll cadence
-	// claims it — no NOTIFY involved, no real 60s wait.
-	if _, err := pool.Exec(ctx, `update run_wakeups set wake_at = now() - interval '1 second'
+	// Move both durable representations of the same backoff clock in one
+	// transaction. Retry eligibility is deliberately duplicated in
+	// run_nodes.enqueued_at (queue age remains truthful after wake-up cleanup)
+	// and run_wakeups.wake_at (timer/sweeper coordination). Advancing only one
+	// creates a state production time progression can never produce.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin clock advance: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `update run_nodes set enqueued_at = now() - interval '1 second'
+		where run_id=$1`, runID); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("advance queue clock: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `update run_wakeups set wake_at = now() - interval '1 second'
 		where run_node_id = (select id from run_nodes where run_id=$1)`, runID); err != nil {
-		t.Fatalf("advance clock: %v", err)
+		_ = tx.Rollback(ctx)
+		t.Fatalf("advance wake-up clock: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit clock advance: %v", err)
 	}
 	waitRun(t, pool, runID, "succeeded", 15*time.Second)
 	stop()
