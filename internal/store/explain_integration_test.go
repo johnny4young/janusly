@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -61,6 +62,10 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 		{"listScimUserGroupIDs", listScimUserGroupIDs, []any{"org-x", "dir-x", "user-x"}},
 		{"listActiveScimUserState", listActiveScimUserState, []any{"org-x", "dir-x", int32(5001)}},
 		{"listScheduleFireHistory", listScheduleFireHistory, []any{"wf-x", "org-x", now}},
+		{"listFailedRunNodeSamples", listFailedRunNodeSamples, []any{"org-x", now}},
+	}
+	requiredIndexes := map[string]string{
+		"listFailedRunNodeSamples": "run_nodes_failed_finished_idx",
 	}
 
 	for index, c := range cases {
@@ -106,15 +111,22 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 				t.Fatalf("plan json: %v", err)
 			}
 			var offenders []string
+			var indexes []string
 			walkPlan(parsed[0]["Plan"].(map[string]any), func(node map[string]any) {
 				if node["Node Type"] == "Seq Scan" {
 					if rel, _ := node["Relation Name"].(string); watchedTables[rel] {
 						offenders = append(offenders, rel)
 					}
 				}
+				if name, _ := node["Index Name"].(string); name != "" {
+					indexes = append(indexes, name)
+				}
 			})
 			if len(offenders) > 0 {
 				t.Fatalf("no index can serve %s over %v (seq scan survives enable_seqscan=off)", c.name, offenders)
+			}
+			if required := requiredIndexes[c.name]; required != "" && !slices.Contains(indexes, required) {
+				t.Fatalf("%s did not use required index %s: %v", c.name, required, indexes)
 			}
 		})
 	}

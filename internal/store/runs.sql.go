@@ -1478,7 +1478,9 @@ JOIN runs r ON r.id = rn.run_id
 WHERE r.org_id = $1
   AND rn.status = 'failed'
   AND r.replay_mode IS NULL
-  AND COALESCE(rn.finished_at, r.created_at) >= $2
+  -- Keep both branches sargable. COALESCE over finished_at hid the partial
+  -- failed-row index and made this bounded sample walk accumulated history.
+  AND (rn.finished_at >= $2 OR (rn.finished_at IS NULL AND r.created_at >= $2))
 ORDER BY COALESCE(rn.finished_at, r.created_at) DESC
 LIMIT 500
 `
