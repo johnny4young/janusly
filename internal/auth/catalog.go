@@ -5,6 +5,8 @@
 // one entry plus its default roles — same contract as the contract.
 package auth
 
+import "slices"
+
 // PermissionEntry mirrors the contract's catalog rows (descriptions stay
 // with the contract; the runtime needs keys, categories, and defaults).
 type PermissionEntry struct {
@@ -78,6 +80,21 @@ func IsPermission(key string) bool {
 func DefaultRoleHasPermission(role Role, key string) bool {
 	entry, ok := permissionsByKey[key]
 	return ok && entry.DefaultRoles[role]
+}
+
+// DefaultPermissionsForRole returns the effective grant carried by a virtual
+// built-in role before an organization creates an override row. API consumers
+// must not have to interpret a missing row as an empty grant: persisting that
+// ambiguity as an override would durably strip the role's default access.
+func DefaultPermissionsForRole(role Role) []string {
+	keys := make([]string, 0, len(PermissionCatalog))
+	for _, entry := range PermissionCatalog {
+		if entry.DefaultRoles[role] {
+			keys = append(keys, entry.Key)
+		}
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // MandatoryAdminPermissions is the self-lockout floor: any override of the

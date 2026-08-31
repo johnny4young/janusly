@@ -1,6 +1,9 @@
 package auth
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // The catalog is CLOSED: exactly 41 keys, every default role a built-in,
 // and the anchor cases from the contract's own matrix hold.
@@ -47,6 +50,14 @@ func TestPermissionCatalogPinned(t *testing.T) {
 	}
 	if IsPermission("made.up") {
 		t.Fatal("unknown keys must not validate")
+	}
+	viewer := DefaultPermissionsForRole(RoleViewer)
+	editor := DefaultPermissionsForRole(RoleEditor)
+	if len(viewer) == 0 || len(editor) <= len(viewer) {
+		t.Fatalf("effective built-in grants are incomplete: viewer=%v editor=%v", viewer, editor)
+	}
+	if !DefaultRoleHasPermission(RoleEditor, "workflows.write") || slices.Contains(viewer, "workflows.write") || !slices.Contains(editor, "workflows.write") {
+		t.Fatalf("effective built-in grants drifted: viewer=%v editor=%v", viewer, editor)
 	}
 }
 

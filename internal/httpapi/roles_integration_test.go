@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -104,4 +105,54 @@ func TestRolesCrudAndOverrides(t *testing.T) {
 	if res := h.call("DELETE", "/org/roles/editor", nil, ""); res.status != 404 || res.body["code"] != "roles_override_not_found" {
 		t.Fatalf("no-override revert: %+v", res.body)
 	}
+}
+
+func TestBuiltInRolesReportTheirEffectiveGrant(t *testing.T) {
+	h := newAPIHarness(t)
+
+	assertBuiltins := func(stage string) {
+		t.Helper()
+		res := h.call("GET", "/org/roles", nil, "")
+		if res.status != http.StatusOK {
+			t.Fatalf("%s list roles: %d %+v", stage, res.status, res.body)
+		}
+		roles, ok := res.body["roles"].([]any)
+		if !ok {
+			t.Fatalf("%s roles missing: %+v", stage, res.body)
+		}
+		seen := map[string][]any{}
+		for _, raw := range roles {
+			role := raw.(map[string]any)
+			if !role["isBuiltin"].(bool) {
+				continue
+			}
+			granted, ok := role["grantedPermissions"].([]any)
+			if !ok {
+				t.Fatalf("%s built-in %v reported an ambiguous grant: %+v", stage, role["name"], role)
+			}
+			seen[role["name"].(string)] = granted
+		}
+		if len(seen["viewer"]) == 0 || len(seen["editor"]) == 0 || len(seen["admin"]) == 0 {
+			t.Fatalf("%s built-in defaults missing: %+v", stage, seen)
+		}
+		contains := func(values []any, key string) bool {
+			for _, value := range values {
+				if value == key {
+					return true
+				}
+			}
+			return false
+		}
+		if contains(seen["viewer"], "workflows.write") || !contains(seen["editor"], "workflows.write") {
+			t.Fatalf("%s built-in grants are not effective defaults: %+v", stage, seen)
+		}
+	}
+
+	assertBuiltins("virtual")
+	// A description-only built-in override persists a null grant. Its read
+	// contract must still expose the effective defaults, not an empty set.
+	if res := h.call("POST", "/org/roles/editor", map[string]any{"description": "Default editor"}, ""); res.status != http.StatusOK {
+		t.Fatalf("create description-only override: %d %+v", res.status, res.body)
+	}
+	assertBuiltins("null override")
 }

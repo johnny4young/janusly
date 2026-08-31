@@ -52,6 +52,8 @@ func roleViewFrom(id, orgID, name, inheritsFrom string, description pgtype.Text,
 		var keys []string
 		_ = json.Unmarshal(grantedPermissions, &keys)
 		grants = keys
+	} else if isBuiltin && auth.IsBuiltinRole(name) {
+		grants = auth.DefaultPermissionsForRole(auth.Role(name))
 	}
 	return map[string]any{
 		"id": id, "orgId": orgID, "name": name,
@@ -96,7 +98,8 @@ func (s *V1Server) listRolesCore(r *http.Request, rc v1Request) opResult {
 		if !byName[string(builtin)] {
 			roles = append(roles, map[string]any{
 				"name": string(builtin), "inheritsFrom": string(builtin),
-				"isBuiltin": true, "grantedPermissions": nil, "description": nil,
+				"isBuiltin": true, "description": nil,
+				"grantedPermissions": auth.DefaultPermissionsForRole(builtin),
 			})
 		}
 	}
