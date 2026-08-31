@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useWorkflowStore } from '../store'
@@ -45,6 +45,19 @@ describe('<UserMenu /> docs capability', () => {
     expect(screen.getAllByText('Acme Operations').length).toBeGreaterThan(0)
     expect(screen.getByLabelText('Editor')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Sign out/ })).toBeInTheDocument()
+  })
+
+  it('closes with Escape and restores focus to the menu trigger', async () => {
+    render(<UserMenu />)
+    const trigger = screen.getByRole('button', { name: 'Open user menu' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    expect(screen.getByRole('dialog', { name: 'Account and workspace controls' })).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog', { name: 'Account and workspace controls' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Open user menu' })).toHaveFocus())
   })
 
   it('omits the Docs item when no URL is configured', () => {

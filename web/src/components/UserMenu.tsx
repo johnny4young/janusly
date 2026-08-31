@@ -116,6 +116,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
   const [showProfileEditor, setShowProfileEditor] = useState(false)
   const [profileName, setProfileName] = useState(identityContext?.profile.name ?? '')
   const popoverRef = useRef<HTMLDivElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -124,6 +125,18 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setOpen(false)
+      queueMicrotask(() => triggerRef.current?.focus())
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
   }, [open])
 
   const identityEmail = identityContext?.profile.email ?? identityContext?.identity.email ?? userId ?? 'dev-user@local'
@@ -273,6 +286,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
   return (
     <div className="user-menu" ref={popoverRef}>
       <button
+        ref={triggerRef}
         type="button"
         className="user-menu__trigger"
         onClick={() => setOpen(prev => !prev)}
