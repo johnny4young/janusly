@@ -61,10 +61,19 @@ func TestRecoveryQueueReadModel(t *testing.T) {
 
 	// dl-a: oldest (two days ago), open, P1 owned by the caller, earliest SLA.
 	// dl-b: an hour ago, replayed, P3. dl-c: newest, open, NO recovery item.
+	// dl-validation is drill evidence: direct reads may inspect it, but neither
+	// the operator queue nor its status counts may advertise it as work.
 	dlA, dlB, dlC := "dlq-a-"+suffix, "dlq-b-"+suffix, "dlq-c-"+suffix
+	dlValidation := "dlq-validation-" + suffix
 	seedQueueDeadLetter(t, h.org, dlA, "open", "connect timeout upstream-alpha", past)
 	seedQueueDeadLetter(t, h.org, dlB, "replayed", "boom bravo", now.Add(-time.Hour))
 	seedQueueDeadLetter(t, h.org, dlC, "open", "charlie failed", now)
+	seedQueueDeadLetter(t, h.org, dlValidation, "open", "validation drill", now.Add(time.Second))
+	if _, err := testPool(t).Exec(context.Background(),
+		`UPDATE dead_letters SET replay_mode = 'validation' WHERE org_id = $1 AND id = $2`,
+		h.org, dlValidation); err != nil {
+		t.Fatalf("mark validation dead letter: %v", err)
+	}
 	seedQueueRecoveryItem(t, h.org, "ri-a-"+suffix, dlA, "p1", "api-tester", past.Add(time.Hour))
 	seedQueueRecoveryItem(t, h.org, "ri-b-"+suffix, dlB, "p3", "", now.Add(24*time.Hour))
 	// Another tenant's row must never surface.
@@ -77,6 +86,11 @@ func TestRecoveryQueueReadModel(t *testing.T) {
 	}
 	if ids := queueItemIDs(t, res.body); len(ids) != 3 || ids[0] != dlC || ids[1] != dlB || ids[2] != dlA {
 		t.Fatalf("newest order: %v", ids)
+	}
+	counts := h.call("GET", "/dlq/counts", nil, "")
+	if counts.status != http.StatusOK || counts.body["total"] != float64(3) ||
+		counts.body["open"] != float64(2) || counts.body["replayed"] != float64(1) {
+		t.Fatalf("queue counts must exclude validation evidence: %d %+v", counts.status, counts.body)
 	}
 	items := res.body["items"].([]any)
 	if items[0].(map[string]any)["recovery"] != nil {

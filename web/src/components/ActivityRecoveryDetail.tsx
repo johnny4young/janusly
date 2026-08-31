@@ -15,6 +15,7 @@ import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { buildRecoveryErrorSummary } from '../recovery-error-summary'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './dead-letter-types'
+import { RecoveryDrillOutcomeCard } from './recovery/RecoveryDrillOutcomeCard'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { RunExplainChat } from './RunExplainChat'
 
@@ -44,12 +45,24 @@ export function mergeActivityRecoveryDetail(
   detail: DeadLetter,
   summaryStatusAtFetch = summary.status,
 ): DeadLetter {
+  const workflowSnapshot = detail.workflowJson && typeof detail.workflowJson === 'object'
+    ? detail.workflowJson as Record<string, unknown>
+    : null
+  const nodeSnapshot = detail.nodeJson && typeof detail.nodeJson === 'object'
+    ? detail.nodeJson as Record<string, unknown>
+    : null
+  const snapshotWorkflowName = typeof workflowSnapshot?.name === 'string'
+    ? workflowSnapshot.name
+    : undefined
+  const snapshotNodeType = typeof nodeSnapshot?.type === 'string'
+    ? nodeSnapshot.type
+    : undefined
   return {
     ...summary,
     ...detail,
     status: summary.status === summaryStatusAtFetch ? detail.status : summary.status,
-    workflowName: detail.workflowName ?? summary.workflowName,
-    nodeType: detail.nodeType ?? summary.nodeType,
+    workflowName: detail.workflowName ?? summary.workflowName ?? snapshotWorkflowName,
+    nodeType: detail.nodeType ?? summary.nodeType ?? snapshotNodeType,
     createdAt: detail.createdAt ?? summary.createdAt,
   }
 }
@@ -175,6 +188,7 @@ export function ActivityRecoveryDetail({
     <section
       className="we-activity-recovery"
       data-testid="activity-recovery-detail"
+      data-dead-letter-id={current.id}
       aria-label={t('activity.recoveryDetail.aria', { step: stepLabel })}
     >
       <div className="split-row we-activity-detail__heading">
@@ -245,6 +259,22 @@ export function ActivityRecoveryDetail({
           <dd><code title={current.runId}>{current.runId.slice(0, 12)}…</code></dd>
         </div>
       </dl>
+
+      {current.drill && (
+        <>
+          <div className="we-recovery-drill-context" data-testid="dlq-recovery-drill-context">
+            <span className="we-pill" data-tone="info">{t('dlq.drill.label')}</span>
+            <span className="we-pill" data-tone="neutral">
+              {t(`packs.drill.path.${current.drill.recoveryPath}`, {
+                defaultValue: current.drill.recoveryPath,
+              })}
+            </span>
+          </div>
+          {current.drillOutcome && (
+            <RecoveryDrillOutcomeCard outcome={current.drillOutcome} />
+          )}
+        </>
+      )}
 
       {detail.kind === 'loading' && (
         <p className="we-activity-detail__state" role="status">

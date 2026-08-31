@@ -250,8 +250,9 @@ func TestProductSurfaceLoop(t *testing.T) {
 	detail := h.call("GET", "/dlq?id="+res.body["deadLetterId"].(string), nil, "")
 	drill, _ := detail.body["drill"].(map[string]any)
 	outcome, _ := detail.body["drillOutcome"].(map[string]any)
+	drillWorkflow, _ := detail.body["workflowJson"].(map[string]any)
 	if detail.status != 200 || drill["fixtureId"] != fixtureIDs[0] ||
-		outcome["status"] != "awaiting_action" {
+		outcome["status"] != "awaiting_action" || drillWorkflow["id"] != workflowID {
 		t.Fatalf("drill detail/outcome: %d %+v", detail.status, detail.body)
 	}
 

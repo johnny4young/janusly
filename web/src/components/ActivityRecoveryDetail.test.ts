@@ -35,6 +35,24 @@ describe('mergeActivityRecoveryDetail', () => {
     })
   })
 
+  it('derives bounded labels from an off-list immutable snapshot', () => {
+    const detail: DeadLetter = {
+      id: 'dead-letter-drill',
+      runId: 'run-drill',
+      nodeId: 'page_oncall',
+      attempt: 1,
+      status: 'open',
+      workflowJson: { name: 'Incident triage', nodes: [] },
+      nodeJson: { id: 'page_oncall', type: 'tool' },
+      errorJson: { code: 'worker_stalled' },
+    }
+
+    expect(mergeActivityRecoveryDetail(detail, detail)).toMatchObject({
+      workflowName: 'Incident triage',
+      nodeType: 'tool',
+    })
+  })
+
   it('keeps detail status until the bounded summary advances after the detail fetch', () => {
     const summary: DeadLetter = {
       id: 'dead-letter-1',

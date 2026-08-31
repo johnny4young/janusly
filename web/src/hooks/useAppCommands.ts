@@ -1,9 +1,6 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback } from 'react'
 import { AuthProvider } from '../auth'
-import {
-  consumeDeadLetterDeepLink,
-  requestRecoveryQueueFocus,
-} from '../components/recovery-queue-focus-bus'
+import { requestRecoveryQueueFocus } from '../components/recovery-queue-focus-bus'
 import type { ActiveTab } from '../types'
 import {
   resolveWorkspaceDestinationTarget,
@@ -53,11 +50,6 @@ export function useAppCommands(options: AppCommandsOptions) {
     }
     setActiveTab(tab)
   }, [openRecoveryQueue, setActiveTab])
-
-  useEffect(() => {
-    const deepLink = consumeDeadLetterDeepLink()
-    if (deepLink?.deadLetterId && canReadDlq) openRecoveryQueue(deepLink.deadLetterId)
-  }, [canReadDlq, openRecoveryQueue])
 
   const integrationCommands = useIntegrationCommands(options, {
     openRecoveryQueue,

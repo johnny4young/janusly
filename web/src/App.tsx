@@ -23,6 +23,7 @@ import { AppWorkspace } from './AppWorkspace'
 import { BrandMark } from './components/BrandMark'
 import { Login } from './components/Login'
 import { WorkspaceGate } from './components/WorkspaceGate'
+import { consumeDeadLetterDeepLink } from './components/recovery-queue-focus-bus'
 import { isSupabaseConfigured } from './auth'
 import { api } from './api'
 import type { RunInputPreset } from './components/RunInputDialog'
@@ -242,6 +243,8 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [semanticBlockerRunIds, setSemanticBlockerRunIds] = useState<string[]>([])
   const [activityRecoveryId, setActivityRecoveryId] = useState<string | null>(null)
+  const [initialRecoveryDeepLink] = useState(() => consumeDeadLetterDeepLink())
+  const recoveryDeepLinkOpened = useRef(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [snippetMenuOpen, setSnippetMenuOpen] = useState(false)
   const [aiActionRequest, setAiActionRequest] = useState<AiAuthoringActionRequest | null>(null)
@@ -446,6 +449,24 @@ export default function App() {
     focusSidebarSearch,
     t,
   })
+
+  // Hold the normalized alert target across auth and tenant bootstrap. App's
+  // org transition intentionally clears selected operational state, so
+  // consuming and opening the URL inside an earlier command-hook effect can
+  // lose the incident on cold load. Open exactly once only after the final
+  // tenant and its permissions are known.
+  useEffect(() => {
+    const deadLetterId = initialRecoveryDeepLink?.deadLetterId
+    if (
+      recoveryDeepLinkOpened.current
+      || !tenantReady
+      || !deadLetterId
+      || !tenantPermissions.includes('runs.read')
+      || !tenantPermissions.includes('dlq.read')
+    ) return
+    recoveryDeepLinkOpened.current = true
+    openRecoveryQueue(deadLetterId)
+  }, [initialRecoveryDeepLink, openRecoveryQueue, tenantPermissions, tenantReady])
 
   const draftRecoveryOffered = useRef(false)
   useEffect(() => {

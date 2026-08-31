@@ -147,6 +147,17 @@ describe('normalisePatchSuggestion', () => {
     const result = normalisePatchSuggestion(legacy)
     expect(result.suggestions[0]).toMatchObject({ confidence: 0, calibratedConfidence: 0 })
   })
+
+  it('binds every patch shape to the exact persisted workflow identity', () => {
+    const input = suggestion()
+    const result = normalisePatchSuggestion(input, 'persisted-workflow-id')
+
+    expect(result).not.toBe(input)
+    expect(result.suggestedWorkflow.id).toBe('persisted-workflow-id')
+    expect(result.suggestions.map((item) => item.workflow.id)).toEqual(['persisted-workflow-id'])
+    expect(input.suggestedWorkflow).toBe(baseWorkflow)
+    expect('id' in baseWorkflow).toBe(false)
+  })
 })
 
 describe('resolveConfidenceDisplay', () => {

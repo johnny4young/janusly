@@ -208,11 +208,13 @@ export function toWorkflow(value: unknown): WorkflowDefinition {
  * fields — fall back to a single-item array in that case so the dialog
  * code never has to branch on which shape it received.
  */
-export function normalisePatchSuggestion(raw: PatchSuggestion): PatchSuggestion {
-  if (Array.isArray(raw.suggestions) && raw.suggestions.length > 0) {
-    return raw
-  }
-  return {
+export function normalisePatchSuggestion(
+  raw: PatchSuggestion,
+  persistedWorkflowId?: string | null,
+): PatchSuggestion {
+  const normalised: PatchSuggestion = Array.isArray(raw.suggestions) && raw.suggestions.length > 0
+    ? raw
+    : {
     ...raw,
     suggestions: [{
       workflow: raw.suggestedWorkflow,
@@ -223,5 +225,20 @@ export function normalisePatchSuggestion(raw: PatchSuggestion): PatchSuggestion 
       // renderer shows a single number (delta is 0, subtitle suppressed).
       calibratedConfidence: raw.mode === 'ai' ? 50 : 0,
     }],
+  }
+  if (!persistedWorkflowId) return normalised
+
+  const bindIdentity = (workflow: WorkflowDefinition): WorkflowDefinition => (
+    workflow.id === persistedWorkflowId
+      ? workflow
+      : { ...workflow, id: persistedWorkflowId }
+  )
+  return {
+    ...normalised,
+    suggestedWorkflow: bindIdentity(normalised.suggestedWorkflow),
+    suggestions: normalised.suggestions.map((suggestion) => ({
+      ...suggestion,
+      workflow: bindIdentity(suggestion.workflow),
+    })),
   }
 }

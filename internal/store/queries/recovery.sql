@@ -55,7 +55,9 @@ LIMIT sqlc.arg(page_limit);
 
 -- name: CountDeadLettersByStatus :many
 SELECT status, count(*) AS count FROM dead_letters
-WHERE org_id = $1 GROUP BY status;
+WHERE org_id = $1
+  AND replay_mode IS NULL
+GROUP BY status;
 
 -- name: ListDeadLetterFailureSamples :many
 SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at,

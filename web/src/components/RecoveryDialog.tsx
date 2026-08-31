@@ -337,7 +337,7 @@ export function RecoveryDialog({
         method: 'POST',
         body: JSON.stringify({ deadLetterId: dlq.id }),
       }) as PatchSuggestion
-      const normalised = normalisePatchSuggestion(result)
+      const normalised = normalisePatchSuggestion(result, dlq.recovery?.metadataWorkflowId)
       setSelectedSuggestionIndex(0)
       setStep({ kind: 'review', suggestion: normalised })
     } catch (error) {
@@ -357,7 +357,10 @@ export function RecoveryDialog({
         body: JSON.stringify({ deadLetterId: dlq.id }),
       }) as { suggestion: PatchSuggestion }
       setSelectedSuggestionIndex(0)
-      setStep({ kind: 'review', suggestion: normalisePatchSuggestion(result.suggestion) })
+      setStep({
+        kind: 'review',
+        suggestion: normalisePatchSuggestion(result.suggestion, dlq.recovery?.metadataWorkflowId),
+      })
     } catch (error) {
       setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.useFailed')) })
     } finally {

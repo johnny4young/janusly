@@ -513,6 +513,27 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Pack workflow is not executable", nil))
 			return
 		}
+		// Once this organization installs the pack, drills must exercise that
+		// persisted workflow identity and latest draft—not the catalog's global
+		// template id. Otherwise a validated recovery later tries to save the
+		// template id, which can belong to another tenant under the global
+		// workflows PK and fails with a misleading conflict.
+		installedWorkflowID := wf.ID + "-" + shortHash(rc.orgID, 8)
+		latest, latestErr := store.New(s.pool).GetLatestWorkflowVersion(r.Context(), store.GetLatestWorkflowVersionParams{
+			WorkflowID: installedWorkflowID,
+			OrgID:      rc.orgID,
+		})
+		switch {
+		case latestErr == nil:
+			wf, _ = domain.Parse(latest.DagJson)
+			if wf == nil {
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Installed pack workflow is not executable", nil))
+				return
+			}
+		case !errors.Is(latestErr, pgx.ErrNoRows):
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
 		source := engine.RecoveryDrillSource{
 			Kind: "solution_pack_drill", PackID: pack.ID, FixtureID: fixture.ID,
 			FailureMode: fixture.FailureMode, RecoveryPath: fixture.RecoveryPath,
