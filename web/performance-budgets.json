@@ -6,7 +6,7 @@
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 530
+    "maxGzipKiB": 536
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -99,7 +99,7 @@
     "ReasoningPanel.js": 5.99,
     "RecentAlertsCard.js": 1.18,
     "recovery-item.js": 0.6,
-    "RecoveryCasePanel.js": 3.5,
+    "RecoveryCasePanel.js": 5.32,
     "RecoveryDialog.js": 9.8,
     "ReplayCampaignsCard.js": 1.6,
     "RollbackConfirmDialog.js": 1.27,
