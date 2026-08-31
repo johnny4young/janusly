@@ -46,7 +46,9 @@ docker compose -f deploy/observability/compose.local.yml up -d
 The stack contains Alloy, Prometheus, Alertmanager, Tempo, and Grafana. Alloy scrapes
 `host.docker.internal:9464`. On platforms where a container cannot reach the
 host loopback listener, set `JANUSLY_INTERNAL_HOST=0.0.0.0` only while the
-collector network is protected.
+collector network is protected. The root application Compose file already uses
+that container-internal bind while publishing `9464` only on host loopback; the
+standalone process default remains `127.0.0.1`.
 
 Local endpoints:
 

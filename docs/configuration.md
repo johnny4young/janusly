@@ -77,7 +77,10 @@ The frontend has no API URL variable. It calls the page origin in production.
 
 AI paths must degrade to deterministic fallback results when the provider is
 missing or unavailable. Tenant model, budget, and behavior settings belong in
-the closed `org_configs` catalog.
+the closed `org_configs` catalog. The root Compose service explicitly forwards
+the process memory gate and embedding provider/model variables; setting them in
+`.env` therefore changes the application container rather than only the sibling
+Ollama service.
 
 ## Integrations
 

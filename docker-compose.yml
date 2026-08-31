@@ -35,7 +35,10 @@ services:
       # own stable contract. Keep both aligned without adding a runtime alias.
       PORT: ${PORT:-3001}
       JANUSLY_PORT: ${JANUSLY_PORT:-3001}
-      JANUSLY_INTERNAL_HOST: ${JANUSLY_INTERNAL_HOST:-127.0.0.1}
+      # Inside the container, bind the privileged listener to its private
+      # interface so the loopback-only host mapping and sibling collectors can
+      # reach it. The process default remains 127.0.0.1 outside Compose.
+      JANUSLY_INTERNAL_HOST: ${JANUSLY_INTERNAL_HOST:-0.0.0.0}
       JANUSLY_INTERNAL_PORT: 9464
       JANUSLY_WORKER_CONCURRENCY: ${JANUSLY_WORKER_CONCURRENCY:-8}
       JANUSLY_API_POOL_SIZE: ${JANUSLY_API_POOL_SIZE:-10}
@@ -52,6 +55,9 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OTEL_EXPORTER: ${OTEL_EXPORTER:-}
+      JANUSLY_MEMORY_ENABLED: ${JANUSLY_MEMORY_ENABLED:-false}
+      JANUSLY_EMBEDDING_PROVIDER: ${JANUSLY_EMBEDDING_PROVIDER:-ollama}
+      JANUSLY_EMBEDDING_MODEL: ${JANUSLY_EMBEDDING_MODEL:-bge-m3}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       ALLOW_PRIVATE_HTTP_TARGETS: ${ALLOW_PRIVATE_HTTP_TARGETS:-false}
     depends_on:
