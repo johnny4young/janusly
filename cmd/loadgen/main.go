@@ -12,6 +12,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -29,9 +30,105 @@ import (
 )
 
 const (
-	maxResponseBytes = 1 << 20
-	maxLatencyMs     = 90_000
+	maxResponseBytes                 = 1 << 20
+	maxLatencyMs                     = 90_000
+	queueSnapshotAvailabilityMinimum = 0.995
+	queueUnavailableConsecutiveLimit = 6
+	minimumQueueProbeInterval        = 100 * time.Millisecond
+	maximumQueueProbeInterval        = time.Minute
+	maximumExactJSONInteger          = 1<<53 - 1
 )
+
+type queueObservabilitySummary struct {
+	Probes                    int     `json:"probes"`
+	ValidSnapshots            int     `json:"validSnapshots"`
+	UnavailableSnapshots      int     `json:"unavailableSnapshots"`
+	Availability              float64 `json:"availability"`
+	MaxUnavailableConsecutive int     `json:"maxUnavailableConsecutive"`
+	MaxActive                 int     `json:"maxActive"`
+	MaxWaiting                int     `json:"maxWaiting"`
+	MinimumAvailability       float64 `json:"minimumAvailability"`
+	UnavailableLimit          int     `json:"unavailableConsecutiveLimit"`
+	Passed                    bool    `json:"passed"`
+	unavailableConsecutive    int
+}
+
+func nonNegativeJSONInteger(value any) (int, bool) {
+	number, ok := value.(float64)
+	if !ok || number < 0 || number != math.Trunc(number) || number > maximumExactJSONInteger {
+		return 0, false
+	}
+	return int(number), true
+}
+
+func (summary *queueObservabilitySummary) record(snapshot map[string]any) error {
+	summary.Probes++
+	active, activeOK := nonNegativeJSONInteger(snapshot["active"])
+	waiting, waitingOK := nonNegativeJSONInteger(snapshot["waiting"])
+	if activeOK && waitingOK {
+		if queue, present := snapshot["queue"]; present && queue == nil {
+			return errors.New("queue snapshot mixed measured counts with queue:null")
+		}
+		summary.ValidSnapshots++
+		summary.unavailableConsecutive = 0
+		summary.MaxActive = max(summary.MaxActive, active)
+		summary.MaxWaiting = max(summary.MaxWaiting, waiting)
+		return nil
+	}
+
+	_, activePresent := snapshot["active"]
+	_, waitingPresent := snapshot["waiting"]
+	queue, queuePresent := snapshot["queue"]
+	if !activePresent && !waitingPresent && queuePresent && queue == nil {
+		summary.UnavailableSnapshots++
+		summary.unavailableConsecutive++
+		summary.MaxUnavailableConsecutive = max(
+			summary.MaxUnavailableConsecutive,
+			summary.unavailableConsecutive,
+		)
+		return nil
+	}
+	return errors.New("queue snapshot omitted or malformed non-negative integer counts")
+}
+
+func (summary *queueObservabilitySummary) finalize() {
+	summary.MinimumAvailability = queueSnapshotAvailabilityMinimum
+	summary.UnavailableLimit = queueUnavailableConsecutiveLimit
+	if summary.Probes > 0 {
+		summary.Availability = float64(summary.ValidSnapshots) / float64(summary.Probes)
+	}
+	summary.Passed = summary.Probes > 0 &&
+		summary.ValidSnapshots+summary.UnavailableSnapshots == summary.Probes &&
+		summary.Availability+1e-12 >= queueSnapshotAvailabilityMinimum &&
+		summary.MaxUnavailableConsecutive <= queueUnavailableConsecutiveLimit
+}
+
+func monitorQueue(
+	ctx context.Context,
+	interval time.Duration,
+	probe func(context.Context) (map[string]any, error),
+	summary *queueObservabilitySummary,
+) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		snapshot, err := probe(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("queue probe during load: %w", err)
+		}
+		if err := summary.record(snapshot); err != nil {
+			return fmt.Errorf("queue probe during load: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
 
 type latencyHistogram struct {
 	buckets   []atomic.Uint64
@@ -142,10 +239,15 @@ func validateBase(raw string, allowNonLoopback bool) (string, error) {
 	return strings.TrimSuffix(parsed.String(), "/"), nil
 }
 
+func validQueueProbeInterval(interval time.Duration) bool {
+	return interval == 0 || (interval >= minimumQueueProbeInterval && interval <= maximumQueueProbeInterval)
+}
+
 type config struct {
 	base, scenario, org, user, workflowName string
 	vus                                     int
 	duration                                time.Duration
+	queueProbeInterval                      time.Duration
 	allowDevAuth, allowNonLoopback          bool
 }
 
@@ -158,6 +260,7 @@ func parseConfig() (config, error) {
 	flag.StringVar(&cfg.org, "org", fmt.Sprintf("load-%d", time.Now().UnixNano()), "organization id")
 	flag.StringVar(&cfg.user, "user", "loadgen", "dev-header user id")
 	flag.StringVar(&cfg.workflowName, "workflow-name", "Load soak workflow", "workflow name used by start scenarios")
+	flag.DurationVar(&cfg.queueProbeInterval, "queue-probe-interval", 0, "operator queue snapshot cadence; 0 disables")
 	flag.BoolVar(&cfg.allowDevAuth, "allow-dev-auth", false, "explicitly allow forgeable local dev headers")
 	flag.BoolVar(&cfg.allowNonLoopback, "allow-non-loopback", false, "explicitly allow a non-loopback API origin")
 	flag.Parse()
@@ -177,6 +280,9 @@ func parseConfig() (config, error) {
 	}
 	if cfg.duration < time.Second || cfg.duration > 24*time.Hour {
 		problems = append(problems, "duration must be in 1s..24h")
+	}
+	if !validQueueProbeInterval(cfg.queueProbeInterval) {
+		problems = append(problems, "queue-probe-interval must be 0 or in 100ms..1m")
 	}
 	if strings.TrimSpace(cfg.org) == "" || strings.TrimSpace(cfg.user) == "" || strings.TrimSpace(cfg.workflowName) == "" {
 		problems = append(problems, "org, user, and workflow-name must be non-empty")
@@ -209,10 +315,11 @@ func run() error {
 	}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Timeout: 60 * time.Second, Transport: transport}
+	queueClient := &http.Client{Timeout: 5 * time.Second, Transport: transport}
 	recorder := newLatencyHistogram()
 	var nodesCompleted atomic.Int64
 
-	call := func(method, path string, body any) (map[string]any, error) {
+	call := func(ctx context.Context, requestClient *http.Client, method, path string, body any) (map[string]any, error) {
 		var raw []byte
 		if body != nil {
 			var marshalErr error
@@ -221,7 +328,7 @@ func run() error {
 				return nil, marshalErr
 			}
 		}
-		req, err := http.NewRequest(method, cfg.base+path, bytes.NewReader(raw))
+		req, err := http.NewRequestWithContext(ctx, method, cfg.base+path, bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
@@ -229,7 +336,7 @@ func run() error {
 		req.Header.Set("content-type", "application/json")
 		req.Header.Set("x-org-id", cfg.org)
 		req.Header.Set("x-user-id", cfg.user)
-		res, err := client.Do(req)
+		res, err := requestClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -282,10 +389,13 @@ func run() error {
 		},
 	}
 
+	phaseContext, cancelPhase := context.WithCancel(context.Background())
+	defer cancelPhase()
+
 	runToTerminal := func(workflow map[string]any, nodes int64) {
 		startAt := time.Now()
 		pollDeadline := startAt.Add(90 * time.Second)
-		res, err := call("POST", "/v1/start", map[string]any{"workflow": workflow})
+		res, err := call(phaseContext, client, "POST", "/v1/start", map[string]any{"workflow": workflow})
 		if err != nil {
 			recorder.record(time.Since(startAt), true)
 			return
@@ -297,11 +407,15 @@ func run() error {
 			return
 		}
 		for {
+			if phaseContext.Err() != nil {
+				recorder.record(time.Since(startAt), true)
+				return
+			}
 			if time.Now().After(pollDeadline) {
 				recorder.record(time.Since(startAt), true)
 				return
 			}
-			res, err := call("GET", "/v1/status?runId="+url.QueryEscape(runID), nil)
+			res, err := call(phaseContext, client, "GET", "/v1/status?runId="+url.QueryEscape(runID), nil)
 			if err != nil {
 				recorder.record(time.Since(startAt), true)
 				return
@@ -323,10 +437,24 @@ func run() error {
 
 	begun := time.Now()
 	deadline := begun.Add(cfg.duration)
+	queueSummary := queueObservabilitySummary{}
+	var queueMonitorDone chan error
+	if cfg.queueProbeInterval > 0 {
+		queueMonitorDone = make(chan error, 1)
+		go func() {
+			err := monitorQueue(phaseContext, cfg.queueProbeInterval, func(ctx context.Context) (map[string]any, error) {
+				return call(ctx, queueClient, "GET", "/system/queue", nil)
+			}, &queueSummary)
+			if err != nil {
+				cancelPhase()
+			}
+			queueMonitorDone <- err
+		}()
+	}
 	var wg sync.WaitGroup
 	for range cfg.vus {
 		wg.Go(func() {
-			for time.Now().Before(deadline) {
+			for time.Now().Before(deadline) && phaseContext.Err() == nil {
 				switch cfg.scenario {
 				case "start":
 					runToTerminal(linear, 2)
@@ -334,13 +462,20 @@ func run() error {
 					runToTerminal(diamond, 4)
 				case "list":
 					startAt := time.Now()
-					_, err := call("GET", "/v1/runs?limit=50", nil)
+					_, err := call(phaseContext, client, "GET", "/v1/runs?limit=50", nil)
 					recorder.record(time.Since(startAt), err != nil)
 				}
 			}
 		})
 	}
 	wg.Wait()
+	cancelPhase()
+	if queueMonitorDone != nil {
+		if err := <-queueMonitorDone; err != nil {
+			return err
+		}
+		queueSummary.finalize()
+	}
 	elapsed := time.Since(begun)
 
 	out := recorder.summary(elapsed)
@@ -349,6 +484,9 @@ func run() error {
 	out["durationSec"] = elapsed.Seconds()
 	out["requestedDurationSec"] = cfg.duration.Seconds()
 	out["organization"] = cfg.org
+	if cfg.queueProbeInterval > 0 {
+		out["queueObservability"] = queueSummary
+	}
 	if cfg.scenario == "diamond" || cfg.scenario == "start" {
 		out["nodesPerSec"] = float64(nodesCompleted.Load()) / elapsed.Seconds()
 	}

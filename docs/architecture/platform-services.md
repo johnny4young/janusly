@@ -35,14 +35,20 @@ budgets, a 512 MiB peak RSS ceiling, or post-settle growth beyond the recorded
 RSS, heap, goroutine, and PostgreSQL-connection baselines. Burst PostgreSQL
 connections become eligible for retirement after five idle minutes and are
 checked every 30 seconds, so the post-settle comparison measures steady state
-rather than pgx's 30-minute default. The profile also checks the
-drained runtime in Chromium at desktop and compact widths, in English and
-Spanish. Use `JANUSLY_LOAD_WARMUP_DURATION`,
+rather than pgx's 30-minute default. The profile also checks the drained runtime
+in Chromium at desktop and compact widths, in English and Spanish. Every warmup
+and measured phase probes the tenant-scoped operator queue once per second.
+Transport failures and malformed snapshots fail the phase immediately; the
+explicit degraded envelope `{ "queue": null }` remains distinguishable from an
+empty queue but must retain 99.5% availability with no more than six consecutive
+unavailable snapshots. The summary preserves each phase's counts, observed
+peaks, availability, and longest blackout. Use `JANUSLY_LOAD_WARMUP_DURATION`,
 `JANUSLY_LOAD_MEASURE_DURATION`, and `JANUSLY_LOAD_SETTLE_SECONDS` together with
 `JANUSLY_LOAD_SMOKE=1` only for a local smoke; post-settle budgets remain visible
 but are required only by the default-duration qualification evidence. The load
 profile disables console trace export so exporter I/O does not distort the
-runtime under test.
+runtime under test. `JANUSLY_LOAD_QUEUE_PROBE_INTERVAL_SECONDS` exists for
+bounded harness tests, but qualification evidence uses the one-second default.
 
 The measured p95/p99 ceilings are 1.5/5 seconds for start-to-terminal, 750/1500
 milliseconds for the 50-VU shared-tenant run list, and 2/5 seconds for the

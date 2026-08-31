@@ -11,6 +11,7 @@ warmup_duration=${JANUSLY_LOAD_WARMUP_DURATION:-2m}
 measure_duration=${JANUSLY_LOAD_MEASURE_DURATION:-20m}
 settle_seconds=${JANUSLY_LOAD_SETTLE_SECONDS:-360}
 sample_interval=${JANUSLY_LOAD_SAMPLE_INTERVAL:-5}
+queue_probe_interval_seconds=${JANUSLY_LOAD_QUEUE_PROBE_INTERVAL_SECONDS:-1}
 org_id=${JANUSLY_LOAD_ORG_ID:-default}
 user_id=${JANUSLY_LOAD_USER_ID:-local-load-soak}
 workflow_name=${JANUSLY_LOAD_WORKFLOW_NAME:-Load soak workflow}
@@ -52,6 +53,9 @@ validate_configuration() {
     die "Compose project must start with janusly-qualification-"
   [[ -f "$compose_file" && ! -L "$compose_file" ]] || die "Compose file must be a regular non-symlink"
   [[ "$sample_interval" =~ ^[1-9][0-9]*$ ]] || die "sample interval must be a positive integer"
+  [[ "$queue_probe_interval_seconds" =~ ^[1-9][0-9]?$ ]] &&
+    ((queue_probe_interval_seconds <= 60)) ||
+    die "queue probe interval must be an integer in 1..60 seconds"
   [[ "$settle_seconds" =~ ^[0-9]+$ ]] || die "settle seconds must be a non-negative integer"
   [[ "$smoke_mode" == 0 || "$smoke_mode" == 1 ]] || die "JANUSLY_LOAD_SMOKE must be 0 or 1"
   [[ "$origin" =~ ^http://(127\.0\.0\.1|localhost|\[::1\]):[0-9]+$ ]] ||
@@ -131,10 +135,20 @@ run_phase() {
     -org "$org_id" \
     -user "$user_id" \
     -workflow-name "$workflow_name" \
+    -queue-probe-interval "${queue_probe_interval_seconds}s" \
     -allow-dev-auth \
     >"$output"
-  jq -e '.iterations > 0 and .errors == 0 and .errorRate == 0' "$output" >/dev/null ||
-    die "$label failed its zero-error budget"
+  jq -e '
+    .iterations > 0 and .errors == 0 and .errorRate == 0 and
+    (.queueObservability as $queue |
+      $queue.probes > 0 and
+      ($queue.validSnapshots + $queue.unavailableSnapshots == $queue.probes) and
+      $queue.minimumAvailability == 0.995 and
+      $queue.unavailableConsecutiveLimit == 6 and
+      $queue.availability >= $queue.minimumAvailability and
+      $queue.maxUnavailableConsecutive <= $queue.unavailableConsecutiveLimit and
+      $queue.passed == true)
+  ' "$output" >/dev/null || die "$label failed its request or queue-observability budget"
 }
 
 queue_snapshot() {
@@ -178,6 +192,7 @@ write_summary() {
     --arg warmupDuration "$warmup_duration" \
     --arg measureDuration "$measure_duration" \
     --argjson settleSeconds "$settle_seconds" \
+    --argjson queueProbeIntervalSeconds "$queue_probe_interval_seconds" \
     --argjson expectedRuns "$expected_runs" \
     --argjson peakRssBytes "$peak_rss" \
     --argjson peakGoroutines "$peak_goroutines" \
@@ -186,23 +201,46 @@ write_summary() {
     --slurpfile finalRuntime "$evidence_dir/runtime-final.json" \
     --slurpfile baselineDatabase "$evidence_dir/postgres-baseline.json" \
     --slurpfile finalDatabase "$evidence_dir/postgres-final.json" \
+    --slurpfile startWarmup "$evidence_dir/start-warmup.json" \
     --slurpfile start "$evidence_dir/start-measured.json" \
+    --slurpfile listWarmup "$evidence_dir/list-warmup.json" \
     --slurpfile list "$evidence_dir/list-measured.json" \
+    --slurpfile diamondWarmup "$evidence_dir/diamond-warmup.json" \
     --slurpfile diamond "$evidence_dir/diamond-measured.json" \
     --slurpfile queue "$evidence_dir/queue-after.json" \
-    '{
+    '[
+      ({phase:"start-warmup"} + $startWarmup[0].queueObservability),
+      ({phase:"start-measured"} + $start[0].queueObservability),
+      ({phase:"list-warmup"} + $listWarmup[0].queueObservability),
+      ({phase:"list-measured"} + $list[0].queueObservability),
+      ({phase:"diamond-warmup"} + $diamondWarmup[0].queueObservability),
+      ({phase:"diamond-measured"} + $diamond[0].queueObservability)
+    ] as $queuePhases |
+    {
       git:{commit:$commit,tree:$tree},
       mode:(if $smoke then "smoke" else "qualification" end),
-      durations:{warmup:$warmupDuration,measured:$measureDuration,settleSeconds:$settleSeconds},
+      durations:{
+        warmup:$warmupDuration,
+        measured:$measureDuration,
+        settleSeconds:$settleSeconds,
+        queueProbeIntervalSeconds:$queueProbeIntervalSeconds
+      },
       expectedRuns:$expectedRuns,
       runtime:{baseline:$baselineRuntime[0],final:$finalRuntime[0],peakRssBytes:$peakRssBytes,peakGoroutines:$peakGoroutines},
       postgres:{baseline:$baselineDatabase[0],final:$finalDatabase[0]},
       scenarios:{start:$start[0],list:$list[0],diamond:$diamond[0]},
+      queueObservability:{
+        phases:$queuePhases,
+        minimumAvailabilityObserved:($queuePhases | map(.availability) | min),
+        maxUnavailableConsecutiveObserved:($queuePhases | map(.maxUnavailableConsecutive) | max)
+      },
       queue:$queue[0],
       thresholds:{
         start:{p95Ms:1500,p99Ms:5000},
         list:{p95Ms:750,p99Ms:1500},
         diamond:{p95Ms:2000,p99Ms:5000},
+        queueSnapshotAvailability:0.995,
+        queueUnavailableConsecutive:6,
         peakRssBytes:536870912,
         finalRssGrowthBytes:67108864,
         finalHeapGrowthBytes:33554432,
@@ -210,7 +248,12 @@ write_summary() {
         finalConnectionGrowth:2
       },
       budgets:{
-        zeroErrors:([$start[0].errors,$list[0].errors,$diamond[0].errors] | all(. == 0)),
+        zeroErrors:([
+          $startWarmup[0].errors,$start[0].errors,
+          $listWarmup[0].errors,$list[0].errors,
+          $diamondWarmup[0].errors,$diamond[0].errors
+        ] | all(. == 0)),
+        queueSnapshots:($queuePhases | all(.passed == true)),
         startLatency:($start[0].p95Ms <= 1500 and $start[0].p99Ms <= 5000),
         listLatency:($list[0].p95Ms <= 750 and $list[0].p99Ms <= 1500),
         diamondLatency:($diamond[0].p95Ms <= 2000 and $diamond[0].p99Ms <= 5000),
@@ -223,7 +266,8 @@ write_summary() {
       }
     } |
     .passed = (
-      .budgets.zeroErrors and .budgets.startLatency and .budgets.listLatency and
+      .budgets.zeroErrors and .budgets.queueSnapshots and
+      .budgets.startLatency and .budgets.listLatency and
       .budgets.diamondLatency and .budgets.queuesDrained and .budgets.peakRss and
       ($smoke or (
         .budgets.finalRss and .budgets.finalHeap and .budgets.finalGoroutines and
@@ -234,6 +278,48 @@ write_summary() {
   jq -e '.passed == true' "$evidence_dir/summary.json" >/dev/null ||
     die "one or more load/soak budgets failed; inspect $evidence_dir/summary.json"
 }
+
+run_selftest() {
+  temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/janusly-load-soak-selftest.XXXXXX")
+  evidence_dir="$temporary_dir/evidence"
+  mkdir -p "$evidence_dir"
+  trap cleanup EXIT INT TERM
+
+  jq -n '{
+    iterations:1,errors:0,errorRate:0,p95Ms:1,p99Ms:2,
+    queueObservability:{
+      probes:200,validSnapshots:199,unavailableSnapshots:1,
+      availability:0.995,maxUnavailableConsecutive:1,maxActive:3,maxWaiting:7,
+      minimumAvailability:0.995,unavailableConsecutiveLimit:6,passed:true
+    }
+  }' >"$temporary_dir/phase.json"
+  for phase in start-warmup start-measured list-warmup list-measured diamond-warmup diamond-measured; do
+    cp "$temporary_dir/phase.json" "$evidence_dir/$phase.json"
+  done
+  printf '{"capturedAt":"2026-01-01T00:00:00Z","rssBytes":100,"goroutines":2,"heapBytes":50}\n' \
+    >"$evidence_dir/runtime-baseline.json"
+  cp "$evidence_dir/runtime-baseline.json" "$evidence_dir/runtime-final.json"
+  printf '{"connections":2}\n' >"$evidence_dir/postgres-baseline.json"
+  cp "$evidence_dir/postgres-baseline.json" "$evidence_dir/postgres-final.json"
+  printf '{"waiting":0,"active":0,"maintenance":{"waiting":0,"active":0}}\n' \
+    >"$evidence_dir/queue-after.json"
+  printf 'captured_at\trss_bytes\tgoroutines\theap_bytes\n2026-01-01T00:00:00Z\t100\t2\t50\n' \
+    >"$evidence_dir/runtime-samples.tsv"
+  smoke_mode=1
+  write_summary
+  jq -e '
+    .passed == true and .budgets.queueSnapshots == true and
+    (.queueObservability.phases | length) == 6 and
+    .queueObservability.minimumAvailabilityObserved == 0.995 and
+    .queueObservability.maxUnavailableConsecutiveObserved == 1
+  ' "$evidence_dir/summary.json" >/dev/null
+  cat "$evidence_dir/summary.json"
+}
+
+if [[ ${JANUSLY_LOAD_SELFTEST:-0} == 1 ]]; then
+  run_selftest
+  exit 0
+fi
 
 validate_configuration
 mkdir -p "$evidence_dir"
