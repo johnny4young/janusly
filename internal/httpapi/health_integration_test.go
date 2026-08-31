@@ -6,7 +6,6 @@ import (
 	"context"
 	"net/http"
 	"testing"
-	"time"
 )
 
 // Two-tier health: the open route never exposes live queue numbers, and
@@ -18,8 +17,8 @@ func TestTwoTierQueueHealth(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 
-	// A stale eligible queued node: running run, queued node, and its
-	// node.queued event 120 seconds in the past (the eligibility instant).
+	// A stale eligible queued node: queue age is owned by run_nodes rather
+	// than reconstructed from best-effort node.queued events.
 	org := "org-qhealth"
 	runID := "run-qhealth"
 	_, _ = pool.Exec(ctx, `DELETE FROM run_events WHERE run_id = 'run-qhealth'`)
@@ -29,15 +28,10 @@ func TestTwoTierQueueHealth(t *testing.T) {
 		VALUES ($1, $2, 'running', '{}', 'wv-q')`, runID, org); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO run_nodes (id, run_id, node_id, status)
-		VALUES ($1, $2, 'slow', 'queued')`, runID+"-slow", runID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO run_nodes (id, run_id, node_id, status, enqueued_at)
+		VALUES ($1, $2, 'slow', 'queued', clock_timestamp() - interval '120 seconds')`,
+		runID+"-slow", runID); err != nil {
 		t.Fatalf("seed node: %v", err)
-	}
-	queuedAt := time.Now().UTC().Add(-120 * time.Second)
-	if _, err := pool.Exec(ctx, `INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
-		VALUES ($1, $2, 'slow', 'node.queued', '{}', $3)`,
-		runID+"-ev-"+time.Now().Format("150405.000"), runID, queuedAt); err != nil {
-		t.Fatalf("seed event: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM run_events WHERE run_id = 'run-qhealth'`)
@@ -54,7 +48,7 @@ func TestTwoTierQueueHealth(t *testing.T) {
 	}
 
 	// Admin detail: the stale node counts, its age measured from the
-	// queued event, maintenance projected as a drained in-process lane.
+	// queue clock, maintenance projected as a drained in-process lane.
 	admin := h.call("GET", "/system/queue", nil, "")
 	if admin.status != 200 {
 		t.Fatalf("admin queue: %d %+v", admin.status, admin.body)

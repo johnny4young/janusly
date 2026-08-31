@@ -8,6 +8,15 @@ Workers claim eligible tasks with bounded concurrency. Claims carry generation
 identity; completion uses compare-and-set predicates. Downstream work becomes
 eligible only after the upstream terminal write commits.
 
+Eligible tasks are claimed oldest-first by the durable `run_nodes.enqueued_at`
+clock, with the stable row ID used only to break timestamp ties. Every
+transition into `queued` refreshes that clock. A partial index over
+`(enqueued_at, id)` contains only queued rows, so claim cost follows live queue
+depth rather than accumulated terminal history. Retry wake-ups continue to
+gate eligibility; queue-health age starts at the later of enqueue and wake-up.
+Janusly does not currently expose priority or named-lane policy: adding either
+requires an operator-facing service contract and load evidence first.
+
 PostgreSQL notifications wake workers and SSE readers. Polling and table state
 remain authoritative after missed notifications or process restarts.
 

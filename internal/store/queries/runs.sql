@@ -143,7 +143,7 @@ SELECT status, org_id, replay_mode FROM runs WHERE id = $1;
 -- reconciler therefore cannot publish the rollback delivery before backoff.
 -- name: RequeueRunNodeForRetry :execrows
 UPDATE run_nodes
-SET status = 'queued', attempts = sqlc.arg(attempt),
+SET status = 'queued', attempts = sqlc.arg(attempt), enqueued_at = clock_timestamp(),
     queue_publication_repair_after = sqlc.arg(wake_at),
     queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
@@ -316,7 +316,7 @@ LIMIT sqlc.arg(page_limit);
 -- A Go-created redrive remains recoverable by Node before its Go claim.
 -- name: RedriveFailedRunNode :one
 UPDATE run_nodes
-SET status = 'queued', attempts = 1,
+SET status = 'queued', attempts = 1, enqueued_at = clock_timestamp(),
     queue_publication_repair_after = clock_timestamp(),
     queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)

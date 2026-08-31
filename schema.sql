@@ -1054,7 +1054,8 @@ CREATE TABLE public.run_nodes (
     recovery_validation_run_id text,
     waiting_repair_after timestamp with time zone,
     queue_publication_repair_after timestamp with time zone,
-    queue_publication_generation integer DEFAULT 0 NOT NULL
+    queue_publication_generation integer DEFAULT 0 NOT NULL,
+    enqueued_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL
 );
 
 
@@ -2971,7 +2972,10 @@ CREATE INDEX run_nodes_queue_publication_repair_idx ON public.run_nodes USING bt
 -- Name: run_nodes_queued_claim_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX run_nodes_queued_claim_idx ON public.run_nodes USING btree (id) WHERE (status = 'queued'::text);
+-- The partial index contains only claimable-state history and follows the
+-- worker's FIFO order, so terminal run history cannot make queue polling
+-- degrade into a full run_nodes scan.
+CREATE INDEX run_nodes_queued_claim_idx ON public.run_nodes USING btree (enqueued_at, id) WHERE (status = 'queued'::text);
 
 
 --

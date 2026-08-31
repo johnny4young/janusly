@@ -749,6 +749,7 @@ type RunNode struct {
 	WaitingRepairAfter          *time.Time
 	QueuePublicationRepairAfter *time.Time
 	QueuePublicationGeneration  int32
+	EnqueuedAt                  time.Time
 }
 
 type RunStartIdempotency struct {

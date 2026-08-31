@@ -2163,7 +2163,7 @@ const redriveFailedRunNode = `-- name: RedriveFailedRunNode :one
 
 
 UPDATE run_nodes
-SET status = 'queued', attempts = 1,
+SET status = 'queued', attempts = 1, enqueued_at = clock_timestamp(),
     queue_publication_repair_after = clock_timestamp(),
     queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = $1 AND node_id = $2
@@ -2191,7 +2191,7 @@ func (q *Queries) RedriveFailedRunNode(ctx context.Context, arg RedriveFailedRun
 
 const requeueRunNodeForRetry = `-- name: RequeueRunNodeForRetry :execrows
 UPDATE run_nodes
-SET status = 'queued', attempts = $1,
+SET status = 'queued', attempts = $1, enqueued_at = clock_timestamp(),
     queue_publication_repair_after = $2,
     queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = $3 AND node_id = $4

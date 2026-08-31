@@ -596,7 +596,7 @@ WHERE rn.status = 'queued' AND r.status = 'running'
     SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = rn.id AND w.wake_at > now()
   )
-ORDER BY rn.id
+ORDER BY rn.enqueued_at, rn.id
 LIMIT $1
 FOR UPDATE OF rn SKIP LOCKED
 `
@@ -678,27 +678,17 @@ func (q *Queries) NotifyRunEvents(ctx context.Context, runID string) error {
 
 const queryQueueHealth = `-- name: QueryQueueHealth :one
 WITH eligible AS (
-  SELECT rn.id, rn.run_id, rn.node_id
+  SELECT rn.id, GREATEST(rn.enqueued_at, COALESCE(w.wake_at, rn.enqueued_at)) AS eligible_at
   FROM run_nodes rn
   JOIN runs r ON r.id = rn.run_id
+  LEFT JOIN run_wakeups w ON w.run_node_id = rn.id
   WHERE rn.status = 'queued' AND r.status = 'running'
-    AND NOT EXISTS (
-      SELECT 1 FROM run_wakeups w
-      WHERE w.run_node_id = rn.id AND w.wake_at > now())
+    AND (w.wake_at IS NULL OR w.wake_at <= now())
 )
 SELECT
   (SELECT count(*) FROM eligible)::int AS waiting,
   (SELECT count(*) FROM run_nodes WHERE status = 'running')::int AS active,
-  (SELECT min(candidate) FROM (
-     SELECT GREATEST(
-       COALESCE((SELECT max(ev.created_at) FROM run_events ev
-         WHERE ev.run_id = e.run_id AND ev.node_id = e.node_id
-           AND ev.type = 'node.queued'), '-infinity'::timestamptz),
-       COALESCE((SELECT w.wake_at FROM run_wakeups w
-         WHERE w.run_node_id = e.id), '-infinity'::timestamptz)
-     ) AS candidate FROM eligible e
-   ) instants
-   WHERE candidate > '-infinity'::timestamptz) AS oldest_eligible_at
+  (SELECT min(eligible_at) FROM eligible) AS oldest_eligible_at
 `
 
 type QueryQueueHealthRow struct {
@@ -707,6 +697,9 @@ type QueryQueueHealthRow struct {
 	OldestEligibleAt interface{}
 }
 
+// enqueued_at is the durable queue clock. A retry remains in `queued` while
+// its wake-up gates eligibility, so queue age starts from whichever instant
+// is later: entry into the queue or the due clock.
 func (q *Queries) QueryQueueHealth(ctx context.Context) (QueryQueueHealthRow, error) {
 	row := q.db.QueryRow(ctx, queryQueueHealth)
 	var i QueryQueueHealthRow
@@ -717,7 +710,7 @@ func (q *Queries) QueryQueueHealth(ctx context.Context) (QueryQueueHealthRow, er
 const queueRunNode = `-- name: QueueRunNode :execrows
 
 UPDATE run_nodes
-SET status = 'queued', attempts = 1,
+SET status = 'queued', attempts = 1, enqueued_at = clock_timestamp(),
     queue_publication_repair_after = clock_timestamp(),
     queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = $1 AND node_id = $2 AND status = 'pending'
