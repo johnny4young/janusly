@@ -1,14 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
+import { ConfirmProvider } from './ConfirmDialog'
 import { MembersPanel } from './MembersPanel'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
 const initialState = useWorkflowStore.getState()
 
-function setupApi(opts: { roles?: unknown; members?: unknown[] }) {
+function setupApi(opts: { roles?: unknown; members?: unknown[]; invitations?: unknown[] }) {
   vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
     if (path === '/members' && (!init || init.method !== 'POST')) {
       return opts.members ?? []
@@ -20,7 +21,11 @@ function setupApi(opts: { roles?: unknown; members?: unknown[] }) {
         { name: 'admin',  isBuiltin: true,  inheritsFrom: 'admin',  description: null },
       ] }
     }
+    if (path === '/members/invitations' && (!init || init.method !== 'POST')) {
+      return { invitations: opts.invitations ?? [] }
+    }
     if (path === '/members/invite' && init?.method === 'POST') return { id: 'inv-1', status: 'pending' }
+    if (/^\/members\/invitations\/[^/]+\/revoke$/.test(path) && init?.method === 'POST') return { ok: true }
     if (path === '/members/role' && init?.method === 'POST') return { ok: true }
     if (path === '/organizations/owner' && init?.method === 'POST') return { ok: true, ownerUserId: 'user-1' }
     if (path.startsWith('/members?userId=') && init?.method === 'DELETE') return { ok: true }
@@ -230,5 +235,236 @@ describe('<MembersPanel /> dynamic role list', () => {
     })
     expect(screen.queryByLabelText('Remove ada@example.com')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Invite/i })).toBeDisabled()
+    expect(screen.getByText('Member access is read-only')).toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.some(([path]) => path === '/members/invitations')).toBe(false)
+  })
+
+  it('does not advertise admin member mutations to a viewer-base custom role', async () => {
+    setupApi({})
+    useWorkflowStore.setState((state) => ({
+      identityContext: state.identityContext
+        ? {
+            ...state.identityContext,
+            organizations: state.identityContext.organizations.map((organization) => ({
+              ...organization,
+              role: 'invitation-operator',
+              roleBase: 'viewer',
+              permissions: ['members.read', 'members.write', 'members.role_set'],
+            })),
+          }
+        : null,
+    }))
+
+    render(<MembersPanel />)
+
+    expect(await screen.findByText('Member access is read-only')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Invite/i })).toBeDisabled()
+    expect(screen.queryByTestId('members-invitations-panel')).not.toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.some(([path]) => path === '/members/invitations')).toBe(false)
+  })
+
+  it('shows only actionable pending invitations and preserves their bound role', async () => {
+    setupApi({
+      invitations: [
+        {
+          id: 'inv-pending',
+          orgId: 'default',
+          email: 'pending@example.com',
+          role: 'editor',
+          status: 'pending',
+          createdAt: '2026-08-31T15:30:00Z',
+        },
+        {
+          id: 'inv-accepted',
+          orgId: 'default',
+          email: 'accepted@example.com',
+          role: 'viewer',
+          status: 'accepted',
+        },
+        {
+          id: 'inv-revoked',
+          orgId: 'default',
+          email: 'revoked@example.com',
+          role: 'admin',
+          status: 'revoked',
+        },
+      ],
+    })
+
+    render(<MembersPanel />)
+
+    const pending = await screen.findByTestId('members-invitation-inv-pending')
+    expect(within(pending).getByText('pending@example.com')).toBeInTheDocument()
+    expect(within(pending).getByText(/Editor role/)).toBeInTheDocument()
+    expect(screen.queryByText('accepted@example.com')).not.toBeInTheDocument()
+    expect(screen.queryByText('revoked@example.com')).not.toBeInTheDocument()
+  })
+
+  it('requires a focus-managed confirmation before revoking a pending invitation', async () => {
+    setupApi({
+      invitations: [{
+        id: 'inv-pending',
+        orgId: 'default',
+        email: 'pending@example.com',
+        role: 'viewer',
+        status: 'pending',
+      }],
+    })
+
+    render(
+      <ConfirmProvider>
+        <MembersPanel />
+      </ConfirmProvider>,
+    )
+
+    const trigger = await screen.findByRole('button', { name: 'Revoke invitation for pending@example.com' })
+    trigger.focus()
+    fireEvent.click(trigger)
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Revoke invitation' })
+    expect(within(dialog).getByText(/existing link will stop working/)).toBeInTheDocument()
+    expect(api).not.toHaveBeenCalledWith('/members/invitations/inv-pending/revoke', { method: 'POST' })
+
+    fireEvent.click(within(dialog).getByTestId('confirm-dialog-cancel'))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'))
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/members/invitations/inv-pending/revoke', { method: 'POST' })
+    })
+  })
+
+  it('shows a loading skeleton instead of flashing the members empty state', async () => {
+    let resolveMembers: ((value: unknown[]) => void) | undefined
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/members') {
+        return new Promise((resolve) => { resolveMembers = resolve })
+      }
+      if (path === '/members/invitations') return Promise.resolve({ invitations: [] })
+      if (path === '/org/roles') return Promise.resolve({ roles: [] })
+      return Promise.resolve(null)
+    })
+
+    render(<MembersPanel />)
+
+    expect(await screen.findByTestId('members-loading')).toBeInTheDocument()
+    expect(screen.queryByTestId('members-empty')).not.toBeInTheDocument()
+
+    await act(async () => { resolveMembers?.([]) })
+    expect(await screen.findByTestId('members-empty')).toBeInTheDocument()
+  })
+
+  it('ignores a stale member response after the active organization changes', async () => {
+    let resolveDefault: ((value: unknown[]) => void) | undefined
+    let resolveSecond: ((value: unknown[]) => void) | undefined
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/members') {
+        const orgId = useWorkflowStore.getState().identityContext?.currentOrganizationId
+        return new Promise((resolve) => {
+          if (orgId === 'second') resolveSecond = resolve
+          else resolveDefault = resolve
+        })
+      }
+      if (path === '/members/invitations') return Promise.resolve({ invitations: [] })
+      if (path === '/org/roles') return Promise.resolve({ roles: [] })
+      return Promise.resolve(null)
+    })
+
+    render(<MembersPanel />)
+    await waitFor(() => expect(resolveDefault).toBeTypeOf('function'))
+
+    act(() => {
+      useWorkflowStore.setState((state) => ({
+        identityContext: state.identityContext
+          ? {
+              ...state.identityContext,
+              organizations: [
+                ...state.identityContext.organizations,
+                {
+                  ...state.identityContext.organizations[0]!,
+                  id: 'second',
+                  name: 'Second',
+                },
+              ],
+              currentOrganizationId: 'second',
+            }
+          : null,
+      }))
+    })
+    await waitFor(() => expect(resolveSecond).toBeTypeOf('function'))
+
+    await act(async () => {
+      resolveSecond?.([{ id: 'm-second', orgId: 'second', userId: 'second-user', email: 'second@example.com', role: 'viewer', isOwner: false }])
+    })
+    expect(await screen.findByText('second@example.com')).toBeInTheDocument()
+
+    await act(async () => {
+      resolveDefault?.([{ id: 'm-stale', orgId: 'default', userId: 'stale-user', email: 'stale@example.com', role: 'admin', isOwner: false }])
+    })
+    expect(screen.queryByText('stale@example.com')).not.toBeInTheDocument()
+    expect(screen.getByText('second@example.com')).toBeInTheDocument()
+  })
+
+  it('does not carry a stale custom role catalog across organizations', async () => {
+    let resolveDefaultRoles: ((value: unknown) => void) | undefined
+    let resolveSecondRoles: ((value: unknown) => void) | undefined
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve([])
+      if (path === '/members/invitations') return Promise.resolve({ invitations: [] })
+      if (path === '/org/roles') {
+        const orgId = useWorkflowStore.getState().identityContext?.currentOrganizationId
+        return new Promise((resolve) => {
+          if (orgId === 'second') resolveSecondRoles = resolve
+          else resolveDefaultRoles = resolve
+        })
+      }
+      return Promise.resolve(null)
+    })
+
+    render(<MembersPanel />)
+    await waitFor(() => expect(resolveDefaultRoles).toBeTypeOf('function'))
+
+    act(() => {
+      useWorkflowStore.setState((state) => ({
+        identityContext: state.identityContext
+          ? {
+              ...state.identityContext,
+              organizations: [
+                ...state.identityContext.organizations,
+                {
+                  ...state.identityContext.organizations[0]!,
+                  id: 'second',
+                  name: 'Second',
+                },
+              ],
+              currentOrganizationId: 'second',
+            }
+          : null,
+      }))
+    })
+    await waitFor(() => expect(resolveSecondRoles).toBeTypeOf('function'))
+
+    await act(async () => {
+      resolveSecondRoles?.({
+        roles: [
+          { name: 'viewer', isBuiltin: true, inheritsFrom: 'viewer', description: null },
+          { name: 'second-reviewer', isBuiltin: false, inheritsFrom: 'viewer', description: 'Second org only' },
+        ],
+      })
+    })
+    expect(await screen.findByRole('radio', { name: /second-reviewer/i })).toBeInTheDocument()
+
+    await act(async () => {
+      resolveDefaultRoles?.({
+        roles: [
+          { name: 'viewer', isBuiltin: true, inheritsFrom: 'viewer', description: null },
+          { name: 'stale-admin', isBuiltin: false, inheritsFrom: 'admin', description: 'Wrong org' },
+        ],
+      })
+    })
+    expect(screen.queryByRole('radio', { name: /stale-admin/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /second-reviewer/i })).toBeInTheDocument()
   })
 })

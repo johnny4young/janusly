@@ -11,17 +11,20 @@
  *   grants admin UI. Sourced from `GET /org/roles`.
  */
 
-import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, CircleCheck, Crown, Info, Trash2, UserPlus } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { AlertCircle, CircleCheck, Crown, Info, Mail, RefreshCw, Trash2, UserPlus } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
+import { LoadingSkeleton } from './LoadingSkeleton'
 import { useWorkflowStore } from '../store'
-import type { OrgMember, OrgRole } from '../types'
-import { tApiError, useT } from '../i18n'
+import type { OrgInvitation, OrgMember, OrgRole } from '../types'
+import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { currentSessionOrganization, sessionCan } from '../identity-context'
+import { useConfirm } from './ConfirmDialog'
 import { Button } from './ui/Button'
-import { FieldStack, FormActions, FormField , SelectControl} from './ui/Form'
+import { FieldStack, FormActions, FormField, SelectControl } from './ui/Form'
+import { StatusSummary } from './ui/StatusSummary'
 
 type OrgRoleEntry = {
   name: string
@@ -29,6 +32,12 @@ type OrgRoleEntry = {
   inheritsFrom: OrgRole
   description: string | null
 }
+
+const BUILTIN_ROLE_ENTRIES: OrgRoleEntry[] = [
+  { name: 'viewer', isBuiltin: true, inheritsFrom: 'viewer', description: null },
+  { name: 'editor', isBuiltin: true, inheritsFrom: 'editor', description: null },
+  { name: 'admin', isBuiltin: true, inheritsFrom: 'admin', description: null },
+]
 
 const BUILTIN_ROLE_COPY_KEYS: Record<OrgRole, string> = {
   viewer: 'members.role.viewer.copy',
@@ -48,6 +57,27 @@ function describeRole(role: string, entry?: OrgRoleEntry): string {
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+function pendingInvitationsFromResponse(value: unknown): OrgInvitation[] {
+  const rows = (value as { invitations?: unknown } | null)?.invitations
+  if (!Array.isArray(rows)) return []
+  return rows.filter((candidate): candidate is OrgInvitation => {
+    if (!candidate || typeof candidate !== 'object') return false
+    const row = candidate as Record<string, unknown>
+    return typeof row.id === 'string'
+      && typeof row.orgId === 'string'
+      && typeof row.email === 'string'
+      && typeof row.role === 'string'
+      && row.status === 'pending'
+  })
+}
+
+function invitationSentAt(value: string | null | undefined): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (!Number.isFinite(date.valueOf())) return null
+  return date.toLocaleString(getResolvedLocale())
+}
+
 /** Render the members list with invite form + per-row role / remove controls. */
 export function MembersPanel() {
   const { t } = useT()
@@ -56,12 +86,17 @@ export function MembersPanel() {
   const platformVersion = useWorkflowStore(state => state.platformVersion)
   const identityContext = useWorkflowStore(state => state.identityContext)
   const setIdentityContext = useWorkflowStore(state => state.setIdentityContext)
+  const confirm = useConfirm()
   const [members, setMembers] = useState<OrgMember[]>([])
-  const [orgRoles, setOrgRoles] = useState<OrgRoleEntry[]>([
-    { name: 'viewer', isBuiltin: true, inheritsFrom: 'viewer', description: null },
-    { name: 'editor', isBuiltin: true, inheritsFrom: 'editor', description: null },
-    { name: 'admin', isBuiltin: true, inheritsFrom: 'admin', description: null },
-  ])
+  const [membersLoading, setMembersLoading] = useState(true)
+  const [membersLoadFailed, setMembersLoadFailed] = useState(false)
+  const [invitations, setInvitations] = useState<OrgInvitation[]>([])
+  const [invitationsLoading, setInvitationsLoading] = useState(false)
+  const [invitationsLoadFailed, setInvitationsLoadFailed] = useState(false)
+  const [revokingInvitationId, setRevokingInvitationId] = useState<string | null>(null)
+  const membersRequest = useRef(0)
+  const invitationsRequest = useRef(0)
+  const [orgRoles, setOrgRoles] = useState<OrgRoleEntry[]>(BUILTIN_ROLE_ENTRIES)
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<string>('viewer')
   const [pending, setPending] = useState(false)
@@ -71,27 +106,71 @@ export function MembersPanel() {
   const [confirmTransferId, setConfirmTransferId] = useState<string | null>(null)
   const trimmedEmail = email.trim()
   const emailInvalid = trimmedEmail.length > 0 && !emailPattern.test(trimmedEmail)
-  const canManageMembers = sessionCan(identityContext, 'members.write')
-  const canSetRoles = sessionCan(identityContext, 'members.role_set')
   const currentOrganization = currentSessionOrganization(identityContext)
+  const isAdminRole = currentOrganization?.roleBase === 'admin'
+  const canManageMembers = isAdminRole && sessionCan(identityContext, 'members.write')
+  const canSetRoles = isAdminRole && sessionCan(identityContext, 'members.role_set')
+  const activeOrganizationId = currentOrganization?.id ?? ''
   const canInvite = canManageMembers && emailPattern.test(trimmedEmail) && !pending
   const roleLabel = (name: string) => name === 'viewer' || name === 'editor' || name === 'admin'
     ? t(`userMenu.role.${name}`)
     : name
 
   const load = useCallback(async () => {
+    const request = ++membersRequest.current
+    setMembersLoading(true)
+    setMembersLoadFailed(false)
     try {
       const data = await api('/members')
+      if (request !== membersRequest.current) return
       setMembers(Array.isArray(data) ? data : [])
-    } catch (error) {
-      addToast(tApiError(error) || (t('members.loadFailed')), 'error')
+    } catch {
+      if (request !== membersRequest.current) return
+      setMembersLoadFailed(true)
+    } finally {
+      if (request === membersRequest.current) setMembersLoading(false)
     }
-  }, [addToast, t])
+  }, [activeOrganizationId])
 
-  useEffect(() => { void load() }, [load])
+  const loadInvitations = useCallback(async () => {
+    const request = ++invitationsRequest.current
+    if (!canManageMembers) {
+      setInvitations([])
+      setInvitationsLoading(false)
+      setInvitationsLoadFailed(false)
+      return
+    }
+    setInvitationsLoading(true)
+    setInvitationsLoadFailed(false)
+    try {
+      const data = await api('/members/invitations')
+      if (request !== invitationsRequest.current) return
+      setInvitations(pendingInvitationsFromResponse(data))
+    } catch {
+      if (request !== invitationsRequest.current) return
+      setInvitationsLoadFailed(true)
+    } finally {
+      if (request === invitationsRequest.current) setInvitationsLoading(false)
+    }
+  }, [activeOrganizationId, canManageMembers])
+
+  useEffect(() => {
+    setMembers([])
+    void load()
+    return () => { membersRequest.current += 1 }
+  }, [load])
+
+  useEffect(() => {
+    setInvitations([])
+    void loadInvitations()
+    return () => { invitationsRequest.current += 1 }
+  }, [loadInvitations])
 
   useEffect(() => {
     let cancelled = false
+    // Never carry a custom role from the previous organization while the
+    // active tenant's role catalog is loading (or if that load fails).
+    setOrgRoles(BUILTIN_ROLE_ENTRIES)
     api('/org/roles')
       .then((data) => {
         if (cancelled) return
@@ -104,7 +183,7 @@ export function MembersPanel() {
     return () => {
       cancelled = true
     }
-  }, [platformVersion])
+  }, [activeOrganizationId, platformVersion])
 
   const invite = async () => {
     const trimmed = email.trim()
@@ -125,11 +204,32 @@ export function MembersPanel() {
       // doesn't silently reuse the previous (possibly elevated) selection.
       setRole('viewer')
       bumpPlatformVersion()
-      await load()
+      await Promise.all([load(), loadInvitations()])
     } catch (error) {
       addToast(tApiError(error) || (t('members.inviteFailed')), 'error')
     } finally {
       setPending(false)
+    }
+  }
+
+  const revokeInvitation = async (invitation: OrgInvitation) => {
+    const accepted = await confirm({
+      title: t('members.invitations.revokeTitle'),
+      body: t('members.invitations.revokeConfirm', { email: invitation.email }),
+      confirmLabel: t('members.invitations.revoke'),
+      tone: 'danger',
+    })
+    if (!accepted) return
+    setRevokingInvitationId(invitation.id)
+    try {
+      await api(`/members/invitations/${encodeURIComponent(invitation.id)}/revoke`, { method: 'POST' })
+      addToast(t('members.invitations.revokeDone', { email: invitation.email }), 'success')
+      bumpPlatformVersion()
+      await loadInvitations()
+    } catch (error) {
+      addToast(tApiError(error) || t('members.invitations.revokeFailed'), 'error')
+    } finally {
+      setRevokingInvitationId(null)
     }
   }
 
@@ -259,124 +359,246 @@ export function MembersPanel() {
             {t('members.invite')}
           </Button>
         </FormActions>
+        {!canManageMembers && (
+          <StatusSummary
+            icon={<Info size={16} />}
+            title={t('members.readOnly.title')}
+            description={t('members.readOnly.body')}
+            tone="info"
+          />
+        )}
       </section>
 
-      {members.length === 0 && (
-        <EmptyState
-          icon={<CircleCheck />}
-          kicker={t('emptyState.members.kicker')}
-          body={t('emptyState.members.body')}
-          testId="members-empty"
-        />
-      )}
+      <section className="we-card" aria-labelledby="members-list-title" data-testid="members-list-panel">
+        <header className="we-card__header">
+          <div>
+            <div className="section-kicker">{t('members.list.kicker')}</div>
+            <h3 id="members-list-title">{t('members.list.heading')}</h3>
+          </div>
+          {!membersLoading && !membersLoadFailed && (
+            <span className="mode-pill mode-pill-neutral">
+              {t('members.list.count', { count: members.length })}
+            </span>
+          )}
+        </header>
 
-      {members.length > 0 && (
-        <ul className="we-list">
-          {members.map(member => {
-            const label = member.email ?? member.userId
-            const initials = (label.includes('@') ? label.split('@')[0] : label).slice(0, 2).toUpperCase()
-            const isAdmin = member.role === 'admin'
-            const memberRole = orgRoles.find(entry => entry.name === member.role)
-            const canReceiveOwnership = currentOrganization?.isOwner === true
-              && !member.isOwner
-              && (member.role === 'admin' || memberRole?.inheritsFrom === 'admin')
-            return (
-              <li key={member.id}>
-                <div className="we-list-row" data-testid={`members-row-${member.userId}`} data-severity={isAdmin ? 'cobalt' : undefined}>
-                  <span className="we-list-row__avatar" aria-hidden="true">{initials}</span>
-                  <div className="we-list-row__body">
-                    <strong>
-                      {label}
-                      {member.isOwner && (
-                        <span className="mode-pill mode-pill-neutral" data-testid={`members-owner-${member.userId}`}>
-                          <Crown size={12} aria-hidden="true" /> {t('members.owner')}
-                        </span>
-                      )}
-                    </strong>
-                    <small>{describeRole(member.role, memberRole)}</small>
-                  </div>
-                  <div className="we-list-row__meta">
-                    <SelectControl
-
-                      value={member.role}
-                      onChange={(event) => updateRole(member.userId, event.target.value)}
-                      aria-label={t('members.row.roleAria', { member: label })}
-                      disabled={!canSetRoles || member.isOwner}
-                    >
-                      {orgRoles.map(option => (
-                        <option key={option.name} value={option.name}>
-                          {roleLabel(option.name)}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
-                        </option>
-                      ))}
-                    </SelectControl>
-                    {canReceiveOwnership && (confirmTransferId === member.userId ? (
-                      <span className="we-list-row__confirm">
-                        <span className="we-list-row__confirm-text">
-                          {t('members.row.transferConfirm', { member: label })}
-                        </span>
-                        <button
-                          type="button"
-                          className="small-command danger"
-                          onClick={() => transferOwnership(member.userId)}
-                          data-testid={`members-transfer-confirm-${member.userId}`}
-                        >
-                          {t('members.row.transferConfirmCta')}
-                        </button>
-                        <button type="button" className="small-command" onClick={() => setConfirmTransferId(null)}>
-                          {t('common.cancel')}
-                        </button>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="small-command"
-                        onClick={() => setConfirmTransferId(member.userId)}
-                        aria-label={t('members.row.transferAria', { member: label })}
-                        title={t('members.row.transferTitle')}
-                        data-testid={`members-transfer-${member.userId}`}
+        {membersLoading ? (
+          <LoadingSkeleton rows={3} label={t('members.list.loading')} testId="members-loading" />
+        ) : membersLoadFailed ? (
+          <StatusSummary
+            icon={<AlertCircle size={16} />}
+            title={t('members.list.loadFailed')}
+            description={t('members.list.loadFailedBody')}
+            tone="danger"
+            role="alert"
+            actions={(
+              <Button
+                variant="secondary"
+                size="sm"
+                leadingIcon={<RefreshCw size={14} />}
+                onClick={() => void load()}
+              >
+                {t('members.list.retry')}
+              </Button>
+            )}
+          />
+        ) : members.length === 0 ? (
+          <EmptyState
+            icon={<CircleCheck />}
+            kicker={t('emptyState.members.kicker')}
+            body={t('emptyState.members.body')}
+            testId="members-empty"
+          />
+        ) : (
+          <ul className="we-list">
+            {members.map(member => {
+              const label = member.email ?? member.userId
+              const initials = (label.includes('@') ? label.split('@')[0] : label).slice(0, 2).toUpperCase()
+              const isAdmin = member.role === 'admin'
+              const memberRole = orgRoles.find(entry => entry.name === member.role)
+              const canReceiveOwnership = currentOrganization?.isOwner === true
+                && !member.isOwner
+                && (member.role === 'admin' || memberRole?.inheritsFrom === 'admin')
+              return (
+                <li key={member.id}>
+                  <div className="we-list-row" data-testid={`members-row-${member.userId}`} data-severity={isAdmin ? 'cobalt' : undefined}>
+                    <span className="we-list-row__avatar" aria-hidden="true">{initials}</span>
+                    <div className="we-list-row__body">
+                      <strong>
+                        {label}
+                        {member.isOwner && (
+                          <span className="mode-pill mode-pill-neutral" data-testid={`members-owner-${member.userId}`}>
+                            <Crown size={12} aria-hidden="true" /> {t('members.owner')}
+                          </span>
+                        )}
+                      </strong>
+                      <small>{describeRole(member.role, memberRole)}</small>
+                    </div>
+                    <div className="we-list-row__meta">
+                      <SelectControl
+                        value={member.role}
+                        onChange={(event) => updateRole(member.userId, event.target.value)}
+                        aria-label={t('members.row.roleAria', { member: label })}
+                        disabled={!canSetRoles || member.isOwner}
                       >
-                        <Crown size={14} aria-hidden="true" />
-                      </button>
-                    ))}
-                    {!canManageMembers || member.isOwner ? null : confirmRemoveId === member.userId ? (
-                      <span className="we-list-row__confirm">
-                        <span className="we-list-row__confirm-text">
-                          {t('members.row.removeConfirm', { member: label })}
+                        {orgRoles.map(option => (
+                          <option key={option.name} value={option.name}>
+                            {roleLabel(option.name)}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
+                          </option>
+                        ))}
+                      </SelectControl>
+                      {canReceiveOwnership && (confirmTransferId === member.userId ? (
+                        <span className="we-list-row__confirm">
+                          <span className="we-list-row__confirm-text">
+                            {t('members.row.transferConfirm', { member: label })}
+                          </span>
+                          <button
+                            type="button"
+                            className="small-command danger"
+                            onClick={() => transferOwnership(member.userId)}
+                            data-testid={`members-transfer-confirm-${member.userId}`}
+                          >
+                            {t('members.row.transferConfirmCta')}
+                          </button>
+                          <button type="button" className="small-command" onClick={() => setConfirmTransferId(null)}>
+                            {t('common.cancel')}
+                          </button>
                         </span>
-                        <button
-                          type="button"
-                          className="small-command danger"
-                          onClick={() => remove(member.userId)}
-                          data-testid={`members-remove-confirm-${member.userId}`}
-                        >
-                          {t('members.row.removeConfirmCta')}
-                        </button>
+                      ) : (
                         <button
                           type="button"
                           className="small-command"
-                          onClick={() => setConfirmRemoveId(null)}
+                          onClick={() => setConfirmTransferId(member.userId)}
+                          aria-label={t('members.row.transferAria', { member: label })}
+                          title={t('members.row.transferTitle')}
+                          data-testid={`members-transfer-${member.userId}`}
                         >
-                          {t('common.cancel')}
+                          <Crown size={14} aria-hidden="true" />
                         </button>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="small-command danger"
-                        onClick={() => setConfirmRemoveId(member.userId)}
-                        aria-label={t('members.row.removeAria', { member: label })}
-                        title={t('members.row.removeTitle')}
-                        data-testid={`members-remove-${member.userId}`}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
-                      </button>
-                    )}
+                      ))}
+                      {!canManageMembers || member.isOwner ? null : confirmRemoveId === member.userId ? (
+                        <span className="we-list-row__confirm">
+                          <span className="we-list-row__confirm-text">
+                            {t('members.row.removeConfirm', { member: label })}
+                          </span>
+                          <button
+                            type="button"
+                            className="small-command danger"
+                            onClick={() => remove(member.userId)}
+                            data-testid={`members-remove-confirm-${member.userId}`}
+                          >
+                            {t('members.row.removeConfirmCta')}
+                          </button>
+                          <button
+                            type="button"
+                            className="small-command"
+                            onClick={() => setConfirmRemoveId(null)}
+                          >
+                            {t('common.cancel')}
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="small-command danger"
+                          onClick={() => setConfirmRemoveId(member.userId)}
+                          aria-label={t('members.row.removeAria', { member: label })}
+                          title={t('members.row.removeTitle')}
+                          data-testid={`members-remove-${member.userId}`}
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </li>
-            )
-          })}
-        </ul>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
+
+      {canManageMembers && (
+        <section className="we-card" aria-labelledby="members-invitations-title" data-testid="members-invitations-panel">
+          <header className="we-card__header">
+            <div>
+              <div className="section-kicker">{t('members.invitations.kicker')}</div>
+              <h3 id="members-invitations-title">{t('members.invitations.heading')}</h3>
+            </div>
+            {!invitationsLoading && !invitationsLoadFailed && (
+              <span className="mode-pill mode-pill-neutral">
+                {t('members.invitations.count', { count: invitations.length })}
+              </span>
+            )}
+          </header>
+
+          {invitationsLoading ? (
+            <LoadingSkeleton rows={2} label={t('members.invitations.loading')} testId="members-invitations-loading" />
+          ) : invitationsLoadFailed ? (
+            <StatusSummary
+              icon={<AlertCircle size={16} />}
+              title={t('members.invitations.loadFailed')}
+              description={t('members.invitations.loadFailedBody')}
+              tone="danger"
+              role="alert"
+              actions={(
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leadingIcon={<RefreshCw size={14} />}
+                  onClick={() => void loadInvitations()}
+                >
+                  {t('members.list.retry')}
+                </Button>
+              )}
+            />
+          ) : invitations.length === 0 ? (
+            <EmptyState
+              icon={<Mail />}
+              kicker={t('members.invitations.empty.title')}
+              body={t('members.invitations.empty.body')}
+              testId="members-invitations-empty"
+            />
+          ) : (
+            <ul className="we-list">
+              {invitations.map(invitation => {
+                const sentAt = invitationSentAt(invitation.createdAt)
+                return (
+                  <li key={invitation.id}>
+                    <div className="we-list-row" data-testid={`members-invitation-${invitation.id}`} data-severity="warning">
+                      <span className="we-list-row__avatar" aria-hidden="true"><Mail size={15} /></span>
+                      <div className="we-list-row__body">
+                        <strong>{invitation.email}</strong>
+                        <small>
+                          {t('members.invitations.role', { role: roleLabel(invitation.role) })}
+                          {' · '}
+                          {sentAt
+                            ? t('members.invitations.sentAt', { date: sentAt })
+                            : t('members.invitations.awaiting')}
+                        </small>
+                      </div>
+                      <div className="we-list-row__meta">
+                        <span className="we-list-row__pill we-list-row__pill--warning">
+                          {t('members.invitations.pending')}
+                        </span>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          loading={revokingInvitationId === invitation.id}
+                          loadingLabel={t('members.invitations.revoking')}
+                          onClick={() => void revokeInvitation(invitation)}
+                          aria-label={t('members.invitations.revokeAria', { email: invitation.email })}
+                        >
+                          {t('members.invitations.revoke')}
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </section>
       )}
     </div>
   )

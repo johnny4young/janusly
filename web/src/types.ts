@@ -250,6 +250,16 @@ export type SemanticCaseResolution = {
 }
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: string; isOwner: boolean; invitedBy?: string; createdAt?: string }
+export type OrgInvitation = {
+  id: string
+  orgId: string
+  email: string
+  role: string
+  status: string
+  invitedBy?: string | null
+  acceptedAt?: string | null
+  createdAt?: string | null
+}
 
 export type McpTransport = 'stdio' | 'sse' | 'http'
 export type McpConnectionStatus = 'pending' | 'active' | 'failed' | 'disabled'
