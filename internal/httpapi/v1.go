@@ -9,9 +9,10 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,8 +83,27 @@ type V1Server struct {
 	queueCache     *queueHealthCache
 	mcp            *mcpclient.Client
 	workos         workosClient
-	background     context.Context
-	backgroundWG   sync.WaitGroup
+	feedbackMemory *feedbackMemoryPool
+}
+
+// V1ServerOptions describes process-owned feedback-memory work. Validation is
+// repeated at the HTTP construction boundary so tests and future embedders
+// cannot accidentally bypass the bounded runtime configuration.
+type V1ServerOptions struct {
+	FeedbackMemoryWorkers       int
+	FeedbackMemoryQueueCapacity int
+	FeedbackMemoryTaskTimeout   time.Duration
+	Logger                      *slog.Logger
+}
+
+// DefaultV1ServerOptions returns the production-safe bounded defaults.
+func DefaultV1ServerOptions() V1ServerOptions {
+	return V1ServerOptions{
+		FeedbackMemoryWorkers:       defaultFeedbackMemoryWorkers,
+		FeedbackMemoryQueueCapacity: defaultFeedbackMemoryQueueCapacity,
+		FeedbackMemoryTaskTimeout:   defaultFeedbackMemoryTaskTimeout,
+		Logger:                      slog.Default(),
+	}
 }
 
 // NewV1Handler mounts the v1 routes plus the operational health surfaces. The stream hub's
@@ -93,20 +113,57 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	return handler
 }
 
-// NewV1HandlerWithShutdown additionally returns a shutdown func that
-// cancels the stream hub's hijacked LISTEN connection. Test harnesses MUST
-// call it: the hijacked conn is invisible to pool.Close, so without the
-// cancel every harness leaks one Postgres connection for the binary's
-// lifetime (the "too many clients" suite failure under a live soak).
+// NewV1HandlerWithShutdown additionally returns a compatibility shutdown func
+// that cancels the stream hub's hijacked LISTEN connection and drains optional
+// feedback-memory work. Test harnesses MUST call it before closing the pool.
 func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Handler, func()) {
-	return newV1HandlerWithWorkOS(eng, pool, workos.NewFromEnv())
+	options := DefaultV1ServerOptions()
+	handler, shutdown, err := newV1HandlerWithWorkOS(eng, pool, workos.NewFromEnv(), options)
+	if err != nil {
+		options.Logger.Error("V1 server construction failed", "reason", "feedback_memory_options")
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		}), func() {}
+	}
+	return handler, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), feedbackMemoryTaskTimeoutMax)
+		defer cancel()
+		if err := shutdown(ctx); err != nil {
+			options.Logger.Error("V1 server shutdown incomplete", "reason", "feedback_memory_drain")
+		}
+	}
 }
 
-func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client workosClient) (http.Handler, func()) {
+// NewV1HandlerWithOptions builds the production surface with explicitly
+// validated background-work bounds. Shutdown must run before either database
+// pool closes because accepted tasks retain the API pool.
+func NewV1HandlerWithOptions(
+	eng *engine.Engine,
+	pool *pgxpool.Pool,
+	options V1ServerOptions,
+) (http.Handler, func(context.Context) error, error) {
+	return newV1HandlerWithWorkOS(eng, pool, workos.NewFromEnv(), options)
+}
+
+func newV1HandlerWithWorkOS(
+	eng *engine.Engine,
+	pool *pgxpool.Pool,
+	client workosClient,
+	options V1ServerOptions,
+) (http.Handler, func(context.Context) error, error) {
+	feedbackMemory, err := newFeedbackMemoryPool(feedbackMemoryPoolOptions{
+		workers:       options.FeedbackMemoryWorkers,
+		queueCapacity: options.FeedbackMemoryQueueCapacity,
+		taskTimeout:   options.FeedbackMemoryTaskTimeout,
+		logger:        options.Logger,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("feedback memory pool options: %w", err)
+	}
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	server := &V1Server{
 		engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
-		newID: uuid.NewString, hub: newStreamHub(), workos: client, background: serverCtx,
+		newID: uuid.NewString, hub: newStreamHub(), workos: client, feedbackMemory: feedbackMemory,
 	}
 	server.authPolicy = authpolicy.New(pool)
 	server.resolver.SetPolicyEvaluator(func(ctx context.Context, input auth.PolicyInput) bool {
@@ -141,11 +198,11 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	// GET serves a static asset or the SPA shell. API patterns above always win
 	// by specificity, and static content is public by design.
 	mux.Handle("GET /", webdist.Handler())
-	shutdown := func() {
+	shutdown := func(ctx context.Context) error {
 		cancelServer()
-		server.backgroundWG.Wait()
+		return server.feedbackMemory.shutdown(ctx)
 	}
-	return WithBrowserHeaders(mux), shutdown
+	return WithBrowserHeaders(mux), shutdown, nil
 }
 
 // mountAPIRoutes registers every API pattern without the SPA catch-all.
@@ -294,15 +351,6 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.mountBrowserSessionRoutes(mux)
 	s.mountIdentityRoutes(mux)
 	s.mountCausalRoutes(mux)
-}
-
-// runBackground owns fire-and-forget route work under the server lifetime.
-// Request cancellation must not discard already-accepted feedback memory,
-// while process shutdown still cancels and joins every outstanding task.
-func (s *V1Server) runBackground(run func(context.Context)) {
-	s.backgroundWG.Go(func() {
-		run(s.background)
-	})
 }
 
 type v1Request struct {

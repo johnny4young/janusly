@@ -39,6 +39,13 @@ type Config struct {
 	PollInterval time.Duration
 	// HTTPTimeout bounds outbound http executor calls.
 	HTTPTimeout time.Duration
+	// FeedbackMemoryWorkers bounds optional feedback-derived memory commits.
+	FeedbackMemoryWorkers int
+	// FeedbackMemoryQueueCapacity bounds accepted tasks waiting for workers;
+	// saturation drops only the optional memory side effect.
+	FeedbackMemoryQueueCapacity int
+	// FeedbackMemoryTaskTimeout bounds one feedback-derived memory task.
+	FeedbackMemoryTaskTimeout time.Duration
 }
 
 // IsProduction is the single process-environment gate for production-only
@@ -84,16 +91,21 @@ func Load(getenv func(string) string) (Config, error) {
 	production := IsProduction(getenv)
 
 	cfg := Config{
-		Production:        production,
-		DatabaseURL:       str("JANUSLY_DATABASE_URL", defaultDatabaseURL),
-		Port:              num("JANUSLY_PORT", 3001, 1, 65535),
-		InternalPort:      num("JANUSLY_INTERNAL_PORT", 9464, 1, 65535),
-		InternalHost:      str("JANUSLY_INTERNAL_HOST", "127.0.0.1"),
-		WorkerConcurrency: num("JANUSLY_WORKER_CONCURRENCY", 8, 1, 64),
-		APIPoolSize:       num("JANUSLY_API_POOL_SIZE", 10, 1, 100),
-		WorkerPoolSize:    num("JANUSLY_WORKER_POOL_SIZE", 0, 0, 100),
-		PollInterval:      time.Duration(num("JANUSLY_POLL_MS", 250, 50, 5000)) * time.Millisecond,
-		HTTPTimeout:       time.Duration(num("JANUSLY_HTTP_TIMEOUT_MS", 30_000, 1000, 600_000)) * time.Millisecond,
+		Production:                  production,
+		DatabaseURL:                 str("JANUSLY_DATABASE_URL", defaultDatabaseURL),
+		Port:                        num("JANUSLY_PORT", 3001, 1, 65535),
+		InternalPort:                num("JANUSLY_INTERNAL_PORT", 9464, 1, 65535),
+		InternalHost:                str("JANUSLY_INTERNAL_HOST", "127.0.0.1"),
+		WorkerConcurrency:           num("JANUSLY_WORKER_CONCURRENCY", 8, 1, 64),
+		APIPoolSize:                 num("JANUSLY_API_POOL_SIZE", 10, 1, 100),
+		WorkerPoolSize:              num("JANUSLY_WORKER_POOL_SIZE", 0, 0, 100),
+		PollInterval:                time.Duration(num("JANUSLY_POLL_MS", 250, 50, 5000)) * time.Millisecond,
+		HTTPTimeout:                 time.Duration(num("JANUSLY_HTTP_TIMEOUT_MS", 30_000, 1000, 600_000)) * time.Millisecond,
+		FeedbackMemoryWorkers:       num("JANUSLY_FEEDBACK_MEMORY_WORKERS", 4, 1, 32),
+		FeedbackMemoryQueueCapacity: num("JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY", 256, 1, 4096),
+		FeedbackMemoryTaskTimeout: time.Duration(num(
+			"JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS", 15_000, 1000, 300_000,
+		)) * time.Millisecond,
 	}
 	if cfg.WorkerPoolSize == 0 {
 		cfg.WorkerPoolSize = cfg.WorkerConcurrency + 2

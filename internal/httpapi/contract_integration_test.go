@@ -41,6 +41,12 @@ func newAPIHarnessWithoutWorkers(t *testing.T) *apiHarness {
 }
 
 func newAPIHarnessWithWorkers(t *testing.T, startWorkers bool) *apiHarness {
+	options := DefaultV1ServerOptions()
+	options.Logger = quietTestLogger()
+	return newAPIHarnessWithOptions(t, startWorkers, options)
+}
+
+func newAPIHarnessWithOptions(t *testing.T, startWorkers bool, options V1ServerOptions) *apiHarness {
 	t.Helper()
 	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
@@ -67,10 +73,21 @@ func newAPIHarnessWithWorkers(t *testing.T, startWorkers bool) *apiHarness {
 		t.Cleanup(func() { stopWorkers(); <-done })
 	}
 
-	handler, shutdownHub := NewV1HandlerWithShutdown(eng, pool)
+	handler, shutdownHub, err := NewV1HandlerWithOptions(eng, pool, options)
+	if err != nil {
+		t.Fatalf("V1 handler: %v", err)
+	}
 	server := httptest.NewServer(handler)
+	t.Cleanup(func() {
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelShutdown()
+		if err := shutdownHub(shutdownCtx); err != nil {
+			t.Errorf("shutdown V1 handler: %v", err)
+		}
+	})
+	// Cleanup is LIFO: stop HTTP intake before closing background intake and
+	// draining accepted tasks that still use the PostgreSQL pool.
 	t.Cleanup(server.Close)
-	t.Cleanup(shutdownHub)
 	raw := make([]byte, 6)
 	for i := range raw {
 		raw[i] = byte('a' + time.Now().UnixNano()>>uint(i*3)%26)

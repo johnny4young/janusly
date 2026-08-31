@@ -17,12 +17,18 @@ trap 'rm -f -- "$compose_config"' EXIT
 JANUSLY_MEMORY_ENABLED=true \
 JANUSLY_EMBEDDING_PROVIDER=ollama \
 JANUSLY_EMBEDDING_MODEL=test-model \
+JANUSLY_FEEDBACK_MEMORY_WORKERS=6 \
+JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY=512 \
+JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS=20000 \
   docker compose -f "$root/docker-compose.yml" config --format json >"$compose_config"
 jq -e '
   .services.janusly.environment.JANUSLY_INTERNAL_HOST == "0.0.0.0" and
   .services.janusly.environment.JANUSLY_MEMORY_ENABLED == "true" and
   .services.janusly.environment.JANUSLY_EMBEDDING_PROVIDER == "ollama" and
   .services.janusly.environment.JANUSLY_EMBEDDING_MODEL == "test-model" and
+  .services.janusly.environment.JANUSLY_FEEDBACK_MEMORY_WORKERS == "6" and
+  .services.janusly.environment.JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY == "512" and
+  .services.janusly.environment.JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS == "20000" and
   any(
     .services.janusly.ports[];
     .target == 9464 and .host_ip == "127.0.0.1" and .protocol == "tcp"

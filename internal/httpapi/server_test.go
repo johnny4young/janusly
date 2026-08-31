@@ -34,6 +34,18 @@ func TestMetricsExposeGoRuntime(t *testing.T) {
 	if res.StatusCode != 200 || !strings.Contains(string(body), "go_goroutines") {
 		t.Fatalf("expected go_goroutines in metrics, got status %d", res.StatusCode)
 	}
+	for _, metric := range []string{
+		"janusly_feedback_memory_accepted_total",
+		"janusly_feedback_memory_dropped_total",
+		"janusly_feedback_memory_failures_total",
+		"janusly_feedback_memory_active",
+		"janusly_feedback_memory_queue_depth",
+		"janusly_feedback_memory_duration_seconds",
+	} {
+		if !strings.Contains(string(body), metric) {
+			t.Fatalf("expected %s in metrics", metric)
+		}
+	}
 }
 
 func TestPprofIndexIsServed(t *testing.T) {

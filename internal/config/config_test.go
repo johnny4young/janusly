@@ -24,6 +24,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.WorkerConcurrency != 8 || cfg.PollInterval != 250*time.Millisecond {
 		t.Fatalf("unexpected worker defaults: %+v", cfg)
 	}
+	if cfg.FeedbackMemoryWorkers != 4 || cfg.FeedbackMemoryQueueCapacity != 256 ||
+		cfg.FeedbackMemoryTaskTimeout != 15*time.Second {
+		t.Fatalf("unexpected feedback memory defaults: %+v", cfg)
+	}
 	if cfg.Production {
 		t.Fatal("development defaults must not enable the production boot posture")
 	}
@@ -34,16 +38,23 @@ func TestLoadDefaults(t *testing.T) {
 
 func TestLoadOverrides(t *testing.T) {
 	cfg, err := Load(env(map[string]string{
-		"JANUSLY_PORT":               "4700",
-		"JANUSLY_INTERNAL_HOST":      "0.0.0.0",
-		"JANUSLY_WORKER_CONCURRENCY": "2",
-		"JANUSLY_POLL_MS":            "500",
+		"JANUSLY_PORT":                           "4700",
+		"JANUSLY_INTERNAL_HOST":                  "0.0.0.0",
+		"JANUSLY_WORKER_CONCURRENCY":             "2",
+		"JANUSLY_POLL_MS":                        "500",
+		"JANUSLY_FEEDBACK_MEMORY_WORKERS":        "6",
+		"JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY": "512",
+		"JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS":     "20000",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg.Port != 4700 || cfg.InternalHost != "0.0.0.0" || cfg.WorkerConcurrency != 2 || cfg.PollInterval != 500*time.Millisecond {
 		t.Fatalf("overrides not applied: %+v", cfg)
+	}
+	if cfg.FeedbackMemoryWorkers != 6 || cfg.FeedbackMemoryQueueCapacity != 512 ||
+		cfg.FeedbackMemoryTaskTimeout != 20*time.Second {
+		t.Fatalf("feedback memory overrides not applied: %+v", cfg)
 	}
 }
 
@@ -58,6 +69,9 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 		{"concurrency zero", "JANUSLY_WORKER_CONCURRENCY", "0", "[1, 64]"},
 		{"poll below floor", "JANUSLY_POLL_MS", "10", "[50, 5000]"},
 		{"not a number", "JANUSLY_HTTP_TIMEOUT_MS", "soon", "[1000, 600000]"},
+		{"feedback workers too high", "JANUSLY_FEEDBACK_MEMORY_WORKERS", "33", "[1, 32]"},
+		{"feedback queue zero", "JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY", "0", "[1, 4096]"},
+		{"feedback timeout too high", "JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS", "300001", "[1000, 300000]"},
 		{"invalid internal host", "JANUSLY_INTERNAL_HOST", "metrics.example.com", "127.0.0.1, 0.0.0.0, ::1, or ::"},
 	}
 	for _, tc := range cases {

@@ -63,6 +63,20 @@ Rate limits and workflow queue state are PostgreSQL-backed so multiple Janusly
 instances share one durable view. A store error keeps the documented fail-open
 traffic posture while emitting degradation evidence.
 
+Recovery feedback is the durable primary operation. Its optional memory side
+effect is owned by `V1Server`, not by request goroutines: a fixed worker pool
+(four by default) reads a bounded process queue (256 by default), and every task
+has a 15-second deadline. A full or closed queue drops only that optional side
+effect; the durable feedback row and successful response remain intact. Logs
+contain a closed reason and sampled aggregate count, never tenant, operator,
+panic, provider, or memory content.
+
+The internal listener publishes accepted, dropped, failed, active, queue-depth,
+and duration metrics under `janusly_feedback_memory_*`. Shutdown first closes
+HTTP intake, then drains accepted tasks. If the five-minute drain deadline is
+reached, it cancels active work and explicitly discards queued work, joining all
+owned workers before PostgreSQL pools close.
+
 Each process heartbeat uses one boot-unique instance identity. PostgreSQL keeps
 the detailed instance/build/concurrency rows for platform telemetry, while the
 tenant-admin `/system/workers` route returns only `healthy`, `degraded`, or

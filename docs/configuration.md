@@ -19,6 +19,9 @@ in `org_configs`; secrets never do.
 | `JANUSLY_WORKER_POOL_SIZE` | derived | Execution PostgreSQL pool size; `0` derives concurrency plus two. |
 | `JANUSLY_POLL_MS` | `250` | Durable-queue fallback poll interval, range 50–5000 ms. |
 | `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Default outbound HTTP timeout. |
+| `JANUSLY_FEEDBACK_MEMORY_WORKERS` | `4` | Fixed workers for optional feedback-derived memory commits, range 1–32. |
+| `JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY` | `256` | Waiting-task bound for optional feedback-derived memory, range 1–4096; saturation never rejects durable feedback. |
+| `JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS` | `15000` | Per-task deadline for feedback-derived memory, range 1000–300000 ms. |
 
 `JANUSLY_PORT` and `JANUSLY_INTERNAL_PORT` must differ. There are no alternate
 names for these settings.
@@ -71,6 +74,9 @@ The frontend has no API URL variable. It calls the page origin in production.
 | `JANUSLY_AI_GENERATION_MODE` | Workflow generation mode; default `free_json`. |
 | `JANUSLY_AI_GENERATION_CANDIDATES` | Bounded candidate count for generation. |
 | `JANUSLY_MEMORY_ENABLED` | Process-level memory gate. |
+| `JANUSLY_FEEDBACK_MEMORY_WORKERS` | Bounded optional-memory worker count. |
+| `JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY` | Bounded optional-memory waiting queue. |
+| `JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS` | Deadline for one optional feedback-memory task. |
 | `JANUSLY_EMBEDDING_PROVIDER` | Embedding provider; local default is Ollama. |
 | `JANUSLY_EMBEDDING_MODEL` | Embedding model; local default is `bge-m3`. |
 | `OLLAMA_BASE_URL` | Ollama endpoint. |
@@ -78,9 +84,9 @@ The frontend has no API URL variable. It calls the page origin in production.
 AI paths must degrade to deterministic fallback results when the provider is
 missing or unavailable. Tenant model, budget, and behavior settings belong in
 the closed `org_configs` catalog. The root Compose service explicitly forwards
-the process memory gate and embedding provider/model variables; setting them in
-`.env` therefore changes the application container rather than only the sibling
-Ollama service.
+the process memory gate, bounded feedback-memory controls, and embedding
+provider/model variables; setting them in `.env` therefore changes the
+application container rather than only the sibling Ollama service.
 
 ## Integrations
 

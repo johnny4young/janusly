@@ -37,11 +37,12 @@ import (
 )
 
 const (
-	shutdownGrace           = 10 * time.Second
-	serverReadHeaderTimeout = 10 * time.Second
-	serverReadTimeout       = 30 * time.Second
-	serverIdleTimeout       = 2 * time.Minute
-	serverMaxHeaderBytes    = 64 << 10
+	shutdownGrace            = 10 * time.Second
+	feedbackMemoryDrainGrace = 5 * time.Minute
+	serverReadHeaderTimeout  = 10 * time.Second
+	serverReadTimeout        = 30 * time.Second
+	serverIdleTimeout        = 2 * time.Minute
+	serverMaxHeaderBytes     = 64 << 10
 )
 
 func newHTTPServer(addr string, handler http.Handler) *http.Server {
@@ -286,8 +287,22 @@ func run() error {
 	})
 	defer runner.Shutdown()
 
-	publicAPI, shutdownPublicAPI := httpapi.NewV1HandlerWithShutdown(eng, pool)
-	defer shutdownPublicAPI()
+	publicAPI, shutdownPublicAPI, err := httpapi.NewV1HandlerWithOptions(eng, pool, httpapi.V1ServerOptions{
+		FeedbackMemoryWorkers:       cfg.FeedbackMemoryWorkers,
+		FeedbackMemoryQueueCapacity: cfg.FeedbackMemoryQueueCapacity,
+		FeedbackMemoryTaskTimeout:   cfg.FeedbackMemoryTaskTimeout,
+		Logger:                      logger,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), feedbackMemoryDrainGrace)
+		defer cancelDrain()
+		if err := shutdownPublicAPI(drainCtx); err != nil {
+			logger.Error("V1 server shutdown incomplete", "reason", "feedback_memory_drain")
+		}
+	}()
 	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), publicAPI)
 	internal := newHTTPServer(
 		net.JoinHostPort(cfg.InternalHost, strconv.Itoa(cfg.InternalPort)),
@@ -317,6 +332,11 @@ func run() error {
 		if err := srv.Shutdown(graceCtx); err != nil {
 			problems = append(problems, err)
 		}
+	}
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), feedbackMemoryDrainGrace)
+	defer cancelDrain()
+	if err := shutdownPublicAPI(drainCtx); err != nil {
+		problems = append(problems, err)
 	}
 	return errors.Join(problems...)
 }

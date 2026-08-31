@@ -33,6 +33,8 @@ const (
 	patchMemoryRationaleMaxRunes    = 1200
 )
 
+var errFeedbackMemoryCommitFailed = errors.New("feedback memory commit failed")
+
 func isFeedbackApproachLabel(value string) bool {
 	switch value {
 	case "add_retry", "raise_timeout", "swap_secret_ref", "add_approval", "fix_url", "other":
@@ -178,26 +180,41 @@ func (s *V1Server) scheduleFeedbackMemory(
 	if body.Rationale.Present && body.Rationale.Value != "" {
 		patchContent = composePatchMemoryContent(body.ApproachLabel, body.Rationale.Value)
 	}
-	s.runBackground(func(background context.Context) {
-		memory.Commit(background, s.pool, memory.CommitInput{
+	if s.feedbackMemory == nil {
+		return
+	}
+	s.feedbackMemory.enqueue(func(background context.Context) error {
+		failed := false
+		if result := memory.Commit(background, s.pool, memory.CommitInput{
 			OrgID: rc.orgID, WorkflowID: workflowID, RunID: dlq.RunID,
 			Kind: "recovery_rationale", Content: recoveryContent,
 			Metadata: map[string]any{
 				"approachLabel": body.ApproachLabel, "accepted": true,
 				"suggestionMode": body.SuggestionMode, "deadLetterId": body.DeadLetterID,
 			},
-		})
-		if patchContent == "" {
-			return
+		}); !result.OK {
+			failed = true
 		}
-		memory.Commit(background, s.pool, memory.CommitInput{
+		if patchContent == "" {
+			if failed {
+				return errFeedbackMemoryCommitFailed
+			}
+			return nil
+		}
+		if result := memory.Commit(background, s.pool, memory.CommitInput{
 			OrgID: rc.orgID, WorkflowID: workflowID, RunID: dlq.RunID,
 			Kind: "patch_rationale", Content: patchContent,
 			Metadata: map[string]any{
 				"approachLabel":  body.ApproachLabel,
 				"suggestionMode": body.SuggestionMode, "deadLetterId": body.DeadLetterID,
 			},
-		})
+		}); !result.OK {
+			failed = true
+		}
+		if failed {
+			return errFeedbackMemoryCommitFailed
+		}
+		return nil
 	})
 }
 

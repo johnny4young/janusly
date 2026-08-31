@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -305,5 +306,103 @@ func TestAcceptedRecoveryFeedbackSchedulesConsentedMemory(t *testing.T) {
 	}
 	if !seen["recovery_rationale"] || !seen["patch_rationale"] {
 		t.Fatalf("both accepted-feedback memories required: %+v", seen)
+	}
+}
+
+func TestFeedbackMemorySaturationKeepsPrimaryFeedbackAccepted(t *testing.T) {
+	var embeddingCalls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	embedding := make([]float64, 1024)
+	embeddingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/embeddings" {
+			http.NotFound(w, r)
+			return
+		}
+		embeddingCalls.Add(1)
+		startedOnce.Do(func() { close(started) })
+		select {
+		case <-release:
+			w.Header().Set("content-type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"embedding": embedding})
+		case <-r.Context().Done():
+		}
+	}))
+	defer embeddingServer.Close()
+	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
+	t.Setenv("OLLAMA_BASE_URL", embeddingServer.URL)
+
+	options := DefaultV1ServerOptions()
+	options.FeedbackMemoryWorkers = 1
+	options.FeedbackMemoryQueueCapacity = 1
+	options.FeedbackMemoryTaskTimeout = 30 * time.Second
+	options.Logger = quietTestLogger()
+	h := newAPIHarnessWithOptions(t, true, options)
+	pool := testPool(t)
+	ctx := t.Context()
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	if _, err := pool.Exec(ctx, `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type)
+		VALUES
+		($1, $2, 'memory.enabled', 'true', 'memory', 'test', 'boolean'),
+		($3, $2, 'memory.allowedKinds', to_jsonb('recovery_rationale'::text), 'memory', 'test', 'string')`,
+		"cfg-memory-saturation-on-"+suffix, h.org, "cfg-memory-saturation-kinds-"+suffix); err != nil {
+		t.Fatalf("enable memory: %v", err)
+	}
+
+	workflowPrefix := "wf-feedback-saturation-" + suffix + "-"
+	deadLetters := make([]string, 3)
+	for index := range deadLetters {
+		deadLetters[index] = seedFeedbackDeadLetter(t, h.org, workflowPrefix+fmt.Sprint(index),
+			suffix+"-"+fmt.Sprint(index), true)
+	}
+	first := h.call("POST", "/recovery/feedback", map[string]any{
+		"deadLetterId": deadLetters[0], "suggestionMode": "ai",
+		"approachLabel": "add_retry", "accepted": true,
+	}, "")
+	if first.status != http.StatusOK {
+		t.Fatalf("first feedback: %d %+v", first.status, first.body)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first feedback memory task did not start")
+	}
+	for index := 1; index < 3; index++ {
+		response := h.call("POST", "/recovery/feedback", map[string]any{
+			"deadLetterId": deadLetters[index], "suggestionMode": "ai",
+			"approachLabel": "add_retry", "accepted": true,
+		}, "")
+		if response.status != http.StatusOK || response.body["ok"] != true {
+			t.Fatalf("feedback %d must survive optional-memory saturation: %d %+v",
+				index, response.status, response.body)
+		}
+	}
+	var feedbackRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM recovery_feedback
+		WHERE org_id = $1 AND workflow_id LIKE $2`, h.org, workflowPrefix+"%").Scan(&feedbackRows); err != nil {
+		t.Fatalf("count durable feedback: %v", err)
+	}
+	if feedbackRows != 3 {
+		t.Fatalf("primary feedback was lost under saturation: %d", feedbackRows)
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var memoryRows int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM memory_entries
+			WHERE org_id = $1 AND workflow_id LIKE $2`, h.org, workflowPrefix+"%").Scan(&memoryRows)
+		if memoryRows == 2 && embeddingCalls.Load() == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("bounded optional memory did not converge: rows=%d calls=%d",
+				memoryRows, embeddingCalls.Load())
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
