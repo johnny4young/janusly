@@ -5,6 +5,7 @@ import { BookOpenCheck, ShieldX } from 'lucide-react'
 import { getResolvedLocale, useT } from '../../i18n'
 import type { RecoveryPlaybookSummary } from './types'
 import { resolvePlaybookScorecard } from './playbook-scorecard'
+import { Button } from '@/components/ui/Button'
 
 export function PlaybookMatchCard({
   playbook,
@@ -57,25 +58,25 @@ export function PlaybookMatchCard({
           <strong>{t('recoveryDialog.playbook.retireConfirmTitle')}</strong>
           <span>{t('recoveryDialog.playbook.retireConfirmBody')}</span>
           <div className="we-recovery-playbook__actions">
-            <button type="button" className="command-button" onClick={() => setConfirmRetire(false)} disabled={busy !== null} autoFocus>
+            <Button variant="secondary" type="button"  onClick={() => setConfirmRetire(false)} disabled={busy !== null} autoFocus>
               {t('recoveryDialog.playbook.keepActive')}
-            </button>
-            <button type="button" className="command-button" onClick={onRetire} disabled={busy !== null}>
+            </Button>
+            <Button variant="secondary" type="button"  onClick={onRetire} disabled={busy !== null}>
               <ShieldX size={14} aria-hidden="true" />
               <span>{busy === 'retire' ? t('recoveryDialog.playbook.retiring') : t('recoveryDialog.playbook.confirmRetire')}</span>
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
       <div className="we-recovery-playbook__actions">
-        <button type="button" className="command-button" onClick={() => setConfirmRetire(true)} disabled={busy !== null}>
+        <Button variant="secondary" type="button"  onClick={() => setConfirmRetire(true)} disabled={busy !== null}>
           <ShieldX size={14} aria-hidden="true" />
           <span>{t('recoveryDialog.playbook.retire')}</span>
-        </button>
-        <button type="button" className="command-button command-button-primary" onClick={onUse} disabled={busy !== null}>
+        </Button>
+        <Button variant="primary" type="button"  onClick={onUse} disabled={busy !== null}>
           <BookOpenCheck size={14} aria-hidden="true" />
           <span>{busy === 'use' ? t('recoveryDialog.playbook.loading') : t('recoveryDialog.playbook.use')}</span>
-        </button>
+        </Button>
       </div>
       )}
     </section>

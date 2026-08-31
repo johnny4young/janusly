@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
+import { Button } from '@/components/ui/Button'
 
 export type RecoveryQualification = {
   id: string
@@ -302,9 +303,9 @@ export function WorkflowRecoveryQualification({
         </div>
       )}
       {!readOnly && (
-        <button
+        <Button variant="secondary"
           type="button"
-          className="command-button"
+
           disabled={qualifying || loading}
           onClick={() => { void runQualification() }}
         >
@@ -313,7 +314,7 @@ export function WorkflowRecoveryQualification({
             : t(qualification
               ? 'workflowRollout.qualification.runAgain'
               : 'workflowRollout.qualification.run')}
-        </button>
+        </Button>
       )}
     </div>
   )

@@ -13,6 +13,7 @@ import { useT } from '../../i18n'
 import type { DeadLetter } from '../dead-letter-types'
 import { approachLabelDisplay } from './recovery-dialog-model'
 import type { PatchSuggestion } from './types'
+import { Button } from '@/components/ui/Button'
 
 /**
  * Closed enum of quick-pick reasons shown as chips in the cancel UX.
@@ -105,17 +106,17 @@ export function CancellingBody({
           {t('recoveryDialog.cancelling.skipClose')}
         </button>
         <div className="we-recovery-cancelling__primary">
-          <button type="button" className="command-button" onClick={onBack}>
+          <Button variant="secondary" type="button"  onClick={onBack}>
             {t('recoveryDialog.cancelling.back')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary"
             type="button"
-            className="command-button command-button-primary"
+
             onClick={() => onSubmit(comment.trim())}
             disabled={comment.trim().length === 0}
           >
             {t('recoveryDialog.cancelling.submitClose')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

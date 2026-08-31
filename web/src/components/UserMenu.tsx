@@ -47,6 +47,7 @@ import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
 import type { ActiveTab, AiHealth } from '../types'
 import { parseDocsUrl } from '../docs-link'
 import { currentSessionOrganization, sessionCan } from '../identity-context'
+import { TextInput } from '@/components/ui/Form'
 
 type UserMenuProps = {
   aiHealth?: AiHealth | null
@@ -353,8 +354,8 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
               {(identityContext?.identity.mode === 'supabase' || identityContext?.identity.mode === 'dev-headers') && (
                 showWorkspaceCreate ? (
                   <form className="user-menu__recent-create" onSubmit={createWorkspace}>
-                    <input
-                      className="text-field"
+                    <TextInput
+
                       aria-label={t('auth.workspace.organizationName')}
                       value={workspaceName}
                       onChange={(event) => setWorkspaceName(event.target.value)}
@@ -489,9 +490,9 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
           {showProfileEditor && (
             <form className="user-menu__profile-editor" onSubmit={saveProfile}>
               <label htmlFor="user-menu-profile-name">{t('auth.workspace.profileName')}</label>
-              <input
+              <TextInput
                 id="user-menu-profile-name"
-                className="text-field"
+
                 value={profileName}
                 onChange={(event) => setProfileName(event.target.value)}
                 minLength={2}

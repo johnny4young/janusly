@@ -19,19 +19,23 @@ import {
   type RecoveryAutonomyProfile,
 } from '@/lib/recovery-autonomy'
 
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import type {
   RecoveryCase,
+  RecoveryCaseArtifact,
   RecoveryCaseTransition,
   SemanticCaseResolution,
 } from '../types'
 import { EmptyView, PanelChrome } from './panel-primitives'
+import { Button } from './ui/Button'
+import { FormActions, FormDisclosure, FormField } from './ui/Form'
 
 type RecoveryCaseDetail = {
   case: RecoveryCase
   transitions: RecoveryCaseTransition[]
+  artifacts: RecoveryCaseArtifact[]
   autonomy: RecoveryAutonomyProfile
 }
 
@@ -87,6 +91,8 @@ function parseRecoveryCase(value: unknown): RecoveryCase | null {
     || (value.detectorKind !== 'expression' && value.detectorKind !== 'schema')
     || (value.action !== 'observe' && value.action !== 'quarantine')
     || typeof value.message !== 'string'
+    || !Number.isInteger(value.revision)
+    || (value.revision as number) < 1
     || !isRecoveryCaseState(value.state)
     || !(value.createdBy === null || typeof value.createdBy === 'string')
     || typeof value.createdAt !== 'string'
@@ -94,6 +100,31 @@ function parseRecoveryCase(value: unknown): RecoveryCase | null {
     || !(value.resolvedAt === null || typeof value.resolvedAt === 'string')
   ) return null
   return value as RecoveryCase
+}
+
+const RECOVERY_ARTIFACT_KINDS = new Set<RecoveryCaseArtifact['kind']>([
+  'diagnosis',
+  'candidate',
+  'validation',
+  'publication',
+  'verification',
+])
+
+function parseRecoveryCaseArtifact(value: unknown): RecoveryCaseArtifact | null {
+  if (!isRecord(value)) return null
+  if (
+    typeof value.id !== 'string'
+    || typeof value.caseId !== 'string'
+    || typeof value.kind !== 'string'
+    || !RECOVERY_ARTIFACT_KINDS.has(value.kind as RecoveryCaseArtifact['kind'])
+    || typeof value.sha256 !== 'string'
+    || !/^[a-f0-9]{64}$/.test(value.sha256)
+    || !isRecoveryCaseActorKind(value.actorKind)
+    || !(value.actorId === null || typeof value.actorId === 'string')
+    || typeof value.createdAt !== 'string'
+    || !('payload' in value)
+  ) return null
+  return value as RecoveryCaseArtifact
 }
 
 function parseRecoveryCaseTransition(
@@ -194,12 +225,17 @@ function parseRecoveryCaseDetail(value: unknown): RecoveryCaseDetail | null {
     !recoveryCase
     || !autonomy
     || !Array.isArray(value.transitions)
+    || !Array.isArray(value.artifacts)
   ) return null
   const transitions = value.transitions
     .map(parseRecoveryCaseTransition)
     .filter((item): item is RecoveryCaseTransition => item !== null)
   if (transitions.length !== value.transitions.length) return null
-  return { case: recoveryCase, transitions, autonomy }
+  const artifacts = value.artifacts
+    .map(parseRecoveryCaseArtifact)
+    .filter((item): item is RecoveryCaseArtifact => item !== null)
+  if (artifacts.length !== value.artifacts.length) return null
+  return { case: recoveryCase, transitions, artifacts, autonomy }
 }
 
 function parseResolution(value: unknown): SemanticCaseResolution | null {
@@ -217,6 +253,120 @@ function parseResolution(value: unknown): SemanticCaseResolution | null {
     resumed: value.resumed,
     resolvedCaseIds: value.resolvedCaseIds,
   }
+}
+
+type RecoveryCandidatePayload = {
+  kind: 'replace_output' | 'repair_workflow' | 'adjust_detector' | 'accept_loss'
+  decision: 'replace' | 'accept_loss' | 'manual_follow_up'
+  reason: string
+  requiredPermissions: string[]
+  output?: unknown
+  target?: {
+    workflowId?: string
+    workflowVersionId?: string
+    detectorId?: string
+  }
+  risk?: 'low' | 'medium' | 'high'
+  expectedResult?: string
+}
+
+type RecoveryDiagnosisHypothesis = {
+  id: string
+  cause: string
+  confidence: number | null
+  evidence: string[]
+  counterEvidence: string[]
+}
+
+type RecoveryDiagnosisPayload = {
+  mode: 'deterministic_fallback' | 'ai_enriched'
+  summary: string
+  hypotheses: RecoveryDiagnosisHypothesis[]
+}
+
+function boundedStringList(value: unknown, limit: number): string[] | null {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > limit) return null
+  const strings = value.filter((item): item is string => (
+    typeof item === 'string' && item.length <= 1600
+  ))
+  return strings.length === value.length ? strings : null
+}
+
+function diagnosisPayload(
+  artifact: RecoveryCaseArtifact | undefined,
+): RecoveryDiagnosisPayload | null {
+  if (!artifact || artifact.kind !== 'diagnosis' || !isRecord(artifact.payload)) {
+    return null
+  }
+  const payload = artifact.payload
+  if (
+    (payload.mode !== 'deterministic_fallback' && payload.mode !== 'ai_enriched')
+    || typeof payload.summary !== 'string'
+    || payload.summary.length > 3200
+    || !Array.isArray(payload.hypotheses)
+    || payload.hypotheses.length < 1
+    || payload.hypotheses.length > 3
+  ) return null
+  const hypotheses = payload.hypotheses.map((value) => {
+    if (!isRecord(value) || typeof value.id !== 'string' || typeof value.cause !== 'string') {
+      return null
+    }
+    const evidence = boundedStringList(value.evidence, 5)
+    const counterEvidence = boundedStringList(value.counterEvidence, 5)
+    if (
+      !evidence
+      || !counterEvidence
+      || value.id.length > 320
+      || value.cause.length > 3200
+      || !(
+        value.confidence === undefined
+        || (typeof value.confidence === 'number'
+          && Number.isFinite(value.confidence)
+          && value.confidence >= 0
+          && value.confidence <= 1)
+      )
+    ) return null
+    return {
+      id: value.id,
+      cause: value.cause,
+      confidence: typeof value.confidence === 'number' ? value.confidence : null,
+      evidence,
+      counterEvidence,
+    }
+  })
+  if (hypotheses.some(hypothesis => hypothesis === null)) return null
+  return {
+    mode: payload.mode,
+    summary: payload.summary,
+    hypotheses: hypotheses as RecoveryDiagnosisHypothesis[],
+  }
+}
+
+function candidatePayload(artifact: RecoveryCaseArtifact): RecoveryCandidatePayload | null {
+  if (artifact.kind !== 'candidate' || !isRecord(artifact.payload)) return null
+  const payload = artifact.payload
+  if (
+    !['replace_output', 'repair_workflow', 'adjust_detector', 'accept_loss'].includes(String(payload.kind))
+    || !['replace', 'accept_loss', 'manual_follow_up'].includes(String(payload.decision))
+    || typeof payload.reason !== 'string'
+    || !Array.isArray(payload.requiredPermissions)
+    || !payload.requiredPermissions.every(permission => typeof permission === 'string')
+  ) return null
+  return payload as RecoveryCandidatePayload
+}
+
+function validationCandidateId(artifact: RecoveryCaseArtifact): string | null {
+  if (artifact.kind !== 'validation' || !isRecord(artifact.payload)) return null
+  return typeof artifact.payload.candidateArtifactId === 'string'
+    ? artifact.payload.candidateArtifactId
+    : null
+}
+
+function validationPayload(artifact: RecoveryCaseArtifact | null): { passed: boolean; summary: string } | null {
+  if (!artifact || artifact.kind !== 'validation' || !isRecord(artifact.payload)) return null
+  if (typeof artifact.payload.passed !== 'boolean' || typeof artifact.payload.summary !== 'string') return null
+  return { passed: artifact.payload.passed, summary: artifact.payload.summary }
 }
 
 export function RecoveryCasePanel({
@@ -239,12 +389,16 @@ export function RecoveryCasePanel({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [output, setOutput] = useState('{\n  "mode": "ai"\n}')
   const [reason, setReason] = useState('')
-  const [resolveError, setResolveError] = useState<string | null>(null)
-  const [resolving, setResolving] = useState(false)
+  const [mutationError, setMutationError] = useState<string | null>(null)
+  const [busyAction, setBusyAction] = useState<string | null>(null)
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null)
+  const [approvedCandidateId, setApprovedCandidateId] = useState<string | null>(null)
 
   const loadCase = useCallback(async () => {
     if (!caseId) {
       setDetail(null)
+      setSelectedCandidateId(null)
+      setApprovedCandidateId(null)
       setLoading(false)
       return
     }
@@ -260,6 +414,15 @@ export function RecoveryCasePanel({
         throw new Error(t('recoveryCase.invalidResponse'))
       }
       setDetail(parsed)
+      const candidates = parsed.artifacts.filter(artifact => artifact.kind === 'candidate')
+      setSelectedCandidateId(current => (
+        current && candidates.some(candidate => candidate.id === current)
+          ? current
+          : candidates.find(candidate => candidatePayload(candidate)?.kind !== 'accept_loss')?.id
+            ?? candidates[0]?.id
+            ?? null
+      ))
+      if (parsed.case.state !== 'awaiting_approval') setApprovedCandidateId(null)
     } catch (error) {
       setDetail(null)
       setLoadError(tApiError(error) || t('recoveryCase.loadFailed'))
@@ -280,62 +443,122 @@ export function RecoveryCasePanel({
     [i18n.resolvedLanguage],
   )
 
-  const resolveCase = async (decision: 'replace' | 'accept_loss') => {
-    if (!detail) return
-    setResolveError(null)
-    const trimmedReason = reason.trim()
-    if (!trimmedReason) {
-      setResolveError(t('recoveryCenter.tile.semantic.reasonRequired'))
-      return
+  const governedPath = (suffix: string) =>
+    `/recovery/cases/${encodeURIComponent(detail?.case.id ?? '')}/${suffix}`
+
+  const finishMutation = async (action: string, operation: () => Promise<unknown>) => {
+    setMutationError(null)
+    setBusyAction(action)
+    try {
+      const result = await operation()
+      await loadCase()
+      return result
+    } catch (error) {
+      setMutationError(
+        tApiError(error) || t('recoveryCenter.tile.semantic.resolveFailed'),
+      )
+      return null
+    } finally {
+      setBusyAction(null)
     }
+  }
+
+  const diagnoseCase = async () => {
+    if (!detail) return
+    await finishMutation('diagnose', () => contractApi(
+      'POST /recovery/cases/{caseId}/diagnose',
+      governedPath('diagnose'),
+      { expectedRevision: detail.case.revision },
+    ))
+  }
+
+  const proposeCandidates = async (includeReplacement: boolean) => {
+    if (!detail) return
+    const trimmedReason = reason.trim()
     let replacement: unknown
-    if (decision === 'replace') {
+    if (includeReplacement) {
+      if (!trimmedReason) {
+        setMutationError(t('recoveryCenter.tile.semantic.reasonRequired'))
+        return
+      }
       try {
         replacement = JSON.parse(output)
       } catch {
-        setResolveError(t('recoveryCenter.tile.semantic.invalidJson'))
+        setMutationError(t('recoveryCenter.tile.semantic.invalidJson'))
         return
       }
     }
+    const result = await finishMutation('candidates', () => contractApi(
+      'POST /recovery/cases/{caseId}/candidates',
+      governedPath('candidates'),
+      {
+        expectedRevision: detail.case.revision,
+        ...(includeReplacement
+          ? { manualReplacement: { output: replacement, reason: trimmedReason } }
+          : {}),
+      },
+    ))
+    if (result) setReason('')
+  }
 
-    setResolving(true)
-    try {
-      const response = await api(
-        `/recovery/cases/${encodeURIComponent(detail.case.id)}/resolve`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            decision,
-            reason: trimmedReason,
-            ...(decision === 'replace' ? { output: replacement } : {}),
-          }),
-        },
-      )
-      const result = parseResolution(response)
-      if (!result) throw new Error(t('recoveryCase.invalidResponse'))
-      addToast(
-        t(
-          detail.case.action === 'observe'
-            ? 'recoveryCenter.tile.semantic.observed'
-            : decision === 'replace'
-              ? result.resumed
-                ? 'recoveryCenter.tile.semantic.replaced'
-                : 'recoveryCenter.tile.semantic.replacedPending'
-              : result.resumed
-                ? 'recoveryCenter.tile.semantic.accepted'
-                : 'recoveryCenter.tile.semantic.acceptedPending',
-        ),
-        'success',
-      )
-      setReason('')
-      await Promise.all([loadCase(), onResolved()])
-    } catch (error) {
-      setResolveError(
-        tApiError(error) || t('recoveryCenter.tile.semantic.resolveFailed'),
-      )
-    } finally {
-      setResolving(false)
+  const validateCandidate = async () => {
+    if (!detail || !selectedCandidateId) return
+    await finishMutation('validate', () => contractApi(
+      'POST /recovery/cases/{caseId}/validate',
+      governedPath('validate'),
+      {
+        expectedRevision: detail.case.revision,
+        candidateArtifactId: selectedCandidateId,
+      },
+    ))
+  }
+
+  const selectedValidation = detail?.artifacts
+    .filter(artifact => validationCandidateId(artifact) === selectedCandidateId)
+    .at(-1) ?? null
+  const selectedValidationPayload = validationPayload(selectedValidation)
+
+  const approveCandidate = async () => {
+    if (!detail || !selectedCandidateId || !selectedValidation) return
+    const result = await finishMutation('approve', () => contractApi(
+      'POST /recovery/cases/{caseId}/approve',
+      governedPath('approve'),
+      {
+        expectedRevision: detail.case.revision,
+        candidateArtifactId: selectedCandidateId,
+        validationArtifactId: selectedValidation.id,
+      },
+    ))
+    if (result) setApprovedCandidateId(selectedCandidateId)
+  }
+
+  const applyCandidate = async () => {
+    if (!detail || !selectedCandidateId || !selectedValidation) return
+    const response = await finishMutation('apply', () => contractApi(
+      'POST /recovery/cases/{caseId}/apply',
+      governedPath('apply'),
+      {
+        expectedRevision: detail.case.revision,
+        candidateArtifactId: selectedCandidateId,
+        validationArtifactId: selectedValidation.id,
+      },
+    ))
+    if (!response) return
+    const result = parseResolution(response)
+    if (!result) {
+      setMutationError(t('recoveryCase.invalidResponse'))
+      return
     }
+    addToast(
+      t(
+        result.resumed
+          ? 'recoveryCenter.tile.semantic.replaced'
+          : 'recoveryCenter.tile.semantic.replacedPending',
+      ),
+      'success',
+    )
+    setApprovedCandidateId(null)
+    await onResolved()
   }
 
   if (!caseId) {
@@ -357,19 +580,32 @@ export function RecoveryCasePanel({
 
   const recoveryCase = detail?.case ?? null
   const transitions = detail?.transitions ?? []
+  const artifacts = detail?.artifacts ?? []
   const autonomy = detail?.autonomy ?? null
-  const canAcknowledge = Boolean(
-    canResolve
-    && recoveryCase
-    && (
-      (recoveryCase.action === 'quarantine' && recoveryCase.state === 'contained')
-      || (recoveryCase.action === 'observe' && recoveryCase.state === 'detected')
-    ),
-  )
+  const diagnoses = artifacts.filter(artifact => artifact.kind === 'diagnosis')
+  const latestDiagnosis = diagnoses.at(-1)
+  const latestDiagnosisPayload = diagnosisPayload(latestDiagnosis)
+  const candidates = artifacts.filter(artifact => candidatePayload(artifact) !== null)
+  const selectedCandidate = candidates.find(candidate => candidate.id === selectedCandidateId) ?? null
+  const selectedPayload = selectedCandidate ? candidatePayload(selectedCandidate) : null
   const canReplace = Boolean(
-    canAcknowledge
-    && recoveryCase?.action === 'quarantine'
+    recoveryCase?.action === 'quarantine'
     && autonomy?.capabilities.applyWithApproval,
+  )
+  const canDiagnose = Boolean(
+    canResolve && recoveryCase
+    && (recoveryCase.state === 'detected' || recoveryCase.state === 'contained'),
+  )
+  const canPropose = Boolean(canResolve && recoveryCase?.state === 'diagnosed')
+  const canValidate = Boolean(
+    canResolve && recoveryCase?.state === 'candidates_ready' && selectedCandidate,
+  )
+  const canApprove = Boolean(
+    canResolve && recoveryCase?.state === 'awaiting_approval'
+    && selectedCandidate && selectedValidation && selectedValidationPayload?.passed,
+  )
+  const canApply = Boolean(
+    canApprove && approvedCandidateId === selectedCandidateId,
   )
   const details = Array.isArray(recoveryCase?.detailsJson)
     ? recoveryCase.detailsJson
@@ -384,14 +620,15 @@ export function RecoveryCasePanel({
       kicker={t('recoveryCase.kicker')}
       icon={<ShieldAlert size={18} />}
     >
-      <button
-        type="button"
+      <Button
         className="we-recovery-case__back"
         onClick={onBack}
+        size="sm"
+        variant="ghost"
+        leadingIcon={<ArrowLeft size={15} />}
       >
-        <ArrowLeft size={15} aria-hidden="true" />
         {t('recoveryCase.back')}
-      </button>
+      </Button>
 
       {loading && (
         <div className="we-card we-recovery-case__notice" role="status">
@@ -403,9 +640,9 @@ export function RecoveryCasePanel({
         <div className="we-card we-recovery-case__notice" data-tone="danger" role="alert">
           <CircleAlert size={17} aria-hidden="true" />
           <span>{loadError}</span>
-          <button type="button" className="small-command" onClick={() => void loadCase()}>
+          <Button size="sm" variant="ghost" onClick={() => void loadCase()}>
             {t('common.retry')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -462,14 +699,14 @@ export function RecoveryCasePanel({
                 </ul>
               </div>
             )}
-            <button
-              type="button"
-              className="small-command"
+            <Button
+              size="sm"
+              variant="ghost"
+              leadingIcon={<ExternalLink size={14} />}
               onClick={() => void onOpenRun(recoveryCase.runId)}
             >
-              <ExternalLink size={14} aria-hidden="true" />
               {t('recoveryCenter.tile.semantic.openRun')}
-            </button>
+            </Button>
           </section>
 
           {autonomy && (
@@ -597,79 +834,286 @@ export function RecoveryCasePanel({
 
             <section className="we-card we-recovery-case__decision" aria-labelledby="recovery-case-decision-title">
               <div className="section-kicker">{t('recoveryCase.decisionKicker')}</div>
-              <h3 id="recovery-case-decision-title">{t('recoveryCase.decisionTitle')}</h3>
+              <h3 id="recovery-case-decision-title">{t('recoveryCase.governed.title')}</h3>
               <p className="helper-text">
-                {canAcknowledge
-                  ? t(
-                      recoveryCase.action === 'quarantine'
-                        ? canReplace
-                          ? 'recoveryCase.decisionQuarantine'
-                          : 'recoveryCase.decisionPolicyBlocked'
-                        : 'recoveryCase.decisionObserve',
-                    )
-                  : t(
-                      canResolve
-                        ? 'recoveryCase.decisionUnavailable'
-                        : 'recoveryCase.decisionReadOnly',
-                    )}
+                {canResolve
+                  ? t('recoveryCase.governed.description')
+                  : t('recoveryCase.decisionReadOnly')}
               </p>
-              {canAcknowledge && (
+
+              <ol className="we-recovery-case__steps" aria-label={t('recoveryCase.governed.progress')}>
+                {[
+                  ['diagnosis', diagnoses.length > 0],
+                  ['candidates', candidates.length > 0],
+                  ['validation', Boolean(selectedValidation)],
+                  ['approval', approvedCandidateId === selectedCandidateId],
+                  ['verification', ['verified_recovered', 'accepted_loss'].includes(recoveryCase.state)],
+                ].map(([step, complete], index) => (
+                  <li key={String(step)} data-complete={complete} data-current={!complete && index === [
+                    diagnoses.length > 0,
+                    candidates.length > 0,
+                    Boolean(selectedValidation),
+                    approvedCandidateId === selectedCandidateId,
+                    ['verified_recovered', 'accepted_loss'].includes(recoveryCase.state),
+                  ].findIndex(value => !value)}>
+                    <span>{complete ? <ShieldCheck size={14} /> : index + 1}</span>
+                    {t(`recoveryCase.governed.step.${step}`)}
+                  </li>
+                ))}
+              </ol>
+
+              {latestDiagnosisPayload && (
+                <div className="we-recovery-case__diagnosis" data-testid={`recovery-diagnosis-${recoveryCase.id}`}>
+                  <div className="we-recovery-case__diagnosis-head">
+                    <strong>{latestDiagnosisPayload.summary}</strong>
+                    <span
+                      className="we-pill"
+                      data-tone={latestDiagnosisPayload.mode === 'ai_enriched' ? 'success' : 'neutral'}
+                    >
+                      {t(`recoveryCase.governed.mode.${latestDiagnosisPayload.mode}`)}
+                    </span>
+                  </div>
+                  <p>{t(`recoveryCase.governed.modeHelp.${latestDiagnosisPayload.mode}`)}</p>
+                  <div className="we-recovery-case__hypotheses">
+                    {latestDiagnosisPayload.hypotheses.map((hypothesis, index) => (
+                      <article key={hypothesis.id}>
+                        <div className="we-recovery-case__hypothesis-head">
+                          <span>
+                            {t('recoveryCase.governed.hypothesisNumber', {
+                              number: index + 1,
+                            })}
+                          </span>
+                          {hypothesis.confidence !== null && (
+                            <span>
+                              {t('recoveryCase.governed.confidence', {
+                                percent: Math.round(hypothesis.confidence * 100),
+                              })}
+                            </span>
+                          )}
+                        </div>
+                        <strong>{hypothesis.cause}</strong>
+                        <div className="we-recovery-case__hypothesis-evidence">
+                          <div>
+                            <span>{t('recoveryCase.governed.supportingEvidence')}</span>
+                            {hypothesis.evidence.length > 0
+                              ? (
+                                  <ul>
+                                    {hypothesis.evidence.map((statement, statementIndex) => (
+                                      <li key={`${hypothesis.id}:evidence:${statementIndex}`}>
+                                        {statement}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )
+                              : <small>{t('recoveryCase.governed.evidenceUnavailable')}</small>}
+                          </div>
+                          <div>
+                            <span>{t('recoveryCase.governed.counterEvidence')}</span>
+                            {hypothesis.counterEvidence.length > 0
+                              ? (
+                                  <ul>
+                                    {hypothesis.counterEvidence.map((statement, statementIndex) => (
+                                      <li key={`${hypothesis.id}:counter:${statementIndex}`}>
+                                        {statement}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )
+                              : <small>{t('recoveryCase.governed.counterEvidenceUnavailable')}</small>}
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {candidates.length > 0 && (
+                <div
+                  className="we-recovery-case__candidates"
+                  role="radiogroup"
+                  aria-label={t('recoveryCase.governed.candidates')}
+                >
+                  {candidates.map(candidate => {
+                    const payload = candidatePayload(candidate)
+                    if (!payload) return null
+                    const selected = candidate.id === selectedCandidateId
+                    return (
+                      <label key={candidate.id} className="we-recovery-case__candidate" data-selected={selected}>
+                        <input
+                          type="radio"
+                          name={`recovery-candidate-${recoveryCase.id}`}
+                          value={candidate.id}
+                          checked={selected}
+                          onChange={() => {
+                            setSelectedCandidateId(candidate.id)
+                            setApprovedCandidateId(null)
+                          }}
+                        />
+                        <span>
+                          <strong>{t(`recoveryCase.governed.candidate.${payload.kind}`)}</strong>
+                          <small>{payload.reason}</small>
+                          {payload.decision === 'manual_follow_up' && (
+                            <small>{t('recoveryCase.governed.authoringRequired')}</small>
+                          )}
+                        </span>
+                        <span className="we-pill" data-tone={payload.kind === 'accept_loss' ? 'warning' : 'neutral'}>
+                          {t(`recoveryCase.governed.risk.${payload.risk ?? (payload.kind === 'accept_loss' ? 'high' : 'medium')}`)}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+
+              {selectedValidationPayload && (
+                <div
+                  className="we-recovery-case__validation"
+                  data-tone={selectedValidationPayload.passed ? 'success' : 'warning'}
+                  role="status"
+                >
+                  {selectedValidationPayload.passed ? <ShieldCheck size={17} /> : <CircleAlert size={17} />}
+                  <span>
+                    <strong>{t(
+                      selectedValidationPayload.passed
+                        ? 'recoveryCase.governed.validationPassed'
+                        : 'recoveryCase.governed.validationBlocked',
+                    )}</strong>
+                    <small>{selectedValidationPayload.summary}</small>
+                  </span>
+                </div>
+              )}
+
+              {mutationError && <p className="ui-field__error" role="alert">{mutationError}</p>}
+
+              {canResolve
+                && recoveryCase.action === 'quarantine'
+                && !canReplace
+                && !['verified_recovered', 'accepted_loss', 'abandoned'].includes(recoveryCase.state) && (
+                <div className="we-recovery-case__readonly" role="note">
+                  <LockKeyhole size={16} aria-hidden="true" />
+                  {t('recoveryCase.decisionPolicyBlocked')}
+                </div>
+              )}
+
+              {canDiagnose && (
+                <Button
+                  variant="primary"
+                  loading={busyAction === 'diagnose'}
+                  loadingLabel={t('recoveryCase.governed.diagnosing')}
+                  onClick={() => void diagnoseCase()}
+                  data-testid={`semantic-recovery-diagnose-${recoveryCase.id}`}
+                >
+                  {t('recoveryCase.governed.diagnose')}
+                </Button>
+              )}
+
+              {canPropose && (
                 <div className="we-recovery-case__form">
                   {canReplace && (
-                    <label className="we-field">
-                      <span>{t('recoveryCenter.tile.semantic.output')}</span>
-                      <textarea
-                        className="text-field we-recovery-case__output"
-                        value={output}
-                        onChange={event => setOutput(event.target.value)}
-                        rows={8}
-                        spellCheck={false}
-                        data-testid={`semantic-recovery-output-${recoveryCase.id}`}
-                      />
-                    </label>
-                  )}
-                  <label className="we-field">
-                    <span>{t('recoveryCenter.tile.semantic.reason')}</span>
-                    <textarea
-                      className="text-field"
-                      value={reason}
-                      onChange={event => setReason(event.target.value)}
-                      rows={3}
-                      maxLength={1000}
-                      data-testid={`semantic-recovery-reason-${recoveryCase.id}`}
-                    />
-                  </label>
-                  {resolveError && <p className="field-error" role="alert">{resolveError}</p>}
-                  <div className="we-recovery-case__decision-actions">
-                    {canReplace && (
-                      <button
-                        type="button"
-                        className="command-button command-button-primary"
-                        disabled={resolving}
-                        onClick={() => void resolveCase('replace')}
-                        data-testid={`semantic-recovery-replace-${recoveryCase.id}`}
+                    <FormDisclosure summary={t('recoveryCase.governed.manualOption')}>
+                      <FormField
+                        label={t('recoveryCenter.tile.semantic.output')}
+                        hint={t('recoveryCase.governed.outputHint')}
                       >
-                        {resolving
-                          ? t('recoveryCenter.tile.semantic.resolving')
-                          : t('recoveryCenter.tile.semantic.replace')}
-                      </button>
+                        {controlProps => (
+                          <textarea
+                            {...controlProps}
+                            className="we-recovery-case__output"
+                            value={output}
+                            onChange={event => setOutput(event.target.value)}
+                            rows={8}
+                            spellCheck={false}
+                            data-testid={`semantic-recovery-output-${recoveryCase.id}`}
+                          />
+                        )}
+                      </FormField>
+                      <FormField
+                        label={t('recoveryCenter.tile.semantic.reason')}
+                        required
+                      >
+                        {controlProps => (
+                          <textarea
+                            {...controlProps}
+                            value={reason}
+                            onChange={event => setReason(event.target.value)}
+                            rows={3}
+                            maxLength={1000}
+                            data-testid={`semantic-recovery-reason-${recoveryCase.id}`}
+                          />
+                        )}
+                      </FormField>
+                    </FormDisclosure>
+                  )}
+                  <FormActions>
+                    {canReplace && (
+                      <Button
+                        variant="primary"
+                        loading={busyAction === 'candidates'}
+                        onClick={() => void proposeCandidates(true)}
+                        data-testid={`semantic-recovery-propose-${recoveryCase.id}`}
+                      >
+                        {t('recoveryCase.governed.proposeReplacement')}
+                      </Button>
                     )}
-                    <button
-                      type="button"
-                      className={recoveryCase.action === 'observe'
-                        ? 'command-button command-button-primary'
-                        : 'command-button'}
-                      disabled={resolving}
-                      onClick={() => void resolveCase('accept_loss')}
+                    <Button
+                      variant={canReplace ? 'secondary' : 'primary'}
+                      loading={busyAction === 'candidates'}
+                      onClick={() => void proposeCandidates(false)}
                       data-testid={`semantic-recovery-accept-${recoveryCase.id}`}
                     >
-                      {t(
-                        recoveryCase.action === 'observe'
-                          ? 'recoveryCenter.tile.semantic.acknowledge'
-                          : 'recoveryCenter.tile.semantic.acceptLoss',
-                      )}
-                    </button>
-                  </div>
+                      {t('recoveryCase.governed.proposeSafeAlternative')}
+                    </Button>
+                  </FormActions>
+                </div>
+              )}
+
+              {canValidate && (
+                <Button
+                  variant="primary"
+                  loading={busyAction === 'validate'}
+                  onClick={() => void validateCandidate()}
+                  data-testid={`semantic-recovery-validate-${recoveryCase.id}`}
+                >
+                  {t('recoveryCase.governed.validate')}
+                </Button>
+              )}
+
+              {canApprove && !canApply && (
+                <Button
+                  variant="primary"
+                  loading={busyAction === 'approve'}
+                  leadingIcon={<LockKeyhole size={15} />}
+                  onClick={() => void approveCandidate()}
+                  data-testid={`semantic-recovery-approve-${recoveryCase.id}`}
+                >
+                  {t('recoveryCase.governed.approve')}
+                </Button>
+              )}
+
+              {canApply && (
+                <div className="we-recovery-case__approval-ready" role="status">
+                  <ShieldCheck size={17} aria-hidden="true" />
+                  <span>{t('recoveryCase.governed.approvalReady')}</span>
+                  <Button
+                    variant="primary"
+                    loading={busyAction === 'apply'}
+                    onClick={() => void applyCandidate()}
+                    data-testid={`semantic-recovery-apply-${recoveryCase.id}`}
+                  >
+                    {t(
+                      selectedPayload?.kind === 'accept_loss'
+                        ? 'recoveryCase.governed.applyLoss'
+                        : 'recoveryCase.governed.apply',
+                    )}
+                  </Button>
+                </div>
+              )}
+
+              {!canResolve && (
+                <div className="we-recovery-case__readonly" role="note">
+                  <LockKeyhole size={16} aria-hidden="true" />
+                  {t('recoveryCase.decisionReadOnly')}
                 </div>
               )}
             </section>

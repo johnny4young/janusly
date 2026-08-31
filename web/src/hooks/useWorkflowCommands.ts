@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { useConfirm } from '../components/ConfirmDialog'
 import type { WorkflowCreationMode } from '../components/WorkflowsDashboard'
 import { getResolvedLocale } from '../i18n'
@@ -9,10 +9,14 @@ import {
   type ActiveTab,
   type AiMode,
   type AiReviewIssue,
+  type AuthoringCapabilityCatalog,
   type ValidationIssue,
+  type WorkflowBriefCompilation,
+  type WorkflowIntentBrief,
   type WorkflowDefinition,
   type WorkflowImprovementResult,
   type WorkflowImprovementSuggestion,
+  type WorkflowProposalResponse,
 } from '../types'
 import type { AppCommandsOptions } from './app-command-types'
 import { clearDraft, readDraft } from './useDraftPersistence'
@@ -233,6 +237,70 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     t,
   ])
 
+  const loadAuthoringCapabilities = useCallback(async (): Promise<AuthoringCapabilityCatalog> => {
+    return await contractApi(
+      'GET /authoring/capabilities',
+      '/authoring/capabilities',
+      undefined,
+    )
+  }, [])
+
+  const compileWorkflowBrief = useCallback(async (prompt: string): Promise<WorkflowBriefCompilation> => {
+    const result = await api('/ai/workflow-briefs/compile', {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }) as WorkflowBriefCompilation
+    if (!result?.brief || !Array.isArray(result.clarifyingQuestions)) {
+      throw new Error(t('toasts.aiResponseInvalid'))
+    }
+    return result
+  }, [t])
+
+  const proposeWorkflow = useCallback(async (
+    brief: WorkflowIntentBrief,
+    catalogVersion: string,
+  ): Promise<WorkflowProposalResponse> => {
+    const result = await api('/ai/workflow-proposals', {
+      method: 'POST',
+      body: JSON.stringify({
+        brief,
+        catalogVersion,
+        currentWorkflow: getWorkflowJson(),
+      }),
+    }) as WorkflowProposalResponse & { bonBackoff?: unknown }
+    if (
+      !result?.proposal
+      || !result.bindings
+      || !Array.isArray(result.proposal.workflow?.nodes)
+      || !Array.isArray(result.proposal.workflow?.edges)
+    ) {
+      throw new Error(t('toasts.aiResponseInvalid'))
+    }
+    return {
+      ...result,
+      bonBackoff: parseAiCandidateBackoff(result.bonBackoff),
+    }
+  }, [getWorkflowJson, t])
+
+  const applyWorkflowProposal = useCallback(async (
+    response: WorkflowProposalResponse,
+  ): Promise<boolean> => {
+    if (!response.proposal.applicable || !response.bindings.complete) return false
+    if (!await confirmReplaceCanvas()) return false
+    hydrateWorkflow(response.proposal.workflow, { saved: false, dirty: true })
+    setValidationIssues([])
+    setAiReviewIssues([])
+    addToast(t('toasts.aiProposalApplied'), 'success')
+    return true
+  }, [
+    addToast,
+    confirmReplaceCanvas,
+    hydrateWorkflow,
+    setAiReviewIssues,
+    setValidationIssues,
+    t,
+  ])
+
   const explainWorkflow = useCallback(async () => {
     const workflow = getWorkflowJson()
     const result = await api('/ai/explain-workflow', {
@@ -333,14 +401,18 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
   ])
 
   return {
+    applyWorkflowProposal,
     applyWorkflowImprovement,
     beginWorkflowCreation,
+    compileWorkflowBrief,
     confirmReplaceCanvas,
     createNewWorkflow,
     explainWorkflow,
     generateWorkflow,
+    loadAuthoringCapabilities,
     maybeRestoreDraft,
     openWorkflow,
+    proposeWorkflow,
     reviewWorkflow,
     saveWorkflow,
     suggestWorkflowImprovement,

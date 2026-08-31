@@ -6,8 +6,8 @@ import test from 'node:test'
 
 import {
   collectLegacyUiOwners,
-  compareLegacyUiBaseline,
   isLegacyUiClass,
+  legacyUiViolations,
 } from './check-ui-legacy.mjs'
 
 test('recognizes only the frozen form and action namespaces', () => {
@@ -34,16 +34,13 @@ test('collects production JSX owners but ignores tests and unrelated literals', 
   })
 })
 
-test('rejects growth and requires intentional baseline shrinkage', () => {
+test('rejects every legacy production reference without an allowance list', () => {
   assert.deepEqual(
-    compareLegacyUiBaseline(
-      { 'Panel.tsx': ['command-button', 'text-field'] },
-      { 'Panel.tsx': ['command-button'] },
-    ),
-    ['new legacy class .text-field in Panel.tsx'],
+    legacyUiViolations({ 'Panel.tsx': ['command-button', 'text-field'] }),
+    [
+      'legacy class .command-button in Panel.tsx',
+      'legacy class .text-field in Panel.tsx',
+    ],
   )
-  assert.deepEqual(
-    compareLegacyUiBaseline({}, { 'Panel.tsx': ['command-button'] }),
-    ['stale baseline class .command-button in Panel.tsx'],
-  )
+  assert.deepEqual(legacyUiViolations({}), [])
 })

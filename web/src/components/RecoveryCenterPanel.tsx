@@ -43,15 +43,17 @@ import {
   buildGreeting,
   buildHeatmapCells,
   computeLongestOpenDowntime,
-  computeRecommendedActions,
   computeStreaks,
+  decodeOperatorBrief,
   listActiveRuns,
+  presentOperatorBrief,
   readDisplayName,
   readHealthScore,
   shouldShowOnboarding,
   type ClustersResponse,
   type HeatmapDay,
   type OperatorWins,
+  type OperatorBrief,
   type RecoveryLedger,
   type RecoveryMetrics,
   type RecommendedAction,
@@ -93,6 +95,7 @@ type RecoveryQueueOverview = {
 }
 
 type SemanticCasesStatus = 'loading' | 'available' | 'unavailable'
+type OperatorBriefStatus = 'loading' | 'available' | 'unavailable'
 
 const RECOVERY_IMPACT_ACTIVE_POLL_MS = 10_000
 const RECOVERY_IMPACT_IDLE_POLL_MS = 60_000
@@ -121,6 +124,10 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     cases: RecoveryCase[]
     status: SemanticCasesStatus
   }> | null>(null)
+  const [operatorBriefSnapshot, setOperatorBriefSnapshot] = useState<OrgSnapshot<{
+    brief: OperatorBrief | null
+    status: OperatorBriefStatus
+  }> | null>(null)
   const [ledgerSnapshot, setLedgerSnapshot] = useState<OrgSnapshot<RecoveryLedger | null> | null>(null)
   const [winsSnapshot, setWinsSnapshot] = useState<IdentitySnapshot<OperatorWins | null> | null>(null)
   const [impactPollVersion, setImpactPollVersion] = useState(0)
@@ -139,6 +146,12 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     : semanticCasesStatus === 'available'
       ? 'clear'
       : semanticCasesStatus
+  const operatorBrief = operatorBriefSnapshot?.orgId === resolvedOrgId
+    ? operatorBriefSnapshot.value.brief
+    : null
+  const operatorBriefStatus = operatorBriefSnapshot?.orgId === resolvedOrgId
+    ? operatorBriefSnapshot.value.status
+    : 'loading'
   const semanticBlockerRunIds = useMemo(
     () => [...new Set(
       semanticCases
@@ -351,6 +364,32 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   }, [applyImpactSnapshot, platformVersion, resolvedOrgId, resolvedUserId])
 
   useEffect(() => {
+    let cancelled = false
+    setOperatorBriefSnapshot({
+      orgId: resolvedOrgId,
+      value: { brief: null, status: 'loading' },
+    })
+    void api('/operations/brief')
+      .then((payload) => {
+        if (cancelled) return
+        const brief = decodeOperatorBrief(payload)
+        if (!brief) throw new Error('invalid operator brief')
+        setOperatorBriefSnapshot({
+          orgId: resolvedOrgId,
+          value: { brief, status: 'available' },
+        })
+      })
+      .catch(() => {
+        if (cancelled) return
+        setOperatorBriefSnapshot({
+          orgId: resolvedOrgId,
+          value: { brief: null, status: 'unavailable' },
+        })
+      })
+    return () => { cancelled = true }
+  }, [platformVersion, resolvedOrgId])
+
+  useEffect(() => {
     if (impactPollVersion === 0) return
     let cancelled = false
     const { orgId, userId } = identityRef.current
@@ -495,11 +534,6 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     () => props.runNodes.filter((node) => node.status === 'waiting'),
     [props.runNodes],
   )
-  const topClusters = useMemo(
-    () => (clusters?.clusters ?? []).slice().sort((a, b) => b.frequency - a.frequency).slice(0, 3),
-    [clusters],
-  )
-  const topClusterFrequency = topClusters[0]?.frequency ?? 0
   const heatmapCells = useMemo(
     () => nowMs === null ? [] : buildHeatmapCells(heatmap, 90, nowMs),
     [heatmap, nowMs],
@@ -561,60 +595,32 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     i18n.language,
   ])
 
-  const recommendedActions = useMemo(() => computeRecommendedActions({
-    openFailures: openFailureCount,
-    pendingApprovals: waitingNodes.length,
-    semanticCases: semanticCases.length,
-    topClusterFrequency,
-    healthScore,
-  }), [
-    openFailureCount,
-    waitingNodes.length,
-    semanticCases.length,
-    topClusterFrequency,
-    healthScore,
-    i18n.language,
-  ])
+  const recommendedActions = useMemo(
+    () => presentOperatorBrief(operatorBrief),
+    [operatorBrief, i18n.language],
+  )
   const allActiveRuns = useMemo(
     () => listActiveRuns(props.runs, props.runs.length),
     [props.runs],
   )
   const activeRuns = allActiveRuns.slice(0, 3)
   const handleRecommendedAction = useCallback((action: RecommendedAction) => {
-    if (action.id === 'resolve_approvals') {
-      const waitingRun = props.runs.find(
-        (run) => run.status === 'waiting' || run.hasWaitingNodes,
-      )
-      if (waitingRun) {
-        void props.onOpenRun(waitingRun.id, 'runs')
-      } else {
-        props.onOpenTab('runs')
-      }
-      return
-    }
-    if (action.id === 'review_semantic_cases') {
-      const semanticCase = semanticCases[0]
-      if (semanticCase) props.onOpenRecoveryCase(semanticCase.id)
+    const { target } = action
+    if (target.destination === 'recoveryCase') {
+      props.onOpenRecoveryCase(target.id)
+    } else if (target.destination === 'runs') {
+      if (target.runId) void props.onOpenRun(target.runId, 'runs')
       else props.onOpenTab('runs')
-      return
+    } else if (target.destination === 'recover') {
+      props.onOpenRecoveryQueue(target.kind === 'dead_letter' ? target.id : undefined)
+    } else if (target.destination === 'operations') {
+      props.onOpenTab('operations')
     }
-    // A cluster is acted on the same way a single failure is — from the
-    // recovery queue, where the Recovery dialog its copy promises lives.
-    if (action.id === 'triage_failures' || action.id === 'recover_cluster') {
-      props.onOpenRecoveryQueue(openDeadLetters[0]?.id)
-      return
-    }
-    // Everything else follows the action's declared destination. Hardcoding
-    // one here let the model and the UI disagree silently.
-    props.onOpenTab(action.ctaTab)
   }, [
-    openDeadLetters,
     props.onOpenRecoveryCase,
     props.onOpenRecoveryQueue,
     props.onOpenRun,
     props.onOpenTab,
-    props.runs,
-    semanticCases,
   ])
 
   const introDismissed = (metrics?.terminalRuns ?? 0) > 0
@@ -651,7 +657,8 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     onOpenRecoveryQueue: props.onOpenRecoveryQueue,
     onOpenRun: (runId: string) => props.onOpenRun(runId, 'runs'), onOpenTab: props.onOpenTab,
     onStartRecoveryDrill: props.onStartRecoveryDrill, openDeadLetters, openFailureCount,
-    operatorWins, recommendedActions, recoveryClearEligible, setInsightsOpen, showOnboarding,
+    operatorBriefStatus, operatorBriefWarnings: operatorBrief?.warnings ?? [], operatorWins,
+    recommendedActions, recoveryClearEligible, setInsightsOpen, showOnboarding,
     streak, validation, waitingNodes,
   }
 }

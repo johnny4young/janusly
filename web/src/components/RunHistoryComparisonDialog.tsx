@@ -21,6 +21,7 @@ import { getResolvedLocale, useT } from '../i18n'
 import type { RunSummary } from '../types'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { RunComparisonView, type RunComparisonPayload } from './RunComparisonView'
+import { Button } from '@/components/ui/Button'
 
 type ComparableRun = RunSummary & {
   workflowId: string
@@ -177,9 +178,9 @@ export function RunHistoryComparisonDialog({
         </div>
 
         <footer className="run-input-dialog__footer">
-          <button type="button" className="command-button" onClick={onClose}>
+          <Button variant="secondary" type="button"  onClick={onClose}>
             {t('runHistoryComparison.close')}
-          </button>
+          </Button>
         </footer>
       </div>
     </div>

@@ -16,6 +16,7 @@ import { useWorkflowStore } from '../store'
 import { useConfirm } from './ConfirmDialog'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
+import { Button } from '@/components/ui/Button'
 
 type SlackUserMapping = { slackUserId: string; userId: string }
 type SlackConnection = {
@@ -225,14 +226,14 @@ export function SlackInteractionsPanel() {
             <MessageSquareMore size={16} aria-hidden /> {t('slackInteractions.title')}
           </h3>
         </div>
-        <button
+        <Button variant="ghost" size="sm"
           type="button"
-          className="we-btn we-btn--ghost we-btn--sm"
+
           onClick={() => showForm ? closeForm() : setShowForm(true)}
         >
           {showForm ? <X size={14} aria-hidden /> : <Plus size={14} aria-hidden />}
           {t(showForm ? 'slackInteractions.action.cancel' : 'slackInteractions.action.new')}
-        </button>
+        </Button>
       </div>
       <p className="helper-text we-slack-interactions__intro">{t('slackInteractions.intro')}</p>
 
@@ -305,9 +306,9 @@ export function SlackInteractionsPanel() {
                     </option>
                   ))}
                 </select>
-                <button
+                <Button variant="ghost" size="sm"
                   type="button"
-                  className="we-btn we-btn--ghost we-btn--sm"
+
                   aria-label={t('slackInteractions.form.removeMapping', { number: index + 1 })}
                   onClick={() => setForm((current) => {
                     const next = current.userMappings.filter((row) => row.key !== mapping.key)
@@ -315,12 +316,12 @@ export function SlackInteractionsPanel() {
                   })}
                 >
                   <Trash2 size={13} aria-hidden />
-                </button>
+                </Button>
               </div>
             ))}
-            <button
+            <Button variant="ghost" size="sm"
               type="button"
-              className="we-btn we-btn--ghost we-btn--sm"
+
               onClick={() => setForm((current) => ({
                 ...current,
                 userMappings: [...current.userMappings, {
@@ -331,7 +332,7 @@ export function SlackInteractionsPanel() {
               }))}
             >
               <Plus size={13} aria-hidden /> {t('slackInteractions.form.addMapping')}
-            </button>
+            </Button>
           </fieldset>
           {!uniqueSlackIds && (
             <p className="helper-text helper-text--error" role="alert">{t('slackInteractions.form.duplicateSlackUser')}</p>
@@ -344,9 +345,9 @@ export function SlackInteractionsPanel() {
             />
             {t('slackInteractions.form.enabled')}
           </label>
-          <button
+          <Button variant="primary" size="sm"
             type="button"
-            className="we-btn we-btn--primary we-btn--sm"
+
             disabled={!canSave}
             onClick={() => void save()}
           >
@@ -354,7 +355,7 @@ export function SlackInteractionsPanel() {
             {t(saving ? 'slackInteractions.action.saving' : editingId
               ? 'slackInteractions.action.saveChanges'
               : 'slackInteractions.action.create')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -385,19 +386,19 @@ export function SlackInteractionsPanel() {
                 <code className="we-slack-interactions__callback">{connection.callbackUrl}</code>
               </div>
               <div className="we-list-row__actions">
-                <button
+                <Button variant="ghost" size="sm"
                   type="button"
-                  className="we-btn we-btn--ghost we-btn--sm"
+
                   onClick={() => void copyCallback(connection)}
                 >
                   <Copy size={13} aria-hidden /> {t('slackInteractions.action.copy')}
-                </button>
-                <button type="button" className="we-btn we-btn--ghost we-btn--sm" onClick={() => edit(connection)}>
+                </Button>
+                <Button variant="ghost" size="sm" type="button"  onClick={() => edit(connection)}>
                   <Pencil size={13} aria-hidden /> {t('slackInteractions.action.edit')}
-                </button>
-                <button type="button" className="we-btn we-btn--ghost we-btn--sm" onClick={() => void remove(connection)}>
+                </Button>
+                <Button variant="ghost" size="sm" type="button"  onClick={() => void remove(connection)}>
                   <Trash2 size={13} aria-hidden /> {t('slackInteractions.action.delete')}
-                </button>
+                </Button>
               </div>
             </li>
           ))}

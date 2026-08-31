@@ -24,6 +24,7 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
 import { useConfirm } from './ConfirmDialog'
+import { Button } from '@/components/ui/Button'
 
 type Channel = {
   destination: AlertDestination
@@ -338,9 +339,9 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
         <h3>
           <Bell size={16} aria-hidden /> {t('alerts.panel.title')}
         </h3>
-        <button
+        <Button variant="ghost" size="sm"
           type="button"
-          className="we-btn we-btn--ghost we-btn--sm"
+
           disabled={!canWrite}
           onClick={() => {
             if (showForm) cancelForm()
@@ -348,7 +349,7 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
           }}
         >
           <Plus size={14} aria-hidden /> {t('alerts.panel.new')}
-        </button>
+        </Button>
       </div>
 
       {showForm && (
@@ -638,9 +639,9 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
                       />
                     </>
                   )}
-                  <button
+                  <Button variant="ghost" size="sm"
                     type="button"
-                    className="we-btn we-btn--ghost we-btn--sm"
+
                     onClick={() => {
                       const newChannels = form.channels.filter((_, i) => i !== idx)
                       setForm({
@@ -650,14 +651,14 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
                     }}
                   >
                     <Trash2 size={12} aria-hidden />
-                  </button>
+                  </Button>
                 </div>
               )
             })}
             {form.channels.length < 5 && (
-              <button
+              <Button variant="ghost" size="sm"
                 type="button"
-                className="we-btn we-btn--ghost we-btn--sm"
+
                 onClick={() =>
                   setForm({
                     ...form,
@@ -669,7 +670,7 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
                 }
               >
                 + {t('alerts.form.addChannel')}
-              </button>
+              </Button>
             )}
           </fieldset>
 
@@ -700,9 +701,9 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
           </label>
 
           <div className="we-alert-policies__form-actions">
-            <button
+            <Button variant="primary" size="sm"
               type="button"
-              className="we-btn we-btn--primary we-btn--sm"
+
               onClick={submitPolicy}
               disabled={!canWrite || submitting || form.name.trim().length === 0 || minFrequencyInvalid || stalledMinutesInvalid || warnDaysInvalid || cooldownInvalid}
             >
@@ -711,14 +712,14 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
                 : editingId
                 ? t('alerts.form.saveChanges')
                 : t('alerts.form.save')}
-            </button>
-            <button
+            </Button>
+            <Button variant="ghost" size="sm"
               type="button"
-              className="we-btn we-btn--ghost we-btn--sm"
+
               onClick={cancelForm}
             >
               {t('alerts.form.cancel')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -748,19 +749,19 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
                 </span>
               </div>
               <div className="we-list-row__actions">
-                <button
+                <Button variant="ghost" size="sm"
                   type="button"
-                  className="we-btn we-btn--ghost we-btn--sm"
+
                   onClick={() => startEdit(policy)}
                   disabled={!canWrite}
                   aria-label={t('alerts.action.edit')}
                   data-testid="alert-policy-edit"
                 >
                   <Pencil size={14} />
-                </button>
-                <button
+                </Button>
+                <Button variant="ghost" size="sm"
                   type="button"
-                  className="we-btn we-btn--ghost we-btn--sm"
+
                   onClick={() => toggleEnabled(policy)}
                   disabled={!canWrite}
                   aria-label={
@@ -768,16 +769,16 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
                   }
                 >
                   {policy.enabled ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
-                </button>
-                <button
+                </Button>
+                <Button variant="ghost" size="sm"
                   type="button"
-                  className="we-btn we-btn--ghost we-btn--sm"
+
                   onClick={() => deletePolicy(policy)}
                   disabled={!canWrite}
                   aria-label={t('alerts.action.delete')}
                 >
                   <Trash2 size={14} />
-                </button>
+                </Button>
               </div>
             </div>
           ))}

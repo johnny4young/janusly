@@ -82,7 +82,7 @@
 .ui-field__required { color: var(--we-danger-text); }
 .ui-field__required::before { content: "*"; }
 
-:where(.ui-field > [data-ui-control], .ui-form-disclosure__body > [data-ui-control]) {
+.ui-control {
   width: 100%;
   min-height: var(--we-control-md);
   border: 1px solid var(--we-line-strong);
@@ -95,13 +95,13 @@
   transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
-:where(.ui-field > textarea[data-ui-control], .ui-form-disclosure__body > textarea[data-ui-control]) { min-height: 96px; resize: vertical; }
-:where(.ui-field > [data-ui-control], .ui-form-disclosure__body > [data-ui-control])::placeholder { color: var(--we-faint); }
-:where(.ui-field > [data-ui-control], .ui-form-disclosure__body > [data-ui-control]):hover:not(:disabled) { border-color: color-mix(in srgb, var(--we-primary) 32%, var(--we-line-strong)); }
-:where(.ui-field > [data-ui-control], .ui-form-disclosure__body > [data-ui-control]):focus-visible { outline: none; border-color: var(--we-primary); box-shadow: var(--we-focus-ring); }
-:where(.ui-field > [data-ui-control], .ui-form-disclosure__body > [data-ui-control]):disabled { background: var(--we-surface-muted); color: var(--we-muted); cursor: not-allowed; }
-:where(.ui-field > [data-ui-control], .ui-form-disclosure__body > [data-ui-control])[aria-invalid="true"] { border-color: var(--we-danger); }
-:where(.ui-field > [data-ui-control], .ui-form-disclosure__body > [data-ui-control])[aria-invalid="true"]:focus-visible { box-shadow: 0 0 0 3px var(--we-danger-border-25); }
+textarea.ui-control { min-height: 96px; resize: vertical; }
+.ui-control::placeholder { color: var(--we-faint); }
+.ui-control:hover:not(:disabled) { border-color: color-mix(in srgb, var(--we-primary) 32%, var(--we-line-strong)); }
+.ui-control:focus-visible { outline: none; border-color: var(--we-primary); box-shadow: var(--we-focus-ring); }
+.ui-control:disabled { background: var(--we-surface-muted); color: var(--we-muted); cursor: not-allowed; }
+.ui-control[aria-invalid="true"] { border-color: var(--we-danger); }
+.ui-control[aria-invalid="true"]:focus-visible { box-shadow: 0 0 0 3px var(--we-danger-border-25); }
 
 .ui-field__hint, .ui-field__error { display: flex; align-items: flex-start; gap: var(--we-space-1); font-size: 12px; line-height: 1.45; }
 .ui-field__hint { color: var(--we-muted); }

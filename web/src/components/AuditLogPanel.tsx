@@ -15,6 +15,8 @@ import { ListChecks } from "lucide-react";
 
 import { api } from "../api";
 import { getResolvedLocale, useT } from "../i18n";
+import { Button } from '@/components/ui/Button'
+import { FormField } from '@/components/ui/Form'
 
 /** One audit row as returned by `GET /audit`. `action` is a stable technical
  *  identifier shown verbatim (not translated); `metadata` is the redacted
@@ -130,7 +132,7 @@ export function AuditLogPanel() {
         <ListChecks size={18} aria-hidden="true" />
         <h3 id="audit-heading">{t("audit.heading")}</h3>
       </header>
-      <p className="we-field__hint">{t("audit.intro")}</p>
+      <p className="helper-text">{t("audit.intro")}</p>
 
       <div className="we-audit-presets" role="group" aria-label={t("audit.presets.aria")}>
         <span>{t("audit.presets.label")}</span>
@@ -145,23 +147,24 @@ export function AuditLogPanel() {
       </div>
 
       <form className="we-budget-settings__form" onSubmit={applyFilter} noValidate>
-        <label className="we-field">
-          <span className="we-field__label">{t("audit.filter.label")}</span>
-          <input
-            type="text"
-            className="we-field__input"
-            placeholder={t("audit.filter.placeholder")}
-            value={filterInput}
-            onChange={(e) => setFilterInput(e.target.value)}
-          />
-        </label>
-        <button type="submit" className="we-button we-button--ghost">
+        <FormField label={t("audit.filter.label")}>
+          {(controlProps) => (
+            <input
+              {...controlProps}
+              type="text"
+              placeholder={t("audit.filter.placeholder")}
+              value={filterInput}
+              onChange={(e) => setFilterInput(e.target.value)}
+            />
+          )}
+        </FormField>
+        <Button variant="ghost" type="submit" >
           {t("audit.filter.apply")}
-        </button>
+        </Button>
         {appliedAction && (
-          <button type="button" className="we-button we-button--ghost" onClick={clearFilter}>
+          <Button variant="ghost" type="button"  onClick={clearFilter}>
             {t("audit.filter.clear")}
-          </button>
+          </Button>
         )}
       </form>
 
@@ -209,14 +212,14 @@ export function AuditLogPanel() {
           </div>
 
           {hasMore && (
-            <button
+            <Button variant="ghost"
               type="button"
-              className="we-button we-button--ghost"
+
               onClick={loadMore}
               disabled={loadingMore}
             >
               {loadingMore ? t("audit.loadingMore") : t("audit.loadMore")}
-            </button>
+            </Button>
           )}
         </>
       )}

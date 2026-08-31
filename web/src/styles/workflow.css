@@ -367,8 +367,6 @@
   line-height: 1.45;
 }
 
-.ai-fix-card .command-button { justify-self: start; }
-
 .template-catalog-section {
   display: grid;
   gap: 8px;
@@ -652,7 +650,7 @@
   margin-top: 4px;
 }
 
-.user-menu__recent-create .text-field {
+.user-menu__recent-create .ui-control {
   min-width: 0;
   height: 30px;
 }
@@ -1119,13 +1117,6 @@
 .we-recovery-center-tile[data-severity="warning"] { border-left-color: var(--we-warning); }
 .we-recovery-center-tile[data-severity="danger"] { border-left-color: var(--we-danger); }
 .we-recovery-center-tile[data-severity="neutral"] { border-left-color: var(--we-line-strong); }
-
-.command-button-compact {
-  min-height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 600;
-}
 
 /* Watch-rows for the AI is watching tile (failure clusters). */
 .we-recovery-watch {

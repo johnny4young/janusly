@@ -13,6 +13,8 @@ import { AuthProvider } from '../auth'
 import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
 import { useT } from '../i18n'
 import { BrandMark } from './BrandMark'
+import { Button } from '@/components/ui/Button'
+import { FieldLabel, TextInput } from '@/components/ui/Form'
 
 type LoginMode = 'login' | 'signup'
 
@@ -71,10 +73,10 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
 
         <h1>{mode === 'login' ? t('auth.login.welcomeBack') : t('auth.login.createAccount')}</h1>
 
-        <label className="field-label" htmlFor="auth-email">{t('auth.login.email')}</label>
-        <input
+        <FieldLabel  htmlFor="auth-email">{t('auth.login.email')}</FieldLabel>
+        <TextInput
           id="auth-email"
-          className="text-field"
+
           type="email"
           autoComplete="email"
           required
@@ -82,10 +84,10 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
           onChange={(event) => setEmail(event.target.value)}
         />
 
-        <label className="field-label" htmlFor="auth-password">{t('auth.login.password')}</label>
-        <input
+        <FieldLabel  htmlFor="auth-password">{t('auth.login.password')}</FieldLabel>
+        <TextInput
           id="auth-password"
-          className="text-field"
+
           type="password"
           autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
           required
@@ -96,10 +98,10 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
 
         {error && <div className="issue issue-error" role="alert">{error}</div>}
 
-        <button type="submit" className="command-button command-button-primary auth-submit" disabled={pending}>
+        <Button variant="primary" type="submit" className="auth-submit" disabled={pending}>
           {mode === 'login' ? <LogIn size={16} aria-hidden="true" /> : <UserPlus size={16} aria-hidden="true" />}
           <span>{pending ? t('common.working') : mode === 'login' ? t('auth.login.login') : t('auth.login.signUp')}</span>
-        </button>
+        </Button>
 
         <button
           type="button"
@@ -116,10 +118,10 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
           <span>{t('auth.login.or')}</span>
         </div>
 
-        <label className="field-label" htmlFor="auth-sso-org">{t('auth.login.ssoOrgLabel')}</label>
-        <input
+        <FieldLabel  htmlFor="auth-sso-org">{t('auth.login.ssoOrgLabel')}</FieldLabel>
+        <TextInput
           id="auth-sso-org"
-          className="text-field"
+
           type="text"
           autoComplete="organization"
           placeholder={t('auth.login.ssoOrgPlaceholder')}
@@ -127,14 +129,14 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
           onChange={(event) => setSsoOrgId(event.target.value)}
         />
 
-        <button
+        <Button variant="secondary"
           type="button"
-          className="command-button command-button-secondary auth-submit"
+          className="auth-submit"
           onClick={startSso}
         >
           <Building2 size={16} aria-hidden="true" />
           <span>{t('auth.login.continueSso')}</span>
-        </button>
+        </Button>
       </form>
     </main>
   )

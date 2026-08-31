@@ -1,4 +1,48 @@
-import { useId, type AriaAttributes, type DetailsHTMLAttributes, type ReactNode } from 'react'
+import {
+  forwardRef,
+  useId,
+  type AriaAttributes,
+  type DetailsHTMLAttributes,
+  type InputHTMLAttributes,
+  type LabelHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from 'react'
+
+function mergeControlClassName(className?: string) {
+  return ['ui-control', className].filter(Boolean).join(' ')
+}
+
+/** Standalone semantic controls for compact filters and inline editors. Use
+ * FormField around them whenever a visible label, hint, or error is present. */
+export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function TextInput({ className, ...props }, ref) {
+    return <input {...props} ref={ref} className={mergeControlClassName(className)} data-ui-control />
+  },
+)
+
+export const SelectControl = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
+  function SelectControl({ className, ...props }, ref) {
+    return <select {...props} ref={ref} className={mergeControlClassName(className)} data-ui-control />
+  },
+)
+
+export const TextAreaControl = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
+  function TextAreaControl({ className, ...props }, ref) {
+    return <textarea {...props} ref={ref} className={mergeControlClassName(className)} data-ui-control />
+  },
+)
+
+export const FieldLabel = forwardRef<HTMLLabelElement, LabelHTMLAttributes<HTMLLabelElement>>(
+  function FieldLabel({ children, className, ...props }, ref) {
+    return (
+      <label {...props} ref={ref} className={['ui-field__label', className].filter(Boolean).join(' ')}>
+        <span>{children}</span>
+      </label>
+    )
+  },
+)
 
 export type FormControlProps = {
   id: string
@@ -42,7 +86,7 @@ export function FormField({
       </label>
       {children({
         id: controlId,
-        className: controlClassName,
+        className: mergeControlClassName(controlClassName),
         'data-ui-control': true,
         'aria-describedby': describedBy,
         'aria-errormessage': errorId,

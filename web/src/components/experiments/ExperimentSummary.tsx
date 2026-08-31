@@ -14,6 +14,7 @@ import { Clipboard } from 'lucide-react'
 
 import { useT } from '../../i18n'
 import { formatCurrency, formatDelta, formatPercent, formatScorePoints, parseSummary, type Experiment, type ExperimentSummary } from './types'
+import { Button } from '@/components/ui/Button'
 
 function getRecommendationReason(summary: ExperimentSummary, t: ReturnType<typeof useT>['t']): string {
   if (summary.recommendation === 'promote_candidate') {
@@ -91,10 +92,10 @@ export function ExperimentSummaryDetail({
               <>
                 <p>{t('experiments.recommendation.promote_candidate.manual')}</p>
                 <code>{experiment.candidateRef}</code>
-                <button type="button" className="we-button we-button--ghost" onClick={onCopyCandidate}>
+                <Button variant="ghost" type="button"  onClick={onCopyCandidate}>
                   <Clipboard size={14} aria-hidden="true" />
                   {t('experiments.action.copyCandidate')}
-                </button>
+                </Button>
               </>
             )}
           </aside>

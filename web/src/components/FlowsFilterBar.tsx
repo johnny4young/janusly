@@ -13,6 +13,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import { FilterX, Pencil, Search, Trash2, X } from 'lucide-react'
 import { useT } from '../i18n'
 import type { SortKey } from '../flows-filters'
+import { SelectControl, TextInput } from '@/components/ui/Form'
 
 type TFunc = ReturnType<typeof useT>['t']
 
@@ -83,9 +84,9 @@ export function FlowsFilterBar({
     <div className="we-list-toolbar">
       <span className="we-list-search">
         <Search size={14} aria-hidden="true" />
-        <input
+        <TextInput
           type="search"
-          className="text-field"
+
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder={t('workflowsDashboard.searchPlaceholder')}
@@ -113,8 +114,8 @@ export function FlowsFilterBar({
             </span>
           ))}
           {tagOptions.some(tag => !tagFilters.includes(tag)) && (
-            <select
-              className="text-field we-list-row__tag-add"
+            <SelectControl
+              className="we-list-row__tag-add"
               value=""
               aria-label={t('workflowsDashboard.tagFilterAria')}
               onChange={event => { if (event.target.value) setTagFilters(prev => prev.includes(event.target.value) ? prev : [...prev, event.target.value]) }}
@@ -124,7 +125,7 @@ export function FlowsFilterBar({
               {tagOptions.filter(tag => !tagFilters.includes(tag)).map(tag => (
                 <option key={tag} value={tag}>{tag}</option>
               ))}
-            </select>
+            </SelectControl>
           )}
         </span>
       )}
@@ -134,8 +135,8 @@ export function FlowsFilterBar({
       {canWrite && soleTagFilter && (
         renamingTag ? (
           <span className="we-list-tag-manage">
-            <input
-              className="text-field we-list-tag-manage__input"
+            <TextInput
+              className="we-list-tag-manage__input"
               value={tagRenameDraft}
               autoFocus
               maxLength={40}
@@ -190,8 +191,8 @@ export function FlowsFilterBar({
         )
       )}
       {folderOptions.length > 0 && (
-        <select
-          className="text-field"
+        <SelectControl
+
           value={folderFilter}
           onChange={event => setFolderFilter(event.target.value)}
           aria-label={t('workflowsDashboard.folderFilterAria')}
@@ -201,7 +202,7 @@ export function FlowsFilterBar({
           {folderOptions.map(folder => (
             <option key={folder} value={folder}>{folder}</option>
           ))}
-        </select>
+        </SelectControl>
       )}
       {/* One-click reset of the active search / tag / folder filters. Only
           shown when at least one is active; leaves sort + view state intact. */}

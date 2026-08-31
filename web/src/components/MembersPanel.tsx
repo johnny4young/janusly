@@ -21,7 +21,7 @@ import { tApiError, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { currentSessionOrganization, sessionCan } from '../identity-context'
 import { Button } from './ui/Button'
-import { FieldStack, FormActions, FormField } from './ui/Form'
+import { FieldStack, FormActions, FormField , SelectControl} from './ui/Form'
 
 type OrgRoleEntry = {
   name: string
@@ -296,8 +296,8 @@ export function MembersPanel() {
                     <small>{describeRole(member.role, memberRole)}</small>
                   </div>
                   <div className="we-list-row__meta">
-                    <select
-                      className="text-field text-field--compact"
+                    <SelectControl
+
                       value={member.role}
                       onChange={(event) => updateRole(member.userId, event.target.value)}
                       aria-label={t('members.row.roleAria', { member: label })}
@@ -308,7 +308,7 @@ export function MembersPanel() {
                           {roleLabel(option.name)}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
                         </option>
                       ))}
-                    </select>
+                    </SelectControl>
                     {canReceiveOwnership && (confirmTransferId === member.userId ? (
                       <span className="we-list-row__confirm">
                         <span className="we-list-row__confirm-text">

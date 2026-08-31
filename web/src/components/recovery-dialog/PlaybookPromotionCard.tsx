@@ -6,6 +6,7 @@ import { api } from '../../api'
 import { useT } from '../../i18n'
 import { useWorkflowStore } from '../../store'
 import type { RecoveryPlaybookPromotionSource, RecoveryPlaybookSummary } from './types'
+import { Button } from '@/components/ui/Button'
 
 type PromotionState =
   | { kind: 'idle' }
@@ -67,10 +68,10 @@ export function PlaybookPromotionCard({ source }: { source: RecoveryPlaybookProm
           <strong>{t('recoveryDialog.playbook.promoteTitle')}</strong>
           <p className="helper-text">{t('recoveryDialog.playbook.promoteBody')}</p>
         </div>
-        <button type="button" className="command-button" onClick={() => setState({ kind: 'form' })}>
+        <Button variant="secondary" type="button"  onClick={() => setState({ kind: 'form' })}>
           <BookPlus size={14} aria-hidden="true" />
           <span>{t('recoveryDialog.playbook.create')}</span>
-        </button>
+        </Button>
       </section>
     )
   }
@@ -101,18 +102,18 @@ export function PlaybookPromotionCard({ source }: { source: RecoveryPlaybookProm
         </div>
         <p className="helper-text">{t('recoveryDialog.playbook.draftNotice')}</p>
         <div className="we-recovery-playbook__actions">
-          <button type="button" className="command-button" disabled={state.kind === 'saving'} onClick={() => setState({ kind: 'idle' })}>
+          <Button variant="secondary" type="button"  disabled={state.kind === 'saving'} onClick={() => setState({ kind: 'idle' })}>
             {t('recoveryDialog.playbook.back')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary"
             type="button"
-            className="command-button command-button-primary"
+
             disabled={state.kind === 'saving' || title.trim().length === 0 || instructions.trim().length === 0}
             onClick={() => void createDraft()}
           >
             <BookPlus size={14} aria-hidden="true" />
             <span>{state.kind === 'saving' ? t('recoveryDialog.playbook.creating') : t('recoveryDialog.playbook.saveDraft')}</span>
-          </button>
+          </Button>
         </div>
       </section>
     )
@@ -128,15 +129,15 @@ export function PlaybookPromotionCard({ source }: { source: RecoveryPlaybookProm
           <span className="we-recovery-playbook__version">v{playbook.version}</span>
         </header>
         <p className="helper-text">{t('recoveryDialog.playbook.activateNotice')}</p>
-        <button
+        <Button variant="primary"
           type="button"
-          className="command-button command-button-primary"
+
           disabled={state.kind === 'activating'}
           onClick={() => void activate(playbook)}
         >
           <ShieldCheck size={14} aria-hidden="true" />
           <span>{state.kind === 'activating' ? t('recoveryDialog.playbook.activating') : t('recoveryDialog.playbook.activate')}</span>
-        </button>
+        </Button>
       </section>
     )
   }
@@ -153,7 +154,7 @@ export function PlaybookPromotionCard({ source }: { source: RecoveryPlaybookProm
   return (
     <section className="we-recovery-playbook-promotion" data-testid="recovery-playbook-error" role="alert">
       <div><strong>{t('recoveryDialog.playbook.errorTitle')}</strong><p className="helper-text">{state.message}</p></div>
-      <button type="button" className="command-button" onClick={() => setState({ kind: 'form' })}>{t('recoveryDialog.footer.retry')}</button>
+      <Button variant="secondary" type="button"  onClick={() => setState({ kind: 'form' })}>{t('recoveryDialog.footer.retry')}</Button>
     </section>
   )
 }

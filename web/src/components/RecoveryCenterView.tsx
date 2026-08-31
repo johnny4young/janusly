@@ -20,7 +20,8 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
     healthScore, heatmap, heatmapCells, insightsOpen, ledger, longestOpen, memoryPurgeCountdownLabel,
     metrics, metricsError, metricsLoading, metricsStatus, nowMs, onOpenActivity,
     onOpenMemoryGovernance, onOpenRecoveryQueue, onOpenRun, onOpenTab, onStartRecoveryDrill,
-    openDeadLetters, openFailureCount, operatorWins, recommendedActions, recoveryClearEligible,
+    openDeadLetters, openFailureCount, operatorBriefStatus, operatorBriefWarnings, operatorWins,
+    recommendedActions, recoveryClearEligible,
     setInsightsOpen, showOnboarding, streak, validation, waitingNodes,
   } = model
 
@@ -49,6 +50,8 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         actions={recommendedActions}
         activeRuns={activeRuns}
         activeRunCount={allActiveRuns.length}
+        status={operatorBriefStatus}
+        warnings={operatorBriefWarnings}
         onSelectAction={handleRecommendedAction}
         onOpenRun={onOpenRun}
         onOpenActivity={onOpenActivity}

@@ -6,6 +6,7 @@ import { useT } from '../i18n'
 import { canOpenSettingsSection, SETTINGS_AREAS } from '../settings-sections'
 import type { OpsSection } from './operations-section-bus'
 import { EmptyView } from './panel-primitives'
+import { TextInput } from '@/components/ui/Form'
 
 export function SettingsOverview({
   permissions,
@@ -60,9 +61,9 @@ export function SettingsOverview({
         </div>
         <label className="we-list-search we-settings-index__search">
           <Search size={15} aria-hidden="true" />
-          <input
+          <TextInput
             type="search"
-            className="text-field"
+
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t('settings.index.searchPlaceholder')}

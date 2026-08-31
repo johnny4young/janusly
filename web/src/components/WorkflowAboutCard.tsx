@@ -22,6 +22,7 @@ import { api } from '../api'
 import { useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { SafeMarkdown } from './SafeMarkdown'
+import { Button } from '@/components/ui/Button'
 
 type WorkflowMetadataRecord = {
   workflowId: string
@@ -213,9 +214,9 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
             <div className="we-workflow-about-card__link-row" data-testid="workflow-about-card-slack">
               <span className="we-list-row__hint">{t('workflowMetadata.field.slackChannel')}</span>
               <code>{metadata.slackChannel}</code>
-              <button
+              <Button variant="ghost" size="sm"
                 type="button"
-                className="we-btn we-btn--ghost we-btn--sm"
+
                 onClick={() => {
                   if (typeof navigator !== 'undefined' && navigator.clipboard) {
                     void navigator.clipboard.writeText(metadata.slackChannel!)
@@ -225,7 +226,7 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
                 title={t('workflowMetadata.action.copy')}
               >
                 <Copy size={12} aria-hidden />
-              </button>
+              </Button>
             </div>
           )}
           {metadata.linearProject && (
@@ -256,15 +257,15 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
           >
             <SafeMarkdown source={metadata.runbookMarkdown} allowOperatorLinks />
           </div>
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => setRunbookExpanded((v) => !v)}
           >
             {runbookExpanded
               ? (t('workflowMetadata.action.collapseRunbook'))
               : (t('workflowMetadata.action.expandRunbook'))}
-          </button>
+          </Button>
         </div>
       )}
     </section>

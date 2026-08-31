@@ -7,19 +7,25 @@ import type { RecommendedAction } from './recovery-center-model'
 const actions: RecommendedAction[] = [
   {
     id: 'resolve_approvals',
+    kind: 'run_approval',
+    priority: 1,
     title: 'Resolve one approval',
     body: 'A refund is waiting for a decision.',
     ctaLabel: 'Open run',
-    ctaTab: 'runs',
     severity: 'warning',
+    target: { kind: 'run_node', id: 'approve', runId: 'run-waiting', destination: 'runs' },
+    allowedActions: ['runs.inspect', 'runs.approve'],
   },
   {
     id: 'review_semantic_cases',
+    kind: 'semantic_case',
+    priority: 2,
     title: 'Review one outcome incident',
     body: 'A declared business outcome did not hold.',
     ctaLabel: 'Review case',
-    ctaTab: 'recover',
     severity: 'danger',
+    target: { kind: 'recovery_case', id: 'case-1', destination: 'recoveryCase' },
+    allowedActions: ['recovery.cases.inspect'],
   },
 ]
 
@@ -47,6 +53,8 @@ describe('<HomeActionWorkspace /> (browser smoke)', () => {
           actions={actions}
           activeRuns={activeRuns}
           activeRunCount={activeRuns.length}
+          status="available"
+          warnings={[]}
           onSelectAction={vi.fn()}
           onOpenRun={vi.fn()}
           onOpenActivity={vi.fn()}
@@ -80,6 +88,8 @@ describe('<HomeActionWorkspace /> (browser smoke)', () => {
         actions={actions}
         activeRuns={activeRuns}
         activeRunCount={activeRuns.length}
+        status="available"
+        warnings={[]}
         onSelectAction={onSelectAction}
         onOpenRun={onOpenRun}
         onOpenActivity={onOpenActivity}

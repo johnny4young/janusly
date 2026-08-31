@@ -27,6 +27,7 @@ const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ defa
 import type { DeadLetter } from './dead-letter-types'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
+import { Button } from '@/components/ui/Button'
 
 type ClusterCategory =
   | 'secret_missing'
@@ -324,7 +325,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
               {isOpen && (
                 <div className="we-cluster-row__details">
                   <div className="we-cluster-row__section">
-                    <div className="field-label">{t('clusters.affected')}</div>
+                    <h4 className="ui-field__label"><span>{t('clusters.affected')}</span></h4>
                     <ul className="we-cluster-row__workflows">
                       {cluster.affectedWorkflows.map((wf) => (
                         <li key={wf.workflowId}>
@@ -335,7 +336,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
                     </ul>
                   </div>
                   <div className="we-cluster-row__section">
-                    <div className="field-label">{t('clusters.recent')}</div>
+                    <h4 className="ui-field__label"><span>{t('clusters.recent')}</span></h4>
                     <ul className="we-cluster-row__samples">
                       {(showAllSamples[cluster.signature] ? cluster.samples : cluster.samples.slice(0, SAMPLES_PREVIEW_LIMIT)).map((sample) => (
                         <li key={`${sample.source}:${sample.id}`}>
@@ -360,9 +361,9 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
                   {canRecover && cluster.frequency >= MIN_FREQUENCY_FOR_BULK_RECOVER
                     && cluster.samples.some((s) => s.source === 'dead_letter') ? (
                     <div className="we-cluster-row__section">
-                      <button
+                      <Button variant="primary"
                         type="button"
-                        className="command-button command-button-primary"
+
                         onClick={() => openClusterRecovery(cluster)}
                         disabled={recovery?.kind === 'loading' && recovery.signature === cluster.signature}
                       >
@@ -372,7 +373,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
                             ? t('clusters.loadingMembers')
                             : t('clusters.recover')}
                         </span>
-                      </button>
+                      </Button>
                       {recovery?.kind === 'error' && recovery.signature === cluster.signature && (
                         <p className="helper-text we-recovery-warning" role="alert">
                           {t('clusters.recoveryError', { detail: recovery.message })}

@@ -30,6 +30,7 @@ import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { tApiError } from '../i18n/server-events'
 import { formatStatusLabel } from '../constants'
+import { Button } from '@/components/ui/Button'
 
 type SourceRun = {
   id: string
@@ -252,40 +253,40 @@ export function ReplayLabForkDialog({
         <footer className="run-input-dialog__footer">
           {step.kind === 'idle' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" type="button"  onClick={onClose}>
                 {t('replayLab.fork.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 ref={primaryRef}
                 type="button"
-                className="command-button command-button-primary"
+
                 onClick={onSubmit}
                 data-testid="replay-lab-fork-submit"
               >
                 <GitBranch size={14} aria-hidden="true" />
                 {t('replayLab.fork.submit')}
-              </button>
+              </Button>
             </>
           )}
           {step.kind === 'starting' && (
-            <button type="button" className="command-button command-button-primary" disabled>
+            <Button variant="primary" type="button"  disabled>
               {t('replayLab.fork.starting')}
-            </button>
+            </Button>
           )}
           {step.kind === 'error' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" type="button"  onClick={onClose}>
                 {t('replayLab.fork.close')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 ref={primaryRef}
                 type="button"
-                className="command-button command-button-primary"
+
                 onClick={() => setStep({ kind: 'idle' })}
                 data-testid="replay-lab-fork-back"
               >
                 {t('common.back')}
-              </button>
+              </Button>
             </>
           )}
         </footer>

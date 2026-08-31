@@ -18,7 +18,7 @@ export function MemoryGovernancePanel() {
         <BrainCircuit size={18} aria-hidden="true" />
         <h3 id="memory-governance-heading">{t('memoryGovernance.heading')}</h3>
       </header>
-      <p className="we-field__hint">{t('memoryGovernance.intro')}</p>
+      <p className="helper-text">{t('memoryGovernance.intro')}</p>
 
       {loading && !status ? (
         <p className="we-budget-settings__status" aria-live="polite">{t('memoryGovernance.loading')}</p>

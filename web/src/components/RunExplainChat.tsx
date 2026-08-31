@@ -11,6 +11,7 @@ import { api } from '../api'
 import { formatAiModeLabel } from '../constants'
 import type { AiMode } from '../types'
 import { useT } from '../i18n'
+import { Button } from '@/components/ui/Button'
 
 type Message = {
   role: 'user' | 'assistant'
@@ -164,9 +165,9 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
         placeholder={t('runExplain.placeholder')}
       />
 
-      <button className="command-button command-button-primary" disabled={!runId || loading || !question.trim()} onClick={ask}>
+      <Button variant="primary"  disabled={!runId || loading || !question.trim()} onClick={ask}>
         {loading ? t('runExplain.explaining') : t('runExplain.ask')}
-      </button>
+      </Button>
     </section>
   )
 }

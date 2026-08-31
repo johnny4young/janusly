@@ -27,6 +27,7 @@ import { useWorkflowStore } from '../store'
 import { RunComparisonView, type RunComparisonPayload } from './RunComparisonView'
 import { useT } from '../i18n'
 import { formatStatusLabel } from '../constants'
+import { Button } from '@/components/ui/Button'
 
 type SourceRun = {
   id: string
@@ -262,56 +263,56 @@ export function ReplayLabDialog({
         <footer className="run-input-dialog__footer">
           {step.kind === 'idle' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" type="button"  onClick={onClose}>
                 {t('replayLab.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 ref={primaryRef}
                 type="button"
-                className="command-button command-button-primary"
+
                 onClick={startReplay}
                 data-testid="replay-lab-start"
               >
                 <Play size={14} aria-hidden="true" />
                 {t('replayLab.start')}
-              </button>
+              </Button>
             </>
           )}
           {step.kind === 'starting' && (
-            <button type="button" className="command-button command-button-primary" disabled>
+            <Button variant="primary" type="button"  disabled>
               {t('replayLab.starting')}
-            </button>
+            </Button>
           )}
           {(step.kind === 'replaying' || step.kind === 'comparing') && (
-            <button type="button" className="command-button command-button-primary" disabled>
+            <Button variant="primary" type="button"  disabled>
               {t('replayLab.running')}
-            </button>
+            </Button>
           )}
           {step.kind === 'done' && (
-            <button
+            <Button variant="primary"
               ref={primaryRef}
               type="button"
-              className="command-button command-button-primary"
+
               onClick={onClose}
               data-testid="replay-lab-close-done"
             >
               {t('replayLab.closeButton')}
-            </button>
+            </Button>
           )}
           {step.kind === 'error' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" type="button"  onClick={onClose}>
                 {t('replayLab.closeButton')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 ref={primaryRef}
                 type="button"
-                className="command-button command-button-primary"
+
                 onClick={() => setStep({ kind: 'idle' })}
               >
                 <RefreshCcw size={14} aria-hidden="true" />
                 {t('replayLab.retry')}
-              </button>
+              </Button>
             </>
           )}
         </footer>

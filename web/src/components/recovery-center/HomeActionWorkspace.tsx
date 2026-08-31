@@ -1,11 +1,15 @@
 import {
+  AlertTriangle,
   ArrowRight,
   CheckCircle2,
   CircleDot,
   Clock3,
+  LoaderCircle,
 } from 'lucide-react'
 import { useT } from '../../i18n'
 import type { RunSummary } from '../../types'
+import { Button } from '../ui/Button'
+import { StatusSummary } from '../ui/StatusSummary'
 import type {
   RecommendedAction,
 } from './recovery-center-model'
@@ -18,6 +22,8 @@ export function HomeActionWorkspace({
   actions,
   activeRuns,
   activeRunCount,
+  status,
+  warnings,
   onSelectAction,
   onOpenRun,
   onOpenActivity,
@@ -25,6 +31,8 @@ export function HomeActionWorkspace({
   actions: RecommendedAction[]
   activeRuns: RunSummary[]
   activeRunCount: number
+  status: 'loading' | 'available' | 'unavailable'
+  warnings: string[]
   onSelectAction: (action: RecommendedAction) => void
   onOpenRun: (runId: string) => void | Promise<void>
   onOpenActivity: () => void
@@ -47,17 +55,33 @@ export function HomeActionWorkspace({
           )}
         </header>
 
-        {actions.length === 0 ? (
+        {status === 'loading' ? (
+          <div className="we-home-priority__state" role="status">
+            <LoaderCircle className="we-home-priority__spinner" size={20} aria-hidden="true" />
+            <div>
+              <strong>{t('home.priority.loadingTitle')}</strong>
+              <p>{t('home.priority.loadingBody')}</p>
+            </div>
+          </div>
+        ) : status === 'unavailable' ? (
+          <StatusSummary
+            className="we-home-priority__status"
+            role="status"
+            tone="warning"
+            icon={<AlertTriangle size={20} />}
+            title={t('home.priority.unavailableTitle')}
+            description={t('home.priority.unavailableBody')}
+          />
+        ) : actions.length === 0 ? (
           <div className="we-home-priority__clear" data-testid="home-priority-clear">
             <span aria-hidden="true"><CheckCircle2 size={20} /></span>
             <div>
               <strong>{t('home.priority.clearTitle')}</strong>
               <p>{t('home.priority.clearBody')}</p>
             </div>
-            <button type="button" className="we-btn we-btn--secondary" onClick={onOpenActivity}>
+            <Button type="button" variant="secondary" size="sm" onClick={onOpenActivity} trailingIcon={<ArrowRight size={14} />}>
               {t('workspace.destination.activity.label')}
-              <ArrowRight size={14} aria-hidden="true" />
-            </button>
+            </Button>
           </div>
         ) : (
           <ol className="we-home-priority__list">
@@ -74,19 +98,25 @@ export function HomeActionWorkspace({
                   <strong>{action.title}</strong>
                   <p>{action.body}</p>
                 </div>
-                <button
+                <Button
                   type="button"
-                  className="we-btn we-btn--primary"
+                  variant="primary"
+                  size="sm"
                   onClick={() => onSelectAction(action)}
                   data-testid={`recovery-center-action-cta-${action.id}`}
+                  trailingIcon={<ArrowRight size={14} />}
                 >
                   {action.ctaLabel}
-                  <ArrowRight size={14} aria-hidden="true" />
-                </button>
+                </Button>
               </li>
             ))}
           </ol>
         )}
+        {status === 'available' && warnings.length > 0 ? (
+          <p className="we-home-priority__warning" role="status">
+            {t('home.priority.degraded')}
+          </p>
+        ) : null}
       </section>
 
       <section

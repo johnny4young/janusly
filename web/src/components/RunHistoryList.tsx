@@ -25,6 +25,7 @@ import { EmptyView } from './panel-primitives'
 import { RunHistoryComparisonDialog } from './RunHistoryComparisonDialog'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
 import { SemanticOutcomePill } from './SemanticOutcomePill'
+import { SelectControl } from '@/components/ui/Form'
 
 /** Fixed card pitch for the compact row plus its 8px bottom margin. */
 const RUN_HISTORY_ROW_HEIGHT = 156
@@ -151,27 +152,27 @@ export function RunHistoryList({
       <div className="we-run-history-filters" role="group" aria-label={t('rightPanel.runs.filtersAria')}>
         <label>
           <span>{t('rightPanel.runs.workflowFilter')}</span>
-          <select
-            className="text-field"
+          <SelectControl
+
             value={workflowId}
             onChange={event => setWorkflowId(event.target.value)}
             data-testid="run-history-workflow-filter"
           >
             <option value="">{t('rightPanel.runs.workflowFilterAll')}</option>
             {workflowOptions.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
-          </select>
+          </SelectControl>
         </label>
         <label>
           <span>{t('rightPanel.runs.statusFilter')}</span>
-          <select
-            className="text-field"
+          <SelectControl
+
             value={status}
             onChange={event => setStatus(isRunStatus(event.target.value) ? event.target.value : '')}
             data-testid="run-history-status-filter"
           >
             <option value="">{t('rightPanel.runs.statusFilterAll')}</option>
             {runStatusValues.map(value => <option key={value} value={value}>{formatStatusLabel(value)}</option>)}
-          </select>
+          </SelectControl>
         </label>
         {hasActiveFilters && (
           <button type="button" className="small-command" onClick={clearFilters} data-testid="run-history-clear-filters">

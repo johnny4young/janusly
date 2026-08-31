@@ -24,6 +24,8 @@ import { api } from "../api";
 import { useWorkflowStore } from "../store";
 import { getResolvedLocale, useT } from "../i18n";
 import { useConfirm } from "./ConfirmDialog";
+import { Button } from '@/components/ui/Button'
+import { FormField, SelectControl } from '@/components/ui/Form'
 
 type DefaultRole = "viewer" | "editor" | "admin";
 type DirectoryStatus = "active" | "revoked";
@@ -288,14 +290,14 @@ export function ScimDirectorySettingsPanel({
                     <td>{row.lastSyncedAt ? new Date(row.lastSyncedAt).toLocaleString(getResolvedLocale()) : "—"}</td>
                     <td>
                       {canConfigureDirectory && row.status === "active" && (
-                        <button
+                        <Button variant="ghost"
                           type="button"
-                          className="we-button we-button--ghost"
+
                           onClick={() => revoke(row)}
                           aria-label={t("scim.disconnectAria", { id: row.providerDirectoryId })}
                         >
                           <Trash2 size={14} aria-hidden="true" /> {t("scim.disconnect")}
-                        </button>
+                        </Button>
                       )}
                     </td>
                   </tr>
@@ -306,42 +308,50 @@ export function ScimDirectorySettingsPanel({
 
           {canConfigureDirectory && directories.filter((d) => d.status === "active").length === 0 && (
             <form className="we-budget-settings__form" onSubmit={attach} noValidate>
-              <label className="we-field">
-                <span className="we-field__label">{t("scim.field.directoryId")}</span>
-                <input
-                  type="text"
-                  className="we-field__input"
-                  placeholder={t("scim.field.directoryIdPlaceholder")}
-                  value={form.providerDirectoryId}
-                  onChange={(e) => setForm({ ...form, providerDirectoryId: e.target.value })}
-                />
-                <small className="we-field__hint">{t("scim.field.directoryIdHint")}</small>
-              </label>
+              <FormField
+                label={t("scim.field.directoryId")}
+                hint={t("scim.field.directoryIdHint")}
+                required
+              >
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    type="text"
+                    placeholder={t("scim.field.directoryIdPlaceholder")}
+                    value={form.providerDirectoryId}
+                    onChange={(e) => setForm({ ...form, providerDirectoryId: e.target.value })}
+                  />
+                )}
+              </FormField>
 
-              <label className="we-field">
-                <span className="we-field__label">{t("scim.field.type")}</span>
-                <input
-                  type="text"
-                  className="we-field__input"
-                  placeholder={t("scim.field.typePlaceholder")}
-                  value={form.directoryType}
-                  onChange={(e) => setForm({ ...form, directoryType: e.target.value })}
-                />
-              </label>
+              <FormField label={t("scim.field.type")}>
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    type="text"
+                    placeholder={t("scim.field.typePlaceholder")}
+                    value={form.directoryType}
+                    onChange={(e) => setForm({ ...form, directoryType: e.target.value })}
+                  />
+                )}
+              </FormField>
 
-              <label className="we-field">
-                <span className="we-field__label">{t("scim.field.defaultRole")}</span>
-                <select
-                  className="we-field__input"
-                  value={form.defaultRole}
-                  onChange={(e) => setForm({ ...form, defaultRole: e.target.value as DefaultRole })}
-                >
-                  <option value="viewer">{t("scim.role.viewer")}</option>
-                  <option value="editor">{t("scim.role.editor")}</option>
-                  <option value="admin">{t("scim.role.admin")}</option>
-                </select>
-                <small className="we-field__hint">{t("scim.field.defaultRoleHint")}</small>
-              </label>
+              <FormField
+                label={t("scim.field.defaultRole")}
+                hint={t("scim.field.defaultRoleHint")}
+              >
+                {(controlProps) => (
+                  <select
+                    {...controlProps}
+                    value={form.defaultRole}
+                    onChange={(e) => setForm({ ...form, defaultRole: e.target.value as DefaultRole })}
+                  >
+                    <option value="viewer">{t("scim.role.viewer")}</option>
+                    <option value="editor">{t("scim.role.editor")}</option>
+                    <option value="admin">{t("scim.role.admin")}</option>
+                  </select>
+                )}
+              </FormField>
 
               {error && (
                 <div className="we-budget-settings__error" role="alert">
@@ -349,14 +359,14 @@ export function ScimDirectorySettingsPanel({
                 </div>
               )}
 
-              <button
+              <Button variant="primary"
                 type="submit"
-                className="we-button we-button--primary we-budget-settings__save"
+                className="we-budget-settings__save"
                 disabled={saving || form.providerDirectoryId.trim().length === 0}
               >
                 {saving ? <>{t("scim.connecting")}</> : <><Link2 size={14} aria-hidden="true" /> {t("scim.connect")}</>}
                 {!saving && <Save size={14} aria-hidden="true" />}
-              </button>
+              </Button>
             </form>
           )}
 
@@ -365,21 +375,21 @@ export function ScimDirectorySettingsPanel({
               <header className="we-budget-settings__header">
                 <h4 id="scim-mappings-heading">{t("scim.mappings.heading")}</h4>
                 {canSetRoles && mappings.length > 0 && (
-                  <button
+                  <Button variant="ghost"
                     type="button"
-                    className="we-button we-button--ghost"
+
                     onClick={resyncRoles}
                     disabled={resyncing}
                     aria-label={t("scim.mappings.resync.aria")}
                   >
                     <RefreshCw size={14} aria-hidden="true" />{" "}
                     {resyncing ? t("scim.mappings.resync.running") : t("scim.mappings.resync.button")}
-                  </button>
+                  </Button>
                 )}
               </header>
-              <p className="we-field__hint">{t("scim.mappings.intro")}</p>
+              <p className="helper-text">{t("scim.mappings.intro")}</p>
               {mappings.length > 0 && (
-                <p className="we-field__hint">{t("scim.mappings.resync.hint")}</p>
+                <p className="helper-text">{t("scim.mappings.resync.hint")}</p>
               )}
 
               {mappings.length > 0 ? (
@@ -396,8 +406,7 @@ export function ScimDirectorySettingsPanel({
                       <tr key={row.id}>
                         <td>{groupName(row.providerGroupId)}</td>
                         <td>
-                          <select
-                            className="we-field__input"
+                          <SelectControl
                             value={row.role}
                             disabled={!canSetRoles}
                             aria-label={t("scim.mappings.roleAria", { group: groupName(row.providerGroupId) })}
@@ -406,18 +415,18 @@ export function ScimDirectorySettingsPanel({
                             {ROLES.map((r) => (
                               <option key={r} value={r}>{t(`scim.role.${r}`)}</option>
                             ))}
-                          </select>
+                          </SelectControl>
                         </td>
                         <td>
                           {canSetRoles && (
-                            <button
+                            <Button variant="ghost"
                               type="button"
-                              className="we-button we-button--ghost"
+
                               onClick={() => removeMapping(row)}
                               aria-label={t("scim.mappings.removeAria", { group: groupName(row.providerGroupId) })}
                             >
                               <Trash2 size={14} aria-hidden="true" /> {t("scim.mappings.remove")}
-                            </button>
+                            </Button>
                           )}
                         </td>
                       </tr>
@@ -433,42 +442,44 @@ export function ScimDirectorySettingsPanel({
               {canSetRoles && groups.length > 0 && (
                 unmappedGroups.length > 0 ? (
                   <form className="we-budget-settings__form" onSubmit={addMapping} noValidate>
-                    <label className="we-field">
-                      <span className="we-field__label">{t("scim.mappings.add.group")}</span>
-                      <select
-                        className="we-field__input"
-                        value={mappingForm.providerGroupId}
-                        onChange={(e) => setMappingForm({ ...mappingForm, providerGroupId: e.target.value })}
-                      >
-                        <option value="">{t("scim.mappings.add.groupPlaceholder")}</option>
-                        {unmappedGroups.map((g) => (
-                          <option key={g.providerGroupId} value={g.providerGroupId}>{g.name}</option>
-                        ))}
-                      </select>
-                    </label>
+                    <FormField label={t("scim.mappings.add.group")} required>
+                      {(controlProps) => (
+                        <select
+                          {...controlProps}
+                          value={mappingForm.providerGroupId}
+                          onChange={(e) => setMappingForm({ ...mappingForm, providerGroupId: e.target.value })}
+                        >
+                          <option value="">{t("scim.mappings.add.groupPlaceholder")}</option>
+                          {unmappedGroups.map((g) => (
+                            <option key={g.providerGroupId} value={g.providerGroupId}>{g.name}</option>
+                          ))}
+                        </select>
+                      )}
+                    </FormField>
 
-                    <label className="we-field">
-                      <span className="we-field__label">{t("scim.mappings.add.role")}</span>
-                      <select
-                        className="we-field__input"
-                        value={mappingForm.role}
-                        onChange={(e) => setMappingForm({ ...mappingForm, role: e.target.value as DefaultRole })}
-                      >
-                        {ROLES.map((r) => (
-                          <option key={r} value={r}>{t(`scim.role.${r}`)}</option>
-                        ))}
-                      </select>
-                    </label>
+                    <FormField label={t("scim.mappings.add.role")}>
+                      {(controlProps) => (
+                        <select
+                          {...controlProps}
+                          value={mappingForm.role}
+                          onChange={(e) => setMappingForm({ ...mappingForm, role: e.target.value as DefaultRole })}
+                        >
+                          {ROLES.map((r) => (
+                            <option key={r} value={r}>{t(`scim.role.${r}`)}</option>
+                          ))}
+                        </select>
+                      )}
+                    </FormField>
 
-                    <button
+                    <Button variant="primary"
                       type="submit"
-                      className="we-button we-button--primary we-budget-settings__save"
+                      className="we-budget-settings__save"
                       disabled={addingMapping || !mappingForm.providerGroupId}
                     >
                       {addingMapping
                         ? <>{t("scim.mappings.add.adding")}</>
                         : <><Plus size={14} aria-hidden="true" /> {t("scim.mappings.add.submit")}</>}
-                    </button>
+                    </Button>
                   </form>
                 ) : (
                   <p className="we-budget-settings__status">{t("scim.mappings.allMapped")}</p>

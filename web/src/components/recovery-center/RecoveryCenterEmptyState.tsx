@@ -12,6 +12,7 @@ import {
   Workflow,
   X,
 } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
 import { useT } from '../../i18n'
 
 export function RecoveryLabEntry({
@@ -33,15 +34,17 @@ export function RecoveryLabEntry({
       data-testid="recovery-lab-entry"
     >
       {onDismiss && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           className="we-recovery-lab-entry__dismiss"
           onClick={onDismiss}
           aria-label={t('recoveryCenter.labEntry.dismiss')}
           data-testid="recovery-lab-entry-dismiss"
         >
           <X size={14} aria-hidden="true" />
-        </button>
+        </Button>
       )}
       <div className="we-recovery-lab-entry__copy">
         <div className="section-kicker">{t('recoveryCenter.labEntry.kicker')}</div>
@@ -53,34 +56,34 @@ export function RecoveryLabEntry({
         </div>
         <div className="we-recovery-lab-entry__actions">
           {onStartDrill && (
-            <button
+            <Button
+              variant="primary"
               type="button"
-              className="command-button command-button-primary"
               onClick={() => void onStartDrill()}
               data-testid="recovery-center-empty-cta-drill"
             >
               <PlayCircle size={14} aria-hidden="true" />
               <span>{t('recoveryCenter.labEntry.cta.drill')}</span>
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
-            className={onStartDrill ? 'command-button' : 'command-button command-button-primary'}
+            variant={onStartDrill ? 'secondary' : 'primary'}
             onClick={onOpenStudio}
             data-testid="recovery-center-empty-cta-studio"
           >
             <Sparkles size={14} aria-hidden="true" />
             <span>{t('recoveryCenter.labEntry.cta.studio')}</span>
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
             type="button"
-            className="command-button"
             onClick={onOpenRecipes}
             data-testid="recovery-center-empty-cta-recipes"
           >
             <Workflow size={14} aria-hidden="true" />
             <span>{t('recoveryCenter.labEntry.cta.recipes')}</span>
-          </button>
+          </Button>
         </div>
       </div>
 

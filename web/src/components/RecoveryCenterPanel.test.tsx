@@ -10,11 +10,11 @@ import { consumeRecoveryFocusDay } from './recovery-day-focus-bus'
 import {
   buildGreeting,
   countActiveRecoveryBlockers,
-  computeRecommendedActions,
+  decodeOperatorBrief,
   humanizeAge,
   listActiveRuns,
+  presentOperatorBrief,
   readErrorSignature,
-  type RecommendedActionSignals,
 } from './recovery-center/recovery-center-model'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
@@ -114,6 +114,39 @@ const baseValidation = {
     sampleSize: 1,
   },
   byFailureMode: [],
+}
+
+const briefKeys = {
+  resolve_approvals: 'runApproval',
+  review_semantic_cases: 'semanticCase',
+  recover_cluster: 'failureCluster',
+  triage_failures: 'routineTriage',
+} as const
+
+function briefAction(args: {
+  id: keyof typeof briefKeys
+  kind: string
+  priority?: number
+  severity?: string
+  params?: Record<string, unknown>
+  target: { kind: string; id: string; destination: string; runId?: string; workflowId?: string }
+}) {
+  const prefix = `operations.brief.${briefKeys[args.id]}`
+  return {
+    id: args.id,
+    kind: args.kind,
+    priority: args.priority ?? 1,
+    severity: args.severity ?? 'high',
+    titleKey: `${prefix}.title`, bodyKey: `${prefix}.body`, ctaKey: `${prefix}.cta`,
+    params: args.params ?? {}, evidence: [], target: args.target,
+    allowedActions: ['inspect'], createdAt: '2026-08-31T12:00:00Z',
+  }
+}
+
+function operatorBrief(...actions: ReturnType<typeof briefAction>[]) {
+  return {
+    version: '1', generatedAt: '2026-08-31T12:00:00Z', actions, warnings: [],
+  }
 }
 
 type ApiMockHandler = (
@@ -246,102 +279,48 @@ describe('listActiveRuns', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────
-// computeRecommendedActions — bounded operational priority fixtures
+// Operator Brief — the browser validates and localizes without re-ranking.
 // ─────────────────────────────────────────────────────────────────────────
 
-describe('computeRecommendedActions', () => {
-  const signals = (
-    overrides: Partial<RecommendedActionSignals>,
-  ): RecommendedActionSignals => ({
-    openFailures: 0,
-    pendingApprovals: 0,
-    semanticCases: 0,
-    topClusterFrequency: 0,
-    healthScore: 95,
+describe('Operator Brief projection', () => {
+  const action = (overrides: Record<string, unknown> = {}) => ({
+    id: 'case:1', kind: 'semantic_case', priority: 1, severity: 'critical',
+    titleKey: 'operations.brief.semanticCase.title',
+    bodyKey: 'operations.brief.semanticCase.body',
+    ctaKey: 'operations.brief.semanticCase.cta',
+    params: {}, evidence: [],
+    target: { kind: 'recovery_case', id: 'case-1', destination: 'recoveryCase' },
+    allowedActions: ['recovery.cases.inspect'],
+    createdAt: '2026-08-31T12:00:00Z',
     ...overrides,
   })
 
-  it('prioritizes pending approvals first when waiting nodes > 0', () => {
-    const actions = computeRecommendedActions(signals({
-      openFailures: 5,
-      pendingApprovals: 2,
-      topClusterFrequency: 4,
-      healthScore: 55,
-    }))
-    expect(actions[0]!.id).toBe('resolve_approvals')
-    expect(actions[0]!.severity).toBe('warning')
-    expect(actions[0]!.ctaTab).toBe('recover')
-    expect(actions[0]!.title).toContain('Resolve 2 approval')
+  it('preserves exact server order and localizes machine keys', () => {
+    const brief = decodeOperatorBrief({
+      version: '1', generatedAt: '2026-08-31T12:00:00Z', warnings: [],
+      actions: [
+        action({ id: 'server-second', priority: 2, severity: 'medium' }),
+        action({ id: 'server-first', priority: 1, severity: 'high' }),
+      ],
+    })
+    const presented = presentOperatorBrief(brief)
+    expect(presented.map((item) => item.id)).toEqual(['server-second', 'server-first'])
+    expect(presented[0]).toMatchObject({
+      title: 'Diagnose a business outcome incident',
+      severity: 'cobalt',
+      target: { id: 'case-1', destination: 'recoveryCase' },
+    })
   })
 
-  it('surfaces declared business-outcome incidents before diagnostic work', () => {
-    const actions = computeRecommendedActions(signals({
-      semanticCases: 2,
-      topClusterFrequency: 4,
-      healthScore: 55,
-    }))
-    expect(actions[0]!.id).toBe('review_semantic_cases')
-    expect(actions[0]!.severity).toBe('danger')
-    expect(actions[0]!.title).toContain('2 business outcome incidents')
-  })
-
-  it('falls through to recover_cluster when no approvals but a frequency-≥2 cluster exists', () => {
-    const actions = computeRecommendedActions(signals({
-      openFailures: 5,
-      topClusterFrequency: 4,
-      healthScore: 90,
-    }))
-    expect(actions[0]!.id).toBe('recover_cluster')
-    expect(actions[0]!.severity).toBe('cobalt')
-    expect(actions[0]!.ctaTab).toBe('recover')
-    expect(actions[0]!.title).toContain('Recover all 4')
-    expect(actions.some((action) => action.id === 'triage_failures')).toBe(false)
-  })
-
-  it('falls through to triage_failures when no approvals and no qualifying cluster', () => {
-    const actions = computeRecommendedActions(signals({
-      openFailures: 3,
-      topClusterFrequency: 1,
-      healthScore: 90,
-    }))
-    expect(actions[0]!.id).toBe('triage_failures')
-    expect(actions[0]!.severity).toBe('warning')
-    expect(actions[0]!.title).toBe('Triage Recovery Queue · Open: 3')
-  })
-
-  it('flags review_workflow_risk with severity danger when health < 60', () => {
-    const actions = computeRecommendedActions(signals({
-      healthScore: 45,
-    }))
-    expect(actions[0]!.id).toBe('review_workflow_risk')
-    expect(actions[0]!.severity).toBe('danger')
-  })
-
-  it('flags review_workflow_risk with severity warning when health 60-79', () => {
-    const actions = computeRecommendedActions(signals({
-      healthScore: 72,
-    }))
-    expect(actions[0]!.id).toBe('review_workflow_risk')
-    expect(actions[0]!.severity).toBe('warning')
-  })
-
-  it('caps the priority inbox at three actions', () => {
-    const actions = computeRecommendedActions(signals({
-      openFailures: 5,
-      pendingApprovals: 2,
-      semanticCases: 1,
-      topClusterFrequency: 4,
-      healthScore: 45,
-    }))
-    expect(actions.map((action) => action.id)).toEqual([
-      'resolve_approvals',
-      'review_semantic_cases',
-      'recover_cluster',
-    ])
-  })
-
-  it('returns no artificial task when every operational signal is clean', () => {
-    expect(computeRecommendedActions(signals({}))).toEqual([])
+  it('rejects oversized, unknown-key, and unsafe-destination envelopes', () => {
+    const envelope = (actions: unknown[]) => ({
+      version: '1', generatedAt: '2026-08-31T12:00:00Z', warnings: [], actions,
+    })
+    expect(decodeOperatorBrief(envelope([action(), action(), action(), action()]))).toBeNull()
+    expect(decodeOperatorBrief(envelope([action({ titleKey: 'attacker.copy' })]))).toBeNull()
+    expect(decodeOperatorBrief(envelope([action({
+      target: { kind: 'secret', id: 'secret', destination: 'externalUrl' },
+    })]))).toBeNull()
   })
 })
 
@@ -856,6 +835,16 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
   it('keeps priority work above the fold and diagnostics behind one disclosure', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/operations/brief') return operatorBrief(
+        briefAction({
+          id: 'resolve_approvals', kind: 'run_approval', priority: 1,
+          target: { kind: 'run_node', id: 'human-approve', runId: 'run-1', destination: 'runs' },
+        }),
+        briefAction({
+          id: 'recover_cluster', kind: 'failure_cluster', priority: 2, severity: 'medium',
+          params: { count: 3 }, target: { kind: 'failure_cluster', id: 'cluster-1', destination: 'recover' },
+        }),
+      )
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -892,6 +881,10 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
   it('opens the exact oldest visible failure from the priority inbox', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/operations/brief') return operatorBrief(briefAction({
+        id: 'triage_failures', kind: 'routine_triage',
+        target: { kind: 'dead_letter', id: 'dlq-1', runId: 'run-1', destination: 'recover' },
+      }))
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -912,6 +905,10 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
   it('routes clustered recovery work to the recovery queue', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/operations/brief') return operatorBrief(briefAction({
+        id: 'recover_cluster', kind: 'failure_cluster', severity: 'medium', params: { count: 3 },
+        target: { kind: 'failure_cluster', id: 'cluster-1', destination: 'recover' },
+      }))
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -1021,6 +1018,10 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       createdAt: '2026-07-28T13:00:00.000Z',
     }
     mockRecoveryApi(async (path: string) => {
+      if (path === '/operations/brief') return operatorBrief(briefAction({
+        id: 'resolve_approvals', kind: 'run_approval',
+        target: { kind: 'run_node', id: 'human-approve', runId: 'run-waiting', destination: 'runs' },
+      }))
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -1102,6 +1103,10 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
     }
     mockRecoveryApi(async (path: string) => {
+      if (path === '/operations/brief') return operatorBrief(briefAction({
+        id: 'triage_failures', kind: 'routine_triage',
+        target: { kind: 'dead_letter', id: oldest.id, runId: oldest.runId, destination: 'recover' },
+      }))
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -1119,7 +1124,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('recovery-center-action-triage_failures'))
-        .toHaveTextContent('Triage Recovery Queue · Open: 1')
+        .toHaveTextContent('Triage an open failure')
     })
     const downtime = await screen.findByTestId('recovery-center-longest-downtime')
     expect(downtime).toHaveTextContent(/5h/)
@@ -1148,6 +1153,10 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
   it('surfaces semantic work as a priority and opens the exact case', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/operations/brief') return operatorBrief(briefAction({
+        id: 'review_semantic_cases', kind: 'semantic_case', severity: 'critical',
+        target: { kind: 'recovery_case', id: 'case-1', runId: 'run-1', destination: 'recoveryCase' },
+      }))
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -1212,8 +1221,8 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
     render(<RecoveryCenterPanel {...baseProps} />)
 
     const action = await screen.findByTestId('recovery-center-action-review_semantic_cases')
-    expect(action).toHaveTextContent('2 business outcome incidents')
-    expect(screen.getByText('2 business outcome incidents need review.')).toBeVisible()
+    expect(action).toHaveTextContent('Diagnose a business outcome incident')
+    expect(screen.getByText('A declared workflow outcome did not hold. Review bounded evidence and recovery candidates.')).toBeVisible()
     expect(screen.getByTestId('recovery-center-greeting').closest('header'))
       .not.toHaveAttribute('data-all-clear')
     fireEvent.click(screen.getByTestId('recovery-center-action-cta-review_semantic_cases'))
@@ -1499,6 +1508,10 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
 describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
   it('surfaces a soft warning when /recovery/metrics fails but still renders tiles', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/operations/brief') return operatorBrief(briefAction({
+        id: 'triage_failures', kind: 'routine_triage',
+        target: { kind: 'dead_letter', id: 'dlq-x', runId: 'r1', destination: 'recover' },
+      }))
       if (path === '/recovery/metrics') throw new Error('Recovery metrics unavailable')
       if (path === '/dlq/clusters') return baseClusters
       // The Budget tile (5th tile) reads /billing/budget on the same

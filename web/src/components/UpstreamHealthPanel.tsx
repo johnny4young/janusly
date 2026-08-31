@@ -28,6 +28,7 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useConfirm } from './ConfirmDialog'
+import { Button } from '@/components/ui/Button'
 
 type UpstreamHealthSource = {
   id: string
@@ -186,14 +187,14 @@ export function UpstreamHealthPanel({ canWrite = true }: { canWrite?: boolean } 
         <h3>
           <Activity size={16} aria-hidden /> {t('upstreamHealth.panel.title')}
         </h3>
-        <button
+        <Button variant="ghost" size="sm"
           type="button"
-          className="we-btn we-btn--ghost we-btn--sm"
+
           disabled={!canWrite}
           onClick={() => (showForm ? cancelForm() : setShowForm(true))}
         >
           <Plus size={14} aria-hidden /> {t('upstreamHealth.panel.new')}
-        </button>
+        </Button>
       </div>
 
       <p className="we-card__subtitle">{t('upstreamHealth.panel.subtitle')}</p>
@@ -265,17 +266,17 @@ export function UpstreamHealthPanel({ canWrite = true }: { canWrite?: boolean } 
           </label>
 
           <div className="we-upstream-health__form-actions">
-            <button
+            <Button variant="primary" size="sm"
               type="button"
-              className="we-btn we-btn--primary we-btn--sm"
+
               onClick={() => void submitSource()}
               disabled={!canWrite || submitting || form.name.trim().length === 0 || form.url.trim().length === 0}
             >
               {editingId ? t('upstreamHealth.form.saveChanges') : t('common.save')}
-            </button>
-            <button type="button" className="we-btn we-btn--ghost we-btn--sm" onClick={cancelForm}>
+            </Button>
+            <Button variant="ghost" size="sm" type="button"  onClick={cancelForm}>
               {t('common.cancel')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -321,36 +322,36 @@ export function UpstreamHealthPanel({ canWrite = true }: { canWrite?: boolean } 
                 )}
               </div>
               <div className="we-list-row__actions">
-                <button
+                <Button variant="ghost" size="icon"
                   type="button"
-                  className="we-btn we-btn--ghost we-btn--icon"
+
                   title={t('upstreamHealth.action.checkNow')}
                   aria-label={t('upstreamHealth.action.checkNow')}
                   onClick={() => void checkNow(s)}
                   disabled={!canWrite || checkingId === s.id}
                 >
                   <RefreshCw size={14} aria-hidden className={checkingId === s.id ? 'we-spin' : undefined} />
-                </button>
-                <button
+                </Button>
+                <Button variant="ghost" size="icon"
                   type="button"
-                  className="we-btn we-btn--ghost we-btn--icon"
+
                   title={t('common.edit')}
                   aria-label={t('common.edit')}
                   onClick={() => startEdit(s)}
                   disabled={!canWrite}
                 >
                   <Pencil size={14} aria-hidden />
-                </button>
-                <button
+                </Button>
+                <Button variant="ghost" size="icon"
                   type="button"
-                  className="we-btn we-btn--ghost we-btn--icon"
+
                   title={t('common.delete')}
                   aria-label={t('common.delete')}
                   onClick={() => void deleteSource(s)}
                   disabled={!canWrite}
                 >
                   <Trash2 size={14} aria-hidden />
-                </button>
+                </Button>
               </div>
             </li>
           ))}

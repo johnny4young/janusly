@@ -24,7 +24,7 @@ import type { Credential } from '../types'
 import { CredentialRotateModal } from './CredentialRotateModal'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { Button } from './ui/Button'
-import { FieldStack, FormField } from './ui/Form'
+import { FieldStack, FormField , SelectControl, TextInput} from './ui/Form'
 
 const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 const CONNECTION_ROW_HEIGHT = 166
@@ -333,23 +333,23 @@ export function ConnectionsPanel({
             })}
           </p>
           {canWrite && (
-            <button
+            <Button variant="primary"
               type="button"
-              className="command-button command-button-primary"
+
               onClick={() => setCreating(true)}
             >
               <Plus size={14} aria-hidden="true" />
               <span>{t('rightPanel.credentials.addButton')}</span>
-            </button>
+            </Button>
           )}
         </div>
 
         <div className="we-list-toolbar">
           <label className="we-list-search">
             <Search size={15} aria-hidden="true" />
-            <input
+            <TextInput
               type="search"
-              className="text-field"
+
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t('rightPanel.credentials.searchPlaceholder')}
@@ -358,15 +358,15 @@ export function ConnectionsPanel({
           </label>
           <label className="we-connections-inventory__type-filter">
             <span className="we-sr-only">{t('rightPanel.credentials.typeFilter')}</span>
-            <select
-              className="text-field text-field--compact"
+            <SelectControl
+
               value={kind}
               onChange={(event) => setKind(event.target.value)}
               aria-label={t('rightPanel.credentials.typeFilter')}
             >
               <option value="">{t('activity.filter.all')}</option>
               {kinds.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
+            </SelectControl>
           </label>
         </div>
 

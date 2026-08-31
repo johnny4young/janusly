@@ -12,6 +12,7 @@ import React from 'react'
 import { Languages } from 'lucide-react'
 import { changeAppLanguage, getResolvedLocale, getStoredLanguage, resolveAppLanguage, useT } from './index'
 import type { AppLanguage } from './resources'
+import { SelectControl } from '@/components/ui/Form'
 
 type LocaleSwitcherProps = {
   /**
@@ -57,9 +58,9 @@ export function LocaleSwitcher({ variant }: LocaleSwitcherProps) {
         <Languages size={14} aria-hidden="true" />
         <span>{t('auth.userMenu.language')}</span>
       </label>
-      <select
+      <SelectControl
         id={selectId}
-        className="we-locale-switcher__select text-field"
+        className="we-locale-switcher__select"
         value={value}
         onChange={onChange}
         disabled={pending}
@@ -69,7 +70,7 @@ export function LocaleSwitcher({ variant }: LocaleSwitcherProps) {
         <option value="system">{t('auth.locale.system')}</option>
         <option value="en">English</option>
         <option value="es">Español</option>
-      </select>
+      </SelectControl>
     </div>
   )
 }

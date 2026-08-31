@@ -22,7 +22,7 @@
 
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { Activity, Boxes, Database, FlaskConical, Layers3, Plug, Users, Workflow } from 'lucide-react'
-import type { ActiveTab, AiAuthoringActionRequest, AiCandidateBackoff, AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion } from '../types'
+import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
 import { AiStudioPanel } from './AiStudioPanel'
 import { AuthoringPanel, type AuthoringPanelModel } from './AuthoringPanel'
@@ -59,13 +59,10 @@ import type { WorkflowCreationMode } from './WorkflowsDashboard'
 export type RightPanelAuthoring = AuthoringPanelModel & {
   aiHealth: AiHealth | null
   aiActionRequest: AiAuthoringActionRequest | null
-  /** Resolves `null` when the author declined the unsaved-canvas guard. */
-  onGenerateWorkflow: (prompt: string) => Promise<{
-    mode: AiMode
-    workflow: WorkflowDefinition
-    aiError?: string
-    bonBackoff?: AiCandidateBackoff
-  } | null>
+  onLoadAuthoringCapabilities: () => Promise<AuthoringCapabilityCatalog>
+  onCompileWorkflowBrief: (prompt: string) => Promise<WorkflowBriefCompilation>
+  onProposeWorkflow: (brief: WorkflowIntentBrief, catalogVersion: string) => Promise<WorkflowProposalResponse>
+  onApplyWorkflowProposal: (proposal: WorkflowProposalResponse) => Promise<boolean>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string }>
   onReviewWorkflow: () => Promise<{
     mode: AiMode
@@ -215,7 +212,10 @@ function RightPanelRouter(props: RightPanelProps) {
     <AiStudioPanel
       health={authoring.aiHealth}
       workflowName={authoring.currentWorkflowName}
-      onGenerateWorkflow={authoring.onGenerateWorkflow}
+      onLoadAuthoringCapabilities={authoring.onLoadAuthoringCapabilities}
+      onCompileWorkflowBrief={authoring.onCompileWorkflowBrief}
+      onProposeWorkflow={authoring.onProposeWorkflow}
+      onApplyWorkflowProposal={authoring.onApplyWorkflowProposal}
       onExplainWorkflow={authoring.onExplainWorkflow}
       onReviewWorkflow={authoring.onReviewWorkflow}
       actionRequest={authoring.aiActionRequest}

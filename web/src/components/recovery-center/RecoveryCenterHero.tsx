@@ -15,6 +15,7 @@ import { useT } from '../../i18n'
 import { HealthRing } from './HealthRing'
 import { CelebrationBurst } from './CelebrationBurst'
 import { formatDowntime, type DowntimeSeverity, type OperatorWins, type StreakSummary } from './recovery-center-model'
+import { Button } from '@/components/ui/Button'
 
 export function RecoveryCenterHero({
   salutation,
@@ -132,9 +133,9 @@ export function RecoveryCenterHero({
               <strong>{t('recoveryCenter.hero.memoryPurgeTitle')}</strong>
               <span>{memoryPurgeCountdown}</span>
             </div>
-            <button type="button" className="we-btn we-btn--secondary" onClick={onOpenMemoryGovernance}>
+            <Button variant="secondary" type="button"  onClick={onOpenMemoryGovernance}>
               {t('recoveryCenter.hero.memoryPurgeCta')}
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -143,9 +144,9 @@ export function RecoveryCenterHero({
         <div>
           <strong>{healthTitle}</strong>
           {metricsStatus === 'unavailable' && onRefreshStatus && (
-            <button type="button" className="we-btn we-btn--ghost we-btn--sm" onClick={onRefreshStatus}>
+            <Button variant="ghost" size="sm" type="button"  onClick={onRefreshStatus}>
               {t('common.retry')}
-            </button>
+            </Button>
           )}
         </div>
       </div>

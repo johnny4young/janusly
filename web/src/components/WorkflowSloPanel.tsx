@@ -18,6 +18,8 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
+import { Button } from '@/components/ui/Button'
+import { FieldStack, FormField } from '@/components/ui/Form'
 
 export type WorkflowSloPanelProps = {
   /** Optional explicit workflowId. When omitted, the panel pulls the current
@@ -128,61 +130,67 @@ export function WorkflowSloPanel({ workflowId: explicit, readOnly = false }: Wor
           void onSave(slo)
         }}
       >
-        <fieldset className="we-fieldset" disabled={readOnly}>
-        <label className="we-field">
-          <span>{t('workflowSlo.field.successRatePercent')}</span>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={0.1}
-            value={slo.successRatePercent ?? ''}
-            placeholder={t('workflowSlo.field.placeholder')}
-            onChange={(e) => setSlo({ ...slo, successRatePercent: parseOptionalNumber(e.target.value) })}
-            disabled={loading || saving}
-          />
-        </label>
-        <label className="we-field">
-          <span>{t('workflowSlo.field.p95DurationMs')}</span>
-          <input
-            type="number"
-            min={0}
-            step={1}
-            value={slo.p95DurationMs ?? ''}
-            placeholder={t('workflowSlo.field.placeholder')}
-            onChange={(e) => setSlo({ ...slo, p95DurationMs: parseOptionalNumber(e.target.value) })}
-            disabled={loading || saving}
-          />
-        </label>
-        <label className="we-field">
-          <span>{t('workflowSlo.field.windowDays')}</span>
-          <select
-            value={slo.windowDays}
-            onChange={(e) => setSlo({ ...slo, windowDays: Number(e.target.value) as WindowDays })}
-            disabled={loading || saving}
-          >
-            {[7, 14, 30].map((days) => (
-              <option key={days} value={days}>
-                {t('workflowSlo.windowOption', { days })}
-              </option>
-            ))}
-          </select>
-        </label>
+        <FieldStack labelledBy="we-slo-panel-title" disabled={readOnly}>
+        <FormField label={t('workflowSlo.field.successRatePercent')}>
+          {(controlProps) => (
+            <input
+              {...controlProps}
+              type="number"
+              min={0}
+              max={100}
+              step={0.1}
+              value={slo.successRatePercent ?? ''}
+              placeholder={t('workflowSlo.field.placeholder')}
+              onChange={(e) => setSlo({ ...slo, successRatePercent: parseOptionalNumber(e.target.value) })}
+              disabled={loading || saving}
+            />
+          )}
+        </FormField>
+        <FormField label={t('workflowSlo.field.p95DurationMs')}>
+          {(controlProps) => (
+            <input
+              {...controlProps}
+              type="number"
+              min={0}
+              step={1}
+              value={slo.p95DurationMs ?? ''}
+              placeholder={t('workflowSlo.field.placeholder')}
+              onChange={(e) => setSlo({ ...slo, p95DurationMs: parseOptionalNumber(e.target.value) })}
+              disabled={loading || saving}
+            />
+          )}
+        </FormField>
+        <FormField label={t('workflowSlo.field.windowDays')}>
+          {(controlProps) => (
+            <select
+              {...controlProps}
+              value={slo.windowDays}
+              onChange={(e) => setSlo({ ...slo, windowDays: Number(e.target.value) as WindowDays })}
+              disabled={loading || saving}
+            >
+              {[7, 14, 30].map((days) => (
+                <option key={days} value={days}>
+                  {t('workflowSlo.windowOption', { days })}
+                </option>
+              ))}
+            </select>
+          )}
+        </FormField>
         <p className="helper-text">{t('workflowSlo.field.unsupportedV1')}</p>
         <div className="we-slo-panel__actions">
-          <button type="submit" className="command-button command-button-primary" disabled={loading || saving}>
+          <Button variant="primary" type="submit"  disabled={loading || saving}>
             {saving ? (t('workflowSlo.saving')) : (t('workflowSlo.save'))}
-          </button>
-          <button
+          </Button>
+          <Button variant="secondary"
             type="button"
-            className="command-button"
+
             onClick={() => void onSave(null)}
             disabled={loading || saving}
           >
             {t('workflowSlo.clear')}
-          </button>
+          </Button>
         </div>
-        </fieldset>
+        </FieldStack>
       </form>
     </section>
   )

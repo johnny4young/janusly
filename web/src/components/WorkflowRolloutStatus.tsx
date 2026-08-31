@@ -1,6 +1,7 @@
 import { ShieldCheck } from 'lucide-react'
 
 import { useT } from '../i18n'
+import { Button } from '@/components/ui/Button'
 
 type RolloutStatus = 'active' | 'promoted' | 'rolled_back' | 'cancelled'
 
@@ -58,22 +59,22 @@ export function WorkflowRolloutStatus({
       </div>
       {!readOnly && status === 'active' && (
         <div className="we-rollout-panel__actions">
-          <button
+          <Button variant="primary"
             type="button"
-            className="command-button command-button-primary"
+
             disabled={mutating}
             onClick={() => onDecide('promote')}
           >
             {t('workflowRollout.promote')}
-          </button>
-          <button
+          </Button>
+          <Button variant="danger"
             type="button"
-            className="command-button command-button-danger"
+
             disabled={mutating}
             onClick={() => onDecide('rollback')}
           >
             {t('workflowRollout.rollback')}
-          </button>
+          </Button>
         </div>
       )}
       {status !== 'active' && (

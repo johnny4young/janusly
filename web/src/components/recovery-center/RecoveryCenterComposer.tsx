@@ -24,6 +24,7 @@ import { api } from '../../api'
 import { useWorkflowStore } from '../../store'
 import { useT } from '../../i18n'
 import { t as runtimeT } from '../../i18n/runtime'
+import { Button } from '@/components/ui/Button'
 
 export function RecoveryCenterComposer({
   onOpenTab,
@@ -186,12 +187,12 @@ export function RecoveryCenterComposer({
           <p>{answer.text}</p>
           {answer.aiError && <small className="recovery-center-composer__answer-error">{answer.aiError}</small>}
           <div className="recovery-center-composer__answer-acts">
-            <button type="button" className="command-button command-button-compact" onClick={() => setAnswer(null)}>
+            <Button variant="secondary" size="sm" type="button"  onClick={() => setAnswer(null)}>
               {t('recoveryCenter.composer.dismiss')}
-            </button>
-            <button type="button" className="command-button command-button-compact" onClick={() => onOpenTab('ai-studio')}>
+            </Button>
+            <Button variant="secondary" size="sm" type="button"  onClick={() => onOpenTab('ai-studio')}>
               {t('recoveryCenter.composer.openStudio')}
-            </button>
+            </Button>
           </div>
         </div>
       )}

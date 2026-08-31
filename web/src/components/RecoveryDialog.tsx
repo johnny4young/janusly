@@ -65,6 +65,7 @@ import type {
   Step,
   SuggestionTab,
 } from './recovery-dialog/types'
+import { Button } from '@/components/ui/Button'
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled'])
 const VALIDATION_POLL_INTERVAL_MS = 1500
@@ -793,26 +794,26 @@ export function RecoveryDialog({
         <footer className="run-input-dialog__footer">
           {step.kind === 'idle' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" type="button"  onClick={onClose}>
                 {t('recoveryDialog.footer.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 type="button"
                 ref={primaryRef}
-                className="command-button command-button-primary"
+
                 onClick={generateSuggestion}
               >
                 <Sparkles size={14} aria-hidden="true" />
                 <span>{t('recoveryDialog.footer.generate')}</span>
-              </button>
+              </Button>
             </>
           )}
 
           {step.kind === 'review' && (
             <>
-              <button
+              <Button variant="secondary"
                 type="button"
-                className="command-button"
+
                 onClick={() => setStep({
                   kind: 'cancelling',
                   suggestion: step.suggestion,
@@ -821,11 +822,11 @@ export function RecoveryDialog({
                 })}
               >
                 {t('recoveryDialog.footer.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 type="button"
                 ref={primaryRef}
-                className="command-button command-button-primary"
+
                 onClick={validateSuggestion}
                 disabled={!canApplyPatch}
                 title={!canApplyPatch ? (t('recoveryDialog.footer.applyDisabledReason')) : undefined}
@@ -836,15 +837,15 @@ export function RecoveryDialog({
                     ? t('recoveryDialog.footer.validateCluster', { count: clusterMembers!.length })
                     : t('recoveryDialog.footer.validate')}
                 </span>
-              </button>
+              </Button>
             </>
           )}
 
           {step.kind === 'validated' && (
             <>
-              <button
+              <Button variant="secondary"
                 type="button"
-                className="command-button"
+
                 onClick={() => setStep({
                   kind: 'cancelling',
                   suggestion: step.suggestion,
@@ -854,11 +855,11 @@ export function RecoveryDialog({
                 })}
               >
                 {t('recoveryDialog.footer.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 type="button"
                 ref={primaryRef}
-                className="command-button command-button-primary"
+
                 onClick={() => void applyAfterValidation(step.suggestion, step.selectedIndex, step.runId)}
                 disabled={!canApplyPatch}
               >
@@ -866,15 +867,15 @@ export function RecoveryDialog({
                 <span>{isClusterMode
                   ? t('recoveryDialog.footer.applyCluster', { count: clusterMembers!.length })
                   : t('recoveryDialog.footer.apply')}</span>
-              </button>
+              </Button>
             </>
           )}
 
           {step.kind === 'validation-failed' && (
             <>
-              <button
+              <Button variant="secondary"
                 type="button"
-                className="command-button"
+
                 onClick={() => setStep({
                   kind: 'cancelling',
                   suggestion: step.suggestion,
@@ -886,11 +887,11 @@ export function RecoveryDialog({
                 })}
               >
                 {t('recoveryDialog.footer.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 type="button"
                 ref={primaryRef}
-                className="command-button command-button-primary"
+
                 onClick={() => {
                   // Operator → system feedback: the operator chose to
                   // iterate because the sandbox replay rejected this
@@ -914,41 +915,41 @@ export function RecoveryDialog({
               >
                 <RefreshCcw size={14} aria-hidden="true" />
                 <span>{t('recoveryDialog.footer.iterate')}</span>
-              </button>
+              </Button>
             </>
           )}
 
           {step.kind === 'error' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" type="button"  onClick={onClose}>
                 {t('recoveryDialog.footer.close')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 type="button"
                 ref={primaryRef}
-                className="command-button command-button-primary"
+
                 onClick={() => setStep({ kind: 'idle' })}
               >
                 {t('recoveryDialog.footer.retry')}
-              </button>
+              </Button>
             </>
           )}
 
           {step.kind === 'applied' && (
-            <button
+            <Button variant="primary"
               type="button"
               ref={primaryRef}
-              className="command-button command-button-primary"
+
               onClick={onClose}
             >
               {t('recoveryDialog.footer.close')}
-            </button>
+            </Button>
           )}
 
           {(step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating') && (
-            <button type="button" className="command-button" disabled>
+            <Button variant="secondary" type="button"  disabled>
               {t('recoveryDialog.footer.working')}
-            </button>
+            </Button>
           )}
         </footer>
       </div>

@@ -11,6 +11,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import type { WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
+import { SelectControl, TextInput } from '@/components/ui/Form'
 
 type SchemaFieldsEditorProps = {
   scope: string
@@ -181,8 +182,7 @@ function InputRow({ name, shape, form, required, onRename, onTypeChange, onDescr
       <div className="we-workflow-io__row-main">
         <label>
           <span className="we-sr-only">{t('rightPanel.inspector.inputNameAria', { name })}</span>
-          <input
-            className={`text-field text-field--compact${nameError ? ' text-field--error' : ''}`}
+          <TextInput
             value={nameDraft}
             maxLength={80}
             aria-invalid={nameError || undefined}
@@ -194,9 +194,9 @@ function InputRow({ name, shape, form, required, onRename, onTypeChange, onDescr
         </label>
         <label>
           <span className="we-sr-only">{t('rightPanel.inspector.inputTypeAria', { name })}</span>
-          <select className="text-field text-field--compact" value={shape.type} onChange={(event) => onTypeChange(event.target.value as WorkflowInputSchemaShape['type'])}>
+          <SelectControl  value={shape.type} onChange={(event) => onTypeChange(event.target.value as WorkflowInputSchemaShape['type'])}>
             {INPUT_TYPES.slice(0, form ? 3 : 5).map(type => <option key={type} value={type}>{t(`rightPanel.inspector.inputType.${type}`)}</option>)}
-          </select>
+          </SelectControl>
         </label>
         <label className="checkbox-row we-workflow-io__required">
           <input
@@ -211,8 +211,8 @@ function InputRow({ name, shape, form, required, onRename, onTypeChange, onDescr
           <Trash2 size={14} aria-hidden="true" />
         </button>
       </div>
-      <input
-        className="text-field text-field--compact we-workflow-io__description"
+      <TextInput
+        className="we-workflow-io__description"
         value={shape.description ?? ''}
         onChange={(event) => onDescriptionChange(event.target.value)}
         placeholder={t('rightPanel.inspector.inputDescriptionPlaceholder')}
@@ -250,8 +250,8 @@ function InputDefaultField({ name, shape, onChange }: {
     return (
       <label className="we-workflow-io__default">
         <span className="we-sr-only">{label}</span>
-        <select
-          className="text-field text-field--compact"
+        <SelectControl
+
           value={value}
           aria-label={label}
           onChange={(event) => onChange(event.target.value === '' ? undefined : event.target.value === 'true')}
@@ -259,7 +259,7 @@ function InputDefaultField({ name, shape, onChange }: {
           <option value="">{t('rightPanel.inspector.inputDefaultNone')}</option>
           <option value="true">{t('rightPanel.inspector.inputDefaultTrue')}</option>
           <option value="false">{t('rightPanel.inspector.inputDefaultFalse')}</option>
-        </select>
+        </SelectControl>
       </label>
     )
   }
@@ -278,8 +278,8 @@ function InputDefaultField({ name, shape, onChange }: {
   return (
     <label className="we-workflow-io__default">
       <span className="we-sr-only">{label}</span>
-      <input
-        className="text-field text-field--compact"
+      <TextInput
+
         type="text"
         value={shape.default === undefined ? '' : String(shape.default)}
         placeholder={t('rightPanel.inspector.inputDefaultPlaceholder')}
@@ -319,8 +319,8 @@ function NumberDefaultField({ label, value, placeholder, onChange }: {
   return (
     <label className="we-workflow-io__default">
       <span className="we-sr-only">{label}</span>
-      <input
-        className="text-field text-field--compact"
+      <TextInput
+
         type="text"
         inputMode="decimal"
         value={draft}
@@ -477,8 +477,7 @@ function OutputRow({ name, template, onRename, onTemplateChange, onRemove }: {
       <div className="we-workflow-io__row-main we-workflow-io__row-main--output">
         <label>
           <span className="we-sr-only">{t('rightPanel.inspector.outputNameAria', { name })}</span>
-          <input
-            className={`text-field text-field--compact${nameError ? ' text-field--error' : ''}`}
+          <TextInput
             value={nameDraft}
             maxLength={80}
             aria-invalid={nameError || undefined}
@@ -488,8 +487,8 @@ function OutputRow({ name, template, onRename, onTemplateChange, onRemove }: {
             onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
           />
         </label>
-        <input
-          className="text-field text-field--compact we-workflow-io__template"
+        <TextInput
+          className="we-workflow-io__template"
           value={template}
           onChange={(event) => onTemplateChange(event.target.value)}
           placeholder={t('rightPanel.inspector.outputTemplatePlaceholder')}

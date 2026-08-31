@@ -34,6 +34,7 @@ import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { getNodeLabel } from '../constants'
 import { useT } from '../i18n'
+import { FieldLabel, SelectControl } from '@/components/ui/Form'
 
 type SnippetInsertMenuProps = {
   open: boolean
@@ -245,10 +246,10 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
 
         <div className="we-snippet-menu__head">
           <p className="helper-text">{t('snippets.menu.subtitle')}</p>
-          <label className="field-label" htmlFor="snippet-target">{t('snippets.menu.targetLabel')}</label>
-          <select
+          <FieldLabel  htmlFor="snippet-target">{t('snippets.menu.targetLabel')}</FieldLabel>
+          <SelectControl
             id="snippet-target"
-            className="text-field"
+
             value={targetNodeId ?? ''}
             onChange={(event) => setTargetNodeId(event.target.value || null)}
           >
@@ -258,7 +259,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
                 {getNodeLabel(node.data.type)} · {node.id}
               </option>
             ))}
-          </select>
+          </SelectControl>
         </div>
 
         <ul className="we-cmdk-list" role="listbox" aria-label={t('snippets.menu.title')}>

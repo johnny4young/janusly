@@ -7,6 +7,7 @@ import { TrashPanel } from './TrashPanel'
 import type { SavedWorkflow } from '../types'
 import type { WorkflowsDashboardController } from './WorkflowsDashboard'
 import { UNGROUPED_FOLDER as UNGROUPED } from './workflows-dashboard-model'
+import { TextInput } from '@/components/ui/Form'
 
 export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardController }) {
   const {
@@ -270,8 +271,8 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
       {canWrite && !showTrashed && selectionMode && selectedIds.size > 0 && (
         <div className="we-list-bulk-bar" data-testid="workflows-bulk-bar">
           <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
-          <input
-            className="text-field we-list-bulk-bar__input"
+          <TextInput
+            className="we-list-bulk-bar__input"
             list="we-bulk-folder-options"
             value={bulkFolderDraft}
             maxLength={60}
@@ -306,8 +307,8 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
               multi-value (a workflow can carry several), so unlike the folder
               Move/Ungroup this has two verbs instead of a single target. */}
           <span className="we-list-bulk-bar__divider" aria-hidden="true" />
-          <input
-            className="text-field we-list-bulk-bar__input"
+          <TextInput
+            className="we-list-bulk-bar__input"
             list="we-bulk-tag-options"
             value={bulkTagDraft}
             maxLength={40}
@@ -481,8 +482,8 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
                     // Inline rename: the controls preventDefault so a click never
                     // toggles the <details>; Enter saves, Esc cancels.
                     <span className="we-list-folder__rename" onClick={event => { event.preventDefault(); event.stopPropagation() }}>
-                      <input
-                        className="text-field we-list-folder__rename-input"
+                      <TextInput
+                        className="we-list-folder__rename-input"
                         value={renameDraft}
                         autoFocus
                         maxLength={60}
@@ -576,8 +577,8 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
               (folders derive from each row's folder value — no folders table). */}
           {newFolderDropFor !== null ? (
             <div className="we-list-folder-new we-list-folder-new--naming">
-              <input
-                className="text-field we-list-folder-new__input"
+              <TextInput
+                className="we-list-folder-new__input"
                 value={newFolderDraft}
                 autoFocus
                 maxLength={60}

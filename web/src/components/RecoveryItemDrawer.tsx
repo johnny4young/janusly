@@ -29,6 +29,7 @@ import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { WorkflowAboutCard } from './WorkflowAboutCard'
 import { ReportDeliveryDialog } from './ReportDeliveryDialog'
+import { Button } from '@/components/ui/Button'
 
 /** Per-surface copy for the generalized delivery dialog (evidence variant). */
 const EVIDENCE_DELIVER_COPY = {
@@ -392,14 +393,14 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
             {t(`recoveryItems.status.${item.status}`)}
           </span>
         </h3>
-        <button
+        <Button variant="ghost" size="sm"
           type="button"
-          className="we-btn we-btn--ghost we-btn--sm"
+
           onClick={onClose}
           aria-label={t('common.close')}
         >
           <X size={14} aria-hidden />
-        </button>
+        </Button>
       </div>
 
       <dl className="we-recovery-item-drawer__meta">
@@ -422,33 +423,33 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
           {t('recoveryItems.evidence.label')}
         </span>
         <div className="we-recovery-item-drawer__evidence-actions">
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => exportEvidence('json')}
             disabled={evidenceBusy !== null}
             data-testid="ri-evidence-json"
           >
             <Download size={14} aria-hidden /> {t('recoveryItems.evidence.json')}
-          </button>
-          <button
+          </Button>
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => exportEvidence('markdown')}
             disabled={evidenceBusy !== null}
             data-testid="ri-evidence-markdown"
           >
             <Download size={14} aria-hidden /> {t('recoveryItems.evidence.markdown')}
-          </button>
-          <button
+          </Button>
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => setDeliverOpen(true)}
             disabled={evidenceBusy !== null}
             data-testid="ri-evidence-deliver"
           >
             <Send size={14} aria-hidden /> {t('recoveryEvidence.deliver.action')}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -469,16 +470,16 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
             <span className="we-recovery-occurrences__lastseen">
               {t('recoveryItems.occurrences.lastSeen', { when: formatRelativeTime(item.lastOccurredAtIso) })}
             </span>
-            <button
+            <Button variant="ghost" size="sm"
               type="button"
-              className="we-btn we-btn--ghost we-btn--sm"
+
               onClick={() => setOccurrencesOpen((v) => !v)}
               aria-expanded={occurrencesOpen}
               aria-busy={occurrencesOpen && children === null && !childrenError}
               data-testid="recovery-item-occurrences-toggle"
             >
               {t(occurrencesOpen ? 'recoveryItems.occurrences.hide' : 'recoveryItems.occurrences.show')}
-            </button>
+            </Button>
           </div>
           {occurrencesOpen && (
             <div
@@ -521,83 +522,83 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
       <p className="we-recovery-item-drawer__legend helper-text">{t('recoveryItems.legend')}</p>
       <div className="we-recovery-item-drawer__actions" data-testid="recovery-item-drawer-actions">
         {canAcknowledge && (
-          <button
+          <Button variant="primary" size="sm"
             type="button"
-            className="we-btn we-btn--primary we-btn--sm"
+
             onClick={() => callTransition('acknowledge', {})}
             disabled={busyTransition !== null}
             data-testid="ri-action-acknowledge"
           >
             {t('recoveryItems.action.acknowledge')}
-          </button>
+          </Button>
         )}
-        <button
+        <Button variant="ghost" size="sm"
           type="button"
-          className="we-btn we-btn--ghost we-btn--sm"
+
           onClick={takeOwnership}
           disabled={busyTransition !== null || item.status === 'resolved'}
           data-testid="ri-action-take-ownership"
         >
           {t('recoveryItems.action.takeOwnership')}
-        </button>
+        </Button>
         {canInProgress && (
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => callTransition('in-progress', {})}
             disabled={busyTransition !== null}
             data-testid="ri-action-in-progress"
           >
             {t('recoveryItems.action.inProgress')}
-          </button>
+          </Button>
         )}
         {canWaitingExternal && (
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => callTransition('waiting-external', {})}
             disabled={busyTransition !== null}
             data-testid="ri-action-waiting-external"
           >
             {t('recoveryItems.action.waitingExternal')}
-          </button>
+          </Button>
         )}
         {canResolve && (
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => setResolveOpen((v) => !v)}
             disabled={busyTransition !== null}
             data-testid="ri-action-resolve"
           >
             {t('recoveryItems.action.resolve')}
-          </button>
+          </Button>
         )}
         {canReopen && (
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => callTransition('reopen', {})}
             disabled={busyTransition !== null}
             data-testid="ri-action-reopen"
           >
             {t('recoveryItems.action.reopen')}
-          </button>
+          </Button>
         )}
         {item.status !== 'resolved' && escalationTargets.length > 0 && (
           <div className="we-recovery-item-drawer__escalate" data-testid="ri-escalate-controls">
             <span>{t('recoveryItems.action.escalateTo')}</span>
             {escalationTargets.map((s) => (
-              <button
+              <Button variant="ghost" size="sm"
                 key={s}
                 type="button"
-                className="we-btn we-btn--ghost we-btn--sm"
+
                 onClick={() => submitEscalate(s)}
                 disabled={busyTransition !== null}
                 data-testid={`ri-action-escalate-${s}`}
               >
                 {t(`recoveryItems.severity.${s}`)}
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -618,15 +619,15 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
               ))}
             </select>
           </label>
-          <button
+          <Button variant="primary" size="sm"
             type="button"
-            className="we-btn we-btn--primary we-btn--sm"
+
             onClick={submitResolve}
             disabled={busyTransition !== null}
             data-testid="ri-resolve-submit"
           >
             <Check size={14} aria-hidden /> {t('recoveryItems.resolve.submit')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -655,14 +656,14 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
           </ul>
         )}
         {!handoffOpen ? (
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => setHandoffOpen(true)}
             data-testid="ri-handoff-open"
           >
             <Send size={14} aria-hidden /> {t('recoveryHandoff.action.open')}
-          </button>
+          </Button>
         ) : (
           <div className="we-recovery-item-drawer__handoff-form" data-testid="recovery-item-handoff-form">
             <label>
@@ -728,22 +729,22 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
               </label>
             )}
             <div className="we-recovery-item-drawer__handoff-actions">
-              <button
+              <Button variant="primary" size="sm"
                 type="button"
-                className="we-btn we-btn--primary we-btn--sm"
+
                 onClick={submitHandoff}
                 disabled={busyTransition !== null || !canSubmitHandoff}
                 data-testid="ri-handoff-submit"
               >
                 {t('recoveryHandoff.action.submit')}
-              </button>
-              <button
+              </Button>
+              <Button variant="ghost" size="sm"
                 type="button"
-                className="we-btn we-btn--ghost we-btn--sm"
+
                 onClick={() => setHandoffOpen(false)}
               >
                 {t('common.cancel')}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -775,15 +776,15 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
             maxLength={4_000}
             rows={2}
           />
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={submitComment}
             disabled={busyTransition !== null || commentDraft.trim().length === 0}
             data-testid="ri-comment-submit"
           >
             {t('recoveryItems.action.addComment')}
-          </button>
+          </Button>
         </div>
       </div>
     </aside>

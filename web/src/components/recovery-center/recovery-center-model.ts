@@ -17,7 +17,8 @@
  */
 
 import { t as runtimeT } from '../../i18n/runtime'
-import type { ActiveTab, RunNode, RunSummary } from '../../types'
+import type { RunNode, RunSummary } from '../../types'
+import type { ApiResponse } from '../../lib/api-types.generated'
 import type { DeadLetter } from '../dead-letter-types'
 import { isOpenRunStatus } from '@/lib/status'
 
@@ -188,100 +189,142 @@ export function healthBand(score: number | null): 'high' | 'mid' | 'low' | 'unkn
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Recommended actions — pure helper.
+// Operator Brief — runtime decoder + presentation projection only. Ranking,
+// authority, evidence and targets are owned by internal/operations.
 // ─────────────────────────────────────────────────────────────────────────
-
-export type RecommendedActionId =
-  | 'resolve_approvals'
-  | 'review_semantic_cases'
-  | 'recover_cluster'
-  | 'triage_failures'
-  | 'review_workflow_risk'
 
 export type RecommendedActionSeverity = 'cobalt' | 'cyan' | 'success' | 'warning' | 'danger'
 
+export type OperatorBrief = ApiResponse<'GET /operations/brief'>
+export type OperatorBriefAction = OperatorBrief['actions'][number]
+
 export type RecommendedAction = {
-  id: RecommendedActionId
+  id: string
+  kind: string
+  priority: number
   title: string
   body: string
   ctaLabel: string
-  ctaTab: ActiveTab
   severity: RecommendedActionSeverity
+  target: OperatorBriefAction['target']
+  allowedActions: string[]
 }
 
-export type RecommendedActionSignals = {
-  openFailures: number
-  pendingApprovals: number
-  semanticCases: number
-  topClusterFrequency: number
-  healthScore: number | null
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
-/**
- * Deterministic priority of recommended next actions. Operator-blocking
- * work first (approvals waiting on input), then semantic containment,
- * bulk recovery, individual triage, and long-term risk. Pure function
- * so each ordering rule can be tested in isolation.
- */
-export function computeRecommendedActions(signals: RecommendedActionSignals): RecommendedAction[] {
-  const actions: RecommendedAction[] = []
-  if (signals.pendingApprovals > 0) {
-    actions.push({
-      id: 'resolve_approvals',
-      title: runtimeT('recoveryCenter.action.resolve_approvals.title', { count: signals.pendingApprovals }),
-      body: runtimeT('recoveryCenter.action.resolve_approvals.body'),
-      ctaLabel: runtimeT('recoveryCenter.action.resolve_approvals.cta'),
-      ctaTab: 'recover',
-      severity: 'warning',
-    })
+function stringArray(value: unknown, limit: number): string[] | null {
+  if (!Array.isArray(value) || value.length > limit || value.some((item) => typeof item !== 'string')) {
+    return null
   }
-  if (signals.semanticCases > 0) {
-    actions.push({
-      id: 'review_semantic_cases',
-      title: runtimeT('recoveryCenter.action.review_semantic_cases.title', {
-        count: signals.semanticCases,
-      }),
-      body: runtimeT('recoveryCenter.action.review_semantic_cases.body'),
-      ctaLabel: runtimeT('recoveryCenter.action.review_semantic_cases.cta'),
-      ctaTab: 'recover',
-      severity: 'danger',
-    })
+  return value
+}
+
+function decodeBriefAction(value: unknown): OperatorBriefAction | null {
+  const item = record(value)
+  const target = record(item?.target)
+  const evidence = Array.isArray(item?.evidence) && item.evidence.length <= 8
+    ? item.evidence.map(record)
+    : null
+  const allowedActions = stringArray(item?.allowedActions, 10)
+  const params = record(item?.params)
+  const destinations = new Set(['recoveryCase', 'runs', 'recover', 'operations'])
+  if (
+    !item || !target || !evidence || evidence.some((entry) => !entry)
+    || !allowedActions || !params
+    || typeof item.id !== 'string' || typeof item.kind !== 'string'
+    || typeof item.priority !== 'number' || !Number.isInteger(item.priority)
+    || typeof item.severity !== 'string' || typeof item.titleKey !== 'string'
+    || typeof item.bodyKey !== 'string' || typeof item.ctaKey !== 'string'
+    || !item.titleKey.startsWith('operations.brief.')
+    || !item.bodyKey.startsWith('operations.brief.')
+    || !item.ctaKey.startsWith('operations.brief.')
+    || typeof item.createdAt !== 'string'
+    || typeof target.kind !== 'string' || typeof target.id !== 'string'
+    || typeof target.destination !== 'string' || !destinations.has(target.destination)
+  ) return null
+  const decodedEvidence = evidence.map((entry) => {
+    if (
+      typeof entry!.kind !== 'string' || typeof entry!.id !== 'string'
+      || typeof entry!.key !== 'string'
+    ) return null
+    return {
+      kind: entry!.kind,
+      id: entry!.id,
+      key: entry!.key,
+      value: entry!.value,
+    }
+  })
+  if (decodedEvidence.some((entry) => !entry)) return null
+  if (target.runId !== undefined && typeof target.runId !== 'string') return null
+  if (target.workflowId !== undefined && typeof target.workflowId !== 'string') return null
+  return {
+    id: item.id,
+    kind: item.kind,
+    priority: item.priority,
+    severity: item.severity,
+    titleKey: item.titleKey,
+    bodyKey: item.bodyKey,
+    ctaKey: item.ctaKey,
+    params,
+    evidence: decodedEvidence as OperatorBriefAction['evidence'],
+    target: {
+      kind: target.kind,
+      id: target.id,
+      destination: target.destination,
+      ...(typeof target.runId === 'string' ? { runId: target.runId } : {}),
+      ...(typeof target.workflowId === 'string' ? { workflowId: target.workflowId } : {}),
+    },
+    allowedActions,
+    createdAt: item.createdAt,
   }
-  if (signals.topClusterFrequency >= 2) {
-    actions.push({
-      id: 'recover_cluster',
-      title: runtimeT('recoveryCenter.action.recover_cluster.title', { count: signals.topClusterFrequency }),
-      body: runtimeT('recoveryCenter.action.recover_cluster.body'),
-      ctaLabel: runtimeT('recoveryCenter.action.recover_cluster.cta'),
-      // The copy promises "apply one fix to all of them via the Recovery
-      // dialog", which only opens from the recovery queue. Settings shows
-      // the same clusters read-only, so sending the operator there stranded
-      // them one destination short of the action.
-      ctaTab: 'recover',
-      severity: 'cobalt',
-    })
-  } else if (signals.openFailures > 0) {
-    actions.push({
-      id: 'triage_failures',
-      title: runtimeT('recoveryCenter.action.triage_failures.title', { count: signals.openFailures }),
-      body: runtimeT('recoveryCenter.action.triage_failures.body'),
-      ctaLabel: runtimeT('recoveryCenter.action.triage_failures.cta'),
-      ctaTab: 'recover',
-      severity: 'warning',
-    })
+}
+
+/** Decode the bounded server read model without re-ranking it client-side. */
+export function decodeOperatorBrief(value: unknown): OperatorBrief | null {
+  const item = record(value)
+  if (
+    !item || item.version !== '1' || typeof item.generatedAt !== 'string'
+    || !Array.isArray(item.actions) || item.actions.length > 3
+  ) return null
+  const actions = item.actions.map(decodeBriefAction)
+  const warnings = stringArray(item.warnings, 10)
+  if (actions.some((action) => !action) || !warnings) return null
+  return {
+    version: '1',
+    generatedAt: item.generatedAt,
+    actions: actions as OperatorBriefAction[],
+    warnings,
   }
-  if (signals.healthScore !== null && signals.healthScore < 80) {
-    const severity: RecommendedActionSeverity = signals.healthScore < 60 ? 'danger' : 'warning'
-    actions.push({
-      id: 'review_workflow_risk',
-      title: runtimeT('recoveryCenter.action.review_workflow_risk.title'),
-      body: runtimeT('recoveryCenter.action.review_workflow_risk.body'),
-      ctaLabel: runtimeT('recoveryCenter.action.review_workflow_risk.cta'),
-      ctaTab: 'operations',
-      severity,
-    })
+}
+
+function actionTone(severity: string): RecommendedActionSeverity {
+  switch (severity) {
+    case 'critical': return 'danger'
+    case 'high': return 'warning'
+    case 'medium': return 'cobalt'
+    case 'low': return 'cyan'
+    default: return 'cyan'
   }
-  return actions.slice(0, 3)
+}
+
+/** Localize the exact server order; this function never adds or sorts work. */
+export function presentOperatorBrief(brief: OperatorBrief | null): RecommendedAction[] {
+  if (!brief) return []
+  return brief.actions.map((action) => ({
+    id: action.id,
+    kind: action.kind,
+    priority: action.priority,
+    title: runtimeT(action.titleKey, action.params),
+    body: runtimeT(action.bodyKey, action.params),
+    ctaLabel: runtimeT(action.ctaKey, action.params),
+    severity: actionTone(action.severity),
+    target: action.target,
+    allowedActions: action.allowedActions,
+  }))
 }
 
 export function listActiveRuns(runs: readonly RunSummary[], limit = 3): RunSummary[] {

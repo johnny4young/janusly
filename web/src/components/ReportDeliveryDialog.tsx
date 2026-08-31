@@ -30,6 +30,8 @@ import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { isLikelyHttpUrl } from '../url'
 import { formatStatusLabel } from '../constants'
+import { Button } from '@/components/ui/Button'
+import { FormField } from '@/components/ui/Form'
 
 type SourceRun = {
   id: string
@@ -293,86 +295,96 @@ export function ReportDeliveryDialog({
               </fieldset>
 
               <div className="we-report-delivery-fields">
-                <label className="we-field">
-                  <span>{t('reportDelivery.field.credential')}</span>
-                  <input
-                    type="text"
-                    value={credentialName}
-                    onChange={(event) => setCredentialName(event.target.value)}
-                    placeholder={destination === 'slack'
-                      ? t('reportDelivery.placeholder.slack')
-                      : destination === 'github'
-                        ? t('reportDelivery.placeholder.github')
-                        : t('reportDelivery.placeholder.webhook')}
-                    autoComplete="off"
-                    spellCheck={false}
-                    disabled={step.kind === 'submitting'}
-                    data-testid="report-delivery-credential"
-                  />
-                  <small>{t('reportDelivery.field.credentialHint')}</small>
-                </label>
+                <FormField
+                  label={t('reportDelivery.field.credential')}
+                  hint={t('reportDelivery.field.credentialHint')}
+                >
+                  {(controlProps) => (
+                    <input
+                      {...controlProps}
+                      type="text"
+                      value={credentialName}
+                      onChange={(event) => setCredentialName(event.target.value)}
+                      placeholder={destination === 'slack'
+                        ? t('reportDelivery.placeholder.slack')
+                        : destination === 'github'
+                          ? t('reportDelivery.placeholder.github')
+                          : t('reportDelivery.placeholder.webhook')}
+                      autoComplete="off"
+                      spellCheck={false}
+                      disabled={step.kind === 'submitting'}
+                      data-testid="report-delivery-credential"
+                    />
+                  )}
+                </FormField>
 
                 {destination === 'github' && (
                   <>
-                    <label className="we-field">
-                      <span>{t('reportDelivery.field.owner')}</span>
-                      <input
-                        type="text"
-                        value={owner}
-                        onChange={(event) => setOwner(event.target.value)}
-                        placeholder={t('reportDelivery.field.ownerPlaceholder')}
-                        autoComplete="off"
-                        disabled={step.kind === 'submitting'}
-                        data-testid="report-delivery-owner"
-                      />
-                    </label>
-                    <label className="we-field">
-                      <span>{t('reportDelivery.field.repo')}</span>
-                      <input
-                        type="text"
-                        value={repo}
-                        onChange={(event) => setRepo(event.target.value)}
-                        placeholder={t('reportDelivery.field.repoPlaceholder')}
-                        autoComplete="off"
-                        disabled={step.kind === 'submitting'}
-                        data-testid="report-delivery-repo"
-                      />
-                    </label>
-                    <label className="we-field">
-                      <span>{t('reportDelivery.field.labels')}</span>
-                      <input
-                        type="text"
-                        value={labels}
-                        onChange={(event) => setLabels(event.target.value)}
-                        placeholder={t('reportDelivery.field.labelsPlaceholder')}
-                        autoComplete="off"
-                        disabled={step.kind === 'submitting'}
-                        data-testid="report-delivery-labels"
-                      />
-                    </label>
+                    <FormField label={t('reportDelivery.field.owner')}>
+                      {(controlProps) => (
+                        <input
+                          {...controlProps}
+                          type="text"
+                          value={owner}
+                          onChange={(event) => setOwner(event.target.value)}
+                          placeholder={t('reportDelivery.field.ownerPlaceholder')}
+                          autoComplete="off"
+                          disabled={step.kind === 'submitting'}
+                          data-testid="report-delivery-owner"
+                        />
+                      )}
+                    </FormField>
+                    <FormField label={t('reportDelivery.field.repo')}>
+                      {(controlProps) => (
+                        <input
+                          {...controlProps}
+                          type="text"
+                          value={repo}
+                          onChange={(event) => setRepo(event.target.value)}
+                          placeholder={t('reportDelivery.field.repoPlaceholder')}
+                          autoComplete="off"
+                          disabled={step.kind === 'submitting'}
+                          data-testid="report-delivery-repo"
+                        />
+                      )}
+                    </FormField>
+                    <FormField label={t('reportDelivery.field.labels')}>
+                      {(controlProps) => (
+                        <input
+                          {...controlProps}
+                          type="text"
+                          value={labels}
+                          onChange={(event) => setLabels(event.target.value)}
+                          placeholder={t('reportDelivery.field.labelsPlaceholder')}
+                          autoComplete="off"
+                          disabled={step.kind === 'submitting'}
+                          data-testid="report-delivery-labels"
+                        />
+                      )}
+                    </FormField>
                   </>
                 )}
 
                 {destination === 'webhook' && (
-                  <label className="we-field">
-                    <span>{t('reportDelivery.field.url')}</span>
-                    <input
-                      type="url"
-                      value={webhookUrl}
-                      onChange={(event) => setWebhookUrl(event.target.value)}
-                      placeholder={t('reportDelivery.field.urlPlaceholder')}
-                      autoComplete="off"
-                      disabled={step.kind === 'submitting'}
-                      aria-invalid={webhookInvalid}
-                      aria-describedby={webhookInvalid ? 'report-delivery-url-error' : undefined}
-                      data-testid="report-delivery-url"
-                    />
-                    {webhookInvalid && (
-                      <span id="report-delivery-url-error" className="helper-text helper-text--error" role="alert">
-                        <AlertCircle size={13} aria-hidden="true" /> {t('reportDelivery.field.urlInvalid')}
-                      </span>
+                  <FormField
+                    label={t('reportDelivery.field.url')}
+                    error={webhookInvalid ? (
+                      <><AlertCircle size={13} aria-hidden="true" /> {t('reportDelivery.field.urlInvalid')}</>
+                    ) : undefined}
+                  >
+                    {(controlProps) => (
+                      <input
+                        {...controlProps}
+                        type="url"
+                        value={webhookUrl}
+                        onChange={(event) => setWebhookUrl(event.target.value)}
+                        placeholder={t('reportDelivery.field.urlPlaceholder')}
+                        autoComplete="off"
+                        disabled={step.kind === 'submitting'}
+                        data-testid="report-delivery-url"
+                      />
                     )}
-                  </label>
+                  </FormField>
                 )}
               </div>
             </section>
@@ -412,52 +424,52 @@ export function ReportDeliveryDialog({
         <footer className="run-input-dialog__footer">
           {step.kind === 'idle' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" type="button"  onClick={onClose}>
                 {t('reportDelivery.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 ref={primaryRef}
                 type="button"
-                className="command-button command-button-primary"
+
                 onClick={submit}
                 disabled={!formValid}
                 data-testid="report-delivery-submit"
               >
                 <Send size={14} aria-hidden="true" />
                 {t('reportDelivery.send')}
-              </button>
+              </Button>
             </>
           )}
           {step.kind === 'submitting' && (
-            <button type="button" className="command-button command-button-primary" disabled>
+            <Button variant="primary" type="button"  disabled>
               {t('reportDelivery.sending')}
-            </button>
+            </Button>
           )}
           {step.kind === 'succeeded' && (
-            <button
+            <Button variant="primary"
               ref={primaryRef}
               type="button"
-              className="command-button command-button-primary"
+
               onClick={onClose}
               data-testid="report-delivery-close-done"
             >
               {t('reportDelivery.closeButton')}
-            </button>
+            </Button>
           )}
           {step.kind === 'failed' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" type="button"  onClick={onClose}>
                 {t('reportDelivery.closeButton')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 ref={primaryRef}
                 type="button"
-                className="command-button command-button-primary"
+
                 onClick={() => setStep({ kind: 'idle' })}
                 data-testid="report-delivery-retry"
               >
                 {t('reportDelivery.retry')}
-              </button>
+              </Button>
             </>
           )}
         </footer>

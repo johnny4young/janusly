@@ -1,11 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { RecoveryCasePanel } from './RecoveryCasePanel'
 
-vi.mock('../api', () => ({ api: vi.fn() }))
+vi.mock('../api', () => ({ api: vi.fn(), contractApi: vi.fn() }))
 
 const initialState = useWorkflowStore.getState()
 
@@ -40,9 +40,92 @@ function autonomy(level: 1 | 3 = 3) {
   }
 }
 
+type TestState =
+  | 'contained'
+  | 'diagnosed'
+  | 'candidates_ready'
+  | 'awaiting_approval'
+  | 'verified_recovered'
+
+const revisions: Record<TestState, number> = {
+  contained: 2,
+  diagnosed: 3,
+  candidates_ready: 4,
+  awaiting_approval: 6,
+  verified_recovered: 9,
+}
+
+function artifact(
+  id: string,
+  kind: 'diagnosis' | 'candidate' | 'validation' | 'publication' | 'verification',
+  payload: unknown,
+  hashChar: string,
+) {
+  return {
+    id,
+    caseId: 'case-1',
+    kind,
+    payload,
+    sha256: hashChar.repeat(64),
+    actorKind: 'user',
+    actorId: 'operator-1',
+    createdAt: '2026-07-27T12:01:00.000Z',
+  }
+}
+
+const diagnosis = artifact('diagnosis-1', 'diagnosis', {
+  mode: 'deterministic_fallback',
+  summary: 'AI output did not satisfy the semantic contract',
+  hypotheses: [{
+    id: 'contract-violation',
+    cause: 'The mode field is not ai.',
+    confidence: 0.82,
+    evidence: ['The deterministic detector rejected mode=manual.'],
+    counterEvidence: ['The retained evidence does not include the upstream model response.'],
+  }],
+}, 'a')
+
+const replacementCandidate = artifact('candidate-replace', 'candidate', {
+  kind: 'replace_output',
+  decision: 'replace',
+  output: { mode: 'ai' },
+  reason: 'Reviewed against the authoritative record',
+  risk: 'medium',
+  expectedResult: 'The semantic detector passes',
+  requiredPermissions: ['recovery.write'],
+}, 'b')
+
+const lossCandidate = artifact('candidate-loss', 'candidate', {
+  kind: 'accept_loss',
+  decision: 'accept_loss',
+  reason: 'Explicitly accept this business outcome loss',
+  risk: 'high',
+  expectedResult: 'The case closes without changing output',
+  requiredPermissions: ['recovery.write'],
+}, 'c')
+
+const validation = artifact('validation-1', 'validation', {
+  candidateArtifactId: replacementCandidate.id,
+  candidateSha256: replacementCandidate.sha256,
+  caseRevision: 4,
+  passed: true,
+  summary: 'Replacement passed every deterministic detector',
+}, 'd')
+
+const publication = artifact('publication-1', 'publication', {
+  candidateArtifactId: replacementCandidate.id,
+  validationArtifactId: validation.id,
+}, 'e')
+
+const verification = artifact('verification-1', 'verification', {
+  resultState: 'verified_recovered',
+  deterministicValidationPassed: true,
+}, 'f')
+
 function detail(
-  state: 'contained' | 'verified_recovered' = 'contained',
+  state: TestState = 'contained',
   autonomyLevel: 1 | 3 = 3,
+  artifacts: ReturnType<typeof artifact>[] = [],
 ) {
   return {
     case: {
@@ -59,6 +142,7 @@ function detail(
       message: 'AI output is required',
       detailsJson: ['$.mode must equal "ai"'],
       state,
+      revision: revisions[state],
       createdBy: 'operator-1',
       createdAt: '2026-07-27T12:00:00.000Z',
       updatedAt: '2026-07-27T12:02:00.000Z',
@@ -75,17 +159,19 @@ function detail(
         toState: 'contained',
         actorKind: 'system',
         actorId: null,
-        evidenceJson: { detectorId: 'ai-mode' },
+        evidenceJson: [{ kind: 'semantic_detector', id: 'ai-mode' }],
         reason: 'Downstream effects paused',
         occurredAt: '2026-07-27T12:00:01.000Z',
       },
     ],
+    artifacts,
     autonomy: autonomy(autonomyLevel),
   }
 }
 
 beforeEach(() => {
   vi.mocked(api).mockReset()
+  vi.mocked(contractApi).mockReset()
   useWorkflowStore.setState({
     ...initialState,
     toasts: [],
@@ -145,28 +231,47 @@ describe('<RecoveryCasePanel />', () => {
     expect(screen.queryByTestId('recovery-case-workspace-case-1')).toBeNull()
   })
 
-  it('validates and resolves a quarantined result from the case workspace', async () => {
-    let resolved = false
-    vi.mocked(api).mockImplementation(async (path, options) => {
-      if (path === '/v1/recovery/cases/case-1') {
-        return detail(resolved ? 'verified_recovered' : 'contained')
-      }
-      if (
-        path === '/recovery/cases/case-1/resolve'
-        && options?.method === 'POST'
-      ) {
-        resolved = true
-        return {
-          ok: true,
-          runId: 'run-1',
-          sourceNodeId: 'answer',
-          decision: 'replace',
-          resumed: true,
-          resolvedCaseIds: ['case-1'],
-        }
-      }
-      throw new Error(`Unexpected API call: ${path}`)
-    })
+  it('runs diagnose → candidates → validate → approve → apply as distinct governed operations', async () => {
+    vi.mocked(api)
+      .mockResolvedValueOnce(detail('contained'))
+      .mockResolvedValueOnce(detail('diagnosed', 3, [diagnosis]))
+      .mockResolvedValueOnce(detail('candidates_ready', 3, [
+        diagnosis,
+        replacementCandidate,
+        lossCandidate,
+      ]))
+      .mockResolvedValueOnce(detail('awaiting_approval', 3, [
+        diagnosis,
+        replacementCandidate,
+        lossCandidate,
+        validation,
+      ]))
+      .mockResolvedValueOnce(detail('awaiting_approval', 3, [
+        diagnosis,
+        replacementCandidate,
+        lossCandidate,
+        validation,
+      ]))
+      .mockResolvedValueOnce(detail('verified_recovered', 3, [
+        diagnosis,
+        replacementCandidate,
+        lossCandidate,
+        validation,
+        publication,
+        verification,
+      ]))
+    vi.mocked(contractApi)
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        runId: 'run-1',
+        sourceNodeId: 'answer',
+        decision: 'replace',
+        resumed: true,
+        resolvedCaseIds: ['case-1'],
+      })
     const onResolved = vi.fn().mockResolvedValue(undefined)
 
     render(
@@ -179,28 +284,74 @@ describe('<RecoveryCasePanel />', () => {
       />,
     )
 
+    fireEvent.click(await screen.findByTestId('semantic-recovery-diagnose-case-1'))
+    await waitFor(() => expect(contractApi).toHaveBeenNthCalledWith(
+      1,
+      'POST /recovery/cases/{caseId}/diagnose',
+      '/recovery/cases/case-1/diagnose',
+      { expectedRevision: 2 },
+    ))
+    expect(await screen.findByTestId('recovery-diagnosis-case-1'))
+      .toHaveTextContent('Deterministic')
+    expect(screen.getByText('The deterministic detector rejected mode=manual.'))
+      .toBeVisible()
+    expect(screen.getByText('The retained evidence does not include the upstream model response.'))
+      .toBeVisible()
+
     fireEvent.change(
       await screen.findByTestId('semantic-recovery-reason-case-1'),
       { target: { value: 'Reviewed against the authoritative record' } },
     )
-    fireEvent.click(screen.getByTestId('semantic-recovery-replace-case-1'))
+    fireEvent.click(screen.getByTestId('semantic-recovery-propose-case-1'))
+    await waitFor(() => expect(contractApi).toHaveBeenNthCalledWith(
+      2,
+      'POST /recovery/cases/{caseId}/candidates',
+      '/recovery/cases/case-1/candidates',
+      {
+        expectedRevision: 3,
+        manualReplacement: {
+          output: { mode: 'ai' },
+          reason: 'Reviewed against the authoritative record',
+        },
+      },
+    ))
 
+    fireEvent.click(await screen.findByTestId('semantic-recovery-validate-case-1'))
+    await waitFor(() => expect(contractApi).toHaveBeenNthCalledWith(
+      3,
+      'POST /recovery/cases/{caseId}/validate',
+      '/recovery/cases/case-1/validate',
+      { expectedRevision: 4, candidateArtifactId: replacementCandidate.id },
+    ))
+
+    fireEvent.click(await screen.findByTestId('semantic-recovery-approve-case-1'))
+    await waitFor(() => expect(contractApi).toHaveBeenNthCalledWith(
+      4,
+      'POST /recovery/cases/{caseId}/approve',
+      '/recovery/cases/case-1/approve',
+      {
+        expectedRevision: 6,
+        candidateArtifactId: replacementCandidate.id,
+        validationArtifactId: validation.id,
+      },
+    ))
+
+    fireEvent.click(await screen.findByTestId('semantic-recovery-apply-case-1'))
     await waitFor(() => {
-      expect(api).toHaveBeenCalledWith(
-        '/recovery/cases/case-1/resolve',
+      expect(contractApi).toHaveBeenNthCalledWith(
+        5,
+        'POST /recovery/cases/{caseId}/apply',
+        '/recovery/cases/case-1/apply',
         {
-          method: 'POST',
-          body: JSON.stringify({
-            decision: 'replace',
-            reason: 'Reviewed against the authoritative record',
-            output: { mode: 'ai' },
-          }),
+          expectedRevision: 6,
+          candidateArtifactId: replacementCandidate.id,
+          validationArtifactId: validation.id,
         },
       )
       expect(onResolved).toHaveBeenCalledTimes(1)
     })
     expect(await screen.findByText('Recovered')).toBeVisible()
-    expect(screen.queryByTestId('semantic-recovery-replace-case-1')).toBeNull()
+    expect(screen.queryByTestId('semantic-recovery-apply-case-1')).toBeNull()
   })
 
   it('keeps viewers read-only while preserving the case evidence', async () => {
@@ -217,12 +368,15 @@ describe('<RecoveryCasePanel />', () => {
     )
 
     expect(await screen.findByText('AI output is required')).toBeVisible()
-    expect(screen.getByText(/read-only access/i)).toBeVisible()
-    expect(screen.queryByTestId('semantic-recovery-replace-case-1')).toBeNull()
+    expect(screen.getAllByText(/read-only access/i)).toHaveLength(2)
+    expect(screen.queryByTestId('semantic-recovery-diagnose-case-1')).toBeNull()
   })
 
   it('blocks replacement below level 3 while retaining accepted-loss governance', async () => {
-    vi.mocked(api).mockResolvedValue(detail('contained', 1))
+    vi.mocked(api)
+      .mockResolvedValueOnce(detail('contained', 1))
+      .mockResolvedValueOnce(detail('diagnosed', 1, [diagnosis]))
+    vi.mocked(contractApi).mockResolvedValue({})
 
     render(
       <RecoveryCasePanel
@@ -240,14 +394,16 @@ describe('<RecoveryCasePanel />', () => {
     expect(policy).toHaveTextContent('Level 1')
     expect(policy).toHaveTextContent('Apply with approval')
     expect(screen.getByText(/does not permit replacement/i)).toBeVisible()
+
+    fireEvent.click(screen.getByTestId('semantic-recovery-diagnose-case-1'))
+    expect(
+      await screen.findByTestId('semantic-recovery-accept-case-1'),
+    ).toBeVisible()
     expect(
       screen.queryByTestId('semantic-recovery-output-case-1'),
     ).toBeNull()
     expect(
-      screen.queryByTestId('semantic-recovery-replace-case-1'),
+      screen.queryByTestId('semantic-recovery-propose-case-1'),
     ).toBeNull()
-    expect(
-      screen.getByTestId('semantic-recovery-accept-case-1'),
-    ).toBeVisible()
   })
 })

@@ -16,6 +16,8 @@ import { useConfirm } from './ConfirmDialog'
 import type {
   RecoveryQualificationGate,
 } from './WorkflowRecoveryQualification'
+import { Button } from '@/components/ui/Button'
+import { FormField } from '@/components/ui/Form'
 
 const WorkflowRecoveryQualification = lazy(() => import('./WorkflowRecoveryQualification').then(module => ({
   default: module.WorkflowRecoveryQualification,
@@ -302,36 +304,69 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
         && latest && (
         <form className="we-rollout-panel__form" onSubmit={event => { event.preventDefault(); void createRollout() }}>
           <div className="we-rollout-panel__pair">
-            <label className="we-field">
-              <span>{t('workflowRollout.baseline')}</span>
-              <select value={draft.baselineVersionId} onChange={event => setDraft({ ...draft, baselineVersionId: event.target.value })} disabled={mutating}>
-                {versions.slice(1).map(version => <option key={version.id} value={version.id}>v{version.version}</option>)}
-              </select>
-            </label>
+            <FormField label={t('workflowRollout.baseline')}>
+              {(controlProps) => (
+                <select
+                  {...controlProps}
+                  value={draft.baselineVersionId}
+                  onChange={event => setDraft({ ...draft, baselineVersionId: event.target.value })}
+                  disabled={mutating}
+                >
+                  {versions.slice(1).map(version => <option key={version.id} value={version.id}>v{version.version}</option>)}
+                </select>
+              )}
+            </FormField>
             <div className="we-rollout-panel__canary">
               <span>{t('workflowRollout.canary')}</span>
               <strong>v{latest.version}</strong>
             </div>
           </div>
           <div className="we-rollout-panel__fields">
-            <div className="we-field">
-              <label htmlFor="workflow-rollout-traffic">{t('workflowRollout.traffic')}</label>
-              <span className="we-rollout-panel__input-unit">
-                <input id="workflow-rollout-traffic" type="number" min={1} max={50} value={draft.trafficPercent} disabled={mutating} onChange={event => setDraft({ ...draft, trafficPercent: Number(event.target.value) })} />
-                <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
-              </span>
-            </div>
-            <div className="we-field">
-              <label htmlFor="workflow-rollout-minimum-outcomes">{t('workflowRollout.sample')}</label>
-              <input id="workflow-rollout-minimum-outcomes" type="number" min={5} max={100} value={draft.minimumSampleSize} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSampleSize: Number(event.target.value) })} />
-            </div>
-            <div className="we-field">
-              <label htmlFor="workflow-rollout-success-floor">{t('workflowRollout.successRate')}</label>
-              <span className="we-rollout-panel__input-unit">
-                <input id="workflow-rollout-success-floor" type="number" min={1} max={100} value={draft.minimumSuccessRatePercent} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSuccessRatePercent: Number(event.target.value) })} />
-                <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
-              </span>
-            </div>
+            <FormField id="workflow-rollout-traffic" label={t('workflowRollout.traffic')}>
+              {(controlProps) => (
+                <span className="we-rollout-panel__input-unit">
+                  <input
+                    {...controlProps}
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={draft.trafficPercent}
+                    disabled={mutating}
+                    onChange={event => setDraft({ ...draft, trafficPercent: Number(event.target.value) })}
+                  />
+                  <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
+                </span>
+              )}
+            </FormField>
+            <FormField id="workflow-rollout-minimum-outcomes" label={t('workflowRollout.sample')}>
+              {(controlProps) => (
+                <input
+                  {...controlProps}
+                  type="number"
+                  min={5}
+                  max={100}
+                  value={draft.minimumSampleSize}
+                  disabled={mutating}
+                  onChange={event => setDraft({ ...draft, minimumSampleSize: Number(event.target.value) })}
+                />
+              )}
+            </FormField>
+            <FormField id="workflow-rollout-success-floor" label={t('workflowRollout.successRate')}>
+              {(controlProps) => (
+                <span className="we-rollout-panel__input-unit">
+                  <input
+                    {...controlProps}
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={draft.minimumSuccessRatePercent}
+                    disabled={mutating}
+                    onChange={event => setDraft({ ...draft, minimumSuccessRatePercent: Number(event.target.value) })}
+                  />
+                  <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
+                </span>
+              )}
+            </FormField>
           </div>
           <p className="helper-text">{t('workflowRollout.guardrailHint')}</p>
           {qualificationGate?.required && qualificationGate.status !== 'passed' && (
@@ -339,9 +374,9 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
               {t('workflowRollout.qualification.blockedHint')}
             </p>
           )}
-          <button
+          <Button variant="primary"
             type="submit"
-            className="command-button command-button-primary"
+
             disabled={
               mutating
               || !draft.baselineVersionId
@@ -351,7 +386,7 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
             }
           >
             {mutating ? t('workflowRollout.starting') : t('workflowRollout.start')}
-          </button>
+          </Button>
         </form>
       )}
     </section>

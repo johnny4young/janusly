@@ -22,6 +22,7 @@ import type { ActiveTab } from '../types'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { api } from '../api'
+import { Button } from '@/components/ui/Button'
 
 /**
  * Steps whose copy changes when no AI provider key is configured — both have
@@ -122,15 +123,15 @@ export function OnboardingBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab) =>
         <span className="we-onboarding-banner__count">
           {t('onboarding.banner.progress', { done: doneCount, total })}
         </span>
-        <button
+        <Button variant="primary"
           type="button"
-          className="command-button command-button-primary"
+
           onClick={() => onOpenTab(current.target)}
           data-testid="onboarding-banner-cta"
         >
           {tk(`onboarding.step.${current.step}.cta`)}
           <ArrowRight size={14} aria-hidden="true" />
-        </button>
+        </Button>
         <button
           type="button"
           className="we-onboarding-banner__skip"

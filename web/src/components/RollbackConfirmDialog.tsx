@@ -26,6 +26,7 @@ import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { WorkflowDiffView } from './WorkflowDiffView'
 import { useT } from '../i18n'
+import { Button } from '@/components/ui/Button'
 
 type VersionForRollback = {
   id: string
@@ -192,36 +193,36 @@ export function RollbackConfirmDialog({
         <footer className="run-input-dialog__footer">
           {step.kind === 'idle' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" type="button"  onClick={onClose}>
                 {t('common.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 type="button"
                 ref={primaryRef}
-                className="command-button command-button-primary"
+
                 onClick={rollback}
               >
                 <RotateCcw size={14} aria-hidden="true" />
                 <span>{t('rollback.action')}</span>
-              </button>
+              </Button>
             </>
           )}
 
           {step.kind === 'rolling-back' && (
-            <button type="button" className="command-button" disabled>
+            <Button variant="secondary" type="button"  disabled>
               {t('common.working')}
-            </button>
+            </Button>
           )}
 
           {(step.kind === 'done' || step.kind === 'error') && (
-            <button
+            <Button variant="primary"
               type="button"
               ref={primaryRef}
-              className="command-button command-button-primary"
+
               onClick={onClose}
             >
               {t('common.close')}
-            </button>
+            </Button>
           )}
         </footer>
       </div>

@@ -1,7 +1,7 @@
 /**
- * Freeze the exact production owners of Janusly's pre-semantic form/action
- * classes. New UI must use components/ui; migrations deliberately shrink the
- * checked-in baseline with `node scripts/check-ui-legacy.mjs --write-baseline`.
+ * Reject every production owner of Janusly's retired pre-semantic form/action
+ * classes. New UI must use components/ui; there is deliberately no baseline
+ * or allowance list to grow back.
  *
  * Used by: `pnpm lint` and `scripts/check-ui-legacy.test.mjs`.
  */
@@ -58,20 +58,10 @@ export function collectLegacyUiOwners(sourceRoot) {
   return Object.fromEntries(Object.entries(owners).sort(([left], [right]) => left.localeCompare(right)))
 }
 
-export function compareLegacyUiBaseline(actual, baseline) {
-  const violations = []
-  const files = new Set([...Object.keys(actual), ...Object.keys(baseline)])
-  for (const file of Array.from(files).sort()) {
-    const actualClasses = new Set(actual[file] ?? [])
-    const baselineClasses = new Set(baseline[file] ?? [])
-    for (const className of actualClasses) {
-      if (!baselineClasses.has(className)) violations.push(`new legacy class .${className} in ${file}`)
-    }
-    for (const className of baselineClasses) {
-      if (!actualClasses.has(className)) violations.push(`stale baseline class .${className} in ${file}`)
-    }
-  }
-  return violations
+export function legacyUiViolations(actual) {
+  return Object.entries(actual).flatMap(([file, classNames]) => (
+    classNames.map(className => `legacy class .${className} in ${file}`)
+  ))
 }
 
 function isMainModule() {
@@ -81,22 +71,14 @@ function isMainModule() {
 if (isMainModule()) {
   const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const sourceRoot = path.join(repositoryRoot, 'src')
-  const baselinePath = path.join(repositoryRoot, 'scripts', 'ui-legacy-baseline.json')
   const actual = collectLegacyUiOwners(sourceRoot)
-
-  if (process.argv.includes('--write-baseline')) {
-    fs.writeFileSync(baselinePath, `${JSON.stringify(actual, null, 2)}\n`)
-    console.log(`UI legacy baseline updated (${Object.keys(actual).length} production owners).`)
+  const violations = legacyUiViolations(actual)
+  if (violations.length > 0) {
+    console.error('UI legacy guard failed:')
+    for (const violation of violations) console.error(`  ${violation}`)
+    console.error('Migrate every usage to components/ui; legacy allowances are not supported.')
+    process.exitCode = 1
   } else {
-    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'))
-    const violations = compareLegacyUiBaseline(actual, baseline)
-    if (violations.length > 0) {
-      console.error('UI legacy ratchet failed:')
-      for (const violation of violations) console.error(`  ${violation}`)
-      console.error('Migrate new usage to components/ui, or shrink the baseline after an intentional migration.')
-      process.exitCode = 1
-    } else {
-      console.log(`UI legacy ratchet passed (${Object.keys(actual).length} frozen production owners).`)
-    }
+    console.log('UI legacy guard passed (0 production owners, 0 references).')
   }
 }

@@ -13,6 +13,8 @@ import { AlertCircle, Gauge, TimerReset, X } from 'lucide-react'
 import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
+import { Button } from '@/components/ui/Button'
+import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
 
 type CampaignPreview = {
   canCreate: boolean
@@ -202,11 +204,11 @@ export function ReplayCampaignDialog({
             )}
           </section>
 
-          <label className="field-label" htmlFor="replay-campaign-name">{t('replayCampaign.dialog.name')}</label>
-          <input
+          <FieldLabel  htmlFor="replay-campaign-name">{t('replayCampaign.dialog.name')}</FieldLabel>
+          <TextInput
             ref={nameRef}
             id="replay-campaign-name"
-            className="text-field"
+
             value={name}
             maxLength={120}
             onChange={(event) => setName(event.target.value)}
@@ -214,10 +216,10 @@ export function ReplayCampaignDialog({
             data-testid="replay-campaign-name"
           />
 
-          <label className="field-label" htmlFor="replay-campaign-pace">{t('replayCampaign.dialog.pace')}</label>
-          <select
+          <FieldLabel  htmlFor="replay-campaign-pace">{t('replayCampaign.dialog.pace')}</FieldLabel>
+          <SelectControl
             id="replay-campaign-pace"
-            className="text-field"
+
             value={pacingMs}
             onChange={(event) => setPacingMs(Number(event.target.value))}
             disabled={submitting}
@@ -228,25 +230,25 @@ export function ReplayCampaignDialog({
                 {t('replayCampaign.dialog.paceOption', { seconds: value / 1_000 })}
               </option>
             ))}
-          </select>
+          </SelectControl>
           <p className="helper-text we-campaign-pace-helper">
             <Gauge size={13} aria-hidden="true" /> {t('replayCampaign.dialog.paceHelper')}
           </p>
 
           <footer className="run-input-dialog__footer">
-            <button type="button" className="command-button" onClick={close} disabled={submitting}>
+            <Button variant="secondary" type="button"  onClick={close} disabled={submitting}>
               {t('common.cancel')}
-            </button>
-            <button
+            </Button>
+            <Button variant="primary"
               type="button"
-              className="command-button command-button-primary"
+
               disabled={!preview?.canCreate || !name.trim() || submitting}
               onClick={() => { void submit() }}
               data-testid="replay-campaign-create"
             >
               <TimerReset size={14} aria-hidden="true" />
               <span>{submitting ? t('replayCampaign.dialog.creating') : t('replayCampaign.dialog.create')}</span>
-            </button>
+            </Button>
           </footer>
         </div>
       </div>

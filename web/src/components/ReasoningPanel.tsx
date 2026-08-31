@@ -34,6 +34,7 @@ import {
 import type { RunEvent } from '../types'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { EmptyView } from './panel-primitives'
+import { Button } from '@/components/ui/Button'
 
 const RUN_EVENT_ROW_HEIGHT = 172
 
@@ -360,9 +361,9 @@ export function ReasoningPanel({
               { visible: filteredItems.length, count: timelineItems.length },
             )}
           </span>
-          <button
+          <Button variant="secondary"
             type="button"
-            className="command-button"
+
             disabled={!firstFailure}
             onClick={jumpToFirstFailure}
             title={eventsHasMore && !firstFailure
@@ -373,7 +374,7 @@ export function ReasoningPanel({
             {t(eventsHasMore
               ? 'rightPanel.reasoning.jumpToFirstLoadedFailure'
               : 'rightPanel.reasoning.jumpToFirstFailure')}
-          </button>
+          </Button>
         </div>
       </div>
 

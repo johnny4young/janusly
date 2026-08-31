@@ -24,6 +24,7 @@ import { Redo2, Undo2 } from 'lucide-react'
 import { hasNodePaletteDrag, readNodePaletteDrag } from '../canvas-node-drag'
 import { CanvasStepPicker } from './CanvasStepPicker'
 import '@xyflow/react/dist/style.css'
+import { Button } from '@/components/ui/Button'
 
 type WorkflowCanvasProps = {
   nodes: WorkflowGraphNode[]
@@ -226,9 +227,9 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
     <div className="canvas-error" role="alert">
       <strong>{t('canvas.error.title')}</strong>
       <p>{t('canvas.error.body')}</p>
-      <button type="button" className="command-button" onClick={() => window.location.reload()}>
+      <Button variant="secondary" type="button"  onClick={() => window.location.reload()}>
         {t('canvas.error.reload')}
-      </button>
+      </Button>
     </div>
   )
 

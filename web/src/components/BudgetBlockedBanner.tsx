@@ -18,6 +18,7 @@ import type { ActiveTab } from '../types'
 import { useWorkflowStore } from '../store'
 import { Trans, useT } from '../i18n'
 import { requestOperationsSection } from './operations-section-bus'
+import { Button } from '@/components/ui/Button'
 
 export type BudgetBlockedEnvelope = {
   monthlyUsdSpent?: number
@@ -56,9 +57,9 @@ export function BudgetBlockedBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab)
         </span>
       </div>
       <div className="we-budget-banner__actions">
-        <button
+        <Button variant="primary"
           type="button"
-          className="command-button command-button-primary"
+
           onClick={() => {
             requestOperationsSection('ai')
             onOpenTab('operations')
@@ -68,7 +69,7 @@ export function BudgetBlockedBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab)
         >
           <Coins size={14} aria-hidden="true" />
           {t('budgetBanner.openSettings')}
-        </button>
+        </Button>
         <button
           type="button"
           className="we-budget-banner__close"

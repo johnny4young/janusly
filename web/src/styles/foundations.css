@@ -786,18 +786,10 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 /* ==========================================================================
    Form elements
-   Inputs, labels, JSON editors, and form-specific layout. Keep form spacing
+   JSON editors and form-specific layout. Semantic controls live in
+   ui-system.css; keep form spacing
    here instead of attaching margins directly to button variants.
    ========================================================================== */
-.field-label {
-  display: block;
-  color: var(--we-ink-soft);
-  font-size: 12px;
-  font-weight: 600;
-  margin: 10px 0 5px;
-}
-
-.text-field,
 .code-field {
   width: 100%;
   border: 1px solid var(--we-line-strong);
@@ -809,7 +801,6 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.text-field:focus,
 .code-field:focus {
   border-color: var(--we-primary);
   box-shadow: 0 0 0 3px var(--we-primary-ring);
@@ -825,20 +816,10 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 .code-field-short { min-height: 84px; }
 
-.text-field--compact {
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  min-height: 28px;
-  width: auto;
-}
-
 /* ==========================================================================
    Command buttons
-   Shared button contract plus action variants. Feature-specific buttons should
-   extend these classes instead of redefining hover/focus behavior.
+   Older compact/version-only controls. Product actions use ui-button.
    ========================================================================== */
-.command-button,
 .small-command,
 .version-button {
   display: inline-flex;
@@ -855,96 +836,16 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   font-weight: 500;
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
-.command-button:hover,
 .small-command:hover,
 .version-button:hover {
   border-color: var(--we-primary);
   color: var(--we-primary);
 }
-.command-button:active,
 .small-command:active,
 .version-button:active { transform: translateY(1px); }
 
-.command-button-primary {
-  border-color: transparent;
-  background: linear-gradient(135deg, var(--we-primary) 0%, var(--we-primary-strong) 100%);
-  color: var(--we-surface);
-  font-weight: 600;
-  box-shadow: 0 6px 14px -6px var(--we-primary-shadow);
-}
-
-.command-button-primary:hover {
-  border-color: transparent;
-  color: var(--we-surface);
-  filter: brightness(1.05);
-  box-shadow: 0 10px 22px -10px var(--we-primary-shadow-strong);
-}
-
-/* Destructive variant — used by the confirm dialog's confirm button. */
-.command-button-danger {
-  border-color: transparent;
-  background: var(--we-danger-solid);
-  color: var(--we-surface);
-  font-weight: 600;
-}
-.command-button-danger:hover {
-  border-color: transparent;
-  color: var(--we-surface);
-  filter: brightness(1.05);
-}
-
 /* Confirm dialog reuses the run-input modal shell but stays narrower. */
 .run-input-dialog--confirm { max-width: 28rem; }
-
-.we-btn {
-  align-items: center;
-  background: var(--we-surface);
-  border: 1px solid var(--we-line-strong);
-  border-radius: 8px;
-  color: var(--we-ink);
-  display: inline-flex;
-  font-size: 13px;
-  font-weight: 600;
-  gap: 7px;
-  justify-content: center;
-  min-height: 36px;
-  padding: 0 11px;
-  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
-}
-
-.we-btn:hover {
-  border-color: var(--we-primary);
-  color: var(--we-primary);
-}
-
-.we-btn:active { transform: translateY(1px); }
-
-.we-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  transform: none;
-}
-
-.we-btn--primary {
-  background: linear-gradient(135deg, var(--we-primary) 0%, var(--we-primary-strong) 100%);
-  border-color: transparent;
-  box-shadow: 0 6px 14px -6px var(--we-primary-shadow);
-  color: var(--we-surface);
-}
-
-.we-btn--primary:hover {
-  border-color: transparent;
-  color: var(--we-surface);
-  filter: brightness(1.05);
-}
-
-.we-btn--ghost { background: transparent; }
-
-.we-btn--sm {
-  font-size: 12px;
-  min-height: 28px;
-  padding: 0 9px;
-}
 
 .small-command {
   min-height: 30px;
@@ -976,11 +877,6 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
    Palette chips for adding workflow steps, view navigation buttons, and the
    stream status indicator used in the builder sidebar.
    ========================================================================== */
-.command-button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .panel-list { display: grid; gap: 8px; }
 
 .load-older-events {

@@ -23,6 +23,8 @@ import type { Credential, SolutionPackPublic } from '../types'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
+import { Button } from '@/components/ui/Button'
+import { FieldLabel, SelectControl } from '@/components/ui/Form'
 
 type SolutionPacksPanelProps = {
   packs: SolutionPackPublic[]
@@ -142,7 +144,7 @@ export function SolutionPacksPanel({
 
               {(pack.requiredCredentials.length > 0 || pack.requiredOrgConfigs.length > 0) && (
                 <>
-                  <span className="field-label">{t('packs.requires')}</span>
+                  <h4 className="ui-field__label"><span>{t('packs.requires')}</span></h4>
                   <div className="we-tool-params">
                     {pack.requiredCredentials.map((cred) => {
                       const missing = !credentialKeys.has(`${cred.kind}:${cred.name}`)
@@ -183,12 +185,12 @@ export function SolutionPacksPanel({
               )}
 
               <div className="form-actions">
-                <button type="button" className="command-button command-button-primary" disabled={!canInstall} onClick={() => onInstall(pack.id)}>
+                <Button variant="primary" type="button"  disabled={!canInstall} onClick={() => onInstall(pack.id)}>
                   <Download size={13} aria-hidden="true" /> {t('packs.action.install')}
-                </button>
-                <button type="button" className="command-button" disabled={!canInstall} onClick={() => onSampleRun(pack.id)}>
+                </Button>
+                <Button variant="secondary" type="button"  disabled={!canInstall} onClick={() => onSampleRun(pack.id)}>
                   <Play size={13} aria-hidden="true" /> {t('packs.action.sampleRun')}
-                </button>
+                </Button>
               </div>
 
               {selectedFixture && (
@@ -202,12 +204,12 @@ export function SolutionPacksPanel({
                     </span>
                   </div>
                   <p className="helper-text">{t('packs.drill.helper')}</p>
-                  <label className="field-label" htmlFor={`pack-drill-${pack.id}`}>
+                  <FieldLabel  htmlFor={`pack-drill-${pack.id}`}>
                     {t('packs.drill.scenarioLabel')}
-                  </label>
-                  <select
+                  </FieldLabel>
+                  <SelectControl
                     id={`pack-drill-${pack.id}`}
-                    className="text-field text-field--compact we-pack-drill__select"
+                    className="we-pack-drill__select"
                     value={selectedFixture.id}
                     disabled={!canInstall}
                     aria-describedby={drillDescriptionId}
@@ -222,7 +224,7 @@ export function SolutionPacksPanel({
                         {t(`packs.${pack.id}.drills.${fixture.id}.label`, { defaultValue: fixture.label })}
                       </option>
                     ))}
-                  </select>
+                  </SelectControl>
                   <div className="we-pack-drill__summary" id={drillDescriptionId} aria-live="polite">
                     <div className="we-pack-pills">
                       <span className="mode-pill mode-pill-neutral">
@@ -240,15 +242,15 @@ export function SolutionPacksPanel({
                       })}
                     </p>
                   </div>
-                  <button
+                  <Button variant="secondary"
                     type="button"
-                    className="command-button we-pack-drill__action"
+                    className="we-pack-drill__action"
                     disabled={!canInstall}
                     data-testid={`pack-drill-start-${pack.id}`}
                     onClick={() => onInjectFailure(pack.id, selectedFixture.id)}
                   >
                     <Bug size={13} aria-hidden="true" /> {t('packs.action.startDrill')}
-                  </button>
+                  </Button>
                 </section>
               )}
             </div>

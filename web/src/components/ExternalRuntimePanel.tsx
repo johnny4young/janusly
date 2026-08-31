@@ -23,6 +23,7 @@ import { useWorkflowStore } from '../store'
 import { useConfirm } from './ConfirmDialog'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
+import { Button } from '@/components/ui/Button'
 
 type ExternalRuntimeConnection = {
   id: string
@@ -258,9 +259,9 @@ export function ExternalRuntimePanel({ canWrite }: { canWrite: boolean }) {
           </h3>
         </div>
         {canWrite && (
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="we-btn we-btn--ghost we-btn--sm"
+
             onClick={() => {
               setShowForm((current) => !current)
               setForm(emptyForm())
@@ -268,7 +269,7 @@ export function ExternalRuntimePanel({ canWrite }: { canWrite: boolean }) {
           >
             {showForm ? <X size={14} aria-hidden /> : <Plus size={14} aria-hidden />}
             {t(showForm ? 'externalRuntime.action.cancel' : 'externalRuntime.action.new')}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -323,15 +324,15 @@ export function ExternalRuntimePanel({ canWrite }: { canWrite: boolean }) {
             />
             {t('externalRuntime.form.enabled')}
           </label>
-          <button
+          <Button variant="primary" size="sm"
             type="button"
-            className="we-btn we-btn--primary we-btn--sm"
+
             disabled={!canSave}
             onClick={() => void save()}
           >
             <Save size={14} aria-hidden />
             {t(saving ? 'externalRuntime.action.saving' : 'externalRuntime.action.create')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -380,21 +381,21 @@ export function ExternalRuntimePanel({ canWrite }: { canWrite: boolean }) {
                     <code className="we-external-runtime__callback">{connection.callbackUrl}</code>
                   </div>
                   <div className="we-list-row__actions">
-                    <button
+                    <Button variant="ghost" size="sm"
                       type="button"
-                      className="we-btn we-btn--ghost we-btn--sm"
+
                       onClick={() => void copyCallback(connection)}
                     >
                       <Copy size={13} aria-hidden /> {t('externalRuntime.action.copy')}
-                    </button>
+                    </Button>
                     {canWrite && (
-                      <button
+                      <Button variant="danger" size="sm"
                         type="button"
-                        className="we-btn we-btn--danger we-btn--sm"
+
                         onClick={() => void remove(connection)}
                       >
                         <Trash2 size={13} aria-hidden /> {t('externalRuntime.action.delete')}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </li>

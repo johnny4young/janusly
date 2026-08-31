@@ -22,6 +22,8 @@ import { useWorkflowStore } from '../store'
 import { ExperimentSummaryDetail } from './experiments/ExperimentSummary'
 import { asRecord, DEFAULT_MAX_PROVIDER_CALLS, estimateProviderCalls, formatDate, INITIAL_RUN_FORM, updateExperiment, type EvalDataset, type Experiment, type ExperimentKind, type RunForm } from './experiments/types'
 import { EmptyView } from './panel-primitives'
+import { Button } from '@/components/ui/Button'
+import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
 
 export function ExperimentsPanel(): React.ReactElement {
   const { t } = useT()
@@ -182,29 +184,29 @@ export function ExperimentsPanel(): React.ReactElement {
         </div>
         <p className="helper-text">{t('experiments.setup.description')}</p>
         <div className="we-experiments__form">
-          <label className="field-label" htmlFor="experiment-name">{t('experiments.field.name')}</label>
-          <input id="experiment-name" className="text-field" value={runForm.name} onChange={(event) => setRunForm((current) => ({ ...current, name: event.target.value }))} />
-          <label className="field-label" htmlFor="experiment-kind">{t('experiments.field.kind')}</label>
-          <select id="experiment-kind" className="text-field" value={runForm.kind} onChange={(event) => setRunForm((current) => ({ ...current, kind: event.target.value as ExperimentKind }))}>
+          <FieldLabel  htmlFor="experiment-name">{t('experiments.field.name')}</FieldLabel>
+          <TextInput id="experiment-name"  value={runForm.name} onChange={(event) => setRunForm((current) => ({ ...current, name: event.target.value }))} />
+          <FieldLabel  htmlFor="experiment-kind">{t('experiments.field.kind')}</FieldLabel>
+          <SelectControl id="experiment-kind"  value={runForm.kind} onChange={(event) => setRunForm((current) => ({ ...current, kind: event.target.value as ExperimentKind }))}>
             <option value="prompt">{t('experiments.kind.prompt')}</option>
             <option value="model">{t('experiments.kind.model')}</option>
-          </select>
+          </SelectControl>
           <p className="helper-text we-experiments__ref-hint">{t(`experiments.refHint.${runForm.kind}`)}</p>
-          <label className="field-label" htmlFor="experiment-control">{t('experiments.field.control')}</label>
-          <input id="experiment-control" className="text-field" value={runForm.controlRef} onChange={(event) => setRunForm((current) => ({ ...current, controlRef: event.target.value }))} />
-          <label className="field-label" htmlFor="experiment-candidate">{t('experiments.field.candidate')}</label>
-          <input id="experiment-candidate" className="text-field" value={runForm.candidateRef} onChange={(event) => setRunForm((current) => ({ ...current, candidateRef: event.target.value }))} />
-          <label className="field-label" htmlFor="experiment-dataset">{t('experiments.field.dataset')}</label>
-          <select id="experiment-dataset" className="text-field" value={runForm.evalDatasetId} onChange={(event) => setRunForm((current) => ({ ...current, evalDatasetId: event.target.value }))}>
+          <FieldLabel  htmlFor="experiment-control">{t('experiments.field.control')}</FieldLabel>
+          <TextInput id="experiment-control"  value={runForm.controlRef} onChange={(event) => setRunForm((current) => ({ ...current, controlRef: event.target.value }))} />
+          <FieldLabel  htmlFor="experiment-candidate">{t('experiments.field.candidate')}</FieldLabel>
+          <TextInput id="experiment-candidate"  value={runForm.candidateRef} onChange={(event) => setRunForm((current) => ({ ...current, candidateRef: event.target.value }))} />
+          <FieldLabel  htmlFor="experiment-dataset">{t('experiments.field.dataset')}</FieldLabel>
+          <SelectControl id="experiment-dataset"  value={runForm.evalDatasetId} onChange={(event) => setRunForm((current) => ({ ...current, evalDatasetId: event.target.value }))}>
             <option value="">{t('experiments.dataset.placeholder')}</option>
             {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{t('experiments.dataset.option', { name: dataset.name, count: dataset.exampleCount })}</option>)}
-          </select>
-          <label className="field-label" htmlFor="experiment-scorer">{t('experiments.field.scorer')}</label>
-          <select id="experiment-scorer" className="text-field" value={runForm.scorerKind} onChange={(event) => setRunForm((current) => ({ ...current, scorerKind: event.target.value as RunForm['scorerKind'] }))}>
+          </SelectControl>
+          <FieldLabel  htmlFor="experiment-scorer">{t('experiments.field.scorer')}</FieldLabel>
+          <SelectControl id="experiment-scorer"  value={runForm.scorerKind} onChange={(event) => setRunForm((current) => ({ ...current, scorerKind: event.target.value as RunForm['scorerKind'] }))}>
             <option value="string_equality">{t('experiments.scorer.stringEquality')}</option>
             <option value="json_schema">{t('experiments.scorer.jsonSchema')}</option>
             <option value="llm_judge">{t('experiments.scorer.llmJudge')}</option>
-          </select>
+          </SelectControl>
           {selectedDataset && (
             <p
               id="experiment-call-plan"
@@ -220,10 +222,10 @@ export function ExperimentsPanel(): React.ReactElement {
           )}
         </div>
         <div className="form-actions">
-          <button type="button" className="we-button we-button--primary" onClick={() => void runExperiment()} disabled={!canRun || running} aria-describedby={selectedDataset ? 'experiment-call-plan' : undefined}>
+          <Button variant="primary" type="button"  onClick={() => void runExperiment()} disabled={!canRun || running} aria-describedby={selectedDataset ? 'experiment-call-plan' : undefined}>
             <Play size={14} aria-hidden="true" />
             {running ? t('experiments.action.running') : t('experiments.action.run')}
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -237,14 +239,14 @@ export function ExperimentsPanel(): React.ReactElement {
         </div>
         <p className="helper-text">{t('experiments.dataset.description')}</p>
         <div className="we-experiments__dataset-form">
-          <label className="field-label" htmlFor="experiment-dataset-name">{t('experiments.dataset.name')}</label>
-          <input id="experiment-dataset-name" className="text-field" value={datasetName} onChange={(event) => setDatasetName(event.target.value)} />
-          <label className="field-label" htmlFor="experiment-dataset-description">{t('experiments.dataset.descriptionLabel')}</label>
-          <input id="experiment-dataset-description" className="text-field" value={datasetDescription} onChange={(event) => setDatasetDescription(event.target.value)} />
-          <button type="button" className="we-button" onClick={() => void createDataset()} disabled={!datasetName.trim() || creatingDataset}>
+          <FieldLabel  htmlFor="experiment-dataset-name">{t('experiments.dataset.name')}</FieldLabel>
+          <TextInput id="experiment-dataset-name"  value={datasetName} onChange={(event) => setDatasetName(event.target.value)} />
+          <FieldLabel  htmlFor="experiment-dataset-description">{t('experiments.dataset.descriptionLabel')}</FieldLabel>
+          <TextInput id="experiment-dataset-description"  value={datasetDescription} onChange={(event) => setDatasetDescription(event.target.value)} />
+          <Button variant="secondary" type="button"  onClick={() => void createDataset()} disabled={!datasetName.trim() || creatingDataset}>
             <Plus size={14} aria-hidden="true" />
             {creatingDataset ? t('experiments.action.creatingDataset') : t('experiments.action.createDataset')}
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -254,14 +256,14 @@ export function ExperimentsPanel(): React.ReactElement {
             <div className="section-kicker">{t('experiments.history.kicker')}</div>
             <h3 id="experiments-history-title">{t('experiments.history.title')}</h3>
           </div>
-          <button type="button" className="we-button we-button--ghost" onClick={() => bumpPlatformVersion()} aria-label={t('experiments.action.refresh')}>
+          <Button variant="ghost" type="button"  onClick={() => bumpPlatformVersion()} aria-label={t('experiments.action.refresh')}>
             <RefreshCw size={14} aria-hidden="true" />
-          </button>
+          </Button>
         </div>
         {loadError && (
           <div className="run-input-form-error" role="alert">
             <span>{loadError || t('experiments.load.error')}</span>
-            <button type="button" className="we-button we-button--ghost" onClick={() => bumpPlatformVersion()}>{t('common.retry')}</button>
+            <Button variant="ghost" type="button"  onClick={() => bumpPlatformVersion()}>{t('common.retry')}</Button>
           </div>
         )}
         {loading ? <p className="helper-text">{t('common.loading')}</p> : experiments.length === 0 ? (

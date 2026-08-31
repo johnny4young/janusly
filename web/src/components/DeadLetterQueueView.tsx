@@ -29,6 +29,7 @@ import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { RecoveryItemBadge } from './RecoveryItemBadge'
 import { RecoveryItemDrawer } from './RecoveryItemDrawer'
+import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
 
 type QueueSelectionState = {
   selectionMode: boolean
@@ -192,24 +193,24 @@ export function DeadLetterQueueView({
         </div>
       )}
 
-      <label className="field-label" htmlFor="dlq-search">{t('dlq.search.label')}</label>
-      <input
+      <FieldLabel  htmlFor="dlq-search">{t('dlq.search.label')}</FieldLabel>
+      <TextInput
         id="dlq-search"
         type="search"
-        className="text-field"
+
         value={searchInput}
         onChange={event => queue.setSearchInput(event.target.value)}
         placeholder={t('dlq.search.placeholder')}
         data-testid="dlq-search"
       />
 
-      <label className="field-label" htmlFor="dlq-filter">{t('dlq.show')}</label>
-      <select id="dlq-filter" className="text-field" value={status} onChange={event => queue.setStatus(toStatusFilter(event.target.value))}>
+      <FieldLabel  htmlFor="dlq-filter">{t('dlq.show')}</FieldLabel>
+      <SelectControl id="dlq-filter"  value={status} onChange={event => queue.setStatus(toStatusFilter(event.target.value))}>
         {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item])}</option>)}
-      </select>
+      </SelectControl>
 
-      <div className="field-label">{t('dlq.owner.label')}</div>
-      <div className="we-seg" role="group" aria-label={t('dlq.owner.aria')}>
+      <div id="dlq-owner-label" className="ui-field__label"><span>{t('dlq.owner.label')}</span></div>
+      <div className="we-seg" role="group" aria-labelledby="dlq-owner-label" aria-label={t('dlq.owner.aria')}>
         <button
           type="button"
           aria-pressed={ownerScope === 'all'}
@@ -228,10 +229,10 @@ export function DeadLetterQueueView({
         </button>
       </div>
 
-      <label className="field-label" htmlFor="dlq-severity-filter">{t('dlq.severity.label')}</label>
-      <select
+      <FieldLabel  htmlFor="dlq-severity-filter">{t('dlq.severity.label')}</FieldLabel>
+      <SelectControl
         id="dlq-severity-filter"
-        className="text-field"
+
         value={severityFilter}
         onChange={event => queue.setSeverityFilter(toSeverityFilter(event.target.value))}
         data-testid="dlq-severity-filter"
@@ -240,12 +241,12 @@ export function DeadLetterQueueView({
         {SEVERITIES.map(sev => (
           <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}`)}</option>
         ))}
-      </select>
+      </SelectControl>
 
-      <label className="field-label" htmlFor="dlq-sort">{t('dlq.sort.label')}</label>
-      <select
+      <FieldLabel  htmlFor="dlq-sort">{t('dlq.sort.label')}</FieldLabel>
+      <SelectControl
         id="dlq-sort"
-        className="text-field"
+
         value={sortKey}
         onChange={event => queue.setSortKey(toSortKey(event.target.value))}
         data-testid="dlq-sort"
@@ -253,7 +254,7 @@ export function DeadLetterQueueView({
         {SORT_KEYS.map(key => (
           <option key={key} value={key}>{t(SORT_KEY_LABELS[key])}</option>
         ))}
-      </select>
+      </SelectControl>
 
       {/* Bulk-select bar — a Select-all toggle (always, in selection mode) plus
           the count + "Resolve selected" once at least one row is ticked. Reuses

@@ -2,7 +2,18 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Button } from './Button'
-import { FieldStack, FormActions, FormDisclosure, FormField, FormGrid, FormSection } from './Form'
+import {
+  FieldLabel,
+  FieldStack,
+  FormActions,
+  FormDisclosure,
+  FormField,
+  FormGrid,
+  FormSection,
+  SelectControl,
+  TextAreaControl,
+  TextInput,
+} from './Form'
 import { StatusSummary } from './StatusSummary'
 import { SwitchField } from './SwitchField'
 
@@ -33,6 +44,22 @@ describe('semantic UI primitives', () => {
     expect(input).toHaveAttribute('aria-errormessage')
     expect(describedBy).toHaveLength(2)
     expect(describedBy.every((id) => document.getElementById(id))).toBe(true)
+    expect(input).toHaveClass('ui-control')
+  })
+
+  it('keeps compact standalone controls on the same semantic control contract', () => {
+    render(
+      <div>
+        <FieldLabel htmlFor="query">Query</FieldLabel>
+        <TextInput id="query" className="custom-query" />
+        <SelectControl aria-label="Status"><option>Open</option></SelectControl>
+        <TextAreaControl aria-label="Notes" />
+      </div>,
+    )
+
+    expect(screen.getByLabelText('Query')).toHaveClass('ui-control', 'custom-query')
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveAttribute('data-ui-control')
+    expect(screen.getByRole('textbox', { name: 'Notes' })).toHaveClass('ui-control')
   })
 
   it('groups related fields and actions with semantic fieldset structure', () => {
