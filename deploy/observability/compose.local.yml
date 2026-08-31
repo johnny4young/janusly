@@ -21,6 +21,21 @@ services:
       - tempo
     restart: unless-stopped
 
+  alertmanager:
+    image: prom/alertmanager:v0.33.1@sha256:9e082985f56f4c8c9f724e18f2288c6708f472e56a5286b8863d080434ea065d
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ${ALERTMANAGER_CONFIG:-./alertmanager/alertmanager.yml}:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - 127.0.0.1:9093:9093
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:v3.11.0@sha256:dda13e28bf95a5e5ca5b8ed56852006094c1c8e8871d9c9dbeed30aa6e55271f
     command:
@@ -34,6 +49,8 @@ services:
       - prometheus_data:/prometheus
     ports:
       - 127.0.0.1:9090:9090
+    depends_on:
+      - alertmanager
     restart: unless-stopped
 
   tempo:
@@ -72,6 +89,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  alertmanager_data:
   alloy_data:
   grafana_data:
   prometheus_data:

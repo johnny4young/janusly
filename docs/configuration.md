@@ -115,12 +115,12 @@ credential references are restricted by the reserved namespace and optional
 | `OTEL_EXPORTER` | `console`, `otlp`, or `none`. |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP/HTTP trace destination. |
 | `OTEL_SERVICE_INSTANCE_ID` | Stable process instance label. |
+| `ALERTMANAGER_CONFIG` | Optional path mounted by the local observability Compose stack instead of its non-secret webhook receiver. Use an absolute path for a configuration kept outside the repository. |
 
 Prometheus metrics are served on the internal listener. Keep it on loopback
 unless a collector runs on a private service network. In that case a wildcard
 bind is allowed only when port `9464` has no public route or host mapping; the
 same listener includes build identity and pprof diagnostics.
-unless a protected collector requires a network-visible bind.
 
 See `.env.example` for a minimal copyable template and
 [observability](observability.md) for collector configuration.

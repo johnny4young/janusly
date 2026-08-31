@@ -43,7 +43,7 @@ Use `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` for an explicit trace endpoint and
 docker compose -f deploy/observability/compose.local.yml up -d
 ```
 
-The stack contains Alloy, Prometheus, Tempo, and Grafana. Alloy scrapes
+The stack contains Alloy, Prometheus, Alertmanager, Tempo, and Grafana. Alloy scrapes
 `host.docker.internal:9464`. On platforms where a container cannot reach the
 host loopback listener, set `JANUSLY_INTERNAL_HOST=0.0.0.0` only while the
 collector network is protected.
@@ -52,6 +52,7 @@ Local endpoints:
 
 - Grafana: <http://127.0.0.1:3000>
 - Prometheus: <http://127.0.0.1:9090>
+- Alertmanager: <http://127.0.0.1:9093>
 - Tempo: <http://127.0.0.1:3200>
 - Alloy: <http://127.0.0.1:12345>
 
@@ -89,3 +90,23 @@ cadence. The never-ran rule waits for the slowest hourly loop plus margin and
 counts each scrape instance independently, so startup and multiple replicas do
 not create false pages. Dashboard and alert metric families are checked against
 a scrape from the exact executable by the executable E2E suite.
+
+The local Prometheus sends firing rules to Alertmanager; rules without this hop
+only turn red in a UI. The checked-in receiver is deliberately a loopback-host
+webhook (`http://host.docker.internal:5001/alerts`) rather than a credentialed
+mail or chat destination. Run a local receiver there for development, or point
+`ALERTMANAGER_CONFIG` at a separate configuration file carrying the production
+receiver. Alertmanager does not interpolate environment variables inside its
+YAML, so replacing the mounted file is the supported secret boundary.
+
+Alerts group by `alertname` and `severity`. A critical alert suppresses its
+warning sibling, and `JanuslyMetricsMissing` suppresses derivative symptom
+alerts while the target cannot be observed. Validate a replacement before use:
+
+```bash
+docker run --rm \
+  -v "$PWD/deploy/observability/alertmanager:/config:ro" \
+  --entrypoint /bin/amtool \
+  prom/alertmanager:v0.33.1@sha256:9e082985f56f4c8c9f724e18f2288c6708f472e56a5286b8863d080434ea065d \
+  check-config /config/alertmanager.yml
+```

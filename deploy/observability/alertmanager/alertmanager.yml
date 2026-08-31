@@ -1,0 +1,43 @@
+# Local routing defaults. Alertmanager does not expand environment variables in
+# this file; point ALERTMANAGER_CONFIG at a separate, secret-bearing file for a
+# real destination while preserving the grouping and inhibition policy below.
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: default
+  routes:
+    - matchers:
+        - 'severity="critical"'
+      receiver: critical
+      group_wait: 0s
+      repeat_interval: 1h
+
+inhibit_rules:
+  # Once the critical threshold is active, its warning carries no new signal.
+  - source_matchers:
+      - 'severity="critical"'
+    target_matchers:
+      - 'severity="warning"'
+    equal: [alertname]
+
+  # Missing Janusly metrics make the remaining rules derivative noise. Page
+  # once about the absent target rather than once per now-unobservable symptom.
+  - source_matchers:
+      - 'alertname="JanuslyMetricsMissing"'
+    target_matchers:
+      - 'severity=~"warning|critical"'
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://host.docker.internal:5001/alerts
+        send_resolved: true
+  - name: critical
+    webhook_configs:
+      - url: http://host.docker.internal:5001/alerts
+        send_resolved: true
