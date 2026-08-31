@@ -63,8 +63,9 @@ if [[ ! -x ${playwright[0]} ]]; then
 fi
 PLAYWRIGHT_SKIP_WEB_SERVER=1 \
 JANUSLY_SMOKE=1 \
+JANUSLY_TEXT_SEARCH_E2E=1 \
 JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
 E2E_API_URL="$origin" \
 E2E_UPSTREAM_HOST=host.docker.internal \
 E2E_UPSTREAM_BIND=0.0.0.0 \
-  "${playwright[@]}" test e2e/janusly-smoke.spec.ts --project=chromium
+  "${playwright[@]}" test e2e/janusly-smoke.spec.ts e2e/text-search.spec.ts --project=chromium

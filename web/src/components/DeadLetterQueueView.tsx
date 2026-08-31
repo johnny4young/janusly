@@ -21,6 +21,10 @@ import {
 } from '../hooks/useRecoveryQueueFilters'
 import type { UseVirtualListResult } from '../hooks/useVirtualList'
 import { getResolvedLocale, useT } from '../i18n'
+import {
+  TEXT_SEARCH_MAX_CHARACTERS,
+  TEXT_SEARCH_MIN_INDEXABLE_CHARACTERS,
+} from '../lib/text-search'
 import { downtimeSeverity, humanizeAge } from './recovery-center/recovery-center-model'
 import { BULK_ERROR_PREVIEW, deadLetterRowTone } from './dead-letter-model'
 import type { BulkDeadLetterError, DeadLetter } from './dead-letter-types'
@@ -107,6 +111,7 @@ export function DeadLetterQueueView({
     severityFilter,
     sortKey,
     searchInput,
+    searchState,
     filtered,
     recoveryFilterLoading,
     recoveryByDeadLetterId,
@@ -131,6 +136,14 @@ export function DeadLetterQueueView({
     showSuspectDiff,
   } = selection
   const { canReplay, canResolve, canStartRuns, canUseRecovery } = permissions
+  const searchHint = searchState.kind === 'too-short'
+    ? t('apiErrors.search_query_too_short', { minChars: TEXT_SEARCH_MIN_INDEXABLE_CHARACTERS })
+    : searchState.kind === 'too-long'
+      ? t('apiErrors.search_query_too_long', { maxChars: TEXT_SEARCH_MAX_CHARACTERS })
+      : searchState.kind === 'invalid-characters'
+        ? t('apiErrors.search_query_invalid_characters')
+        : null
+  const searchInvalid = searchState.kind === 'too-long' || searchState.kind === 'invalid-characters'
 
   return (
       <section
@@ -201,8 +214,21 @@ export function DeadLetterQueueView({
         value={searchInput}
         onChange={event => queue.setSearchInput(event.target.value)}
         placeholder={t('dlq.search.placeholder')}
+        aria-invalid={searchInvalid || undefined}
+        aria-describedby={searchHint ? 'dlq-search-hint' : undefined}
+        aria-errormessage={searchInvalid ? 'dlq-search-hint' : undefined}
         data-testid="dlq-search"
       />
+      {searchHint && (
+        <p
+          id="dlq-search-hint"
+          className={searchInvalid ? 'ui-field__error' : 'ui-field__hint'}
+          aria-live="polite"
+          data-testid="dlq-search-hint"
+        >
+          {searchHint}
+        </p>
+      )}
 
       <FieldLabel  htmlFor="dlq-filter">{t('dlq.show')}</FieldLabel>
       <SelectControl id="dlq-filter"  value={status} onChange={event => queue.setStatus(toStatusFilter(event.target.value))}>
@@ -393,7 +419,7 @@ export function DeadLetterQueueView({
           <EmptyState
             icon={<CircleCheck />}
             kicker={t(
-              searchInput.trim() !== ''
+              searchState.kind === 'valid'
                 ? 'emptyState.dlq.search.kicker'
                 : severityFilter !== 'all'
                   ? 'emptyState.dlq.severity.kicker'
@@ -402,7 +428,7 @@ export function DeadLetterQueueView({
                     : 'emptyState.dlq.kicker',
             )}
             body={t(
-              searchInput.trim() !== ''
+              searchState.kind === 'valid'
                 ? 'emptyState.dlq.search.body'
                 : severityFilter !== 'all'
                   ? 'emptyState.dlq.severity.body'
@@ -411,7 +437,7 @@ export function DeadLetterQueueView({
                     : 'emptyState.dlq.body',
             )}
             testId={
-              searchInput.trim() !== ''
+              searchState.kind === 'valid'
                 ? 'dlq-empty-search'
                 : severityFilter !== 'all'
                   ? 'dlq-empty-severity'

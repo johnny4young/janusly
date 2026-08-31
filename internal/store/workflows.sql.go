@@ -1703,8 +1703,7 @@ WHERE w.org_id = $1 AND w.deleted_at IS NULL
        OR COALESCE(m.tags, '[]'::jsonb) @> $4::jsonb)
   AND ($5::text IS NULL OR m.folder = $5::text)
   AND ($6::text IS NULL
-       OR w.name ILIKE $6::text ESCAPE '\'
-       OR w.id ILIKE $6::text ESCAPE '\')
+       OR (w.name || chr(31) || w.id) ILIKE $6::text ESCAPE '\')
 ORDER BY w.created_at DESC, w.id DESC
 LIMIT $7
 `

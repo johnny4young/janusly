@@ -49,6 +49,8 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
     onCreate,
     onOpen,
     query,
+    searchHint,
+    searchInvalid,
     rememberFolderToggle,
     recoveryBusyIds,
     renameDraft,
@@ -238,6 +240,8 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
         <FlowsFilterBar
           canWrite={canWrite}
           query={query}
+          searchHint={searchHint}
+          searchInvalid={searchInvalid}
           setQuery={setQuery}
           tagOptions={tagOptions}
           tagFilters={tagFilters}

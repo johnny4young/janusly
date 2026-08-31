@@ -11,6 +11,12 @@ import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { readFlowsFilters, writeFlowsFilters, type SortKey } from '../flows-filters'
+import {
+  activeTextSearch,
+  classifyTextSearch,
+  TEXT_SEARCH_MAX_CHARACTERS,
+  TEXT_SEARCH_MIN_INDEXABLE_CHARACTERS,
+} from '../lib/text-search'
 
 const FAILED_RUN_STATUSES = new Set(['failed', 'cancelled', 'timed_out'])
 const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
@@ -52,7 +58,7 @@ function useWorkflowsDashboardController({
   const [newFolderDropFor, setNewFolderDropFor] = useState<string | null>(null)
   const [newFolderDraft, setNewFolderDraft] = useState('')
   const [query, setQuery] = useState(() => readFlowsFilters()?.query ?? '')
-  const [debouncedQuery, setDebouncedQuery] = useState(() => readFlowsFilters()?.query ?? '')
+  const [debouncedQuery, setDebouncedQuery] = useState(() => activeTextSearch(readFlowsFilters()?.query ?? ''))
   const [sort, setSort] = useState<SortKey>(() => readFlowsFilters()?.sort ?? 'recent')
   const [tagFilters, setTagFilters] = useState<string[]>(() => readFlowsFilters()?.tags ?? [])
   const [tagOptions, setTagOptions] = useState<string[]>([])
@@ -77,12 +83,20 @@ function useWorkflowsDashboardController({
   const [retentionDays, setRetentionDays] = useState<number | null>(null)
   const [trashNowMs, setTrashNowMs] = useState<number | null>(null)
   const listRequestSeq = useRef(0)
+  const queryState = useMemo(() => classifyTextSearch(query), [query])
+  const searchHint = queryState.kind === 'too-short'
+    ? t('apiErrors.search_query_too_short', { minChars: TEXT_SEARCH_MIN_INDEXABLE_CHARACTERS })
+    : queryState.kind === 'too-long'
+      ? t('apiErrors.search_query_too_long', { maxChars: TEXT_SEARCH_MAX_CHARACTERS })
+      : queryState.kind === 'invalid-characters'
+        ? t('apiErrors.search_query_invalid_characters')
+        : null
+  const searchInvalid = queryState.kind === 'too-long' || queryState.kind === 'invalid-characters'
   const buildListParams = useCallback(() => {
     const params = new URLSearchParams()
     tagFilters.forEach(tag => params.append('tag', tag))
     if (folderFilter) params.set('folder', folderFilter)
-    const trimmedQuery = debouncedQuery.trim()
-    if (trimmedQuery) params.set('q', trimmedQuery)
+    if (debouncedQuery) params.set('q', debouncedQuery)
     return params
   }, [tagFilters, folderFilter, debouncedQuery])
   const load = useCallback(async () => {
@@ -135,7 +149,7 @@ function useWorkflowsDashboardController({
     void load()
   }, [load, platformVersion])
   useEffect(() => {
-    const id = setTimeout(() => setDebouncedQuery(query), 300)
+    const id = setTimeout(() => setDebouncedQuery(activeTextSearch(query)), 300)
     return () => clearTimeout(id)
   }, [query])
   useLayoutEffect(() => {
@@ -201,9 +215,10 @@ function useWorkflowsDashboardController({
     return () => { cancelled = true }
   }, [showTrashed, platformVersion])
   const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const locale = getResolvedLocale()
+    const q = queryState.kind === 'valid' ? queryState.value.toLocaleLowerCase(locale) : ''
     const filtered = q
-      ? workflows.filter(w => w.name.toLowerCase().includes(q) || w.id.toLowerCase().includes(q))
+      ? workflows.filter(w => w.name.toLocaleLowerCase(locale).includes(q) || w.id.toLocaleLowerCase(locale).includes(q))
       : workflows
     return [...filtered].sort((a, b) => {
       if (sort === 'name') return a.name.localeCompare(b.name, getResolvedLocale())
@@ -214,7 +229,7 @@ function useWorkflowsDashboardController({
       }
       return (b.updatedAt ?? b.createdAt ?? '').localeCompare(a.updatedAt ?? a.createdAt ?? '')
     })
-  }, [workflows, query, sort])
+  }, [workflows, queryState, sort])
   const visibleIds = useMemo(() => visible.map((w) => w.id), [visible])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
   const showToolbar =
@@ -670,7 +685,7 @@ function useWorkflowsDashboardController({
     deleteTag, deleteWorkflow, draggingId, dropTarget, folderFilter, folderOptions, groups,
     hasActiveFilters, hasFolders, hasMore, load, loadError, loadMore, loading, loadingMore,
     moveToFolder, newFolderDraft, newFolderDropFor, newFolderHover, onCreate, onOpen,
-    persistCollapsedFolders, query, recoveryBusyIds, renameDraft, renameFolder, renameTag,
+    persistCollapsedFolders, query, searchHint, searchInvalid, recoveryBusyIds, renameDraft, renameFolder, renameTag,
     renamingFolder, renamingTag, restoreWorkflow, resumeWorkflow, selectedIds,
     selectionMode, setBulkFolderDraft, setBulkTagDraft, setConfirmDeleteFolder,
     setConfirmDeleteId, setConfirmDeleteTag, setCreationOpen, setDraggingId, setDropTarget,

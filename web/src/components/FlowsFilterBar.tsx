@@ -20,6 +20,8 @@ type TFunc = ReturnType<typeof useT>['t']
 export type FlowsFilterBarProps = {
   canWrite: boolean
   query: string
+  searchHint: string | null
+  searchInvalid: boolean
   setQuery: Dispatch<SetStateAction<string>>
   tagOptions: string[]
   tagFilters: string[]
@@ -52,6 +54,8 @@ export type FlowsFilterBarProps = {
 export function FlowsFilterBar({
   canWrite,
   query,
+  searchHint,
+  searchInvalid,
   setQuery,
   tagOptions,
   tagFilters,
@@ -82,17 +86,31 @@ export function FlowsFilterBar({
 }: FlowsFilterBarProps) {
   return (
     <div className="we-list-toolbar">
-      <span className="we-list-search">
-        <Search size={14} aria-hidden="true" />
-        <TextInput
-          type="search"
-
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder={t('workflowsDashboard.searchPlaceholder')}
-          aria-label={t('workflowsDashboard.searchPlaceholder')}
-          data-testid="workflows-search"
-        />
+      <span className="we-list-search-field">
+        <span className="we-list-search">
+          <Search size={14} aria-hidden="true" />
+          <TextInput
+            type="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={t('workflowsDashboard.searchPlaceholder')}
+            aria-label={t('workflowsDashboard.searchPlaceholder')}
+            aria-invalid={searchInvalid || undefined}
+            aria-describedby={searchHint ? 'workflows-search-hint' : undefined}
+            aria-errormessage={searchInvalid ? 'workflows-search-hint' : undefined}
+            data-testid="workflows-search"
+          />
+        </span>
+        {searchHint && (
+          <small
+            id="workflows-search-hint"
+            className={searchInvalid ? 'ui-field__error' : 'ui-field__hint'}
+            aria-live="polite"
+            data-testid="workflows-search-hint"
+          >
+            {searchHint}
+          </small>
+        )}
       </span>
       {/* Multi-tag filter — selected tags are chips (✕ to drop one), and a
           "+ tag" picker adds another. Several tags AND together server-side. */}

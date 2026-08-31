@@ -113,6 +113,8 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		"public.rate_limit_windows",
 		"public.org_digest_state",
 		"public.schedule_entries",
+		"public.workflows_active_search_trgm_idx",
+		"public.dead_letters_recovery_search_trgm_idx",
 	} {
 		var found sql.NullString
 		if err := db.QueryRowContext(ctx, `SELECT to_regclass($1)`, relation).Scan(&found); err != nil {
@@ -120,6 +122,16 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		}
 		if !found.Valid {
 			return fmt.Errorf("database schema is incomplete: relation %s is missing; reset the database and rerun migrate", relation)
+		}
+	}
+	for _, extension := range []string{"vector", "pg_trgm"} {
+		var exists bool
+		if err := db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = $1)`, extension).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect database extension %s: %w", extension, err)
+		}
+		if !exists {
+			return fmt.Errorf("database schema is incomplete: extension %s is missing; reset the database and rerun migrate", extension)
 		}
 	}
 

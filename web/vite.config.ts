@@ -82,6 +82,7 @@ export default defineConfig(({ mode }) => ({
             || id.endsWith('/src/hooks/useIntegrationCommands.ts')
             || id.endsWith('/src/hooks/useRunCommands.ts')
             || id.endsWith('/src/hooks/useWorkflowCommands.ts')
+            || id.endsWith('/src/lib/text-search.ts')
             || id.endsWith('/src/components/RecoveryCenterPanel.tsx')
             || id.endsWith('/src/components/RecoveryCenterView.tsx')
           ) {

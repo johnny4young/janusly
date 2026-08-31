@@ -198,8 +198,12 @@ func (s *V1Server) listWorkflowsCore(r *http.Request, rc v1Request) opResult {
 		folder = pgtype.Text{String: value, Valid: true}
 	}
 	searchPattern := pgtype.Text{}
-	if value := strings.TrimSpace(query.Get("q")); value != "" && len(value) <= 100 {
-		searchPattern = pgtype.Text{String: "%" + escapeWorkflowLikePattern(value) + "%", Valid: true}
+	search, bad := parseTextSearchQuery(query.Get("q"), "q")
+	if bad != nil {
+		return *bad
+	}
+	if search != "" {
+		searchPattern = pgtype.Text{String: "%" + escapeTextSearchLikePattern(search) + "%", Valid: true}
 	}
 	rows, err := store.New(s.pool).ListWorkflowRows(r.Context(), store.ListWorkflowRowsParams{
 		OrgID: rc.orgID, PageLimit: int32(limit),
@@ -214,10 +218,6 @@ func (s *V1Server) listWorkflowsCore(r *http.Request, rc v1Request) opResult {
 		items = append(items, newWorkflowListItemView(row))
 	}
 	return opOK(items)
-}
-
-func escapeWorkflowLikePattern(value string) string {
-	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }
 
 // versionView emits the contract's WorkflowVersion key set; columns the

@@ -115,12 +115,6 @@ func parseDayRange(day string) (start, end time.Time, ok bool) {
 	return start.UTC(), start.UTC().Add(24 * time.Hour), true
 }
 
-// escapeLikePattern makes the search term match literally under ILIKE.
-func escapeLikePattern(term string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return replacer.Replace(term)
-}
-
 // recoveryQueueRow carries the wire view plus the raw keyset fields the
 // cursor mints from (the view already stringified them).
 type recoveryQueueRow struct {
@@ -162,10 +156,10 @@ func (s *V1Server) listRecoveryQueue(ctx context.Context, orgID string, q recove
 		where = append(where, "dl.created_at >= "+arg(start), "dl.created_at < "+arg(end))
 	}
 	if q.search != "" {
-		pattern := arg("%" + escapeLikePattern(q.search) + "%")
+		pattern := arg("%" + escapeTextSearchLikePattern(q.search) + "%")
 		where = append(where, fmt.Sprintf(
-			"(dl.node_id ILIKE %s OR dl.run_id ILIKE %s OR dl.error_json->>'message' ILIKE %s)",
-			pattern, pattern, pattern))
+			"(dl.node_id || chr(31) || dl.run_id || chr(31) || COALESCE(dl.error_json->>'message', '')) ILIKE %s ESCAPE '\\'",
+			pattern))
 	}
 	if c := q.cursor; c != nil {
 		cAt, cID := arg(c.createdAt), arg(c.id)
@@ -359,10 +353,11 @@ func (s *V1Server) parseRecoveryQueueFilters(r *http.Request, rc v1Request) (rec
 		}
 		q.owner = owner
 	}
-	// Length-guarded (≤100) to bound the ILIKE pattern.
-	if search := strings.TrimSpace(params.Get("search")); len(search) > 0 && len(search) <= 100 {
-		q.search = search
+	search, bad := parseTextSearchQuery(params.Get("search"), "search")
+	if bad != nil {
+		return q, bad
 	}
+	q.search = search
 	return q, nil
 }
 

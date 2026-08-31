@@ -294,6 +294,38 @@ describe('<WorkflowsDashboard />', () => {
     await waitFor(() => expect(calls.some((u) => u.includes('q=billing'))).toBe(true), { timeout: 2000 })
   })
 
+  it('keeps a short term out of PostgreSQL and explains the full-list boundary', async () => {
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/tags') return { tags: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    const fetchesBefore = calls.filter(url => url.startsWith('/workflows?') || url === '/workflows').length
+
+    fireEvent.change(screen.getByTestId('workflows-search'), { target: { value: 'ab' } })
+    expect(screen.getByTestId('workflows-search')).not.toHaveAttribute('aria-invalid')
+    expect(screen.getByTestId('workflows-search-hint')).toHaveTextContent('at least 3')
+    expect(screen.getByText('Billing sync')).toBeInTheDocument()
+    expect(screen.getByText('Onboarding email')).toBeInTheDocument()
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)) })
+    expect(calls.some(url => new URL(url, 'http://x').searchParams.get('q') === 'ab')).toBe(false)
+    expect(calls.filter(url => url.startsWith('/workflows?') || url === '/workflows')).toHaveLength(fetchesBefore)
+  })
+
+  it('marks overlong search input invalid without truncating it silently', async () => {
+    mockApi((url) => url === '/workflows/tags' ? { tags: [] } : FLOWS)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    const value = '界'.repeat(101)
+    fireEvent.change(screen.getByTestId('workflows-search'), { target: { value } })
+    expect(screen.getByTestId('workflows-search')).toHaveValue(value)
+    expect(screen.getByTestId('workflows-search')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByTestId('workflows-search-hint')).toHaveTextContent('at most 100')
+  })
+
   it('back-fills a beyond-cap match returned only by the ?q= fetch', async () => {
     // The initial unfiltered load returns only wf1; the ?q=onboarding fetch
     // returns wf2 — a row absent from the first page (a beyond-cap match the

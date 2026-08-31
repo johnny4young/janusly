@@ -53,8 +53,7 @@ WHERE w.org_id = $1 AND w.deleted_at IS NULL
        OR COALESCE(m.tags, '[]'::jsonb) @> sqlc.arg(tags)::jsonb)
   AND (sqlc.narg(folder)::text IS NULL OR m.folder = sqlc.narg(folder)::text)
   AND (sqlc.narg(search_pattern)::text IS NULL
-       OR w.name ILIKE sqlc.narg(search_pattern)::text ESCAPE '\'
-       OR w.id ILIKE sqlc.narg(search_pattern)::text ESCAPE '\')
+       OR (w.name || chr(31) || w.id) ILIKE sqlc.narg(search_pattern)::text ESCAPE '\')
 ORDER BY w.created_at DESC, w.id DESC
 LIMIT sqlc.arg(page_limit);
 

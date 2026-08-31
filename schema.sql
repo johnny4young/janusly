@@ -19,6 +19,20 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: pg_trgm; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION pg_trgm IS 'text similarity measurement and index searching based on trigrams';
+
+
+--
 -- Name: vector; Type: EXTENSION; Schema: -; Owner: -
 --
 
@@ -2430,6 +2444,13 @@ CREATE INDEX dead_letters_org_status_created_idx ON public.dead_letters USING bt
 
 
 --
+-- Name: dead_letters_recovery_search_trgm_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX dead_letters_recovery_search_trgm_idx ON public.dead_letters USING gin ((((((node_id || chr(31)) || run_id) || chr(31)) || COALESCE((error_json ->> 'message'::text), ''::text))) public.gin_trgm_ops) WHERE (replay_mode IS NULL);
+
+
+--
 -- Name: eval_datasets_org_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3389,6 +3410,13 @@ CREATE INDEX workflow_versions_org_workflow_created_idx ON public.workflow_versi
 --
 
 CREATE UNIQUE INDEX workflow_versions_org_workflow_version_idx ON public.workflow_versions USING btree (org_id, workflow_id, version);
+
+
+--
+-- Name: workflows_active_search_trgm_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX workflows_active_search_trgm_idx ON public.workflows USING gin ((((name || chr(31)) || id)) public.gin_trgm_ops) WHERE (deleted_at IS NULL);
 
 
 --

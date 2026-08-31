@@ -8886,6 +8886,7 @@ button.we-authoring-problems__row:focus-visible {
 
 /* List toolbar — search + sort segmented over a dense list (Flows). */
 .we-list-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.we-list-search-field { display: grid; gap: 4px; flex: 1 1 180px; min-width: 0; }
 .we-list-search { position: relative; display: inline-flex; align-items: center; flex: 1 1 180px; min-width: 0; }
 .we-list-search > svg { position: absolute; left: 10px; color: var(--we-muted); pointer-events: none; }
 .we-list-search > input { width: 100%; padding-left: 30px; }

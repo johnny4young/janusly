@@ -20,3 +20,10 @@ requirements.
 
 Do not add a second frontend project, root package workspace, production API URL
 setting, or separate production web process.
+
+Workflow and recovery substring search share `web/src/lib/text-search.ts` with
+the Go API boundary. The raw input remains visible, while only a valid,
+Unicode-bounded term is debounced and sent. Short in-progress terms show neutral
+guidance rather than issuing a database request; overlong or control-containing
+terms show inline validation. This keeps browser behavior and direct API clients
+consistent without counting UTF-16 code units as characters.

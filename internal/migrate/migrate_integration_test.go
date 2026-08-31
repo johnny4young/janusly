@@ -101,13 +101,26 @@ func TestFreshMigrationIsIdempotentAndComplete(t *testing.T) {
 		t.Fatalf("migration version = %d, want 1", current)
 	}
 
-	for _, relation := range []string{"org_digest_state", "rate_limit_windows", "run_start_idempotency", "run_summary_memory_jobs", "run_wakeups"} {
+	for _, relation := range []string{
+		"org_digest_state", "rate_limit_windows", "run_start_idempotency", "run_summary_memory_jobs", "run_wakeups",
+		"workflows_active_search_trgm_idx", "dead_letters_recovery_search_trgm_idx",
+	} {
 		var found bool
 		if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.' || $1) IS NOT NULL`, relation).Scan(&found); err != nil {
 			t.Fatalf("inspect relation %s: %v", relation, err)
 		}
 		if !found {
 			t.Errorf("current relation %s is missing", relation)
+		}
+	}
+	for _, extension := range []string{"vector", "pg_trgm"} {
+		var found bool
+		if err := db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = $1)`, extension).Scan(&found); err != nil {
+			t.Fatalf("inspect extension %s: %v", extension, err)
+		}
+		if !found {
+			t.Errorf("current extension %s is missing", extension)
 		}
 	}
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Suspense, useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
@@ -109,7 +109,9 @@ function Harness() {
       <button data-testid="set-sort-severity" onClick={() => f.setSortKey('severity')} />
       <button data-testid="set-sort-oldest" onClick={() => f.setSortKey('oldest')} />
       <span data-testid="search">{f.searchInput}</span>
+      <span data-testid="search-state">{f.searchState.kind}</span>
       <button data-testid="set-search" onClick={() => f.setSearchInput('run-7')} />
+      <button data-testid="set-search-short" onClick={() => f.setSearchInput('ab')} />
       <button data-testid="clear-search" onClick={() => f.setSearchInput('')} />
     </div>
   )
@@ -452,6 +454,19 @@ describe('useRecoveryQueueFilters', () => {
     expect(lastQueueParams()?.get('cursor')).toBeNull()
   })
 
+  it('does not fetch or persist a short term without an indexable trigram', async () => {
+    render(<Harness />)
+    await waitFor(() => expect(lastQueueParams()).not.toBeNull())
+    const fetchesBefore = queueFetchCount()
+    fireEvent.click(screen.getByTestId('set-search-short'))
+    expect(screen.getByTestId('search')).toHaveTextContent('ab')
+    expect(screen.getByTestId('search-state')).toHaveTextContent('too-short')
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)) })
+    expect(queueFetchCount()).toBe(fetchesBefore)
+    expect(lastQueueParams()?.get('search')).toBeNull()
+    expect(JSON.parse(localStorage.getItem(FILTERS_KEY) ?? '{}').search).toBe('')
+  })
+
   it('refetches without search= when the search box is cleared', async () => {
     render(<Harness />)
     await waitFor(() => expect(lastQueueParams()).not.toBeNull())
@@ -476,5 +491,13 @@ describe('useRecoveryQueueFilters', () => {
     render(<Harness />)
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('persisted-term'))
     expect(lastQueueParams()?.get('search')).toBe('persisted-term')
+  })
+
+  it('drops an overlong persisted term instead of truncating it into a different search', async () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ search: '界'.repeat(101) }))
+    render(<Harness />)
+    await waitFor(() => expect(lastQueueParams()).not.toBeNull())
+    expect(screen.getByTestId('search')).toHaveTextContent('')
+    expect(lastQueueParams()?.get('search')).toBeNull()
   })
 })

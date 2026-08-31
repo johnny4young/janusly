@@ -21,6 +21,12 @@ import {
 import type { RecoveryItemBadgeData } from '../components/RecoveryItemBadge'
 import type { RecoveryItemDrawerData } from '../components/RecoveryItemDrawer'
 import type { DeadLetter } from '../components/dead-letter-types'
+import {
+  activeTextSearch,
+  classifyTextSearch,
+  TEXT_SEARCH_MAX_CHARACTERS,
+  type TextSearchState,
+} from '../lib/text-search'
 
 /** DLQ-status filter values; `'all'` shows every status. */
 export const statuses = ['all', 'open', 'replayed', 'resolved'] as const
@@ -88,7 +94,7 @@ export function toSortKey(value: string): SortKey {
 /** Coerce an arbitrary stored value into a bounded search term (≤100 chars, the
  *  server's cap). A non-string degrades to the empty term. */
 function toSearchTerm(value: unknown): string {
-  return typeof value === 'string' ? value.slice(0, 100) : ''
+  return typeof value === 'string' && Array.from(value).length <= TEXT_SEARCH_MAX_CHARACTERS ? value : ''
 }
 
 /** Coerce an arbitrary value into an `OwnerScope`, defaulting to `'all'`. */
@@ -228,6 +234,8 @@ export type RecoveryQueueFilters = {
    *  id / error message), so typing doesn't issue a request per keystroke. */
   searchInput: string
   setSearchInput: (value: string) => void
+  /** Shared Unicode validation state. Invalid terms never reach PostgreSQL. */
+  searchState: TextSearchState
   /** Active heatmap drill-in day (`YYYY-MM-DD`) or null. When set, the queue is
    *  restricted to failures created that UTC day; the panel shows a clear chip. */
   dayFilter: string | null
@@ -284,7 +292,8 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   // Raw search box value vs the debounced term that drives the server fetch.
   // Both seed from the persisted term so the first load already carries it.
   const [searchInput, setSearchInput] = useState<string>(initialFilters.search)
-  const [search, setSearch] = useState<string>(initialFilters.search)
+  const [search, setSearch] = useState<string>(() => activeTextSearch(initialFilters.search))
+  const searchState = useMemo(() => classifyTextSearch(searchInput), [searchInput])
   // Heatmap drill-in: a `YYYY-MM-DD` restricting the queue to one UTC day. Not
   // persisted (a transient, click-scoped focus). A committed mount adopts the
   // pending handoff below; never consume sessionStorage during render because
@@ -404,10 +413,10 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   // Settle `searchInput` into the debounced `search` ~300ms after the last
   // keystroke so typing doesn't fire a request per character (mirrors the
   // Flows-list search debounce). The fetch effect keys off `search`, so a
-  // settled change resets pagination to page 1. The term is trimmed + capped to
-  // the server's ≤100 bound here so the persisted + sent value is normalized.
+  // settled change resets pagination to page 1. Invalid short, long, or control
+  // terms settle to no search, so the browser never launches a table-wide scan.
   useEffect(() => {
-    const id = setTimeout(() => setSearch(searchInput.trim().slice(0, 100)), 300)
+    const id = setTimeout(() => setSearch(activeTextSearch(searchInput)), 300)
     return () => clearTimeout(id)
   }, [searchInput])
 
@@ -464,6 +473,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     setSortKey,
     searchInput,
     setSearchInput,
+    searchState,
     filtered: rows,
     recoveryFilterLoading: loading,
     recoveryByDeadLetterId,
