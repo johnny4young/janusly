@@ -135,10 +135,20 @@ async function stubApi(page: Page) {
     },
   ]
 
-  await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ status: 204, body: '' }))
-  await page.route('https://fonts.gstatic.com/**', (route) => route.fulfill({ status: 204, body: '' }))
-  await page.route('http://localhost:3001/**', async (route) => {
+  await page.route('**/*', async (route) => {
     const url = new URL(route.request().url())
+    if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
+      await route.fulfill({ status: 204, body: '' })
+      return
+    }
+    // Production is same-origin. Match browser API transports rather than a
+    // retired localhost:3001 base URL, while leaving documents and assets to
+    // the preview server so transfer measurements remain real.
+    const resourceType = route.request().resourceType()
+    if (resourceType !== 'fetch' && resourceType !== 'xhr') {
+      await route.continue()
+      return
+    }
     // The API helper transparently promotes contract-backed GETs to `/v1`.
     // Normalize those aliases so this production-build harness exercises the
     // same fixture envelope as the unversioned compatibility route.
@@ -148,7 +158,29 @@ async function stubApi(page: Page) {
     // envelope before the Recovery Center home renders, so an empty default
     // would leave every route stuck on the identity-pending shell.
     if (pathname === '/auth/context') body = sessionContext
-    else if (pathname === '/dlq/queue') body = { items: rows, nextCursor: null, hasMore: false }
+    else if (pathname === '/operations/brief') {
+      body = {
+        version: '1',
+        generatedAt: createdAt,
+        actions: [{
+          id: 'triage_failures',
+          kind: 'routine_triage',
+          priority: 1,
+          severity: 'medium',
+          titleKey: 'operations.brief.routineTriage.title',
+          bodyKey: 'operations.brief.routineTriage.body',
+          ctaKey: 'operations.brief.routineTriage.cta',
+          params: {},
+          evidence: [{ kind: 'dead_letter', id: 'perf-b', key: 'status', value: 'open' }],
+          target: {
+            kind: 'dead_letter', id: 'perf-b', runId: 'run-perf-b', destination: 'recover',
+          },
+          allowedActions: ['dlq.inspect', 'dlq.redrive'],
+          createdAt,
+        }],
+        warnings: [],
+      }
+    } else if (pathname === '/dlq/queue') body = { items: rows, nextCursor: null, hasMore: false }
     else if (pathname === '/dlq/counts') body = { total: 2, open: 2, replayed: 0, resolved: 0 }
     else if (pathname === '/dlq' && url.searchParams.has('id')) {
       const id = url.searchParams.get('id') ?? 'perf-a'
@@ -248,21 +280,16 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   await captureElement(canvas, 'web-en-performance-workflow-builder')
 
   await page.getByRole('button', { name: /^Home\b/ }).click()
-  await page.getByTestId('recovery-center-action-cta-triage_failures').click()
-  const secondRow = page.getByTestId('activity-row-recovery:perf-b')
-  await expect(secondRow).toBeVisible()
-  const activityResources = await page.evaluate(() => (
-    (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
-      .map((entry) => new URL(entry.name).pathname)
-  ))
-  expect(activityResources.some(
-    (path) => /ActivityRecoveryDetail-.*\.js$/.test(path),
-  )).toBe(true)
   await resetRouteMeasurement(page)
-  await secondRow.click()
+  await page.getByTestId('recovery-center-action-cta-triage_failures').click()
   const detail = page.getByTestId('activity-recovery-detail')
   await expect(detail).toContainText('Delivery failed')
   const recoveryMeasurement = await measureRoute(page, 'selectedRecovery')
+  expect(recoveryMeasurement.resources.some(
+    (path) => /ActivityRecoveryDetail-.*\.js$/.test(path),
+  )).toBe(true)
+  // Exact-ID inspection intentionally retains the unversioned compatibility
+  // route; collection reads are the calls promoted to the /v1 contract.
   expect(recoveryMeasurement.resources.some((path) => path === '/dlq')).toBe(true)
   expect(recoveryMeasurement.transferredBytes).toBeGreaterThan(0)
   await captureElement(detail, 'web-en-performance-selected-recovery')
