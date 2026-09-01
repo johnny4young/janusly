@@ -31,7 +31,7 @@ type Theme = 'light' | 'dark'
 type Surface =
   | 'home'
   | 'command-palette'
-  | 'recovery-case'
+  | 'recovery'
   | 'ai-studio'
   | 'team'
   | 'connections'
@@ -176,12 +176,22 @@ async function captureSurface(
   }
 }
 
-async function openRecoveryCase(
+async function openRecoverySurface(
   page: Page,
   fixture: SemanticRecoveryFixture,
 ): Promise<void> {
   const preferred = page.getByTestId('recovery-center-action-cta-review_semantic_cases')
   const direct = page.getByTestId(`semantic-recovery-open-${fixture.caseId}`)
+  if (phase === 'before' && !await preferred.or(direct).first().isVisible()) {
+    // The exact pre-phase baseline could list the quarantined run while its
+    // semantic projection degraded to "status incomplete". Preserve that
+    // unreachable state rather than fabricating an internal store transition.
+    const activeWork = page.getByTestId('home-active-work')
+    await expect(activeWork).toContainText(fixture.workflowName)
+    await activeWork.getByRole('button').first().click()
+    await expect(page.getByTestId('run-overview')).toBeVisible()
+    return
+  }
   await expect(preferred.or(direct).first()).toBeVisible({ timeout: 30_000 })
   if (await preferred.isVisible()) {
     await preferred.click()
@@ -249,8 +259,8 @@ async function captureCombination(
   await page.keyboard.press('Escape')
   await expect(palette).toHaveCount(0)
 
-  await openRecoveryCase(page, fixture)
-  surfaces.push(await captureSurface(page, 'recovery-case', slug))
+  await openRecoverySurface(page, fixture)
+  surfaces.push(await captureSurface(page, 'recovery', slug))
 
   await openWorkflowAiAction(page, copy[locale].workflows)
   await expect(page.locator('.ai-studio-hero')).toBeVisible()
