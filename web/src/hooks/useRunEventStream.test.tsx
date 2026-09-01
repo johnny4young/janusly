@@ -200,7 +200,7 @@ describe('useRunEventStream', () => {
         `event: run-status\ndata: ${JSON.stringify({
           kind: 'run.status',
           status: 'waiting',
-          outcomeStatus: 'semantic_quarantined',
+          outcomeStatus: 'semantic_recovering',
           semanticViolationCount: 2,
         })}\n\n`,
       ]),
@@ -211,7 +211,7 @@ describe('useRunEventStream', () => {
     await waitFor(() => {
       expect(patchRunSummary).toHaveBeenCalledWith('run-1', {
         status: 'waiting',
-        outcomeStatus: 'semantic_quarantined',
+        outcomeStatus: 'semantic_recovering',
         semanticViolationCount: 2,
       })
     })

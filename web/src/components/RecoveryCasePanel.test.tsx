@@ -45,6 +45,7 @@ type TestState =
   | 'diagnosed'
   | 'candidates_ready'
   | 'awaiting_approval'
+  | 'monitoring'
   | 'verified_recovered'
 
 const revisions: Record<TestState, number> = {
@@ -52,6 +53,7 @@ const revisions: Record<TestState, number> = {
   diagnosed: 3,
   candidates_ready: 4,
   awaiting_approval: 6,
+  monitoring: 8,
   verified_recovered: 9,
 }
 
@@ -268,6 +270,14 @@ describe('<RecoveryCasePanel />', () => {
         replacementCandidate,
         validation,
       ]))
+      .mockResolvedValueOnce(detail('monitoring', 3, [
+        diagnosis,
+        repairCandidate,
+        lossCandidate,
+        replacementCandidate,
+        validation,
+        publication,
+      ]))
       .mockResolvedValueOnce(detail('verified_recovered', 3, [
         diagnosis,
         repairCandidate,
@@ -369,7 +379,11 @@ describe('<RecoveryCasePanel />', () => {
       )
       expect(onResolved).toHaveBeenCalledTimes(1)
     })
-    expect(await screen.findByText('Recovered')).toBeVisible()
+    expect((await screen.findByText('Monitoring')).closest('[data-tone]')).toHaveAttribute(
+      'data-tone',
+      'info',
+    )
+    expect(await screen.findByText('Recovered', {}, { timeout: 2_500 })).toBeVisible()
     expect(screen.queryByTestId('semantic-recovery-apply-case-1')).toBeNull()
   })
 

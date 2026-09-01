@@ -334,6 +334,22 @@ WHERE org_id = $1 AND run_id = $2 AND source_node_id = $3
 ORDER BY id
 FOR UPDATE;
 
+-- Terminal settlement follows the same node → run → case lock hierarchy as
+-- governed apply. Only cases already published into monitoring are eligible;
+-- an earlier recovery state can never be finalized by a run event.
+-- name: LockMonitoringSemanticRecoveryCases :many
+SELECT * FROM recovery_cases
+WHERE org_id = $1 AND run_id = $2
+  AND source = 'semantic_violation' AND state = 'monitoring'
+ORDER BY id
+FOR UPDATE;
+
+-- name: GetLatestRecoveryCaseArtifactByKind :one
+SELECT * FROM recovery_case_artifacts
+WHERE org_id = $1 AND case_id = $2 AND kind = $3
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: ReplaceSemanticRunNodeOutput :execrows
 UPDATE run_nodes AS node
 SET state_json = sqlc.arg(state_json)
@@ -344,12 +360,31 @@ WHERE node.run_id = sqlc.arg(run_id)
   AND run.id = node.run_id
   AND run.org_id = sqlc.arg(org_id);
 
--- name: CountOpenSemanticRecoveryCases :one
+-- Publishing and monitoring cases no longer block the run: their immutable
+-- replacement has already passed every deterministic detector and terminal
+-- verification is now owned by the resumed generation.
+-- name: CountBlockingSemanticRecoveryCases :one
 SELECT count(*)::int AS total_open,
        count(*) FILTER (WHERE action = 'quarantine')::int AS open_quarantines
 FROM recovery_cases
 WHERE org_id = $1 AND run_id = $2
-  AND state NOT IN ('verified_recovered', 'recurred', 'accepted_loss', 'abandoned');
+  AND state NOT IN (
+    'publishing', 'monitoring',
+    'verified_recovered', 'recurred', 'accepted_loss', 'abandoned'
+  );
+
+-- Monitoring has its own honest run posture. Only the terminal generation can
+-- promote it to recovered; a failed/cancelled generation clears it while the
+-- verification artifact remains the durable explanation.
+-- name: FinalizeRunSemanticRecoveryOutcome :execrows
+UPDATE runs
+SET outcome_status = CASE
+  WHEN sqlc.arg(terminal_success)::boolean THEN 'semantic_recovered'
+  ELSE NULL
+END
+WHERE id = $1 AND org_id = $2
+  AND status IN ('succeeded', 'failed', 'cancelled', 'timed_out')
+  AND outcome_status = 'semantic_recovering';
 
 -- name: UpdateRunSemanticResolution :execrows
 UPDATE runs

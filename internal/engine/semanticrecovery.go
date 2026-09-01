@@ -520,7 +520,7 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 	}
 	finalState := "accepted_loss"
 	if decision == "replace" {
-		finalState = "verified_recovered"
+		finalState = "monitoring"
 	}
 
 	if decision == "replace" {
@@ -566,7 +566,7 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 		}
 	}
 
-	remaining, err := q.CountOpenSemanticRecoveryCases(ctx, store.CountOpenSemanticRecoveryCasesParams{
+	remaining, err := q.CountBlockingSemanticRecoveryCases(ctx, store.CountBlockingSemanticRecoveryCasesParams{
 		OrgID: orgID, RunID: snapshot.RunID,
 	})
 	if err != nil {
@@ -579,7 +579,7 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 		case remaining.TotalOpen > 0:
 			outcomeStatus = "semantic_violation"
 		case decision == "replace":
-			outcomeStatus = "semantic_recovered"
+			outcomeStatus = "semantic_recovering"
 		default:
 			outcomeStatus = "semantic_accepted_loss"
 		}
@@ -683,14 +683,13 @@ func scrubSemanticReplacementValue(value any) any {
 }
 
 var semanticRecoveryReplacementPaths = map[string][]string{
-	"detected":          {"contained", "diagnosed", "candidates_ready", "validating", "awaiting_approval", "publishing", "monitoring", "verified_recovered"},
-	"contained":         {"diagnosed", "candidates_ready", "validating", "awaiting_approval", "publishing", "monitoring", "verified_recovered"},
-	"diagnosed":         {"candidates_ready", "validating", "awaiting_approval", "publishing", "monitoring", "verified_recovered"},
-	"candidates_ready":  {"validating", "awaiting_approval", "publishing", "monitoring", "verified_recovered"},
-	"validating":        {"awaiting_approval", "publishing", "monitoring", "verified_recovered"},
-	"awaiting_approval": {"publishing", "monitoring", "verified_recovered"},
-	"publishing":        {"monitoring", "verified_recovered"},
-	"monitoring":        {"verified_recovered"},
+	"detected":          {"contained", "diagnosed", "candidates_ready", "validating", "awaiting_approval", "publishing", "monitoring"},
+	"contained":         {"diagnosed", "candidates_ready", "validating", "awaiting_approval", "publishing", "monitoring"},
+	"diagnosed":         {"candidates_ready", "validating", "awaiting_approval", "publishing", "monitoring"},
+	"candidates_ready":  {"validating", "awaiting_approval", "publishing", "monitoring"},
+	"validating":        {"awaiting_approval", "publishing", "monitoring"},
+	"awaiting_approval": {"publishing", "monitoring"},
+	"publishing":        {"monitoring"},
 }
 
 type semanticResolutionArtifactPair struct {
@@ -728,18 +727,21 @@ func (e *Engine) insertSemanticResolutionArtifacts(
 	if err != nil {
 		return semanticResolutionArtifactPair{}, err
 	}
-	verification, err := insert("verification", map[string]any{
-		"eventId": eventID, "caseId": item.ID, "runId": item.RunID,
-		"sourceNodeId": item.SourceNodeID, "detectorId": item.DetectorID,
-		"decision": decision, "resultState": finalState,
-		"deterministicValidationPassed": decision == "replace",
-		"humanLossAcknowledged":         decision == "accept_loss",
-		"candidateArtifactId":           candidate.ID,
-		"validationArtifactId":          validation.ID,
-		"verifiedAt":                    occurredAt.UTC().Format(time.RFC3339Nano),
-	}, occurredAt.Add(time.Millisecond))
-	if err != nil {
-		return semanticResolutionArtifactPair{}, err
+	var verification store.RecoveryCaseArtifact
+	if finalState == "accepted_loss" {
+		verification, err = insert("verification", map[string]any{
+			"eventId": eventID, "caseId": item.ID, "runId": item.RunID,
+			"sourceNodeId": item.SourceNodeID, "detectorId": item.DetectorID,
+			"decision": decision, "resultState": finalState,
+			"deterministicValidationPassed": false,
+			"humanLossAcknowledged":         true,
+			"candidateArtifactId":           candidate.ID,
+			"validationArtifactId":          validation.ID,
+			"verifiedAt":                    occurredAt.UTC().Format(time.RFC3339Nano),
+		}, occurredAt.Add(time.Millisecond))
+		if err != nil {
+			return semanticResolutionArtifactPair{}, err
+		}
 	}
 	return semanticResolutionArtifactPair{publication: publication, verification: verification}, nil
 }
@@ -762,7 +764,7 @@ func (e *Engine) advanceSemanticResolutionCase(
 		stepAt := occurredAt.Add(time.Duration(index) * time.Millisecond)
 		receiptReason := reason
 		if decision == "replace" && index == len(targets)-1 {
-			receiptReason = "Replacement output passed every deterministic detector"
+			receiptReason = "Replacement output passed every deterministic detector; terminal verification is monitoring"
 		}
 		receipt := domain.RecoveryCaseTransitionReceipt{
 			CaseID: item.ID, From: from, To: to,
@@ -820,6 +822,172 @@ func (e *Engine) advanceSemanticResolutionCase(
 		}
 		from = to
 		revision = moved.Revision
+	}
+	return nil
+}
+
+type semanticPublicationBinding struct {
+	CaseID               string `json:"caseId"`
+	RunID                string `json:"runId"`
+	Decision             string `json:"decision"`
+	CandidateArtifactID  string `json:"candidateArtifactId"`
+	CandidateSha256      string `json:"candidateSha256"`
+	ValidationArtifactID string `json:"validationArtifactId"`
+	ValidationSha256     string `json:"validationSha256"`
+}
+
+// finalizeSemanticRecoveryMonitoring is the generation-bound verification
+// half of governed apply. The approved replacement only reaches monitoring;
+// the ordinary terminal run transaction owns the final artifact and CAS so a
+// failed downstream effect can never leave a falsely verified recovery case.
+func (e *Engine) finalizeSemanticRecoveryMonitoring(
+	ctx context.Context,
+	q *store.Queries,
+	runID, terminalStatus, terminalEventID string,
+	terminalAt time.Time,
+) error {
+	resultState := "recurred"
+	terminalSuccess := terminalStatus == "succeeded"
+	switch terminalStatus {
+	case "succeeded":
+		resultState = "verified_recovered"
+	case "failed", "cancelled", "timed_out":
+	default:
+		return fmt.Errorf("unsupported semantic verification terminal status %q", terminalStatus)
+	}
+	if runID == "" || terminalEventID == "" {
+		return fmt.Errorf("semantic verification requires run and terminal event ids")
+	}
+	run, err := q.GetRunExecution(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("read semantic verification run: %w", err)
+	}
+	if run.Status != terminalStatus {
+		return fmt.Errorf("semantic verification run status = %s, want %s", run.Status, terminalStatus)
+	}
+	cases, err := q.LockMonitoringSemanticRecoveryCases(
+		ctx,
+		store.LockMonitoringSemanticRecoveryCasesParams{
+			OrgID: run.OrgID, RunID: runID,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("lock monitoring semantic recovery cases: %w", err)
+	}
+	if len(cases) == 0 {
+		return nil
+	}
+	if _, err := q.FinalizeRunSemanticRecoveryOutcome(
+		ctx,
+		store.FinalizeRunSemanticRecoveryOutcomeParams{
+			ID: runID, OrgID: run.OrgID, TerminalSuccess: terminalSuccess,
+		},
+	); err != nil {
+		return fmt.Errorf("finalize semantic recovery outcome: %w", err)
+	}
+
+	for index, item := range cases {
+		publication, err := q.GetLatestRecoveryCaseArtifactByKind(
+			ctx,
+			store.GetLatestRecoveryCaseArtifactByKindParams{
+				OrgID: item.OrgID, CaseID: item.ID, Kind: "publication",
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("read semantic publication artifact: %w", err)
+		}
+		var binding semanticPublicationBinding
+		if json.Unmarshal(publication.PayloadJson, &binding) != nil ||
+			binding.CaseID != item.ID || binding.RunID != runID ||
+			binding.Decision != "replace" || binding.CandidateArtifactID == "" ||
+			binding.ValidationArtifactID == "" {
+			return fmt.Errorf("invalid semantic publication binding for case %s", item.ID)
+		}
+
+		verifiedAt := terminalAt.Add(time.Duration(index*2+1) * time.Millisecond)
+		payload := map[string]any{
+			"eventId": terminalEventID, "caseId": item.ID, "runId": runID,
+			"sourceNodeId": item.SourceNodeID, "detectorId": item.DetectorID,
+			"decision": "replace", "resultState": resultState,
+			"terminalStatus":                 terminalStatus,
+			"generationBoundTerminalSuccess": terminalSuccess,
+			"deterministicValidationPassed":  true,
+			"publicationArtifactId":          publication.ID,
+			"publicationSha256":              publication.PayloadSha256,
+			"candidateArtifactId":            binding.CandidateArtifactID,
+			"candidateSha256":                binding.CandidateSha256,
+			"validationArtifactId":           binding.ValidationArtifactID,
+			"validationSha256":               binding.ValidationSha256,
+			"verifiedAt":                     verifiedAt.UTC().Format(time.RFC3339Nano),
+		}
+		raw, hash, err := boundedRecoveryArtifact(payload)
+		if err != nil {
+			return err
+		}
+		verification, err := q.InsertRecoveryCaseArtifact(
+			ctx,
+			store.InsertRecoveryCaseArtifactParams{
+				ID:    StableSemanticID("rca", item.ID, "verification", hash),
+				OrgID: item.OrgID, CaseID: item.ID, Kind: "verification",
+				PayloadJson: raw, PayloadSha256: hash,
+				ActorKind: "system", ActorID: pgtype.Text{}, CreatedAt: verifiedAt,
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("insert terminal semantic verification: %w", err)
+		}
+		reason := "Approved replacement reached generation-bound terminal success"
+		if !terminalSuccess {
+			reason = "Approved replacement did not reach generation-bound terminal success: " + terminalStatus
+		}
+		receipt := domain.RecoveryCaseTransitionReceipt{
+			CaseID: item.ID, From: "monitoring", To: resultState,
+			ActorKind: "system", Reason: reason,
+			Evidence: []domain.RecoveryCaseEvidenceRef{
+				{Kind: "run", ID: runID},
+				{Kind: "run_event", ID: terminalEventID},
+				{Kind: "publication", ID: publication.ID, Sha256: publication.PayloadSha256},
+				{Kind: "effect", ID: verification.ID, Sha256: verification.PayloadSha256},
+			},
+		}
+		if problems := domain.ValidateRecoveryCaseTransitionReceipt(receipt); len(problems) > 0 {
+			return fmt.Errorf("validate terminal semantic recovery receipt: %s", strings.Join(problems, "; "))
+		}
+		transitionAt := verifiedAt.Add(time.Millisecond)
+		moved, err := q.AdvanceRecoveryCaseStateAtRevision(
+			ctx,
+			store.AdvanceRecoveryCaseStateAtRevisionParams{
+				ToState: resultState, OccurredAt: transitionAt, Terminal: true,
+				OrgID: item.OrgID, ID: item.ID, FromState: "monitoring",
+				ExpectedRevision: item.Revision,
+			},
+		)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrRecoveryCaseConflict
+			}
+			return fmt.Errorf("finalize semantic recovery case: %w", err)
+		}
+		evidenceJSON, err := json.Marshal(receipt.Evidence)
+		if err != nil {
+			return fmt.Errorf("marshal terminal semantic evidence: %w", err)
+		}
+		inserted, err := q.InsertRecoveryCaseTransition(
+			ctx,
+			store.InsertRecoveryCaseTransitionParams{
+				ID:    StableSemanticID("sct", item.ID, "monitoring", resultState, fmt.Sprint(item.Revision)),
+				OrgID: item.OrgID, CaseID: item.ID,
+				FromState: "monitoring", ToState: resultState,
+				ActorKind: "system", ActorID: pgtype.Text{}, EvidenceJson: evidenceJSON,
+				Reason: pgtype.Text{String: reason, Valid: true}, OccurredAt: transitionAt,
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("insert terminal semantic transition: %w", err)
+		}
+		if inserted != 1 || moved.State != resultState {
+			return ErrRecoveryCaseConflict
+		}
 	}
 	return nil
 }

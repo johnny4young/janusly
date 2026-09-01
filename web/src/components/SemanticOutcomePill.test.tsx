@@ -54,6 +54,7 @@ describe('<SemanticOutcomePill />', () => {
     const statuses: NonNullable<RunSummary['outcomeStatus']>[] = [
       'semantic_violation',
       'semantic_quarantined',
+      'semantic_recovering',
       'semantic_recovered',
       'semantic_accepted_loss',
     ]

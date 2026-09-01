@@ -6,6 +6,7 @@ export type SemanticRecoveryFixture = {
   runId: string
   caseId: string
   workflowName: string
+  providerTarget: string
 }
 
 export function semanticFixtureCopy(locale: SemanticFixtureLocale) {
@@ -60,6 +61,7 @@ export async function createSemanticRecoveryFixture(
     orgPrefix?: string
     orgSuffix?: string
     userId?: string
+    providerBaseUrl?: string
   } = {},
 ): Promise<SemanticRecoveryFixture> {
   const apiUrl = options.apiUrl ?? process.env.E2E_API_URL ?? 'http://127.0.0.1:7311'
@@ -72,6 +74,11 @@ export async function createSemanticRecoveryFixture(
   const userId = options.userId ?? `semantic-operator-${locale}`
   const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const target = `semantic-${locale}-${nonce}`
+  const providerBaseUrl = (
+    options.providerBaseUrl ?? 'http://provider-simulator:4010'
+  ).replace(/\/+$/, '')
+  const providerUrl = new URL(`${providerBaseUrl}/webhook`)
+  providerUrl.searchParams.set('target', target)
   const workflow = {
     dslVersion: '1.0',
     id: `semantic-outcome-${locale}-${nonce}`,
@@ -92,7 +99,7 @@ export async function createSemanticRecoveryFixture(
         id: 'deliver',
         type: 'http',
         config: {
-          url: `http://provider-simulator:4010/webhook?target=${target}`,
+          url: providerUrl.toString(),
           method: 'POST',
           headers: { 'X-Idempotency-Key': target },
           body: { result: '{{context.draft_response.output.response}}' },
@@ -203,6 +210,7 @@ export async function createSemanticRecoveryFixture(
         runId: started.runId,
         caseId: recoveryCase.id,
         workflowName: copy.workflowName,
+        providerTarget: target,
       }
     }
     await new Promise(resolve => setTimeout(resolve, 250))

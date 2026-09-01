@@ -71,6 +71,17 @@ function isRecoveryCaseState(value: unknown): value is RecoveryCase['state'] {
     && RECOVERY_CASE_STATES.has(value as RecoveryCase['state'])
 }
 
+function recoveryCaseTone(
+  state: RecoveryCase['state'],
+  action: RecoveryCase['action'],
+): 'danger' | 'warning' | 'info' | 'success' | 'neutral' {
+  if (state === 'verified_recovered') return 'success'
+  if (state === 'accepted_loss' || state === 'abandoned') return 'neutral'
+  if (state === 'publishing' || state === 'monitoring') return 'info'
+  if (state === 'recurred' || action === 'quarantine') return 'danger'
+  return 'warning'
+}
+
 function isRecoveryCaseActorKind(
   value: unknown,
 ): value is RecoveryCaseTransition['actorKind'] {
@@ -417,6 +428,7 @@ export function RecoveryCasePanel({
 
   const loadCase = useCallback(async (
     preferredCandidateKind?: RecoveryCandidateKind,
+    background = false,
   ) => {
     if (!caseId) {
       setDetail(null)
@@ -425,8 +437,10 @@ export function RecoveryCasePanel({
       setLoading(false)
       return
     }
-    setLoading(true)
-    setLoadError(null)
+    if (!background) {
+      setLoading(true)
+      setLoadError(null)
+    }
     try {
       const path = `/v1${V1_READ_PATHS.recoveryCase.replace(
         '{caseId}',
@@ -437,6 +451,7 @@ export function RecoveryCasePanel({
         throw new Error(t('recoveryCase.invalidResponse'))
       }
       setDetail(parsed)
+      setLoadError(null)
       const candidates = parsed.artifacts.filter(artifact => artifact.kind === 'candidate')
       setSelectedCandidateId(current => selectCandidateId(
         candidates,
@@ -445,16 +460,31 @@ export function RecoveryCasePanel({
       ))
       if (parsed.case.state !== 'awaiting_approval') setApprovedCandidateId(null)
     } catch (error) {
-      setDetail(null)
+      if (!background) setDetail(null)
       setLoadError(tApiError(error) || t('recoveryCase.loadFailed'))
     } finally {
-      setLoading(false)
+      if (!background) setLoading(false)
     }
   }, [caseId, t])
 
   useEffect(() => {
     void loadCase()
   }, [loadCase])
+
+  useEffect(() => {
+    if (detail?.case.state !== 'monitoring') return
+    let cancelled = false
+    let timeout = 0
+    const refresh = async () => {
+      await loadCase(undefined, true)
+      if (!cancelled) timeout = window.setTimeout(refresh, 1_000)
+    }
+    timeout = window.setTimeout(refresh, 1_000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeout)
+    }
+  }, [detail?.case.state, loadCase])
 
   const formatter = useMemo(
     () => new Intl.DateTimeFormat(getResolvedLocale(), {
@@ -688,14 +718,7 @@ export function RecoveryCasePanel({
               </div>
               <span
                 className="we-pill"
-                data-tone={
-                  recoveryCase.state === 'verified_recovered'
-                  || recoveryCase.state === 'accepted_loss'
-                    ? 'success'
-                    : recoveryCase.action === 'quarantine'
-                      ? 'danger'
-                      : 'warning'
-                }
+                data-tone={recoveryCaseTone(recoveryCase.state, recoveryCase.action)}
               >
                 {t(`recoveryCase.state.${recoveryCase.state}`)}
               </span>

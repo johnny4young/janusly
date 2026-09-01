@@ -4,9 +4,11 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/store"
 )
 
 func semanticWorkflow(id, action string, passWhen string) *domain.Workflow {
@@ -165,8 +168,9 @@ func TestSemanticOutcomeInterception(t *testing.T) {
 
 // The governed operator path is intentionally provider-free: immutable
 // artifacts bind validation and a 30-minute human grant to one case revision;
-// exactly one concurrent apply can consume the grant, publish the replacement,
-// verify the outcome and resume downstream work.
+// exactly one concurrent apply can consume the grant, publish the replacement
+// into monitoring and resume downstream work; only terminal generation success
+// may append verification and close the case.
 func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
@@ -180,9 +184,20 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	defer pool.Close()
 	eng := New(pool)
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
-	workerCtx, stop := context.WithCancel(context.Background())
-	defer stop()
-	go func() { _ = eng.RunWorkers(workerCtx, 2, 20*time.Millisecond, dispatcher.Execute, quietLogger()) }()
+	startWorkers := func() (context.CancelFunc, <-chan struct{}) {
+		workerCtx, stop := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = eng.RunWorkers(workerCtx, 2, 20*time.Millisecond, dispatcher.Execute, quietLogger())
+		}()
+		return stop, done
+	}
+	stop, workersDone := startWorkers()
+	defer func() {
+		stop()
+		<-workersDone
+	}()
 
 	org := fmt.Sprintf("org-governed-semantic-%d", time.Now().UnixNano())
 	wf := semanticWorkflow("wf-governed", "quarantine", "context.calc.output.total === '10'")
@@ -194,6 +209,8 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 		t.Fatalf("start quarantined run: %v", err)
 	}
 	waitRunStatus(t, pool, runID, "waiting", 0)
+	stop()
+	<-workersDone
 
 	var caseID, state string
 	var revision int64
@@ -305,6 +322,31 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	if winners != 1 || !applied.Resumed || applied.Decision != "replace" {
 		t.Fatalf("exactly one governed apply must resume: winners=%d result=%+v errors=%v", winners, applied, errs)
 	}
+	if err := pool.QueryRow(ctx, `SELECT state, revision FROM recovery_cases WHERE org_id = $1 AND id = $2`, org, caseID).
+		Scan(&state, &revision); err != nil {
+		t.Fatalf("read monitoring case: %v", err)
+	}
+	if state != "monitoring" || revision != validated.Case.Revision+2 {
+		t.Fatalf("apply state/revision = %s/%d, want monitoring/%d", state, revision, validated.Case.Revision+2)
+	}
+	var monitoringOutcome string
+	if err := pool.QueryRow(ctx, `SELECT coalesce(outcome_status, '') FROM runs WHERE id=$1 AND org_id=$2`, runID, org).
+		Scan(&monitoringOutcome); err != nil {
+		t.Fatalf("read monitoring run outcome: %v", err)
+	}
+	if monitoringOutcome != "semantic_recovering" {
+		t.Fatalf("monitoring run outcome = %q, want semantic_recovering", monitoringOutcome)
+	}
+	var beforeTerminalPublication, beforeTerminalVerification int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE kind='publication'), count(*) FILTER (WHERE kind='verification')
+		FROM recovery_case_artifacts WHERE org_id=$1 AND case_id=$2`, org, caseID).
+		Scan(&beforeTerminalPublication, &beforeTerminalVerification); err != nil {
+		t.Fatalf("count monitoring artifacts: %v", err)
+	}
+	if beforeTerminalPublication != 1 || beforeTerminalVerification != 0 {
+		t.Fatalf("monitoring evidence = publication:%d verification:%d, want 1/0", beforeTerminalPublication, beforeTerminalVerification)
+	}
+	stop, workersDone = startWorkers()
 	waitRunStatus(t, pool, runID, "succeeded", 0)
 
 	if err := pool.QueryRow(ctx, `SELECT state, revision FROM recovery_cases WHERE org_id = $1 AND id = $2`, org, caseID).
@@ -313,6 +355,14 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	}
 	if state != "verified_recovered" || revision != validated.Case.Revision+3 {
 		t.Fatalf("terminal state/revision = %s/%d, want verified_recovered/%d", state, revision, validated.Case.Revision+3)
+	}
+	var verifiedOutcome string
+	if err := pool.QueryRow(ctx, `SELECT coalesce(outcome_status, '') FROM runs WHERE id=$1 AND org_id=$2`, runID, org).
+		Scan(&verifiedOutcome); err != nil {
+		t.Fatalf("read verified run outcome: %v", err)
+	}
+	if verifiedOutcome != "semantic_recovered" {
+		t.Fatalf("verified run outcome = %q, want semantic_recovered", verifiedOutcome)
 	}
 	var artifacts, publication, verification, receipts int
 	if err := pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE kind='publication'), count(*) FILTER (WHERE kind='verification')
@@ -334,5 +384,149 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	}
 	if grantCount != 2 || revokedCount != 1 || consumedCount != 1 {
 		t.Fatalf("grant lifecycle = total:%d revoked:%d consumed:%d", grantCount, revokedCount, consumedCount)
+	}
+}
+
+// A published replacement is not a verified recovery when its resumed
+// generation fails or is cancelled. Both terminal paths atomically clear the
+// monitoring run outcome, record bounded failure evidence and close the case
+// as recurred.
+func TestSemanticRecoveryTerminalFailureRecurs(t *testing.T) {
+	for _, terminalStatus := range []string{"failed", "cancelled"} {
+		t.Run(terminalStatus, func(t *testing.T) {
+			assertSemanticRecoveryTerminalRecurred(t, terminalStatus)
+		})
+	}
+}
+
+func assertSemanticRecoveryTerminalRecurred(t *testing.T, terminalStatus string) {
+	t.Helper()
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	eng := New(pool)
+	nonce := terminalStatus + "-" + fmt.Sprint(time.Now().UnixNano())
+	orgID := "org-semantic-terminal-" + nonce
+	runID := "run-semantic-terminal-" + nonce
+	caseID := "case-semantic-terminal-" + nonce
+	publicationID := "publication-semantic-terminal-" + nonce
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, outcome_status)
+		VALUES ($1, $2, 'version-terminal', 'running', '{}'::jsonb, 'semantic_recovering')`,
+		runID, orgID); err != nil {
+		t.Fatalf("insert monitoring run: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO recovery_cases (
+			id, org_id, run_id, workflow_version_id, source, detector_id,
+			source_node_id, detector_kind, action, message, state, revision
+		) VALUES ($1, $2, $3, 'version-terminal', 'semantic_violation',
+			'det-terminal', 'source-terminal', 'expression', 'quarantine',
+			'terminal verification', 'monitoring', 8)`, caseID, orgID, runID); err != nil {
+		t.Fatalf("insert monitoring case: %v", err)
+	}
+	publicationPayload := map[string]any{
+		"caseId": caseID, "runId": runID, "decision": "replace",
+		"candidateArtifactId":  "candidate-terminal",
+		"candidateSha256":      strings.Repeat("a", 64),
+		"validationArtifactId": "validation-terminal",
+		"validationSha256":     strings.Repeat("b", 64),
+	}
+	publicationRaw, publicationHash, err := boundedRecoveryArtifact(publicationPayload)
+	if err != nil {
+		t.Fatalf("bound publication: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO recovery_case_artifacts (
+			id, org_id, case_id, kind, payload_json, payload_sha256,
+			actor_kind, actor_id, created_at
+		) VALUES ($1, $2, $3, 'publication', $4, $5, 'user', 'editor-1', $6)`,
+		publicationID, orgID, caseID, publicationRaw, publicationHash,
+		time.Now().UTC().Add(-time.Second)); err != nil {
+		t.Fatalf("insert publication: %v", err)
+	}
+
+	if terminalStatus == "cancelled" {
+		if err := eng.CancelRun(ctx, runID, map[string]any{"reason": "semantic test"}); err != nil {
+			t.Fatalf("cancel monitoring run: %v", err)
+		}
+	} else {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin terminal transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		q := store.New(eng.wrapTx(tx))
+		events := &runEventBuffer{}
+		terminalAt := time.Now().UTC().Truncate(time.Millisecond)
+		if err := eng.flipRunTerminal(
+			ctx, q, events, runID, terminalStatus,
+			map[string]any{"failedNodes": 1}, terminalAt, nil,
+		); err != nil {
+			t.Fatalf("flip %s run: %v", terminalStatus, err)
+		}
+		if err := events.flush(ctx, q); err != nil {
+			t.Fatalf("flush terminal events: %v", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("commit terminal transaction: %v", err)
+		}
+	}
+
+	var state, outcome string
+	var revision int64
+	if err := pool.QueryRow(ctx, `
+		SELECT c.state, c.revision, coalesce(r.outcome_status, '')
+		FROM recovery_cases c JOIN runs r ON r.id = c.run_id AND r.org_id = c.org_id
+		WHERE c.org_id = $1 AND c.id = $2`, orgID, caseID).
+		Scan(&state, &revision, &outcome); err != nil {
+		t.Fatalf("read recurred case: %v", err)
+	}
+	if state != "recurred" || revision != 9 || outcome != "" {
+		t.Fatalf("terminal failure state/revision/outcome = %s/%d/%q, want recurred/9/empty", state, revision, outcome)
+	}
+	var verificationRaw []byte
+	if err := pool.QueryRow(ctx, `
+		SELECT payload_json FROM recovery_case_artifacts
+		WHERE org_id=$1 AND case_id=$2 AND kind='verification'`, orgID, caseID).
+		Scan(&verificationRaw); err != nil {
+		t.Fatalf("read terminal verification: %v", err)
+	}
+	var verification map[string]any
+	if json.Unmarshal(verificationRaw, &verification) != nil ||
+		verification["terminalStatus"] != terminalStatus ||
+		verification["resultState"] != "recurred" ||
+		verification["generationBoundTerminalSuccess"] != false {
+		t.Fatalf("terminal verification payload: %s", verificationRaw)
+	}
+	terminalEventID, _ := verification["eventId"].(string)
+	var terminalEvents int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM run_events
+		WHERE run_id=$1 AND id=$2 AND type=$3`,
+		runID, terminalEventID, "run."+terminalStatus,
+	).Scan(&terminalEvents); err != nil {
+		t.Fatalf("count exact terminal event: %v", err)
+	}
+	if terminalEvents != 1 {
+		t.Fatalf("verification must bind one exact run.%s event: %d", terminalStatus, terminalEvents)
+	}
+	var systemTransitions int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM recovery_case_transitions
+		WHERE org_id=$1 AND case_id=$2 AND from_state='monitoring'
+		  AND to_state='recurred' AND actor_kind='system'`, orgID, caseID).
+		Scan(&systemTransitions); err != nil {
+		t.Fatalf("count terminal transitions: %v", err)
+	}
+	if systemTransitions != 1 {
+		t.Fatalf("terminal failure must write one system transition: %d", systemTransitions)
 	}
 }

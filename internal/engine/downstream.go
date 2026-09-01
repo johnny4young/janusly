@@ -237,7 +237,13 @@ func (e *Engine) flipRunTerminal(ctx context.Context, q *store.Queries, events *
 		return fmt.Errorf("marshal run event payload: %w", err)
 	}
 	eventAt := causeAt.Add(time.Millisecond)
-	events.add(e.newID(), runID, "", "run."+status, payloadJSON, eventAt)
+	terminalEventID := e.newID()
+	events.add(terminalEventID, runID, "", "run."+status, payloadJSON, eventAt)
+	if err := e.finalizeSemanticRecoveryMonitoring(
+		ctx, q, runID, status, terminalEventID, eventAt,
+	); err != nil {
+		return fmt.Errorf("finalize semantic recovery monitoring: %w", err)
+	}
 	return nil
 }
 

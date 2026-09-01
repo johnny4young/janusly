@@ -51,11 +51,17 @@ func (e *Engine) CancelRun(ctx context.Context, runID string, reason any) error 
 	}); err != nil {
 		return fmt.Errorf("cancel nodes: %w", err)
 	}
+	terminalEventID := e.newID()
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID, Type: "run.cancelled",
+		ID: terminalEventID, RunID: runID, Type: "run.cancelled",
 		Payload: eventJSON, CreatedAt: &cancelledAt,
 	}); err != nil {
 		return fmt.Errorf("insert run.cancelled: %w", err)
+	}
+	if err := e.finalizeSemanticRecoveryMonitoring(
+		ctx, q, runID, "cancelled", terminalEventID, cancelledAt,
+	); err != nil {
+		return fmt.Errorf("finalize cancelled semantic recovery monitoring: %w", err)
 	}
 	if err := q.NotifyRunEvents(ctx, runID); err != nil {
 		return fmt.Errorf("notify run events: %w", err)

@@ -175,6 +175,37 @@ func (q *Queries) CountAutoHealingAttempts(ctx context.Context, arg CountAutoHea
 	return count, err
 }
 
+const countBlockingSemanticRecoveryCases = `-- name: CountBlockingSemanticRecoveryCases :one
+SELECT count(*)::int AS total_open,
+       count(*) FILTER (WHERE action = 'quarantine')::int AS open_quarantines
+FROM recovery_cases
+WHERE org_id = $1 AND run_id = $2
+  AND state NOT IN (
+    'publishing', 'monitoring',
+    'verified_recovered', 'recurred', 'accepted_loss', 'abandoned'
+  )
+`
+
+type CountBlockingSemanticRecoveryCasesParams struct {
+	OrgID string
+	RunID string
+}
+
+type CountBlockingSemanticRecoveryCasesRow struct {
+	TotalOpen       int32
+	OpenQuarantines int32
+}
+
+// Publishing and monitoring cases no longer block the run: their immutable
+// replacement has already passed every deterministic detector and terminal
+// verification is now owned by the resumed generation.
+func (q *Queries) CountBlockingSemanticRecoveryCases(ctx context.Context, arg CountBlockingSemanticRecoveryCasesParams) (CountBlockingSemanticRecoveryCasesRow, error) {
+	row := q.db.QueryRow(ctx, countBlockingSemanticRecoveryCases, arg.OrgID, arg.RunID)
+	var i CountBlockingSemanticRecoveryCasesRow
+	err := row.Scan(&i.TotalOpen, &i.OpenQuarantines)
+	return i, err
+}
+
 const countDeadLettersByStatus = `-- name: CountDeadLettersByStatus :many
 SELECT status, count(*) AS count FROM dead_letters
 WHERE org_id = $1
@@ -207,31 +238,6 @@ func (q *Queries) CountDeadLettersByStatus(ctx context.Context, orgID string) ([
 	return items, nil
 }
 
-const countOpenSemanticRecoveryCases = `-- name: CountOpenSemanticRecoveryCases :one
-SELECT count(*)::int AS total_open,
-       count(*) FILTER (WHERE action = 'quarantine')::int AS open_quarantines
-FROM recovery_cases
-WHERE org_id = $1 AND run_id = $2
-  AND state NOT IN ('verified_recovered', 'recurred', 'accepted_loss', 'abandoned')
-`
-
-type CountOpenSemanticRecoveryCasesParams struct {
-	OrgID string
-	RunID string
-}
-
-type CountOpenSemanticRecoveryCasesRow struct {
-	TotalOpen       int32
-	OpenQuarantines int32
-}
-
-func (q *Queries) CountOpenSemanticRecoveryCases(ctx context.Context, arg CountOpenSemanticRecoveryCasesParams) (CountOpenSemanticRecoveryCasesRow, error) {
-	row := q.db.QueryRow(ctx, countOpenSemanticRecoveryCases, arg.OrgID, arg.RunID)
-	var i CountOpenSemanticRecoveryCasesRow
-	err := row.Scan(&i.TotalOpen, &i.OpenQuarantines)
-	return i, err
-}
-
 const countOperatorRecoveries = `-- name: CountOperatorRecoveries :one
 SELECT count(*)::int
 FROM recovery_impact_events e
@@ -255,6 +261,34 @@ func (q *Queries) CountOperatorRecoveries(ctx context.Context, arg CountOperator
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const finalizeRunSemanticRecoveryOutcome = `-- name: FinalizeRunSemanticRecoveryOutcome :execrows
+UPDATE runs
+SET outcome_status = CASE
+  WHEN $3::boolean THEN 'semantic_recovered'
+  ELSE NULL
+END
+WHERE id = $1 AND org_id = $2
+  AND status IN ('succeeded', 'failed', 'cancelled', 'timed_out')
+  AND outcome_status = 'semantic_recovering'
+`
+
+type FinalizeRunSemanticRecoveryOutcomeParams struct {
+	ID              string
+	OrgID           string
+	TerminalSuccess bool
+}
+
+// Monitoring has its own honest run posture. Only the terminal generation can
+// promote it to recovered; a failed/cancelled generation clears it while the
+// verification artifact remains the durable explanation.
+func (q *Queries) FinalizeRunSemanticRecoveryOutcome(ctx context.Context, arg FinalizeRunSemanticRecoveryOutcomeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, finalizeRunSemanticRecoveryOutcome, arg.ID, arg.OrgID, arg.TerminalSuccess)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const findActiveRecoveryApprovalGrant = `-- name: FindActiveRecoveryApprovalGrant :one
@@ -471,6 +505,36 @@ func (q *Queries) GetDeadLetterForImpact(ctx context.Context, arg GetDeadLetterF
 		&i.ReplayClaimedAt,
 		&i.ReplayedAt,
 		&i.ReplayMode,
+	)
+	return i, err
+}
+
+const getLatestRecoveryCaseArtifactByKind = `-- name: GetLatestRecoveryCaseArtifactByKind :one
+SELECT id, org_id, case_id, kind, payload_json, payload_sha256, actor_kind, actor_id, created_at FROM recovery_case_artifacts
+WHERE org_id = $1 AND case_id = $2 AND kind = $3
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestRecoveryCaseArtifactByKindParams struct {
+	OrgID  string
+	CaseID string
+	Kind   string
+}
+
+func (q *Queries) GetLatestRecoveryCaseArtifactByKind(ctx context.Context, arg GetLatestRecoveryCaseArtifactByKindParams) (RecoveryCaseArtifact, error) {
+	row := q.db.QueryRow(ctx, getLatestRecoveryCaseArtifactByKind, arg.OrgID, arg.CaseID, arg.Kind)
+	var i RecoveryCaseArtifact
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.CaseID,
+		&i.Kind,
+		&i.PayloadJson,
+		&i.PayloadSha256,
+		&i.ActorKind,
+		&i.ActorID,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1775,6 +1839,61 @@ func (q *Queries) ListResolvedRecoveryFailureRows(ctx context.Context, arg ListR
 	for rows.Next() {
 		var i ListResolvedRecoveryFailureRowsRow
 		if err := rows.Scan(&i.NodeID, &i.NodeJson, &i.ErrorJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockMonitoringSemanticRecoveryCases = `-- name: LockMonitoringSemanticRecoveryCases :many
+SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at FROM recovery_cases
+WHERE org_id = $1 AND run_id = $2
+  AND source = 'semantic_violation' AND state = 'monitoring'
+ORDER BY id
+FOR UPDATE
+`
+
+type LockMonitoringSemanticRecoveryCasesParams struct {
+	OrgID string
+	RunID string
+}
+
+// Terminal settlement follows the same node → run → case lock hierarchy as
+// governed apply. Only cases already published into monitoring are eligible;
+// an earlier recovery state can never be finalized by a run event.
+func (q *Queries) LockMonitoringSemanticRecoveryCases(ctx context.Context, arg LockMonitoringSemanticRecoveryCasesParams) ([]RecoveryCase, error) {
+	rows, err := q.db.Query(ctx, lockMonitoringSemanticRecoveryCases, arg.OrgID, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecoveryCase
+	for rows.Next() {
+		var i RecoveryCase
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.RunID,
+			&i.WorkflowID,
+			&i.WorkflowVersionID,
+			&i.Source,
+			&i.DetectorID,
+			&i.SourceNodeID,
+			&i.DetectorKind,
+			&i.Action,
+			&i.Message,
+			&i.DetailsJson,
+			&i.State,
+			&i.Revision,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ResolvedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

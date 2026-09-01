@@ -1,3 +1,5 @@
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 import {
@@ -15,6 +17,64 @@ const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
 type Locale = 'en' | 'es'
 
 const fixtures = new Map<string, SemanticRecoveryFixture>()
+const providerReceipts = new Map<string, number>()
+let providerServer: Server | null = null
+let providerBaseUrl = ''
+
+test.beforeAll(async () => {
+  if (!enabled) return
+  providerReceipts.clear()
+  providerServer = createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://semantic-provider.local')
+    if (request.method !== 'POST' || url.pathname !== '/webhook') {
+      response.writeHead(404).end()
+      return
+    }
+    let bytes = 0
+    request.on('data', chunk => {
+      bytes += Buffer.byteLength(chunk)
+    })
+    request.on('end', () => {
+      const target = url.searchParams.get('target') ?? ''
+      if (!target || bytes > 64 * 1024) {
+        response.writeHead(bytes > 64 * 1024 ? 413 : 400).end()
+        return
+      }
+      providerReceipts.set(target, (providerReceipts.get(target) ?? 0) + 1)
+      setTimeout(() => {
+        response.writeHead(202, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ accepted: true, target }))
+      }, 500)
+    })
+  })
+  await new Promise<void>((resolve, reject) => {
+    const server = providerServer
+    if (!server) {
+      reject(new Error('semantic provider server was not created'))
+      return
+    }
+    const onError = (error: Error) => reject(error)
+    server.once('error', onError)
+    server.listen(0, '0.0.0.0', () => {
+      server.off('error', onError)
+      resolve()
+    })
+  })
+  const address = providerServer.address()
+  if (!address || typeof address === 'string') {
+    throw new Error('semantic provider server did not expose a TCP address')
+  }
+  providerBaseUrl = `http://host.docker.internal:${(address as AddressInfo).port}`
+})
+
+test.afterAll(async () => {
+  const server = providerServer
+  providerServer = null
+  if (!server) return
+  await new Promise<void>((resolve, reject) => {
+    server.close(error => error ? reject(error) : resolve())
+  })
+})
 
 function labels(locale: Locale) {
   return locale === 'en'
@@ -98,7 +158,7 @@ async function persistEvidence() {
 for (const locale of ['en', 'es'] as const) {
   test(`semantic quarantine is visible and recoverable in ${locale}`, async ({ page }) => {
     test.skip(!enabled, 'requires the persistent local Docker stack')
-    const fixture = await createFixture(locale)
+    const fixture = await createFixture(locale, { providerBaseUrl })
     fixtures.set(`${locale}-level3`, fixture)
     await persistEvidence()
 
@@ -194,7 +254,12 @@ for (const locale of ['en', 'es'] as const) {
     await applyButton.click()
     await expect(
       page.getByTestId(`recovery-case-workspace-${fixture.caseId}`),
-    ).toContainText(locale === 'en' ? 'Recovered' : 'Recuperado')
+    ).toContainText(locale === 'en' ? 'Monitoring' : 'Monitoreando')
+    await expect(
+      page.getByTestId(`recovery-case-workspace-${fixture.caseId}`),
+    ).toContainText(locale === 'en' ? 'Recovered' : 'Recuperado', {
+      timeout: 30_000,
+    })
     await page.getByRole('button', { name: copy.backToRecovery }).click()
     await expect(page.getByTestId('home-priority-clear')).toBeVisible()
     await expect(page.getByRole('button', { name: copy.allClearAria })).toBeVisible()
@@ -223,6 +288,7 @@ for (const locale of ['en', 'es'] as const) {
     await hideTransientOverlays(page)
     await capture(page, `semantic-outcome-recovered-${locale}`)
     await expect(runRow.locator('.status-pill[data-status="succeeded"]')).toBeVisible()
+    expect(providerReceipts.get(fixture.providerTarget)).toBe(1)
 
     expect(browserErrors).toEqual([])
   })
