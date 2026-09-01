@@ -27,6 +27,7 @@ const (
 	maintenanceQueueLagWarnSecondsDefault = 300
 	queueLagWarnSecondsMax                = 86_400
 	queueSnapshotTTL                      = 5 * time.Second
+	queueSnapshotFailureTTL               = 1 * time.Second
 	queueSnapshotTimeout                  = 2 * time.Second
 )
 
@@ -59,30 +60,43 @@ func resolveQueueWarnSeconds(envName string, fallback int) int {
 	return parsed
 }
 
-// queueHealthCache coalesces snapshot reads: one flight at a time, both
-// success and failure cached for the TTL so a scrape storm cannot pile
-// onto a slow database.
+// queueHealthCache coalesces snapshot reads: one flight at a time. Successful
+// snapshots are cached for the normal TTL. Failures use a shorter TTL so one
+// transient timeout is not projected as a multi-probe outage, while the mutex
+// still prevents a scrape storm from piling onto a slow database.
 type queueHealthCache struct {
 	mu        sync.Mutex
 	snapshot  *queueSnapshot
 	fetchedAt time.Time
+	failed    bool
 	read      func(ctx context.Context) (*queueSnapshot, error)
+	now       func() time.Time
 }
 
 func (c *queueHealthCache) get(ctx context.Context) *queueSnapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.fetchedAt.IsZero() && time.Since(c.fetchedAt) < queueSnapshotTTL {
+	now := time.Now
+	if c.now != nil {
+		now = c.now
+	}
+	ttl := queueSnapshotTTL
+	if c.failed {
+		ttl = queueSnapshotFailureTTL
+	}
+	if age := now().Sub(c.fetchedAt); !c.fetchedAt.IsZero() && age >= 0 && age < ttl {
 		return c.snapshot
 	}
 	readCtx, cancel := context.WithTimeout(ctx, queueSnapshotTimeout)
 	defer cancel()
 	snapshot, err := c.read(readCtx)
-	c.fetchedAt = time.Now()
+	c.fetchedAt = now()
 	if err != nil {
 		c.snapshot = nil // store failure: queue reads as null, ok stays true
+		c.failed = true
 	} else {
 		c.snapshot = snapshot
+		c.failed = false
 	}
 	return c.snapshot
 }

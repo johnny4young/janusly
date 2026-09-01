@@ -60,7 +60,8 @@ var (
 )
 
 // QueueDepthCollector exposes janusly_queue_depth{state} from one bounded
-// GROUP BY, cached briefly so concurrent scrapes coalesce.
+// statement whose per-state counts use the queue's partial indexes. It is
+// cached briefly so concurrent scrapes coalesce.
 type QueueDepthCollector struct {
 	pool  *pgxpool.Pool
 	desc  *prometheus.Desc
@@ -89,9 +90,19 @@ func (c *QueueDepthCollector) Collect(ch chan<- prometheus.Metric) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		rows, err := c.pool.Query(ctx,
-			`SELECT status, count(*) FROM run_nodes
-			 WHERE status IN ('pending','queued','running','waiting')
-			 GROUP BY status`)
+			`SELECT state, depth FROM (
+				SELECT 'pending'::text AS state, count(*)::bigint AS depth
+				FROM run_nodes WHERE status = 'pending'
+				UNION ALL
+				SELECT 'queued'::text AS state, count(*)::bigint AS depth
+				FROM run_nodes WHERE status = 'queued'
+				UNION ALL
+				SELECT 'running'::text AS state, count(*)::bigint AS depth
+				FROM run_nodes WHERE status = 'running'
+				UNION ALL
+				SELECT 'waiting'::text AS state, count(*)::bigint AS depth
+				FROM run_nodes WHERE status = 'waiting'
+			) AS queue_depth`)
 		if err == nil {
 			fresh := map[string]float64{"pending": 0, "queued": 0, "running": 0, "waiting": 0}
 			for rows.Next() {

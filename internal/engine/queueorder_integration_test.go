@@ -286,3 +286,88 @@ func TestClaimPlanUsesFIFOQueueIndex(t *testing.T) {
 		t.Fatalf("claim scanned accumulated run-node history:\n%s", plan.String())
 	}
 }
+
+func TestQueueDepthPlanUsesPerStateIndexes(t *testing.T) {
+	pool := queueOrderTestPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin representative queue-depth plan: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	runID := fmt.Sprintf("run-depth-plan-%d", time.Now().UnixNano())
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO runs (id, org_id, status, input_json, workflow_version_id)
+		VALUES ($1, 'org-depth-plan', 'running', '{}', 'wv-depth-plan')`, runID); err != nil {
+		t.Fatalf("seed representative depth run: %v", err)
+	}
+	// The collector must stay proportional to current work after terminal
+	// history dominates the table. Include every state in its closed metric
+	// catalog so the EXPLAIN owns the exact production predicate.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO run_nodes (
+			id, run_id, node_id, status, enqueued_at, finished_at
+		)
+		SELECT $1 || '-history-' || ordinal::text, $1,
+		       'history-' || ordinal::text, 'succeeded',
+		       clock_timestamp() - interval '1 hour',
+		       clock_timestamp() - interval '1 hour'
+		FROM generate_series(1, 10000) AS ordinal`, runID); err != nil {
+		t.Fatalf("seed terminal depth history: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO run_nodes (id, run_id, node_id, status, enqueued_at)
+		SELECT $1 || '-open-' || ordinal::text, $1,
+		       'open-' || ordinal::text,
+		       (ARRAY['pending', 'queued', 'running', 'waiting'])[((ordinal - 1) % 4) + 1],
+		       clock_timestamp()
+		FROM generate_series(1, 16) AS ordinal`, runID); err != nil {
+		t.Fatalf("seed open depth tail: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ANALYZE run_nodes`); err != nil {
+		t.Fatalf("analyze representative depth history: %v", err)
+	}
+	rows, err := tx.Query(ctx, `EXPLAIN (COSTS OFF)
+		SELECT state, depth FROM (
+			SELECT 'pending'::text AS state, count(*)::bigint AS depth
+			FROM run_nodes WHERE status = 'pending'
+			UNION ALL
+			SELECT 'queued'::text AS state, count(*)::bigint AS depth
+			FROM run_nodes WHERE status = 'queued'
+			UNION ALL
+			SELECT 'running'::text AS state, count(*)::bigint AS depth
+			FROM run_nodes WHERE status = 'running'
+			UNION ALL
+			SELECT 'waiting'::text AS state, count(*)::bigint AS depth
+			FROM run_nodes WHERE status = 'waiting'
+		) AS queue_depth`)
+	if err != nil {
+		t.Fatalf("explain queue depth: %v", err)
+	}
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatalf("scan queue-depth plan: %v", err)
+		}
+		plan.WriteString(line)
+		plan.WriteByte('\n')
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate queue-depth plan: %v", err)
+	}
+	for _, index := range []string{
+		"run_nodes_pending_status_idx",
+		"run_nodes_queued_claim_idx",
+		"run_nodes_running_started_idx",
+		"run_nodes_waiting_target_idx",
+	} {
+		if !strings.Contains(plan.String(), index) {
+			t.Fatalf("queue depth did not use %s:\n%s", index, plan.String())
+		}
+	}
+	if strings.Contains(plan.String(), "Seq Scan on run_nodes") {
+		t.Fatalf("queue depth scanned terminal run-node history:\n%s", plan.String())
+	}
+}

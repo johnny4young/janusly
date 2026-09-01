@@ -2983,6 +2983,16 @@ CREATE INDEX run_nodes_failed_finished_idx ON public.run_nodes USING btree (fini
 
 
 --
+-- Name: run_nodes_pending_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+-- Queued, running, and waiting already have specialized partial indexes. This
+-- closes the remaining pending-state observability path without introducing a
+-- generic index that could displace the worker's FIFO claim plan.
+CREATE INDEX run_nodes_pending_status_idx ON public.run_nodes USING btree (status) WHERE (status = 'pending'::text);
+
+
+--
 -- Name: run_nodes_queue_publication_repair_idx; Type: INDEX; Schema: public; Owner: -
 --
 
