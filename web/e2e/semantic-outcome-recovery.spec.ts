@@ -111,7 +111,9 @@ for (const locale of ['en', 'es'] as const) {
     }, { activeOrg: fixture.orgId, language: locale })
 
     await page.goto('/')
-    const action = page.getByTestId('recovery-center-action-review_semantic_cases')
+    const action = page.getByTestId(
+      `recovery-center-action-recovery-case:${fixture.caseId}`,
+    )
     await expect(action).toContainText(copy.message)
     await expect(page.getByRole('button', { name: copy.blockedRunAria })).toContainText(
       copy.blockedRun,
@@ -122,7 +124,9 @@ for (const locale of ['en', 'es'] as const) {
     await expectNoHorizontalOverflow(page)
     await capture(page, `semantic-outcome-quarantine-${locale}`)
 
-    await page.getByTestId('recovery-center-action-cta-review_semantic_cases').click()
+    await page.getByTestId(
+      `recovery-center-action-cta-recovery-case:${fixture.caseId}`,
+    ).click()
     await expect(
       page.getByTestId(`recovery-case-workspace-${fixture.caseId}`),
     ).toBeVisible()

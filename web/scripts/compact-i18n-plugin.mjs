@@ -14,6 +14,13 @@ const NAMESPACE_PARAM = 'janusly-namespace'
 const NAMESPACES = new Set(['core', 'workspace'])
 const PACK_SEPARATOR = '\0'
 
+// Home renders before the large workspace catalog is requested. Keep the
+// bounded Operator Brief copy on the core path even though the broader
+// operations settings surface remains demand-loaded with the workspace.
+const CORE_PREFIXES = [
+  'operations.brief.',
+]
+
 const WORKSPACE_PREFIXES = [
   'activity.',
   'aiStudio.',
@@ -94,7 +101,10 @@ function assertFlatCatalog(catalog, label) {
 }
 
 export function selectCatalogNamespace(catalog, namespace) {
-  const inWorkspace = (key) => WORKSPACE_PREFIXES.some((prefix) => key.startsWith(prefix))
+  const inWorkspace = (key) => (
+    !CORE_PREFIXES.some((prefix) => key.startsWith(prefix))
+    && WORKSPACE_PREFIXES.some((prefix) => key.startsWith(prefix))
+  )
   return Object.fromEntries(Object.entries(catalog).filter(([key]) => (
     namespace === 'workspace' ? inWorkspace(key) : !inWorkspace(key)
   )))

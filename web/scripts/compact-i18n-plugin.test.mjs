@@ -50,11 +50,16 @@ test('catalog namespaces form a complete, non-overlapping partition', () => {
     'recoveryCenter.title': 'Recovery',
     'rightPanel.workflows.title': 'Workflows',
     'operations.title': 'Settings',
+    'operations.brief.semanticCase.title': 'Diagnose an outcome incident',
   }
   const core = selectCatalogNamespace(catalog, 'core')
   const workspace = selectCatalogNamespace(catalog, 'workspace')
 
-  assert.deepEqual(Object.keys(core), ['app.title', 'recoveryCenter.title'])
+  assert.deepEqual(Object.keys(core), [
+    'app.title',
+    'recoveryCenter.title',
+    'operations.brief.semanticCase.title',
+  ])
   assert.deepEqual(Object.keys(workspace), ['rightPanel.workflows.title', 'operations.title'])
   assert.deepEqual(
     new Set([...Object.keys(core), ...Object.keys(workspace)]),

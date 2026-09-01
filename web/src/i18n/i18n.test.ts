@@ -18,6 +18,16 @@ describe('i18n.t', () => {
     expect(t('common.save')).toBe('Save')
   })
 
+  it('keeps the Home Operator Brief copy in the eagerly available core catalog', () => {
+    changeAppLanguage('en')
+    expect(t('operations.brief.semanticCase.title'))
+      .toBe('Diagnose a business outcome incident')
+    changeAppLanguage('es')
+    expect(t('operations.brief.semanticCase.title'))
+      .toBe('Diagnosticar un incidente de resultado de negocio')
+    changeAppLanguage('en')
+  })
+
   it('returns the Spanish string after switching locale', () => {
     changeAppLanguage('es')
     expect(t('common.save')).toBe('Guardar')

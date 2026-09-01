@@ -117,21 +117,21 @@ const baseValidation = {
 }
 
 const briefKeys = {
-  resolve_approvals: 'runApproval',
-  review_semantic_cases: 'semanticCase',
-  recover_cluster: 'failureCluster',
-  triage_failures: 'routineTriage',
+  run_approval: 'runApproval',
+  semantic_case: 'semanticCase',
+  failure_cluster: 'failureCluster',
+  routine_triage: 'routineTriage',
 } as const
 
 function briefAction(args: {
-  id: keyof typeof briefKeys
-  kind: string
+  id: string
+  kind: keyof typeof briefKeys
   priority?: number
   severity?: string
   params?: Record<string, unknown>
   target: { kind: string; id: string; destination: string; runId?: string; workflowId?: string }
 }) {
-  const prefix = `operations.brief.${briefKeys[args.id]}`
+  const prefix = `operations.brief.${briefKeys[args.kind]}`
   return {
     id: args.id,
     kind: args.kind,
@@ -1154,7 +1154,7 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
   it('surfaces semantic work as a priority and opens the exact case', async () => {
     mockRecoveryApi(async (path: string) => {
       if (path === '/operations/brief') return operatorBrief(briefAction({
-        id: 'review_semantic_cases', kind: 'semantic_case', severity: 'critical',
+        id: 'recovery-case:case-1', kind: 'semantic_case', severity: 'critical',
         target: { kind: 'recovery_case', id: 'case-1', runId: 'run-1', destination: 'recoveryCase' },
       }))
       if (path === '/recovery/metrics') return baseMetrics
@@ -1220,12 +1220,12 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
 
     render(<RecoveryCenterPanel {...baseProps} />)
 
-    const action = await screen.findByTestId('recovery-center-action-review_semantic_cases')
+    const action = await screen.findByTestId('recovery-center-action-recovery-case:case-1')
     expect(action).toHaveTextContent('Diagnose a business outcome incident')
     expect(screen.getByText('A declared workflow outcome did not hold. Review bounded evidence and recovery candidates.')).toBeVisible()
     expect(screen.getByTestId('recovery-center-greeting').closest('header'))
       .not.toHaveAttribute('data-all-clear')
-    fireEvent.click(screen.getByTestId('recovery-center-action-cta-review_semantic_cases'))
+    fireEvent.click(screen.getByTestId('recovery-center-action-cta-recovery-case:case-1'))
     expect(baseProps.onOpenRecoveryCase).toHaveBeenCalledWith('case-1')
     expect(api).not.toHaveBeenCalledWith(
       expect.stringContaining('/resolve'),

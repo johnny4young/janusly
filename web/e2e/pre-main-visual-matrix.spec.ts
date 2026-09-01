@@ -184,7 +184,9 @@ async function openRecoverySurface(
   page: Page,
   fixture: SemanticRecoveryFixture,
 ): Promise<void> {
-  const preferred = page.getByTestId('recovery-center-action-cta-review_semantic_cases')
+  const preferred = page.getByTestId(
+    `recovery-center-action-cta-recovery-case:${fixture.caseId}`,
+  )
   const direct = page.getByTestId(`semantic-recovery-open-${fixture.caseId}`)
   if (phase === 'before' && !await preferred.or(direct).first().isVisible()) {
     // The exact pre-phase baseline could list the quarantined run while its
