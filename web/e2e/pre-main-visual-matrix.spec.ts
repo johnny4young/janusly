@@ -220,7 +220,19 @@ async function recordFocus(
   if (focused) return
   findings.push(finding)
   if (phase === 'after') {
-    expect(focused, `${finding} must not regress in the current candidate`).toBe(true)
+    const activeElement = await locator.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null
+      return active ? {
+        tag: active.tagName.toLowerCase(),
+        className: active.className,
+        testId: active.dataset.testid ?? null,
+        ariaLabel: active.getAttribute('aria-label'),
+      } : null
+    })
+    expect(
+      focused,
+      `${finding} must not regress in the current candidate; active=${JSON.stringify(activeElement)}`,
+    ).toBe(true)
   }
 }
 
