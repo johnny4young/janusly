@@ -43,8 +43,8 @@
 }
 
 .ui-button--primary:hover:not(:disabled) {
-  border-color: var(--we-primary-strong);
-  background: var(--we-primary-strong);
+  border-color: var(--we-primary-solid-hover);
+  background: var(--we-primary-solid-hover);
 }
 
 /* Disabled semantic buttons keep explicit token contrast instead of inheriting

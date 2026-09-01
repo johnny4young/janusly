@@ -60,6 +60,7 @@
 :root {
   --we-primary: var(--color-we-primary);
   --we-primary-strong: var(--color-we-primary-strong);
+  --we-primary-solid-hover: color-mix(in srgb, var(--we-primary) 72%, #000000);
   --we-primary-text: var(--color-we-primary-text);
   --we-primary-soft: var(--color-we-primary-soft);
   --we-primary-ring: color-mix(in srgb, var(--we-primary) 18%, transparent);
@@ -217,6 +218,7 @@
   --we-faint: var(--color-we-faint);
   --we-primary: var(--color-we-primary);
   --we-primary-strong: var(--color-we-primary-strong);
+  --we-primary-solid-hover: color-mix(in srgb, var(--we-primary) 72%, #000000);
   --we-primary-text: var(--color-we-primary-text);
   --we-primary-soft: var(--color-we-primary-soft);
   --we-primary-ring: color-mix(in srgb, var(--color-we-primary) 28%, transparent);
