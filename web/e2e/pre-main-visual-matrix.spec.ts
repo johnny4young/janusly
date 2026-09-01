@@ -212,7 +212,11 @@ async function recordFocus(
   finding: string,
   findings: string[],
 ): Promise<void> {
-  const focused = await locator.evaluate(element => document.activeElement === element)
+  // React moves focus in an effect after the opening click. Poll the observable
+  // browser state instead of sampling the same event turn and misclassifying a
+  // correctly managed dialog as an accessibility failure.
+  const focused = await expect(locator).toBeFocused({ timeout: 1_000 })
+    .then(() => true, () => false)
   if (focused) return
   findings.push(finding)
   if (phase === 'after') {
