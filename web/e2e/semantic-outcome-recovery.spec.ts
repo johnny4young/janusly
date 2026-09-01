@@ -283,11 +283,13 @@ for (const locale of ['en', 'es'] as const) {
     const runRow = page.getByRole('article').filter({ hasText: fixture.workflowName }).first()
     await expect(runRow.locator('[data-outcome-status="semantic_recovered"]')).toHaveText(copy.recovered)
     await runRow.getByRole('button').first().click()
-    await expect(runRow.locator('.status-pill[data-status="succeeded"]')).toBeVisible()
-    await runRow.scrollIntoViewIfNeeded()
+    // Expanding history replaces the virtualized list subtree. Reacquire the
+    // article instead of retaining a locator whose current element can detach.
+    const expandedRunRow = page.getByRole('article').filter({ hasText: fixture.workflowName }).first()
+    await expect(expandedRunRow.locator('.status-pill[data-status="succeeded"]')).toBeVisible()
     await hideTransientOverlays(page)
     await capture(page, `semantic-outcome-recovered-${locale}`)
-    await expect(runRow.locator('.status-pill[data-status="succeeded"]')).toBeVisible()
+    await expect(expandedRunRow.locator('.status-pill[data-status="succeeded"]')).toBeVisible()
     expect(providerReceipts.get(fixture.providerTarget)).toBe(1)
 
     expect(browserErrors).toEqual([])
