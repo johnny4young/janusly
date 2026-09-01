@@ -8905,7 +8905,7 @@ button.we-authoring-problems__row:focus-visible {
 .we-role-option[data-selected="true"] { border-color: var(--we-primary); background: var(--we-primary-soft); }
 .we-role-option__copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .we-role-option__name { font-size: 13px; font-weight: 600; color: var(--we-ink); text-transform: capitalize; }
-.we-role-option[data-selected="true"] .we-role-option__name { color: var(--we-primary); }
+.we-role-option[data-selected="true"] .we-role-option__name { color: var(--we-primary-text); }
 .we-role-option__desc { font-size: 11.5px; color: var(--we-muted); line-height: 1.4; }
 .we-role-option__radio { width: 16px; height: 16px; border-radius: var(--we-radius-pill); border: 1.5px solid var(--we-line-strong); flex-shrink: 0; }
 .we-role-option[data-selected="true"] .we-role-option__radio { border-color: var(--we-primary); background: radial-gradient(circle, var(--we-primary) 0 38%, transparent 42%); }

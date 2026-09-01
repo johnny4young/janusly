@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
@@ -65,6 +67,13 @@ describe('<MembersPanel /> dynamic role list', () => {
         invitationsTruncated: false,
       },
     }, true)
+  })
+
+  it('uses the theme-aware accessible text token for the selected role', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/platform.css'), 'utf8')
+    expect(css).toMatch(
+      /\.we-role-option\[data-selected="true"\] \.we-role-option__name \{ color: var\(--we-primary-text\); \}/,
+    )
   })
 
   it('populates the invite-form role dropdown with custom roles fetched from /org/roles', async () => {
