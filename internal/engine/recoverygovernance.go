@@ -33,6 +33,13 @@ var (
 	ErrRecoveryApprovalMissing  = errors.New("recovery approval is missing or expired")
 )
 
+func recoveryActorKind(actor *auth.Context) string {
+	if actor != nil && (actor.Source == auth.SourceMcp || actor.Source == auth.SourceService) {
+		return "agent"
+	}
+	return "user"
+}
+
 // RecoveryArtifactInput is one bounded, append-only fact created by a
 // governed recovery operation.
 type RecoveryArtifactInput struct {
@@ -136,6 +143,7 @@ func (e *Engine) AdvanceRecoveryCase(ctx context.Context, input AdvanceRecoveryC
 	}
 
 	now := e.now().UTC().Truncate(time.Millisecond)
+	actorKind := recoveryActorKind(input.Auth)
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return AdvanceRecoveryCaseResult{}, fmt.Errorf("begin governed recovery: %w", err)
@@ -170,7 +178,7 @@ func (e *Engine) AdvanceRecoveryCase(ctx context.Context, input AdvanceRecoveryC
 		row, err := q.InsertRecoveryCaseArtifact(ctx, store.InsertRecoveryCaseArtifactParams{
 			ID: artifact.id, OrgID: input.Auth.OrgID, CaseID: input.CaseID,
 			Kind: artifact.kind, PayloadJson: artifact.raw, PayloadSha256: artifact.hash,
-			ActorKind: "user", ActorID: pgtype.Text{String: input.Auth.UserID, Valid: true},
+			ActorKind: actorKind, ActorID: pgtype.Text{String: input.Auth.UserID, Valid: true},
 			CreatedAt: now,
 		})
 		if err != nil {
@@ -193,7 +201,7 @@ func (e *Engine) AdvanceRecoveryCase(ctx context.Context, input AdvanceRecoveryC
 		}
 		receipt := domain.RecoveryCaseTransitionReceipt{
 			CaseID: input.CaseID, From: step.From, To: step.To,
-			ActorKind: "user", ActorID: input.Auth.UserID,
+			ActorKind: actorKind, ActorID: input.Auth.UserID,
 			Evidence: evidence, Reason: strings.TrimSpace(step.Reason),
 		}
 		if problems := domain.ValidateRecoveryCaseTransitionReceipt(receipt); len(problems) > 0 {
@@ -215,7 +223,7 @@ func (e *Engine) AdvanceRecoveryCase(ctx context.Context, input AdvanceRecoveryC
 		inserted, err := q.InsertRecoveryCaseTransition(ctx, store.InsertRecoveryCaseTransitionParams{
 			ID:    StableSemanticID("sct", input.CaseID, step.From, step.To, fmt.Sprint(revision)),
 			OrgID: input.Auth.OrgID, CaseID: input.CaseID,
-			FromState: step.From, ToState: step.To, ActorKind: "user",
+			FromState: step.From, ToState: step.To, ActorKind: actorKind,
 			ActorID:      pgtype.Text{String: input.Auth.UserID, Valid: true},
 			EvidenceJson: evidenceJSON,
 			Reason:       pgtype.Text{String: receipt.Reason, Valid: true}, OccurredAt: occurredAt,
@@ -304,7 +312,7 @@ func (e *Engine) ApproveRecoveryCandidate(ctx context.Context, input ApproveReco
 	if json.Unmarshal(validation.PayloadJson, &validationPayload) != nil ||
 		!validationPayload.Passed || validationPayload.CandidateArtifactID != candidate.ID ||
 		validationPayload.CandidateSha256 != candidate.PayloadSha256 ||
-		validationPayload.CaseRevision >= caseRow.Revision {
+		!currentRecoveryValidation(validationPayload.CaseRevision, caseRow.Revision) {
 		return store.RecoveryApprovalGrant{}, ErrRecoveryCaseConflict
 	}
 	// A fresh human approval supersedes any unconsumed grant for this case.

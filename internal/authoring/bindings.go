@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/mcpclient"
@@ -134,9 +133,18 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 				addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Alternatives: availableSubworkflowIDs(catalog, workflow.ID), Reason: "subworkflow_binding_required"})
 			} else if !exists || entry.Status != "active" || workflowID == workflow.ID {
 				addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Requested: workflowID, Alternatives: availableSubworkflowIDs(catalog, workflow.ID), Reason: "exact_subworkflow_not_eligible"})
-			} else if version, present := integerValue(node.Config["version"]); present && (version < 1 || version > int64(entry.LatestVersion)) {
-				addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.version", Requested: fmt.Sprint(version), Alternatives: []string{fmt.Sprint(entry.LatestVersion)}, Reason: "subworkflow_version_not_found"})
 			} else {
+				if rawVersion, specified := node.Config["version"]; specified {
+					version, valid := integerValue(rawVersion)
+					if !valid {
+						addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.version", Requested: fmt.Sprint(rawVersion), Alternatives: []string{fmt.Sprint(entry.LatestVersion)}, Reason: "subworkflow_version_invalid"})
+						continue
+					}
+					if version < 1 || version > int64(entry.LatestVersion) {
+						addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.version", Requested: fmt.Sprint(version), Alternatives: []string{fmt.Sprint(entry.LatestVersion)}, Reason: "subworkflow_version_not_found"})
+						continue
+					}
+				}
 				addResolved(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Requested: workflowID, ResolvedID: workflowID, Alternatives: []string{}})
 			}
 		case "wait_until":
@@ -210,16 +218,7 @@ func requireConfig(report *BindingReport, node domain.Node, field string) {
 }
 
 func completeWaitUntil(config map[string]any) bool {
-	duration := trimmedString(config["duration"])
-	until := trimmedString(config["until"])
-	if (duration == "") == (until == "") {
-		return false
-	}
-	if until != "" {
-		_, err := time.Parse(time.RFC3339, until)
-		return err == nil
-	}
-	return strings.HasPrefix(duration, "P") && duration != "P" && duration != "PT"
+	return domain.ValidateWaitUntilConfig(config) == nil
 }
 
 func completeMultiAgent(config map[string]any) bool {

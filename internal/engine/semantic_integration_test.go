@@ -270,6 +270,35 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	}
 	validation := validated.Artifacts[0]
 
+	// Any later case revision expires the validation binding, even when the
+	// immutable candidate itself is unchanged. Return to candidates_ready,
+	// validate again, and prove the former artifact cannot be approved.
+	reopened, err := eng.AdvanceRecoveryCase(ctx, AdvanceRecoveryCaseInput{
+		Auth: actor, CaseID: caseID, ExpectedRevision: validated.Case.Revision,
+		Steps: []RecoveryTransitionStep{{
+			From: "awaiting_approval", To: "candidates_ready", Reason: "Operator requested fresh validation",
+		}},
+		AuditAction: audit.Action("recovery.case.validated"),
+	})
+	if err != nil {
+		t.Fatalf("reopen for validation freshness: %v", err)
+	}
+	revalidated, err := eng.ValidateRecoveryCaseCandidate(ctx, ValidateRecoveryCaseCandidateInput{
+		Auth: actor, CaseID: caseID, ExpectedRevision: reopened.Case.Revision,
+		CandidateArtifactID: candidate.ID,
+	})
+	if err != nil || !revalidated.Passed {
+		t.Fatalf("fresh candidate validation: passed=%v err=%v", revalidated.Passed, err)
+	}
+	if _, err := eng.ApproveRecoveryCandidate(ctx, ApproveRecoveryCandidateInput{
+		Auth: actor, CaseID: caseID, ExpectedRevision: revalidated.Case.Revision,
+		CandidateArtifactID: candidate.ID, ValidationArtifactID: validation.ID,
+	}); !errors.Is(err, ErrRecoveryCaseConflict) {
+		t.Fatalf("stale validation must fail closed, got %v", err)
+	}
+	validated.Case = revalidated.Case
+	validation = revalidated.Validation
+
 	// An expired grant can be superseded without changing the case revision.
 	base := time.Now().UTC().Truncate(time.Millisecond)
 	eng.now = func() time.Time { return base.Add(-31 * time.Minute) }
@@ -373,7 +402,10 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM recovery_case_transitions WHERE org_id=$1 AND case_id=$2`, org, caseID).Scan(&receipts); err != nil {
 		t.Fatalf("count receipts: %v", err)
 	}
-	if artifacts != 5 || publication != 1 || verification != 1 || receipts != 8 {
+	// The stale-validation proof above deliberately adds one replacement
+	// validation artifact and three lifecycle receipts (reopen plus the
+	// validating round trip) before the normal publication/verification path.
+	if artifacts != 6 || publication != 1 || verification != 1 || receipts != 11 {
 		t.Fatalf("governed evidence incomplete: artifacts=%d publication=%d verification=%d receipts=%d", artifacts, publication, verification, receipts)
 	}
 	var grantCount, revokedCount, consumedCount int

@@ -3,6 +3,7 @@
 package domain
 
 import (
+	"fmt"
 	"maps"
 	"math"
 	"regexp"
@@ -14,10 +15,25 @@ import (
 const (
 	maxJSTimestampMillis = int64(8_640_000_000_000_000)
 	maxJSSafeInteger     = float64(9_007_199_254_740_991)
+	dayMillis            = float64(86_400_000)
+	hourMillis           = float64(3_600_000)
+	minuteMillis         = float64(60_000)
+	secondMillis         = float64(1_000)
+	yearMillis           = 365 * dayMillis
+	monthMillis          = 30 * dayMillis
+	// time.Duration is nanoseconds. Keeping the parsed millisecond value at
+	// or below this ceiling keeps the executor's nanosecond product below
+	// MaxInt64 before the cast, preventing an enormous duration from wrapping
+	// into a past wake-up.
+	maxWaitUntilDurationMillis = float64(math.MaxInt64 / int64(time.Millisecond))
 )
 
 var approvalInstantPattern = regexp.MustCompile(
 	`^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|([+-])(\d{2}):(\d{2}))$`,
+)
+
+var waitUntilISODurationPattern = regexp.MustCompile(
+	`^P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$`,
 )
 
 // WaitingConfigError is the stable workflow-validation/executor error shape.
@@ -27,6 +43,83 @@ type WaitingConfigError struct {
 }
 
 func (e *WaitingConfigError) Error() string { return e.Message }
+
+// ParseISODurationMillis converts Janusly's bounded ISO-8601 duration grammar
+// to milliseconds. It rejects malformed values, the empty P/PT forms and
+// numeric overflow. Calendar-aware month/year arithmetic remains deliberately
+// out of scope: month = 30 days and year = 365 days, matching the runtime
+// contract.
+func ParseISODurationMillis(value string) *float64 {
+	match := waitUntilISODurationPattern.FindStringSubmatch(value)
+	if match == nil {
+		return nil
+	}
+	empty := true
+	total := float64(0)
+	units := []float64{yearMillis, monthMillis, dayMillis, hourMillis, minuteMillis, secondMillis}
+	for index, group := range match[1:] {
+		if group == "" {
+			continue
+		}
+		empty = false
+		component, err := strconv.ParseFloat(group, 64)
+		if err != nil || math.IsNaN(component) || math.IsInf(component, 0) {
+			return nil
+		}
+		total += component * units[index]
+		if math.IsNaN(total) || math.IsInf(total, 0) {
+			return nil
+		}
+	}
+	if empty {
+		return nil
+	}
+	return &total
+}
+
+// ValidateWaitUntilConfig is the single pure configuration grammar used by
+// domain validation, capability binding and execution. A proposal cannot be
+// marked complete with a value the runtime would later reject.
+func ValidateWaitUntilConfig(config map[string]any) error {
+	rawDuration, hasDuration := config["duration"]
+	rawUntil, hasUntil := config["until"]
+	if hasDuration && hasUntil {
+		return &WaitingConfigError{Code: "wait_until_conflicting_time",
+			Message: "wait_until accepts either config.duration or config.until, not both"}
+	}
+	if !hasDuration && !hasUntil {
+		return &WaitingConfigError{Code: "wait_until_missing_duration",
+			Message: "wait_until requires config.duration or config.until"}
+	}
+	if hasDuration {
+		text, ok := rawDuration.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return &WaitingConfigError{Code: "wait_until_invalid_duration",
+				Message: "wait_until.duration must be a valid ISO 8601 duration"}
+		}
+		delay := ParseISODurationMillis(text)
+		if delay == nil {
+			return &WaitingConfigError{Code: "wait_until_invalid_duration",
+				Message: fmt.Sprintf("wait_until.duration must be a valid ISO 8601 duration, got: %s", text)}
+		}
+		if *delay <= 0 {
+			return &WaitingConfigError{Code: "wait_until_non_positive_duration",
+				Message: fmt.Sprintf("wait_until.duration must resolve to a positive number of milliseconds, got: %v", *delay)}
+		}
+		durationNanos := *delay * float64(time.Millisecond)
+		if durationNanos < 1 || *delay > maxWaitUntilDurationMillis {
+			return &WaitingConfigError{Code: "wait_until_invalid_duration",
+				Message: "wait_until.duration must resolve to a supported duration"}
+		}
+		return nil
+	}
+	text, _ := rawUntil.(string)
+	if ParseAbsoluteInstant(text) == nil {
+		return &WaitingConfigError{Code: "wait_until_invalid_until",
+			Message: "wait_until.until must be an ISO 8601 date-time with an explicit timezone"}
+	}
+	return nil
+}
 
 // ApprovalWaitingConfig is the normalized approval checkpoint policy. A
 // relative timeout remains relative until the engine commits the waiting

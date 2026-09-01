@@ -9,9 +9,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -31,55 +29,11 @@ type Waiting struct {
 // grammar with authoring validation.
 type ConfigError = domain.WaitingConfigError
 
-// Approximations inherited from the contract: year = 365 days, month = 30
-// days — calendar-aware arithmetic is intentionally out of scope.
-const (
-	dayMs    = 86_400_000
-	hourMs   = 3_600_000
-	minuteMs = 60_000
-	secondMs = 1_000
-	yearMs   = 365 * dayMs
-	monthMs  = 30 * dayMs
-)
-
-var isoDurationPattern = regexp.MustCompile(
-	`^P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$`,
-)
-
 // ParseISODuration converts an ISO 8601 duration to milliseconds; nil for
-// malformed input, the bare P, or PT. Decimals allowed, negatives not.
+// malformed input, the bare P, PT or overflow. The implementation lives in
+// domain so authoring and validation use the exact runtime grammar.
 func ParseISODuration(value string) *float64 {
-	match := isoDurationPattern.FindStringSubmatch(value)
-	if match == nil {
-		return nil
-	}
-	empty := true
-	for _, group := range match[1:] {
-		if group != "" {
-			empty = false
-		}
-	}
-	if empty {
-		return nil
-	}
-	total := durationComponent(match[1], yearMs) +
-		durationComponent(match[2], monthMs) +
-		durationComponent(match[3], dayMs) +
-		durationComponent(match[4], hourMs) +
-		durationComponent(match[5], minuteMs) +
-		durationComponent(match[6], secondMs)
-	return &total
-}
-
-func durationComponent(text string, unitMs float64) float64 {
-	if text == "" {
-		return 0
-	}
-	n, err := strconv.ParseFloat(text, 64)
-	if err != nil {
-		return 0
-	}
-	return n * unitMs
+	return domain.ParseISODurationMillis(value)
 }
 
 // ParseAbsoluteInstant parses an unambiguous ISO 8601 instant (explicit
@@ -99,40 +53,18 @@ type waitUntilSchedule struct {
 // codes and messages: duration XOR until, positive duration, explicit
 // timezone; a past absolute instant resumes immediately.
 func resolveWaitUntilSchedule(config map[string]any, now time.Time) (*waitUntilSchedule, error) {
+	if err := domain.ValidateWaitUntilConfig(config); err != nil {
+		return nil, err
+	}
 	_, hasDuration := config["duration"]
-	_, hasUntil := config["until"]
-	if hasDuration && hasUntil {
-		return nil, &ConfigError{Code: "wait_until_conflicting_time",
-			Message: "wait_until accepts either config.duration or config.until, not both"}
-	}
-	if !hasDuration && !hasUntil {
-		return nil, &ConfigError{Code: "wait_until_missing_duration",
-			Message: "wait_until requires config.duration or config.until"}
-	}
 	if hasDuration {
-		text, ok := config["duration"].(string)
-		if !ok || strings.TrimSpace(text) == "" {
-			return nil, &ConfigError{Code: "wait_until_invalid_duration",
-				Message: "wait_until.duration must be a valid ISO 8601 duration"}
-		}
+		text := config["duration"].(string)
 		delay := ParseISODuration(text)
-		if delay == nil {
-			return nil, &ConfigError{Code: "wait_until_invalid_duration",
-				Message: fmt.Sprintf("wait_until.duration must be a valid ISO 8601 duration, got: %s", text)}
-		}
-		if *delay <= 0 {
-			return nil, &ConfigError{Code: "wait_until_non_positive_duration",
-				Message: fmt.Sprintf("wait_until.duration must resolve to a positive number of milliseconds, got: %v", *delay)}
-		}
-		wakeAt := now.Add(time.Duration(*delay) * time.Millisecond)
+		wakeAt := now.Add(time.Duration(*delay * float64(time.Millisecond)))
 		return &waitUntilSchedule{delayMs: *delay, wakeAt: wakeAt, source: "duration"}, nil
 	}
 	text, _ := config["until"].(string)
 	instant := ParseAbsoluteInstant(text)
-	if instant == nil {
-		return nil, &ConfigError{Code: "wait_until_invalid_until",
-			Message: "wait_until.until must be an ISO 8601 date-time with an explicit timezone"}
-	}
 	delay := float64(instant.Sub(now).Milliseconds())
 	if delay < 0 {
 		delay = 0

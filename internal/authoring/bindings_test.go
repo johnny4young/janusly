@@ -101,6 +101,25 @@ func TestBindWorkflowFlagsExpiredCredentialAndIncompleteSafeNodes(t *testing.T) 
 	}
 }
 
+func TestBindWorkflowRejectsMalformedWaitAndSubworkflowVersion(t *testing.T) {
+	wf := &domain.Workflow{ID: "wf-parent", Nodes: []domain.Node{
+		{ID: "wait", Type: "wait_until", Config: map[string]any{"duration": "Pjunk"}},
+		{ID: "child", Type: "subworkflow", Config: map[string]any{"workflowId": "wf-child", "version": "3"}},
+	}, Edges: []domain.Edge{}}
+	report := BindWorkflow(bindingTestCatalog(), wf)
+	if report.Complete || len(report.Missing) != 2 || len(report.Resolved) != 0 {
+		t.Fatalf("malformed executable config must block proposal apply: %+v", report)
+	}
+	reasons := []string{report.Missing[0].Reason, report.Missing[1].Reason}
+	if !slices.Contains(reasons, "wait_until_configuration_incomplete") ||
+		!slices.Contains(reasons, "subworkflow_version_invalid") {
+		t.Fatalf("missing precise binding reasons: %+v", report.Missing)
+	}
+	if HasUnboundCapabilityIdentity(report) {
+		t.Fatalf("malformed configuration is incomplete, not an invented catalog identity: %+v", report.Missing)
+	}
+}
+
 func TestHasUnboundCapabilityIdentitySeparatesMissingConfigFromInventedIDs(t *testing.T) {
 	identityReasons := []string{
 		"exact_tool_not_found", "exact_mcp_tool_not_found", "exact_credential_not_found",
@@ -116,7 +135,8 @@ func TestHasUnboundCapabilityIdentitySeparatesMissingConfigFromInventedIDs(t *te
 	configurationReasons := []string{
 		"tool_binding_required", "mcp_binding_required", "credential_binding_required",
 		"credential_not_configured", "credential_expired", "subworkflow_binding_required",
-		"tool_input_required", "mcp_input_required", "wait_until_configuration_incomplete",
+		"subworkflow_version_invalid", "tool_input_required", "mcp_input_required",
+		"wait_until_configuration_incomplete",
 	}
 	for _, reason := range configurationReasons {
 		t.Run("configuration/"+reason, func(t *testing.T) {

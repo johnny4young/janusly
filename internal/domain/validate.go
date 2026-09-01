@@ -261,6 +261,15 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 				push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
 			}
 		}
+		if node.Type == "wait_until" {
+			if err := ValidateWaitUntilConfig(node.Config); err != nil {
+				code := "wait_until_invalid_duration"
+				if configErr, ok := err.(*WaitingConfigError); ok {
+					code = configErr.Code
+				}
+				push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
+			}
+		}
 	}
 
 	for index, edge := range wf.Edges {

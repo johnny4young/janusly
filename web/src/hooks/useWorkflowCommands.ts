@@ -26,13 +26,6 @@ type ValidationResponse = {
   issues?: ValidationIssue[]
 }
 
-type GenerateWorkflowResponse = WorkflowDefinition & {
-  mode?: AiMode
-  error?: string
-  aiError?: string
-  bonBackoff?: unknown
-}
-
 type ExplainWorkflowResponse = {
   mode?: AiMode
   explanation?: string
@@ -199,40 +192,6 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     hydrateWorkflow,
     maybeRestoreDraft,
     setActiveTab,
-    setValidationIssues,
-    t,
-  ])
-
-  const generateWorkflow = useCallback(async (prompt: string) => {
-    if (!await confirmReplaceCanvas()) return null
-    const result = await api('/ai/generate-workflow', {
-      method: 'POST',
-      body: JSON.stringify({ prompt }),
-    }) as GenerateWorkflowResponse
-    if (result.error) throw new Error(result.error)
-    if (!Array.isArray(result.nodes) || !Array.isArray(result.edges)) {
-      throw new Error(t('toasts.aiResponseInvalid'))
-    }
-    hydrateWorkflow(result, { saved: false, dirty: true })
-    setValidationIssues([])
-    const mode = result.mode ?? 'fallback'
-    const tone = mode === 'error' ? 'error' : result.aiError ? 'info' : 'success'
-    const message = mode === 'ai'
-      ? t('toasts.aiDrafted')
-      : result.aiError
-        ? t('toasts.aiFallbackStarter')
-        : t('toasts.starterLoaded')
-    addToast(message, tone)
-    return {
-      mode,
-      workflow: result as WorkflowDefinition,
-      aiError: result.aiError,
-      bonBackoff: parseAiCandidateBackoff(result.bonBackoff),
-    }
-  }, [
-    addToast,
-    confirmReplaceCanvas,
-    hydrateWorkflow,
     setValidationIssues,
     t,
   ])
@@ -408,7 +367,6 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     confirmReplaceCanvas,
     createNewWorkflow,
     explainWorkflow,
-    generateWorkflow,
     loadAuthoringCapabilities,
     maybeRestoreDraft,
     openWorkflow,

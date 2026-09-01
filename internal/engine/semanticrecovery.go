@@ -153,6 +153,14 @@ type SemanticRecoveryValidationPayload struct {
 	Summary             string `json:"summary"`
 }
 
+// currentRecoveryValidation binds the artifact to the exact lifecycle point
+// that produced the present awaiting_approval revision. Validation advances
+// candidates_ready -> validating -> awaiting_approval, so any other delta
+// proves that the case changed after this artifact was inspected.
+func currentRecoveryValidation(validationRevision, caseRevision int64) bool {
+	return caseRevision > 2 && validationRevision == caseRevision-2
+}
+
 // ParseSemanticRecoveryCandidatePayload is the single immutable-envelope
 // decoder used by validation, approval/apply and the MCP permission guard.
 // It validates shape and the closed decision/kind pairing without executing
@@ -416,7 +424,7 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 	if candidateErr != nil || json.Unmarshal(validationArtifact.PayloadJson, &validation) != nil ||
 		!validation.Passed || validation.CandidateArtifactID != candidateArtifact.ID ||
 		validation.CandidateSha256 != candidateArtifact.PayloadSha256 ||
-		validation.CaseRevision >= target.Revision {
+		!currentRecoveryValidation(validation.CaseRevision, target.Revision) {
 		return ResolveSemanticOutcomeResult{}, ErrRecoveryCaseConflict
 	}
 	candidate.Reason = strings.TrimSpace(candidate.Reason)
@@ -427,6 +435,7 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 		return ResolveSemanticOutcomeResult{}, ErrRecoverySemanticInputInvalid
 	}
 	now := e.now().UTC().Truncate(time.Millisecond)
+	actorKind := recoveryActorKind(input.Auth)
 	grant, err := q.FindActiveRecoveryApprovalGrant(ctx, store.FindActiveRecoveryApprovalGrantParams{
 		OrgID: orgID, CaseID: input.CaseID,
 		CandidateArtifactID:  input.CandidateArtifactID,
@@ -545,7 +554,7 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 	reason := signature.ScrubSecretShapes(candidate.Reason)
 	artifactPairs := make(map[string]semanticResolutionArtifactPair, len(casesToResolve))
 	for index, item := range casesToResolve {
-		pair, err := e.insertSemanticResolutionArtifacts(ctx, q, item, input.Auth.UserID,
+		pair, err := e.insertSemanticResolutionArtifacts(ctx, q, item, actorKind, input.Auth.UserID,
 			decision, finalState, eventID, candidateArtifact, validationArtifact,
 			resolvedAt.Add(time.Duration(index)*time.Millisecond))
 		if err != nil {
@@ -559,7 +568,7 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 		}
 	}
 	for index, item := range casesToResolve {
-		if err := e.advanceSemanticResolutionCase(ctx, q, item, input.Auth.UserID,
+		if err := e.advanceSemanticResolutionCase(ctx, q, item, actorKind, input.Auth.UserID,
 			decision, reason, eventID, resolvedAt.Add(time.Duration(index*16)*time.Millisecond),
 			candidateArtifact, validationArtifact, artifactPairs[item.ID]); err != nil {
 			return ResolveSemanticOutcomeResult{}, err
@@ -699,7 +708,7 @@ type semanticResolutionArtifactPair struct {
 
 func (e *Engine) insertSemanticResolutionArtifacts(
 	ctx context.Context, q *store.Queries, item store.RecoveryCase,
-	actorID, decision, finalState, eventID string,
+	actorKind, actorID, decision, finalState, eventID string,
 	candidate, validation store.RecoveryCaseArtifact, occurredAt time.Time,
 ) (semanticResolutionArtifactPair, error) {
 	insert := func(kind string, payload any, createdAt time.Time) (store.RecoveryCaseArtifact, error) {
@@ -710,7 +719,7 @@ func (e *Engine) insertSemanticResolutionArtifacts(
 		row, err := q.InsertRecoveryCaseArtifact(ctx, store.InsertRecoveryCaseArtifactParams{
 			ID: StableSemanticID("rca", item.ID, kind, hash), OrgID: item.OrgID,
 			CaseID: item.ID, Kind: kind, PayloadJson: raw, PayloadSha256: hash,
-			ActorKind: "user", ActorID: pgtype.Text{String: actorID, Valid: true},
+			ActorKind: actorKind, ActorID: pgtype.Text{String: actorID, Valid: true},
 			CreatedAt: createdAt,
 		})
 		if err != nil {
@@ -748,7 +757,7 @@ func (e *Engine) insertSemanticResolutionArtifacts(
 
 func (e *Engine) advanceSemanticResolutionCase(
 	ctx context.Context, q *store.Queries, item store.RecoveryCase,
-	actorID, decision, reason, eventID string, occurredAt time.Time,
+	actorKind, actorID, decision, reason, eventID string, occurredAt time.Time,
 	candidate, validation store.RecoveryCaseArtifact, artifacts semanticResolutionArtifactPair,
 ) error {
 	targets := []string{"accepted_loss"}
@@ -768,7 +777,7 @@ func (e *Engine) advanceSemanticResolutionCase(
 		}
 		receipt := domain.RecoveryCaseTransitionReceipt{
 			CaseID: item.ID, From: from, To: to,
-			ActorKind: "user", ActorID: actorID, Reason: receiptReason,
+			ActorKind: actorKind, ActorID: actorID, Reason: receiptReason,
 			Evidence: []domain.RecoveryCaseEvidenceRef{
 				{Kind: "operator_decision", ID: eventID},
 				{Kind: "run_node", ID: item.RunID + ":" + item.SourceNodeID},
@@ -809,7 +818,7 @@ func (e *Engine) advanceSemanticResolutionCase(
 		}
 		inserted, err := q.InsertRecoveryCaseTransition(ctx, store.InsertRecoveryCaseTransitionParams{
 			ID: StableSemanticID("sct", item.ID, from, to, fmt.Sprint(revision)), OrgID: item.OrgID, CaseID: item.ID,
-			FromState: from, ToState: to, ActorKind: "user",
+			FromState: from, ToState: to, ActorKind: actorKind,
 			ActorID: pgtype.Text{String: actorID, Valid: true}, EvidenceJson: evidence,
 			Reason:     pgtype.Text{String: receiptReason, Valid: receiptReason != ""},
 			OccurredAt: stepAt,

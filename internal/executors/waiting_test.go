@@ -86,6 +86,11 @@ func TestResolveWaitUntilScheduleContract(t *testing.T) {
 		!duration.wakeAt.Equal(now.Add(2*time.Minute)) {
 		t.Fatalf("duration schedule broken: %+v err %v", duration, err)
 	}
+	fractional, err := resolveWaitUntilSchedule(map[string]any{"duration": "PT0.0005S"}, now)
+	if err != nil || fractional.delayMs != 0.5 ||
+		!fractional.wakeAt.Equal(now.Add(500*time.Microsecond)) {
+		t.Fatalf("fractional millisecond schedule broken: %+v err %v", fractional, err)
+	}
 	past, err := resolveWaitUntilSchedule(map[string]any{"until": "2020-01-01T00:00:00Z"}, now)
 	if err != nil || past.delayMs != 0 || past.source != "until" {
 		t.Fatalf("a past instant must resume immediately: %+v err %v", past, err)
@@ -94,6 +99,10 @@ func TestResolveWaitUntilScheduleContract(t *testing.T) {
 	_, err = resolveWaitUntilSchedule(map[string]any{"duration": "PT0S"}, now)
 	if !isConfigError(err, &configErr) || configErr.Code != "wait_until_non_positive_duration" {
 		t.Fatalf("non-positive duration code broken: %v", err)
+	}
+	_, err = resolveWaitUntilSchedule(map[string]any{"duration": "P1000Y"}, now)
+	if !isConfigError(err, &configErr) || configErr.Code != "wait_until_invalid_duration" {
+		t.Fatalf("overflowing duration must fail before time.Duration conversion: %v", err)
 	}
 }
 

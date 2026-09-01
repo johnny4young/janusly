@@ -5,8 +5,40 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 )
+
+func TestRecoveryActorKindPreservesHumanAndAgentProvenance(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		actor  *auth.Context
+		expect string
+	}{
+		{name: "nil defaults closed human", actor: nil, expect: "user"},
+		{name: "web", actor: &auth.Context{Source: auth.SourceWeb}, expect: "user"},
+		{name: "dev", actor: &auth.Context{Source: auth.SourceDev}, expect: "user"},
+		{name: "mcp", actor: &auth.Context{Source: auth.SourceMcp}, expect: "agent"},
+		{name: "service", actor: &auth.Context{Source: auth.SourceService}, expect: "agent"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := recoveryActorKind(test.actor); got != test.expect {
+				t.Fatalf("actor kind = %q, want %q", got, test.expect)
+			}
+		})
+	}
+}
+
+func TestCurrentRecoveryValidationRequiresExactTwoStepRevision(t *testing.T) {
+	if !currentRecoveryValidation(7, 9) {
+		t.Fatal("the exact two-step validation revision must remain current")
+	}
+	for _, stale := range []int64{0, 1, 6, 8, 9, 10} {
+		if currentRecoveryValidation(stale, 9) {
+			t.Fatalf("validation revision %d must be stale for case revision 9", stale)
+		}
+	}
+}
 
 func TestBoundedRecoveryArtifactScrubsKeysAndSecretShapes(t *testing.T) {
 	raw, digest, err := boundedRecoveryArtifact(map[string]any{

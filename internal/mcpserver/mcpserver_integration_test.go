@@ -327,6 +327,19 @@ func TestMcpGovernedSemanticRecoveryRequiresIndependentApproval(t *testing.T) {
 	if !reused.IsError {
 		t.Fatal("one-use approval/candidate apply must not be reusable")
 	}
+	var agentArtifacts, incorrectlyHumanArtifacts int
+	if err := pool.QueryRow(t.Context(), `SELECT
+		count(*) FILTER (WHERE actor_kind='agent'),
+		count(*) FILTER (WHERE actor_kind='user')
+		FROM recovery_case_artifacts
+		WHERE org_id=$1 AND case_id=$2`, orgID, caseID).
+		Scan(&agentArtifacts, &incorrectlyHumanArtifacts); err != nil {
+		t.Fatal(err)
+	}
+	if agentArtifacts < 4 || incorrectlyHumanArtifacts != 0 {
+		t.Fatalf("MCP recovery provenance must remain agent-authored: agent=%d user=%d",
+			agentArtifacts, incorrectlyHumanArtifacts)
+	}
 	var invoked int
 	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
 		WHERE org_id=$1 AND action='mcp.tool.invoked' AND target_id LIKE 'recovery.cases.%'`, orgID).Scan(&invoked); err != nil {
