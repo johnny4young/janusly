@@ -59,6 +59,7 @@ export async function createSemanticRecoveryFixture(
     autonomyLevel?: 0 | 1 | 2 | 3 | 4
     orgPrefix?: string
     orgSuffix?: string
+    userId?: string
   } = {},
 ): Promise<SemanticRecoveryFixture> {
   const apiUrl = options.apiUrl ?? process.env.E2E_API_URL ?? 'http://127.0.0.1:7311'
@@ -68,7 +69,7 @@ export async function createSemanticRecoveryFixture(
     locale,
     options.orgSuffix,
   ].filter(Boolean).join('-')
-  const userId = `semantic-operator-${locale}`
+  const userId = options.userId ?? `semantic-operator-${locale}`
   const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const target = `semantic-${locale}-${nonce}`
   const workflow = {

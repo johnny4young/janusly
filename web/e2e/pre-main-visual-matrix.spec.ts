@@ -181,10 +181,12 @@ async function openRecoveryCase(
   fixture: SemanticRecoveryFixture,
 ): Promise<void> {
   const preferred = page.getByTestId('recovery-center-action-cta-review_semantic_cases')
-  if (await preferred.isVisible().catch(() => false)) {
+  const direct = page.getByTestId(`semantic-recovery-open-${fixture.caseId}`)
+  await expect(preferred.or(direct).first()).toBeVisible({ timeout: 30_000 })
+  if (await preferred.isVisible()) {
     await preferred.click()
   } else {
-    await page.getByTestId(`semantic-recovery-open-${fixture.caseId}`).click()
+    await direct.click()
   }
   await expect(page.getByTestId(`recovery-case-workspace-${fixture.caseId}`)).toBeVisible()
 }
@@ -211,6 +213,8 @@ async function captureCombination(
     reducedMotion: 'reduce',
   })
   const page = await context.newPage()
+  page.setDefaultTimeout(30_000)
+  page.setDefaultNavigationTimeout(30_000)
   const browserErrors = installBrowserGuards(page)
   await page.addInitScript(({ activeOrg, selectedLocale, selectedTheme }) => {
     window.localStorage.clear()
@@ -289,10 +293,12 @@ test('captures the exact pre-main bilingual theme and viewport matrix', async ({
     en: await createSemanticRecoveryFixture('en', {
       apiUrl,
       orgPrefix: `visual-${phase}`,
+      userId: 'dev-user',
     }),
     es: await createSemanticRecoveryFixture('es', {
       apiUrl,
       orgPrefix: `visual-${phase}`,
+      userId: 'dev-user',
     }),
   }
   const evidence: MatrixEvidence = {
