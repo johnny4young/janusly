@@ -82,11 +82,14 @@ func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
 		ID: row.ID, OrgID: row.OrgID,
 		WorkflowID: row.WorkflowID, WorkflowName: textOrNullString(row.WorkflowName),
 		WorkflowVersionID: row.WorkflowVersionID, Status: row.Status,
-		HasWaitingNodes: row.HasWaitingNodes,
-		OutputJSON:      normalizedRaw(row.OutputJson),
-		ParentRunID:     textOrNull(row.ParentRunID), ParentNodeID: textOrNull(row.ParentNodeID),
+		HasWaitingNodes:        row.HasWaitingNodes,
+		OutcomeStatus:          textOrNull(row.OutcomeStatus),
+		SemanticViolationCount: int(row.SemanticViolationCount),
+		OutputJSON:             normalizedRaw(row.OutputJson),
+		ParentRunID:            textOrNull(row.ParentRunID), ParentNodeID: textOrNull(row.ParentNodeID),
 		ReplayMode: textOrNull(row.ReplayMode), TraceID: textOrNull(row.TraceID),
-		CreatedBy: textOrNull(row.CreatedBy), CreatedAt: timeOrNull(row.CreatedAt),
+		ValidationEvidenceLevel: textOrNull(row.ValidationEvidenceLevel),
+		CreatedBy:               textOrNull(row.CreatedBy), CreatedAt: timeOrNull(row.CreatedAt),
 	}
 }
 

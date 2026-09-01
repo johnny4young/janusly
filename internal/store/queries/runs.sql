@@ -286,7 +286,9 @@ LIMIT sqlc.arg(page_limit);
 -- the contract's optional filters.
 
 -- name: ListRunSummaries :many
-SELECT r.id, r.org_id, r.workflow_version_id, r.status, r.output_json,
+SELECT r.id, r.org_id, r.workflow_version_id, r.status,
+       r.outcome_status, r.semantic_violation_count,
+       r.validation_evidence_level, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
        r.created_at, r.trace_id,
        coalesce(wv.workflow_id, r.workflow_version_id) AS workflow_id,

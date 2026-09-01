@@ -1846,7 +1846,9 @@ const listRunSummaries = `-- name: ListRunSummaries :many
 
 
 
-SELECT r.id, r.org_id, r.workflow_version_id, r.status, r.output_json,
+SELECT r.id, r.org_id, r.workflow_version_id, r.status,
+       r.outcome_status, r.semantic_violation_count,
+       r.validation_evidence_level, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
        r.created_at, r.trace_id,
        coalesce(wv.workflow_id, r.workflow_version_id) AS workflow_id,
@@ -1878,20 +1880,23 @@ type ListRunSummariesParams struct {
 }
 
 type ListRunSummariesRow struct {
-	ID                string
-	OrgID             string
-	WorkflowVersionID string
-	Status            string
-	OutputJson        json.RawMessage
-	ParentRunID       pgtype.Text
-	ParentNodeID      pgtype.Text
-	ReplayMode        pgtype.Text
-	CreatedBy         pgtype.Text
-	CreatedAt         *time.Time
-	TraceID           pgtype.Text
-	WorkflowID        string
-	WorkflowName      interface{}
-	HasWaitingNodes   bool
+	ID                      string
+	OrgID                   string
+	WorkflowVersionID       string
+	Status                  string
+	OutcomeStatus           pgtype.Text
+	SemanticViolationCount  int32
+	ValidationEvidenceLevel pgtype.Text
+	OutputJson              json.RawMessage
+	ParentRunID             pgtype.Text
+	ParentNodeID            pgtype.Text
+	ReplayMode              pgtype.Text
+	CreatedBy               pgtype.Text
+	CreatedAt               *time.Time
+	TraceID                 pgtype.Text
+	WorkflowID              string
+	WorkflowName            interface{}
+	HasWaitingNodes         bool
 }
 
 // Run summaries for the list surface: workflow identity joined through the
@@ -1919,6 +1924,9 @@ func (q *Queries) ListRunSummaries(ctx context.Context, arg ListRunSummariesPara
 			&i.OrgID,
 			&i.WorkflowVersionID,
 			&i.Status,
+			&i.OutcomeStatus,
+			&i.SemanticViolationCount,
+			&i.ValidationEvidenceLevel,
 			&i.OutputJson,
 			&i.ParentRunID,
 			&i.ParentNodeID,
