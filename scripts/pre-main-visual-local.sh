@@ -14,7 +14,7 @@ current_postgres_port=${JANUSLY_VISUAL_AFTER_POSTGRES_PORT:-35434}
 baseline_postgres_port=${JANUSLY_VISUAL_BEFORE_POSTGRES_PORT:-35433}
 current_metrics_port=${JANUSLY_VISUAL_AFTER_METRICS_PORT:-39464}
 baseline_metrics_port=${JANUSLY_VISUAL_BEFORE_METRICS_PORT:-39463}
-credential_master_key=visual0000000000000000000000000000000000000000000000000000000000
+credential_master_key=0a6ee99978435f3e242e19aa61839045c6c1a5f1f5e63558f9d40706702570c7
 baseline_source=
 active_source=
 active_project=
@@ -80,6 +80,8 @@ validate() {
     *) usage >&2; die "unknown profile: $profile" ;;
   esac
   [[ ${CONFIRM:-} == reset ]] || die 'isolated volume cleanup requires CONFIRM=reset'
+  [[ "$credential_master_key" =~ ^[0-9a-fA-F]{64}$ ]] ||
+    die 'visual credential master key must be exactly 32 bytes encoded as hex'
   git -C "$root" cat-file -e "${baseline_ref}^{commit}" 2>/dev/null ||
     die "baseline ref does not resolve: $baseline_ref"
   if [[ -n $(git -C "$root" status --porcelain --untracked-files=all) ]]; then
