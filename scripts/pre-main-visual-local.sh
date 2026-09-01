@@ -139,7 +139,12 @@ start_active_stack() {
   compose build janusly
   compose run --rm janusly migrate
   compose up -d janusly
-  wait_for_app "http://127.0.0.1:${active_app_port}"
+  if ! wait_for_app "http://127.0.0.1:${active_app_port}"; then
+    printf 'pre-main visual: %s runtime did not become healthy\n' "$active_project" >&2
+    compose ps >&2 || true
+    compose logs --no-color --tail=200 janusly postgres >&2 || true
+    return 1
+  fi
 }
 
 run_visual_phase() {
