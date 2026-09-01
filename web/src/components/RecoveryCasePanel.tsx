@@ -270,6 +270,8 @@ type RecoveryCandidatePayload = {
   expectedResult?: string
 }
 
+type RecoveryCandidateKind = RecoveryCandidatePayload['kind']
+
 type RecoveryDiagnosisHypothesis = {
   id: string
   cause: string
@@ -356,6 +358,25 @@ function candidatePayload(artifact: RecoveryCaseArtifact): RecoveryCandidatePayl
   return payload as RecoveryCandidatePayload
 }
 
+function selectCandidateId(
+  candidates: RecoveryCaseArtifact[],
+  current: string | null,
+  preferredKind?: RecoveryCandidateKind,
+): string | null {
+  if (preferredKind) {
+    const preferred = candidates.find(candidate => (
+      candidatePayload(candidate)?.kind === preferredKind
+    ))
+    if (preferred) return preferred.id
+  }
+  if (current && candidates.some(candidate => candidate.id === current)) {
+    return current
+  }
+  return candidates.find(candidate => (
+    candidatePayload(candidate)?.kind !== 'accept_loss'
+  ))?.id ?? candidates[0]?.id ?? null
+}
+
 function validationCandidateId(artifact: RecoveryCaseArtifact): string | null {
   if (artifact.kind !== 'validation' || !isRecord(artifact.payload)) return null
   return typeof artifact.payload.candidateArtifactId === 'string'
@@ -394,7 +415,9 @@ export function RecoveryCasePanel({
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null)
   const [approvedCandidateId, setApprovedCandidateId] = useState<string | null>(null)
 
-  const loadCase = useCallback(async () => {
+  const loadCase = useCallback(async (
+    preferredCandidateKind?: RecoveryCandidateKind,
+  ) => {
     if (!caseId) {
       setDetail(null)
       setSelectedCandidateId(null)
@@ -415,12 +438,10 @@ export function RecoveryCasePanel({
       }
       setDetail(parsed)
       const candidates = parsed.artifacts.filter(artifact => artifact.kind === 'candidate')
-      setSelectedCandidateId(current => (
-        current && candidates.some(candidate => candidate.id === current)
-          ? current
-          : candidates.find(candidate => candidatePayload(candidate)?.kind !== 'accept_loss')?.id
-            ?? candidates[0]?.id
-            ?? null
+      setSelectedCandidateId(current => selectCandidateId(
+        candidates,
+        current,
+        preferredCandidateKind,
       ))
       if (parsed.case.state !== 'awaiting_approval') setApprovedCandidateId(null)
     } catch (error) {
@@ -446,12 +467,16 @@ export function RecoveryCasePanel({
   const governedPath = (suffix: string) =>
     `/recovery/cases/${encodeURIComponent(detail?.case.id ?? '')}/${suffix}`
 
-  const finishMutation = async (action: string, operation: () => Promise<unknown>) => {
+  const finishMutation = async (
+    action: string,
+    operation: () => Promise<unknown>,
+    preferredCandidateKind?: RecoveryCandidateKind,
+  ) => {
     setMutationError(null)
     setBusyAction(action)
     try {
       const result = await operation()
-      await loadCase()
+      await loadCase(preferredCandidateKind)
       return result
     } catch (error) {
       setMutationError(
@@ -488,16 +513,20 @@ export function RecoveryCasePanel({
         return
       }
     }
-    const result = await finishMutation('candidates', () => contractApi(
-      'POST /recovery/cases/{caseId}/candidates',
-      governedPath('candidates'),
-      {
-        expectedRevision: detail.case.revision,
-        ...(includeReplacement
-          ? { manualReplacement: { output: replacement, reason: trimmedReason } }
-          : {}),
-      },
-    ))
+    const result = await finishMutation(
+      'candidates',
+      () => contractApi(
+        'POST /recovery/cases/{caseId}/candidates',
+        governedPath('candidates'),
+        {
+          expectedRevision: detail.case.revision,
+          ...(includeReplacement
+            ? { manualReplacement: { output: replacement, reason: trimmedReason } }
+            : {}),
+        },
+      ),
+      includeReplacement ? 'replace_output' : undefined,
+    )
     if (result) setReason('')
   }
 

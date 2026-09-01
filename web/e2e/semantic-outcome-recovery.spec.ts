@@ -4,7 +4,10 @@ import {
   createSemanticRecoveryFixture,
   type SemanticRecoveryFixture,
 } from './_helpers/semantic-recovery-fixture'
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import {
+  openWorkspaceDestination,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 
 const enabled = process.env.JANUSLY_SEMANTIC_OUTCOME_E2E === '1'
 const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
@@ -17,24 +20,22 @@ function labels(locale: Locale) {
   return locale === 'en'
     ? {
         workflowName: 'Semantic outcome recovery',
+        briefTitle: 'Diagnose a business outcome incident',
         message: 'The draft requires an operator-approved business outcome.',
         reason: 'Reviewed against the business policy.',
         runs: 'Runs',
         recovered: 'Outcome recovered',
-        blocker: '1 blocker',
-        blockedRun: '1 blocked run',
         blockedRunAria: 'Open recovery — 1 run is blocked on a human gate',
         allClearAria: 'Open Recovery Center — no pending work',
         backToRecovery: 'Back to Recovery Center',
       }
     : {
         workflowName: 'Recuperación de resultado semántico',
+        briefTitle: 'Diagnosticar un incidente de resultado de negocio',
         message: 'El borrador requiere un resultado de negocio aprobado por un operador.',
         reason: 'Revisado según la política de negocio.',
         runs: 'Ejecuciones',
         recovered: 'Resultado recuperado',
-        blocker: '1 bloqueador',
-        blockedRun: '1 ejecución bloqueada',
         blockedRunAria: 'Abrir recuperación — 1 ejecución está bloqueada en un gate humano',
         allClearAria: 'Abrir Centro de Recuperación — sin trabajo pendiente',
         backToRecovery: 'Volver al Centro de recuperación',
@@ -114,22 +115,20 @@ for (const locale of ['en', 'es'] as const) {
     const action = page.getByTestId(
       `recovery-center-action-recovery-case:${fixture.caseId}`,
     )
-    await expect(action).toContainText(copy.message)
-    await expect(page.getByRole('button', { name: copy.blockedRunAria })).toContainText(
-      copy.blockedRun,
-    )
-    await expect(
-      page.getByText(copy.blocker, { exact: true }),
-    ).toBeVisible()
+    // Home consumes the bounded Operator Brief and intentionally avoids
+    // placing detector evidence in the ranking card. The exact incident copy
+    // belongs to the authenticated case workspace opened by the CTA.
+    await expect(action).toContainText(copy.briefTitle)
+    await expect(page.getByRole('button', { name: copy.blockedRunAria })).toBeVisible()
     await expectNoHorizontalOverflow(page)
     await capture(page, `semantic-outcome-quarantine-${locale}`)
 
     await page.getByTestId(
       `recovery-center-action-cta-recovery-case:${fixture.caseId}`,
     ).click()
-    await expect(
-      page.getByTestId(`recovery-case-workspace-${fixture.caseId}`),
-    ).toBeVisible()
+    const workspace = page.getByTestId(`recovery-case-workspace-${fixture.caseId}`)
+    await expect(workspace).toBeVisible()
+    await expect(workspace).toContainText(copy.message)
     const autonomy = page.getByTestId(
       `recovery-autonomy-profile-${fixture.caseId}`,
     )
@@ -200,9 +199,20 @@ for (const locale of ['en', 'es'] as const) {
     await expect(page.getByTestId('home-priority-clear')).toBeVisible()
     await expect(page.getByRole('button', { name: copy.allClearAria })).toBeVisible()
 
+    const activityDestination = locale === 'en' ? 'Activity' : 'Actividad'
+    await openWorkspaceDestination(page, activityDestination)
+    const activityRow = page.getByTestId(`activity-row-run:${fixture.runId}`)
+    await expect(activityRow).toBeVisible()
+    await expect(async () => {
+      await page.getByTestId('activity-refresh').click()
+      await expect(activityRow).toHaveAttribute('data-category', 'recovered', {
+        timeout: 1_000,
+      })
+    }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] })
+
     await openWorkspaceSection(
       page,
-      locale === 'en' ? 'Activity' : 'Actividad',
+      activityDestination,
       copy.runs,
     )
     const runRow = page.getByRole('article').filter({ hasText: fixture.workflowName }).first()
@@ -235,7 +245,9 @@ test('recommendation-only policy keeps replacement locked and accepted loss expl
   }, { activeOrg: fixture.orgId })
 
   await page.goto('/')
-  await page.getByTestId(`semantic-recovery-open-${fixture.caseId}`).click()
+  await page.getByTestId(
+    `recovery-center-action-cta-recovery-case:${fixture.caseId}`,
+  ).click()
   const workspace = page.getByTestId(
     `recovery-case-workspace-${fixture.caseId}`,
   )

@@ -95,6 +95,19 @@ const replacementCandidate = artifact('candidate-replace', 'candidate', {
   requiredPermissions: ['recovery.write'],
 }, 'b')
 
+const repairCandidate = artifact('candidate-repair', 'candidate', {
+  kind: 'repair_workflow',
+  decision: 'manual_follow_up',
+  target: {
+    workflowId: 'workflow-1',
+    workflowVersionId: 'version-1',
+  },
+  reason: 'Create and qualify a successor workflow version',
+  risk: 'medium',
+  expectedResult: 'A qualified successor addresses future executions',
+  requiredPermissions: ['recovery.write', 'workflows.write'],
+}, 'c')
+
 const lossCandidate = artifact('candidate-loss', 'candidate', {
   kind: 'accept_loss',
   decision: 'accept_loss',
@@ -102,7 +115,7 @@ const lossCandidate = artifact('candidate-loss', 'candidate', {
   risk: 'high',
   expectedResult: 'The case closes without changing output',
   requiredPermissions: ['recovery.write'],
-}, 'c')
+}, 'd')
 
 const validation = artifact('validation-1', 'validation', {
   candidateArtifactId: replacementCandidate.id,
@@ -110,17 +123,17 @@ const validation = artifact('validation-1', 'validation', {
   caseRevision: 4,
   passed: true,
   summary: 'Replacement passed every deterministic detector',
-}, 'd')
+}, 'e')
 
 const publication = artifact('publication-1', 'publication', {
   candidateArtifactId: replacementCandidate.id,
   validationArtifactId: validation.id,
-}, 'e')
+}, 'f')
 
 const verification = artifact('verification-1', 'verification', {
   resultState: 'verified_recovered',
   deterministicValidationPassed: true,
-}, 'f')
+}, '0')
 
 function detail(
   state: TestState = 'contained',
@@ -237,25 +250,29 @@ describe('<RecoveryCasePanel />', () => {
       .mockResolvedValueOnce(detail('diagnosed', 3, [diagnosis]))
       .mockResolvedValueOnce(detail('candidates_ready', 3, [
         diagnosis,
-        replacementCandidate,
+        repairCandidate,
         lossCandidate,
+        replacementCandidate,
       ]))
       .mockResolvedValueOnce(detail('awaiting_approval', 3, [
         diagnosis,
-        replacementCandidate,
+        repairCandidate,
         lossCandidate,
+        replacementCandidate,
         validation,
       ]))
       .mockResolvedValueOnce(detail('awaiting_approval', 3, [
         diagnosis,
-        replacementCandidate,
+        repairCandidate,
         lossCandidate,
+        replacementCandidate,
         validation,
       ]))
       .mockResolvedValueOnce(detail('verified_recovered', 3, [
         diagnosis,
-        replacementCandidate,
+        repairCandidate,
         lossCandidate,
+        replacementCandidate,
         validation,
         publication,
         verification,
@@ -315,6 +332,8 @@ describe('<RecoveryCasePanel />', () => {
         },
       },
     ))
+
+    expect(screen.getByRole('radio', { name: /Replace output/ })).toBeChecked()
 
     fireEvent.click(await screen.findByTestId('semantic-recovery-validate-case-1'))
     await waitFor(() => expect(contractApi).toHaveBeenNthCalledWith(
