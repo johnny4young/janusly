@@ -213,7 +213,44 @@ func TestClaimReturnsEligibleQueueWait(t *testing.T) {
 func TestClaimPlanUsesFIFOQueueIndex(t *testing.T) {
 	pool := queueOrderTestPool(t)
 	ctx := context.Background()
-	rows, err := pool.Query(ctx, `EXPLAIN (COSTS OFF)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin representative queue plan: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	runID := fmt.Sprintf("run-queue-plan-%d", time.Now().UnixNano())
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO runs (id, org_id, status, input_json, workflow_version_id)
+		VALUES ($1, 'org-queue-plan', 'running', '{}', 'wv-queue-plan')`, runID); err != nil {
+		t.Fatalf("seed representative queue run: %v", err)
+	}
+	// A tiny fresh table legitimately favors a per-run index scan. Model the
+	// production risk this gate owns instead: one long-running workflow with
+	// substantial terminal history and a small FIFO-ready tail. The partial
+	// index must keep the claim independent from that accumulated history.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO run_nodes (
+			id, run_id, node_id, status, enqueued_at, finished_at
+		)
+		SELECT $1 || '-history-' || ordinal::text, $1,
+		       'history-' || ordinal::text, 'succeeded',
+		       clock_timestamp() - interval '1 hour',
+		       clock_timestamp() - interval '1 hour'
+		FROM generate_series(1, 10000) AS ordinal`, runID); err != nil {
+		t.Fatalf("seed accumulated run history: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO run_nodes (id, run_id, node_id, status, enqueued_at)
+		SELECT $1 || '-queued-' || ordinal::text, $1,
+		       'queued-' || ordinal::text, 'queued',
+		       clock_timestamp() - make_interval(secs => (20 - ordinal)::double precision)
+		FROM generate_series(1, 16) AS ordinal`, runID); err != nil {
+		t.Fatalf("seed representative FIFO tail: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ANALYZE run_nodes, runs, run_wakeups`); err != nil {
+		t.Fatalf("analyze representative queue: %v", err)
+	}
+	rows, err := tx.Query(ctx, `EXPLAIN (COSTS OFF)
 		SELECT rn.id
 		FROM run_nodes rn
 		JOIN runs r ON r.id = rn.run_id
