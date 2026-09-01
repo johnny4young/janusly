@@ -1,6 +1,7 @@
 package authoring
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -85,5 +86,55 @@ func TestBindWorkflowFlagsExpiredCredentialAndIncompleteSafeNodes(t *testing.T) 
 	report := BindWorkflow(bindingTestCatalog(), wf)
 	if report.Complete || len(report.Missing) != 7 {
 		t.Fatalf("unsafe/incomplete nodes must block apply: %+v", report)
+	}
+	reasons := make([]string, 0, len(report.Missing))
+	for _, missing := range report.Missing {
+		reasons = append(reasons, missing.Reason)
+	}
+	for _, expected := range []string{"credential_expired", "tool_input_required", "mcp_input_required"} {
+		if !slices.Contains(reasons, expected) {
+			t.Fatalf("missing precise reason %q: %+v", expected, report.Missing)
+		}
+	}
+	if HasUnboundCapabilityIdentity(report) {
+		t.Fatalf("expired credentials and incomplete fields are not invented identities: %+v", report.Missing)
+	}
+}
+
+func TestHasUnboundCapabilityIdentitySeparatesMissingConfigFromInventedIDs(t *testing.T) {
+	identityReasons := []string{
+		"exact_tool_not_found", "exact_mcp_tool_not_found", "exact_credential_not_found",
+		"exact_subworkflow_not_eligible", "subworkflow_version_not_found", "node_type_not_executable",
+	}
+	for _, reason := range identityReasons {
+		t.Run("identity/"+reason, func(t *testing.T) {
+			if !HasUnboundCapabilityIdentity(BindingReport{Missing: []Binding{{Reason: reason}}}) {
+				t.Fatalf("%s must activate the provider identity guard", reason)
+			}
+		})
+	}
+	configurationReasons := []string{
+		"tool_binding_required", "mcp_binding_required", "credential_binding_required",
+		"credential_not_configured", "credential_expired", "subworkflow_binding_required",
+		"tool_input_required", "mcp_input_required", "wait_until_configuration_incomplete",
+	}
+	for _, reason := range configurationReasons {
+		t.Run("configuration/"+reason, func(t *testing.T) {
+			if HasUnboundCapabilityIdentity(BindingReport{Missing: []Binding{{Reason: reason}}}) {
+				t.Fatalf("%s must remain a reviewable incomplete configuration", reason)
+			}
+		})
+	}
+}
+
+func TestBindWorkflowClassifiesUnknownCredentialAsIdentity(t *testing.T) {
+	wf := &domain.Workflow{Nodes: []domain.Node{{
+		ID: "notify", Type: "tool", Config: map[string]any{
+			"tool": "slack.post", "input": map[string]any{"credential": "invented-credential"},
+		},
+	}}}
+	report := BindWorkflow(bindingTestCatalog(), wf)
+	if !HasUnboundCapabilityIdentity(report) || len(report.Missing) != 1 || report.Missing[0].Reason != "exact_credential_not_found" {
+		t.Fatalf("unknown credential must be an exact identity failure: %+v", report)
 	}
 }

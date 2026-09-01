@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -133,9 +134,9 @@ func TestWorkflowProposalRejectsProviderInventedCapability(t *testing.T) {
 	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", simulator.URL)
 
 	res := h.call("POST", "/ai/workflow-proposals", map[string]any{
-		"prompt": "Use the CRM super power to prepare a report",
+		"prompt": "Use tool crm.super_power to prepare a report; if it is unavailable, leave an explicit missing binding",
 	}, "")
-	if res.status != http.StatusOK || res.body["mode"] != "ai" || calls.Load() != 1 {
+	if res.status != http.StatusOK || res.body["mode"] != "fallback" || res.body["providerGuarded"] != true || calls.Load() != 1 {
 		t.Fatalf("provider proposal: status=%d calls=%d body=%+v", res.status, calls.Load(), res.body)
 	}
 	bindings := res.body["bindings"].(map[string]any)
@@ -143,8 +144,78 @@ func TestWorkflowProposalRejectsProviderInventedCapability(t *testing.T) {
 	if bindings["complete"] != false || proposal["applicable"] != false {
 		t.Fatalf("invented capability must be visible and unappliable: %+v", res.body)
 	}
+	workflowText := fmt.Sprintf("%v", proposal["workflow"])
+	if strings.Contains(workflowText, "crm.super_power") || !strings.Contains(workflowText, "capability-binding-required") {
+		t.Fatalf("unsafe provider graph must be discarded, got %s", workflowText)
+	}
 	missing := fmt.Sprintf("%v", bindings["missing"])
-	if !strings.Contains(missing, "crm.super_power") || !strings.Contains(missing, "exact_tool_not_found") {
-		t.Fatalf("missing binding must preserve the rejected ID: %s", missing)
+	if !strings.Contains(missing, "crm.super_power") || !strings.Contains(missing, "requested_tool_not_in_catalog") ||
+		!strings.Contains(missing, "unsafe_provider_capability_reference") || strings.Contains(missing, "exact_tool_not_found") {
+		t.Fatalf("missing binding must come from intent plus the provider guard, without retaining the unsafe graph: %s", missing)
+	}
+
+	compatibility := h.call("POST", "/ai/generate-workflow", map[string]any{
+		"prompt": "Use tool crm.super_power to prepare a report; if it is unavailable, leave an explicit missing binding",
+	}, "")
+	if compatibility.status != http.StatusOK || compatibility.body["mode"] != "fallback" ||
+		compatibility.body["providerGuarded"] != true || calls.Load() != 2 {
+		t.Fatalf("compatibility guard: status=%d calls=%d body=%+v", compatibility.status, calls.Load(), compatibility.body)
+	}
+	compatibilityNodes, _ := json.Marshal(compatibility.body["nodes"])
+	if strings.Contains(string(compatibilityNodes), "crm.super_power") ||
+		!strings.Contains(fmt.Sprintf("%v", compatibility.body["bindings"]), "unsafe_provider_capability_reference") {
+		t.Fatalf("compatibility endpoint leaked an executable invented identity: nodes=%s body=%+v", compatibilityNodes, compatibility.body)
+	}
+	var guardedAudits int
+	if err := testPool(t).QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id=$1 AND action='ai.workflow.proposal_guarded'
+		  AND metadata->>'reason'='unsafe_provider_capability_reference'`, h.org).Scan(&guardedAudits); err != nil {
+		t.Fatal(err)
+	}
+	if guardedAudits != 2 {
+		t.Fatalf("both product surfaces must audit the deterministic guard without the rejected ID: %d", guardedAudits)
+	}
+	var leakedAuditMetadata int
+	if err := testPool(t).QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id=$1 AND action='ai.workflow.proposal_guarded'
+		  AND metadata::text LIKE '%crm.super_power%'`, h.org).Scan(&leakedAuditMetadata); err != nil {
+		t.Fatal(err)
+	}
+	if leakedAuditMetadata != 0 {
+		t.Fatalf("guard audit must record only bounded reason metadata, leaked rows=%d", leakedAuditMetadata)
+	}
+}
+
+func TestWorkflowProposalPreservesConfigurationOnlyIncompleteAIGraph(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	incomplete := `{"dslVersion":"1.0","id":"known-tool-incomplete","name":"Known tool","outputs":{"result":"{{context.call.output}}"},"nodes":[{"id":"call","type":"tool","config":{"tool":"text.uppercase","input":{}}}],"edges":[]}`
+	var calls atomic.Int64
+	simulator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicReply(incomplete))
+	}))
+	t.Cleanup(simulator.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", simulator.URL)
+
+	res := h.call("POST", "/ai/workflow-proposals", map[string]any{
+		"prompt": "Use tool text.uppercase to prepare the result",
+	}, "")
+	if res.status != http.StatusOK || res.body["mode"] != "ai" || calls.Load() != 1 {
+		t.Fatalf("configuration-only proposal: status=%d calls=%d body=%+v", res.status, calls.Load(), res.body)
+	}
+	if res.body["providerGuarded"] != nil {
+		t.Fatalf("configuration-only gaps must not discard the AI graph: %+v", res.body)
+	}
+	bindings := res.body["bindings"].(map[string]any)
+	proposal := res.body["proposal"].(map[string]any)
+	workflow := proposal["workflow"].(map[string]any)
+	if bindings["complete"] != false || proposal["applicable"] != false || workflow["id"] != "known-tool-incomplete" ||
+		!strings.Contains(fmt.Sprintf("%v", bindings["missing"]), "tool_input_required") {
+		t.Fatalf("known incomplete graph should remain reviewable and blocked: %+v", res.body)
 	}
 }

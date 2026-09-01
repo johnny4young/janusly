@@ -7,11 +7,16 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/tools"
 )
+
+func init() {
+	audit.RegisterRuntimeAction("ai.workflow.proposal_guarded")
+}
 
 type workflowProposalRequest struct {
 	Prompt          string                `json:"prompt"`
@@ -36,6 +41,15 @@ type workflowProposal struct {
 	Readiness        proposalReadiness `json:"readiness"`
 	Diff             proposalDiff      `json:"diff"`
 	Applicable       bool              `json:"applicable"`
+}
+
+type finalizedAuthoringProposal struct {
+	WorkflowDoc     map[string]any
+	Workflow        *domain.Workflow
+	Bindings        authoring.BindingReport
+	ParseIssues     []domain.Issue
+	Mode            string
+	ProviderGuarded bool
 }
 
 type proposalDiff struct {
@@ -66,6 +80,64 @@ func (s *V1Server) compileWorkflowBriefCore(r *http.Request, _ v1Request) opResu
 	return opOK(compiled)
 }
 
+// finalizeAuthoringProposal is the deterministic capability-identity
+// chokepoint shared by the contract-first API, the compatibility endpoint and
+// paid-provider qualification. BindWorkflow stays a pure reporter. When an AI
+// draft references an executable identity absent from the tenant catalog, the
+// whole untrusted graph is discarded rather than patched; a neutral local
+// graph preserves the proposal envelope while an explicit synthetic binding
+// keeps Apply closed.
+func finalizeAuthoringProposal(
+	prompt string,
+	brief authoring.IntentBrief,
+	catalog authoring.Catalog,
+	workflowDoc map[string]any,
+	mode string,
+) finalizedAuthoringProposal {
+	graphBindings, workflow, parseIssues := authoring.BindWorkflowJSON(catalog, workflowDoc)
+	if mode != "ai" || workflow == nil || !authoring.HasUnboundCapabilityIdentity(graphBindings) {
+		bindings := graphBindings
+		if workflow != nil {
+			bindings = authoring.BindProposal(catalog, brief, workflow)
+		}
+		return finalizedAuthoringProposal{
+			WorkflowDoc: workflowDoc, Workflow: workflow, Bindings: bindings,
+			ParseIssues: parseIssues, Mode: mode,
+		}
+	}
+
+	guarded := authoring.GuardedIncompleteWorkflow()
+	if compiled, _, err := compileWorkflowAssuranceDocument(prompt, guarded); err == nil {
+		guarded = compiled
+	}
+	bindings, workflow, parseIssues := authoring.BindWorkflowJSON(catalog, guarded)
+	if workflow != nil {
+		bindings = authoring.BindProposal(catalog, brief, workflow)
+	}
+	bindings.Missing = append(bindings.Missing, authoring.Binding{
+		Kind: "provider_output", Field: "workflow", Alternatives: []string{},
+		Reason: "unsafe_provider_capability_reference",
+	})
+	bindings.Complete = false
+	return finalizedAuthoringProposal{
+		WorkflowDoc: guarded, Workflow: workflow, Bindings: bindings,
+		ParseIssues: parseIssues, Mode: "fallback", ProviderGuarded: true,
+	}
+}
+
+func (s *V1Server) auditGuardedAuthoringProposal(r *http.Request, rc v1Request, surface string, finalized finalizedAuthoringProposal) {
+	if !finalized.ProviderGuarded {
+		return
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "ai.workflow.proposal_guarded", audit.Options{
+		TargetType: "ai", TargetID: stringField(finalized.WorkflowDoc, "id"),
+		Metadata: map[string]any{
+			"surface": surface, "catalogVersion": finalized.Bindings.CatalogVersion,
+			"reason": "unsafe_provider_capability_reference",
+		},
+	})
+}
+
 func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult {
 	var request workflowProposalRequest
 	if err := decodeBody(r, &request); err != nil {
@@ -79,8 +151,9 @@ func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult 
 		return opError(http.StatusUnprocessableEntity, "authoring_objective_required", "A business objective is required", nil)
 	}
 	catalog := s.authoringCatalog(rc, r)
+	proposalPrompt := authoring.ProposalPrompt(compiled.Brief)
 	generated := s.generateWorkflowFromPrompt(
-		r.Context(), rc, authoring.ProposalPrompt(compiled.Brief), request.Model,
+		r.Context(), rc, proposalPrompt, request.Model,
 		authoring.CapabilityPromptBlock(catalog),
 	)
 	if generated.status < 200 || generated.status >= 300 || generated.data == nil {
@@ -97,10 +170,13 @@ func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult 
 	delete(workflowDoc, "aiError")
 	delete(workflowDoc, "bonBackoff")
 
-	bindings, workflow, parseIssues := authoring.BindWorkflowJSON(catalog, workflowDoc)
-	if workflow != nil {
-		bindings = authoring.BindProposal(catalog, compiled.Brief, workflow)
-	}
+	finalized := finalizeAuthoringProposal(proposalPrompt, compiled.Brief, catalog, workflowDoc, mode)
+	s.auditGuardedAuthoringProposal(r, rc, "workflow_proposal", finalized)
+	workflowDoc = finalized.WorkflowDoc
+	workflow := finalized.Workflow
+	bindings := finalized.Bindings
+	parseIssues := finalized.ParseIssues
+	mode = finalized.Mode
 	if request.CatalogVersion != "" && request.CatalogVersion != catalog.Version {
 		bindings.Missing = append(bindings.Missing, authoring.Binding{
 			Kind: "catalog_version", Field: "catalogVersion", Requested: request.CatalogVersion,
@@ -112,7 +188,7 @@ func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult 
 	if workflow != nil {
 		readiness = proposalWorkflowReadiness(workflow, parseIssues)
 	}
-	assumptions, risks := proposalSignals(compiled.Brief, bindings, mode, readiness)
+	assumptions, risks := proposalSignals(compiled.Brief, bindings, mode, readiness, finalized.ProviderGuarded)
 	qualification := map[string]bool{"intent": false, "recovery": false, "semantic": false}
 	intentContract := map[string]string{}
 	var recoveryContract any
@@ -139,6 +215,9 @@ func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult 
 		"mode": mode, "brief": compiled.Brief,
 		"clarifyingQuestions": compiled.ClarifyingQuestions,
 		"bindings":            bindings, "proposal": proposal,
+	}
+	if finalized.ProviderGuarded {
+		response["providerGuarded"] = true
 	}
 	if aiError != "" {
 		response["aiError"] = aiError
@@ -206,14 +285,17 @@ func deduplicateReadinessIssues(issues []domain.ReadinessIssue) []domain.Readine
 	return out
 }
 
-func proposalSignals(brief authoring.IntentBrief, bindings authoring.BindingReport, mode string, readiness proposalReadiness) ([]string, []string) {
+func proposalSignals(brief authoring.IntentBrief, bindings authoring.BindingReport, mode string, readiness proposalReadiness, providerGuarded bool) ([]string, []string) {
 	assumptions := []string{}
 	risks := []string{}
 	if brief.Trigger == "manual" {
 		assumptions = append(assumptions, "manual_trigger")
 	}
-	if mode == "fallback" {
+	if mode == "fallback" && !providerGuarded {
 		assumptions = append(assumptions, "deterministic_template")
+	}
+	if providerGuarded {
+		risks = append(risks, "provider_output_guarded")
 	}
 	if len(bindings.Missing) > 0 {
 		risks = append(risks, "missing_capability_binding")

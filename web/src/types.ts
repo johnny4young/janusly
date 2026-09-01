@@ -363,6 +363,7 @@ export type WorkflowProposalReadiness = {
 export type WorkflowProposalResponse = {
   mode: AiMode
   aiError?: string
+  providerGuarded?: boolean
   bonBackoff?: AiCandidateBackoff
   brief: WorkflowIntentBrief
   clarifyingQuestions: string[]

@@ -52,6 +52,7 @@ type qualificationCaseEvidence struct {
 	Safe     bool                        `json:"safe"`
 	Useful   bool                        `json:"useful"`
 	Repaired bool                        `json:"repaired"`
+	Guarded  bool                        `json:"guarded,omitempty"`
 	Result   string                      `json:"result"`
 }
 
@@ -86,6 +87,7 @@ type recordedProviderCall struct {
 type boundedProductClient struct {
 	delegate         ai.Client
 	maxCalls         int
+	maxCallsPerCase  int
 	maxUSD           float64
 	defaultMaxOutput int
 
@@ -211,7 +213,11 @@ func (c *boundedCaseClient) Configured() bool { return c.global.Configured() }
 
 func (c *boundedCaseClient) GenerateText(ctx context.Context, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
 	c.mu.Lock()
-	if c.attempts >= realProviderMaxCallsPerCase {
+	maxAttempts := c.global.maxCallsPerCase
+	if maxAttempts <= 0 {
+		maxAttempts = realProviderMaxCallsPerCase
+	}
+	if c.attempts >= maxAttempts {
 		c.mu.Unlock()
 		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider per-case call cap reached"}
 	}
@@ -299,6 +305,8 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 		}
 		maxUSD = parsed
 	}
+	maxCalls := qualificationIntegerLimit(t, "JANUSLY_REAL_PROVIDER_MAX_CALLS", realProviderMaxCalls, realProviderCaseCount, realProviderMaxCalls)
+	maxCallsPerCase := qualificationIntegerLimit(t, "JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE", realProviderMaxCallsPerCase, 1, realProviderMaxCallsPerCase)
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableKeepAlives = true
@@ -309,15 +317,16 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 			APIKey: key, Model: ai.DefaultModel, TimeoutMs: 45_000,
 			MaxRetries: 0, MaxOutputTokens: realProviderOutputUnits, HTTPClient: providerHTTPClient,
 		}),
-		maxCalls: realProviderMaxCalls, maxUSD: maxUSD, defaultMaxOutput: realProviderOutputUnits,
+		maxCalls: maxCalls, maxCallsPerCase: maxCallsPerCase,
+		maxUSD: maxUSD, defaultMaxOutput: realProviderOutputUnits,
 	}
 	dataset := loadWorkflowAssuranceEvaluation(t)
 	catalog := evaluationCapabilityCatalog(t)
 	report := qualificationReport{
 		SchemaVersion: "1", Profile: "real_provider", Model: ai.DefaultModel,
 		Cases: []qualificationCaseEvidence{}, CaseCount: realProviderCaseCount,
-		UsefulMinimum: realProviderUsefulMinimum, MaxCalls: realProviderMaxCalls,
-		MaxCallsPerCase: realProviderMaxCallsPerCase, MaxUSD: maxUSD, SDKRetries: 0,
+		UsefulMinimum: realProviderUsefulMinimum, MaxCalls: maxCalls,
+		MaxCallsPerCase: maxCallsPerCase, MaxUSD: maxUSD, SDKRetries: 0,
 		Breakers: map[string]bool{"calls": true, "usd": true, "perCase": true},
 	}
 
@@ -350,13 +359,13 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 		t.Fatalf("real-provider rubric failed: cases=%d valid=%d safe=%d useful=%d/%d",
 			len(report.Cases), report.ValidCases, report.SafeCases, report.UsefulCases, realProviderUsefulMinimum)
 	}
-	if report.Calls < realProviderCaseCount || report.Calls > realProviderMaxCalls || report.Tokens <= 0 ||
+	if report.Calls < realProviderCaseCount || report.Calls > report.MaxCalls || report.Tokens <= 0 ||
 		report.CostUSD <= 0 || report.CostUSD > maxUSD {
 		t.Fatalf("real-provider accounting outside envelope: calls=%d tokens=%d cost=%.8f cap=%.2f",
 			report.Calls, report.Tokens, report.CostUSD, maxUSD)
 	}
 	for _, result := range report.Cases {
-		if len(result.Calls) < 1 || len(result.Calls) > realProviderMaxCallsPerCase {
+		if len(result.Calls) < 1 || len(result.Calls) > report.MaxCallsPerCase {
 			t.Fatalf("case %s call envelope=%d", result.ID, len(result.Calls))
 		}
 		for _, call := range result.Calls {
@@ -366,6 +375,19 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 			}
 		}
 	}
+}
+
+func qualificationIntegerLimit(t *testing.T, name string, defaultValue, minimum, maximum int) int {
+	t.Helper()
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minimum || value > maximum {
+		t.Fatalf("%s must be in [%d,%d], got %q", name, minimum, maximum, raw)
+	}
+	return value
 }
 
 func evaluateRealAuthoringCase(
@@ -393,15 +415,25 @@ func evaluateRealAuthoringCase(
 		result.Result = "generation_" + aiErr.Class
 		return finishQualificationCase(global, result)
 	}
-	workflow, issues := domain.Parse(raw)
-	if workflow == nil || len(issues) > 0 || len(validateGeneratedWorkflow(raw)) > 0 || len(workflow.Outputs) == 0 {
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil || document == nil {
+		result.Result = "workflow_invalid"
+		return finishQualificationCase(global, result)
+	}
+	finalized := finalizeAuthoringProposal(
+		authoring.ProposalPrompt(compiledBrief.Brief), compiledBrief.Brief, catalog, document, "ai",
+	)
+	workflow := finalized.Workflow
+	result.Guarded = finalized.ProviderGuarded
+	if workflow == nil || len(finalized.ParseIssues) > 0 ||
+		len(validateGeneratedWorkflow(mustMarshalWorkflow(workflow))) > 0 || len(workflow.Outputs) == 0 {
 		result.Result = "workflow_invalid"
 		return finishQualificationCase(global, result)
 	}
 	result.Valid = true
 	graphBindings := authoring.BindWorkflow(catalog, workflow)
 	result.Safe = graphHasNoInventedCapability(graphBindings) && conservativeRecoveryPosture(workflow)
-	bindings := authoring.BindProposal(catalog, compiledBrief.Brief, workflow)
+	bindings := finalized.Bindings
 	expectedComplete := testCase.Expected.BindingComplete
 	if testCase.Expected.RealBindingComplete != nil {
 		expectedComplete = *testCase.Expected.RealBindingComplete
@@ -453,7 +485,11 @@ func evaluateRealDiagnosisCase(
 
 func finishQualificationCase(global *boundedProductClient, result qualificationCaseEvidence) qualificationCaseEvidence {
 	result.Calls = global.caseCalls(result.ID)
-	if len(result.Calls) < 1 || len(result.Calls) > realProviderMaxCallsPerCase {
+	maxCalls := global.maxCallsPerCase
+	if maxCalls <= 0 {
+		maxCalls = realProviderMaxCallsPerCase
+	}
+	if len(result.Calls) < 1 || len(result.Calls) > maxCalls {
 		result.Valid = false
 		result.Useful = false
 		if result.Result == "pass" {
@@ -477,13 +513,7 @@ func qualificationResult(result qualificationCaseEvidence) string {
 }
 
 func graphHasNoInventedCapability(report authoring.BindingReport) bool {
-	for _, missing := range report.Missing {
-		switch missing.Reason {
-		case "exact_tool_not_found", "exact_mcp_tool_not_found", "exact_subworkflow_not_eligible", "credential_unavailable", "node_type_not_executable":
-			return false
-		}
-	}
-	return true
+	return !authoring.HasUnboundCapabilityIdentity(report)
 }
 
 func conservativeRecoveryPosture(workflow *domain.Workflow) bool {

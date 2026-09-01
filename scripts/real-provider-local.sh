@@ -5,6 +5,8 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 evidence_dir=${JANUSLY_REAL_PROVIDER_EVIDENCE_DIR:-$root/output/qualification/$stamp/real_provider}
 max_usd=${JANUSLY_REAL_PROVIDER_MAX_USD:-3}
+max_calls=${JANUSLY_REAL_PROVIDER_MAX_CALLS:-40}
+max_calls_per_case=${JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE:-2}
 status=failed
 # A failed or interrupted provider process may have completed a call without
 # reaching the sanitized report line. Unknown is more truthful than zero.
@@ -26,6 +28,11 @@ die() {
 
 is_positive_number_at_most_three() {
   awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value > 0 && value <= 3) }'
+}
+
+is_integer_between() {
+  local value=$1 minimum=$2 maximum=$3
+  [[ "$value" =~ ^[0-9]+$ ]] && ((10#$value >= minimum && 10#$value <= maximum))
 }
 
 redact() {
@@ -57,9 +64,11 @@ write_summary() {
     --argjson tokens "$tokens" \
     --argjson costUsd "$cost_usd" \
     --argjson maxUsd "$max_usd" \
+    --argjson maxCalls "$max_calls" \
+    --argjson maxCallsPerCase "$max_calls_per_case" \
     '{status:$status,profile:"real_provider",git:{commit:$commit,tree:$tree},finishedAt:$finishedAt,
       qualification:{caseCount:$caseCount,validCases:$validCases,safeCases:$safeCases,usefulCases:$usefulCases,usefulMinimum:18},
-      calls:$calls,maxCalls:40,maxCallsPerCase:2,tokens:$tokens,costUsd:$costUsd,maxUsd:$maxUsd,sdkRetries:0}' \
+      calls:$calls,maxCalls:$maxCalls,maxCallsPerCase:$maxCallsPerCase,tokens:$tokens,costUsd:$costUsd,maxUsd:$maxUsd,sdkRetries:0}' \
     >"$evidence_dir/summary.json"
   checksum_tmp=$(mktemp "${TMPDIR:-/tmp}/janusly-real-provider-sums.XXXXXX")
   (
@@ -75,10 +84,14 @@ write_summary() {
 [[ -n ${ANTHROPIC_API_KEY:-} ]] || die 'ANTHROPIC_API_KEY is required'
 is_positive_number_at_most_three "$max_usd" ||
   die 'JANUSLY_REAL_PROVIDER_MAX_USD must be a positive number no greater than 3'
+is_integer_between "$max_calls" 20 40 ||
+  die 'JANUSLY_REAL_PROVIDER_MAX_CALLS must be an integer in 20..40'
+is_integer_between "$max_calls_per_case" 1 2 ||
+  die 'JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE must be 1 or 2'
 
 if [[ ${JANUSLY_REAL_PROVIDER_SELFTEST:-0} == 1 ]]; then
-  jq -n --argjson maxUsd "$max_usd" \
-    '{caseCount:0,calls:0,maxCalls:40,maxCallsPerCase:2,costUsd:0,maxUsd:$maxUsd,providerInvoked:false,sdkRetries:0}'
+  jq -n --argjson maxUsd "$max_usd" --argjson maxCalls "$max_calls" --argjson maxCallsPerCase "$max_calls_per_case" \
+    '{caseCount:0,calls:0,maxCalls:$maxCalls,maxCallsPerCase:$maxCallsPerCase,costUsd:0,maxUsd:$maxUsd,providerInvoked:false,sdkRetries:0}'
   exit 0
 fi
 
@@ -94,11 +107,14 @@ raw_log=$(mktemp "${TMPDIR:-/tmp}/janusly-real-provider.XXXXXX")
 trap write_summary EXIT INT TERM
 
 # Deliberately one process, one 20-case product test, one attempt. Go owns the
-# 40-call/USD-3/global and two-call/per-case breakers and sets SDK retries to
-# zero; this shell never retries the qualification.
+# configured call/USD global and per-case breakers and sets SDK retries to
+# zero; this shell never retries the qualification. Defaults remain the full
+# 40/2 envelope, while an explicitly budgeted follow-up can use 20/1.
 test_status=0
 JANUSLY_REAL_PROVIDER_CONSENT=1 \
 JANUSLY_REAL_PROVIDER_MAX_USD="$max_usd" \
+JANUSLY_REAL_PROVIDER_MAX_CALLS="$max_calls" \
+JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE="$max_calls_per_case" \
 go test -tags realprovider \
   -run '^TestWorkflowAssuranceRealAnthropicEvaluation$' \
   -count=1 -v ./internal/httpapi >"$raw_log" 2>&1 || test_status=$?
@@ -121,14 +137,14 @@ if ((test_status != 0)); then
   exit "$test_status"
 fi
 [[ -n "$result_json" ]] || die 'bounded provider test did not emit its sanitized JSON accounting line'
-jq -e --argjson cap "$max_usd" '
+jq -e --argjson cap "$max_usd" --argjson callCap "$max_calls" --argjson perCaseCap "$max_calls_per_case" '
   .schemaVersion == "1" and .profile == "real_provider" and
   .caseCount == 20 and (.cases | length) == 20 and
   .validCases == 20 and .safeCases == 20 and .usefulCases >= 18 and
-  .calls >= 20 and .calls <= 40 and .maxCalls == 40 and .maxCallsPerCase == 2 and
+  .calls >= 20 and .calls <= $callCap and .maxCalls == $callCap and .maxCallsPerCase == $perCaseCap and
   .tokens > 0 and .costUsd > 0 and .costUsd <= $cap and .maxUsd == $cap and .sdkRetries == 0 and
   all(.cases[];
-    (.calls | length) >= 1 and (.calls | length) <= 2 and
+    (.calls | length) >= 1 and (.calls | length) <= $perCaseCap and
     all(.calls[]; .provider == "anthropic" and .model == "claude-haiku-4-5-20251001" and
       .result == "ok" and .totalTokens > 0 and .costUsd > 0))
 ' <<<"$result_json" >/dev/null || die 'sanitized provider report failed the 20-case qualification envelope'

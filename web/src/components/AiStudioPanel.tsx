@@ -83,6 +83,7 @@ const MODE_COPY_KEYS: Record<AiMode, string> = {
 const SIGNAL_COPY_KEYS: Record<string, string> = {
   manual_trigger: 'aiStudio.proposal.signal.manualTrigger',
   deterministic_template: 'aiStudio.proposal.signal.deterministicTemplate',
+  provider_output_guarded: 'aiStudio.proposal.signal.providerOutputGuarded',
   missing_capability_binding: 'aiStudio.proposal.signal.missingBinding',
   external_effect_without_declared_approval: 'aiStudio.proposal.signal.externalEffectApproval',
   readiness_blocked: 'aiStudio.proposal.signal.readinessBlocked',
@@ -621,7 +622,16 @@ export function AiStudioPanel({
 
         {proposal && (
           <div className="ai-proposal" data-testid="workflow-proposal">
-            {proposal.mode === 'fallback' && (
+            {proposal.providerGuarded ? (
+              <div data-testid="provider-output-guarded">
+                <StatusSummary
+                  role="status"
+                  tone="warning"
+                  title={t('aiStudio.proposal.guardedTitle')}
+                  description={t('aiStudio.proposal.guardedBody')}
+                />
+              </div>
+            ) : proposal.mode === 'fallback' && (
               <StatusSummary
                 role="status"
                 tone="info"

@@ -63,3 +63,25 @@ func TestDeterministicWorkflowEmitsCompleteSafePrimitives(t *testing.T) {
 		})
 	}
 }
+
+func TestGuardedIncompleteWorkflowCarriesNoExecutableIdentity(t *testing.T) {
+	first := GuardedIncompleteWorkflow()
+	second := GuardedIncompleteWorkflow()
+	first["name"] = "mutated"
+	first["nodes"].([]any)[0].(map[string]any)["id"] = "mutated"
+	if second["name"] != "Capability binding required" ||
+		second["nodes"].([]any)[0].(map[string]any)["id"] != "binding_required" {
+		t.Fatalf("guarded workflow must be an independent neutral document: %+v", second)
+	}
+	raw, err := json.Marshal(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, issues := domain.Parse(raw)
+	if workflow == nil || len(issues) > 0 || len(workflow.Nodes) != 1 || workflow.Nodes[0].Type != "noop" {
+		t.Fatalf("guarded workflow must be parseable and inert: workflow=%+v issues=%+v", workflow, issues)
+	}
+	if report := BindWorkflow(NewBuilder(nil, nil).Build(t.Context(), ""), workflow); !report.Complete {
+		t.Fatalf("neutral graph itself must not introduce a capability binding: %+v", report)
+	}
+}

@@ -72,7 +72,11 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 		case "tool":
 			name := trimmedString(node.Config["tool"])
 			entry, exists := builtin[name]
-			if name == "" || !exists {
+			if name == "" {
+				addMissing(Binding{Kind: "builtin_tool", NodeID: node.ID, Field: "config.tool", Alternatives: sortedBuiltinNames(catalog), Reason: "tool_binding_required"})
+				continue
+			}
+			if !exists {
 				addMissing(Binding{Kind: "builtin_tool", NodeID: node.ID, Field: "config.tool", Requested: name, Alternatives: sortedBuiltinNames(catalog), Reason: "exact_tool_not_found"})
 				continue
 			}
@@ -89,17 +93,30 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 			if slices.Contains(entry.Required, "credential") {
 				credential := trimmedString(input["credential"])
 				entry, exists := credentials[credential]
-				if credential == "" || !exists || !entry.Configured || entry.Expired {
-					addMissing(Binding{Kind: "credential", NodeID: node.ID, Field: "config.input.credential", Requested: credential, Alternatives: availableCredentialNames(catalog, credentialKindForTool(name)), Reason: "credential_unavailable"})
-				} else {
+				reason := ""
+				switch {
+				case credential == "":
+					reason = "credential_binding_required"
+				case !exists:
+					reason = "exact_credential_not_found"
+				case !entry.Configured:
+					reason = "credential_not_configured"
+				case entry.Expired:
+					reason = "credential_expired"
+				}
+				if reason == "" {
 					addResolved(Binding{Kind: "credential", NodeID: node.ID, Field: "config.input.credential", Requested: credential, ResolvedID: entry.ID, Alternatives: []string{}})
+				} else {
+					addMissing(Binding{Kind: "credential", NodeID: node.ID, Field: "config.input.credential", Requested: credential, Alternatives: availableCredentialNames(catalog, credentialKindForTool(name)), Reason: reason})
 				}
 			}
 		case "mcp_tool":
 			alias := trimmedString(node.Config["connectionAlias"])
 			name := trimmedString(node.Config["toolName"])
 			entry, exists := mcp[alias+"\x00"+name]
-			if alias == "" || name == "" || !exists {
+			if alias == "" || name == "" {
+				addMissing(Binding{Kind: "mcp_tool", NodeID: node.ID, Field: "config.connectionAlias+toolName", Requested: mcpIdentifier(alias, name), Alternatives: sortedMcpNames(catalog), Reason: "mcp_binding_required"})
+			} else if !exists {
 				addMissing(Binding{Kind: "mcp_tool", NodeID: node.ID, Field: "config.connectionAlias+toolName", Requested: alias + "/" + name, Alternatives: sortedMcpNames(catalog), Reason: "exact_mcp_tool_not_found"})
 			} else {
 				addResolved(Binding{Kind: "mcp_tool", NodeID: node.ID, Field: "config.connectionAlias+toolName", Requested: alias + "/" + name, ResolvedID: alias + "/" + name, Alternatives: []string{}})
@@ -113,7 +130,9 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 		case "subworkflow":
 			workflowID := trimmedString(node.Config["workflowId"])
 			entry, exists := workflows[workflowID]
-			if workflowID == "" || !exists || entry.Status != "active" || workflowID == workflow.ID {
+			if workflowID == "" {
+				addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Alternatives: availableSubworkflowIDs(catalog, workflow.ID), Reason: "subworkflow_binding_required"})
+			} else if !exists || entry.Status != "active" || workflowID == workflow.ID {
 				addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Requested: workflowID, Alternatives: availableSubworkflowIDs(catalog, workflow.ID), Reason: "exact_subworkflow_not_eligible"})
 			} else if version, present := integerValue(node.Config["version"]); present && (version < 1 || version > int64(entry.LatestVersion)) {
 				addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.version", Requested: fmt.Sprint(version), Alternatives: []string{fmt.Sprint(entry.LatestVersion)}, Reason: "subworkflow_version_not_found"})
@@ -148,6 +167,26 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 		}
 	}
 	return report
+}
+
+// HasUnboundCapabilityIdentity distinguishes provider-authored executable
+// identities that are absent from the exact tenant catalog from ordinary
+// incomplete configuration. The former must never survive the AI proposal
+// boundary; the latter can remain visible in an unappliable draft so an
+// operator can finish it without losing otherwise valid graph structure.
+func HasUnboundCapabilityIdentity(report BindingReport) bool {
+	for _, missing := range report.Missing {
+		switch missing.Reason {
+		case "exact_tool_not_found",
+			"exact_mcp_tool_not_found",
+			"exact_credential_not_found",
+			"exact_subworkflow_not_eligible",
+			"subworkflow_version_not_found",
+			"node_type_not_executable":
+			return true
+		}
+	}
+	return false
 }
 
 func BindWorkflowJSON(catalog Catalog, document map[string]any) (BindingReport, *domain.Workflow, []domain.Issue) {
@@ -311,6 +350,17 @@ func configuredInputField(input map[string]any, field string) bool {
 		return strings.TrimSpace(text) != ""
 	}
 	return true
+}
+
+func mcpIdentifier(alias, name string) string {
+	switch {
+	case alias == "":
+		return name
+	case name == "":
+		return alias
+	default:
+		return alias + "/" + name
+	}
 }
 
 func integerValue(value any) (int64, bool) {

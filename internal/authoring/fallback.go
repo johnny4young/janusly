@@ -54,3 +54,21 @@ func DeterministicWorkflow(prompt string) map[string]any {
 	_ = json.Unmarshal(raw, &copy)
 	return copy
 }
+
+// GuardedIncompleteWorkflow is the neutral graph returned when an external
+// model emitted an executable identity that is not present in the exact
+// tenant capability catalog. It intentionally carries no tool, credential,
+// MCP, trigger or subworkflow identifiers. The proposal boundary adds the
+// intent and recovery contracts and keeps Apply blocked with an explicit
+// binding artifact; callers receive a fresh document on every invocation.
+func GuardedIncompleteWorkflow() map[string]any {
+	return map[string]any{
+		"dslVersion": "1.0",
+		"id":         "capability-binding-required",
+		"name":       "Capability binding required",
+		"nodes": []any{map[string]any{
+			"id": "binding_required", "type": "noop", "config": map[string]any{},
+		}},
+		"edges": []any{},
+	}
+}

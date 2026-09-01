@@ -30,6 +30,7 @@ import (
 	"github.com/johnny4young/janusly/internal/aiconfig"
 	"github.com/johnny4young/janusly/internal/aiguidance"
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/orgconfig"
@@ -113,7 +114,42 @@ func (s *V1Server) generateWorkflowCore(r *http.Request, rc v1Request) opResult 
 		Model  string `json:"model"`
 	}
 	_ = decodeBody(r, &body)
-	return s.generateWorkflowFromPrompt(r.Context(), rc, body.Prompt, body.Model, "")
+	compiled, err := authoring.CompileBrief(authoring.CompileBriefRequest{Prompt: body.Prompt})
+	if err != nil {
+		return opError(http.StatusRequestEntityTooLarge, "ai_prompt_too_long", err.Error(), nil)
+	}
+	catalog := s.authoringCatalog(rc, r)
+	generated := s.generateWorkflowFromPrompt(
+		r.Context(), rc, body.Prompt, body.Model, authoring.CapabilityPromptBlock(catalog),
+	)
+	if generated.status < 200 || generated.status >= 300 || generated.data == nil {
+		return generated
+	}
+	wire, ok := generated.data.(map[string]any)
+	if !ok {
+		return opError(http.StatusInternalServerError, "authoring_proposal_invalid", "Generated workflow has an invalid envelope", nil)
+	}
+	mode, _ := wire["mode"].(string)
+	aiError, _ := wire["aiError"].(string)
+	workflowDoc := maps.Clone(wire)
+	delete(workflowDoc, "mode")
+	delete(workflowDoc, "aiError")
+	delete(workflowDoc, "bonBackoff")
+	finalized := finalizeAuthoringProposal(body.Prompt, compiled.Brief, catalog, workflowDoc, mode)
+	s.auditGuardedAuthoringProposal(r, rc, "generate_workflow_compatibility", finalized)
+	response := maps.Clone(finalized.WorkflowDoc)
+	response["mode"] = finalized.Mode
+	if aiError != "" {
+		response["aiError"] = aiError
+	}
+	if backoff, present := wire["bonBackoff"]; present {
+		response["bonBackoff"] = backoff
+	}
+	if finalized.ProviderGuarded {
+		response["providerGuarded"] = true
+		response["bindings"] = finalized.Bindings
+	}
+	return opOK(response)
 }
 
 // generateWorkflowFromPrompt is the shared generation ladder used by both

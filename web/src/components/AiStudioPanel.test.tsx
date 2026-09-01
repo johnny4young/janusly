@@ -211,6 +211,33 @@ describe('<AiStudioPanel />', () => {
     expect(screen.getByRole('button', { name: /Apply proposal to draft/i })).toBeEnabled()
   })
 
+  it('distinguishes a guarded provider draft from the zero-call local fallback', async () => {
+    const guarded = workflowProposal({ mode: 'fallback', providerGuarded: true })
+    guarded.bindings = {
+      catalogVersion: catalog.version,
+      resolved: [],
+      missing: [{
+        kind: 'provider_output',
+        nodeId: '',
+        field: 'workflow',
+        alternatives: [],
+        reason: 'unsafe_provider_capability_reference',
+      }],
+      complete: false,
+    }
+    guarded.proposal.applicable = false
+    guarded.proposal.risks = ['provider_output_guarded', 'missing_capability_binding']
+    renderPanel({ onProposeWorkflow: vi.fn(async () => guarded) })
+
+    await compileAndPropose()
+    expect(screen.getByTestId('provider-output-guarded')).toHaveTextContent('Unsafe AI draft replaced locally')
+    expect(screen.getByTestId('provider-output-guarded')).toHaveTextContent('Janusly discarded that graph')
+    expect(screen.queryByText('No external AI call was required.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Assumptions and risks'))
+    expect(screen.getByText(/provider graph was discarded because it contained a tool/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Apply proposal to draft/i })).toBeDisabled()
+  })
+
   it('renders no more than three clarifying questions', async () => {
     renderPanel({
       onCompileWorkflowBrief: vi.fn(async () => ({
