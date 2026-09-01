@@ -33,6 +33,8 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ')
 
+const MAX_INITIAL_FOCUS_FRAMES = 4
+
 export function useDialogFocusTrap(
   dialogRef: RefObject<HTMLElement | null>,
   options?: {
@@ -47,6 +49,7 @@ export function useDialogFocusTrap(
   // dialog's own initial-focus moves focus inward — so it can be restored when
   // the dialog closes. (Guarded ref write during render: idempotent.)
   const triggerRef = useRef<HTMLElement | null>(null)
+  const initialFocusFrameRef = useRef<number | null>(null)
   const restoreFrameRef = useRef<number | null>(null)
   const prevActive = useRef(false)
   if (active && !prevActive.current) {
@@ -67,15 +70,43 @@ export function useDialogFocusTrap(
       cancelAnimationFrame(restoreFrameRef.current)
       restoreFrameRef.current = null
     }
-    const root = dialogRef.current
+    if (initialFocusFrameRef.current !== null) {
+      cancelAnimationFrame(initialFocusFrameRef.current)
+      initialFocusFrameRef.current = null
+    }
+    const preferredInitialFocus = typeof initialFocus === 'object' ? initialFocus : null
 
-    if (initialFocus && root) {
+    const focusInitialControl = (): boolean => {
+      const root = dialogRef.current
+      if (!root) return false
       const firstFocusable = root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)[0]
-      const preferred = initialFocus === true ? null : initialFocus.current
+      const preferred = preferredInitialFocus?.current ?? null
       const target = preferred && root.contains(preferred) && preferred.matches(FOCUSABLE_SELECTOR)
         ? preferred
         : firstFocusable
       target?.focus()
+      return root.contains(document.activeElement)
+    }
+
+    if (initialFocus) {
+      const verifyInitialFocus = (remainingFrames: number) => {
+        const root = dialogRef.current
+        if (root?.contains(document.activeElement)) return
+        if (focusInitialControl() || remainingFrames <= 0) return
+        initialFocusFrameRef.current = requestAnimationFrame(() => {
+          initialFocusFrameRef.current = null
+          verifyInitialFocus(remainingFrames - 1)
+        })
+      }
+      // An always-mounted dialog can still be inert during the opening commit,
+      // or an off-canvas visibility transition may not be focusable during the
+      // first style frames. Retry only while focus remains outside and keep the
+      // sequence tightly bounded.
+      initialFocusFrameRef.current = requestAnimationFrame(() => {
+        initialFocusFrameRef.current = null
+        verifyInitialFocus(MAX_INITIAL_FOCUS_FRAMES - 1)
+      })
+      focusInitialControl()
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -99,6 +130,10 @@ export function useDialogFocusTrap(
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('keydown', onKeyDown)
+      if (initialFocusFrameRef.current !== null) {
+        cancelAnimationFrame(initialFocusFrameRef.current)
+        initialFocusFrameRef.current = null
+      }
       // Restore focus to the trigger on close / unmount (if it still exists).
       const trigger = triggerRef.current
       if (trigger && document.contains(trigger)) {
