@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 581,
+  "artifactGzipKiB": 583,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 537
+    "maxGzipKiB": 539
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -87,7 +87,7 @@
     "index.css": 40.68,
     "index.js": 0.82,
     "McpConnectionsPanel.js": 3.07,
-    "MembersPanel.js": 2.4,
+    "MembersPanel.js": 3.38,
     "MemoryGovernancePanel.js": 0.83,
     "MultiAgentTimeline.js": 1.78,
     "OperationsPage.js": 5.37,
