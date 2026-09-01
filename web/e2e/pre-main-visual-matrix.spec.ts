@@ -5,6 +5,7 @@ import {
   expect,
   test,
   type Browser,
+  type Locator,
   type Page,
 } from '@playwright/test'
 
@@ -67,6 +68,7 @@ type MatrixEvidence = {
     caseId: string
     surfaces: SurfaceEvidence[]
     browserErrors: string[]
+    interactionFindings: string[]
   }>
 }
 
@@ -141,7 +143,9 @@ async function captureSurface(
   const overflowPx = await page.evaluate(
     () => Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
   )
-  expect(overflowPx, `${slug}/${surface} must not overflow horizontally`).toBeLessThanOrEqual(2)
+  if (phase === 'after') {
+    expect(overflowPx, `${slug}/${surface} must not overflow horizontally`).toBeLessThanOrEqual(2)
+  }
 
   const axe = await new AxeBuilder({ page }).withTags(wcagTags).analyze()
   const blockingViolations = axe.violations
@@ -201,13 +205,30 @@ async function openRecoverySurface(
   await expect(page.getByTestId(`recovery-case-workspace-${fixture.caseId}`)).toBeVisible()
 }
 
-async function validateMobileNavigation(page: Page, locale: SemanticFixtureLocale): Promise<void> {
+async function recordFocus(
+  locator: Locator,
+  finding: string,
+  findings: string[],
+): Promise<void> {
+  const focused = await locator.evaluate(element => document.activeElement === element)
+  if (focused) return
+  findings.push(finding)
+  if (phase === 'after') {
+    expect(focused, `${finding} must not regress in the current candidate`).toBe(true)
+  }
+}
+
+async function validateMobileNavigation(
+  page: Page,
+  locale: SemanticFixtureLocale,
+  findings: string[],
+): Promise<void> {
   const trigger = page.getByRole('button', { name: copy[locale].navigation })
   await trigger.click()
   const close = page.getByRole('button', { name: copy[locale].closeNavigation })
-  await expect(close).toBeFocused()
+  await recordFocus(close, 'mobile_navigation_close_not_focused', findings)
   await page.keyboard.press('Escape')
-  await expect(trigger).toBeFocused()
+  await recordFocus(trigger, 'mobile_navigation_trigger_focus_not_restored', findings)
 }
 
 async function captureCombination(
@@ -226,6 +247,7 @@ async function captureCombination(
   page.setDefaultTimeout(30_000)
   page.setDefaultNavigationTimeout(30_000)
   const browserErrors = installBrowserGuards(page)
+  const interactionFindings: string[] = []
   await page.addInitScript(({ activeOrg, selectedLocale, selectedTheme }) => {
     window.localStorage.clear()
     window.sessionStorage.clear()
@@ -249,12 +271,18 @@ async function captureCombination(
   await expect(page.locator('.we-recovery-center-hero')).toBeVisible()
   surfaces.push(await captureSurface(page, 'home', slug))
 
-  if (viewport.name === 'mobile') await validateMobileNavigation(page, locale)
+  if (viewport.name === 'mobile') {
+    await validateMobileNavigation(page, locale, interactionFindings)
+  }
 
   await page.keyboard.press('ControlOrMeta+K')
   const palette = page.getByTestId('command-palette')
   await expect(palette).toBeVisible()
-  await expect(palette.getByRole('combobox')).toBeFocused()
+  await recordFocus(
+    palette.getByRole('combobox'),
+    'command_palette_input_not_focused',
+    interactionFindings,
+  )
   surfaces.push(await captureSurface(page, 'command-palette', slug))
   await page.keyboard.press('Escape')
   await expect(palette).toHaveCount(0)
@@ -270,7 +298,7 @@ async function captureCombination(
   const memberEmail = page.locator('#member-email')
   await expect(memberEmail).toBeVisible()
   await memberEmail.focus()
-  await expect(memberEmail).toBeFocused()
+  await recordFocus(memberEmail, 'member_email_not_focused', interactionFindings)
   surfaces.push(await captureSurface(page, 'team', slug))
 
   await openWorkspaceSection(page, copy[locale].settings, copy[locale].workspace)
@@ -284,14 +312,28 @@ async function captureCombination(
   await page.getByRole('button', { name: copy[locale].addConnection }).first().click()
   const dialog = page.getByRole('dialog', { name: copy[locale].addConnectionDialog })
   await expect(dialog).toBeVisible()
-  await expect(page.getByLabel(copy[locale].connectionName)).toBeFocused()
+  await recordFocus(
+    page.getByLabel(copy[locale].connectionName),
+    'connection_dialog_initial_focus_missing',
+    interactionFindings,
+  )
   surfaces.push(await captureSurface(page, 'connection-dialog', slug))
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
 
-  expect(browserErrors, `${slug} must not emit browser errors`).toEqual([])
+  if (phase === 'after') {
+    expect(browserErrors, `${slug} must not emit browser errors`).toEqual([])
+  }
   await context.close()
-  return { locale, theme, viewport, caseId: fixture.caseId, surfaces, browserErrors }
+  return {
+    locale,
+    theme,
+    viewport,
+    caseId: fixture.caseId,
+    surfaces,
+    browserErrors,
+    interactionFindings,
+  }
 }
 
 test.describe.configure({ mode: 'serial' })
