@@ -39,18 +39,45 @@ fi
 help=$("$root/scripts/qualification-local.sh" --help)
 grep -F "pagerduty | load | all" <<<"$help" >/dev/null
 grep -F "load and flagship PagerDuty profiles are intentionally" <<<"$help" >/dev/null
-grep -F "pagerduty qualification requires a clean worktree" "$root/scripts/qualification-local.sh" >/dev/null
+grep -F 'die "$profile qualification requires a clean worktree' "$root/scripts/qualification-local.sh" >/dev/null
 grep -F 'sourceIntegrityVerified:$sourceIntegrityVerified' "$root/scripts/qualification-local.sh" >/dev/null
-grep -F 'PagerDuty candidate source changed while qualification was running' "$root/scripts/qualification-local.sh" >/dev/null
+grep -F 'candidate source changed while qualification was running' "$root/scripts/qualification-local.sh" >/dev/null
 grep -F 'worktree add --quiet --detach "$qualification_snapshot" "$qualification_commit"' \
   "$root/scripts/qualification-local.sh" >/dev/null
 grep -F 'JANUSLY_QUALIFICATION_SOURCE_COMMIT="$qualification_commit"' \
   "$root/scripts/qualification-local.sh" >/dev/null
+grep -F '"$qualification_snapshot/scripts/qualification-local.sh" "$profile"' \
+  "$root/scripts/qualification-local.sh" >/dev/null
 grep -F "':(exclude)web/node_modules'" "$root/scripts/qualification-local.sh" >/dev/null
-[[ $(grep -c 'pagerduty_source_status' "$root/scripts/qualification-local.sh") -eq 3 ]] || {
-  echo "PagerDuty source checks do not consistently exclude only the harness dependency mount" >&2
+[[ $(grep -c 'qualification_source_status' "$root/scripts/qualification-local.sh") -eq 3 ]] || {
+  echo "immutable source checks do not consistently exclude only the harness dependency mount" >&2
   exit 1
 }
+
+fixture=$(mktemp -d "${TMPDIR:-/tmp}/janusly-qualification-dirty.XXXXXX")
+trap 'rm -rf "$fixture"' EXIT
+mkdir -p "$fixture/scripts" "$fixture/web/node_modules/.bin"
+cp "$root/scripts/qualification-local.sh" "$fixture/scripts/qualification-local.sh"
+touch "$fixture/web/node_modules/.bin/playwright"
+chmod +x "$fixture/web/node_modules/.bin/playwright"
+git -C "$fixture" init -q
+git -C "$fixture" config user.name Janusly
+git -C "$fixture" config user.email janusly@example.invalid
+printf 'frozen\n' >"$fixture/candidate.txt"
+git -C "$fixture" add candidate.txt scripts/qualification-local.sh
+git -C "$fixture" commit -qm frozen
+printf 'changed\n' >>"$fixture/candidate.txt"
+for immutable_profile in load pagerduty; do
+  error_file="$fixture/$immutable_profile.err"
+  if CONFIRM=reset "$fixture/scripts/qualification-local.sh" "$immutable_profile" \
+    >"$fixture/$immutable_profile.out" 2>"$error_file"; then
+    echo "$immutable_profile accepted a dirty qualification source" >&2
+    exit 1
+  fi
+  grep -F "$immutable_profile qualification requires a clean worktree" "$error_file" >/dev/null
+done
+rm -rf "$fixture"
+trap - EXIT
 grep -F 'failed to write complete evidence summary' "$root/scripts/qualification-local.sh" >/dev/null
 grep -F 'failed to capture final diagnostics' "$root/scripts/qualification-local.sh" >/dev/null
 grep -F 'project_has_resources && die "refusing pre-existing resources for project $project"' \

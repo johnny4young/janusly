@@ -53,12 +53,12 @@ die() {
   exit 2
 }
 
-# The immutable PagerDuty snapshot mounts the already-installed dependency
+# Immutable load and PagerDuty snapshots mount the already-installed dependency
 # tree as web/node_modules. A trailing-slash node_modules/ ignore rule does not
 # match that symlink, so plain `git status` reports the harness-owned mount as
 # untracked and makes the snapshot reject itself. Exclude only that dependency
 # mount while retaining a full status check for every candidate source path.
-pagerduty_source_status() {
+qualification_source_status() {
   git -C "$root" status --porcelain --untracked-files=normal -- \
     . ':(exclude)web/node_modules'
 }
@@ -80,20 +80,20 @@ validate_configuration() {
   done
   [[ "$app_port" != "$postgres_port" && "$app_port" != "$metrics_port" && "$postgres_port" != "$metrics_port" ]] ||
     die "qualification ports must be distinct"
-  if [[ "$profile" == pagerduty ]] && [[ -n $(pagerduty_source_status) ]]; then
-    die "pagerduty qualification requires a clean worktree so build provenance matches the tested source"
+  if [[ "$profile" == load || "$profile" == pagerduty ]] && [[ -n $(qualification_source_status) ]]; then
+    die "$profile qualification requires a clean worktree so build provenance matches the tested source"
   fi
-  if [[ "$profile" == pagerduty ]] && [[ ! -x "$root/web/node_modules/.bin/playwright" ]]; then
-    die "PagerDuty qualification requires installed web dependencies; run make frontend-install"
+  if [[ "$profile" == load || "$profile" == pagerduty ]] && [[ ! -x "$root/web/node_modules/.bin/playwright" ]]; then
+    die "$profile qualification requires installed web dependencies; run make frontend-install"
   fi
-  if [[ "$profile" == pagerduty && ${JANUSLY_QUALIFICATION_SNAPSHOT:-0} == 1 ]]; then
+  if [[ ("$profile" == load || "$profile" == pagerduty) && ${JANUSLY_QUALIFICATION_SNAPSHOT:-0} == 1 ]]; then
     [[ -n ${JANUSLY_QUALIFICATION_SOURCE_ROOT:-} && "$root" != "$JANUSLY_QUALIFICATION_SOURCE_ROOT" ]] ||
-      die "invalid PagerDuty qualification source snapshot"
+      die "invalid $profile qualification source snapshot"
     [[ "$qualification_commit" == "${JANUSLY_QUALIFICATION_SOURCE_COMMIT:-}" &&
        "$qualification_tree" == "${JANUSLY_QUALIFICATION_SOURCE_TREE:-}" ]] ||
-      die "PagerDuty source snapshot does not match the frozen candidate"
+      die "$profile source snapshot does not match the frozen candidate"
     if git -C "$root" symbolic-ref --quiet HEAD >/dev/null; then
-      die "PagerDuty qualification source snapshot must use a detached HEAD"
+      die "$profile qualification source snapshot must use a detached HEAD"
     fi
   fi
   if ((uses_supabase)); then
@@ -102,10 +102,10 @@ validate_configuration() {
   fi
 }
 
-pagerduty_candidate_unchanged() {
+qualification_candidate_unchanged() {
   [[ $(git -C "$root" rev-parse HEAD) == "$qualification_commit" ]] &&
     [[ $(git -C "$root" rev-parse 'HEAD^{tree}') == "$qualification_tree" ]] &&
-    [[ -z $(pagerduty_source_status) ]]
+    [[ -z $(qualification_source_status) ]]
 }
 
 remove_qualification_snapshot() {
@@ -115,12 +115,12 @@ remove_qualification_snapshot() {
 }
 
 # The live checkout is not an immutable build context even when it is clean at
-# both ends of a run. Execute the flagship qualification from a detached
-# worktree at the frozen commit so Docker, Playwright, and Go all consume the
-# same source. Only the ignored dependency directory is shared; no source file
-# comes from the mutable checkout.
-run_pagerduty_snapshot() {
-  qualification_snapshot=$(mktemp -d "${TMPDIR:-/tmp}/janusly-pagerduty-source.XXXXXX")
+# both ends of a long run. Execute load and flagship qualification from a
+# detached worktree at the frozen commit so Docker, Playwright, and Go all
+# consume the same source. Only the ignored dependency directory is shared; no
+# source file comes from the mutable checkout.
+run_qualification_snapshot() {
+  qualification_snapshot=$(mktemp -d "${TMPDIR:-/tmp}/janusly-${profile}-source.XXXXXX")
   rmdir "$qualification_snapshot"
   trap remove_qualification_snapshot EXIT
   trap 'exit 130' INT
@@ -136,12 +136,12 @@ run_pagerduty_snapshot() {
   JANUSLY_QUALIFICATION_SOURCE_COMMIT="$qualification_commit" \
   JANUSLY_QUALIFICATION_SOURCE_TREE="$qualification_tree" \
   JANUSLY_EVIDENCE_DIR="$evidence_root" \
-    "$qualification_snapshot/scripts/qualification-local.sh" pagerduty
+    "$qualification_snapshot/scripts/qualification-local.sh" "$profile"
   exit_status=$?
   set -e
 
   if ! remove_qualification_snapshot; then
-    printf 'qualification: failed to remove detached PagerDuty source snapshot\n' >&2
+    printf 'qualification: failed to remove detached %s source snapshot\n' "$profile" >&2
     exit_status=1
   fi
   trap - EXIT INT TERM
@@ -238,10 +238,10 @@ write_summary() {
 cleanup() {
   local exit_status=$?
   trap - EXIT INT TERM
-  if [[ "$profile" == pagerduty ]] && ! pagerduty_candidate_unchanged; then
+  if [[ "$profile" == load || "$profile" == pagerduty ]] && ! qualification_candidate_unchanged; then
     source_integrity=false
     exit_status=1
-    printf 'qualification: PagerDuty candidate source changed while qualification was running\n' >&2
+    printf 'qualification: %s candidate source changed while qualification was running\n' "$profile" >&2
   fi
   if ((started)); then
     if ! capture_diagnostics; then
@@ -466,8 +466,8 @@ if [[ "$profile" == load || "$profile" == pagerduty ]]; then
 fi
 
 validate_configuration
-if [[ "$profile" == pagerduty && ${JANUSLY_QUALIFICATION_SNAPSHOT:-0} != 1 ]]; then
-  run_pagerduty_snapshot
+if [[ ("$profile" == load || "$profile" == pagerduty) && ${JANUSLY_QUALIFICATION_SNAPSHOT:-0} != 1 ]]; then
+  run_qualification_snapshot
   exit $?
 fi
 if [[ "$profile" == selftest ]]; then
