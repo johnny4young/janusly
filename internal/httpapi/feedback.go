@@ -281,7 +281,7 @@ func (s *V1Server) recordFeedbackCore(r *http.Request, rc v1Request) opResult {
 func (s *V1Server) listCalibrationsCore(r *http.Request, rc v1Request) opResult {
 	rows, err := store.New(s.pool).ListConfidenceCalibrations(r.Context(), rc.orgID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {

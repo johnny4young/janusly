@@ -33,10 +33,36 @@ type opResult struct {
 func opOK(data any) opResult { return opResult{status: http.StatusOK, data: data} }
 
 func opError(status int, code, message string, params map[string]any) opResult {
+	status = publicErrorStatus(code, status)
+	message, params = publicErrorFields(code, message, params)
 	return opResult{status: status, code: code, message: message, params: params}
 }
 
+// publicErrorFields is the final defense against reflecting database,
+// provider, or evidence details through a generic 500. Callers should still
+// pass the stable literal, but both encoders normalize it so a future direct
+// opResult or writeV1Error cannot bypass the invariant.
+func publicErrorFields(code, message string, params map[string]any) (string, map[string]any) {
+	if code == "internal_error" {
+		return "Internal error", nil
+	}
+	return message, params
+}
+
+func publicErrorStatus(code string, status int) int {
+	if code == "internal_error" {
+		return http.StatusInternalServerError
+	}
+	return status
+}
+
 func writeUnversioned(w http.ResponseWriter, result opResult) {
+	result.status = publicErrorStatus(result.code, result.status)
+	result.message, result.params = publicErrorFields(result.code, result.message, result.params)
+	if result.code == "internal_error" {
+		result.data = nil
+		result.unversionedExtras = nil
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(result.status)
 	if result.data != nil || (result.status >= 200 && result.status < 300 && result.code == "") {
@@ -53,6 +79,12 @@ func writeUnversioned(w http.ResponseWriter, result opResult) {
 }
 
 func writeVersioned(w http.ResponseWriter, requestID string, result opResult) {
+	result.status = publicErrorStatus(result.code, result.status)
+	result.message, result.params = publicErrorFields(result.code, result.message, result.params)
+	if result.code == "internal_error" {
+		result.data = nil
+		result.unversionedExtras = nil
+	}
 	if result.data != nil || (result.status >= 200 && result.status < 300 && result.code == "") {
 		// Non-200 successes keep their status (202 = accepted, run deferred).
 		writeV1(w, requestID, result.status, map[string]any{"data": result.data})
@@ -113,7 +145,14 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 	}))
 	mux.HandleFunc("POST /workflows/{workflowId}/restore", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		workflowID := r.PathValue("workflowId")
-		rows, err := store.New(s.pool).RestoreWorkflow(r.Context(), store.RestoreWorkflowParams{
+		tx, err := s.pool.Begin(r.Context())
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		defer func() { _ = tx.Rollback(r.Context()) }()
+		txq := store.New(tx)
+		rows, err := txq.RestoreWorkflow(r.Context(), store.RestoreWorkflowParams{
 			ID: workflowID, OrgID: rc.orgID,
 		})
 		if err != nil {
@@ -124,14 +163,34 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
 			return
 		}
-		// Restore re-registers schedules from the latest version.
-		if version, err := store.New(s.pool).GetLatestWorkflowVersion(r.Context(), store.GetLatestWorkflowVersionParams{
+		// Restoring the parent and reconstructing its schedules are one state
+		// transition. Never report success for an active workflow whose latest
+		// snapshot could not be loaded, parsed, or registered.
+		version, err := txq.GetLatestWorkflowVersion(r.Context(), store.GetLatestWorkflowVersionParams{
 			WorkflowID: workflowID, OrgID: rc.orgID,
-		}); err == nil {
-			if wf, _ := domain.Parse(version.DagJson); wf != nil {
-				_ = s.engine.SyncWorkflowSchedules(r.Context(), store.New(s.pool),
-					rc.orgID, workflowID, version.ID, rc.userID, wf)
+		})
+		switch {
+		case err == nil:
+			wf, _ := domain.Parse(version.DagJson)
+			if wf == nil {
+				writeUnversioned(w, opError(http.StatusUnprocessableEntity, "workflows_version_malformed",
+					"Workflow version is malformed", nil))
+				return
 			}
+			if err := s.engine.SyncWorkflowSchedules(r.Context(), txq,
+				rc.orgID, workflowID, version.ID, rc.userID, wf); err != nil {
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+				return
+			}
+		case errors.Is(err, pgx.ErrNoRows):
+			// A workflow created before its first save has no schedules to restore.
+		default:
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.restored", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,

@@ -1,6 +1,8 @@
 package authoring
 
 import (
+	"bytes"
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -15,15 +17,25 @@ func bindingTestCatalog() Catalog {
 		Version: "catalog-v1",
 		BuiltinTools: []tools.CatalogEntry{
 			{Name: "text.uppercase", Required: []string{"value"}},
+			{Name: "time.now"},
 			{Name: "slack.post", Required: []string{"credential"}, WriteSide: true},
+			{Name: "pagerduty.incident.get", Required: []string{"credential", "requesterEmail", "incidentId"}},
+			{Name: "pagerduty.incident.acknowledge", Required: []string{"credential", "requesterEmail", "incidentId"}, WriteSide: true},
+			{Name: "pagerduty.incident.snooze", Required: []string{"credential", "requesterEmail", "incidentId", "durationSeconds"}, WriteSide: true},
+			{Name: "pagerduty.policy.evaluate", Required: []string{"eventType", "occurredAt", "receivedAt", "evaluatedAt", "incident", "pagerDutyUserId", "snoozeSeconds", "timeZone", "workingHours"}},
+			{Name: "pagerduty.outcome.verify", Required: []string{"incident", "expectedIncidentId", "expectedSnoozeUntil"}},
+			{Name: "vector.upsert", Required: []string{"content"}, WriteSide: true},
 		},
 		McpTools: []mcpclient.ExposedMcpTool{{
 			ConnectionAlias: "crm", ToolName: "contacts.update",
+			WriteSide:   true,
 			InputFields: []mcpclient.ExposedMcpInputField{{Name: "contactId", Type: "string", Required: true}},
 		}},
 		Credentials: []CredentialCapability{
 			{ID: "cred-1", Name: "incidents", Kind: "slack_webhook", Configured: true, UpdatedAt: time.Now()},
 			{ID: "cred-expired", Name: "old", Kind: "slack_webhook", Configured: true, Expired: true, UpdatedAt: time.Now()},
+			{ID: "cred-pd-api", Name: "pagerduty-api", Kind: "pagerduty_api_token", Configured: true, UpdatedAt: time.Now()},
+			{ID: "cred-pd-hook", Name: "pagerduty-webhook", Kind: "pagerduty_webhook_secret", Configured: true, UpdatedAt: time.Now()},
 		},
 		Subworkflows: []SubworkflowCapability{{WorkflowID: "wf-child", Name: "Child", Status: "active", LatestVersion: 3}},
 	}
@@ -89,6 +101,9 @@ func TestBindWorkflowFlagsExpiredCredentialAndIncompleteSafeNodes(t *testing.T) 
 	}
 	reasons := make([]string, 0, len(report.Missing))
 	for _, missing := range report.Missing {
+		if missing.Alternatives == nil {
+			t.Fatalf("binding alternatives must be an empty JSON array, never null: %+v", missing)
+		}
 		reasons = append(reasons, missing.Reason)
 	}
 	for _, expected := range []string{"credential_expired", "tool_input_required", "mcp_input_required"} {
@@ -98,6 +113,45 @@ func TestBindWorkflowFlagsExpiredCredentialAndIncompleteSafeNodes(t *testing.T) 
 	}
 	if HasUnboundCapabilityIdentity(report) {
 		t.Fatalf("expired credentials and incomplete fields are not invented identities: %+v", report.Missing)
+	}
+}
+
+func TestBindingReportsNeverMarshalNullCollections(t *testing.T) {
+	t.Parallel()
+	catalog := bindingTestCatalog()
+	report, workflow, _ := BindWorkflowJSON(catalog, map[string]any{
+		"nodes": []any{map[string]any{
+			"id": "uppercase", "type": "tool",
+			"config": map[string]any{"tool": "text.uppercase", "input": map[string]any{}},
+		}},
+		"edges": []any{},
+	})
+	if workflow == nil || report.Complete {
+		t.Fatalf("expected a parseable, explicitly incomplete workflow: workflow=%+v report=%+v", workflow, report)
+	}
+	report = BindProposal(catalog, IntentBrief{
+		Trigger: "unsupported-trigger", ExternalEffects: []string{"unknown-effect"},
+	}, workflow)
+	wire, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wire) == 0 || slices.ContainsFunc(report.Missing, func(binding Binding) bool {
+		return binding.Alternatives == nil
+	}) {
+		t.Fatalf("binding report contains a nil alternatives collection: %s", wire)
+	}
+	if bytes.Contains(wire, []byte(`"alternatives":null`)) {
+		t.Fatalf("binding report emitted alternatives:null: %s", wire)
+	}
+
+	invalid, _, _ := BindWorkflowJSON(catalog, map[string]any{"nodes": "invalid", "edges": []any{}})
+	invalidWire, err := json.Marshal(invalid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(invalidWire, []byte(`"alternatives":null`)) {
+		t.Fatalf("invalid workflow report emitted alternatives:null: %s", invalidWire)
 	}
 }
 
@@ -156,5 +210,57 @@ func TestBindWorkflowClassifiesUnknownCredentialAsIdentity(t *testing.T) {
 	report := BindWorkflow(bindingTestCatalog(), wf)
 	if !HasUnboundCapabilityIdentity(report) || len(report.Missing) != 1 || report.Missing[0].Reason != "exact_credential_not_found" {
 		t.Fatalf("unknown credential must be an exact identity failure: %+v", report)
+	}
+}
+
+func TestBindWorkflowResolvesPagerDutyTriggerAndRejectsWrongCredentialKinds(t *testing.T) {
+	catalog := bindingTestCatalog()
+	workflow := &domain.Workflow{Nodes: []domain.Node{
+		{ID: "trigger", Type: "pagerduty_incident", Config: map[string]any{"webhookCredential": "pagerduty-webhook"}},
+		{ID: "read", Type: "tool", Config: map[string]any{"tool": "pagerduty.incident.get", "input": map[string]any{
+			"credential": "pagerduty-api", "requesterEmail": "operator@example.com", "incidentId": "P1",
+		}}},
+	}}
+	report := BindWorkflow(catalog, workflow)
+	if !report.Complete || len(report.Missing) != 0 || len(report.Resolved) != 3 {
+		t.Fatalf("exact PagerDuty bindings rejected: %+v", report)
+	}
+
+	workflow.Nodes[0].Config["webhookCredential"] = "pagerduty-api"
+	workflow.Nodes[1].Config["input"].(map[string]any)["credential"] = "pagerduty-webhook"
+	report = BindWorkflow(catalog, workflow)
+	if report.Complete || len(report.Missing) != 2 {
+		t.Fatalf("wrong credential kinds must block Apply: %+v", report)
+	}
+	for _, missing := range report.Missing {
+		if missing.Reason != "credential_kind_mismatch" {
+			t.Fatalf("wrong reason: %+v", report.Missing)
+		}
+		if len(missing.Alternatives) != 1 {
+			t.Fatalf("only credentials of the required kind may be alternatives: %+v", missing)
+		}
+	}
+}
+
+func TestBindWorkflowHandlesNilAndNeverSuggestsWrongCredentialKind(t *testing.T) {
+	catalog := bindingTestCatalog()
+	report := BindWorkflow(catalog, nil)
+	if report.Complete || len(report.Missing) != 1 || report.Missing[0].Reason != "workflow_contract_invalid" {
+		t.Fatalf("nil workflow must fail closed without panicking: %+v", report)
+	}
+
+	catalog.Credentials = []CredentialCapability{{
+		ID: "cred-slack", Name: "slack-only", Kind: "slack_webhook", Configured: true,
+	}}
+	workflow := &domain.Workflow{Nodes: []domain.Node{{
+		ID: "read", Type: "tool", Config: map[string]any{
+			"tool": "pagerduty.incident.get", "input": map[string]any{
+				"credential": "", "requesterEmail": "operator@example.com", "incidentId": "P1",
+			},
+		},
+	}}}
+	report = BindWorkflow(catalog, workflow)
+	if report.Complete || len(report.Missing) != 1 || len(report.Missing[0].Alternatives) != 0 {
+		t.Fatalf("an incompatible credential must never be suggested as a valid alternative: %+v", report)
 	}
 }

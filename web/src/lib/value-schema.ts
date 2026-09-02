@@ -20,7 +20,7 @@
  * change.
  */
 
-import { z } from "zod";
+import * as z from "zod/mini";
 
 export const workflowInputTypeValues = [
   "string",
@@ -30,7 +30,7 @@ export const workflowInputTypeValues = [
   "array",
 ] as const;
 
-export const WorkflowInputTypeSchema = z.enum(workflowInputTypeValues);
+export const WorkflowInputTypeSchema = /* @__PURE__ */ z.enum(workflowInputTypeValues);
 
 /**
  * Hand-written because Zod cannot infer the recursive lazy shape without an
@@ -46,17 +46,15 @@ export type WorkflowInputSchemaShape = {
   default?: unknown;
 };
 
-export const WorkflowInputSchema: z.ZodType<WorkflowInputSchemaShape> =
-  z.lazy(() =>
+export const WorkflowInputSchema: z.ZodMiniType<WorkflowInputSchemaShape> =
+  /* @__PURE__ */ z.lazy(() =>
     z.object({
       type: WorkflowInputTypeSchema,
-      description: z.string().optional(),
-      properties: z
-        .record(z.string(), WorkflowInputSchema)
-        .optional(),
-      required: z.array(z.string()).optional(),
-      items: WorkflowInputSchema.optional(),
-      enum: z.array(z.unknown()).optional(),
-      default: z.unknown().optional(),
+      description: z.optional(z.string()),
+      properties: z.optional(z.record(z.string(), WorkflowInputSchema)),
+      required: z.optional(z.array(z.string())),
+      items: z.optional(WorkflowInputSchema),
+      enum: z.optional(z.array(z.unknown())),
+      default: z.optional(z.unknown()),
     }),
   );

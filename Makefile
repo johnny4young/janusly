@@ -13,7 +13,7 @@ GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 	test-integration test-e2e test-e2e-full verify verify-current-db vuln frontend-install \
 	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
 	restore-local recovery-local-selftest load-soak-local-selftest \
-	qualify-oci-local qualify-private-metrics-local qualify-real-provider
+	qualify-oci-local qualify-private-metrics-local qualify-real-provider qualify-pagerduty
 
 dev: db-up migrate
 	JANUSLY_DATABASE_URL='$(DB_URL)' PNPM='$(PNPM)' bash scripts/dev.sh
@@ -93,6 +93,8 @@ test-e2e-full:
 
 qualify-local-selftest:
 	bash scripts/verify-isolated.test.sh
+	bash scripts/test-e2e.test.sh
+	bash scripts/pre-main-visual-local.test.sh
 	bash scripts/qualification-local.test.sh
 	bash scripts/load-soak-local.test.sh
 	bash scripts/assert-clean-source.test.sh
@@ -106,6 +108,12 @@ load-soak-local-selftest:
 
 qualify-local:
 	CONFIRM='$(CONFIRM)' bash scripts/qualification-local.sh '$(or $(PROFILE),all)'
+
+qualify-pagerduty:
+	CONFIRM='$(CONFIRM)' bash scripts/qualification-local.sh pagerduty
+
+qualify-visual-local:
+	CONFIRM='$(CONFIRM)' bash scripts/pre-main-visual-local.sh '$(or $(PROFILE),all)'
 
 qualify-oci-local:
 	CONFIRM='$(CONFIRM)' IMAGE='$(IMAGE)' bash scripts/oci-railway-local.sh

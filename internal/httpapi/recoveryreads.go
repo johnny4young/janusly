@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/auth"
@@ -44,7 +45,7 @@ func (s *V1Server) recoveryCasesCore(r *http.Request, rc v1Request) opResult {
 		PageLimit: int32(limit),
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	cases := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -79,9 +80,31 @@ func (s *V1Server) recoveryCaseCore(r *http.Request, rc v1Request) opResult {
 	for _, row := range detail.Artifacts {
 		artifacts = append(artifacts, recoveryArtifactView(row))
 	}
+	// The browser needs a durable continuity hint after refresh, not the grant
+	// itself. Keep the projection HTTP-only and omit its identity/actor; apply
+	// still re-checks the exact binding and consumes it through a locked CAS.
+	var activeApproval any
+	grant, err := store.New(s.pool).FindActiveRecoveryApprovalGrantForCase(
+		r.Context(),
+		store.FindActiveRecoveryApprovalGrantForCaseParams{
+			OrgID: rc.orgID, CaseID: caseID,
+			CaseRevision: detail.Case.Revision, NowAt: time.Now().UTC(),
+		},
+	)
+	if err == nil {
+		activeApproval = map[string]any{
+			"candidateArtifactId":  grant.CandidateArtifactID,
+			"validationArtifactId": grant.ValidationArtifactID,
+			"caseRevision":         grant.CaseRevision,
+			"expiresAt":            grant.ExpiresAt,
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
 	return opOK(map[string]any{
 		"case": recoveryCaseView(detail.Case), "transitions": transitions,
 		"artifacts": artifacts, "autonomy": detail.Autonomy,
+		"activeApproval": activeApproval,
 	})
 }
 
@@ -111,7 +134,7 @@ func (s *V1Server) recoveryMyWinsCore(r *http.Request, rc v1Request) opResult {
 		OrgID: rc.orgID, UserID: pgtype.Text{String: rc.userID, Valid: true}, Since: since,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(map[string]any{"recovered": recovered, "windowDays": windowDays})
 }

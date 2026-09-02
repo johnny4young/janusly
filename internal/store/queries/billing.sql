@@ -35,7 +35,7 @@ WHERE org_id = $1 AND metric = 'llm.completion'
   AND jsonb_typeof(metadata->'costUsd') = 'number';
 
 -- The dispatcher resolves the run's saved-workflow id for the composite
--- budget gate; doc-posted runs fall back to the version id itself.
+-- budget gate; ad-hoc runs fall back to their run-scoped identity.
 -- name: GetRunWorkflowID :one
 SELECT coalesce(wv.workflow_id, r.workflow_version_id)
 FROM runs r

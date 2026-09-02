@@ -7,7 +7,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/domain"
@@ -40,7 +43,10 @@ func (s *V1Server) getRolloutCore(r *http.Request, rc v1Request, workflowID stri
 		OrgID: rc.orgID, WorkflowID: workflowID,
 	})
 	if err != nil {
-		return opOK(map[string]any{"rollout": nil})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opOK(map[string]any{"rollout": nil})
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(map[string]any{"rollout": rolloutView(rollout)})
 }
@@ -69,7 +75,7 @@ func (s *V1Server) createRolloutCore(r *http.Request, rc v1Request, workflowID s
 		CreatedBy: rc.userID,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	switch kind {
 	case engine.RolloutNotFound:
@@ -106,10 +112,12 @@ func (s *V1Server) decideRolloutCore(r *http.Request, rc v1Request, workflowID, 
 	var body struct {
 		Reason string `json:"reason"`
 	}
-	_ = decodeBody(r, &body)
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "workflow_rollout_invalid", "Invalid request body", nil)
+	}
 	kind, rollout, err := s.engine.FinishWorkflowRollout(r.Context(), rc.orgID, workflowID, rolloutID, decision, body.Reason)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	switch kind {
 	case engine.RolloutFinishNotFound:
@@ -165,14 +173,18 @@ func qualificationView(row store.WorkflowRecoveryQualification) map[string]any {
 func (s *V1Server) resolveQualificationVersions(r *http.Request, rc v1Request, workflowID, baselineID, candidateID string) (*domain.Workflow, *domain.Workflow, *opResult) {
 	q := store.New(s.pool)
 	if _, err := q.GetWorkflow(r.Context(), store.GetWorkflowParams{ID: workflowID, OrgID: rc.orgID}); err != nil {
-		res := opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+		status, code, message := http.StatusInternalServerError, "internal_error", "Internal error"
+		if errors.Is(err, pgx.ErrNoRows) {
+			status, code, message = http.StatusNotFound, "workflow_not_found", "Workflow not found"
+		}
+		res := opError(status, code, message, nil)
 		return nil, nil, &res
 	}
 	versions, err := q.ListWorkflowVersionsForRollout(r.Context(), store.ListWorkflowVersionsForRolloutParams{
 		OrgID: rc.orgID, WorkflowID: workflowID,
 	})
 	if err != nil {
-		res := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		res := opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		return nil, nil, &res
 	}
 	var baseline, candidate *store.ListWorkflowVersionsForRolloutRow
@@ -226,7 +238,10 @@ func (s *V1Server) getQualificationCore(r *http.Request, rc v1Request, workflowI
 		DatasetVersion: engine.RecoveryQualificationDatasetVersion,
 	})
 	if err != nil {
-		return opOK(map[string]any{"required": true, "qualification": nil})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opOK(map[string]any{"required": true, "qualification": nil})
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(map[string]any{"required": true, "qualification": qualificationView(row)})
 }
@@ -257,7 +272,7 @@ func (s *V1Server) recordQualificationCore(r *http.Request, rc v1Request, workfl
 		SummaryJson: receiptJSON, CreatedBy: rc.userID,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.recovery_qualification.recorded", audit.Options{
 		TargetType: "workflow_recovery_qualification", TargetID: row.ID,

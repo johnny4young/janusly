@@ -5,11 +5,17 @@ INSERT INTO trigger_events (id, org_id, trigger_type, workflow_id,
                             workflow_version_id, node_id, status, dedupe_key, payload_json,
                             workflow_rollout_id, workflow_rollout_variant)
 VALUES ($1, $2, $3, $4, $5, $6, 'received', $7, $8, $9, $10)
-ON CONFLICT (org_id, dedupe_key) DO NOTHING;
+-- Deterministic provider event IDs and the tenant dedupe key identify the
+-- same delivery. Concurrent first deliveries can arbitrate on either unique
+-- index; catch both, then let the caller re-read by the scoped dedupe key.
+-- A pathological unrelated primary-key collision still fails closed because
+-- that scoped re-read returns no row.
+ON CONFLICT DO NOTHING;
 
 -- name: FindTriggerEventByDedupe :one
 SELECT id, org_id, trigger_type, workflow_id, workflow_version_id, node_id,
-       status, run_id, dedupe_key, payload_json, skipped_reason, created_at
+       status, run_id, dedupe_key, payload_json, skipped_reason, created_at,
+       workflow_rollout_id, workflow_rollout_variant
 FROM trigger_events
 WHERE org_id = $1 AND dedupe_key = $2;
 
@@ -23,6 +29,27 @@ WHERE org_id = $1 AND id = $2;
 UPDATE trigger_events
 SET status = $3, skipped_reason = $4
 WHERE org_id = $1 AND id = $2 AND status = 'received';
+
+-- The trigger storm guard and its admission marker must share one transaction:
+-- a process crash after the counter increment but before StartRun must not make
+-- the accepted event consume the same fixed-window budget again on retry.
+-- name: GetTriggerEventRateAdmissionForUpdate :one
+SELECT status, rate_admitted_at
+FROM trigger_events
+WHERE org_id = $1 AND id = $2
+FOR UPDATE;
+
+-- name: MarkTriggerEventRateAdmitted :execrows
+UPDATE trigger_events
+SET rate_admitted_at = $3
+WHERE org_id = $1 AND id = $2
+  AND status = 'received' AND rate_admitted_at IS NULL;
+
+-- name: MarkTriggerEventRateLimited :execrows
+UPDATE trigger_events
+SET status = 'skipped', skipped_reason = 'rate_limited'
+WHERE org_id = $1 AND id = $2
+  AND status = 'received' AND rate_admitted_at IS NULL;
 
 -- name: GetMcpConnectionByAlias :one
 SELECT * FROM mcp_connections WHERE org_id = $1 AND alias = $2;
@@ -144,7 +171,7 @@ SELECT id, name, kind, (secret_ref <> '')::bool AS configured, expires_at, updat
 FROM credentials
 WHERE org_id = $1
 ORDER BY name, id
-LIMIT 200;
+LIMIT 201;
 
 -- name: GetCredentialByOrgName :one
 SELECT id, org_id, name, kind, secret_ref, updated_at, expires_at

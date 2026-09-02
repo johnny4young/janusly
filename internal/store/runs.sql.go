@@ -800,14 +800,15 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (GetRunRow, erro
 }
 
 const getRunExecution = `-- name: GetRunExecution :one
-SELECT status, org_id, input_json, replay_mode FROM runs WHERE id = $1
+SELECT status, org_id, workflow_version_id, input_json, replay_mode FROM runs WHERE id = $1
 `
 
 type GetRunExecutionRow struct {
-	Status     string
-	OrgID      string
-	InputJson  json.RawMessage
-	ReplayMode pgtype.Text
+	Status            string
+	OrgID             string
+	WorkflowVersionID string
+	InputJson         json.RawMessage
+	ReplayMode        pgtype.Text
 }
 
 func (q *Queries) GetRunExecution(ctx context.Context, id string) (GetRunExecutionRow, error) {
@@ -816,6 +817,7 @@ func (q *Queries) GetRunExecution(ctx context.Context, id string) (GetRunExecuti
 	err := row.Scan(
 		&i.Status,
 		&i.OrgID,
+		&i.WorkflowVersionID,
 		&i.InputJson,
 		&i.ReplayMode,
 	)
@@ -1851,7 +1853,9 @@ SELECT r.id, r.org_id, r.workflow_version_id, r.status,
        r.validation_evidence_level, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
        r.created_at, r.trace_id,
-       coalesce(wv.workflow_id, r.workflow_version_id) AS workflow_id,
+       coalesce(wv.workflow_id,
+                nullif(r.input_json->'workflow'->>'id', ''),
+                r.workflow_version_id) AS workflow_id,
        coalesce((r.input_json->'workflow'->>'name')::text, '') AS workflow_name,
        EXISTS (
          SELECT 1 FROM run_nodes rn
@@ -1864,7 +1868,10 @@ WHERE r.org_id = $1
   AND (r.created_at, r.id) < ($2::timestamptz, $3::text)
   AND ($4::text IS NULL
        OR wv.workflow_id = $4
-       OR (wv.id IS NULL AND r.workflow_version_id = $4))
+       OR (wv.id IS NULL AND coalesce(
+             nullif(r.input_json->'workflow'->>'id', ''),
+             r.workflow_version_id
+           ) = $4))
   AND ($5::text IS NULL OR r.status = $5)
 ORDER BY r.created_at DESC, r.id DESC
 LIMIT $6
@@ -1899,8 +1906,11 @@ type ListRunSummariesRow struct {
 	HasWaitingNodes         bool
 }
 
-// Run summaries for the list surface: workflow identity joined through the
-// version snapshot, the waiting-node flag the Activity UI reads, the
+// Run summaries for the list surface: saved identity joins through the exact
+// version snapshot; honest ad-hoc runs retain only their submitted display id
+// from the frozen input snapshot (or their run-scoped identity when unnamed).
+// This grouping identity never makes an ad-hoc run count as a saved version.
+// The waiting-node flag is what the Activity UI reads, with the
 // (created_at, id) keyset the web walks via `before=<iso>|<id>` cursors, and
 // the contract's optional filters.
 func (q *Queries) ListRunSummaries(ctx context.Context, arg ListRunSummariesParams) ([]ListRunSummariesRow, error) {

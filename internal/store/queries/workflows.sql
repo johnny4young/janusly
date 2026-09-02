@@ -4,6 +4,10 @@
 INSERT INTO workflows (id, org_id, name, created_by)
 VALUES ($1, $2, $3, $4);
 
+-- name: UpdateWorkflowName :exec
+UPDATE workflows SET name = $3
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL;
+
 -- name: GetWorkflow :one
 SELECT id, org_id, name, status, paused_reason, created_by, created_at, deleted_at
 FROM workflows
@@ -123,9 +127,23 @@ WHERE workflow_id = $1 AND org_id = $2
 ORDER BY version DESC
 LIMIT 1;
 
+-- name: GetLatestWorkflowHealthSnapshot :one
+SELECT id, version, dag_json, slo_json
+FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY version DESC
+LIMIT 1;
+
 -- name: CountWorkflowVersions :one
 SELECT COALESCE(MAX(version), 0)::int FROM workflow_versions
 WHERE workflow_id = $1 AND org_id = $2;
+
+-- name: GetLatestWorkflowVersionReliability :one
+SELECT version, slo_json, upstream_health_sources
+FROM workflow_versions
+WHERE workflow_id = $1 AND org_id = $2
+ORDER BY version DESC
+LIMIT 1;
 
 -- name: GetWorkflowIngestState :one
 SELECT org_id, status, deleted_at FROM workflows WHERE id = $1;
@@ -258,7 +276,7 @@ JOIN workflow_versions wv ON wv.workflow_id = w.id AND wv.org_id = w.org_id
 WHERE w.org_id = $1 AND w.deleted_at IS NULL
 GROUP BY w.id, w.name, w.status
 ORDER BY w.name, w.id
-LIMIT 200;
+LIMIT 201;
 
 -- name: ListExternalWorkflows :many
 SELECT * FROM external_workflows

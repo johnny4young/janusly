@@ -28,6 +28,11 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
+func init() {
+	audit.RegisterRuntimeAction("workflow.status_page.rotated")
+	audit.RegisterRuntimeAction("workflow.status_page.revoked")
+}
+
 func (s *V1Server) mountStatusPageRoutes(mux *http.ServeMux) {
 	adminGate := routeGate{auth.RoleAdmin, "org.config.write"}
 

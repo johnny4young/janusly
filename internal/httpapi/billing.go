@@ -186,7 +186,7 @@ func (s *V1Server) billingUsageCore(r *http.Request, rc v1Request) opResult {
 	}
 	rows, err := s.usageSlice(r, rc)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	summary := map[string]any{}
 	for _, row := range rows {
@@ -231,7 +231,7 @@ func (s *V1Server) billingUsageExport(w http.ResponseWriter, r *http.Request, rc
 	}
 	rows, err := s.usageSlice(r, rc)
 	if err != nil {
-		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 		return
 	}
 	breakdown := aggregateUsageBreakdown(rows, dimensions)
@@ -329,7 +329,7 @@ func (s *V1Server) workflowBudgetCore(r *http.Request, rc v1Request) opResult {
 		UpdatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	after := map[string]any{"monthlyUsd": row.MonthlyUsd, "warnPercent": row.WarnPercent, "policy": row.Policy}
 	audit.Write(ctx, s.pool, rc.authContext, "billing.budget.configured", audit.Options{

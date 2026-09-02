@@ -12,6 +12,20 @@ Startup checks schema completeness before opening public listeners. Running
 Queries live in `internal/store/queries`, generated types and methods live in
 `internal/store`, and higher layers use organization-scoped store methods.
 
+Every workflow-version append (save, rollback, and solution-pack import) locks
+the active parent and commits the parent name, next immutable version,
+inherited SLO, optionally replaced upstream declarations, and PostgreSQL
+schedule-entry replacement in one transaction. SLO mutation remains the
+separate admin-only chokepoint; an editor save can inherit but cannot replace
+it. The parent lock is shared with rollout creation, so a save
+cannot appear behind an active traffic split. Bounded retries handle only the
+two known unique-write races; all other database errors fail closed. A rollback
+copies the selected DAG exactly but carries the current reliability policy
+forward rather than silently restoring an obsolete or empty declaration.
+The admin SLO mutation takes the same parent lock before reading and updating
+the latest version, so a concurrent save or rollback cannot strand a newly
+declared policy on the version that just stopped being latest.
+
 The durable workflow queue uses PostgreSQL rows plus `janusly_wake` and
 `janusly_run_events` notifications. Notifications reduce latency but do not
 replace polling or durable state.

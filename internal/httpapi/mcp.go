@@ -12,13 +12,13 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/secretstore"
 	"github.com/johnny4young/janusly/internal/store"
@@ -80,19 +80,32 @@ func (s *V1Server) createMcpConnectionCore(r *http.Request, rc v1Request) opResu
 	if body.Args == nil {
 		argsJSON = []byte("[]")
 	}
-	// Refuse reserved platform variables at the door. The resolver refuses
-	// them too, but a row that names one is a stored request to exfiltrate:
-	// it survives restarts, reads as a valid connection in the list, and
-	// costs a discovery round trip to fail. Rejecting at write keeps the
-	// tenant's own mistake visible to them instead of turning into an
-	// opaque "credential secret missing" later.
-	if reserved := reservedEnvRefName(body.EnvRefs); reserved != "" {
-		return opError(http.StatusBadRequest, "mcp_env_ref_reserved",
-			"env ref "+reserved+" names a reserved platform variable", nil)
-	}
-	refsJSON, _ := json.Marshal(body.EnvRefs)
-	if body.EnvRefs == nil {
-		refsJSON = []byte("{}")
+	refsJSON := []byte("{}")
+	if body.EnvRefs != nil {
+		untrustedJSON, marshalErr := json.Marshal(body.EnvRefs)
+		if marshalErr != nil {
+			return opError(http.StatusBadRequest, "mcp_env_refs_invalid",
+				"envRefs must use the supported closed reference shape", nil)
+		}
+		parsedRefs, parseErr := mcpclient.ParseEnvRefs(untrustedJSON)
+		if parseErr != nil {
+			return opError(http.StatusBadRequest, "mcp_env_refs_invalid",
+				"envRefs must use the supported closed reference shape", nil)
+		}
+		// Refuse reserved platform variables at the door. The resolver also
+		// refuses them, but persisting one would leave a stored exfiltration
+		// attempt that costs a discovery round trip merely to fail.
+		for _, ref := range parsedRefs {
+			if secretstore.EnvRefAllowed(ref.Name) {
+				continue
+			}
+			return opError(http.StatusBadRequest, "mcp_env_ref_reserved",
+				"one or more env refs name a reserved platform variable", nil)
+		}
+		refsJSON, marshalErr = json.Marshal(parsedRefs)
+		if marshalErr != nil {
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
 	}
 	id := s.newID()
 	if err := q.InsertMcpConnection(ctx, store.InsertMcpConnectionParams{
@@ -103,7 +116,7 @@ func (s *V1Server) createMcpConnectionCore(r *http.Request, rc v1Request) opResu
 		EnvRefs: refsJSON, Enabled: true, Status: "pending",
 		CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	// create + discovery + audit stay UNTRANSACTED: discovery is network
@@ -120,7 +133,7 @@ func (s *V1Server) createMcpConnectionCore(r *http.Request, rc v1Request) opResu
 		OrgID: rc.orgID, Alias: body.Alias,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opResult{status: http.StatusCreated, data: map[string]any{"connection": map[string]any{
 		"id": connection.ID, "alias": connection.Alias, "transport": connection.Transport,
@@ -145,7 +158,7 @@ func (s *V1Server) setMcpToolFlagsCore(r *http.Request, rc v1Request, alias, too
 		if err == pgx.ErrNoRows {
 			return opError(http.StatusNotFound, "mcp_tool_not_found", "tool not found", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	var body map[string]json.RawMessage
@@ -215,7 +228,7 @@ func (s *V1Server) setMcpToolFlagsCore(r *http.Request, rc v1Request, alias, too
 		RateLimitPerMin: merged.RateLimitPerMin, ExposeToAi: merged.ExposeToAi,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	// Change-only audits, mirroring the contract actions.
@@ -399,33 +412,4 @@ func (s *V1Server) rediscoverMcpConnectionCore(r *http.Request, rc v1Request, al
 	return opOK(map[string]any{"discovery": map[string]any{
 		"ok": discovery.OK, "tools": discovery.Tools, "error": discovery.Error,
 	}})
-}
-
-// reservedEnvRefName returns the first env-ref name the platform refuses to
-// resolve, or "" when every entry is acceptable. Names are sorted so a
-// document with several offenders always reports the same one — an error
-// that changes between identical requests is impossible to act on.
-//
-// Only kind=="env" entries are inspected: other kinds resolve through the
-// managed secret store, which carries its own tenant scoping.
-func reservedEnvRefName(refs map[string]any) string {
-	var offenders []string
-	for _, raw := range refs {
-		entry, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if kind, _ := entry["kind"].(string); kind != "env" {
-			continue
-		}
-		name, _ := entry["name"].(string)
-		if !secretstore.EnvRefAllowed(name) {
-			offenders = append(offenders, name)
-		}
-	}
-	if len(offenders) == 0 {
-		return ""
-	}
-	slices.Sort(offenders)
-	return offenders[0]
 }

@@ -185,6 +185,7 @@ func TestCredentialRoutes(t *testing.T) {
 // MCP alias — and a registered+resolvable credential clears them.
 func TestCredentialReadiness(t *testing.T) {
 	h := newAPIHarness(t)
+	pool := testPool(t)
 	secretstore.ResetForTests()
 	t.Cleanup(secretstore.ResetForTests)
 	t.Setenv("JANUSLY_CREDENTIAL_MASTER_KEY",
@@ -242,6 +243,53 @@ func TestCredentialReadiness(t *testing.T) {
 	}
 	if got := countCredentialMissing(issuesFor()); got != 1 {
 		t.Fatalf("resolvable credential must clear its warn: %d", got)
+	}
+
+	// A real MCP env-ref object must be evaluated, not decoded as the
+	// incompatible map[string]string shape (which previously produced an
+	// empty map and a false healthy result).
+	envName := "ACME_MCP_READINESS_" + suffix
+	envRefs := []byte(fmt.Sprintf(`{"TOKEN":{"kind":"env","name":%q}}`, envName))
+	if _, err := pool.Exec(t.Context(), `INSERT INTO mcp_connections
+		(id, org_id, alias, transport, url, env_refs, enabled, status)
+		VALUES ($1, $2, 'ghost-alias', 'http', 'https://example.test/mcp', $3, true, 'active')`,
+		"mcp-ready-"+suffix, h.org, envRefs); err != nil {
+		t.Fatalf("seed MCP readiness connection: %v", err)
+	}
+	if got := countCredentialMissing(issuesFor()); got != 1 {
+		t.Fatalf("missing MCP env ref must retain its warn: %d", got)
+	}
+	health := h.call("GET", "/credentials/health", nil, "")
+	if health.status != 200 {
+		t.Fatalf("credential health: %d %+v", health.status, health.body)
+	}
+	mcpHealth := health.body["mcpConnections"].([]any)
+	if len(mcpHealth) != 1 || mcpHealth[0].(map[string]any)["secretRefsPresent"] != false {
+		t.Fatalf("missing MCP env ref must be unhealthy: %+v", mcpHealth)
+	}
+	t.Setenv(envName, "available-for-test")
+	if got := countCredentialMissing(issuesFor()); got != 0 {
+		t.Fatalf("resolvable MCP env ref must clear its warn: %d", got)
+	}
+	health = h.call("GET", "/credentials/health", nil, "")
+	mcpHealth = health.body["mcpConnections"].([]any)
+	if len(mcpHealth) != 1 || mcpHealth[0].(map[string]any)["secretRefsPresent"] != true {
+		t.Fatalf("resolved MCP env ref must be healthy: %+v", mcpHealth)
+	}
+
+	// A damaged legacy row is never treated as credential-free. Readiness
+	// fails closed; the inventory remains available and marks it unhealthy.
+	if _, err := pool.Exec(t.Context(), `UPDATE mcp_connections
+		SET env_refs = '{"TOKEN":"legacy"}'::jsonb WHERE org_id = $1 AND alias = 'ghost-alias'`, h.org); err != nil {
+		t.Fatalf("damage MCP env refs: %v", err)
+	}
+	if res := h.call("POST", "/workflows/readiness", map[string]any{"workflow": workflowDoc}, ""); res.status != 500 || res.body["code"] != "internal_error" {
+		t.Fatalf("malformed persisted env refs must fail readiness closed: %d %+v", res.status, res.body)
+	}
+	health = h.call("GET", "/credentials/health", nil, "")
+	mcpHealth = health.body["mcpConnections"].([]any)
+	if len(mcpHealth) != 1 || mcpHealth[0].(map[string]any)["secretRefsPresent"] != false {
+		t.Fatalf("malformed persisted env refs must be unhealthy: %+v", mcpHealth)
 	}
 }
 

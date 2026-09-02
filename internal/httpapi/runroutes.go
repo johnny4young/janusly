@@ -20,8 +20,8 @@ import (
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
-	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/recovery"
+	"github.com/johnny4young/janusly/internal/runstart"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -31,8 +31,9 @@ func (s *V1Server) startRun(w http.ResponseWriter, r *http.Request, rc v1Request
 
 func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
-		Workflow json.RawMessage `json:"workflow"`
-		Input    any             `json:"input"`
+		Workflow          json.RawMessage `json:"workflow"`
+		WorkflowVersionID string          `json:"workflowVersionId"`
+		Input             any             `json:"input"`
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, 2<<20))
 	if err != nil || json.Unmarshal(raw, &body) != nil {
@@ -49,105 +50,73 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "workflow"})
 	}
+	body.WorkflowVersionID = strings.TrimSpace(body.WorkflowVersionID)
+	if len(body.WorkflowVersionID) > 256 {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
+			map[string]any{"field": "workflowVersionId"})
+	}
 	wf, issues := domain.Parse(body.Workflow)
 	if wf == nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "workflow." + contractField(issues)})
-	}
-	// A live rollout owns the deployment choice for this workflow id: the
-	// deterministic assignment picks the variant snapshot, REPLACES the
-	// request's workflow, and the run captures the frozen assignment.
-	var rolloutAssignment *engine.RolloutAssignment
-	if wf.ID != "" {
-		assignment, err := s.engine.ResolveWorkflowRolloutAssignment(r.Context(), rc.orgID, wf.ID, s.newID())
-		if err != nil {
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
-		}
-		if assignment != nil {
-			rolloutAssignment = assignment
-			wf = assignment.Workflow
-		}
-	}
-	// Execution needs the executable subset — here the runtime-only code IS
-	// blocking, unlike save.
-	if result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !result.Valid {
-		rejection := opError(http.StatusBadRequest, "workflows_validation_failed",
-			"Validation failed", map[string]any{"issues": result.Issues})
-		rejection.unversionedExtras = map[string]any{"issues": result.Issues}
-		return rejection
-	}
-	if rejection := s.productionGate(r.Context(), rc.orgID, wf); rejection != nil {
-		return *rejection
-	}
-	// The pause table's /start row: a SAVED workflow paused by its breaker
-	// (or upstream health) REJECTS new starts, naming the actual cause —
-	// breaker vs upstream send the operator to different places.
-	if wf.ID != "" {
-		if status, err := store.New(s.pool).GetWorkflowBreakerStatus(r.Context(), store.GetWorkflowBreakerStatusParams{
-			OrgID: rc.orgID, ID: wf.ID,
-		}); err == nil && status != "active" {
-			code := "upstream_degraded"
-			if status == "paused_circuit_breaker" {
-				code = "workflow_circuit_breaker_paused"
-			}
-			return opError(http.StatusConflict, code,
-				"Workflow is paused — resume it before starting new runs",
-				map[string]any{"status": status})
-		}
-	}
-
-	// Saved-vs-adhoc: legitimate ad-hoc starts (AI Studio "Run" before
-	// Save) can be forbidden per tenant via runs.requireSavedWorkflow.
-	isAdhoc := true
-	if wf.ID != "" {
-		if _, err := store.New(s.pool).GetWorkflow(r.Context(), store.GetWorkflowParams{
-			ID: wf.ID, OrgID: rc.orgID,
-		}); err == nil {
-			isAdhoc = false
-		}
-	}
-	if isAdhoc && orgconfig.LoadBool(r.Context(), s.pool, rc.orgID, "runs.requireSavedWorkflow") {
-		return opError(http.StatusForbidden, "runs_adhoc_disabled",
-			"Ad-hoc workflows are disabled. Save the workflow first.", nil)
 	}
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if len(idempotencyKey) > 256 {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "Idempotency-Key"})
 	}
-	startInput := engine.StartInput{
-		OrgID: rc.orgID, Workflow: wf, Input: body.Input, CreatedBy: rc.userID,
+	started, err := (runstart.Service{
+		Engine: s.engine, Pool: s.pool, NewID: s.newID,
+	}).Start(r.Context(), runstart.Request{
+		OrgID: rc.orgID, CreatedBy: rc.userID, Workflow: wf,
+		RequestedVersionID: body.WorkflowVersionID, Input: body.Input,
 		IdempotencyKey: idempotencyKey,
-	}
-	if rolloutAssignment != nil {
-		startInput.WorkflowVersionID = rolloutAssignment.VersionID
-		startInput.WorkflowRolloutID = rolloutAssignment.Rollout.ID
-		startInput.WorkflowRolloutVariant = rolloutAssignment.Variant
-	}
-	runID, err := s.engine.StartRun(r.Context(), startInput)
+	})
 	if err != nil {
-		// A duplicate key is SUCCESS by definition: the original run id
-		// returns with a body indistinguishable from the first call.
-		var replay *engine.ErrStartIdempotencyReplay
-		if errors.As(err, &replay) {
-			return opOK(map[string]any{"runId": replay.RunID})
+		var rejection *runstart.Rejection
+		if errors.As(err, &rejection) {
+			switch rejection.Code {
+			case runstart.CodeValidationFailed:
+				result := opError(http.StatusBadRequest, rejection.Code,
+					rejection.Message, map[string]any{"issues": rejection.Issues})
+				result.unversionedExtras = map[string]any{"issues": rejection.Issues}
+				return result
+			case runstart.CodeNotProductionReady:
+				return opError(http.StatusUnprocessableEntity, rejection.Code, rejection.Message, nil)
+			case runstart.CodeCircuitPaused, runstart.CodeUpstreamDegraded:
+				return opError(http.StatusConflict, rejection.Code, rejection.Message,
+					map[string]any{"status": rejection.WorkflowStatus})
+			case runstart.CodeVersionMismatch:
+				return opError(http.StatusConflict, rejection.Code, rejection.Message, nil)
+			case runstart.CodeAdhocDisabled:
+				return opError(http.StatusForbidden, rejection.Code, rejection.Message, nil)
+			}
 		}
 		var invalid *engine.InputValidationError
 		if errors.As(err, &invalid) {
 			return opError(http.StatusBadRequest, "runs_input_invalid",
 				err.Error(), map[string]any{"errors": invalid.Errors})
 		}
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
+	// A duplicate idempotency key is success by definition. The original start
+	// already owns its audit record, so replaying the response must not add one.
+	if started.Replayed {
+		return opOK(map[string]any{"runId": started.RunID})
+	}
+	isAdhoc := !started.Binding.Bound
 	startAction := audit.Action("run.started")
 	if isAdhoc {
 		startAction = "run.started.adhoc"
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, startAction, audit.Options{
-		TargetType: "run", TargetID: runID,
-		Metadata: map[string]any{"workflowId": wf.ID, "adhoc": isAdhoc},
+		TargetType: "run", TargetID: started.RunID,
+		Metadata: map[string]any{
+			"workflowId":        started.Workflow.ID,
+			"workflowVersionId": started.Binding.VersionID, "adhoc": isAdhoc,
+		},
 	})
-	return opOK(map[string]any{"runId": runID})
+	return opOK(map[string]any{"runId": started.RunID})
 }
 
 const eventsPageDefault = 200
@@ -168,11 +137,11 @@ func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 			// Unknown and cross-org are indistinguishable, per the golden.
 			return opError(http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	nodes, err := q.ListRunNodesByRun(ctx, runID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	beforeCreatedAt := time.Now().Add(time.Hour)
@@ -193,7 +162,7 @@ func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 		PageLimit: int32(limit + 1),
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	hasMore := len(events) > limit
 	if hasMore {
@@ -276,7 +245,7 @@ func (s *V1Server) listRunsCore(r *http.Request, rc v1Request) opResult {
 		FilterWorkflowID: filterWorkflow, FilterStatus: filterStatus,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	items := make([]RunSummaryView, 0, len(rows))
 	for _, row := range rows {
@@ -307,7 +276,7 @@ func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if err := s.engine.ResumeRunWithInput(r.Context(), body.RunID, body.NodeID, body.Input, body.ResumeToken); err != nil {
 		var inputErr *engine.InputValidationError
@@ -323,7 +292,7 @@ func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 		case errors.Is(err, engine.ErrResumeNodeNotFound):
 			return opError(http.StatusNotFound, "runs_resume_not_found", "Node not found", nil)
 		default:
-			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "run.resumed", audit.Options{
@@ -365,7 +334,7 @@ func (s *V1Server) cancelCore(r *http.Request, rc v1Request) opResult {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusNotFound, "runs_run_not_found", "Run not found", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if owner.OrgID != rc.orgID {
 		return opError(http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
@@ -388,7 +357,7 @@ func (s *V1Server) cancelCore(r *http.Request, rc v1Request) opResult {
 				"Run is already {{status}}; cannot cancel",
 				map[string]any{"status": status})
 		}
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "run.cancelled", audit.Options{
 		TargetType: "run", TargetID: body.RunID,
@@ -492,7 +461,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 				return opError(http.StatusConflict, "dlq_replay_conflict",
 					"This run can no longer be replayed — it was cancelled or already recovered", nil)
 			default:
-				return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+				return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 			}
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
@@ -565,7 +534,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusConflict, "dlq_replay_conflict",
 				"This run can no longer be replayed — it was cancelled or already recovered", nil)
 		default:
-			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{

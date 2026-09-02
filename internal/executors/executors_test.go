@@ -2,6 +2,7 @@ package executors
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -142,5 +143,24 @@ func TestToolNodeDryRunWriteSkip(t *testing.T) {
 	readResult := readOutput.(map[string]any)["result"].(map[string]any)
 	if readResult["skipped"] == true {
 		t.Fatalf("read-side must execute in dry-run: %+v", readResult)
+	}
+}
+
+func TestToolRequireOKMarksAmbiguousWriteFailure(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.Definition{
+		Name: "test.ambiguous-write", Description: "test ambiguous write",
+		Required: []string{}, Fields: []tools.Field{}, WriteSide: true,
+		Execute: func(context.Context, map[string]any) (map[string]any, error) {
+			return map[string]any{"ok": false, "error": "receipt unavailable", "statusCode": 503}, nil
+		},
+	})
+	exec := NewToolExecutor(registry)
+	_, err := exec(context.Background(), Input{Config: map[string]any{
+		"tool": "test.ambiguous-write", "resultPolicy": "require_ok",
+	}})
+	var shape *ExecErrorShape
+	if !errors.As(err, &shape) || !shape.WriteSide || shape.Code != "TOOL_RESULT_NOT_OK" || shape.StatusCode != 503 {
+		t.Fatalf("require_ok write failure lost no-retry identity: %#v", err)
 	}
 }

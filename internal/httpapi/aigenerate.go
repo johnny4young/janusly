@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/johnny4young/janusly/internal/ai"
 	"github.com/johnny4young/janusly/internal/aibudget"
@@ -32,6 +33,7 @@ import (
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/ratelimit"
@@ -113,14 +115,26 @@ func (s *V1Server) generateWorkflowCore(r *http.Request, rc v1Request) opResult 
 		Prompt string `json:"prompt"`
 		Model  string `json:"model"`
 	}
-	_ = decodeBody(r, &body)
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+	}
 	compiled, err := authoring.CompileBrief(authoring.CompileBriefRequest{Prompt: body.Prompt})
 	if err != nil {
 		return opError(http.StatusRequestEntityTooLarge, "ai_prompt_too_long", err.Error(), nil)
 	}
+	// The compatibility endpoint may return an immediately saveable workflow,
+	// so high-impact PagerDuty intent cannot bypass the clarification gate used
+	// by contract-first authoring. In particular, a bare relative campaign must
+	// not be frozen to an arbitrary server receipt time behind the operator's
+	// back. No provider budget or call is consumed for this rejection.
+	if compiled.Brief.Trigger == "pagerduty" && !compiled.Complete {
+		return opError(http.StatusUnprocessableEntity, "authoring_brief_incomplete",
+			"PagerDuty workflow intent requires clarification before generation",
+			map[string]any{"clarifyingQuestions": compiled.ClarifyingQuestions})
+	}
 	catalog := s.authoringCatalog(rc, r)
 	generated := s.generateWorkflowFromPrompt(
-		r.Context(), rc, body.Prompt, body.Model, authoring.CapabilityPromptBlock(catalog),
+		r.Context(), rc, body.Prompt, body.Model, catalog, compiled.Brief,
 	)
 	if generated.status < 200 || generated.status >= 300 || generated.data == nil {
 		return generated
@@ -156,10 +170,18 @@ func (s *V1Server) generateWorkflowCore(r *http.Request, rc v1Request) opResult 
 // the compatibility endpoint and contract-first proposals. systemData is a
 // bounded, DATA-framed capability catalog; it never changes request gates or
 // the deterministic fallback path.
-func (s *V1Server) generateWorkflowFromPrompt(ctx context.Context, rc v1Request, prompt, model, systemData string) opResult {
+func (s *V1Server) generateWorkflowFromPrompt(
+	ctx context.Context,
+	rc v1Request,
+	prompt string,
+	model string,
+	catalog authoring.Catalog,
+	brief authoring.IntentBrief,
+) opResult {
+	systemData := authoring.CapabilityPromptBlock(catalog)
 	client, settings := aiconfig.Resolve(ctx, s.pool, rc.orgID)
 
-	if settings.PromptMaxChars > 0 && len(prompt) > settings.PromptMaxChars {
+	if settings.PromptMaxChars > 0 && utf8.RuneCountInString(prompt) > settings.PromptMaxChars {
 		return opError(http.StatusRequestEntityTooLarge, "ai_prompt_too_long",
 			"prompt exceeds {{maxChars}} characters",
 			map[string]any{"maxChars": settings.PromptMaxChars})
@@ -168,6 +190,39 @@ func (s *V1Server) generateWorkflowFromPrompt(ctx context.Context, rc v1Request,
 		Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
 	}); limitErr != nil {
 		return opError(http.StatusTooManyRequests, "rate_limited", limitErr.Error(), nil)
+	}
+
+	// High-impact PagerDuty action intent has one engine-owned canonical
+	// topology. Compile it before provider budget/calls so model availability,
+	// spend state and wording variance cannot change write authority. Missing
+	// tenant identities remain empty and the shared proposal binder keeps Apply
+	// closed with exact catalog alternatives.
+	if recipe, recognized, recipeErr := authoring.CompilePagerDutyWorkflow(prompt, authoring.DeterministicWorkflowOptions{
+		NewID: s.newID, Catalog: &catalog, Brief: &brief,
+	}); recognized {
+		if recipeErr != nil {
+			audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
+				TargetType: "ai", Metadata: map[string]any{
+					"mode": "error", "generationMode": "deterministic_recipe",
+					"recipe": "pagerduty_on_call", "error": "workflow id generation failed",
+				},
+			})
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+		raw, _ := json.Marshal(recipe)
+		compiled, compilation, compileErr := compileWorkflowAssurance(prompt, raw)
+		if compileErr != nil {
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+		var document map[string]any
+		_ = json.Unmarshal(compiled, &document)
+		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
+			TargetType: "ai", TargetID: templateID(document), Metadata: map[string]any{
+				"mode": "fallback", "generationMode": "deterministic_recipe", "recipe": "pagerduty_on_call",
+				"intentContractAdded": compilation.AddedOutputs, "recoveryContractAdded": compilation.AddedRecoveryContract,
+			},
+		})
+		return opOK(withMode(document, "fallback", ""))
 	}
 
 	gate := aibudget.Gate(ctx, s.pool, rc.orgID, rc.userID, "ai.workflow.generated")
@@ -499,13 +554,17 @@ func (s *V1Server) selectBestOfNWithSystemData(ctx context.Context, client ai.Cl
 	}
 
 	bestScore, bestIndex, validCount := -1, -1, 0
+	registry := executors.NewToolRegistry()
 	for index, entry := range parsed {
 		if issues := validateGeneratedWorkflow(entry.raw); len(issues) > 0 {
 			continue // not a structurally valid graph — skip for scoring
 		}
 		validCount++
 		wf, _ := domain.Parse(entry.raw)
-		readiness := domain.CheckWorkflowReadiness(wf, domain.ReadinessOptions{})
+		readiness := domain.CheckWorkflowReadiness(wf, domain.ReadinessOptions{
+			IsWriteSideTool: func(name string, _ map[string]any) bool { return registry.IsWriteSide(name) },
+			IsExternalTool:  registry.IsExternal,
+		})
 		fails, warns := 0, 0
 		for _, issue := range readiness.Issues {
 			if issue.Severity == "fail" {

@@ -117,6 +117,7 @@ func mcpSemanticWorkflow(id string) *domain.Workflow {
 		{ID: "fx-violation", SourceNodeID: "calc", Output: map[string]any{"total": "900"}, Expected: "violation"},
 	}
 	contract.Evidence.Required = []string{"failure_snapshot", "audit_trail", "terminal_outcome"}
+	contract.Effects = []domain.RecoveryEffect{}
 	contract.Repairs.Allowed = []string{"retry"}
 	contract.Validation.MinimumEvidenceLevel = "static"
 	contract.Approval.ProductionMutation = "required"
@@ -216,21 +217,45 @@ func TestMcpGovernedSemanticRecoveryRequiresIndependentApproval(t *testing.T) {
 	pool := poolForTest(t)
 	eng := engine.New(pool)
 	wf := mcpSemanticWorkflow("mcp-governed-" + uuid.NewString())
+	saved, err := eng.SaveWorkflowVersion(t.Context(), engine.SaveWorkflowVersionInput{
+		OrgID: orgID, UserID: "mcp-test", Workflow: wf, NewID: uuid.NewString,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	runID, err := eng.StartRun(t.Context(), engine.StartInput{
-		OrgID: orgID, Workflow: wf, Input: map[string]any{"total": "900"}, CreatedBy: "mcp-test",
+		OrgID: orgID, Workflow: wf, WorkflowVersionID: saved.VersionID,
+		Input: map[string]any{"total": "900"}, CreatedBy: "mcp-test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitMCPRunStatus(t, pool, runID, "waiting")
-	var caseID, state string
+	var caseID, state, caseWorkflowID, caseWorkflowVersionID string
 	var revision int64
-	if err := pool.QueryRow(t.Context(), `SELECT id,state,revision FROM recovery_cases WHERE org_id=$1 AND run_id=$2`, orgID, runID).
-		Scan(&caseID, &state, &revision); err != nil {
+	if err := pool.QueryRow(t.Context(), `SELECT id,state,revision,workflow_id,workflow_version_id
+		FROM recovery_cases WHERE org_id=$1 AND run_id=$2`, orgID, runID).
+		Scan(&caseID, &state, &revision, &caseWorkflowID, &caseWorkflowVersionID); err != nil {
 		t.Fatal(err)
 	}
 	if state != "contained" {
 		t.Fatalf("case state = %s", state)
+	}
+	if caseWorkflowID != wf.ID || caseWorkflowVersionID != saved.VersionID {
+		t.Fatalf("saved recovery target mismatch: workflow=%q version=%q want=%q/%q",
+			caseWorkflowID, caseWorkflowVersionID, wf.ID, saved.VersionID)
+	}
+	briefResult, initialBrief := callTool(t, session, "operations.brief", map[string]any{})
+	initialActions, _ := initialBrief["actions"].([]any)
+	if briefResult.IsError || len(initialActions) != 1 {
+		t.Fatalf("initial operator brief must surface the one semantic case: error=%v payload=%+v", briefResult.IsError, initialBrief)
+	}
+	initialPriority := initialActions[0].(map[string]any)
+	initialTarget, _ := initialPriority["target"].(map[string]any)
+	initialWire, _ := json.Marshal(initialPriority)
+	if initialPriority["priority"] != float64(1) || initialPriority["kind"] != "semantic_case" ||
+		initialTarget["id"] != caseID || !strings.Contains(string(initialWire), "recovery.cases.diagnose") {
+		t.Fatalf("operator brief did not expose the exact bounded next action: %s", initialWire)
 	}
 
 	diagnose, diagnosed := callTool(t, session, "recovery.cases.diagnose", map[string]any{
@@ -285,6 +310,21 @@ func TestMcpGovernedSemanticRecoveryRequiresIndependentApproval(t *testing.T) {
 	}
 	validationID := validated["validation"].(map[string]any)["id"].(string)
 	revision = int64(validated["case"].(map[string]any)["revision"].(float64))
+	approvalBriefResult, approvalBrief := callTool(t, session, "operations.brief", map[string]any{})
+	approvalActions, _ := approvalBrief["actions"].([]any)
+	if approvalBriefResult.IsError || len(approvalActions) != 1 {
+		t.Fatalf("approval operator brief: error=%v payload=%+v", approvalBriefResult.IsError, approvalBrief)
+	}
+	approvalPriority := approvalActions[0].(map[string]any)
+	approvalTarget, _ := approvalPriority["target"].(map[string]any)
+	approvalWire, _ := json.Marshal(approvalPriority)
+	if approvalPriority["priority"] != float64(1) || approvalPriority["kind"] != "recovery_approval" ||
+		approvalTarget["id"] != caseID || !strings.Contains(string(approvalWire), "recovery.cases.apply") {
+		t.Fatalf("operator brief did not rerank the independent approval blocker: %s", approvalWire)
+	}
+	if strings.Contains(string(approvalWire), "recovery.cases.approve") {
+		t.Fatalf("MCP operator brief must not advertise human approval authority: %s", approvalWire)
+	}
 
 	withoutApproval, _ := callTool(t, session, "recovery.cases.apply", map[string]any{
 		"caseId": caseID, "expectedRevision": revision,
@@ -384,6 +424,28 @@ func TestMcpRecoveryDiagnosisAIRespectsExplicitPermissionCeiling(t *testing.T) {
 
 	aiSession, aiOrg := newMCPSession(t)
 	aiCase := seed(aiOrg, "ai")
+	oversized, _ := callTool(t, aiSession, "recovery.cases.diagnose", map[string]any{
+		"caseId": aiCase, "expectedRevision": 1,
+		"manualReplacement": map[string]any{
+			"output": strings.Repeat("x", 70_000), "reason": "bounded preflight",
+		},
+	})
+	if !oversized.IsError || calls.Load() != 0 {
+		t.Fatalf("oversized candidate must fail before AI or mutation: error=%v calls=%d", oversized.IsError, calls.Load())
+	}
+	var preflightState string
+	var preflightRevision int64
+	var preflightArtifacts int
+	if err := poolForTest(t).QueryRow(t.Context(), `SELECT state,revision,
+		(SELECT count(*) FROM recovery_case_artifacts WHERE org_id=$1 AND case_id=$2)
+		FROM recovery_cases WHERE org_id=$1 AND id=$2`, aiOrg, aiCase).
+		Scan(&preflightState, &preflightRevision, &preflightArtifacts); err != nil {
+		t.Fatal(err)
+	}
+	if preflightState != "contained" || preflightRevision != 1 || preflightArtifacts != 0 {
+		t.Fatalf("failed preflight mutated case: state=%s revision=%d artifacts=%d",
+			preflightState, preflightRevision, preflightArtifacts)
+	}
 	result, payload := callTool(t, aiSession, "recovery.cases.diagnose", map[string]any{
 		"caseId": aiCase, "expectedRevision": 1,
 	})
@@ -437,6 +499,305 @@ func TestMcpWorkflowProposalBindsExactCatalogWithoutReturningDAG(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "exact_tool_not_found") {
 		t.Fatalf("missing binding not explicit: %s", raw)
+	}
+}
+
+func TestMcpPagerDutyFlagshipIsProviderFreeBoundedAndExactlyBound(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	session, orgID := newMCPSession(t)
+	pool := poolForTest(t)
+	suffix := uuid.NewString()
+	apiCredential := "pd-api-" + suffix
+	webhookCredential := "pd-hook-" + suffix
+	for _, credential := range []struct{ id, name, kind string }{
+		{"cred-api-" + suffix, apiCredential, "pagerduty_api_token"},
+		{"cred-hook-" + suffix, webhookCredential, "pagerduty_webhook_secret"},
+	} {
+		if _, err := pool.Exec(t.Context(), `INSERT INTO credentials
+			(id,org_id,name,kind,secret_ref,created_by) VALUES ($1,$2,$3,$4,$5,'mcp-test')`,
+			credential.id, orgID, credential.name, credential.kind, "env://JANUSLY_CRED_MCP_"+strings.ToUpper(strings.ReplaceAll(credential.id, "-", "_"))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	prompt := "From 2026-09-01 to 2026-09-07, when PagerDuty alerts user PUSER1 outside working hours 09:00 to 17:00 in America/Bogota, acknowledge it and snooze it for 12 hours using operator@example.com."
+	result, proposed := callTool(t, session, "workflows.propose", map[string]any{"prompt": prompt})
+	if result.IsError || proposed["applicable"] != true || proposed["mode"] != "deterministic_fallback" {
+		t.Fatalf("bounded flagship proposal: error=%v payload=%+v", result.IsError, proposed)
+	}
+	bindings, _ := proposed["bindings"].(map[string]any)
+	workflow, _ := proposed["workflow"].(map[string]any)
+	if bindings["complete"] != true || workflow["nodeCount"] != float64(11) || workflow["edgeCount"] != float64(11) {
+		t.Fatalf("flagship binding/shape drift: bindings=%+v workflow=%+v", bindings, workflow)
+	}
+	raw, _ := json.Marshal(proposed)
+	if len(raw) > 64_000 {
+		t.Fatalf("flagship MCP response is not bounded: %d bytes", len(raw))
+	}
+	for _, forbidden := range []string{`"config"`, `"input"`, `"edges"`, "env://JANUSLY_CRED_MCP_"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("flagship MCP response exposed DAG/secret reference %q: %s", forbidden, raw)
+		}
+	}
+	for _, expected := range []string{apiCredential, webhookCredential, "pagerduty_incident", "deterministic"} {
+		if !strings.Contains(string(raw), expected) {
+			t.Fatalf("flagship MCP response omitted bounded evidence %q: %s", expected, raw)
+		}
+	}
+
+	vague, vaguePayload := callTool(t, session, "workflows.propose", map[string]any{
+		"prompt": "Durante una semana, PagerDuty mueve casos a revisando en ciertos rangos y los aplaza por 12 horas.",
+	})
+	questions, _ := vaguePayload["clarifyingQuestions"].([]any)
+	vagueWorkflow, _ := vaguePayload["workflow"].(map[string]any)
+	if vague.IsError || vaguePayload["mode"] != "clarification_required" || vaguePayload["applicable"] != false ||
+		len(questions) == 0 || len(questions) > 3 || vagueWorkflow["parseable"] != false || vagueWorkflow["nodeCount"] != float64(0) {
+		t.Fatalf("vague MCP intent must remain bounded and incomplete: error=%v payload=%+v", vague.IsError, vaguePayload)
+	}
+	if _, exposed := vagueWorkflow["id"]; exposed {
+		t.Fatalf("unresolved MCP intent must not manufacture a workflow identity: %+v", vagueWorkflow)
+	}
+}
+
+func TestMcpWorkflowSaveUsesCanonicalAtomicEngineOperation(t *testing.T) {
+	session, orgID := newMCPSession(t)
+	pool := poolForTest(t)
+	workflowID := "mcp-atomic-save-" + uuid.NewString()
+	document := map[string]any{
+		"id": workflowID, "mystery": "strip-me",
+		"nodes": []any{map[string]any{
+			"id": "hourly", "type": "schedule", "unknown": "strip-me",
+			"config": map[string]any{"cronExpression": "0 * * * *", "enabled": true},
+		}},
+		"edges": []any{},
+	}
+
+	const writers = 8
+	type saveOutcome struct {
+		result *mcp.CallToolResult
+		err    error
+	}
+	outcomes := make(chan saveOutcome, writers)
+	var group sync.WaitGroup
+	group.Add(writers)
+	for range writers {
+		go func() {
+			defer group.Done()
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: "workflows.save", Arguments: map[string]any{"workflow": document},
+			})
+			outcomes <- saveOutcome{result: result, err: err}
+		}()
+	}
+	group.Wait()
+	close(outcomes)
+
+	versions := make(map[int]bool, writers)
+	for outcome := range outcomes {
+		if outcome.err != nil || outcome.result == nil || outcome.result.IsError {
+			t.Fatalf("concurrent MCP save failed: result=%+v err=%v", outcome.result, outcome.err)
+		}
+		var payload map[string]any
+		text := outcome.result.Content[0].(*mcp.TextContent).Text
+		if json.Unmarshal([]byte(text), &payload) != nil {
+			t.Fatalf("invalid save response: %s", text)
+		}
+		versions[int(payload["version"].(float64))] = true
+	}
+	if len(versions) != writers {
+		t.Fatalf("MCP saves lost or duplicated versions: %+v", versions)
+	}
+	for version := 1; version <= writers; version++ {
+		if !versions[version] {
+			t.Fatalf("MCP save sequence omitted version %d: %+v", version, versions)
+		}
+	}
+
+	var parentName, versionID string
+	var dagJSON []byte
+	if err := pool.QueryRow(t.Context(), `
+		SELECT w.name, wv.id, wv.dag_json
+		FROM workflows w
+		JOIN workflow_versions wv ON wv.org_id=w.org_id AND wv.workflow_id=w.id
+		WHERE w.org_id=$1 AND w.id=$2
+		ORDER BY wv.version DESC LIMIT 1`, orgID, workflowID).
+		Scan(&parentName, &versionID, &dagJSON); err != nil {
+		t.Fatal(err)
+	}
+	var canonical map[string]any
+	if json.Unmarshal(dagJSON, &canonical) != nil || canonical["id"] != workflowID || canonical["name"] != workflowID {
+		t.Fatalf("MCP did not persist canonical identity defaults: %s", dagJSON)
+	}
+	if _, present := canonical["mystery"]; present || parentName != workflowID {
+		t.Fatalf("MCP canonicalization drifted: parent=%q dag=%s", parentName, dagJSON)
+	}
+	nodes := canonical["nodes"].([]any)
+	if _, present := nodes[0].(map[string]any)["unknown"]; present {
+		t.Fatalf("MCP retained an unknown node carrier: %s", dagJSON)
+	}
+	var scheduledVersionID string
+	if err := pool.QueryRow(t.Context(), `SELECT workflow_version_id FROM schedule_entries
+		WHERE org_id=$1 AND workflow_id=$2 AND node_id='hourly'`, orgID, workflowID).
+		Scan(&scheduledVersionID); err != nil {
+		t.Fatal(err)
+	}
+	if scheduledVersionID != versionID {
+		t.Fatalf("MCP schedule points at %s, latest version is %s", scheduledVersionID, versionID)
+	}
+}
+
+func TestMcpRunStartHonorsSavedOnlyAndPausePolicies(t *testing.T) {
+	session, orgID := newMCPSession(t)
+	pool := poolForTest(t)
+	document := map[string]any{
+		"id": "mcp-run-policy-" + uuid.NewString(), "name": "MCP run policy",
+		"nodes": []any{map[string]any{"id": "done", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1, $2, 'runs.requireSavedWorkflow', 'true', 'runs', 'test policy', 'boolean')`,
+		uuid.NewString(), orgID); err != nil {
+		t.Fatal(err)
+	}
+
+	denied, _ := callTool(t, session, "runs.start", map[string]any{"workflow": document})
+	if !denied.IsError || !strings.Contains(denied.Content[0].(*mcp.TextContent).Text, "runs_adhoc_disabled") {
+		t.Fatalf("MCP must honor tenant saved-only policy: %+v", denied)
+	}
+
+	_, saved := callTool(t, session, "workflows.save", map[string]any{"workflow": document})
+	versionID, _ := saved["versionId"].(string)
+	if versionID == "" {
+		t.Fatalf("save did not return exact version: %+v", saved)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE workflows SET status='paused_circuit_breaker',
+		paused_reason='test breaker' WHERE org_id=$1 AND id=$2`, orgID, document["id"]); err != nil {
+		t.Fatal(err)
+	}
+	paused, _ := callTool(t, session, "runs.start", map[string]any{
+		"workflow": document, "workflowVersionId": versionID,
+	})
+	if !paused.IsError || !strings.Contains(paused.Content[0].(*mcp.TextContent).Text, "workflow_circuit_breaker_paused") {
+		t.Fatalf("MCP must honor circuit-breaker pause: %+v", paused)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE workflows SET status='paused_upstream_degraded',
+		paused_reason='test upstream' WHERE org_id=$1 AND id=$2`, orgID, document["id"]); err != nil {
+		t.Fatal(err)
+	}
+	upstream, _ := callTool(t, session, "runs.start", map[string]any{
+		"workflow": document, "workflowVersionId": versionID,
+	})
+	if !upstream.IsError || !strings.Contains(upstream.Content[0].(*mcp.TextContent).Text, "upstream_degraded") {
+		t.Fatalf("MCP must honor upstream pause: %+v", upstream)
+	}
+
+	var runCount int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM runs WHERE org_id=$1`, orgID).Scan(&runCount); err != nil {
+		t.Fatal(err)
+	}
+	if runCount != 0 {
+		t.Fatalf("denied MCP starts must not persist runs: %d", runCount)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE workflows SET status='active', paused_reason=NULL
+		WHERE org_id=$1 AND id=$2`, orgID, document["id"]); err != nil {
+		t.Fatal(err)
+	}
+	allowed, started := callTool(t, session, "runs.start", map[string]any{
+		"workflow": document, "workflowVersionId": versionID,
+	})
+	if allowed.IsError || started["runId"] == "" {
+		t.Fatalf("active exact saved workflow must start: result=%+v payload=%+v", allowed, started)
+	}
+}
+
+func TestMcpRunStartHonorsProductionReadiness(t *testing.T) {
+	t.Setenv("JANUSLY_ENV", "production")
+	session, orgID := newMCPSession(t)
+	pool := poolForTest(t)
+	document := map[string]any{
+		"id": "mcp-not-ready-" + uuid.NewString(), "name": "Not ready",
+		"nodes": []any{map[string]any{
+			"id": "read", "type": "http",
+			"config": map[string]any{"url": "https://example.invalid", "method": "GET"},
+		}},
+		"edges": []any{},
+	}
+	denied, _ := callTool(t, session, "runs.start", map[string]any{"workflow": document})
+	if !denied.IsError || !strings.Contains(denied.Content[0].(*mcp.TextContent).Text, "runs_not_production_ready") {
+		t.Fatalf("MCP must honor production readiness gate: %+v", denied)
+	}
+	var runCount int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM runs WHERE org_id=$1`, orgID).Scan(&runCount); err != nil {
+		t.Fatal(err)
+	}
+	if runCount != 0 {
+		t.Fatalf("not-ready MCP start persisted %d runs", runCount)
+	}
+}
+
+func mcpRolloutWorkflow(id, verdict string) map[string]any {
+	return map[string]any{
+		"id": id, "name": "MCP rollout", "dslVersion": "1.0",
+		"nodes": []any{
+			map[string]any{"id": "shape", "type": "transform", "config": map[string]any{
+				"mapping": map[string]any{"verdict": verdict},
+			}},
+			map[string]any{"id": "done", "type": "noop", "config": map[string]any{}},
+		},
+		"edges":   []any{map[string]any{"from": "shape", "to": "done"}},
+		"outputs": map[string]any{"verdict": "{{context.shape.output.verdict}}"},
+	}
+}
+
+func TestMcpRunStartCapturesActiveRolloutAssignment(t *testing.T) {
+	session, orgID := newMCPSession(t)
+	pool := poolForTest(t)
+	workflowID := "mcp-rollout-" + uuid.NewString()
+	_, baseline := callTool(t, session, "workflows.save", map[string]any{
+		"workflow": mcpRolloutWorkflow(workflowID, "baseline"),
+	})
+	_, canary := callTool(t, session, "workflows.save", map[string]any{
+		"workflow": mcpRolloutWorkflow(workflowID, "canary"),
+	})
+	baselineID, _ := baseline["versionId"].(string)
+	canaryID, _ := canary["versionId"].(string)
+	if baselineID == "" || canaryID == "" {
+		t.Fatalf("missing saved rollout versions: baseline=%+v canary=%+v", baseline, canary)
+	}
+	kind, rollout, err := engine.New(pool).CreateWorkflowRollout(t.Context(), struct {
+		OrgID, WorkflowID, BaselineVersionID, CanaryVersionID        string
+		TrafficPercent, MinimumSampleSize, MinimumSuccessRatePercent int
+		CreatedBy                                                    string
+	}{
+		OrgID: orgID, WorkflowID: workflowID,
+		BaselineVersionID: baselineID, CanaryVersionID: canaryID,
+		TrafficPercent: 50, MinimumSampleSize: 5, MinimumSuccessRatePercent: 90,
+		CreatedBy: "mcp-test",
+	})
+	if err != nil || kind != engine.RolloutCreated || rollout == nil {
+		t.Fatalf("create rollout: kind=%s rollout=%+v err=%v", kind, rollout, err)
+	}
+
+	result, started := callTool(t, session, "runs.start", map[string]any{
+		"workflow": mcpRolloutWorkflow(workflowID, "caller-draft"),
+	})
+	runID, _ := started["runId"].(string)
+	if result.IsError || runID == "" {
+		t.Fatalf("rollout start failed: result=%+v payload=%+v", result, started)
+	}
+	var rolloutID, variant, versionID, verdict string
+	if err := pool.QueryRow(t.Context(), `SELECT COALESCE(workflow_rollout_id, ''),
+		COALESCE(workflow_rollout_variant, ''), workflow_version_id,
+		input_json->'workflow'->'nodes'->0->'config'->'mapping'->>'verdict'
+		FROM runs WHERE org_id=$1 AND id=$2`, orgID, runID).
+		Scan(&rolloutID, &variant, &versionID, &verdict); err != nil {
+		t.Fatal(err)
+	}
+	wantVersion := map[string]string{"baseline": baselineID, "canary": canaryID}[variant]
+	wantVerdict := map[string]string{"baseline": "baseline", "canary": "canary"}[variant]
+	if rolloutID != rollout.ID || wantVersion == "" || versionID != wantVersion || verdict != wantVerdict {
+		t.Fatalf("MCP rollout authority drifted: rollout=%q variant=%q version=%q verdict=%q", rolloutID, variant, versionID, verdict)
 	}
 }
 

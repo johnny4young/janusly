@@ -33,6 +33,8 @@ func writeV1Data(w http.ResponseWriter, requestID string, data any) {
 }
 
 func writeV1Error(w http.ResponseWriter, requestID string, status int, code, message string, params map[string]any) {
+	status = publicErrorStatus(code, status)
+	message, params = publicErrorFields(code, message, params)
 	errBody := map[string]any{"code": code, "message": message}
 	if params != nil {
 		errBody["params"] = params
@@ -41,9 +43,27 @@ func writeV1Error(w http.ResponseWriter, requestID string, status int, code, mes
 }
 
 func decodeBody(r *http.Request, into any) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 2<<20))
+	return decodeBodyBounded(r, into, 2<<20)
+}
+
+func decodeBodyBounded(r *http.Request, into any, maxBytes int64) error {
+	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxBytes))
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(into)
+	if err := decoder.Decode(into); err != nil {
+		return err
+	}
+	// A strict body is exactly one JSON value. Decoder.Decode alone accepts a
+	// valid prefix followed by a second document, which lets clients sign,
+	// audit, or reason about different bytes than the handler actually uses.
+	// Whitespace after the first value still resolves to io.EOF.
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain exactly one JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 // decodeJSONRecord mirrors the contract's readJson + asRecord pair: it
@@ -111,9 +131,8 @@ func contractField(issues []domain.Issue) string {
 	return field
 }
 
-func (s *V1Server) internal(w http.ResponseWriter, rc v1Request, err error) {
-	writeV1Error(w, rc.id, http.StatusInternalServerError, "internal_error",
-		fmt.Sprintf("Internal error: %v", err), nil)
+func (s *V1Server) internal(w http.ResponseWriter, rc v1Request, _ error) {
+	writeV1Error(w, rc.id, http.StatusInternalServerError, "internal_error", "Internal error", nil)
 }
 
 func parsePositiveInt(raw string, max int) (int, error) {

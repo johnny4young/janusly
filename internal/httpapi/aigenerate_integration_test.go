@@ -79,6 +79,14 @@ func TestGenerateWorkflowLadder(t *testing.T) {
 	if r := h.call("POST", "/ai/generate-workflow", map[string]any{"prompt": string(long)}, ""); r.status != 413 || r.body["code"] != "ai_prompt_too_long" {
 		t.Fatalf("prompt cap: %d %+v", r.status, r.body)
 	}
+	// promptMaxChars is a user-visible character contract, not a UTF-8 byte
+	// budget. A bounded Spanish/Unicode intent must not be rejected merely
+	// because its code points use more than one byte.
+	if r := h.call("POST", "/ai/generate-workflow", map[string]any{
+		"prompt": strings.Repeat("á", 3_000),
+	}, ""); r.status != 200 {
+		t.Fatalf("unicode prompt within character cap: %d %+v", r.status, r.body)
+	}
 
 	// Simulated provider: a valid one-shot generation → mode "ai".
 	valid := `{"dslVersion":"1.0","id":"gen-1","name":"Generated","nodes":[{"id":"a","type":"noop","config":{}}],"edges":[]}`
@@ -105,6 +113,71 @@ func TestGenerateWorkflowLadder(t *testing.T) {
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
 	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
 	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+
+	// Invalid compatibility bodies stop before budget, provider, or fallback
+	// work. Ignoring decode errors would turn unknown fields or a second JSON
+	// document into an empty/partial prompt and could spend on unintended input.
+	providerCallsBeforeInvalidBodies := calls.Load()
+	for _, rawBody := range []string{
+		`{"prompt":"one noop","unknown":true}`,
+		`{"prompt":"one noop"}{"prompt":"two noops"}`,
+	} {
+		req, err := http.NewRequest(http.MethodPost, h.server.URL+"/ai/generate-workflow", strings.NewReader(rawBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("content-type", "application/json")
+		req.Header.Set("x-org-id", h.org)
+		req.Header.Set("x-user-id", "api-tester")
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope map[string]any
+		_ = json.NewDecoder(response.Body).Decode(&envelope)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || envelope["code"] != "invalid_input" {
+			t.Fatalf("invalid generation body: status=%d body=%+v", response.StatusCode, envelope)
+		}
+	}
+	if calls.Load() != providerCallsBeforeInvalidBodies {
+		t.Fatalf("invalid generation bodies reached provider: before=%d after=%d",
+			providerCallsBeforeInvalidBodies, calls.Load())
+	}
+
+	// A recognized write-capable PagerDuty intent remains engine-owned even
+	// when a provider is configured: no model call can choose or omit its
+	// policy, mutation, verification, or evidence topology.
+	providerCallsBeforePagerDuty := calls.Load()
+	pagerDuty := h.call("POST", "/ai/generate-workflow", map[string]any{
+		"prompt": "Starting now for one week, when PagerDuty alerts user PLOCALUSER outside working hours 09:00 to 17:00 in America/Bogota, acknowledge and snooze for 12 hours. API credential pd-api, webhook credential pd-hook, requester operator@example.com.",
+	}, "")
+	if pagerDuty.status != 200 || pagerDuty.body["mode"] != "fallback" ||
+		!strings.HasPrefix(fmt.Sprint(pagerDuty.body["id"]), "pagerduty_off_hours_") {
+		t.Fatalf("deterministic PagerDuty recipe: %d %+v", pagerDuty.status, pagerDuty.body)
+	}
+	if nodes, ok := pagerDuty.body["nodes"].([]any); !ok || len(nodes) != 11 {
+		t.Fatalf("PagerDuty assurance topology: %+v", pagerDuty.body["nodes"])
+	}
+	if calls.Load() != providerCallsBeforePagerDuty {
+		t.Fatalf("PagerDuty recipe called provider: before=%d after=%d", providerCallsBeforePagerDuty, calls.Load())
+	}
+	incompletePagerDuty := h.call("POST", "/ai/generate-workflow", map[string]any{
+		"prompt": "For one week, when PagerDuty alerts user PLOCALUSER outside working hours 09:00 to 17:00 in America/Bogota, acknowledge and snooze for 12 hours. API credential pd-api, webhook credential pd-hook, requester operator@example.com.",
+	}, "")
+	params, _ := incompletePagerDuty.body["params"].(map[string]any)
+	questions, _ := params["clarifyingQuestions"].([]any)
+	if incompletePagerDuty.status != http.StatusUnprocessableEntity || incompletePagerDuty.body["code"] != "authoring_brief_incomplete" ||
+		len(questions) != 1 || calls.Load() != providerCallsBeforePagerDuty {
+		t.Fatalf("incomplete PagerDuty compatibility intent: calls=%d response=%d %+v", calls.Load(), incompletePagerDuty.status, incompletePagerDuty.body)
+	}
+	partialPagerDuty := h.call("POST", "/ai/generate-workflow", map[string]any{
+		"prompt": "When PagerDuty alerts outside working hours, acknowledge the incident.",
+	}, "")
+	if partialPagerDuty.status != http.StatusUnprocessableEntity || partialPagerDuty.body["code"] != "authoring_brief_incomplete" ||
+		calls.Load() != providerCallsBeforePagerDuty {
+		t.Fatalf("partial PagerDuty compatibility intent reached provider: calls=%d response=%d %+v", calls.Load(), partialPagerDuty.status, partialPagerDuty.body)
+	}
 
 	generated := h.call("POST", "/ai/generate-workflow", map[string]any{"prompt": "one noop please"}, "")
 	if generated.status != 200 || generated.body["mode"] != "ai" || generated.body["id"] != "gen-1" {

@@ -11,7 +11,7 @@ import (
 )
 
 // Health rollup + delta: real runs feed the reliability signals, the
-// declared SLO rides the save body, and the delta route splits by
+// declared SLO uses the admin chokepoint, and the delta route splits by
 // version cutoff with the same-failure signature check.
 func TestWorkflowHealthAndDelta(t *testing.T) {
 	h := newAPIHarness(t)
@@ -22,12 +22,16 @@ func TestWorkflowHealthAndDelta(t *testing.T) {
 
 	workflow := map[string]any{
 		"id": wfID, "name": "Salud", "dslVersion": "1.0",
-		"slo":   map[string]any{"successRatePercent": 90.0},
 		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}},
 		"edges": []any{},
 	}
 	if res := h.call("POST", "/v1/workflows/save", workflow, ""); res.status != 200 {
 		t.Fatalf("save: %+v", res.body)
+	}
+	if res := h.call("POST", "/workflows/"+wfID+"/slo", map[string]any{
+		"slo": workflowSloDeclaration(90.0),
+	}, ""); res.status != 200 {
+		t.Fatalf("declare slo: %+v", res.body)
 	}
 	// Six green runs of version 1.
 	for i := 0; i < 6; i++ {
@@ -177,5 +181,87 @@ func TestWorkflowHealthAndDelta(t *testing.T) {
 	if clamped := h.call("GET", "/workflows/health/delta?workflowId="+wfID+
 		"&afterVersion=2&windowDays=99", nil, ""); clamped.body["windowDays"] != float64(30) {
 		t.Fatalf("high window clamp: %+v", clamped.body)
+	}
+}
+
+func TestWorkflowHealthFailsClosedOnMalformedPersistedSlo(t *testing.T) {
+	h := newAPIHarness(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	wfID := "wf-health-malformed-slo-" + suffix
+	workflow := map[string]any{
+		"id": wfID, "name": "Malformed SLO", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	if res := h.call("POST", "/v1/workflows/save", workflow, ""); res.status != 200 {
+		t.Fatalf("save: %+v", res.body)
+	}
+	if _, err := testPool(t).Exec(t.Context(), `UPDATE workflow_versions
+		SET slo_json='{}'::jsonb WHERE org_id=$1 AND workflow_id=$2`, h.org, wfID); err != nil {
+		t.Fatalf("corrupt persisted SLO: %v", err)
+	}
+	for _, path := range []string{
+		"/workflows/health?workflowId=" + wfID,
+		"/workflows/health/delta?workflowId=" + wfID + "&afterVersion=1",
+	} {
+		res := h.call("GET", path, nil, "")
+		if res.status != 500 || res.body["code"] != "internal_error" {
+			t.Fatalf("malformed SLO must fail closed at %s: %d %+v", path, res.status, res.body)
+		}
+	}
+}
+
+func TestWorkflowHealthTreatsAbsentPersistedSloAsUndeclared(t *testing.T) {
+	h := newAPIHarness(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	wfID := "wf-health-no-slo-" + suffix
+	workflow := map[string]any{
+		"id": wfID, "name": "No declared SLO", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	if res := h.call("POST", "/v1/workflows/save", workflow, ""); res.status != 200 {
+		t.Fatalf("save: %d %+v", res.status, res.body)
+	}
+
+	for _, tc := range []struct {
+		name string
+		path string
+		v1   bool
+	}{
+		{name: "legacy", path: "/workflows/health?workflowId=" + wfID},
+		{name: "v1", path: "/v1/workflows/health?workflowId=" + wfID, v1: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := h.call("GET", tc.path, nil, "")
+			if res.status != 200 {
+				t.Fatalf("health: %d %+v", res.status, res.body)
+			}
+			score := res.body
+			if tc.v1 {
+				var ok bool
+				score, ok = res.body["data"].(map[string]any)
+				if !ok {
+					t.Fatalf("v1 health data malformed: %+v", res.body)
+				}
+			}
+			if score["score"] == nil || score["slo"] != nil {
+				t.Fatalf("absent SLO must be a successful undeclared score: %+v", score)
+			}
+		})
+	}
+
+	// Delta remains an explicitly registered unversioned read surface; it
+	// shares the same health-context loader and must preserve the same null-SLO
+	// semantics on both score sides.
+	res := h.call("GET", "/workflows/health/delta?workflowId="+wfID+"&afterVersion=1", nil, "")
+	if res.status != 200 {
+		t.Fatalf("health delta: %d %+v", res.status, res.body)
+	}
+	for _, side := range []string{"before", "after"} {
+		score, ok := res.body[side].(map[string]any)
+		if !ok || score["score"] == nil || score["slo"] != nil {
+			t.Fatalf("absent SLO must remain undeclared on %s: %+v", side, res.body)
+		}
 	}
 }

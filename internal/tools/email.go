@@ -57,7 +57,7 @@ func emailTools() []Definition {
 
 // simulatorEndpoint mirrors the contract's explicit local-stack gate.
 func simulatorEndpoint(path string) string {
-	if os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") != "true" {
+	if !localIntegrationSimulatorEnabled() {
 		return ""
 	}
 	base := strings.TrimSuffix(os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL"), "/")

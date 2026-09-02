@@ -125,6 +125,21 @@ describe('api', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/v1/workflows?limit=20')
   })
 
+  it('versions concrete dynamic reads declared with contract path parameters', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      apiVersion: 'v1',
+      requestId: 'req-version',
+      data: { id: 'version-7', workflowId: 'wf-1', version: 7, dagJson: { id: 'wf-1', nodes: [], edges: [] } },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api('/workflows/versions/version-7?workflowId=wf-1')
+    expect(fetchMock.mock.calls[0][0]).toBe('/v1/workflows/versions/version-7?workflowId=wf-1')
+  })
+
   it('unwraps v1 errors and preserves the correlation ID', async () => {
     mockJsonResponse(403, {
       apiVersion: 'v1',

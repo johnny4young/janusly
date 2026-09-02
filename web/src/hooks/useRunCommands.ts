@@ -51,7 +51,6 @@ export function useRunCommands(
     currentWorkflowInputs,
     eventsCursor,
     eventsHasMore,
-    getWorkflowJson,
     runId,
     setActiveTab,
     setEvents,
@@ -69,8 +68,21 @@ export function useRunCommands(
     input: unknown | undefined,
   ): Promise<{ runId?: string; errors?: string[]; discarded?: true }> => {
     const requestId = runTransitionGuard.begin()
-    const workflow = getWorkflowJson()
-    const body = input !== undefined ? { workflow, input } : workflow
+    const current = useWorkflowStore.getState()
+    const workflow = current.getWorkflowJson()
+    // Only an unchanged canvas may claim an immutable version. The server
+    // independently verifies the tenant, parent workflow and canonical DAG;
+    // omitting the claim keeps templates and edited drafts explicitly ad hoc.
+    const workflowVersionId = !current.workflowDirty
+      && current.currentWorkflowVersion
+      && current.currentWorkflowId === workflow.id
+      ? current.currentWorkflowVersion.id
+      : undefined
+    const body = {
+      workflow,
+      ...(workflowVersionId ? { workflowVersionId } : {}),
+      ...(input !== undefined ? { input } : {}),
+    }
     let result: { runId?: string; errors?: string[] }
     try {
       result = await api('/start', {
@@ -105,7 +117,6 @@ export function useRunCommands(
   }, [
     addToast,
     bumpPlatformVersion,
-    getWorkflowJson,
     refreshPlatform,
     runTransitionGuard,
     setActiveTab,

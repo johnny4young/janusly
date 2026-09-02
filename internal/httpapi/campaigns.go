@@ -144,7 +144,7 @@ func (s *V1Server) campaignPreviewCore(r *http.Request, rc v1Request) opResult {
 	}
 	preview, err := s.previewCohort(r, rc.orgID, body.DeadLetterIDs)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(map[string]any{
 		"canCreate": preview.CanCreate, "clusterSignature": preview.ClusterSignature,
@@ -165,7 +165,7 @@ func (s *V1Server) campaignCreateCore(r *http.Request, rc v1Request) opResult {
 	}
 	preview, err := s.previewCohort(r, rc.orgID, body.DeadLetterIDs)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if !preview.CanCreate || preview.ClusterSignature == nil {
 		return opError(http.StatusConflict, "replay_campaign_invalid_cohort",
@@ -176,7 +176,7 @@ func (s *V1Server) campaignCreateCore(r *http.Request, rc v1Request) opResult {
 	ctx := r.Context()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(tx)
@@ -190,18 +190,18 @@ func (s *V1Server) campaignCreateCore(r *http.Request, rc v1Request) opResult {
 		PacingMs: int32(*body.PacingMs), TotalCount: int32(len(preview.Eligible)),
 		CreatedBy: rc.userID,
 	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	for position, entry := range preview.Eligible {
 		if err := q.InsertReplayCampaignItem(ctx, store.InsertReplayCampaignItemParams{
 			ID: uuid.NewString(), OrgID: rc.orgID, CampaignID: campaignID,
 			DeadLetterID: entry.DeadLetterID, Position: int32(position),
 		}); err != nil {
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	detail, result := s.campaignDetail(r, rc, campaignID)
 	if detail == nil {
@@ -228,11 +228,11 @@ func (s *V1Server) campaignDetail(r *http.Request, rc v1Request, id string) (map
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, opError(http.StatusNotFound, "replay_campaign_not_found", "Replay campaign not found", nil)
 		}
-		return nil, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return nil, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	items, err := q.ListReplayCampaignItems(ctx, store.ListReplayCampaignItemsParams{OrgID: rc.orgID, CampaignID: id})
 	if err != nil {
-		return nil, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return nil, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	itemViews := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -265,7 +265,7 @@ func (s *V1Server) campaignCancelCore(r *http.Request, rc v1Request, id string) 
 	ctx := r.Context()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(tx)
@@ -280,15 +280,15 @@ func (s *V1Server) campaignCancelCore(r *http.Request, rc v1Request, id string) 
 			}
 			return opError(http.StatusConflict, "replay_campaign_not_running", "Replay campaign is no longer running", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if _, err := q.CancelPendingReplayCampaignItems(ctx, store.CancelPendingReplayCampaignItemsParams{
 		OrgID: rc.orgID, CampaignID: id,
 	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	detail, result := s.campaignDetail(r, rc, id)
 	if detail == nil {
@@ -316,7 +316,7 @@ func (s *V1Server) campaignListCore(r *http.Request, rc v1Request) opResult {
 		OrgID: rc.orgID, Limit: limit,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	views := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {

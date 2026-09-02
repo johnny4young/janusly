@@ -47,16 +47,59 @@ func TestRecoveryCaseActionsReflectStateAndPermission(t *testing.T) {
 			CreatedAt: now, UpdatedAt: now,
 		},
 	}
-	viewer := recoveryCaseActions(rows, map[string]bool{}, now)
+	viewer := recoveryCaseActions(rows, map[string]bool{}, now, true)
 	if len(viewer) != 2 || len(viewer[0].action.AllowedActions) != 1 {
 		t.Fatalf("viewer must only inspect: %+v", viewer)
 	}
-	editor := recoveryCaseActions(rows, map[string]bool{"recovery.write": true}, now)
+	editor := recoveryCaseActions(rows, map[string]bool{"recovery.write": true}, now, true)
 	if editor[0].action.AllowedActions[1] != "recovery.cases.approve" ||
 		editor[1].action.AllowedActions[1] != "recovery.cases.diagnose" {
 		t.Fatalf("state actions drifted: %+v", editor)
 	}
 	if editor[1].action.Severity != "critical" {
 		t.Fatalf("quarantine semantic case should be critical: %+v", editor[1])
+	}
+	service := recoveryCaseActions(rows, map[string]bool{"recovery.write": true}, now, false)
+	if len(service) != 2 || len(service[0].action.AllowedActions) != 2 ||
+		service[0].action.AllowedActions[1] != "recovery.cases.apply" {
+		t.Fatalf("service actor should consume an independent grant without being offered approval: %+v", service)
+	}
+}
+
+func TestMCPAllowedActionsProjectToExecutableCatalog(t *testing.T) {
+	canonical := []string{
+		"recovery.cases.inspect",
+		"recovery.cases.candidates",
+		"recovery.cases.approve",
+		"recovery.cases.apply",
+		"runs.inspect",
+		"runs.approve",
+		"dlq.inspect",
+		"dlq.redrive",
+		"future.unregistered.action",
+		"recovery.cases.diagnose",
+	}
+	got := projectAllowedActions(ActionSurfaceMCP, canonical)
+	want := []string{
+		"recovery.cases.inspect",
+		"recovery.cases.diagnose",
+		"recovery.cases.apply",
+		"runs.inspect",
+		"dlq.list",
+		"dlq.redrive",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("MCP action projection = %v, want %v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("MCP action projection = %v, want %v", got, want)
+		}
+	}
+	if unknown := projectAllowedActions(ActionSurface(255), canonical); len(unknown) != 0 {
+		t.Fatalf("unknown surface must fail closed: %v", unknown)
+	}
+	if api := projectAllowedActions(ActionSurfaceAPI, canonical); len(api) != len(canonical) {
+		t.Fatalf("API action vocabulary drifted: %v", api)
 	}
 }

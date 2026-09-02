@@ -1,7 +1,8 @@
 # `queue-observability-root` selective-port audit
 
 This is the immutable decision record for the branch review requested before
-Janusly can be considered ready for a pull request to `main`.
+Janusly can be considered ready for a direct, locally qualified integration
+into `main`.
 
 - Merge base: `cc643044a1a28c4af57d8ca8ae356f439c37b5ec`
 - Audited source head: `a0619c8b460940bd01665573ca844a1267f1d070`

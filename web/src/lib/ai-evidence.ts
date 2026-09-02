@@ -41,7 +41,7 @@
  *    scannable.
  */
 
-import { z } from 'zod'
+import * as z from 'zod/mini'
 
 import { scrubSecretShapes } from './error-signature'
 
@@ -100,22 +100,22 @@ export const MAX_SOURCE_REF_CHARS = 200
  * 0-1 relevance hint (e.g. memory cosine similarity) the renderer can show
  * as a subtle bar.
  */
-export const EvidenceRowSchema = z.object({
+export const EvidenceRowSchema = /* @__PURE__ */ z.object({
   kind: z.enum(EVIDENCE_KINDS),
-  sourceRef: z.string().max(MAX_SOURCE_REF_CHARS),
-  snippet: z.string().max(MAX_SNIPPET_CHARS),
+  sourceRef: z.string().check(z.maxLength(MAX_SOURCE_REF_CHARS)),
+  snippet: z.string().check(z.maxLength(MAX_SNIPPET_CHARS)),
   /** Optional human label for the chip (e.g. "Past feedback", "Runbook").
    *  When absent the renderer derives a label from `kind`. */
-  label: z.string().max(MAX_LABEL_CHARS).optional(),
+  label: z.optional(z.string().check(z.maxLength(MAX_LABEL_CHARS))),
   /** Optional relevance weight in [0, 1]. Higher = more relevant. */
-  weight: z.number().min(0).max(1).optional(),
+  weight: z.optional(z.number().check(z.minimum(0), z.maximum(1))),
 })
 
 export type EvidenceRow = z.infer<typeof EvidenceRowSchema>
 
 /** The response envelope's evidence list. Always present (possibly empty)
  *  on the three extended AI routes. */
-export const EvidenceListSchema = z.array(EvidenceRowSchema).max(MAX_EVIDENCE_ROWS)
+export const EvidenceListSchema = /* @__PURE__ */ z.array(EvidenceRowSchema).check(z.maxLength(MAX_EVIDENCE_ROWS))
 
 // Control characters (NUL, newlines, tabs, DEL) — the cheapest way for a
 // hostile snippet to break the panel layout. Stripped to spaces before the

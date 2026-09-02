@@ -1,13 +1,14 @@
 # Janusly demos
 
-These demos are operator-facing stories backed by templates in
-`internal/httpapi/assets/templates.json`. Template labels live under
-`web/src/i18n`; browser coverage lives in `web/e2e`.
+These demos are operator-facing stories backed by deterministic authoring
+recipes or templates in `internal/httpapi/assets/templates.json`. Template
+labels live under `web/src/i18n`; browser coverage lives in `web/e2e`.
 
 ## Flagship demos
 
 | Demo | Template | Focus |
 | --- | --- | --- |
+| [PagerDuty on-call assurance](pagerduty-on-call-assurance.md) | Deterministic authoring recipe | Intent compilation, exact bindings, bounded writes, provider re-read, and verified outcome. |
 | [Incident triage](incident-triage.md) | `incident-triage` | Event intake, AI summary, issue creation, notification, and recovery. |
 | [Refund triage](refund-triage.md) | `refund-triage-approval` | Human approval before a signed financial effect. |
 | [Failed workflow recovery](failed-workflow-recovery.md) | `failed-workflow-recovery` | Failure evidence, suggested repair, validation, and replay. |

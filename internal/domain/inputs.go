@@ -25,6 +25,12 @@ type InputSchema struct {
 	Default     json.RawMessage         `json:"default,omitempty"`
 }
 
+// InputSchemaNodeMax bounds recursive schema work independently of the raw
+// HTTP byte ceiling. It matches the browser's contract-first proposal guard;
+// 512 fields/items is far beyond normal authoring while keeping default and
+// runtime validation from becoming an adversarial recursion/memory surface.
+const InputSchemaNodeMax = 512
+
 // ParseInputSchemaValue projects a decoded JSON value into the shared schema
 // subset and rejects unknown type tags anywhere in the recursive tree.
 func ParseInputSchemaValue(value any) (*InputSchema, bool) {
@@ -40,21 +46,96 @@ func ParseInputSchemaValue(value any) (*InputSchema, bool) {
 }
 
 func validInputSchemaShape(schema *InputSchema) bool {
-	switch schema.Type {
-	case "string", "number", "boolean":
-		return true
-	case "object":
-		for _, child := range schema.Properties {
-			if child == nil || !validInputSchemaShape(child) {
+	pending := []*InputSchema{schema}
+	visited := 0
+	for len(pending) > 0 {
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		visited++
+		if current == nil || visited > InputSchemaNodeMax {
+			return false
+		}
+		switch current.Type {
+		case "string", "number", "boolean":
+		case "object":
+			for _, child := range current.Properties {
+				pending = append(pending, child)
+			}
+		case "array":
+			if current.Items != nil {
+				pending = append(pending, current.Items)
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// validInputSchemaWire preserves the optional-versus-null boundary that Go's
+// zero values otherwise erase. The source contract accepts omitted optional
+// fields but rejects explicit null for every schema keyword except `default`,
+// whose value is intentionally arbitrary JSON. Traversal stays iterative and
+// shares the same node budget as the typed validator.
+func validInputSchemaWire(raw json.RawMessage) bool {
+	if len(raw) == 0 || isJSONNull(raw) {
+		return false
+	}
+	pending := []json.RawMessage{raw}
+	visited := 0
+	for len(pending) > 0 {
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		visited++
+		if visited > InputSchemaNodeMax {
+			return false
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal(current, &object) != nil || object == nil {
+			return false
+		}
+		var schemaType string
+		if encoded, present := object["type"]; !present || isJSONNull(encoded) || json.Unmarshal(encoded, &schemaType) != nil {
+			return false
+		}
+		if encoded, present := object["description"]; present {
+			var description string
+			if isJSONNull(encoded) || json.Unmarshal(encoded, &description) != nil {
 				return false
 			}
 		}
-		return true
-	case "array":
-		return schema.Items == nil || validInputSchemaShape(schema.Items)
-	default:
-		return false
+		if encoded, present := object["properties"]; present {
+			var properties map[string]json.RawMessage
+			if isJSONNull(encoded) || json.Unmarshal(encoded, &properties) != nil || properties == nil {
+				return false
+			}
+			for _, child := range properties {
+				if isJSONNull(child) {
+					return false
+				}
+				pending = append(pending, child)
+			}
+		}
+		if encoded, present := object["required"]; present {
+			var required []string
+			if isJSONNull(encoded) || json.Unmarshal(encoded, &required) != nil || required == nil {
+				return false
+			}
+		}
+		if encoded, present := object["items"]; present {
+			if isJSONNull(encoded) {
+				return false
+			}
+			pending = append(pending, encoded)
+		}
+		if encoded, present := object["enum"]; present {
+			var values []any
+			if isJSONNull(encoded) || json.Unmarshal(encoded, &values) != nil || values == nil {
+				return false
+			}
+		}
 	}
+	return true
 }
 
 // HasDefault reports whether a default was declared at all.

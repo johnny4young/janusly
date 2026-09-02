@@ -5,9 +5,11 @@
 // REJECTS malformed configuration (an unknown zone or unparseable window
 // errors so the node fails loudly and lands in recovery, instead of
 // silently reporting `false`, which a caller could read as either "act" or
-// "skip"). That is the deliberate opposite of
-// IsWithinPagerDutyWorkingHours, which absorbs bad policy data as
-// "working hours" so it can never authorize a mutation. Don't unify them.
+// "skip"). That is the deliberate opposite of the defensive
+// IsWithinPagerDutyWorkingHours helper, which absorbs bad policy data as
+// "working hours". The executable PagerDuty policy separately validates its
+// complete window first, so invalid data fails closed in both inside and
+// outside modes. Don't unify the helper biases.
 package tools
 
 import (
@@ -81,25 +83,40 @@ func parseTimeWindows(raw any) ([]localWindow, error) {
 }
 
 func timeWindowTools() []Definition {
-	return []Definition{{
-		Name: "time.window",
-		Description: "Check whether an instant falls inside recurring local time windows (e.g. business hours) " +
-			"in an IANA time zone. `days` uses 0=Sunday..6=Saturday; `start`/`end` are 24h `HH:MM` local times " +
-			"and a window whose end precedes its start crosses midnight. Omit `at` for now. " +
-			"Returns `inWindow` plus the matched window.",
-		Required: []string{"timeZone", "windows"},
-		Optional: []string{"at"},
-		Fields: []Field{
-			{Name: "timeZone", Type: "string", Required: true},
-			{Name: "windows", Type: "array", Required: true},
-			{Name: "at", Type: "string"},
+	return []Definition{
+		{
+			Name:         "time.now",
+			Description:  "Return the current UTC instant for an explicit action-time policy check.",
+			Required:     []string{},
+			Optional:     []string{},
+			Fields:       []Field{},
+			InputExample: map[string]any{},
+			Execute: func(_ context.Context, _ map[string]any) (map[string]any, error) {
+				now := time.Now().UTC()
+				iso := now.Format(time.RFC3339Nano)
+				return map[string]any{"at": iso, "iso": iso, "epochMs": now.UnixMilli()}, nil
+			},
 		},
-		InputExample: map[string]any{
-			"timeZone": "America/Bogota",
-			"windows":  []any{map[string]any{"days": []any{1.0, 2.0, 3.0, 4.0, 5.0}, "start": "09:00", "end": "17:00"}},
+		{
+			Name: "time.window",
+			Description: "Check whether an instant falls inside recurring local time windows (e.g. business hours) " +
+				"in an IANA time zone. `days` uses 0=Sunday..6=Saturday; `start`/`end` are 24h `HH:MM` local times " +
+				"and a window whose end precedes its start crosses midnight. Omit `at` for now. " +
+				"Returns `inWindow` plus the matched window.",
+			Required: []string{"timeZone", "windows"},
+			Optional: []string{"at"},
+			Fields: []Field{
+				{Name: "timeZone", Type: "string", Required: true},
+				{Name: "windows", Type: "array", Required: true},
+				{Name: "at", Type: "string"},
+			},
+			InputExample: map[string]any{
+				"timeZone": "America/Bogota",
+				"windows":  []any{map[string]any{"days": []any{1.0, 2.0, 3.0, 4.0, 5.0}, "start": "09:00", "end": "17:00"}},
+			},
+			Execute: executeTimeWindow,
 		},
-		Execute: executeTimeWindow,
-	}}
+	}
 }
 
 func executeTimeWindow(_ context.Context, input map[string]any) (map[string]any, error) {
@@ -120,8 +137,8 @@ func executeTimeWindow(_ context.Context, input map[string]any) (map[string]any,
 	}
 
 	// A decision primitive must never answer from malformed configuration —
-	// see the file header for why this bias is the opposite of the
-	// PagerDuty evaluator's.
+	// see the file header for why this helper bias differs from PagerDuty's
+	// defensive matching helper.
 	clock, ok := zonedwindow.ZonedClock(at, timeZone)
 	if !ok {
 		return nil, fmt.Errorf("Invalid IANA time zone: %s", timeZone) //nolint:staticcheck // contract message is the wire contract

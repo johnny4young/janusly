@@ -6,8 +6,9 @@ baseline_ref=${JANUSLY_VISUAL_BASELINE_REF:-a18a0478d547a956885b4187b1ead303ea02
 profile=${1:-all}
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 evidence_root=${JANUSLY_EVIDENCE_DIR:-$root/output/qualification/pre-main-visual/$stamp}
-current_project=janusly-visual-after
-baseline_project=janusly-visual-before
+run_id=${JANUSLY_VISUAL_RUN_ID:-${UID:-0}-$$}
+current_project=${JANUSLY_VISUAL_AFTER_PROJECT:-janusly-visual-after-$run_id}
+baseline_project=${JANUSLY_VISUAL_BEFORE_PROJECT:-janusly-visual-before-$run_id}
 current_app_port=${JANUSLY_VISUAL_AFTER_PORT:-37332}
 baseline_app_port=${JANUSLY_VISUAL_BEFORE_PORT:-37331}
 current_postgres_port=${JANUSLY_VISUAL_AFTER_POSTGRES_PORT:-35434}
@@ -15,6 +16,7 @@ baseline_postgres_port=${JANUSLY_VISUAL_BEFORE_POSTGRES_PORT:-35433}
 current_metrics_port=${JANUSLY_VISUAL_AFTER_METRICS_PORT:-39464}
 baseline_metrics_port=${JANUSLY_VISUAL_BEFORE_METRICS_PORT:-39463}
 credential_master_key=0a6ee99978435f3e242e19aa61839045c6c1a5f1f5e63558f9d40706702570c7
+docker_bin=${JANUSLY_VISUAL_DOCKER_BIN:-docker}
 baseline_source=
 active_source=
 active_project=
@@ -24,15 +26,17 @@ active_metrics_port=
 active_commit=
 active_tree=
 active_image=
+active_attempted=0
 
 usage() {
   cat <<'EOF'
-usage: scripts/pre-main-visual-local.sh [all|before|after]
+usage: scripts/pre-main-visual-local.sh [all|before|after|selftest]
 
 Captures a provider-free, isolated EN/ES x light/dark x desktop/tablet/mobile
 matrix. "before" reconstructs JANUSLY_VISUAL_BASELINE_REF through git archive;
 "after" uses the clean current HEAD. Every Compose project is isolated and is
-removed with its own volumes after capture. Requires CONFIRM=reset.
+uniquely owned by one invocation before its volumes may be removed. Capture
+profiles require CONFIRM=reset; selftest does not touch Docker.
 EOF
 }
 
@@ -53,13 +57,14 @@ compose() {
   JANUSLY_CREDENTIAL_MASTER_KEY="$credential_master_key" \
   ALLOW_PRIVATE_HTTP_TARGETS=true \
   ANTHROPIC_API_KEY= \
-    docker compose -f "$active_source/docker-compose.yml" -p "$active_project" "$@"
+    "$docker_bin" compose -f "$active_source/docker-compose.yml" -p "$active_project" "$@"
 }
 
 stop_active_stack() {
-  if [[ -n "$active_source" && -n "$active_project" ]]; then
+  if ((active_attempted)) && [[ -n "$active_source" && -n "$active_project" ]]; then
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   fi
+  active_attempted=0
 }
 
 cleanup() {
@@ -75,18 +80,18 @@ trap cleanup EXIT INT TERM
 
 validate() {
   case "$profile" in
-    all|before|after) ;;
+    all|before|after|selftest) ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown profile: $profile" ;;
   esac
-  [[ ${CONFIRM:-} == reset ]] || die 'isolated volume cleanup requires CONFIRM=reset'
+  [[ "$current_project" =~ ^janusly-visual-after-[a-z0-9][a-z0-9_-]*$ ]] ||
+    die 'after Compose project must use a unique janusly-visual-after- prefix'
+  [[ "$baseline_project" =~ ^janusly-visual-before-[a-z0-9][a-z0-9_-]*$ ]] ||
+    die 'before Compose project must use a unique janusly-visual-before- prefix'
+  [[ "$current_project" != "$baseline_project" ]] ||
+    die 'before and after Compose projects must differ'
   [[ "$credential_master_key" =~ ^[0-9a-fA-F]{64}$ ]] ||
     die 'visual credential master key must be exactly 32 bytes encoded as hex'
-  git -C "$root" cat-file -e "${baseline_ref}^{commit}" 2>/dev/null ||
-    die "baseline ref does not resolve: $baseline_ref"
-  if [[ -n $(git -C "$root" status --porcelain --untracked-files=all) ]]; then
-    die 'current source must be clean so after evidence has exact provenance'
-  fi
   for port in \
     "$current_app_port" "$baseline_app_port" \
     "$current_postgres_port" "$baseline_postgres_port" \
@@ -94,6 +99,29 @@ validate() {
     [[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1024 && port <= 65535)) ||
       die "invalid port: $port"
   done
+  [[ "$current_app_port" != "$current_postgres_port" &&
+     "$current_app_port" != "$current_metrics_port" &&
+     "$current_postgres_port" != "$current_metrics_port" ]] ||
+    die 'after ports must be distinct'
+  [[ "$baseline_app_port" != "$baseline_postgres_port" &&
+     "$baseline_app_port" != "$baseline_metrics_port" &&
+     "$baseline_postgres_port" != "$baseline_metrics_port" ]] ||
+    die 'before ports must be distinct'
+  if [[ "$profile" == selftest ]]; then return 0; fi
+  [[ ${CONFIRM:-} == reset ]] || die 'isolated volume cleanup requires CONFIRM=reset'
+  command -v "$docker_bin" >/dev/null 2>&1 || die 'docker is required'
+  git -C "$root" cat-file -e "${baseline_ref}^{commit}" 2>/dev/null ||
+    die "baseline ref does not resolve: $baseline_ref"
+  if [[ -n $(git -C "$root" status --porcelain --untracked-files=all) ]]; then
+    die 'current source must be clean so after evidence has exact provenance'
+  fi
+}
+
+project_has_resources() {
+  local project=$1
+  [[ -n $("$docker_bin" ps -aq --filter "label=com.docker.compose.project=$project") ]] ||
+    [[ -n $("$docker_bin" volume ls -q --filter "label=com.docker.compose.project=$project") ]] ||
+    [[ -n $("$docker_bin" network ls -q --filter "label=com.docker.compose.project=$project") ]]
 }
 
 wait_for_app() {
@@ -133,10 +161,13 @@ select_phase() {
     active_tree=$(git -C "$root" rev-parse 'HEAD^{tree}')
   fi
   active_image="janusly:visual-${phase}-${active_commit:0:8}"
+  active_attempted=0
 }
 
 start_active_stack() {
-  compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  project_has_resources "$active_project" &&
+    die "refusing pre-existing resources for project $active_project"
+  active_attempted=1
   compose up -d --wait postgres
   compose build janusly
   compose run --rm janusly migrate
@@ -220,6 +251,15 @@ write_summary() {
 }
 
 validate
+if [[ "$profile" == selftest ]]; then
+  jq -n \
+    --arg beforeProject "$baseline_project" \
+    --arg afterProject "$current_project" \
+    --argjson beforeAppPort "$baseline_app_port" \
+    --argjson afterAppPort "$current_app_port" \
+    '{projects:{before:$beforeProject,after:$afterProject},ports:{beforeApplication:$beforeAppPort,afterApplication:$afterAppPort}}'
+  exit 0
+fi
 mkdir -p "$evidence_root"
 case "$profile" in
   all)

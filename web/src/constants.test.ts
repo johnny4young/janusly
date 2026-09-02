@@ -132,6 +132,7 @@ describe('node-type catalogue', () => {
   describe('webhook_received node type', () => {
     it('declares a safe empty preset and localized authoring copy', () => {
       expect(nodePresets.webhook_received).toEqual({ endpointKey: '' })
+      expect(nodePresets.pagerduty_incident).toEqual({ webhookCredential: '', rateLimitPerMin: 120 })
       expect(nodeTypes).toContain('webhook_received')
       expect(getNodeLabel('webhook_received')).toBe('Inbound webhook')
       expect(getNodeHelper('webhook_received')).toBe('Start this workflow from an authenticated JSON event')

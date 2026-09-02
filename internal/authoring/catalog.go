@@ -15,17 +15,21 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/tools"
 )
 
-const CatalogSchemaVersion = "1"
+const (
+	CatalogSchemaVersion     = "1"
+	maxDynamicCatalogEntries = 200
+)
 
 // McpCatalogSource is the narrow tenant-safe discovery seam. The concrete MCP
 // client already applies four opt-in flags, sanitization and byte/count caps.
 type McpCatalogSource interface {
-	ListExposedToolsForAi(context.Context, string) []mcpclient.ExposedMcpTool
+	ListExposedToolsForCatalog(context.Context, string) ([]mcpclient.ExposedMcpTool, error)
 }
 
 // TriggerCapability describes an existing trigger surface and the exact node
@@ -93,13 +97,13 @@ type Builder struct {
 }
 
 func NewBuilder(pool *pgxpool.Pool, mcp McpCatalogSource) *Builder {
-	return &Builder{Pool: pool, MCP: mcp, Registry: tools.NewRegistry(), Now: time.Now}
+	return &Builder{Pool: pool, MCP: mcp, Registry: executors.NewToolRegistry(), Now: time.Now}
 }
 
 func (b *Builder) Build(ctx context.Context, orgID string) Catalog {
 	registry := b.Registry
 	if registry == nil {
-		registry = tools.NewRegistry()
+		registry = executors.NewToolRegistry()
 	}
 	now := time.Now()
 	if b.Now != nil {
@@ -116,7 +120,22 @@ func (b *Builder) Build(ctx context.Context, orgID string) Catalog {
 		Warnings:      []string{},
 	}
 	if b.MCP != nil {
-		catalog.McpTools = b.MCP.ListExposedToolsForAi(ctx, orgID)
+		tools, err := b.MCP.ListExposedToolsForCatalog(ctx, orgID)
+		if err != nil {
+			catalog.Warnings = append(catalog.Warnings, "mcp_tools_unavailable")
+		} else {
+			for index := range tools {
+				if tools[index].InputFields == nil {
+					tools[index].InputFields = []mcpclient.ExposedMcpInputField{}
+				}
+			}
+			catalog.McpTools = tools
+			if slices.ContainsFunc(tools, func(tool mcpclient.ExposedMcpTool) bool {
+				return tool.ConnectionAlias == "_truncated" || tool.ToolName == "_truncated"
+			}) {
+				catalog.Warnings = append(catalog.Warnings, "mcp_tools_truncated")
+			}
+		}
 	}
 	if b.Pool != nil {
 		q := store.New(b.Pool)
@@ -124,6 +143,7 @@ func (b *Builder) Build(ctx context.Context, orgID string) Catalog {
 		if err != nil {
 			catalog.Warnings = append(catalog.Warnings, "credentials_unavailable")
 		} else {
+			credentials = boundedCatalogRows(credentials, "credentials_truncated", &catalog.Warnings)
 			for _, row := range credentials {
 				expired := row.ExpiresAt != nil && !row.ExpiresAt.After(now)
 				catalog.Credentials = append(catalog.Credentials, CredentialCapability{
@@ -136,6 +156,7 @@ func (b *Builder) Build(ctx context.Context, orgID string) Catalog {
 		if err != nil {
 			catalog.Warnings = append(catalog.Warnings, "subworkflows_unavailable")
 		} else {
+			workflows = boundedCatalogRows(workflows, "subworkflows_truncated", &catalog.Warnings)
 			for _, row := range workflows {
 				catalog.Subworkflows = append(catalog.Subworkflows, SubworkflowCapability{
 					WorkflowID: row.ID, Name: row.Name, Status: row.Status, LatestVersion: row.LatestVersion,
@@ -145,6 +166,14 @@ func (b *Builder) Build(ctx context.Context, orgID string) Catalog {
 	}
 	catalog.Version = catalogDigest(catalog)
 	return catalog
+}
+
+func boundedCatalogRows[T any](rows []T, warning string, warnings *[]string) []T {
+	if len(rows) <= maxDynamicCatalogEntries {
+		return rows
+	}
+	*warnings = append(*warnings, warning)
+	return rows[:maxDynamicCatalogEntries]
 }
 
 func catalogDigest(catalog Catalog) string {
@@ -165,6 +194,7 @@ func triggerCapabilities() []TriggerCapability {
 		{ID: "email", NodeType: "email_received", RequiredConfig: []string{"aliasKey"}, Endpoint: "POST /v1/triggers/email/ingest"},
 		{ID: "file", NodeType: "file_dropped", RequiredConfig: []string{"bucket"}, Endpoint: "POST /v1/triggers/file/ingest"},
 		{ID: "mcp_event", NodeType: "mcp_server_event", RequiredConfig: []string{"connectionAlias", "resourceUri"}, Endpoint: "POST /v1/triggers/mcp/ingest"},
+		{ID: "pagerduty", NodeType: "pagerduty_incident", RequiredConfig: []string{"webhookCredential"}, Endpoint: "POST /webhooks/pagerduty/{workflowId}/{nodeId}"},
 	}
 }
 

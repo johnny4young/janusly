@@ -17,7 +17,7 @@ func v2ContractDocWithFixtures(detectorSource, fixtureSource string) map[string]
 		"contract": map[string]any{
 			"version": "2",
 			"failure": map[string]any{
-				"technical": map[string]any{"terminalNodeFailure": true},
+				"technical": map[string]any{"terminalNodeFailure": true, "stalledNode": false},
 				"semantic": map[string]any{
 					"mode": "deterministic",
 					"detectors": []any{map[string]any{
@@ -34,6 +34,7 @@ func v2ContractDocWithFixtures(detectorSource, fixtureSource string) map[string]
 				},
 			},
 			"evidence":      map[string]any{"required": []any{"failure_snapshot", "audit_trail", "terminal_outcome"}},
+			"effects":       []any{},
 			"repairs":       map[string]any{"allowed": []any{"retry"}},
 			"validation":    map[string]any{"minimumEvidenceLevel": "static"},
 			"approval":      map[string]any{"productionMutation": "required", "permission": "recovery.write"},

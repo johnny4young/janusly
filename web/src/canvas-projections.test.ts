@@ -45,6 +45,10 @@ describe('getRunWorkflowSnapshot', () => {
   it.each([
     { ...validWorkflow, id: '' },
     { ...validWorkflow, name: 42 },
+    { ...validWorkflow, dslVersion: '2.0' },
+    { ...validWorkflow, metadata: null },
+    { ...validWorkflow, metadata: { description: 42 } },
+    { ...validWorkflow, metadata: { tags: [''] } },
     { ...validWorkflow, inputs: { type: 'object', properties: { invoiceId: null } } },
     { ...validWorkflow, inputs: { type: 'date' } },
     { ...validWorkflow, outputs: { result: null } },
@@ -52,7 +56,9 @@ describe('getRunWorkflowSnapshot', () => {
     { ...validWorkflow, ui: { positions: { missing: { x: 0, y: 0 } } } },
     { ...validWorkflow, nodes: [{ id: 'finish', type: 'noop', label: 'x'.repeat(81), config: {} }] },
     { ...validWorkflow, nodes: [{ id: 'finish', type: 'noop', label: `${' '.repeat(80)}x`, config: {} }] },
+    { ...validWorkflow, edges: [{ id: '', from: 'finish', to: 'finish' }] },
     { ...validWorkflow, edges: [{ from: 'finish', to: 'finish', condition: '' }] },
+    { ...validWorkflow, edges: [{ from: 'finish', to: 'finish', onError: 'false' }] },
   ])('rejects a malformed top-level or input/output shape', workflow => {
     expect(getRunWorkflowSnapshot({ workflow })).toBeNull()
   })
@@ -67,6 +73,24 @@ describe('getRunWorkflowSnapshot', () => {
     const workflow = { nodes, edges: [], ui: { positions } }
 
     expect(getRunWorkflowSnapshot({ workflow })).toBe(workflow)
+  })
+
+  it('shares the 512-node recursive input-schema boundary with Go', () => {
+    const properties = Object.fromEntries(Array.from({ length: 511 }, (_, index) => [
+      `field-${index}`,
+      { type: 'string' },
+    ]))
+    const atLimit = { ...validWorkflow, inputs: { type: 'object', properties } }
+    expect(getRunWorkflowSnapshot({ workflow: atLimit })).toBe(atLimit)
+
+    const overLimit = {
+      ...validWorkflow,
+      inputs: {
+        type: 'object',
+        properties: { ...properties, extra: { type: 'string' } },
+      },
+    }
+    expect(getRunWorkflowSnapshot({ workflow: overLimit })).toBeNull()
   })
 })
 
@@ -173,6 +197,23 @@ describe('workflowToGraph', () => {
     expect(graph.nodes[0].data.label).toBe('Review invoice')
     expect(graph.nodes[1].position).toEqual({ x: 310, y: 200 })
     expect(graph.nodes[1].data.label).toBe('')
+  })
+
+  it('preserves contract edge ids while keeping React Flow ids unique', () => {
+    const graph = workflowToGraph({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'middle', type: 'noop', config: {} },
+        { id: 'finish', type: 'noop', config: {} },
+      ],
+      edges: [
+        { id: 'route', from: 'start', to: 'middle' },
+        { id: 'route', from: 'middle', to: 'finish' },
+      ],
+    })
+
+    expect(graph.edges.map(edge => edge.id)).toEqual(['route', 'e1'])
+    expect(graph.edges.map(edge => edge.data?.contractId)).toEqual(['route', 'route'])
   })
 })
 

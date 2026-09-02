@@ -31,7 +31,7 @@
  *    absent means the workflow is ungrouped in the Flows list.
  */
 
-import { z } from 'zod'
+import * as z from 'zod/mini'
 
 import { RECOVERY_ITEM_SEVERITIES } from './recovery-item'
 import {
@@ -64,67 +64,80 @@ export const WORKFLOW_METADATA_TAG_MAX_LENGTH = 40
 export const WORKFLOW_METADATA_FOLDER_MAX_LENGTH = 60
 
 /** Slack channel must start with `#` (encourages copy-paste safety; avoids URL guessing). */
-const SlackChannelSchema = z
-  .string()
-  .min(2)
-  .max(80)
+const SlackChannelSchema = /* @__PURE__ */ z.string().check(
+  z.minLength(2),
+  z.maxLength(80),
   // Total length = `#` + 1 first char + up to 78 trailing chars = 2..80,
   // matching the outer `.max(80)` so the two bounds agree and a 81-char
   // string can never partially pass the regex before the outer length
   // cap rejects it with a confusing error message.
-  .regex(/^#[a-z0-9][a-z0-9._-]{0,78}$/i, 'slack channel must start with `#`')
+  z.regex(/^#[a-z0-9][a-z0-9._-]{0,78}$/i, 'slack channel must start with `#`'),
+)
 
 /** Linear project: either a full URL or a `<workspace>/<project>` slug. */
-const LinearProjectSchema = z
-  .string()
-  .min(3)
-  .max(200)
-  .refine(
+const LinearProjectSchema = /* @__PURE__ */ z.string().check(
+  z.minLength(3),
+  z.maxLength(200),
+  z.refine(
     (v) =>
       v.startsWith('https://linear.app/') || /^[a-z0-9_-]+\/[a-z0-9_-]+$/i.test(v),
     'linear project must be a linear.app URL or `workspace/project` slug',
-  )
+  ),
+)
 
 /** Closed-key partial-update schema. Every field is optional / nullable. */
-export const WorkflowMetadataSchema = z
-  .object({
-    owners: z
-      .array(z.string().min(1).max(200))
-      .max(WORKFLOW_METADATA_OWNERS_MAX)
-      .default([]),
-    runbookMarkdown: z
-      .string()
-      .refine(
+export const WorkflowMetadataSchema = /* @__PURE__ */ z.strictObject({
+    owners: z._default(
+      z
+        .array(z.string().check(z.minLength(1), z.maxLength(200)))
+        .check(z.maxLength(WORKFLOW_METADATA_OWNERS_MAX)),
+      [],
+    ),
+    runbookMarkdown: z.optional(
+      z.nullable(
+        z.string().check(
+          z.refine(
         (value) => utf8ByteLength(value) <= WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
         'runbook exceeds 32 KiB cap',
-      )
-      .nullable()
-      .optional(),
-    aiGuidanceMarkdown: z
-      .string()
-      .refine(
+          ),
+        ),
+      ),
+    ),
+    aiGuidanceMarkdown: z.optional(
+      z.nullable(
+        z.string().check(
+          z.refine(
         (value) => utf8ByteLength(value) <= WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES,
         'AI guidance exceeds 8 KiB cap',
-      )
-      .refine(
+          ),
+          z.refine(
         (value) => !containsOperatorGuidanceSecret(value),
         'AI guidance must not contain secret-like values',
-      )
-      .nullable()
-      .optional(),
-    description: z.string().max(2000).nullable().optional(),
-    tags: z.array(z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH)).max(WORKFLOW_METADATA_TAGS_MAX).default([]),
-    folder: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH).nullable().optional(),
-    slackChannel: SlackChannelSchema.nullable().optional(),
-    linearProject: LinearProjectSchema.nullable().optional(),
-    severityDefault: z.enum(RECOVERY_ITEM_SEVERITIES).nullable().optional(),
+          ),
+        ),
+      ),
+    ),
+    description: z.optional(z.nullable(z.string().check(z.maxLength(2000)))),
+    tags: z._default(
+      z
+        .array(z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)))
+        .check(z.maxLength(WORKFLOW_METADATA_TAGS_MAX)),
+      [],
+    ),
+    folder: z.optional(
+      z.nullable(
+        z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_FOLDER_MAX_LENGTH)),
+      ),
+    ),
+    slackChannel: z.optional(z.nullable(SlackChannelSchema)),
+    linearProject: z.optional(z.nullable(LinearProjectSchema)),
+    severityDefault: z.optional(z.nullable(z.enum(RECOVERY_ITEM_SEVERITIES))),
   })
-  .strict()
 
 export type WorkflowMetadata = z.infer<typeof WorkflowMetadataSchema>
 
 /** Body of `POST /workflows/:id/metadata`. */
-export const UpsertWorkflowMetadataBodySchema = z.object({
+export const UpsertWorkflowMetadataBodySchema = /* @__PURE__ */ z.object({
   metadata: WorkflowMetadataSchema,
 })
 
@@ -141,11 +154,11 @@ export type UpsertWorkflowMetadataBody = z.infer<typeof UpsertWorkflowMetadataBo
  * drag-to-folder reassign from the Flows list (which only knows the row's
  * folder) can't clobber the rest of a workflow's metadata.
  */
-export const SetWorkflowFolderBodySchema = z
-  .object({
-    folder: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH).nullable(),
-  })
-  .strict()
+export const SetWorkflowFolderBodySchema = /* @__PURE__ */ z.strictObject({
+  folder: z.nullable(
+    z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_FOLDER_MAX_LENGTH)),
+  ),
+})
 
 export type SetWorkflowFolderBody = z.infer<typeof SetWorkflowFolderBodySchema>
 
@@ -155,12 +168,10 @@ export type SetWorkflowFolderBody = z.infer<typeof SetWorkflowFolderBodySchema>
  * required real names (1..60 chars). If `to` already exists the members merge
  * into it — renaming into an existing folder is a deliberate merge, not an error.
  */
-export const RenameWorkflowFolderBodySchema = z
-  .object({
-    from: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH),
-    to: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH),
-  })
-  .strict()
+export const RenameWorkflowFolderBodySchema = /* @__PURE__ */ z.strictObject({
+  from: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_FOLDER_MAX_LENGTH)),
+  to: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_FOLDER_MAX_LENGTH)),
+})
 
 export type RenameWorkflowFolderBody = z.infer<typeof RenameWorkflowFolderBodySchema>
 
@@ -169,11 +180,9 @@ export type RenameWorkflowFolderBody = z.infer<typeof RenameWorkflowFolderBodySc
  * Moves every member of `folder` back to "Ungrouped" (sets `folder` null). The
  * workflows themselves are untouched — delete only clears the folder label.
  */
-export const DeleteWorkflowFolderBodySchema = z
-  .object({
-    folder: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH),
-  })
-  .strict()
+export const DeleteWorkflowFolderBodySchema = /* @__PURE__ */ z.strictObject({
+  folder: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_FOLDER_MAX_LENGTH)),
+})
 
 export type DeleteWorkflowFolderBody = z.infer<typeof DeleteWorkflowFolderBodySchema>
 
@@ -190,12 +199,14 @@ export const WORKFLOW_BULK_ASSIGN_MAX = 500
  * targets arbitrary workflows that may not have a metadata row yet, so the write
  * behind it upserts. `workflowIds` are validated against the caller's org server-side.
  */
-export const AssignWorkflowsToFolderBodySchema = z
-  .object({
-    workflowIds: z.array(z.string().min(1)).min(1).max(WORKFLOW_BULK_ASSIGN_MAX),
-    folder: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH).nullable(),
-  })
-  .strict()
+export const AssignWorkflowsToFolderBodySchema = /* @__PURE__ */ z.strictObject({
+  workflowIds: z
+    .array(z.string().check(z.minLength(1)))
+    .check(z.minLength(1), z.maxLength(WORKFLOW_BULK_ASSIGN_MAX)),
+  folder: z.nullable(
+    z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_FOLDER_MAX_LENGTH)),
+  ),
+})
 
 export type AssignWorkflowsToFolderBody = z.infer<typeof AssignWorkflowsToFolderBodySchema>
 
@@ -208,13 +219,13 @@ export type AssignWorkflowsToFolderBody = z.infer<typeof AssignWorkflowsToFolder
  * (already-present add / absent remove) is silently skipped server-side.
  * `workflowIds` are validated against the caller's org server-side.
  */
-export const AssignTagToWorkflowsBodySchema = z
-  .object({
-    workflowIds: z.array(z.string().min(1)).min(1).max(WORKFLOW_BULK_ASSIGN_MAX),
-    tag: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
-    op: z.enum(['add', 'remove']),
-  })
-  .strict()
+export const AssignTagToWorkflowsBodySchema = /* @__PURE__ */ z.strictObject({
+  workflowIds: z
+    .array(z.string().check(z.minLength(1)))
+    .check(z.minLength(1), z.maxLength(WORKFLOW_BULK_ASSIGN_MAX)),
+  tag: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)),
+  op: z.enum(['add', 'remove']),
+})
 
 export type AssignTagToWorkflowsBody = z.infer<typeof AssignTagToWorkflowsBodySchema>
 
@@ -224,12 +235,10 @@ export type AssignTagToWorkflowsBody = z.infer<typeof AssignTagToWorkflowsBodySc
  * it, in one write. If a workflow already has `to`, the two merge (the renamed
  * tag is deduped, never doubled) — rename-into-existing is a deliberate merge.
  */
-export const RenameWorkflowTagBodySchema = z
-  .object({
-    from: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
-    to: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
-  })
-  .strict()
+export const RenameWorkflowTagBodySchema = /* @__PURE__ */ z.strictObject({
+  from: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)),
+  to: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)),
+})
 
 export type RenameWorkflowTagBody = z.infer<typeof RenameWorkflowTagBodySchema>
 
@@ -239,11 +248,9 @@ export type RenameWorkflowTagBody = z.infer<typeof RenameWorkflowTagBodySchema>
  * themselves are untouched — delete only removes the label, so it's reversible
  * by adding the tag back.
  */
-export const DeleteWorkflowTagBodySchema = z
-  .object({
-    tag: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
-  })
-  .strict()
+export const DeleteWorkflowTagBodySchema = /* @__PURE__ */ z.strictObject({
+  tag: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)),
+})
 
 export type DeleteWorkflowTagBody = z.infer<typeof DeleteWorkflowTagBodySchema>
 
@@ -253,12 +260,10 @@ export type DeleteWorkflowTagBody = z.infer<typeof DeleteWorkflowTagBodySchema>
  * equivalent of the bulk assign for one row. `op` picks the set operation;
  * `add` is a dedup-safe union, `remove` filters the tag out.
  */
-export const SetWorkflowTagBodySchema = z
-  .object({
-    tag: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
-    op: z.enum(['add', 'remove']),
-  })
-  .strict()
+export const SetWorkflowTagBodySchema = /* @__PURE__ */ z.strictObject({
+  tag: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)),
+  op: z.enum(['add', 'remove']),
+})
 
 export type SetWorkflowTagBody = z.infer<typeof SetWorkflowTagBodySchema>
 

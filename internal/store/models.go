@@ -927,6 +927,7 @@ type TriggerEvent struct {
 	DedupeKey              pgtype.Text
 	PayloadJson            json.RawMessage
 	SkippedReason          pgtype.Text
+	RateAdmittedAt         *time.Time
 	CreatedAt              *time.Time
 	BackfillClaimToken     pgtype.Text
 	BackfillClaimedAt      *time.Time

@@ -9,14 +9,16 @@
 //   - internal/tools/timewindow.go — the generic `time.window` tool, which
 //     REJECTS malformed configuration (a decision primitive must never
 //     answer from bad input).
-//   - internal/tools/pagerduty.go — the PagerDuty off-hours evaluator,
-//     which deliberately treats malformed configuration as "inside working
-//     hours" so a broken policy can never authorize a mutation.
+//   - internal/tools/pagerduty.go — the PagerDuty off-hours helper, whose
+//     defensive safe default treats malformed configuration as "inside
+//     working hours". The executable policy validates the complete window
+//     before calling it, so invalid input fails closed before either mode can
+//     authorize a mutation.
 //
-// Those two fail postures are opposite ON PURPOSE. This module stays
+// Those helper-level fail postures are opposite ON PURPOSE. This module stays
 // neutral: it validates and reports, and each caller decides what invalid
-// means. The IANA database is embedded (time/tzdata) so zone resolution
-// never depends on the container image.
+// means. The IANA database is embedded (time/tzdata) so zone resolution never
+// depends on the container image.
 package zonedwindow
 
 import (

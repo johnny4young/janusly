@@ -261,6 +261,27 @@ func TestToolFailureFollowsResultPolicy(t *testing.T) {
 	}}],"edges":[]}`
 	strictRun, _ := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, strict)})
 	runDispatcherToTerminal(t, eng, pool, strictRun, "failed")
+
+	// A write-capable tool can return an unsuccessful envelope after its
+	// provider may already have accepted the effect. Even when a workflow
+	// author adds a retry policy, require_ok must carry writeSide=true so the
+	// engine fails once instead of duplicating the mutation.
+	writeStrict := `{"nodes":[{"id":"t","type":"tool","config":{
+		"tool":"vector.upsert","input":{"content":"effect"},"resultPolicy":"require_ok",
+		"retry":{"maxAttempts":3,"delayMs":1}
+	}}],"edges":[]}`
+	writeRun, _ := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, writeStrict)})
+	runDispatcherToTerminal(t, eng, pool, writeRun, "failed")
+	var attempts int
+	var errorJSON string
+	if err := pool.QueryRow(ctx, `SELECT attempts, error_json::text FROM run_nodes
+		WHERE run_id=$1 AND node_id='t'`, writeRun).Scan(&attempts, &errorJSON); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 || !strings.Contains(errorJSON, `"writeSide": true`) ||
+		!strings.Contains(errorJSON, `"code": "TOOL_RESULT_NOT_OK"`) {
+		t.Fatalf("ambiguous write failure retried or lost identity: attempts=%d error=%s", attempts, errorJSON)
+	}
 }
 
 func TestParallelForkJoinAssemblesLabelledBranches(t *testing.T) {

@@ -22,7 +22,7 @@
 
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { Activity, Boxes, Database, FlaskConical, Layers3, Plug, Users, Workflow } from 'lucide-react'
-import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalResponse } from '../types'
+import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
 import { AiStudioPanel } from './AiStudioPanel'
 import { AuthoringPanel, type AuthoringPanelModel } from './AuthoringPanel'
@@ -61,8 +61,8 @@ export type RightPanelAuthoring = AuthoringPanelModel & {
   aiActionRequest: AiAuthoringActionRequest | null
   onLoadAuthoringCapabilities: () => Promise<AuthoringCapabilityCatalog>
   onCompileWorkflowBrief: (prompt: string) => Promise<WorkflowBriefCompilation>
-  onProposeWorkflow: (brief: WorkflowIntentBrief, catalogVersion: string) => Promise<WorkflowProposalResponse>
-  onApplyWorkflowProposal: (proposal: WorkflowProposalResponse) => Promise<boolean>
+  onProposeWorkflow: (brief: WorkflowIntentBrief, catalogVersion: string, sourcePrompt: string) => Promise<WorkflowProposalResponse>
+  onApplyWorkflowProposal: (proposal: WorkflowProposalResponse) => Promise<WorkflowProposalApplyOutcome>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string }>
   onReviewWorkflow: () => Promise<{
     mode: AiMode
@@ -81,6 +81,7 @@ export type RightPanelCatalog = {
   credentials: Credential[]
   workflows: SavedWorkflow[]
   onOpenWorkflow: (id: string) => void
+  onOpenWorkflowVersion: (workflowId: string, versionId: string, targetTab?: ActiveTab) => Promise<boolean>
   onCreateWorkflow: (mode: WorkflowCreationMode) => void
   onUseTemplate: (workflow: WorkflowDefinition) => void
   onInstallPlugin: (pluginId: string) => void
@@ -123,7 +124,7 @@ export type RightPanelExecution = {
 
 export type RightPanelNavigation = {
   onOpenTab: (tab: ActiveTab) => void
-  onOpenAiAction: (action: AiAuthoringActionRequest['action']) => void
+  onOpenAiAction: (action: AiAuthoringActionRequest['action'], prompt?: string) => void
   activeRecoveryCaseId: string | null
 }
 
@@ -251,8 +252,12 @@ function RightPanelRouter(props: RightPanelProps) {
     <RecoveryCasePanel
       caseId={navigation.activeRecoveryCaseId}
       canResolve={can('recovery.write')}
+      canInspectWorkflow={can('workflows.read')}
+      canAuthorWorkflow={can('workflows.read') && can('workflows.write') && can('ai.write')}
       onBack={() => navigation.onOpenTab('home')}
       onOpenRun={execution.onOpenRun}
+      onOpenWorkflowVersion={catalog.onOpenWorkflowVersion}
+      onOpenAiAuthoring={(prompt) => navigation.onOpenAiAction('generate', prompt)}
       onResolved={execution.onRefreshPlatform}
     />
   )

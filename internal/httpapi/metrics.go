@@ -30,7 +30,7 @@ func (s *V1Server) recoveryMetricsCore(r *http.Request, rc v1Request) opResult {
 	}
 	value, err := s.recoveryMetricsValue(r.Context(), rc.orgID, windowDays)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(value)
 }

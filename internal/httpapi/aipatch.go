@@ -51,7 +51,9 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		DeadLetterID string `json:"deadLetterId"`
 		Model        string `json:"model"`
 	}
-	_ = decodeBody(r, &body)
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+	}
 	if body.DeadLetterID == "" {
 		return opError(http.StatusBadRequest, "ai_dead_letter_id_required", "deadLetterId is required", nil)
 	}
@@ -75,7 +77,7 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusNotFound, "dlq_not_found", "DLQ entry not found", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	// Failure identity for the recovery passport.

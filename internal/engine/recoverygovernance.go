@@ -29,8 +29,9 @@ var recoveryArtifactKinds = map[string]bool{
 }
 
 var (
-	ErrRecoveryArtifactTooLarge = errors.New("recovery case artifact exceeds limit")
-	ErrRecoveryApprovalMissing  = errors.New("recovery approval is missing or expired")
+	ErrRecoveryArtifactTooLarge      = errors.New("recovery case artifact exceeds limit")
+	ErrRecoveryApprovalMissing       = errors.New("recovery approval is missing or expired")
+	ErrRecoveryHumanApprovalRequired = errors.New("recovery approval requires a human-authenticated session")
 )
 
 func recoveryActorKind(actor *auth.Context) string {
@@ -276,6 +277,14 @@ func (e *Engine) ApproveRecoveryCandidate(ctx context.Context, input ApproveReco
 		input.CandidateArtifactID == "" || input.ValidationArtifactID == "" {
 		return store.RecoveryApprovalGrant{}, ErrRecoverySemanticInputInvalid
 	}
+	// Service tokens are automation credentials, including the in-process MCP
+	// principal. They may consume an independently created one-use grant through
+	// apply, but must never create or renew the human authority they depend on.
+	// Dev headers remain available for local provider-free qualification; they
+	// are refused entirely in production by the authentication boundary.
+	if input.Auth.Mode == auth.ModeServiceToken {
+		return store.RecoveryApprovalGrant{}, ErrRecoveryHumanApprovalRequired
+	}
 	now := e.now().UTC().Truncate(time.Millisecond)
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
@@ -296,6 +305,9 @@ func (e *Engine) ApproveRecoveryCandidate(ctx context.Context, input ApproveReco
 	if caseRow.State != "awaiting_approval" || caseRow.Revision != input.ExpectedRevision {
 		return store.RecoveryApprovalGrant{}, ErrRecoveryCaseConflict
 	}
+	if caseRow.Source != semanticRecoveryCaseSource {
+		return store.RecoveryApprovalGrant{}, ErrRecoveryCaseConflict
+	}
 	candidate, err := q.GetRecoveryCaseArtifact(ctx, store.GetRecoveryCaseArtifactParams{
 		OrgID: input.Auth.OrgID, CaseID: input.CaseID, ID: input.CandidateArtifactID,
 	})
@@ -308,8 +320,8 @@ func (e *Engine) ApproveRecoveryCandidate(ctx context.Context, input ApproveReco
 	if err != nil || validation.Kind != "validation" {
 		return store.RecoveryApprovalGrant{}, ErrRecoveryCaseConflict
 	}
-	var validationPayload SemanticRecoveryValidationPayload
-	if json.Unmarshal(validation.PayloadJson, &validationPayload) != nil ||
+	validationPayload, validationErr := ParseSemanticRecoveryValidationPayload(validation.PayloadJson)
+	if validationErr != nil ||
 		!validationPayload.Passed || validationPayload.CandidateArtifactID != candidate.ID ||
 		validationPayload.CandidateSha256 != candidate.PayloadSha256 ||
 		!currentRecoveryValidation(validationPayload.CaseRevision, caseRow.Revision) {

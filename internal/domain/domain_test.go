@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -61,6 +62,31 @@ func TestParseRejectsMissingArraysWithPaths(t *testing.T) {
 	}
 	if !strings.HasPrefix(issues[0].Message, "nodes:") || !strings.HasPrefix(issues[1].Message, "edges:") {
 		t.Fatalf("messages must carry field paths: %+v", issues)
+	}
+}
+
+func TestParseRejectsInvalidAndExcessiveInputSchemas(t *testing.T) {
+	invalid := `{"nodes":[{"id":"n","type":"noop","config":{}}],"edges":[],"inputs":{"type":"secret"}}`
+	wf, issues := Parse([]byte(invalid))
+	if wf != nil || len(issues) != 1 || !strings.HasPrefix(issues[0].Message, "inputs:") {
+		t.Fatalf("unsupported input type must fail at the contract boundary: wf=%v issues=%+v", wf, issues)
+	}
+
+	properties := make(map[string]any, InputSchemaNodeMax)
+	for index := range InputSchemaNodeMax {
+		properties[fmt.Sprintf("field-%03d", index)] = map[string]any{"type": "string"}
+	}
+	document, err := json.Marshal(map[string]any{
+		"nodes":  []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}},
+		"edges":  []any{},
+		"inputs": map[string]any{"type": "object", "properties": properties},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, issues = Parse(document)
+	if wf != nil || len(issues) != 1 || !strings.Contains(issues[0].Message, "at most 512 nodes") {
+		t.Fatalf("over-limit input schema must fail closed: wf=%v issues=%+v", wf, issues)
 	}
 }
 

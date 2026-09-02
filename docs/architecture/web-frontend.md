@@ -18,6 +18,42 @@ and error boundaries around major workspaces. Accessibility, localization,
 browser behavior, bundle budgets, and zero-console-error E2E are acceptance
 requirements.
 
+New contract-first surfaces use `contractApi` with operation types generated
+from `contract/openapi.json`. Authoring additionally validates the parsed
+success payload in `web/src/lib/authoring-contract.ts` before a proposal can
+reach Apply; generated types protect compilation, while the bounded runtime
+guard protects against stale proxies or malformed success JSON. Apply also
+binds the duplicated intent/recovery contracts and qualification flags to the
+exact workflow snapshot, dynamically loading the full strict Recovery Contract
+validator only when a reviewed proposal carries recovery policy. The validated
+snapshot is cloned before confirmation and catalog refresh so shared UI state
+cannot change the object copied into the canvas.
+
+Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
+They must preserve the same strict-object, bound, default, transform, and
+refinement semantics as the API contract; do not trade validation coverage for
+bundle size. Top-level schema factories are marked pure so unused request-body
+schemas do not execute merely because a module also exports a shared enum.
+Semantic recovery response parsing lives in
+`web/src/lib/recovery-case-contract.ts` and shares the lazy
+`recovery-contract` chunk with the workflow recovery validator. The React
+panel consumes only the already-bounded read model. Authoring guards are loaded
+on demand by workflow commands, keeping the default app workspace below its
+immutable budget without weakening the final Apply boundary.
+
+The canvas keeps React Flow identity separate from optional persisted DAG edge
+identity. `workflowToGraph` uses a unique local id even for malformed historical
+duplicates, carries the original id in edge data, and `getWorkflowJson`
+round-trips that original value. Never silently replace a persisted edge id
+with an array index: validation and recovery evidence may refer to it.
+
+The versioned DAG's inline `metadata` is a closed descriptive shape
+(`description`, `tags`), not a generic extension bag. Operational metadata uses
+the dedicated workflow-metadata API. Run-snapshot guards validate this shape,
+the DSL version, recursive inputs, outputs, finite positions, and edge fields
+before hydrating the canvas; malformed historical or proxy data is rejected as
+a whole instead of being partially rendered.
+
 Do not add a second frontend project, root package workspace, production API URL
 setting, or separate production web process.
 

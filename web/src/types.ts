@@ -35,7 +35,14 @@ type WorkflowNodeData = {
   helper?: string
   hasValidationError?: boolean
 }
-type WorkflowEdgeData = { condition?: string; onError?: boolean }
+type WorkflowEdgeData = {
+  condition?: string
+  onError?: boolean
+  /** Optional persisted DAG edge id. React Flow may need a distinct local id
+   *  when historical documents contain duplicate ids, so keep contract
+   *  identity separate from the canvas identity. */
+  contractId?: string
+}
 export type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
 export type ReadinessIssue = ValidationIssue & {
   severity: 'warn' | 'fail'
@@ -246,6 +253,7 @@ export type RecoveryCaseTransition = {
 export type SemanticCaseResolution = {
   runId: string
   sourceNodeId: string
+  decision: 'replace' | 'accept_loss'
   resumed: boolean
   resolvedCaseIds: string[]
 }
@@ -306,6 +314,8 @@ export type AiAuthoringAction = 'generate' | 'explain' | 'review' | 'fix'
 export type AiAuthoringActionRequest = {
   id: number
   action: AiAuthoringAction
+  /** Optional bounded operator-visible intent prefill; never auto-submitted. */
+  prompt?: string
 }
 
 /** Budget-driven reduction of Best-of-N candidates for one AI generation. */
@@ -388,6 +398,11 @@ export type WorkflowProposalResponse = {
 }
 
 export type AuthoringCapabilityCatalog = import('./lib/api-types.generated').ApiResponse<'GET /authoring/capabilities'>
+
+/** Result of the final, capability-aware proposal copy boundary. */
+export type WorkflowProposalApplyOutcome =
+  | { status: 'applied' | 'blocked' | 'cancelled' | 'canvas_changed' }
+  | { status: 'catalog_changed'; catalog: AuthoringCapabilityCatalog }
 
 /** Validate optional Best-of-N metadata before user-facing interpolation. */
 export function parseAiCandidateBackoff(value: unknown): AiCandidateBackoff | undefined {
@@ -480,13 +495,21 @@ export type WorkflowInputSchemaShape = {
   default?: unknown
 }
 
+/** Descriptive metadata versioned inside the DAG. Operational ownership,
+ * runbooks, folders and AI guidance live in the separate workflow-metadata
+ * resource and are intentionally not accepted here as arbitrary JSON. */
+export type WorkflowJsonMetadata = {
+  description?: string
+  tags?: string[]
+}
+
 export type WorkflowDefinition = {
   dslVersion?: '1.0'
   id?: string
   name?: string
-  metadata?: JsonObject
+  metadata?: WorkflowJsonMetadata
   nodes: Array<{ id: string; type: string; label?: string; config: JsonObject }>
-  edges: Array<{ from: string; to: string; condition?: string; onError?: boolean }>
+  edges: Array<{ id?: string; from: string; to: string; condition?: string; onError?: boolean }>
   /** Typed inputs surfaced in the Inspector + validated at run start. */
   inputs?: WorkflowInputSchemaShape
   /** Output projection map; engine renders each template at terminal `succeeded`. */

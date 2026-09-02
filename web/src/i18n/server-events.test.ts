@@ -237,6 +237,14 @@ describe('tApiError', () => {
     expect(result).toBe('A specific server message')
   })
 
+  it('localizes the exact workflow version wire code through shared source-version copy', () => {
+    initI18n('es')
+    expect(tApiError({
+      code: 'workflow_version_not_found',
+      error: 'Workflow version not found',
+    })).toBe('Versión de origen no encontrada')
+  })
+
   it('falls back to the literal `error` when no code is supplied', () => {
     const result = tApiError({ error: 'free-form server message' })
     expect(result).toBe('free-form server message')

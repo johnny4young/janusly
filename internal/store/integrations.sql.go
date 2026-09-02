@@ -218,7 +218,8 @@ func (q *Queries) DeleteUpstreamHealthSource(ctx context.Context, arg DeleteUpst
 
 const findTriggerEventByDedupe = `-- name: FindTriggerEventByDedupe :one
 SELECT id, org_id, trigger_type, workflow_id, workflow_version_id, node_id,
-       status, run_id, dedupe_key, payload_json, skipped_reason, created_at
+       status, run_id, dedupe_key, payload_json, skipped_reason, created_at,
+       workflow_rollout_id, workflow_rollout_variant
 FROM trigger_events
 WHERE org_id = $1 AND dedupe_key = $2
 `
@@ -229,18 +230,20 @@ type FindTriggerEventByDedupeParams struct {
 }
 
 type FindTriggerEventByDedupeRow struct {
-	ID                string
-	OrgID             string
-	TriggerType       string
-	WorkflowID        pgtype.Text
-	WorkflowVersionID string
-	NodeID            string
-	Status            string
-	RunID             pgtype.Text
-	DedupeKey         pgtype.Text
-	PayloadJson       json.RawMessage
-	SkippedReason     pgtype.Text
-	CreatedAt         *time.Time
+	ID                     string
+	OrgID                  string
+	TriggerType            string
+	WorkflowID             pgtype.Text
+	WorkflowVersionID      string
+	NodeID                 string
+	Status                 string
+	RunID                  pgtype.Text
+	DedupeKey              pgtype.Text
+	PayloadJson            json.RawMessage
+	SkippedReason          pgtype.Text
+	CreatedAt              *time.Time
+	WorkflowRolloutID      pgtype.Text
+	WorkflowRolloutVariant pgtype.Text
 }
 
 func (q *Queries) FindTriggerEventByDedupe(ctx context.Context, arg FindTriggerEventByDedupeParams) (FindTriggerEventByDedupeRow, error) {
@@ -259,6 +262,8 @@ func (q *Queries) FindTriggerEventByDedupe(ctx context.Context, arg FindTriggerE
 		&i.PayloadJson,
 		&i.SkippedReason,
 		&i.CreatedAt,
+		&i.WorkflowRolloutID,
+		&i.WorkflowRolloutVariant,
 	)
 	return i, err
 }
@@ -561,6 +566,33 @@ func (q *Queries) GetTriggerEvent(ctx context.Context, arg GetTriggerEventParams
 	return i, err
 }
 
+const getTriggerEventRateAdmissionForUpdate = `-- name: GetTriggerEventRateAdmissionForUpdate :one
+SELECT status, rate_admitted_at
+FROM trigger_events
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetTriggerEventRateAdmissionForUpdateParams struct {
+	OrgID string
+	ID    string
+}
+
+type GetTriggerEventRateAdmissionForUpdateRow struct {
+	Status         string
+	RateAdmittedAt *time.Time
+}
+
+// The trigger storm guard and its admission marker must share one transaction:
+// a process crash after the counter increment but before StartRun must not make
+// the accepted event consume the same fixed-window budget again on retry.
+func (q *Queries) GetTriggerEventRateAdmissionForUpdate(ctx context.Context, arg GetTriggerEventRateAdmissionForUpdateParams) (GetTriggerEventRateAdmissionForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getTriggerEventRateAdmissionForUpdate, arg.OrgID, arg.ID)
+	var i GetTriggerEventRateAdmissionForUpdateRow
+	err := row.Scan(&i.Status, &i.RateAdmittedAt)
+	return i, err
+}
+
 const getUpstreamHealthSource = `-- name: GetUpstreamHealthSource :one
 SELECT id, org_id, name, kind, url, expected_components, check_interval_seconds, enabled, last_status, last_degraded, last_checked_at, last_error_reason, created_by, created_at, updated_at FROM upstream_health_sources
 WHERE org_id = $1 AND id = $2
@@ -782,7 +814,7 @@ INSERT INTO trigger_events (id, org_id, trigger_type, workflow_id,
                             workflow_version_id, node_id, status, dedupe_key, payload_json,
                             workflow_rollout_id, workflow_rollout_variant)
 VALUES ($1, $2, $3, $4, $5, $6, 'received', $7, $8, $9, $10)
-ON CONFLICT (org_id, dedupe_key) DO NOTHING
+ON CONFLICT DO NOTHING
 `
 
 type InsertTriggerEventParams struct {
@@ -799,6 +831,11 @@ type InsertTriggerEventParams struct {
 }
 
 // Credentials/secret store, MCP, Slack, external runtimes, upstream, triggers.
+// Deterministic provider event IDs and the tenant dedupe key identify the
+// same delivery. Concurrent first deliveries can arbitrate on either unique
+// index; catch both, then let the caller re-read by the scoped dedupe key.
+// A pathological unrelated primary-key collision still fails closed because
+// that scoped re-read returns no row.
 func (q *Queries) InsertTriggerEvent(ctx context.Context, arg InsertTriggerEventParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertTriggerEvent,
 		arg.ID,
@@ -876,7 +913,7 @@ SELECT id, name, kind, (secret_ref <> '')::bool AS configured, expires_at, updat
 FROM credentials
 WHERE org_id = $1
 ORDER BY name, id
-LIMIT 200
+LIMIT 201
 `
 
 type ListAuthoringCredentialCapabilitiesRow struct {
@@ -1288,6 +1325,47 @@ func (q *Queries) MarkTriggerEventOutcome(ctx context.Context, arg MarkTriggerEv
 		arg.Status,
 		arg.SkippedReason,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markTriggerEventRateAdmitted = `-- name: MarkTriggerEventRateAdmitted :execrows
+UPDATE trigger_events
+SET rate_admitted_at = $3
+WHERE org_id = $1 AND id = $2
+  AND status = 'received' AND rate_admitted_at IS NULL
+`
+
+type MarkTriggerEventRateAdmittedParams struct {
+	OrgID          string
+	ID             string
+	RateAdmittedAt *time.Time
+}
+
+func (q *Queries) MarkTriggerEventRateAdmitted(ctx context.Context, arg MarkTriggerEventRateAdmittedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markTriggerEventRateAdmitted, arg.OrgID, arg.ID, arg.RateAdmittedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markTriggerEventRateLimited = `-- name: MarkTriggerEventRateLimited :execrows
+UPDATE trigger_events
+SET status = 'skipped', skipped_reason = 'rate_limited'
+WHERE org_id = $1 AND id = $2
+  AND status = 'received' AND rate_admitted_at IS NULL
+`
+
+type MarkTriggerEventRateLimitedParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) MarkTriggerEventRateLimited(ctx context.Context, arg MarkTriggerEventRateLimitedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markTriggerEventRateLimited, arg.OrgID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

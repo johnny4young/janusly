@@ -23,12 +23,14 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -43,6 +45,13 @@ const apiContractFile = "../../web/src/lib/api-contract.ts"
 // routes before webdist, but Vite otherwise answers an unproxied API path with
 // index.html and a misleading 200.
 const viteConfigFile = "../../web/vite.config.ts"
+
+// The public OpenAPI document and its checked-in generated browser client are
+// both derived artifacts. Contracted React calls must exist in both or a stale
+// generator can otherwise leave the TypeScript call site looking authoritative
+// while the router and the published contract disagree.
+const openAPIFile = "../../contract/openapi.json"
+const generatedAPIClientFile = "../../web/src/lib/api-types.generated.ts"
 
 // allowedUnresolvable lists call sites whose path genuinely cannot be
 // resolved to one route at compile time, with the reason. Keep it short: an
@@ -68,10 +77,32 @@ var (
 )
 
 type webCall struct {
-	method string
-	path   string
-	file   string
-	line   int
+	method     string
+	path       string
+	file       string
+	line       int
+	contracted bool
+}
+
+type centralAuthRegistration struct {
+	kind string
+	gate routeGate
+}
+
+func centralAuthForPattern(pattern string) (centralAuthRegistration, bool) {
+	if gate, ok := routeAuthz[pattern]; ok {
+		return centralAuthRegistration{kind: "gated", gate: gate}, true
+	}
+	if authOnlyRoutes[pattern] {
+		return centralAuthRegistration{kind: "auth_only"}, true
+	}
+	if identityOnlyRoutes[pattern] {
+		return centralAuthRegistration{kind: "identity_only"}, true
+	}
+	if optionalIdentityRoutes[pattern] {
+		return centralAuthRegistration{kind: "optional_identity"}, true
+	}
+	return centralAuthRegistration{}, false
 }
 
 // v1ReadPaths mirrors the client's own rewrite table. It is READ from the
@@ -144,10 +175,11 @@ func collectWebCalls(t *testing.T) []webCall {
 		}
 		for _, match := range contractAPICallPattern.FindAllStringSubmatchIndex(source, -1) {
 			calls = append(calls, webCall{
-				method: source[match[2]:match[3]],
-				path:   source[match[4]:match[5]],
-				file:   path,
-				line:   1 + strings.Count(source[:match[0]], "\n"),
+				method:     source[match[2]:match[3]],
+				path:       source[match[4]:match[5]],
+				file:       path,
+				line:       1 + strings.Count(source[:match[0]], "\n"),
+				contracted: true,
 			})
 		}
 		return nil
@@ -159,6 +191,91 @@ func collectWebCalls(t *testing.T) []webCall {
 		t.Fatal("no api() calls found — the extractor is broken, not the frontend")
 	}
 	return calls
+}
+
+// TestEveryContractClientOperationMatchesAllSources closes the full static
+// parity chain for the typed React lane:
+//
+// React contractApi call -> real Go mux -> centralized authorization ->
+// OpenAPI -> all three generated request/response/status maps.
+//
+// Legacy api() calls remain covered by the router and Vite tests above while
+// they are migrated incrementally; a new contract-first product surface must
+// use contractApi and therefore cannot bypass any link in this chain.
+func TestEveryContractClientOperationMatchesAllSources(t *testing.T) {
+	mux := http.NewServeMux()
+	(&V1Server{}).mountAPIRoutes(mux)
+
+	rawOpenAPI, err := os.ReadFile(openAPIFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", openAPIFile, err)
+	}
+	var document struct {
+		Paths map[string]map[string]json.RawMessage `json:"paths"`
+	}
+	if err := json.Unmarshal(rawOpenAPI, &document); err != nil {
+		t.Fatalf("parse %s: %v", openAPIFile, err)
+	}
+	generated, err := os.ReadFile(generatedAPIClientFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", generatedAPIClientFile, err)
+	}
+
+	versioned := v1ReadPaths(t)
+	seen := map[string]bool{}
+	var failures []string
+	contractedCalls := 0
+	for _, call := range collectWebCalls(t) {
+		if !call.contracted {
+			continue
+		}
+		contractedCalls++
+		operation := call.method + " " + call.path
+		if seen[operation] {
+			continue
+		}
+		seen[operation] = true
+
+		wire := wirePath(call, versioned)
+		request := httptest.NewRequest(call.method, wire, nil)
+		_, pattern := mux.Handler(request)
+		if pattern == "" {
+			failures = append(failures, operation+": no Go route")
+			continue
+		}
+		wireAuth, wireRegistered := centralAuthForPattern(pattern)
+		if !wireRegistered {
+			failures = append(failures, operation+": Go pattern "+pattern+" has no central authorization registration")
+		}
+		canonicalWire := wire
+		if !strings.HasPrefix(canonicalWire, "/v1/") {
+			canonicalWire = "/v1" + canonicalWire
+		}
+		canonicalRequest := httptest.NewRequest(call.method, canonicalWire, nil)
+		_, canonicalPattern := mux.Handler(canonicalRequest)
+		if canonicalPattern == "" {
+			failures = append(failures, operation+": OpenAPI /v1 route is not mounted")
+		} else if canonicalAuth, registered := centralAuthForPattern(canonicalPattern); !registered {
+			failures = append(failures, operation+": OpenAPI /v1 pattern "+canonicalPattern+" has no central authorization registration")
+		} else if wireRegistered && canonicalAuth != wireAuth {
+			failures = append(failures, operation+": compatibility and /v1 routes use different authorization registrations")
+		}
+		pathItem, declaredPath := document.Paths[call.path]
+		if !declaredPath || pathItem[strings.ToLower(call.method)] == nil {
+			failures = append(failures, operation+": missing from OpenAPI")
+		}
+		declaration := "\n  " + strconv.Quote(operation) + ":"
+		if count := strings.Count(string(generated), declaration); count != 3 {
+			failures = append(failures, operation+": generated client declarations="+strconv.Itoa(count)+", want 3")
+		}
+	}
+	if contractedCalls == 0 {
+		t.Fatal("no contractApi calls found — the full parity extractor is broken")
+	}
+	if len(failures) > 0 {
+		sort.Strings(failures)
+		t.Fatalf("typed React contract drift:\n   %s", strings.Join(failures, "\n   "))
+	}
 }
 
 // wirePath applies the two transformations the client applies before the
@@ -173,10 +290,46 @@ func wirePath(call webCall, versioned map[string]bool) string {
 	// something concrete so a wildcard segment can match it.
 	path = templateSegment.ReplaceAllString(path, "x")
 	path = routeParamSegment.ReplaceAllString(path, "x")
-	if call.method == "GET" && versioned[path] {
+	if call.method == "GET" && matchesCatalogPath(versioned, path) {
 		return "/v1" + path
 	}
 	return path
+}
+
+// matchesCatalogPath mirrors web/src/lib/api-contract.ts: literal entries
+// match exactly and {param} segments match one non-empty concrete segment.
+// Without this, typed dynamic reads can exist in the catalog yet the parity
+// test exercises their unversioned (and therefore nonexistent) path.
+func matchesCatalogPath(catalog map[string]bool, path string) bool {
+	if catalog[path] {
+		return true
+	}
+	actual := strings.Split(path, "/")
+	for template := range catalog {
+		expected := strings.Split(template, "/")
+		if len(expected) != len(actual) {
+			continue
+		}
+		matched := true
+		for index := range expected {
+			segment := expected[index]
+			if strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}") {
+				if actual[index] == "" {
+					matched = false
+					break
+				}
+				continue
+			}
+			if segment != actual[index] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 // TestEveryWebPathResolvesToARegisteredRoute is the parity guard.

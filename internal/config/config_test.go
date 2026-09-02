@@ -111,6 +111,20 @@ func TestProductionEnvironmentIsExplicit(t *testing.T) {
 	}
 }
 
+func TestProductionRejectsLocalSimulatorGates(t *testing.T) {
+	for _, name := range []string{"JANUSLY_LOCAL_STACK", "JANUSLY_LOCAL_INTEGRATION_SIMULATOR"} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(env(map[string]string{
+				"JANUSLY_ENV": "production",
+				name:          "true",
+			}))
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("production must reject %s: %v", name, err)
+			}
+		})
+	}
+}
+
 func TestLoadAggregatesEveryProblem(t *testing.T) {
 	_, err := Load(env(map[string]string{
 		"JANUSLY_PORT":    "0",

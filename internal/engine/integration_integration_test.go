@@ -159,6 +159,7 @@ func TestIntegrationChokepoint(t *testing.T) {
 		t.Fatalf("github tenant rate limit: %d", got)
 	}
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", receiver.URL)
 	githubResult := tools.ExecuteIntegrationTool(ctx, "github.create_issue", map[string]any{
 		"credential": "bot-github", "owner": "acme", "repo": "incidents", "title": "Incident",
@@ -202,6 +203,26 @@ func TestIntegrationChokepoint(t *testing.T) {
 	if !limited {
 		t.Fatal("rate limit never bit")
 	}
+
+	// Expiry is checked again at the final effect chokepoint. A workflow saved
+	// while the credential was valid cannot keep using its secret afterward.
+	mu.Lock()
+	receivedBeforeExpiry := received
+	mu.Unlock()
+	if _, err := pool.Exec(ctx, `UPDATE credentials SET expires_at=$1 WHERE org_id=$2 AND id=$3`,
+		eng.now().UTC().Add(-time.Second), org, credID); err != nil {
+		t.Fatalf("expire credential: %v", err)
+	}
+	expired := tools.ExecuteIntegrationTool(ctx, "webhook.send", input, deps)
+	if expired["ok"] != false || expired["error"] != "credential expired: partner-hook" {
+		t.Fatalf("expired credential: %+v", expired)
+	}
+	mu.Lock()
+	if received != receivedBeforeExpiry {
+		mu.Unlock()
+		t.Fatalf("expired credential reached provider: before=%d after=%d", receivedBeforeExpiry, received)
+	}
+	mu.Unlock()
 
 	// Usage rows: one per call (success + failures + limited).
 	var usageRows int

@@ -5,6 +5,7 @@ package secretstore
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -205,6 +206,10 @@ func TestSecretStoreRootKeyPosture(t *testing.T) {
 	if got := ResolveCredentialSecretRef(ctx, q, org, secretRef); got != "" {
 		t.Fatalf("missing key must fail closed: %q", got)
 	}
+	if got, err := ResolveCredentialSecretRefWithError(ctx, q, org, secretRef); got != "" ||
+		!errors.Is(err, ErrResolutionUnavailable) {
+		t.Fatalf("error-bearing resolution must classify missing root authority: %q %v", got, err)
+	}
 	// And a write without a key surfaces the sentinel.
 	if _, _, _, err := CreateCredentialSecretVersion(ctx, q, struct {
 		ID           string
@@ -214,5 +219,17 @@ func TestSecretStoreRootKeyPosture(t *testing.T) {
 		CreatedBy    string
 	}{OrgID: org, CredentialID: credID, SecretValue: "nope"}); err != ErrRootKeyMissing {
 		t.Fatalf("keyless write must refuse: %v", err)
+	}
+}
+
+func TestSecretStoreDetailedResolutionClassifiesStoreFailure(t *testing.T) {
+	pool, q := poolAndQueries(t)
+	pool.Close()
+	value, err := ResolveCredentialSecretRefWithError(
+		context.Background(), q, "org-store-down",
+		"janusly-secret://00000000-0000-4000-8000-000000000001",
+	)
+	if value != "" || !errors.Is(err, ErrResolutionUnavailable) {
+		t.Fatalf("closed store resolution = %q, %v", value, err)
 	}
 }

@@ -26,7 +26,15 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 
 	type nodeFact struct {
 		ID, Type, Tool, MCP, Subworkflow string
-		HTTPWrite                        bool
+		ToolWrite, MCPWrite, HTTPWrite   bool
+	}
+	builtinWrite := map[string]bool{}
+	for _, entry := range catalog.BuiltinTools {
+		builtinWrite[entry.Name] = entry.WriteSide
+	}
+	mcpWrite := map[string]bool{}
+	for _, entry := range catalog.McpTools {
+		mcpWrite[entry.ConnectionAlias+"/"+entry.ToolName] = entry.WriteSide
 	}
 	facts := make([]nodeFact, 0, len(workflow.Nodes))
 	for _, node := range workflow.Nodes {
@@ -34,8 +42,16 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 		switch node.Type {
 		case "tool":
 			fact.Tool = trimmedString(node.Config["tool"])
+			fact.ToolWrite = builtinWrite[fact.Tool]
+			if fact.Tool == "http.request" {
+				input, _ := node.Config["input"].(map[string]any)
+				method := strings.ToUpper(trimmedString(input["method"]))
+				fact.HTTPWrite = method != "" && method != "GET" && method != "HEAD" && method != "OPTIONS"
+				fact.ToolWrite = fact.HTTPWrite
+			}
 		case "mcp_tool":
 			fact.MCP = trimmedString(node.Config["connectionAlias"]) + "/" + trimmedString(node.Config["toolName"])
+			fact.MCPWrite = mcpWrite[fact.MCP]
 		case "subworkflow":
 			fact.Subworkflow = trimmedString(node.Config["workflowId"])
 		case "http":
@@ -47,12 +63,12 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 
 	addResolved := func(binding Binding) {
 		if !hasBinding(report.Resolved, binding.Kind, binding.Field, binding.Requested) {
-			report.Resolved = append(report.Resolved, binding)
+			report.Resolved = append(report.Resolved, bindingForWire(binding))
 		}
 	}
 	addMissing := func(binding Binding) {
 		if !hasBinding(report.Missing, binding.Kind, binding.Field, binding.Requested) {
-			report.Missing = append(report.Missing, binding)
+			report.Missing = append(report.Missing, bindingForWire(binding))
 		}
 		report.Complete = false
 	}
@@ -74,7 +90,7 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 
 	triggerTypes := map[string]string{
 		"schedule": "schedule", "webhook": "webhook_received", "email": "email_received",
-		"file": "file_dropped", "mcp_event": "mcp_server_event",
+		"file": "file_dropped", "mcp_event": "mcp_server_event", "pagerduty": "pagerduty_incident",
 	}
 	if brief.Trigger != "" && brief.Trigger != "manual" {
 		if nodeType, supported := triggerTypes[brief.Trigger]; supported {
@@ -98,8 +114,104 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 			require("intent_effect", "brief.externalEffects", effect, []string{"db.query.write", "db.query.transaction"}, func(f nodeFact) bool {
 				return f.Tool == "db.query.write" || f.Tool == "db.query.transaction"
 			})
+		case "pagerduty_acknowledge":
+			require("intent_effect", "brief.externalEffects", effect, []string{"pagerduty.incident.acknowledge"}, func(f nodeFact) bool {
+				return f.Tool == "pagerduty.incident.acknowledge"
+			})
+		case "pagerduty_snooze":
+			require("intent_effect", "brief.externalEffects", effect, []string{"pagerduty.incident.snooze"}, func(f nodeFact) bool {
+				return f.Tool == "pagerduty.incident.snooze"
+			})
+		case "sheet_append":
+			require("intent_effect", "brief.externalEffects", effect, []string{"sheet.append"}, func(f nodeFact) bool {
+				return f.Tool == "sheet.append"
+			})
+		case "vector_memory_write":
+			require("intent_effect", "brief.externalEffects", effect, []string{"vector.upsert"}, func(f nodeFact) bool {
+				return f.Tool == "vector.upsert"
+			})
+		case "pdf_generation":
+			require("intent_effect", "brief.externalEffects", effect, []string{"pdf.generate"}, func(f nodeFact) bool {
+				return f.Tool == "pdf.generate"
+			})
+		case "mcp_write":
+			require("intent_effect", "brief.externalEffects", effect, sortedMcpNames(catalog), func(f nodeFact) bool {
+				return f.MCPWrite
+			})
 		default:
-			addMissing(Binding{Kind: "intent_effect", Field: "brief.externalEffects", Requested: effect, Alternatives: []string{}, Reason: "requested_effect_not_supported"})
+			switch {
+			case strings.HasPrefix(effect, "tool:"):
+				name := strings.TrimSpace(strings.TrimPrefix(effect, "tool:"))
+				require("intent_effect", "brief.externalEffects", effect, []string{name}, func(f nodeFact) bool {
+					return f.Tool == name && f.ToolWrite
+				})
+			case strings.HasPrefix(effect, "mcp:"):
+				identifier := strings.TrimSpace(strings.TrimPrefix(effect, "mcp:"))
+				require("intent_effect", "brief.externalEffects", effect, []string{identifier}, func(f nodeFact) bool {
+					return f.MCP == identifier && f.MCPWrite
+				})
+			case strings.HasPrefix(effect, "subworkflow:"):
+				workflowID := strings.TrimSpace(strings.TrimPrefix(effect, "subworkflow:"))
+				require("intent_effect", "brief.externalEffects", effect, []string{workflowID}, func(f nodeFact) bool {
+					return workflowID != "" && f.Subworkflow == workflowID
+				})
+			default:
+				addMissing(Binding{Kind: "intent_effect", Field: "brief.externalEffects", Requested: effect, Alternatives: []string{}, Reason: "requested_effect_not_supported"})
+			}
+		}
+	}
+	declaredEffects := make(map[string]bool, len(brief.ExternalEffects))
+	for _, effect := range brief.ExternalEffects {
+		declaredEffects[effect] = true
+	}
+	for _, fact := range facts {
+		proposedEffect := ""
+		switch fact.Tool {
+		case "slack.post":
+			proposedEffect = "slack_message"
+		case "github.create_issue":
+			proposedEffect = "github_issue"
+		case "email.send":
+			proposedEffect = "email_delivery"
+		case "webhook.send":
+			proposedEffect = "outbound_webhook"
+		case "db.query.write", "db.query.transaction":
+			proposedEffect = "database_write"
+		case "pagerduty.incident.acknowledge":
+			proposedEffect = "pagerduty_acknowledge"
+		case "pagerduty.incident.snooze":
+			proposedEffect = "pagerduty_snooze"
+		case "sheet.append":
+			proposedEffect = "sheet_append"
+		case "vector.upsert":
+			proposedEffect = "vector_memory_write"
+		case "pdf.generate":
+			proposedEffect = "pdf_generation"
+		}
+		if proposedEffect == "" && fact.HTTPWrite {
+			proposedEffect = "outbound_webhook"
+		}
+		if proposedEffect == "" && fact.MCPWrite {
+			proposedEffect = "mcp_write"
+		}
+		if proposedEffect == "" && fact.ToolWrite {
+			// Future registered write tools fail closed until the operator names
+			// their exact capability as externalEffects: ["tool:<name>"].
+			proposedEffect = "tool:" + fact.Tool
+		}
+		if proposedEffect == "" && fact.Subworkflow != "" {
+			// A subworkflow is a delegation boundary: following latest can change
+			// its transitive effects after this proposal was reviewed, and a pinned
+			// child can still perform writes hidden from the parent graph. Require
+			// the exact child id in the Intent Brief rather than trying to infer
+			// mutable transitive authority from a bounded catalog projection.
+			proposedEffect = "subworkflow:" + fact.Subworkflow
+		}
+		if proposedEffect != "" && !declaredEffects[proposedEffect] {
+			addMissing(Binding{
+				Kind: "proposal_effect", NodeID: fact.ID, Field: "brief.externalEffects",
+				Requested: proposedEffect, Alternatives: []string{proposedEffect}, Reason: "proposed_effect_not_declared",
+			})
 		}
 	}
 	if len(brief.Approvals) > 0 {

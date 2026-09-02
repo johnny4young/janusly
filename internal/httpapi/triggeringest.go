@@ -126,7 +126,7 @@ func (s *V1Server) emailIngestCore(r *http.Request, rc v1Request) opResult {
 	q := store.New(s.pool)
 
 	var body emailIngestBody
-	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, emailIngestMaxJSONBytes)).Decode(&body); err != nil {
+	if err := decodeBodyBounded(r, &body, emailIngestMaxJSONBytes); err != nil {
 		return opError(http.StatusBadRequest, "trigger_invalid_payload", "Invalid email payload", nil)
 	}
 	aliasKey := strings.TrimSpace(body.AliasKey)
@@ -158,7 +158,7 @@ func (s *V1Server) emailIngestCore(r *http.Request, rc v1Request) opResult {
 		return strings.EqualFold(strings.TrimSpace(configured), aliasKey)
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if ambiguous {
 		return opError(http.StatusConflict, "trigger_selector_ambiguous", "Multiple active workflows use this email alias", nil)
@@ -328,7 +328,7 @@ func (s *V1Server) fileIngestCore(r *http.Request, rc v1Request) opResult {
 	ctx := r.Context()
 	q := store.New(s.pool)
 	var body fileIngestBody
-	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, triggerIngestMaxJSONBytes)).Decode(&body); err != nil {
+	if err := decodeBodyBounded(r, &body, triggerIngestMaxJSONBytes); err != nil {
 		return opError(http.StatusBadRequest, "trigger_invalid_payload", "Invalid file-dropped payload", nil)
 	}
 	bucket := strings.TrimSpace(body.Bucket)
@@ -369,7 +369,7 @@ func (s *V1Server) fileIngestCore(r *http.Request, rc v1Request) opResult {
 		return true
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if ambiguous {
 		return opError(http.StatusConflict, "trigger_selector_ambiguous", "Multiple active workflows match this file selector", nil)
@@ -419,7 +419,7 @@ func (s *V1Server) mcpIngestCore(r *http.Request, rc v1Request) opResult {
 	ctx := r.Context()
 	q := store.New(s.pool)
 	var body mcpIngestBody
-	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, triggerIngestMaxJSONBytes)).Decode(&body); err != nil {
+	if err := decodeBodyBounded(r, &body, triggerIngestMaxJSONBytes); err != nil {
 		return opError(http.StatusBadRequest, "trigger_invalid_payload", "Invalid MCP server-event payload", nil)
 	}
 	alias := strings.TrimSpace(body.ConnectionAlias)
@@ -458,7 +458,7 @@ func (s *V1Server) mcpIngestCore(r *http.Request, rc v1Request) opResult {
 		return true
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if ambiguous {
 		return opError(http.StatusConflict, "trigger_selector_ambiguous", "Multiple active workflows match this MCP event selector", nil)

@@ -131,7 +131,7 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'running';
 
 -- name: GetRunExecution :one
-SELECT status, org_id, input_json, replay_mode FROM runs WHERE id = $1;
+SELECT status, org_id, workflow_version_id, input_json, replay_mode FROM runs WHERE id = $1;
 
 -- input_json carries the whole workflow snapshot, so the callers that only
 -- need to know whether this is a sandbox replay must not pay to transfer
@@ -277,9 +277,12 @@ WHERE run_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
 
--- Run summaries for the list surface: workflow identity joined through the
+-- Run summaries for the list surface: saved identity joins through the exact
 
--- version snapshot, the waiting-node flag the Activity UI reads, the
+-- version snapshot; honest ad-hoc runs retain only their submitted display id
+-- from the frozen input snapshot (or their run-scoped identity when unnamed).
+-- This grouping identity never makes an ad-hoc run count as a saved version.
+-- The waiting-node flag is what the Activity UI reads, with the
 
 -- (created_at, id) keyset the web walks via `before=<iso>|<id>` cursors, and
 
@@ -291,7 +294,9 @@ SELECT r.id, r.org_id, r.workflow_version_id, r.status,
        r.validation_evidence_level, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
        r.created_at, r.trace_id,
-       coalesce(wv.workflow_id, r.workflow_version_id) AS workflow_id,
+       coalesce(wv.workflow_id,
+                nullif(r.input_json->'workflow'->>'id', ''),
+                r.workflow_version_id) AS workflow_id,
        coalesce((r.input_json->'workflow'->>'name')::text, '') AS workflow_name,
        EXISTS (
          SELECT 1 FROM run_nodes rn
@@ -304,7 +309,10 @@ WHERE r.org_id = $1
   AND (r.created_at, r.id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
   AND (sqlc.narg(filter_workflow_id)::text IS NULL
        OR wv.workflow_id = sqlc.narg(filter_workflow_id)
-       OR (wv.id IS NULL AND r.workflow_version_id = sqlc.narg(filter_workflow_id)))
+       OR (wv.id IS NULL AND coalesce(
+             nullif(r.input_json->'workflow'->>'id', ''),
+             r.workflow_version_id
+           ) = sqlc.narg(filter_workflow_id)))
   AND (sqlc.narg(filter_status)::text IS NULL OR r.status = sqlc.narg(filter_status))
 ORDER BY r.created_at DESC, r.id DESC
 LIMIT sqlc.arg(page_limit);

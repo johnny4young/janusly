@@ -557,11 +557,11 @@ func TestWorkflowReadSurfaces(t *testing.T) {
 		"id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus",
 		"runCount", "bufferedTriggerCount", "status", "pausedReason",
 		"tags", "folder", "deletedAt")
-	// The contract counts ONLY version-linked runs — a doc-posted
-	// ad-hoc run (this test's start) never counts, exactly like Node. The
-	// counted case lives in TestVersionAttributionSemantics.
-	if row["runCount"] != float64(0) || row["lastRunStatus"] != nil {
-		t.Fatalf("doc-posted runs must not count (contract semantics): %v", row)
+	// Exact copies posted by older clients auto-bind to the latest immutable
+	// version. They therefore count as saved workflow traffic; an edited draft
+	// remains ad-hoc and is covered by TestVersionAttributionSemantics.
+	if row["runCount"] != float64(1) || row["lastRunStatus"] != "succeeded" {
+		t.Fatalf("content-bound saved run must count: %v", row)
 	}
 
 	// Latest: nullable contract — a version row with the full key set here.
@@ -586,13 +586,36 @@ func TestWorkflowReadSurfaces(t *testing.T) {
 		t.Fatalf("versions must list newest first: %v", items)
 	}
 
+	// Exact version: one bounded snapshot, cryptographically bound by the
+	// workflow/version pair rather than an unbounded client-side history scan.
+	exactVersionID := version["id"].(string)
+	exact := h.call("GET", "/v1/workflows/versions/"+exactVersionID+"?workflowId="+workflowID, nil, "")
+	requireEnvelope(t, exact)
+	snapshot := exact.body["data"].(map[string]any)
+	requireKeys(t, snapshot, "id", "workflowId", "version", "dagJson")
+	if snapshot["id"] != exactVersionID || snapshot["workflowId"] != workflowID ||
+		snapshot["version"] != float64(2) {
+		t.Fatalf("exact workflow version binding drifted: %v", snapshot)
+	}
+	if snapshot["dagJson"].(map[string]any)["id"] != workflowID {
+		t.Fatalf("exact workflow version returned the wrong DAG: %v", snapshot)
+	}
+
 	// Guards: missing param names the field; unknown id is workflow_not_found.
 	requireError(t, h.call("GET", "/v1/workflows/latest", nil, ""),
 		400, "invalid_input", "Invalid request body")
 	requireError(t, h.call("GET", "/v1/workflows/versions?workflowId=ghost", nil, ""),
 		404, "workflow_not_found", "Workflow not found")
+	requireError(t, h.call("GET", "/v1/workflows/versions/ghost?workflowId="+workflowID, nil, ""),
+		404, "workflow_version_not_found", "Workflow version not found")
+	requireError(t, h.call("GET", "/v1/workflows/versions/"+strings.Repeat("x", 257)+"?workflowId="+workflowID, nil, ""),
+		400, "invalid_input", "Invalid request body")
+	requireError(t, h.call("GET", "/v1/workflows/versions/"+exactVersionID+"?workflowId="+strings.Repeat("x", 257), nil, ""),
+		400, "invalid_input", "Invalid request body")
 	// Cross-org: the workflow simply does not exist for another tenant.
 	requireError(t, h.call("GET", "/v1/workflows/latest?workflowId="+workflowID, nil, h.org+"-x"),
+		404, "workflow_not_found", "Workflow not found")
+	requireError(t, h.call("GET", "/v1/workflows/versions/"+exactVersionID+"?workflowId="+workflowID, nil, h.org+"-x"),
 		404, "workflow_not_found", "Workflow not found")
 }
 

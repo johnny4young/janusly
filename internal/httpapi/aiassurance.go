@@ -211,6 +211,7 @@ func recoveryEffectForNode(typeName string, config map[string]any) (kind, receip
 		}
 		if toolName == "db.query.write" || toolName == "db.query.transaction" ||
 			toolName == "vector.upsert" || toolName == "github.create_issue" ||
+			toolName == "pagerduty.incident.acknowledge" || toolName == "pagerduty.incident.snooze" ||
 			strings.HasSuffix(toolName, ".write") || strings.HasSuffix(toolName, ".create") ||
 			strings.HasSuffix(toolName, ".delete") || strings.HasSuffix(toolName, ".update") {
 			return "external_write", "runtime", true

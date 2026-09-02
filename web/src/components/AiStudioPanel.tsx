@@ -7,7 +7,7 @@
  * proposal into an unsaved dirty draft; save, validate, and run stay separate.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Bot,
@@ -34,6 +34,7 @@ import type {
   WorkflowImprovementResult,
   WorkflowImprovementSuggestion,
   WorkflowIntentBrief,
+  WorkflowProposalApplyOutcome,
   WorkflowProposalResponse,
 } from '../types'
 import { estimatePromptCostUsd, formatEstimateLabel } from '@/lib/llm-pricing'
@@ -50,14 +51,17 @@ const ASSUMED_TOKEN_BUDGETS: Record<'proposal' | 'explain' | 'review' | 'fix', {
   review: { input: 4_000, output: 1_500 },
   fix: { input: 5_000, output: 2_000 },
 }
+const MAX_PROPOSAL_INPUT_DEFAULTS = 12
+const MAX_PROPOSAL_INPUT_DEFAULT_CHARS = 240
+const MAX_AUTHORING_PROMPT_CHARS = 4000
 
 type AiStudioPanelProps = {
   health: AiHealth | null
   workflowName: string
   onLoadAuthoringCapabilities: () => Promise<AuthoringCapabilityCatalog>
   onCompileWorkflowBrief: (prompt: string) => Promise<WorkflowBriefCompilation>
-  onProposeWorkflow: (brief: WorkflowIntentBrief, catalogVersion: string) => Promise<WorkflowProposalResponse>
-  onApplyWorkflowProposal: (proposal: WorkflowProposalResponse) => Promise<boolean>
+  onProposeWorkflow: (brief: WorkflowIntentBrief, catalogVersion: string, sourcePrompt: string) => Promise<WorkflowProposalResponse>
+  onApplyWorkflowProposal: (proposal: WorkflowProposalResponse) => Promise<WorkflowProposalApplyOutcome>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string; aiError?: string }>
   onReviewWorkflow: () => Promise<{ mode: AiMode; review: ReviewFindings; model?: string; aiError?: string }>
   actionRequest: AiAuthoringActionRequest | null
@@ -67,7 +71,7 @@ type AiStudioPanelProps = {
   onOpenTemplates: () => void
 }
 
-type AuthoringLoading = 'catalog' | 'compile' | 'propose' | 'apply'
+type AuthoringLoading = 'compile' | 'propose' | 'apply'
 type CurrentWorkflowLoading = 'explain' | 'review' | 'fix'
 type ResultState =
   | { kind: 'explanation'; mode: AiMode; title: string; body: string; aiError?: string }
@@ -90,13 +94,49 @@ const SIGNAL_COPY_KEYS: Record<string, string> = {
   readiness_warning: 'aiStudio.proposal.signal.readinessWarning',
 }
 
+const CATALOG_WARNING_COPY: Record<string, [string, string]> = {
+  mcp_tools_unavailable: ['aiStudio.catalog.mcp', 'recoveryCase.autonomy.unavailable'],
+  mcp_tools_truncated: ['aiStudio.catalog.mcp', 'home.health.unavailable'],
+  credentials_unavailable: ['aiStudio.catalog.credentials', 'recoveryCase.autonomy.unavailable'],
+  credentials_truncated: ['aiStudio.catalog.credentials', 'home.health.unavailable'],
+  subworkflows_unavailable: ['aiStudio.catalog.workflows', 'recoveryCase.autonomy.unavailable'],
+  subworkflows_truncated: ['aiStudio.catalog.workflows', 'home.health.unavailable'],
+}
+
 function totalCatalogCapabilities(catalog: AuthoringCapabilityCatalog): number {
   return catalog.builtinTools.length
-    + catalog.mcpTools.length
+    + catalog.mcpTools.filter((tool) => (
+      tool.connectionAlias !== '_truncated' && tool.toolName !== '_truncated'
+    )).length
     + catalog.triggers.length
     + catalog.credentials.length
     + catalog.subworkflows.length
     + catalog.primitives.length
+}
+
+function formatAuthoringDuration(milliseconds: number | null): string {
+  if (milliseconds === null) return '—'
+  if (milliseconds < 100) return '< 0.1 s'
+  return `${(milliseconds / 1000).toFixed(1)} s`
+}
+
+function formatWorkflowInputDefault(value: unknown): string {
+  let formatted: string
+  if (typeof value === 'string') {
+    formatted = value || '""'
+  } else if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+    formatted = String(value)
+  } else {
+    try {
+      formatted = JSON.stringify(value) ?? '—'
+    } catch {
+      formatted = '—'
+    }
+  }
+  const characters = Array.from(formatted)
+  return characters.length > MAX_PROPOSAL_INPUT_DEFAULT_CHARS
+    ? `${characters.slice(0, MAX_PROPOSAL_INPUT_DEFAULT_CHARS).join('')}…`
+    : formatted
 }
 
 export function AiStudioPanel({
@@ -116,35 +156,91 @@ export function AiStudioPanel({
 }: AiStudioPanelProps) {
   const { t, i18n } = useT()
   const locale = i18n.resolvedLanguage
-  const starterPrompts = [
+  const starterPrompts = useMemo(() => [
     t('aiStudio.starter1'),
     t('aiStudio.starter2'),
     t('aiStudio.starter3'),
-  ]
+  ], [locale, t])
+  const primaryStarterPrompt = starterPrompts[0]
 
-  const [prompt, setPrompt] = useState(starterPrompts[0])
+  const [prompt, setPrompt] = useState(primaryStarterPrompt)
   const [catalog, setCatalog] = useState<AuthoringCapabilityCatalog | null>(null)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [briefCompilation, setBriefCompilation] = useState<WorkflowBriefCompilation | null>(null)
   const [proposal, setProposal] = useState<WorkflowProposalResponse | null>(null)
   const [authoringError, setAuthoringError] = useState<string | null>(null)
-  const [authoringLoading, setAuthoringLoading] = useState<AuthoringLoading | null>('catalog')
+  const [catalogLoading, setCatalogLoading] = useState(true)
+  const [authoringLoading, setAuthoringLoading] = useState<AuthoringLoading | null>(null)
   const [applied, setApplied] = useState(false)
+  const [briefCompileMs, setBriefCompileMs] = useState<number | null>(null)
+  const [proposalBuildMs, setProposalBuildMs] = useState<number | null>(null)
   const [currentLoading, setCurrentLoading] = useState<CurrentWorkflowLoading | null>(null)
   const [result, setResult] = useState<ResultState | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
+  const starterPromptsRef = useRef(starterPrompts)
+  const authoringRequestRef = useRef(0)
+  const applyRequestRef = useRef(0)
+  const currentRequestRef = useRef(0)
   const processedRequestRef = useRef<number | null>(null)
-  const skipNextWorkflowResetRef = useRef(false)
+  const expectedAppliedWorkflowIDRef = useRef<string | null>(null)
+  const proposalSourceRef = useRef<{ workflowId: string; revision: number } | null>(null)
   const requestedActionHandlersRef = useRef<{
     explain: () => Promise<void>
     review: () => Promise<void>
     fix: () => Promise<void>
   } | null>(null)
   const currentWorkflowId = useWorkflowStore((state) => state.currentWorkflowId)
+  const workflowRevision = useWorkflowStore((state) => state.workflowRevision)
+  const orgId = useWorkflowStore((state) => state.orgId)
+  const userId = useWorkflowStore((state) => state.userId)
+  const identityScope = `${orgId ?? ''}\u0000${userId ?? ''}`
+  const previousIdentityScopeRef = useRef(identityScope)
+
+  // AI authoring state can contain tenant capability names and operator prose.
+  // Clear it synchronously before paint when the authenticated identity or org
+  // changes so neither data nor an actionable old catalog crosses the boundary.
+  useLayoutEffect(() => {
+    if (previousIdentityScopeRef.current === identityScope) return
+    previousIdentityScopeRef.current = identityScope
+    authoringRequestRef.current += 1
+    applyRequestRef.current += 1
+    currentRequestRef.current += 1
+    expectedAppliedWorkflowIDRef.current = null
+    proposalSourceRef.current = null
+    setPrompt(primaryStarterPrompt)
+    setBriefCompilation(null)
+    setProposal(null)
+    setResult(null)
+    setBriefCompileMs(null)
+    setProposalBuildMs(null)
+    setAuthoringLoading(null)
+    setCurrentLoading(null)
+    setAuthoringError(null)
+    setApplied(false)
+  }, [identityScope, primaryStarterPrompt])
 
   useEffect(() => {
+    if (authoringLoading !== null) return
+    const previousStarters = starterPromptsRef.current
+    starterPromptsRef.current = starterPrompts
+    const selectedStarterIndex = previousStarters.indexOf(prompt)
+    const nextStarter = starterPrompts[selectedStarterIndex]
+    if (selectedStarterIndex < 0 || !nextStarter || nextStarter === prompt) return
+    authoringRequestRef.current += 1
+    setPrompt(nextStarter)
+    setBriefCompilation(null)
+    setProposal(null)
+    setBriefCompileMs(null)
+    setProposalBuildMs(null)
+    setApplied(false)
+    setAuthoringError(null)
+    setAuthoringLoading(null)
+  }, [authoringLoading, prompt, starterPrompts])
+
+  useLayoutEffect(() => {
     let active = true
-    setAuthoringLoading('catalog')
+    setCatalog(null)
+    setCatalogLoading(true)
     setCatalogError(null)
     void onLoadAuthoringCapabilities()
       .then((nextCatalog) => {
@@ -154,23 +250,28 @@ export function AiStudioPanel({
         if (active) setCatalogError(error instanceof Error ? error.message : t('aiStudio.catalog.loadFailed'))
       })
       .finally(() => {
-        if (active) setAuthoringLoading((loading) => loading === 'catalog' ? null : loading)
+        if (active) setCatalogLoading(false)
       })
     return () => { active = false }
-  }, [onLoadAuthoringCapabilities, t])
+  }, [identityScope, onLoadAuthoringCapabilities, t])
 
-  // Proposals include a diff against the active canvas. Switching workflows
-  // invalidates that diff and every analysis of the old flow.
+  // Proposals include a diff against the active canvas. Switching workflows or
+  // editing the current canvas invalidates that diff and every prior analysis.
   useEffect(() => {
+    const expectedAppliedWorkflowID = expectedAppliedWorkflowIDRef.current
+    const isExpectedApply = expectedAppliedWorkflowID !== null && expectedAppliedWorkflowID === currentWorkflowId
+    expectedAppliedWorkflowIDRef.current = null
+    authoringRequestRef.current += 1
+    currentRequestRef.current += 1
+    if (!isExpectedApply) applyRequestRef.current += 1
+    setAuthoringLoading((loading) => isExpectedApply && loading === 'apply' ? loading : null)
+    setCurrentLoading(null)
     setResult(null)
     setProposal(null)
+    proposalSourceRef.current = null
     setAuthoringError(null)
-    if (skipNextWorkflowResetRef.current) {
-      skipNextWorkflowResetRef.current = false
-      return
-    }
-    setApplied(false)
-  }, [currentWorkflowId])
+    if (!isExpectedApply) setApplied(false)
+  }, [currentWorkflowId, workflowRevision])
 
   const healthLabel = health?.enabled ? t('aiStudio.healthOn') : t('aiStudio.healthOff')
   const healthDetail = health?.enabled
@@ -243,55 +344,108 @@ export function AiStudioPanel({
   const compileBrief = async () => {
     const trimmed = prompt.trim()
     if (!trimmed) return
+    const requestID = ++authoringRequestRef.current
+    const startedAt = performance.now()
     setAuthoringLoading('compile')
     setAuthoringError(null)
+    setBriefCompilation(null)
+    setBriefCompileMs(null)
     setProposal(null)
+    setProposalBuildMs(null)
     setApplied(false)
     try {
-      setBriefCompilation(await onCompileWorkflowBrief(trimmed))
+      const compiled = await onCompileWorkflowBrief(trimmed)
+      if (authoringRequestRef.current !== requestID) return
+      setBriefCompilation(compiled)
+      setBriefCompileMs(Math.max(0, Math.round(performance.now() - startedAt)))
     } catch (error) {
+      if (authoringRequestRef.current !== requestID) return
       setAuthoringError(error instanceof Error ? error.message : t('aiStudio.brief.failed'))
     } finally {
-      setAuthoringLoading(null)
+      if (authoringRequestRef.current === requestID) setAuthoringLoading(null)
     }
   }
 
   const buildProposal = async () => {
     if (!briefCompilation || !catalog) return
+    const source = useWorkflowStore.getState()
+    const sourceWorkflow = { workflowId: source.currentWorkflowId, revision: source.workflowRevision }
+    const requestID = ++authoringRequestRef.current
+    const startedAt = performance.now()
     setAuthoringLoading('propose')
     setAuthoringError(null)
     setProposal(null)
+    setProposalBuildMs(null)
     setApplied(false)
     try {
-      setProposal(await onProposeWorkflow(briefCompilation.brief, catalog.version))
+      const nextProposal = await onProposeWorkflow(briefCompilation.brief, catalog.version, prompt.trim())
+      if (authoringRequestRef.current !== requestID) return
+      const current = useWorkflowStore.getState()
+      if (current.currentWorkflowId !== sourceWorkflow.workflowId || current.workflowRevision !== sourceWorkflow.revision) return
+      proposalSourceRef.current = sourceWorkflow
+      setProposal(nextProposal)
+      setProposalBuildMs(Math.max(0, Math.round(performance.now() - startedAt)))
     } catch (error) {
+      if (authoringRequestRef.current !== requestID) return
       setAuthoringError(error instanceof Error ? error.message : t('aiStudio.proposal.failed'))
     } finally {
-      setAuthoringLoading(null)
+      if (authoringRequestRef.current === requestID) setAuthoringLoading(null)
     }
   }
 
   const applyProposal = async () => {
-    if (!proposal?.proposal.applicable || !proposal.bindings.complete) return
+    if (
+      !proposal?.proposal.applicable
+      || !proposal.bindings.complete
+      || !catalog
+      || proposal.bindings.catalogVersion !== catalog.version
+    ) return
+    const proposalToApply = proposal
+    const proposalSource = proposalSourceRef.current
+    const current = useWorkflowStore.getState()
+    if (
+      !proposalSource
+      || current.currentWorkflowId !== proposalSource.workflowId
+      || current.workflowRevision !== proposalSource.revision
+    ) {
+      proposalSourceRef.current = null
+      setProposal(null)
+      setApplied(false)
+      return
+    }
+    const expectedWorkflowID = proposalToApply.proposal.workflow.id ?? 'ui-test'
+    const requestID = ++applyRequestRef.current
     setAuthoringLoading('apply')
     setAuthoringError(null)
-    skipNextWorkflowResetRef.current = true
     try {
-      const didApply = await onApplyWorkflowProposal(proposal)
-      if (!didApply) skipNextWorkflowResetRef.current = false
-      setApplied(didApply)
+      expectedAppliedWorkflowIDRef.current = expectedWorkflowID
+      const outcome = await onApplyWorkflowProposal(proposalToApply)
+      if (applyRequestRef.current !== requestID) return
+      if (outcome.status === 'catalog_changed') setCatalog(outcome.catalog)
+      if (outcome.status !== 'applied') {
+        expectedAppliedWorkflowIDRef.current = null
+        setApplied(false)
+        return
+      }
+      setApplied(true)
     } catch (error) {
-      skipNextWorkflowResetRef.current = false
+      if (applyRequestRef.current !== requestID) return
+      expectedAppliedWorkflowIDRef.current = null
       setAuthoringError(error instanceof Error ? error.message : t('aiStudio.apply.failed'))
     } finally {
-      setAuthoringLoading(null)
+      if (applyRequestRef.current === requestID) {
+        if (expectedAppliedWorkflowIDRef.current === expectedWorkflowID) expectedAppliedWorkflowIDRef.current = null
+        setAuthoringLoading(null)
+      }
     }
   }
 
   const explain = async () => {
+    const requestID = ++currentRequestRef.current
     setCurrentLoading('explain')
     try {
       const response = await onExplainWorkflow()
+      if (currentRequestRef.current !== requestID) return
       setResult({
         kind: 'explanation',
         mode: response.mode,
@@ -302,6 +456,7 @@ export function AiStudioPanel({
         aiError: response.aiError,
       })
     } catch (error) {
+      if (currentRequestRef.current !== requestID) return
       setResult({
         kind: 'explanation',
         mode: 'error',
@@ -309,14 +464,16 @@ export function AiStudioPanel({
         body: error instanceof Error ? error.message : t('aiStudio.explanationFailedBody'),
       })
     } finally {
-      setCurrentLoading(null)
+      if (currentRequestRef.current === requestID) setCurrentLoading(null)
     }
   }
 
   const review = async () => {
+    const requestID = ++currentRequestRef.current
     setCurrentLoading('review')
     try {
       const response = await onReviewWorkflow()
+      if (currentRequestRef.current !== requestID) return
       setResult({
         kind: 'review',
         mode: response.mode,
@@ -327,6 +484,7 @@ export function AiStudioPanel({
         aiError: response.aiError,
       })
     } catch (error) {
+      if (currentRequestRef.current !== requestID) return
       setResult({
         kind: 'review',
         mode: 'error',
@@ -335,14 +493,16 @@ export function AiStudioPanel({
         aiError: error instanceof Error ? error.message : t('aiStudio.reviewFailedBody'),
       })
     } finally {
-      setCurrentLoading(null)
+      if (currentRequestRef.current === requestID) setCurrentLoading(null)
     }
   }
 
   const fix = async () => {
+    const requestID = ++currentRequestRef.current
     setCurrentLoading('fix')
     try {
       const response = await onSuggestWorkflowImprovement()
+      if (currentRequestRef.current !== requestID) return
       setResult({
         kind: 'fix',
         mode: response.mode,
@@ -351,6 +511,7 @@ export function AiStudioPanel({
         aiError: response.aiError,
       })
     } catch (error) {
+      if (currentRequestRef.current !== requestID) return
       setResult({
         kind: 'fix',
         mode: 'error',
@@ -359,7 +520,7 @@ export function AiStudioPanel({
         aiError: error instanceof Error ? error.message : t('aiStudio.fixFailedBody'),
       })
     } finally {
-      setCurrentLoading(null)
+      if (currentRequestRef.current === requestID) setCurrentLoading(null)
     }
   }
 
@@ -369,6 +530,17 @@ export function AiStudioPanel({
     if (!actionRequest || processedRequestRef.current === actionRequest.id) return
     processedRequestRef.current = actionRequest.id
     if (actionRequest.action === 'generate') {
+      const prefill = actionRequest.prompt?.trim()
+      if (prefill) {
+        authoringRequestRef.current += 1
+        setPrompt(prefill.slice(0, MAX_AUTHORING_PROMPT_CHARS))
+        setBriefCompilation(null)
+        setProposal(null)
+        setBriefCompileMs(null)
+        setProposalBuildMs(null)
+        setApplied(false)
+        setAuthoringError(null)
+      }
       promptRef.current?.focus()
       return
     }
@@ -384,9 +556,48 @@ export function AiStudioPanel({
   }
 
   const bindingComplete = Boolean(proposal?.bindings.complete)
-  const proposalApplicable = Boolean(proposal?.proposal.applicable && bindingComplete)
+  const proposalCatalogCurrent = Boolean(
+    proposal && catalog && proposal.bindings.catalogVersion === catalog.version,
+  )
+  const proposalApplicable = Boolean(
+    proposal?.proposal.applicable && bindingComplete && proposalCatalogCurrent,
+  )
+  const writeToolNames = new Set(catalog?.builtinTools.filter((tool) => tool.writeSide).map((tool) => tool.name) ?? [])
+  const writeMcpToolNames = new Set(catalog?.mcpTools.filter((tool) => tool.writeSide).map((tool) => (
+    `${tool.connectionAlias}\u0000${tool.toolName}`
+  )) ?? [])
+  const externalWriteCount = proposal?.proposal.workflow.nodes.filter((node) => (
+    (node.type === 'tool' && writeToolNames.has(String(node.config.tool ?? '')))
+    || (node.type === 'mcp_tool' && writeMcpToolNames.has(
+      `${String(node.config.connectionAlias ?? '')}\u0000${String(node.config.toolName ?? '')}`,
+    ))
+    || (node.type === 'http' && !['GET', 'HEAD', 'OPTIONS'].includes(
+      String(node.config.method ?? 'GET').toUpperCase(),
+    ))
+  )).length ?? 0
+  const assuranceLayerCount = proposal
+    ? Object.values(proposal.proposal.qualification).filter(Boolean).length
+    : 0
+  const allConfiguredInputDefaults = Object.entries(
+    proposal?.proposal.workflow.inputs?.properties ?? {},
+  ).flatMap(([name, schema]) => (
+    Object.prototype.hasOwnProperty.call(schema, 'default')
+      ? [{
+          name,
+          description: schema.description ?? '',
+          value: formatWorkflowInputDefault(schema.default),
+        }]
+      : []
+  ))
+  const configuredInputDefaults = allConfiguredInputDefaults.slice(0, MAX_PROPOSAL_INPUT_DEFAULTS)
+  const authoringElapsedMs = briefCompileMs === null || proposalBuildMs === null
+    ? null
+    : briefCompileMs + proposalBuildMs
+  const zeroCallLocalProposal = Boolean(
+    proposal?.mode === 'fallback' && !proposal.aiError && !proposal.providerGuarded,
+  )
   const authoringSteps = [
-    { label: t('aiStudio.steps.intent'), complete: Boolean(briefCompilation) },
+    { label: t('aiStudio.steps.intent'), complete: Boolean(briefCompilation?.complete) },
     { label: t('aiStudio.steps.binding'), complete: bindingComplete },
     { label: t('aiStudio.steps.proposal'), complete: Boolean(proposal) },
     { label: t('aiStudio.steps.apply'), complete: applied },
@@ -438,12 +649,17 @@ export function AiStudioPanel({
               ref={promptRef}
               className="ai-studio-prompt"
               value={prompt}
-              disabled={authoringLoading === 'compile'}
+              maxLength={MAX_AUTHORING_PROMPT_CHARS}
+              disabled={authoringLoading !== null}
               onChange={(event) => {
+                authoringRequestRef.current += 1
                 setPrompt(event.target.value)
                 setBriefCompilation(null)
                 setProposal(null)
+                setBriefCompileMs(null)
+                setProposalBuildMs(null)
                 setApplied(false)
+                setAuthoringError(null)
               }}
               placeholder={t('aiStudio.placeholder')}
             />
@@ -456,11 +672,16 @@ export function AiStudioPanel({
               key={starter}
               size="sm"
               variant="ghost"
+              disabled={authoringLoading !== null}
               onClick={() => {
+                authoringRequestRef.current += 1
                 setPrompt(starter)
                 setBriefCompilation(null)
                 setProposal(null)
+                setBriefCompileMs(null)
+                setProposalBuildMs(null)
                 setApplied(false)
+                setAuthoringError(null)
               }}
             >
               {starter.slice(0, 34)}…
@@ -474,7 +695,7 @@ export function AiStudioPanel({
             leadingIcon={<Sparkles size={16} />}
             loading={authoringLoading === 'compile'}
             loadingLabel={t('aiStudio.brief.compiling')}
-            disabled={!prompt.trim()}
+            disabled={!prompt.trim() || authoringLoading !== null}
             onClick={() => { void compileBrief() }}
           >
             {t('aiStudio.brief.compile')}
@@ -527,7 +748,7 @@ export function AiStudioPanel({
           )}
         </div>
 
-        {authoringLoading === 'catalog' && <StatusSummary title={t('aiStudio.catalog.loading')} />}
+        {catalogLoading && <StatusSummary title={t('aiStudio.catalog.loading')} />}
         {catalogError && (
           <StatusSummary
             role="alert"
@@ -549,7 +770,12 @@ export function AiStudioPanel({
                 tone="warning"
                 icon={<AlertTriangle size={16} />}
                 title={t('aiStudio.catalog.degraded')}
-                description={catalog.warnings.join(' · ')}
+                description={catalog.warnings.map((warning) => {
+                  const copy = CATALOG_WARNING_COPY[warning]
+                  return copy
+                    ? `${t(copy[0])}: ${t(copy[1])}`
+                    : warning
+                }).join(' · ')}
               />
             )}
           </>
@@ -584,7 +810,10 @@ export function AiStudioPanel({
                 </strong>
                 <span>{binding.requested ?? binding.reason ?? t('common.unknown')}</span>
                 {binding.alternatives.length > 0 && (
-                  <small>{t('aiStudio.binding.alternatives', { alternatives: binding.alternatives.join(', ') })}</small>
+                  <>
+                    <small>{t('aiStudio.binding.alternatives', { alternatives: binding.alternatives.join(', ') })}</small>
+                    <small>{t('aiStudio.brief.questions')}</small>
+                  </>
                 )}
               </article>
             ))}
@@ -612,7 +841,7 @@ export function AiStudioPanel({
             leadingIcon={<Workflow size={16} />}
             loading={authoringLoading === 'propose'}
             loadingLabel={t('aiStudio.proposal.building')}
-            disabled={!briefCompilation || !catalog}
+            disabled={!briefCompilation?.complete || !catalog || authoringLoading !== null}
             onClick={() => { void buildProposal() }}
             trailingIcon={<CostEstimateChip action="proposal" model={health?.model} />}
           >
@@ -671,6 +900,47 @@ export function AiStudioPanel({
               </div>
             </dl>
 
+            {configuredInputDefaults.length > 0 && (
+              <FormDisclosure
+                className="ai-proposal-inputs"
+                summary={`${t('aiStudio.brief.inputs')} (${allConfiguredInputDefaults.length})`}
+              >
+                <p className="helper-text">{t('aiStudio.apply.body')}</p>
+                <dl className="ai-proposal-facts">
+                  {configuredInputDefaults.map(input => (
+                    <div key={input.name}>
+                      <dt>{input.name}</dt>
+                      <dd>{input.value}</dd>
+                      {input.description && <small>{input.description}</small>}
+                    </div>
+                  ))}
+                </dl>
+                {allConfiguredInputDefaults.length > configuredInputDefaults.length && (
+                  <small>
+                    {t('dlq.bulkErrorsMore', {
+                      count: allConfiguredInputDefaults.length - configuredInputDefaults.length,
+                    })}
+                  </small>
+                )}
+              </FormDisclosure>
+            )}
+
+            <div className="ai-value-preview" data-testid="authoring-value-preview">
+              <div className="split-row">
+                <strong>{t('recoveryCenter.validation.kicker')}</strong>
+                {zeroCallLocalProposal && (
+                  <span className="mode-pill mode-pill-fallback">{t('aiStudio.proposal.localTitle')}</span>
+                )}
+              </div>
+              <dl className="ai-proposal-facts">
+                <div><dt>{t('aiStudio.proposal.build')}</dt><dd>{formatAuthoringDuration(authoringElapsedMs)}</dd></div>
+                <div><dt>{t('aiStudio.brief.effects')}</dt><dd>{externalWriteCount}</dd></div>
+                <div><dt>{t('aiStudio.assurance.heading')}</dt><dd>{assuranceLayerCount}/3</dd></div>
+                <div><dt>{t('aiStudio.binding.incomplete')}</dt><dd>{proposal.bindings.missing.length}</dd></div>
+              </dl>
+              <p className="helper-text">{t('aiStudio.apply.appliedBody')}</p>
+            </div>
+
             <div className="ai-assurance-summary" role="status" data-testid="workflow-assurance-summary">
               <span className="helper-text">{t('aiStudio.assurance.heading')}</span>
               {proposal.proposal.qualification.intent && <span className="mode-pill mode-pill-ai">{t('aiStudio.assurance.intent')}</span>}
@@ -711,7 +981,14 @@ export function AiStudioPanel({
           <strong>{t('aiStudio.apply.heading')}</strong>
           <p className="helper-text">{t('aiStudio.apply.body')}</p>
         </div>
-        {proposal && !proposalApplicable && (
+        {proposal && !proposalCatalogCurrent ? (
+          <StatusSummary
+            role="status"
+            tone="warning"
+            title={t('aiStudio.apply.blocked')}
+            description={t('aiStudio.brief.questions')}
+          />
+        ) : proposal && !proposalApplicable && (
           <StatusSummary
             role="status"
             tone="warning"
@@ -761,6 +1038,7 @@ export function AiStudioPanel({
             leadingIcon={<CheckCircle2 size={16} />}
             loading={currentLoading === 'explain'}
             loadingLabel={t('aiStudio.explaining')}
+            disabled={currentLoading !== null}
             onClick={() => { void explain() }}
             trailingIcon={<CostEstimateChip action="explain" model={health?.model} />}
           >
@@ -770,6 +1048,7 @@ export function AiStudioPanel({
             leadingIcon={<ShieldCheck size={16} />}
             loading={currentLoading === 'review'}
             loadingLabel={t('aiStudio.reviewing')}
+            disabled={currentLoading !== null}
             onClick={() => { void review() }}
             trailingIcon={<CostEstimateChip action="review" model={health?.model} />}
           >
@@ -779,6 +1058,7 @@ export function AiStudioPanel({
             leadingIcon={<Wrench size={16} />}
             loading={currentLoading === 'fix'}
             loadingLabel={t('aiStudio.fixing')}
+            disabled={currentLoading !== null}
             onClick={() => { void fix() }}
             trailingIcon={<CostEstimateChip action="fix" model={health?.model} />}
           >

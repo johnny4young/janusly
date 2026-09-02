@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 )
@@ -131,6 +130,18 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 	for _, node := range wf.Nodes {
 		allNodeIDs[node.ID] = true
 	}
+	// Router candidates must be direct successors. Build the adjacency once:
+	// rescanning the whole edge set for each router made validation quadratic
+	// for otherwise valid, body-bounded workflow documents.
+	outgoingNodeIDs := map[string]map[string]bool{}
+	for _, edge := range wf.Edges {
+		outgoing := outgoingNodeIDs[edge.From]
+		if outgoing == nil {
+			outgoing = map[string]bool{}
+			outgoingNodeIDs[edge.From] = outgoing
+		}
+		outgoing[edge.To] = true
+	}
 	nodeIDs := map[string]bool{}
 	for _, node := range wf.Nodes {
 		if nodeIDs[node.ID] {
@@ -168,12 +179,7 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 		if node.Type == "router" || node.Type == "router_llm" {
 			entries, isArray := arrayValues(node.Config["candidates"])
 			if isArray {
-				outgoing := map[string]bool{}
-				for _, edge := range wf.Edges {
-					if edge.From == node.ID {
-						outgoing[edge.To] = true
-					}
-				}
+				outgoing := outgoingNodeIDs[node.ID]
 				for _, candidate := range entries {
 					entry, ok := candidate.(map[string]any)
 					if !ok || entry == nil {
@@ -408,24 +414,35 @@ func hasCycle(nodes []Node, edges []Edge) bool {
 		visited   = 2
 	)
 	state := map[string]int{}
-	var visit func(id string) bool
-	visit = func(id string) bool {
-		switch state[id] {
-		case visiting:
-			return true
-		case visited:
-			return false
-		}
-		state[id] = visiting
-		if slices.ContainsFunc(graph[id], visit) {
-			return true
-		}
-		state[id] = visited
-		return false
+	type frame struct {
+		id   string
+		next int
 	}
 	for _, node := range nodes {
-		if visit(node.ID) {
-			return true
+		if state[node.ID] != unvisited {
+			continue
+		}
+		state[node.ID] = visiting
+		stack := []frame{{id: node.ID}}
+		for len(stack) > 0 {
+			current := &stack[len(stack)-1]
+			successors := graph[current.id]
+			if current.next >= len(successors) {
+				state[current.id] = visited
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			nextID := successors[current.next]
+			current.next++
+			switch state[nextID] {
+			case visiting:
+				return true
+			case visited:
+				continue
+			default:
+				state[nextID] = visiting
+				stack = append(stack, frame{id: nextID})
+			}
 		}
 	}
 	return false

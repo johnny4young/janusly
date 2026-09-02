@@ -6,7 +6,7 @@ import type { AppCommandsOptions } from './app-command-types'
 type IntegrationCommandDependencies = {
   openRecoveryQueue: (deadLetterId?: string) => void
   openRun: (id: string, targetTab?: ActiveTab) => Promise<void>
-  openWorkflow: (id: string) => Promise<void>
+  openWorkflow: (id: string) => Promise<boolean>
 }
 
 export function useIntegrationCommands(

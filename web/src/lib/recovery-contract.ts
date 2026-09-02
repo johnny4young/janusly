@@ -6,12 +6,18 @@
  * stay in the engine/data packages; this module is pure and browser-safe.
  */
 
-import { z } from "zod";
+import * as z from "zod/mini";
 import {
   supportsAutonomousRecovery,
   ValidationEvidenceLevelSchema,
 } from "./validation-evidence";
 import { WorkflowInputSchema } from "./value-schema";
+
+const boundedTrimmedString = (minimum: number, maximum: number) =>
+  z.string().check(z.trim(), z.minLength(minimum), z.maxLength(maximum));
+
+const boundedInt = (minimum: number, maximum: number) =>
+  z.int().check(z.minimum(minimum), z.maximum(maximum));
 
 export const RECOVERY_CONTRACT_VERSION = "1" as const;
 export const RECOVERY_CONTRACT_V2_VERSION = "2" as const;
@@ -19,7 +25,7 @@ export const RECOVERY_QUALIFICATION_DATASET_VERSION =
   "semantic-outcomes-v1" as const;
 
 export const RECOVERY_AUTONOMY_LEVELS = [0, 1, 2, 3, 4] as const;
-export const RecoveryAutonomyLevelSchema = z.union([
+export const RecoveryAutonomyLevelSchema = /* @__PURE__ */ z.union([
   z.literal(0),
   z.literal(1),
   z.literal(2),
@@ -38,7 +44,7 @@ export const RECOVERY_EVIDENCE_KINDS = [
   "effect_receipt",
   "terminal_outcome",
 ] as const;
-export const RecoveryEvidenceKindSchema = z.enum(
+export const RecoveryEvidenceKindSchema = /* @__PURE__ */ z.enum(
   RECOVERY_EVIDENCE_KINDS,
 );
 export type RecoveryEvidenceKind = z.infer<
@@ -51,14 +57,14 @@ export const RECOVERY_EFFECT_KINDS = [
   "notification",
   "human_action",
 ] as const;
-export const RecoveryEffectKindSchema = z.enum(RECOVERY_EFFECT_KINDS);
+export const RecoveryEffectKindSchema = /* @__PURE__ */ z.enum(RECOVERY_EFFECT_KINDS);
 
 export const RECOVERY_EFFECT_IDEMPOTENCY = [
   "required",
   "provider_guaranteed",
   "unavailable",
 ] as const;
-export const RecoveryEffectIdempotencySchema = z.enum(
+export const RecoveryEffectIdempotencySchema = /* @__PURE__ */ z.enum(
   RECOVERY_EFFECT_IDEMPOTENCY,
 );
 
@@ -67,18 +73,16 @@ export const RECOVERY_EFFECT_RECEIPTS = [
   "provider",
   "manual",
 ] as const;
-export const RecoveryEffectReceiptSchema = z.enum(
+export const RecoveryEffectReceiptSchema = /* @__PURE__ */ z.enum(
   RECOVERY_EFFECT_RECEIPTS,
 );
 
-export const RecoveryEffectV1Schema = z
-  .object({
-    nodeId: z.string().trim().min(1).max(200),
-    kind: RecoveryEffectKindSchema,
-    idempotency: RecoveryEffectIdempotencySchema,
-    receipt: RecoveryEffectReceiptSchema,
-  })
-  .strict();
+export const RecoveryEffectV1Schema = /* @__PURE__ */ z.strictObject({
+  nodeId: boundedTrimmedString(1, 200),
+  kind: RecoveryEffectKindSchema,
+  idempotency: RecoveryEffectIdempotencySchema,
+  receipt: RecoveryEffectReceiptSchema,
+});
 export type RecoveryEffectV1 = z.infer<typeof RecoveryEffectV1Schema>;
 
 export const RECOVERY_REPAIR_CLASSES = [
@@ -89,7 +93,7 @@ export const RECOVERY_REPAIR_CLASSES = [
   "credential_rotation",
   "upstream_wait",
 ] as const;
-export const RecoveryRepairClassSchema = z.enum(
+export const RecoveryRepairClassSchema = /* @__PURE__ */ z.enum(
   RECOVERY_REPAIR_CLASSES,
 );
 export type RecoveryRepairClass = z.infer<
@@ -106,78 +110,57 @@ function hasDuplicates(values: readonly string[]): boolean {
   return new Set(values).size !== values.length;
 }
 
-const RecoveryTechnicalFailureSchema = z
-  .object({
-    terminalNodeFailure: z.literal(true),
-    stalledNode: z.boolean(),
-    autonomy: z
-      .object({
-        terminalNodeFailure: RecoveryAutonomyLevelSchema.optional(),
-        stalledNode: RecoveryAutonomyLevelSchema.optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
+const RecoveryTechnicalFailureSchema = /* @__PURE__ */ z.strictObject({
+  terminalNodeFailure: z.literal(true),
+  stalledNode: z.boolean(),
+  autonomy: z.optional(
+    z.strictObject({
+      terminalNodeFailure: z.optional(RecoveryAutonomyLevelSchema),
+      stalledNode: z.optional(RecoveryAutonomyLevelSchema),
+    }),
+  ),
+});
 
-const RecoveryContractCommonSchema = z
-  .object({
-    evidence: z
-      .object({
-        required: z
-          .array(RecoveryEvidenceKindSchema)
-          .min(1)
-          .max(RECOVERY_EVIDENCE_KINDS.length),
-      })
-      .strict(),
-    effects: z.array(RecoveryEffectV1Schema).max(100),
-    repairs: z
-      .object({
-        allowed: z
-          .array(RecoveryRepairClassSchema)
-          .min(1)
-          .max(RECOVERY_REPAIR_CLASSES.length),
-      })
-      .strict(),
-    validation: z
-      .object({
-        minimumEvidenceLevel: ValidationEvidenceLevelSchema,
-      })
-      .strict(),
-    approval: z
-      .object({
-        productionMutation: z.enum([
-          "required",
-          "autonomous_level_4",
-        ]),
-        permission: z.literal("recovery.write"),
-      })
-      .strict(),
+const RecoveryContractCommonSchema = /* @__PURE__ */ z.strictObject({
+    evidence: z.strictObject({
+      required: z
+        .array(RecoveryEvidenceKindSchema)
+        .check(z.minLength(1), z.maxLength(RECOVERY_EVIDENCE_KINDS.length)),
+    }),
+    effects: z.array(RecoveryEffectV1Schema).check(z.maxLength(100)),
+    repairs: z.strictObject({
+      allowed: z
+        .array(RecoveryRepairClassSchema)
+        .check(z.minLength(1), z.maxLength(RECOVERY_REPAIR_CLASSES.length)),
+    }),
+    validation: z.strictObject({
+      minimumEvidenceLevel: ValidationEvidenceLevelSchema,
+    }),
+    approval: z.strictObject({
+      productionMutation: z.enum([
+        "required",
+        "autonomous_level_4",
+      ]),
+      permission: z.literal("recovery.write"),
+    }),
     autonomyLevel: RecoveryAutonomyLevelSchema,
-    narrowAutonomy: z
-      .object({
+    narrowAutonomy: z.optional(
+      z.strictObject({
         allowedRepairClasses: z
           .array(RecoveryRepairClassSchema)
-          .min(1)
-          .max(RECOVERY_REPAIR_CLASSES.length),
-        minimumPriorVerifiedRecoveries: z.number().int().min(1).max(1_000),
-        maxAffectedExecutions: z.number().int().min(1).max(100),
+          .check(z.minLength(1), z.maxLength(RECOVERY_REPAIR_CLASSES.length)),
+        minimumPriorVerifiedRecoveries: boundedInt(1, 1_000),
+        maxAffectedExecutions: boundedInt(1, 100),
         rollbackRequired: z.literal(true),
-      })
-      .strict()
-      .optional(),
-    verification: z
-      .object({
-        kind: z.literal("generation_bound_terminal_success"),
-      })
-      .strict(),
-    recurrence: z
-      .object({
-        windowDays: z.number().int().min(1).max(30),
-      })
-      .strict(),
-  })
-  .strict();
+      }),
+    ),
+    verification: z.strictObject({
+      kind: z.literal("generation_bound_terminal_success"),
+    }),
+    recurrence: z.strictObject({
+      windowDays: boundedInt(1, 30),
+    }),
+  });
 
 type RecoveryContractCommon = z.infer<
   typeof RecoveryContractCommonSchema
@@ -191,7 +174,7 @@ type RecoveryContractWithTechnicalFailure =
 
 function validateRecoveryContractCommon(
   contract: RecoveryContractWithTechnicalFailure,
-  context: z.RefinementCtx,
+  context: z.core.$RefinementCtx<RecoveryContractWithTechnicalFailure>,
 ): void {
   const technicalAutonomy = contract.failure.technical.autonomy;
   for (const [failureClass, level] of Object.entries(
@@ -369,53 +352,42 @@ function validateRecoveryContractCommon(
  * technical failure handling is available, while semantic detection remains
  * disabled on historical snapshots.
  */
-export const RecoveryContractV1Schema = z
-  .object({
+export const RecoveryContractV1Schema = /* @__PURE__ */ z.strictObject({
     version: z.literal(RECOVERY_CONTRACT_VERSION),
-    failure: z
-      .object({
+    failure: z.strictObject({
         technical: RecoveryTechnicalFailureSchema,
-        semantic: z
-          .object({
-            mode: z.literal("disabled"),
-          })
-          .strict(),
-      })
-      .strict(),
+        semantic: z.strictObject({
+          mode: z.literal("disabled"),
+        }),
+      }),
     ...RecoveryContractCommonSchema.shape,
-  })
-  .strict()
-  .superRefine(validateRecoveryContractCommon);
+  }).check(z.superRefine(validateRecoveryContractCommon));
 
 export type RecoveryContractV1 = z.infer<
   typeof RecoveryContractV1Schema
 >;
 
-export const RecoverySemanticExpressionDetectorV2Schema = z
-  .object({
-    id: z.string().trim().min(1).max(200),
-    sourceNodeId: z.string().trim().min(1).max(200),
+export const RecoverySemanticExpressionDetectorV2Schema = /* @__PURE__ */ z.strictObject({
+    id: boundedTrimmedString(1, 200),
+    sourceNodeId: boundedTrimmedString(1, 200),
     kind: z.literal("expression"),
-    passWhen: z.string().trim().min(1).max(2_000),
+    passWhen: boundedTrimmedString(1, 2_000),
     action: z.enum(["observe", "quarantine"]),
-    message: z.string().trim().min(1).max(500),
-    autonomyLevel: RecoveryAutonomyLevelSchema.optional(),
-  })
-  .strict();
+    message: boundedTrimmedString(1, 500),
+    autonomyLevel: z.optional(RecoveryAutonomyLevelSchema),
+  });
 
-export const RecoverySemanticSchemaDetectorV2Schema = z
-  .object({
-    id: z.string().trim().min(1).max(200),
-    sourceNodeId: z.string().trim().min(1).max(200),
+export const RecoverySemanticSchemaDetectorV2Schema = /* @__PURE__ */ z.strictObject({
+    id: boundedTrimmedString(1, 200),
+    sourceNodeId: boundedTrimmedString(1, 200),
     kind: z.literal("schema"),
     schema: WorkflowInputSchema,
     action: z.enum(["observe", "quarantine"]),
-    message: z.string().trim().min(1).max(500),
-    autonomyLevel: RecoveryAutonomyLevelSchema.optional(),
-  })
-  .strict();
+    message: boundedTrimmedString(1, 500),
+    autonomyLevel: z.optional(RecoveryAutonomyLevelSchema),
+  });
 
-export const RecoverySemanticDetectorV2Schema = z.discriminatedUnion(
+export const RecoverySemanticDetectorV2Schema = /* @__PURE__ */ z.discriminatedUnion(
   "kind",
   [
     RecoverySemanticExpressionDetectorV2Schema,
@@ -426,44 +398,35 @@ export type RecoverySemanticDetectorV2 = z.infer<
   typeof RecoverySemanticDetectorV2Schema
 >;
 
-export const RecoverySemanticEvaluationFixtureV2Schema = z
-  .object({
-    id: z.string().trim().min(1).max(200),
-    sourceNodeId: z.string().trim().min(1).max(200),
-    output: z.unknown(),
-    context: z.record(z.string(), z.unknown()).optional(),
+export const RecoverySemanticEvaluationFixtureV2Schema = /* @__PURE__ */ z.strictObject({
+    id: boundedTrimmedString(1, 200),
+    sourceNodeId: boundedTrimmedString(1, 200),
+    output: z.unknown().check(z.refine((value) => value !== undefined, {
+      message: "Fixture output is required",
+    })),
+    context: z.optional(z.record(z.string(), z.unknown())),
     expected: z.enum(["pass", "violation"]),
-  })
-  .strict();
+  });
 export type RecoverySemanticEvaluationFixtureV2 = z.infer<
   typeof RecoverySemanticEvaluationFixtureV2Schema
 >;
 
-export const RecoveryContractV2Schema = z
-  .object({
+export const RecoveryContractV2Schema = /* @__PURE__ */ z.strictObject({
     version: z.literal(RECOVERY_CONTRACT_V2_VERSION),
-    failure: z
-      .object({
+    failure: z.strictObject({
         technical: RecoveryTechnicalFailureSchema,
-        semantic: z
-          .object({
+        semantic: z.strictObject({
             mode: z.literal("deterministic"),
             detectors: z
               .array(RecoverySemanticDetectorV2Schema)
-              .min(1)
-              .max(50),
+              .check(z.minLength(1), z.maxLength(50)),
             evaluationFixtures: z
               .array(RecoverySemanticEvaluationFixtureV2Schema)
-              .min(2)
-              .max(50)
-          })
-          .strict(),
-      })
-      .strict(),
+              .check(z.minLength(2), z.maxLength(50))
+          }),
+      }),
     ...RecoveryContractCommonSchema.shape,
-  })
-  .strict()
-  .superRefine((contract, context) => {
+  }).check(z.superRefine((contract, context) => {
     validateRecoveryContractCommon(contract, context);
     if (
       hasDuplicates(
@@ -510,13 +473,13 @@ export const RecoveryContractV2Schema = z
         message: "Semantic evaluation fixture ids must be unique",
       });
     }
-  });
+  }));
 
 export type RecoveryContractV2 = z.infer<
   typeof RecoveryContractV2Schema
 >;
 
-export const RecoveryContractSchema = z.discriminatedUnion("version", [
+export const RecoveryContractSchema = /* @__PURE__ */ z.discriminatedUnion("version", [
   RecoveryContractV1Schema,
   RecoveryContractV2Schema,
 ]);
@@ -527,31 +490,26 @@ export type RecoveryContract = z.infer<
 export const RECOVERY_CIRCUIT_BREAKER_MIN = 2;
 export const RECOVERY_CIRCUIT_BREAKER_MAX = 100;
 
-const RecoveryCircuitBreakerThresholdSchema = z
-  .number()
-  .int()
-  .min(RECOVERY_CIRCUIT_BREAKER_MIN)
-  .max(RECOVERY_CIRCUIT_BREAKER_MAX);
+const RecoveryCircuitBreakerThresholdSchema = /* @__PURE__ */ boundedInt(
+  RECOVERY_CIRCUIT_BREAKER_MIN,
+  RECOVERY_CIRCUIT_BREAKER_MAX,
+);
 
-export const RecoveryCircuitBreakerSchema = z.union([
+export const RecoveryCircuitBreakerSchema = /* @__PURE__ */ z.union([
   z.literal(false),
   RecoveryCircuitBreakerThresholdSchema,
-  z
-    .object({
+  z.strictObject({
       consecutiveFailures: z.union([
         z.literal(false),
         RecoveryCircuitBreakerThresholdSchema,
       ]),
-    })
-    .strict(),
+    }),
 ]);
 
 /** Optional workflow-level recovery settings persisted in the DAG snapshot. */
-export const WorkflowRecoverySchema = z
-  .object({
-    circuitBreaker: RecoveryCircuitBreakerSchema.optional(),
-    contract: RecoveryContractSchema.optional(),
-  })
-  .strict();
+export const WorkflowRecoverySchema = /* @__PURE__ */ z.strictObject({
+  circuitBreaker: z.optional(RecoveryCircuitBreakerSchema),
+  contract: z.optional(RecoveryContractSchema),
+});
 
 export type WorkflowRecovery = z.infer<typeof WorkflowRecoverySchema>;

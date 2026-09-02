@@ -12,12 +12,12 @@
  * Pure, zero-I/O — safe to import from web bundle + engine + api + data.
  */
 
-import { z } from 'zod'
+import * as z from 'zod/mini'
 
 // ---------- severities ----------
 
 export const RECOVERY_ITEM_SEVERITIES = ['p1', 'p2', 'p3', 'p4'] as const
-export const RecoveryItemSeveritySchema = z.enum(RECOVERY_ITEM_SEVERITIES)
+export const RecoveryItemSeveritySchema = /* @__PURE__ */ z.enum(RECOVERY_ITEM_SEVERITIES)
 export type RecoveryItemSeverity = z.infer<typeof RecoveryItemSeveritySchema>
 
 /**
@@ -42,7 +42,7 @@ export const RECOVERY_ITEM_STATUSES = [
   'resolved',
   'reopened',
 ] as const
-export const RecoveryItemStatusSchema = z.enum(RECOVERY_ITEM_STATUSES)
+export const RecoveryItemStatusSchema = /* @__PURE__ */ z.enum(RECOVERY_ITEM_STATUSES)
 export type RecoveryItemStatus = z.infer<typeof RecoveryItemStatusSchema>
 
 /**
@@ -69,7 +69,7 @@ export const RECOVERY_ITEM_RESOLUTION_REASONS = [
   /** Set only after a generation-matched replay reaches terminal node success. */
   'sandbox_replay_succeeded',
 ] as const
-export const RecoveryItemResolutionReasonSchema = z.enum(RECOVERY_ITEM_RESOLUTION_REASONS)
+export const RecoveryItemResolutionReasonSchema = /* @__PURE__ */ z.enum(RECOVERY_ITEM_RESOLUTION_REASONS)
 export type RecoveryItemResolutionReason = z.infer<typeof RecoveryItemResolutionReasonSchema>
 
 // ---------- comments ----------
@@ -77,99 +77,85 @@ export type RecoveryItemResolutionReason = z.infer<typeof RecoveryItemResolution
 export const RECOVERY_ITEM_COMMENT_BODY_MAX = 4_000
 export const MAX_COMMENTS_PER_ITEM = 200
 
-export const RecoveryItemCommentSchema = z
-  .object({
-    id: z.string().min(1).max(64),
-    authorUserId: z.string().min(1).max(200),
-    body: z.string().min(1).max(RECOVERY_ITEM_COMMENT_BODY_MAX),
-    createdAt: z.string().min(1).max(64), // ISO timestamp
-  })
-  .strict()
+export const RecoveryItemCommentSchema = /* @__PURE__ */ z.strictObject({
+  id: z.string().check(z.minLength(1), z.maxLength(64)),
+  authorUserId: z.string().check(z.minLength(1), z.maxLength(200)),
+  body: z.string().check(z.minLength(1), z.maxLength(RECOVERY_ITEM_COMMENT_BODY_MAX)),
+  createdAt: z.string().check(z.minLength(1), z.maxLength(64)), // ISO timestamp
+})
 
 export type RecoveryItemComment = z.infer<typeof RecoveryItemCommentSchema>
 
 // ---------- request bodies (route → repo) ----------
 
 /** Optional ISO override for the SLA target. Capped at 30 days out. */
-const SlaOverrideSchema = z
-  .string()
-  .datetime()
-  .refine((iso) => {
+const SlaOverrideSchema = /* @__PURE__ */ z.optional(
+  z.iso.datetime().check(z.refine((iso) => {
     const ts = new Date(iso).getTime()
     if (Number.isNaN(ts)) return false
     const horizon = Date.now() + 30 * 24 * 60 * 60 * 1_000
     return ts > Date.now() && ts < horizon
-  }, 'slaTargetAtOverrideIso must be in the future and within 30 days')
-  .optional()
+  }, 'slaTargetAtOverrideIso must be in the future and within 30 days')),
+)
 
-export const AcknowledgeBodySchema = z
-  .object({
-    owner: z.string().min(1).max(200).optional(),
-    severity: RecoveryItemSeveritySchema.optional(),
+export const AcknowledgeBodySchema = /* @__PURE__ */ z.strictObject({
+    owner: z.optional(z.string().check(z.minLength(1), z.maxLength(200))),
+    severity: z.optional(RecoveryItemSeveritySchema),
     slaTargetAtOverrideIso: SlaOverrideSchema,
   })
-  .strict()
 
-export const InProgressBodySchema = z
-  .object({
-    owner: z.string().min(1).max(200).optional(),
-  })
-  .strict()
+export const InProgressBodySchema = /* @__PURE__ */ z.strictObject({
+  owner: z.optional(z.string().check(z.minLength(1), z.maxLength(200))),
+})
 
-export const WaitingExternalBodySchema = z
-  .object({
-    owner: z.string().min(1).max(200).optional(),
-    comment: z.string().min(1).max(RECOVERY_ITEM_COMMENT_BODY_MAX).optional(),
-  })
-  .strict()
+export const WaitingExternalBodySchema = /* @__PURE__ */ z.strictObject({
+  owner: z.optional(z.string().check(z.minLength(1), z.maxLength(200))),
+  comment: z.optional(
+    z.string().check(z.minLength(1), z.maxLength(RECOVERY_ITEM_COMMENT_BODY_MAX)),
+  ),
+})
 
-export const EscalateBodySchema = z
-  .object({
+export const EscalateBodySchema = /* @__PURE__ */ z.strictObject({
     severity: RecoveryItemSeveritySchema,
     slaTargetAtOverrideIso: SlaOverrideSchema,
-    comment: z.string().min(1).max(RECOVERY_ITEM_COMMENT_BODY_MAX).optional(),
+    comment: z.optional(
+      z.string().check(z.minLength(1), z.maxLength(RECOVERY_ITEM_COMMENT_BODY_MAX)),
+    ),
   })
-  .strict()
 
-export const ResolveBodySchema = z
-  .object({
+export const ResolveBodySchema = /* @__PURE__ */ z.strictObject({
     resolutionReason: RecoveryItemResolutionReasonSchema,
-    comment: z.string().min(1).max(RECOVERY_ITEM_COMMENT_BODY_MAX).optional(),
+    comment: z.optional(
+      z.string().check(z.minLength(1), z.maxLength(RECOVERY_ITEM_COMMENT_BODY_MAX)),
+    ),
   })
-  .strict()
 
-export const ReopenBodySchema = z
-  .object({
-    comment: z.string().min(1).max(RECOVERY_ITEM_COMMENT_BODY_MAX).optional(),
-  })
-  .strict()
+export const ReopenBodySchema = /* @__PURE__ */ z.strictObject({
+  comment: z.optional(
+    z.string().check(z.minLength(1), z.maxLength(RECOVERY_ITEM_COMMENT_BODY_MAX)),
+  ),
+})
 
-export const CommentBodySchema = z
-  .object({
-    body: z.string().min(1).max(RECOVERY_ITEM_COMMENT_BODY_MAX),
-  })
-  .strict()
+export const CommentBodySchema = /* @__PURE__ */ z.strictObject({
+  body: z.string().check(z.minLength(1), z.maxLength(RECOVERY_ITEM_COMMENT_BODY_MAX)),
+})
 
-export const AssignOwnerBodySchema = z
-  .object({
-    owner: z.string().min(1).max(200).nullable().optional(),
-  })
-  .strict()
+export const AssignOwnerBodySchema = /* @__PURE__ */ z.strictObject({
+  owner: z.optional(z.nullable(z.string().check(z.minLength(1), z.maxLength(200)))),
+})
 
 // ---------- list filter ----------
 
 export const RECOVERY_ITEMS_DEFAULT_LIMIT = 50
 export const RECOVERY_ITEMS_MAX_LIMIT = 200
 
-export const ListRecoveryItemsFilterSchema = z
-  .object({
-    status: RecoveryItemStatusSchema.optional(),
-    owner: z.string().min(1).max(200).optional(),
-    severity: RecoveryItemSeveritySchema.optional(),
-    limit: z.number().int().min(1).max(RECOVERY_ITEMS_MAX_LIMIT).optional(),
-    cursorIso: z.string().datetime().optional(),
-  })
-  .strict()
+export const ListRecoveryItemsFilterSchema = /* @__PURE__ */ z.strictObject({
+  status: z.optional(RecoveryItemStatusSchema),
+  owner: z.optional(z.string().check(z.minLength(1), z.maxLength(200))),
+  severity: z.optional(RecoveryItemSeveritySchema),
+  limit: z.optional(z.int().check(z.minimum(1), z.maximum(RECOVERY_ITEMS_MAX_LIMIT))),
+  cursorIso: z.optional(z.iso.datetime()),
+})
 
 export type ListRecoveryItemsFilter = z.infer<typeof ListRecoveryItemsFilterSchema>
 

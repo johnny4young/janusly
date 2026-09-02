@@ -8,6 +8,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"math"
@@ -22,6 +23,7 @@ import (
 	"github.com/johnny4young/janusly/internal/health"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/workflowreadiness"
 )
 
 const defaultHealthWindowDays = 30
@@ -80,6 +82,51 @@ func healthSignalsFromRow(row store.QueryWorkflowHealthSignalsRow) health.Signal
 	return signals
 }
 
+func parsePersistedWorkflowSlo(raw json.RawMessage) (*health.Slo, error) {
+	trimmed := bytes.TrimSpace(raw)
+	// PostgreSQL jsonb cannot contain an empty JSON document. pgx therefore
+	// returns zero bytes here only when the nullable slo_json column is SQL
+	// NULL; treat that representation exactly like the explicit JSON null used
+	// by the write contract. Non-empty malformed documents still fail closed.
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &fields); err != nil || fields == nil || len(fields) != 6 {
+		return nil, errors.New("malformed workflow SLO")
+	}
+	for _, field := range []string{
+		"successRatePercent", "mttrSeconds", "p95DurationMs",
+		"budgetBlocksPerWindow", "stuckWaitingNodesMax", "windowDays",
+	} {
+		if _, present := fields[field]; !present {
+			return nil, errors.New("incomplete workflow SLO")
+		}
+	}
+	var persisted workflowSloBody
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&persisted); err != nil || !validWorkflowSlo(persisted) {
+		return nil, errors.New("invalid workflow SLO")
+	}
+	floatThreshold := func(value *int) *float64 {
+		if value == nil {
+			return nil
+		}
+		converted := float64(*value)
+		return &converted
+	}
+	windowDays := persisted.WindowDays
+	return &health.Slo{
+		SuccessRatePercent:    persisted.SuccessRatePercent,
+		MttrSeconds:           floatThreshold(persisted.MttrSeconds),
+		P95DurationMs:         floatThreshold(persisted.P95DurationMs),
+		BudgetBlocksPerWindow: floatThreshold(persisted.BudgetBlocksPerWindow),
+		StuckWaitingNodesMax:  floatThreshold(persisted.StuckWaitingNodesMax),
+		WindowDays:            &windowDays,
+	}, nil
+}
+
 // resolveWorkflowHealthContext loads the tenant-gated latest version, its
 // parsed workflow, merged readiness issues, and the declared SLO.
 func (s *V1Server) resolveWorkflowHealthContext(
@@ -91,37 +138,37 @@ func (s *V1Server) resolveWorkflowHealthContext(
 		res := opError(status, code, message, nil)
 		return &res
 	}
-	owner, err := q.GetWorkflowIngestState(ctx, workflowID)
-	if err != nil || owner.OrgID != rc.orgID || owner.DeletedAt != nil {
-		return nil, nil, nil, fail(http.StatusNotFound, "workflow_not_found", "Workflow not found")
+	if _, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: rc.orgID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, nil, fail(http.StatusNotFound, "workflow_not_found", "Workflow not found")
+		}
+		return nil, nil, nil, fail(http.StatusInternalServerError, "internal_error", "Internal error")
 	}
-	version, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
-		WorkflowID: workflowID, OrgID: rc.orgID,
+	snapshot, err := q.GetLatestWorkflowHealthSnapshot(ctx, store.GetLatestWorkflowHealthSnapshotParams{
+		OrgID: rc.orgID, WorkflowID: workflowID,
 	})
 	if err != nil {
-		return nil, nil, nil, fail(http.StatusNotFound, "workflows_no_versions", "Workflow has no versions")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, nil, fail(http.StatusNotFound, "workflows_no_versions", "Workflow has no versions")
+		}
+		return nil, nil, nil, fail(http.StatusInternalServerError, "internal_error", "Internal error")
 	}
-	wf, _ := domain.Parse(version.DagJson)
+	wf, _ := domain.Parse(snapshot.DagJson)
 	if wf == nil {
 		return nil, nil, nil, fail(http.StatusUnprocessableEntity, "workflows_version_malformed", "Workflow version is malformed")
 	}
-	readiness := domain.CheckWorkflowReadiness(wf, s.readinessOptions())
+	readiness, err := workflowreadiness.Evaluate(ctx, s.pool, rc.orgID, wf)
+	if err != nil {
+		return nil, nil, nil, fail(http.StatusInternalServerError, "internal_error", "Internal error")
+	}
 	issues := make([]health.ReadinessIssue, 0, len(readiness.Issues))
 	for _, issue := range readiness.Issues {
 		issues = append(issues, health.ReadinessIssue{Code: issue.Code, Severity: issue.Severity})
 	}
-	for _, issue := range rollbackAvailabilityIssues(ctx, q, rc.orgID, workflowID) {
-		issues = append(issues, health.ReadinessIssue{Code: issue.Code, Severity: issue.Severity})
-	}
 
-	var slo *health.Slo
-	if raw, err := q.GetLatestWorkflowSlo(ctx, store.GetLatestWorkflowSloParams{
-		OrgID: rc.orgID, WorkflowID: workflowID,
-	}); err == nil && len(raw) > 0 && string(raw) != "null" {
-		var parsed health.Slo
-		if json.Unmarshal(raw, &parsed) == nil {
-			slo = &parsed
-		}
+	slo, err := parsePersistedWorkflowSlo(snapshot.SloJson)
+	if err != nil {
+		return nil, nil, nil, fail(http.StatusInternalServerError, "internal_error", "Internal error")
 	}
 	return wf, issues, slo, nil
 }
@@ -319,29 +366,4 @@ func (s *V1Server) mountWorkflowHealthRoutes(mux *http.ServeMux) {
 			PriorVersion: priorVersion,
 		}))
 	}))
-}
-
-// parseWorkflowSloBody validates the optional save-body `slo` block.
-func parseWorkflowSloBody(raw json.RawMessage) (json.RawMessage, string) {
-	var carrier struct {
-		Slo *struct {
-			SuccessRatePercent *float64 `json:"successRatePercent"`
-			P95DurationMs      *float64 `json:"p95DurationMs"`
-		} `json:"slo"`
-	}
-	if err := json.Unmarshal(raw, &carrier); err != nil || carrier.Slo == nil {
-		return nil, ""
-	}
-	slo := carrier.Slo
-	if slo.SuccessRatePercent != nil && (*slo.SuccessRatePercent < 0 || *slo.SuccessRatePercent > 100) {
-		return nil, "slo.successRatePercent must be between 0 and 100"
-	}
-	if slo.P95DurationMs != nil && (*slo.P95DurationMs < 1 || *slo.P95DurationMs > 86_400_000) {
-		return nil, "slo.p95DurationMs must be between 1 and 86400000"
-	}
-	serialized, err := json.Marshal(slo)
-	if err != nil {
-		return nil, "slo not serializable"
-	}
-	return serialized, ""
 }

@@ -8,8 +8,10 @@
 package domain
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 // RecoveryAutonomyLevels is the closed 0..4 ladder.
@@ -163,6 +165,9 @@ func ParseCircuitBreakerThreshold(raw json.RawMessage) (int, bool, string) {
 	if len(raw) == 0 {
 		return 0, false, ""
 	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return 0, false, "circuitBreaker: null is not a valid threshold"
+	}
 	var boolValue bool
 	if err := json.Unmarshal(raw, &boolValue); err == nil {
 		if boolValue {
@@ -174,17 +179,19 @@ func ParseCircuitBreakerThreshold(raw json.RawMessage) (int, bool, string) {
 	if err := json.Unmarshal(raw, &numberValue); err == nil {
 		return validateBreakerNumber(numberValue)
 	}
-	var objectValue struct {
-		ConsecutiveFailures json.RawMessage `json:"consecutiveFailures"`
-	}
-	if err := json.Unmarshal(raw, &objectValue); err == nil && len(objectValue.ConsecutiveFailures) > 0 {
-		if err := json.Unmarshal(objectValue.ConsecutiveFailures, &boolValue); err == nil {
+	var objectValue map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &objectValue); err == nil && objectValue != nil && len(objectValue) == 1 {
+		consecutiveFailures, present := objectValue["consecutiveFailures"]
+		if !present || isJSONNull(consecutiveFailures) {
+			return 0, false, "circuitBreaker.consecutiveFailures: must be false or an integer 2..100"
+		}
+		if err := json.Unmarshal(consecutiveFailures, &boolValue); err == nil {
 			if boolValue {
 				return 0, false, "circuitBreaker.consecutiveFailures: true is not a valid threshold"
 			}
 			return 0, false, ""
 		}
-		if err := json.Unmarshal(objectValue.ConsecutiveFailures, &numberValue); err == nil {
+		if err := json.Unmarshal(consecutiveFailures, &numberValue); err == nil {
 			return validateBreakerNumber(numberValue)
 		}
 	}
@@ -221,7 +228,13 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 	if !contract.Failure.Technical.TerminalNodeFailure {
 		push("failure.technical.terminalNodeFailure: must be true")
 	}
-	for failureClass, level := range contract.Failure.Technical.Autonomy {
+	failureClasses := make([]string, 0, len(contract.Failure.Technical.Autonomy))
+	for failureClass := range contract.Failure.Technical.Autonomy {
+		failureClasses = append(failureClasses, failureClass)
+	}
+	sort.Strings(failureClasses)
+	for _, failureClass := range failureClasses {
+		level := contract.Failure.Technical.Autonomy[failureClass]
 		if failureClass != "terminalNodeFailure" && failureClass != "stalledNode" {
 			push("failure.technical.autonomy.%s: unknown failure class", failureClass)
 			continue
@@ -417,6 +430,8 @@ func validateSemanticV2(semantic *RecoverySemanticFailure, ceiling int) []string
 		case "schema":
 			if detector.Schema == nil {
 				push("failure.semantic.detectors.%d.schema: schema detectors require a schema", i)
+			} else if !validInputSchemaShape(detector.Schema) {
+				push("failure.semantic.detectors.%d.schema: must be a supported recursive schema with at most %d nodes", i, InputSchemaNodeMax)
 			}
 		default:
 			push("failure.semantic.detectors.%d.kind: must be expression or schema", i)
@@ -447,8 +462,8 @@ func validateSemanticV2(semantic *RecoverySemanticFailure, ceiling int) []string
 		if fixture.ID == "" || len(fixture.ID) > 200 {
 			push("failure.semantic.evaluationFixtures.%d.id: must be 1..200 chars", i)
 		}
-		if fixture.SourceNodeID == "" {
-			push("failure.semantic.evaluationFixtures.%d.sourceNodeId: required", i)
+		if fixture.SourceNodeID == "" || len(fixture.SourceNodeID) > 200 {
+			push("failure.semantic.evaluationFixtures.%d.sourceNodeId: must be 1..200 chars", i)
 		}
 		if fixture.Expected != "pass" && fixture.Expected != "violation" {
 			push("failure.semantic.evaluationFixtures.%d.expected: must be pass or violation", i)

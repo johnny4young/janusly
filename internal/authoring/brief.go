@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -50,6 +51,9 @@ func CompileBrief(request CompileBriefRequest) (BriefCompilation, error) {
 	if len([]rune(prompt)) > MaxBriefPromptChars {
 		return BriefCompilation{}, fmt.Errorf("prompt exceeds %d characters", MaxBriefPromptChars)
 	}
+	structuredTriggerProvided := strings.TrimSpace(request.Brief.Trigger) != ""
+	structuredEffectsProvided := request.Brief.ExternalEffects != nil
+	promptDeclaresNoExternalEffects := explicitlyDeclaresNoExternalEffects(prompt)
 	brief := normalizeBrief(request.Brief)
 	if brief.Version == "" {
 		brief.Version = "1"
@@ -70,7 +74,7 @@ func CompileBrief(request CompileBriefRequest) (BriefCompilation, error) {
 	if brief.ExpectedOutcome == "" && prompt != "" {
 		brief.ExpectedOutcome = truncateRunes(prompt, maxBriefFieldChars)
 	}
-	if len(brief.ExternalEffects) == 0 {
+	if len(brief.ExternalEffects) == 0 && !structuredEffectsProvided {
 		brief.ExternalEffects = inferEffects(prompt)
 	}
 	if len(brief.Approvals) == 0 && containsAnyFold(prompt, "approve", "approval", "aprob", "human review", "revisión humana") {
@@ -87,23 +91,131 @@ func CompileBrief(request CompileBriefRequest) (BriefCompilation, error) {
 
 	questions := make([]string, 0, 3)
 	spanish := brief.Language == "es"
+	requirementText := pagerDutyRequirementText(prompt, &brief)
 	if brief.Objective == "" {
 		questions = append(questions, choose(spanish, "¿Qué resultado de negocio debe conseguir el flujo?", "What business outcome should the workflow achieve?"))
 	}
-	if brief.Trigger == "manual" && !containsAnyFold(prompt, "manual", "manualmente") && len([]rune(prompt)) < 40 {
+	if brief.Trigger == "manual" && !structuredTriggerProvided &&
+		!containsAnyFold(prompt, "manual", "manualmente") && len([]rune(prompt)) < 40 {
 		questions = append(questions, choose(spanish, "¿Qué evento debe iniciar el flujo?", "What event should start the workflow?"))
 	}
-	if len(brief.ExternalEffects) == 0 && len([]rune(prompt)) < 80 {
+	if len(brief.ExternalEffects) == 0 && !structuredEffectsProvided && !promptDeclaresNoExternalEffects && len([]rune(prompt)) < 80 {
 		questions = append(questions, choose(spanish, "¿El flujo modifica algún sistema externo o sólo prepara información?", "Does the workflow modify an external system or only prepare information?"))
+	}
+	if brief.Trigger == "pagerduty" {
+		if !validPagerDutyWorkingHours(requirementText) {
+			questions = append(questions, choose(spanish,
+				"¿Cuál es el rango horario exacto en el que Janusly puede actuar?",
+				"What exact time range may Janusly act within?"))
+		}
+		dateRangePresent := pagerDutyDateRangePattern.MatchString(requirementText)
+		relativeWeekAnchored := containsAnyFold(requirementText,
+			"starting now", "from now", "beginning now", "desde ahora", "a partir de ahora")
+		finiteCampaignValid := dateRangePresent && validPagerDutyDateRange(requirementText)
+		finiteCampaignValid = finiteCampaignValid ||
+			(!dateRangePresent && pagerDutyWeekPattern.MatchString(requirementText) && relativeWeekAnchored)
+		if !finiteCampaignValid {
+			questions = append(questions, choose(spanish,
+				"¿Qué vigencia finita debe usar la disponibilidad? Indica ‘desde ahora durante una semana’ o fechas inclusivas válidas de máximo 31 días (AAAA-MM-DD a AAAA-MM-DD).",
+				"What finite activation period should the availability use? Say ‘starting now for one week’ or provide valid inclusive dates covering at most 31 days (YYYY-MM-DD to YYYY-MM-DD)."))
+		}
+		if !validPagerDutyTimeZone(requirementText) {
+			questions = append(questions, choose(spanish,
+				"¿Qué zona horaria IANA debe usar la política?",
+				"Which IANA timezone should the policy use?"))
+		}
+		if !validPagerDutyDuration(requirementText) {
+			questions = append(questions, choose(spanish,
+				"¿Cuántas horas debe durar el aplazamiento? Usa un valor entre 1 y 168.",
+				"How many hours should the snooze last? Use a value from 1 to 168."))
+		}
+		if _, count := uniquePagerDutyMatch(requirementText, strings.ToLower, pagerDutyEmailPattern); count != 1 {
+			questions = append(questions, choose(spanish,
+				"¿Cuál es el único correo de solicitante autorizado que debe enviar Janusly a PagerDuty?",
+				"Which single authorized requester email should Janusly send to PagerDuty?"))
+		}
+		if _, count := uniquePagerDutyMatch(requirementText, strings.ToUpper, pagerDutyUserPatterns...); count != 1 {
+			questions = append(questions, choose(spanish,
+				"¿Cuál es el único ID exacto del usuario de PagerDuty cuya asignación autoriza la acción?",
+				"What is the single exact PagerDuty user ID whose assignment authorizes the action?"))
+		}
+		if !containsAll(brief.ExternalEffects, "pagerduty_acknowledge", "pagerduty_snooze") {
+			questions = append(questions, choose(spanish,
+				"¿Confirmas que Janusly puede reconocer el incidente y aplazarlo de forma acotada en PagerDuty? Declara ambos efectos externos.",
+				"May Janusly acknowledge the incident and apply a bounded snooze in PagerDuty? Declare both external effects."))
+		}
 	}
 	if len(questions) > 3 {
 		questions = questions[:3]
 	}
+	complete := brief.Objective != "" && brief.Trigger != "" && brief.ExpectedOutcome != "" && len(questions) == 0
 	return BriefCompilation{
 		Brief: brief, ClarifyingQuestions: questions,
-		Complete: brief.Objective != "" && brief.Trigger != "" && brief.ExpectedOutcome != "",
+		Complete: complete,
 		Mode:     "deterministic",
 	}, nil
+}
+
+// explicitlyDeclaresNoExternalEffects distinguishes an intentional read-only
+// contract from a prompt that simply omitted its side effects. This keeps the
+// deterministic compiler conversational without silently treating ambiguous
+// short prompts as safe. Known effect phrases still win because their inferred
+// effects are captured before this declaration is used by downstream binding.
+func explicitlyDeclaresNoExternalEffects(prompt string) bool {
+	return containsAnyFold(prompt,
+		"no external effects", "without external effects",
+		"does not modify external systems", "doesn't modify external systems",
+		"without modifying external systems", "read-only", "read only",
+		"only prepares information", "prepare information only",
+		"sin efectos externos", "no modifica sistemas externos",
+		"no modificar sistemas externos", "sin modificar sistemas externos",
+		"solo prepara información", "sólo prepara información", "solo lectura")
+}
+
+func containsAll(values []string, required ...string) bool {
+	present := make(map[string]bool, len(values))
+	for _, value := range values {
+		present[value] = true
+	}
+	for _, value := range required {
+		if !present[value] {
+			return false
+		}
+	}
+	return true
+}
+
+func validPagerDutyWorkingHours(prompt string) bool {
+	start, end, count := uniquePagerDutyWorkingHours(prompt)
+	return count == 1 && start != "" && end != ""
+}
+
+func validPagerDutyDateRange(prompt string) bool {
+	fromRaw, untilRaw, count := uniquePagerDutyDateRange(prompt)
+	if count != 1 {
+		return false
+	}
+	from, fromErr := time.Parse(time.DateOnly, fromRaw)
+	until, untilErr := time.Parse(time.DateOnly, untilRaw)
+	return fromErr == nil && untilErr == nil && !until.Before(from) &&
+		!until.AddDate(0, 0, 1).After(from.AddDate(0, 0, maxPagerDutyActiveDays))
+}
+
+func validPagerDutyTimeZone(prompt string) bool {
+	value, count := uniquePagerDutyMatch(prompt, nil, pagerDutyTimeZonePattern)
+	if count != 1 {
+		return false
+	}
+	_, err := time.LoadLocation(value)
+	return err == nil
+}
+
+func validPagerDutyDuration(prompt string) bool {
+	hours, count := uniquePagerDutyDurationHours(prompt)
+	if count != 1 {
+		return false
+	}
+	return hours >= 1 && hours*60*60 <= maxPagerDutySnoozeSeconds
 }
 
 func normalizeBrief(brief IntentBrief) IntentBrief {
@@ -142,6 +254,10 @@ func normalizeList(values []string) []string {
 
 func inferTrigger(prompt string) string {
 	switch {
+	case IsPagerDutyWorkflowPrompt(prompt) || containsAnyFold(prompt,
+		"when pagerduty", "pagerduty incident fires", "on pagerduty incident",
+		"cuando pagerduty", "si pagerduty", "evento de pagerduty", "incidente de pagerduty se dispare"):
+		return "pagerduty"
 	case containsAnyFold(prompt, "cron", "schedule", "scheduled", "cada día", "diario", "semanal", "every day", "every week"):
 		return "schedule"
 	case containsAnyFold(prompt,
@@ -165,13 +281,21 @@ func inferTrigger(prompt string) string {
 
 func inferEffects(prompt string) []string {
 	var effects []string
+	if containsAnyFold(prompt, "pagerduty", "pager duty") && containsAnyFold(prompt,
+		"acknowledge", "acknowledged", "reviewing", "revisando", "reconoc") {
+		effects = append(effects, "pagerduty_acknowledge")
+	}
+	if containsAnyFold(prompt, "pagerduty", "pager duty") && (containsAnyFold(prompt,
+		"snooze", "postpone", "silence", "pospon", "aplaz", "apláz", "dilat") || pagerDutyDurationPattern.MatchString(prompt)) {
+		effects = append(effects, "pagerduty_snooze")
+	}
 	if containsAnyFold(prompt, "slack") {
 		effects = append(effects, "slack_message")
 	}
 	if containsAnyFold(prompt, "github issue", "issue in github", "incidencia en github") {
 		effects = append(effects, "github_issue")
 	}
-	if containsAnyFold(prompt, "webhook") && inferTrigger(prompt) != "webhook" {
+	if infersOutboundWebhook(prompt) && inferTrigger(prompt) != "webhook" {
 		effects = append(effects, "outbound_webhook")
 	}
 	if containsAnyFold(prompt,
@@ -184,7 +308,41 @@ func inferEffects(prompt string) []string {
 		"escribir base de datos", "actualizar base de datos", "insertar en base de datos") {
 		effects = append(effects, "database_write")
 	}
+	if containsAnyFold(prompt, "sheet.append") ||
+		(containsAnyFold(prompt, "sheet", "spreadsheet", "hoja") && containsAnyFold(prompt,
+			"append", "add rows", "agregar filas", "añadir filas", "anexar filas")) {
+		effects = append(effects, "sheet_append")
+	}
+	if containsAnyFold(prompt, "vector.upsert") ||
+		(containsAnyFold(prompt, "vector memory", "memoria vectorial") && containsAnyFold(prompt,
+			"store", "write", "upsert", "guardar", "escribir")) {
+		effects = append(effects, "vector_memory_write")
+	}
+	if containsAnyFold(prompt, "pdf.generate") ||
+		(containsAnyFold(prompt, "pdf") && containsAnyFold(prompt,
+			"generate", "create", "render", "generar", "crear", "renderizar")) {
+		effects = append(effects, "pdf_generation")
+	}
+	if containsAnyFold(prompt, "mcp") && containsAnyFold(prompt,
+		"update", "delete", "write", "send", "append", "mutate",
+		"actualizar", "eliminar", "escribir", "enviar", "agregar", "añadir", "modificar",
+		"mcp tool to create", "mcp tool for creating", "herramienta mcp para crear") {
+		effects = append(effects, "mcp_write")
+	}
 	return effects
+}
+
+// infersOutboundWebhook deliberately requires an action phrase. A webhook can
+// also appear as an inbound trigger or as the kind/name of a credential; those
+// mentions describe a binding, not an additional external effect.
+func infersOutboundWebhook(prompt string) bool {
+	return containsAnyFold(prompt,
+		"call the webhook", "call a webhook", "call webhook", "call the partner webhook",
+		"send a webhook", "send webhook", "post to the webhook", "post to a webhook",
+		"invoke the webhook", "invoke a webhook", "invoke webhook", "outbound webhook", "webhook.send",
+		"llamar al webhook", "llamar un webhook", "llamar webhook", "enviar un webhook", "enviar webhook",
+		"publicar en el webhook", "publicar a un webhook", "invocar el webhook", "invocar un webhook",
+		"invocar webhook", "webhook saliente")
 }
 
 func containsAnyFold(value string, candidates ...string) bool {
@@ -236,4 +394,18 @@ func ProposalPrompt(brief IntentBrief) string {
 	}
 	parts = append(parts, "Return a Janusly workflow proposal. Use only exact capabilities provided by the capability catalog; leave unresolved bindings incomplete instead of inventing identifiers.")
 	return strings.Join(parts, "\n")
+}
+
+// ProposalGenerationPrompt keeps the source wording only for a recognized
+// high-impact deterministic recipe. Intent Brief fields are deliberately
+// bounded, so a valid machine identity or safety bound near the end of a
+// 4000-character source prompt could otherwise be truncated before the recipe
+// compiler sees it. Generic/provider generation continues to consume the
+// normalized contract prompt rather than bypassing the staged brief.
+func ProposalGenerationPrompt(compiled BriefCompilation, sourcePrompt string) string {
+	sourcePrompt = strings.TrimSpace(sourcePrompt)
+	if compiled.Brief.Trigger == "pagerduty" && IsPagerDutyWorkflowPrompt(sourcePrompt) {
+		return sourcePrompt
+	}
+	return ProposalPrompt(compiled.Brief)
 }

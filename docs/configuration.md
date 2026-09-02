@@ -33,6 +33,7 @@ When `JANUSLY_ENV=production`:
 - the binary must contain valid commit and tree provenance;
 - `JANUSLY_RESUME_TOKEN_SECRET` must be set;
 - development SSO bypass is refused;
+- local-stack and integration-simulator gates are refused;
 - development auth headers require explicit `ALLOW_DEV_AUTH_HEADERS=true` when
   no identity provider is configured, and are refused outright when Supabase
   is configured;
@@ -92,6 +93,11 @@ application container rather than only the sibling Ollama service.
 
 Outbound safety and integration settings include:
 
+- `JANUSLY_LOCAL_STACK=true` together with
+  `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true` enables local provider simulators;
+  either flag alone is inert, and both are refused in production
+- `JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL`, the base URL used only after that
+  double local gate
 - `ALLOW_PRIVATE_HTTP_TARGETS`
 - `JANUSLY_HTTP_MAX_RESPONSE_BYTES`
 - `JANUSLY_HTTP_MAX_REDIRECTS`

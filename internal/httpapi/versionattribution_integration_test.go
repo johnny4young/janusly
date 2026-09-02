@@ -8,10 +8,9 @@ import (
 	"time"
 )
 
-// Run-count semantics match the contract — the Flows list counts
-// ONLY version-linked runs (engine-driven paths stamp real version-row
-// ids; a doc-posted ad-hoc run never counts, exactly like Node), while
-// the health attribution still sees BOTH kinds via its coalesce.
+// Run-count semantics are content-bound: exact saved documents stamp a real
+// immutable version id (including older clients that omit the optional claim),
+// while edited drafts remain ad-hoc and never impersonate a version row.
 func TestVersionAttributionSemantics(t *testing.T) {
 	h := newAPIHarness(t)
 	suffix := fmt.Sprint(time.Now().UnixNano())
@@ -22,17 +21,60 @@ func TestVersionAttributionSemantics(t *testing.T) {
 		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}},
 		"edges": []any{},
 	}
-	if res := h.call("POST", "/workflows/save", doc, ""); res.status != 200 {
-		t.Fatalf("save: %d %+v", res.status, res.body)
+	saved := h.call("POST", "/workflows/save", doc, "")
+	if saved.status != 200 {
+		t.Fatalf("save: %d %+v", saved.status, saved.body)
+	}
+	versionID, _ := saved.body["versionId"].(string)
+	if versionID == "" {
+		t.Fatalf("save did not return version identity: %+v", saved.body)
 	}
 
-	// A doc-posted run: the contract's doc-id convention — never counted
-	// by the list summary.
+	// An older client can omit workflowVersionId. Exact latest content is still
+	// recognized and attributed to the immutable version.
 	res := h.call("POST", "/start", map[string]any{"workflow": doc}, "")
 	if res.status != 200 {
 		t.Fatalf("start doc: %d %+v", res.status, res.body)
 	}
 	h.waitRun(res.body["runId"].(string), "succeeded")
+	var attributedVersion string
+	if err := testPool(t).QueryRow(t.Context(), `SELECT workflow_version_id FROM runs WHERE org_id=$1 AND id=$2`,
+		h.org, res.body["runId"]).Scan(&attributedVersion); err != nil || attributedVersion != versionID {
+		t.Fatalf("exact saved run attribution mismatch: version=%q want=%q err=%v", attributedVersion, versionID, err)
+	}
+
+	// A caller may explicitly pin an exact version. A changed document cannot
+	// reuse that authority, and the same edited draft without a claim is ad hoc.
+	pinned := h.call("POST", "/start", map[string]any{
+		"workflow": doc, "workflowVersionId": versionID,
+	}, "")
+	if pinned.status != 200 {
+		t.Fatalf("start exact version: %d %+v", pinned.status, pinned.body)
+	}
+	h.waitRun(pinned.body["runId"].(string), "succeeded")
+	edited := map[string]any{
+		"id": workflowID, "name": "Edited draft", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	mismatch := h.call("POST", "/start", map[string]any{
+		"workflow": edited, "workflowVersionId": versionID,
+	}, "")
+	if mismatch.status != 409 || mismatch.body["code"] != "workflow_version_mismatch" {
+		t.Fatalf("mismatched explicit version must fail closed: %d %+v", mismatch.status, mismatch.body)
+	}
+	adhoc := h.call("POST", "/start", map[string]any{"workflow": edited}, "")
+	if adhoc.status != 200 {
+		t.Fatalf("start edited ad-hoc document: %d %+v", adhoc.status, adhoc.body)
+	}
+	adhocRunID := adhoc.body["runId"].(string)
+	h.waitRun(adhocRunID, "succeeded")
+	var adhocVersion string
+	if err := testPool(t).QueryRow(t.Context(), `SELECT workflow_version_id FROM runs WHERE org_id=$1 AND id=$2`,
+		h.org, adhocRunID).Scan(&adhocVersion); err != nil || adhocVersion != adhocRunID {
+		t.Fatalf("ad-hoc run must use run-scoped identity: version=%q run=%q err=%v",
+			adhocVersion, adhocRunID, err)
+	}
 
 	// An engine-driven run: the webhook trigger path stamps the REAL
 	// version-row id (effectiveVersionID) — counted.
@@ -84,10 +126,10 @@ func TestVersionAttributionSemantics(t *testing.T) {
 		return nil
 	}
 
-	// Doc-posted run: not counted (node semantics).
+	// Both exact starts count; the edited ad-hoc draft does not.
 	plain := rowFor(workflowID)
-	if plain["runCount"] != float64(0) || plain["lastRunStatus"] != nil {
-		t.Fatalf("doc-posted runs must not count: %+v", plain)
+	if plain["runCount"] != float64(2) || plain["lastRunStatus"] != "succeeded" {
+		t.Fatalf("only exact saved runs must count: %+v", plain)
 	}
 	// Version-stamped trigger run: counted.
 	triggered := rowFor(workflowID + "-trig")
@@ -95,11 +137,17 @@ func TestVersionAttributionSemantics(t *testing.T) {
 		t.Fatalf("version-linked runs must count: %+v", triggered)
 	}
 
-	// Health attribution keeps seeing BOTH kinds (coalesce: version row
-	// join for the stamped run, count-derivation for the doc-id run).
+	// Health attribution keeps seeing exact and ad-hoc runs through its
+	// version-row join plus bounded snapshot fallback.
 	health := h.call("GET", "/v1/workflows/health?workflowId="+workflowID, nil, "")
-	score := health.body["data"].(map[string]any)
+	if health.status != 200 {
+		t.Fatalf("workflow health: %d %+v", health.status, health.body)
+	}
+	score, ok := health.body["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("workflow health data malformed: %+v", health.body)
+	}
 	if score["score"] == nil {
-		t.Fatalf("health must attribute doc-id runs: %+v", score)
+		t.Fatalf("health must attribute exact version-bound runs: %+v", score)
 	}
 }

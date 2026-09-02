@@ -141,6 +141,11 @@ type BudgetBlockedEnvelope = {
   policy?: 'warn' | 'block'
 }
 
+export type WorkflowVersionIdentity = {
+  id: string
+  version: number
+}
+
 type WorkflowStore = {
   session: Session | null
   user: User | null
@@ -159,6 +164,10 @@ type WorkflowStore = {
    * never-saved workflow doesn't 404 the health/metadata endpoints on load.
    */
   currentWorkflowSaved: boolean
+  /** Exact immutable source currently loaded/saved in the canvas. It remains
+   * visible while editing, but run start binds it only while workflowDirty is
+   * false. Null means a template/proposal/ad-hoc document with no exact source. */
+  currentWorkflowVersion: WorkflowVersionIdentity | null
   /**
    * Whether the canvas holds semantic edits not yet persisted as a workflow
    * version. False for the untouched blank draft and after hydrate/new/save;
@@ -229,13 +238,16 @@ type WorkflowStore = {
 
   addNode: (type: string, position?: { x: number; y: number }) => void
   duplicateNode: (nodeId: string) => void
-  hydrateWorkflow: (workflow: WorkflowDefinition, options?: { saved?: boolean; dirty?: boolean }) => void
+  hydrateWorkflow: (
+    workflow: WorkflowDefinition,
+    options?: { saved?: boolean; dirty?: boolean; version?: WorkflowVersionIdentity | null },
+  ) => void
   /** Set the localized starter name once React mounts after i18n bootstrap. */
   initializeWorkflowName: (name: string) => void
   getWorkflowJson: () => WorkflowDefinition
   newWorkflow: () => void
   /** Mark the current workflow as persisted server-side (after a successful save). */
-  markWorkflowSaved: () => void
+  markWorkflowSaved: (version?: WorkflowVersionIdentity) => void
   /** Force the dirty flag on — used after restoring a local draft (the restored content isn't server-side). */
   markWorkflowDirty: () => void
   setWorkflowName: (name: string) => void
@@ -335,6 +347,7 @@ function clearedWorkflowProjection(workflowRevision: number) {
     currentWorkflowId: `workflow_${crypto.randomUUID().slice(0, 8)}`,
     currentWorkflowName: t('workflow.defaultName'),
     currentWorkflowSaved: false,
+    currentWorkflowVersion: null,
     workflowDirty: false,
     workflowRevision: workflowRevision + 1,
     historyPast: [],
@@ -372,6 +385,7 @@ function graphToWorkflow(
       config: node.data.config ?? {},
     })),
     edges: edges.map((edge) => ({
+      ...(edge.data?.contractId ? { id: edge.data.contractId } : {}),
       from: edge.source,
       to: edge.target,
       condition: edge.data?.condition || undefined,
@@ -405,6 +419,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   // sentinel before paint; never translate during store module evaluation.
   currentWorkflowName: '',
   currentWorkflowSaved: false,
+  currentWorkflowVersion: null,
   workflowDirty: false,
   workflowRevision: 0,
   historyPast: [],
@@ -531,6 +546,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       currentWorkflowId: workflow.id ?? 'ui-test',
       currentWorkflowName: workflow.name ?? workflow.id ?? (t('workflow.defaultName')),
       currentWorkflowSaved: saved,
+      currentWorkflowVersion: options?.version ?? null,
       workflowDirty: dirty,
       currentWorkflowInputs: workflow.inputs,
       currentWorkflowOutputs: workflow.outputs,
@@ -552,7 +568,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     state.currentWorkflowName.length === 0 ? { currentWorkflowName: name } : state
   )),
 
-  markWorkflowSaved: () => set({ currentWorkflowSaved: true, workflowDirty: false }),
+  markWorkflowSaved: (version) => set((state) => ({
+    currentWorkflowSaved: true,
+    workflowDirty: false,
+    currentWorkflowVersion: version ?? state.currentWorkflowVersion,
+  })),
   markWorkflowDirty: () => set({ workflowDirty: true }),
 
   getWorkflowJson: () => {

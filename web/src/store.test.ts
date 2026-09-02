@@ -131,6 +131,27 @@ describe('useWorkflowStore', () => {
     })
   })
 
+  it('round-trips optional persisted edge ids without inventing ids for legacy edges', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf-edge-ids',
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+        { id: 'c', type: 'noop', config: {} },
+      ],
+      edges: [
+        { id: 'approved-route', from: 'a', to: 'b' },
+        { from: 'b', to: 'c' },
+      ],
+    })
+
+    expect(useWorkflowStore.getState().edges.map(edge => edge.id)).toEqual(['approved-route', 'e1'])
+    expect(useWorkflowStore.getState().getWorkflowJson().edges).toEqual([
+      { id: 'approved-route', from: 'a', to: 'b', condition: undefined },
+      { from: 'b', to: 'c', condition: undefined },
+    ])
+  })
+
   it('round-trips the opt-in strict template policy and resets it for a new workflow', () => {
     useWorkflowStore.getState().hydrateWorkflow({
       id: 'wf-strict',
@@ -168,14 +189,14 @@ describe('useWorkflowStore', () => {
     } satisfies NonNullable<WorkflowDefinition['recovery']>
     useWorkflowStore.getState().hydrateWorkflow({
       id: 'wf-assured',
-      metadata: { tags: ['assured'], owner: 'ops' },
+      metadata: { description: 'PagerDuty assurance', tags: ['assured'] },
       recovery,
       nodes: [{ id: 'n1', type: 'noop', config: {} }],
       edges: [],
     })
 
     expect(useWorkflowStore.getState().getWorkflowJson()).toMatchObject({
-      metadata: { tags: ['assured'], owner: 'ops' },
+      metadata: { description: 'PagerDuty assurance', tags: ['assured'] },
       recovery,
     })
 
@@ -584,7 +605,7 @@ describe('useWorkflowStore', () => {
       currentWorkflowInputs: { type: 'object' },
       currentWorkflowOutputs: { result: '{{nodes.private.output}}' },
       currentWorkflowTemplatePolicy: 'strict',
-      currentWorkflowMetadata: { owner: 'a@example.com' },
+      currentWorkflowMetadata: { description: 'Tenant A private metadata', tags: ['private'] },
       currentWorkflowRecovery: { circuitBreaker: 3 },
       nodes: [{
         id: 'private',
@@ -938,6 +959,35 @@ describe('useWorkflowStore semantic workflow signals', () => {
     useWorkflowStore.getState().addNode('http')
     useWorkflowStore.getState().newWorkflow()
     expect(useWorkflowStore.getState().workflowDirty).toBe(false)
+  })
+
+  it('keeps exact version provenance with its canvas and clears it on replacement', () => {
+    const saved = { id: 'wf-version-7', version: 7 }
+    useWorkflowStore.getState().hydrateWorkflow(
+      { id: 'wf_x', name: 'X', nodes: [], edges: [] },
+      { version: saved },
+    )
+    expect(useWorkflowStore.getState().currentWorkflowVersion).toEqual(saved)
+
+    useWorkflowStore.getState().setWorkflowName('Edited X')
+    expect(useWorkflowStore.getState()).toMatchObject({
+      currentWorkflowVersion: saved,
+      workflowDirty: true,
+    })
+
+    useWorkflowStore.getState().hydrateWorkflow(
+      { id: 'proposal', name: 'Proposal', nodes: [], edges: [] },
+      { saved: false, dirty: true },
+    )
+    expect(useWorkflowStore.getState().currentWorkflowVersion).toBeNull()
+
+    useWorkflowStore.getState().markWorkflowSaved({ id: 'proposal-v1', version: 1 })
+    expect(useWorkflowStore.getState()).toMatchObject({
+      currentWorkflowVersion: { id: 'proposal-v1', version: 1 },
+      workflowDirty: false,
+    })
+    useWorkflowStore.getState().newWorkflow()
+    expect(useWorkflowStore.getState().currentWorkflowVersion).toBeNull()
   })
 
   it('markWorkflowSaved clears the flag; markWorkflowDirty forces it on', () => {

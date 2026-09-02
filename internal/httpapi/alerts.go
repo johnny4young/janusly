@@ -90,7 +90,7 @@ func alertPolicyView(row store.AlertPolicy) map[string]any {
 func (s *V1Server) listAlertPoliciesCore(r *http.Request, rc v1Request) opResult {
 	rows, err := store.New(s.pool).ListAlertPolicies(r.Context(), rc.orgID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	policies := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -139,7 +139,7 @@ func (s *V1Server) createAlertPolicyCore(r *http.Request, rc v1Request) opResult
 	})
 	row, err := store.New(s.pool).GetAlertPolicy(r.Context(), store.GetAlertPolicyParams{OrgID: rc.orgID, ID: id})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(map[string]any{"policy": alertPolicyView(row)})
 }
@@ -202,7 +202,7 @@ func (s *V1Server) updateAlertPolicyCore(r *http.Request, rc v1Request, id strin
 	})
 	row, err := q.GetAlertPolicy(r.Context(), store.GetAlertPolicyParams{OrgID: rc.orgID, ID: id})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(map[string]any{"policy": alertPolicyView(row)})
 }
@@ -212,7 +212,7 @@ func (s *V1Server) deleteAlertPolicyCore(r *http.Request, rc v1Request, id strin
 		OrgID: rc.orgID, ID: id,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if deleted == 0 {
 		return opError(http.StatusNotFound, "alert_policy_not_found", "Alert policy not found", nil)
@@ -240,7 +240,7 @@ func (s *V1Server) recentAlertDispatchesCore(r *http.Request, rc v1Request) opRe
 		OrgID: rc.orgID, Cursor: cursor, PageLimit: int32(limit),
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	dispatches := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {

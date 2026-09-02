@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -53,6 +54,9 @@ func recoveryMutationError(err error) opResult {
 			"Recovery evidence exceeds the 64 KB artifact limit", nil)
 	case errors.Is(err, engine.ErrRecoverySemanticInputInvalid):
 		return opError(http.StatusBadRequest, "recovery_invalid_request", "Invalid recovery request", nil)
+	case errors.Is(err, engine.ErrRecoveryHumanApprovalRequired):
+		return opError(http.StatusForbidden, "recovery_human_approval_required",
+			"Recovery approval requires a human-authenticated session", nil)
 	case errors.Is(err, engine.ErrRecoveryPolicyBlocked):
 		return opError(http.StatusForbidden, "recovery_policy_blocked",
 			"The workflow recovery contract does not permit this action", nil)
@@ -66,7 +70,10 @@ func recoveryMutationError(err error) opResult {
 		return opError(http.StatusUnprocessableEntity, "recovery_candidate_invalid",
 			"The replacement output does not satisfy the business outcome contract", params)
 	default:
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		// Recovery failures can wrap SQL text, provider evidence, or sanitized
+		// artifact context. Never reflect those details through either public error
+		// envelope.
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 }
 
@@ -153,9 +160,52 @@ type recoveryCandidatesBody struct {
 	AcceptLossReason  string                 `json:"acceptLossReason,omitempty"`
 }
 
+func decodeRecoveryCandidatesRequest(r *http.Request) (recoveryCandidatesBody, error) {
+	var wire struct {
+		ExpectedRevision  int64           `json:"expectedRevision"`
+		ManualReplacement json.RawMessage `json:"manualReplacement"`
+		AcceptLossReason  json.RawMessage `json:"acceptLossReason"`
+	}
+	if err := decodeGovernedRecoveryBody(r, &wire); err != nil {
+		return recoveryCandidatesBody{}, err
+	}
+	body := recoveryCandidatesBody{ExpectedRevision: wire.ExpectedRevision}
+	if len(wire.AcceptLossReason) > 0 {
+		if bytes.Equal(bytes.TrimSpace(wire.AcceptLossReason), []byte("null")) ||
+			json.Unmarshal(wire.AcceptLossReason, &body.AcceptLossReason) != nil {
+			return recoveryCandidatesBody{}, errors.New("acceptLossReason must be a string")
+		}
+	}
+	if len(wire.ManualReplacement) == 0 {
+		return body, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(wire.ManualReplacement), []byte("null")) {
+		return recoveryCandidatesBody{}, errors.New("manualReplacement must be an object")
+	}
+	var manualWire struct {
+		Output json.RawMessage `json:"output"`
+		Reason json.RawMessage `json:"reason"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(wire.ManualReplacement))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&manualWire); err != nil || len(manualWire.Output) == 0 || len(manualWire.Reason) == 0 {
+		return recoveryCandidatesBody{}, errors.New("manualReplacement must contain output and reason")
+	}
+	var output any
+	if json.Unmarshal(manualWire.Output, &output) != nil {
+		return recoveryCandidatesBody{}, errors.New("manualReplacement output must be JSON")
+	}
+	var reason string
+	if bytes.Equal(bytes.TrimSpace(manualWire.Reason), []byte("null")) || json.Unmarshal(manualWire.Reason, &reason) != nil {
+		return recoveryCandidatesBody{}, errors.New("manualReplacement reason must be a string")
+	}
+	body.ManualReplacement = &manualReplacementBody{Output: output, Reason: reason}
+	return body, nil
+}
+
 func (s *V1Server) createRecoveryCandidatesCore(r *http.Request, rc v1Request) opResult {
-	var body recoveryCandidatesBody
-	if decodeGovernedRecoveryBody(r, &body) != nil || body.ExpectedRevision < 1 {
+	body, err := decodeRecoveryCandidatesRequest(r)
+	if err != nil || body.ExpectedRevision < 1 {
 		return opError(http.StatusBadRequest, "recovery_invalid_request", "Invalid recovery request", nil)
 	}
 	var manual *engine.SemanticManualReplacement

@@ -29,6 +29,9 @@ func TestRecoveryCaseLadder(t *testing.T) {
 	if IsLegalRecoveryCaseTransition("detected", "publishing") {
 		t.Fatal("skipping the ladder must be illegal")
 	}
+	if !IsLegalRecoveryCaseTransition("detected", "diagnosed") {
+		t.Fatal("an observe-only finding must enter diagnosis without claiming containment")
+	}
 	// Every open state can bail to accepted_loss or abandoned — except
 	// publishing, which only abandons (the contract's exact map).
 	if IsLegalRecoveryCaseTransition("publishing", "accepted_loss") {

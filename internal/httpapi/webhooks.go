@@ -17,7 +17,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -99,7 +98,7 @@ func (s *V1Server) webhookSelectorIngestCore(r *http.Request, rc v1Request) opRe
 		},
 	)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if ambiguous {
 		return opError(http.StatusConflict, "trigger_selector_ambiguous",
@@ -122,7 +121,7 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 
 func decodeWebhookIngestBody(r *http.Request) (webhookIngestBody, opResult) {
 	var body webhookIngestBody
-	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, webhookIngestMaxBytes)).Decode(&body); err != nil {
+	if err := decodeBodyBounded(r, &body, webhookIngestMaxBytes); err != nil {
 		return webhookIngestBody{}, opError(http.StatusBadRequest, "trigger_invalid_payload", "Invalid webhook payload", nil)
 	}
 	return body, opResult{}
@@ -204,104 +203,160 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 		if errors.Is(err, pgx.ErrNoRows) {
 			return in.noMatch
 		}
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if ownerState.OrgID != in.orgID || ownerState.DeletedAt != nil {
 		return in.noMatch
 	}
-	version, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
-		WorkflowID: in.workflowID, OrgID: in.orgID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return in.noMatch
-		}
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
-
-	wf, _ := domain.Parse(version.DagJson)
-	if wf == nil {
-		return opError(http.StatusUnprocessableEntity, "trigger_invalid_payload",
-			"Resolved workflow failed schema validation", nil)
-	}
-	nodeID, result := in.matchNode(wf, in.noMatch)
-	if nodeID == "" {
-		return result
-	}
-
-	// ACCEPT-time rollout assignment: the durable event id is the
-	// assignment key, so the deployment choice is deterministic and
-	// captured on the event BEFORE the run exists (buffered events keep it
-	// for backfill). The trigger node must exist in the ASSIGNED version's
-	// snapshot — mutable deployment state never redirects an event to a
-	// version that cannot serve it.
 	triggerEventID := in.eventID
 	if triggerEventID == "" {
 		triggerEventID = uuid.NewString()
 	}
-	effectiveVersionID := version.ID
-	var rolloutAssignment *engine.RolloutAssignment
-	if assignment, err := s.engine.ResolveWorkflowRolloutAssignment(ctx, in.orgID, in.workflowID, triggerEventID); err == nil && assignment != nil {
-		exactNodeID, exactResult := in.matchNode(assignment.Workflow, opError(
-			http.StatusConflict, "trigger_no_matching_node",
-			"Assigned workflow version no longer contains the trigger node", nil))
-		if exactNodeID == "" || exactNodeID != nodeID {
-			return exactResult
-		}
-		wf = assignment.Workflow
-		effectiveVersionID = assignment.VersionID
-		rolloutAssignment = assignment
-	} else if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
-
-	// Persist the replay anchor BEFORE the run, idempotent on the dedupe key.
 	eventPayload := in.eventPayload
-	payloadJSON, err := json.Marshal(map[string]any{"event": eventPayload})
-	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
+	var wf *domain.Workflow
+	var nodeID, effectiveVersionID string
 	rolloutID, rolloutVariant := pgtype.Text{}, pgtype.Text{}
-	if rolloutAssignment != nil {
-		rolloutID = pgtype.Text{String: rolloutAssignment.Rollout.ID, Valid: true}
-		rolloutVariant = pgtype.Text{String: rolloutAssignment.Variant, Valid: true}
-	}
-	created, err := q.InsertTriggerEvent(ctx, store.InsertTriggerEventParams{
-		ID: triggerEventID, OrgID: in.orgID, TriggerType: in.triggerType,
-		WorkflowID:        pgtype.Text{String: in.workflowID, Valid: true},
-		WorkflowVersionID: effectiveVersionID, NodeID: nodeID,
-		DedupeKey:              pgtype.Text{String: in.dedupeKey, Valid: in.dedupeKey != ""},
-		PayloadJson:            payloadJSON,
-		WorkflowRolloutID:      rolloutID,
-		WorkflowRolloutVariant: rolloutVariant,
-	})
-	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
-	if created == 0 && in.dedupeKey != "" {
-		existing, err := q.FindTriggerEventByDedupe(ctx, store.FindTriggerEventByDedupeParams{
-			OrgID: in.orgID, DedupeKey: pgtype.Text{String: in.dedupeKey, Valid: true},
+	created := int64(0)
+
+	duplicateResult := func(existing store.FindTriggerEventByDedupeRow) opResult {
+		return opOK(map[string]any{
+			"ok": true, "duplicate": true,
+			"triggerEventId": existing.ID, "runId": textOrNull(existing.RunID),
 		})
-		if err != nil {
-			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-		}
-		if existing.Status != "received" {
-			// Same dedupe key already processed: the relay sees success for
-			// its retry without a second run.
-			return opOK(map[string]any{
-				"ok": true, "duplicate": true,
-				"triggerEventId": existing.ID, "runId": textOrNull(existing.RunID),
-			})
-		}
-		// Crash-window convergence: the row exists but its run never
-		// started — this delivery adopts the persisted event and finishes
-		// the job with the payload that was actually recorded.
+	}
+	adoptExisting := func(existing store.FindTriggerEventByDedupeRow) opResult {
 		triggerEventID = existing.ID
+		if existing.OrgID != in.orgID || !existing.WorkflowID.Valid || existing.WorkflowID.String != in.workflowID ||
+			existing.TriggerType != in.triggerType || existing.NodeID == "" {
+			return opError(http.StatusConflict, "trigger_event_identity_mismatch",
+				"Persisted trigger event does not match this delivery", nil)
+		}
+		capturedVersion, loadErr := q.GetWorkflowVersionAnyWorkflow(ctx, store.GetWorkflowVersionAnyWorkflowParams{
+			ID: existing.WorkflowVersionID, OrgID: in.orgID,
+		})
+		if loadErr != nil || capturedVersion.WorkflowID != in.workflowID {
+			return opError(http.StatusInternalServerError, "internal_error",
+				"Internal error", nil)
+		}
+		capturedWorkflow, _ := domain.Parse(capturedVersion.DagJson)
+		if capturedWorkflow == nil {
+			return opError(http.StatusInternalServerError, "internal_error",
+				"Internal error", nil)
+		}
+		capturedNodeID, capturedResult := in.matchNode(capturedWorkflow, opError(
+			http.StatusConflict, "trigger_no_matching_node",
+			"Persisted workflow version no longer contains the trigger node", nil))
+		if capturedNodeID == "" || capturedNodeID != existing.NodeID {
+			return capturedResult
+		}
 		var persisted struct {
 			Event map[string]any `json:"event"`
 		}
-		if err := json.Unmarshal(existing.PayloadJson, &persisted); err == nil && persisted.Event != nil {
-			eventPayload = persisted.Event
+		if unmarshalErr := json.Unmarshal(existing.PayloadJson, &persisted); unmarshalErr != nil || persisted.Event == nil {
+			return opError(http.StatusInternalServerError, "internal_error",
+				"Internal error", nil)
+		}
+		wf = capturedWorkflow
+		nodeID = capturedNodeID
+		effectiveVersionID = existing.WorkflowVersionID
+		rolloutID = existing.WorkflowRolloutID
+		rolloutVariant = existing.WorkflowRolloutVariant
+		eventPayload = persisted.Event
+		return opResult{}
+	}
+
+	// Look for an accepted delivery before resolving mutable latest/rollout
+	// state. This is the only way a crash retry can remain bound to the exact
+	// topology, credential identity and payload captured at ACCEPT time.
+	existingFound := false
+	if in.dedupeKey != "" {
+		existing, findErr := q.FindTriggerEventByDedupe(ctx, store.FindTriggerEventByDedupeParams{
+			OrgID: in.orgID, DedupeKey: pgtype.Text{String: in.dedupeKey, Valid: true},
+		})
+		switch {
+		case findErr == nil:
+			if existing.Status != "received" {
+				return duplicateResult(existing)
+			}
+			if result := adoptExisting(existing); result.status != 0 {
+				return result
+			}
+			existingFound = true
+		case errors.Is(findErr, pgx.ErrNoRows):
+			// First delivery continues through current deployment resolution.
+		default:
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+	}
+
+	if !existingFound {
+		version, latestErr := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
+			WorkflowID: in.workflowID, OrgID: in.orgID,
+		})
+		if latestErr != nil {
+			if errors.Is(latestErr, pgx.ErrNoRows) {
+				return in.noMatch
+			}
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+		wf, _ = domain.Parse(version.DagJson)
+		if wf == nil {
+			return opError(http.StatusUnprocessableEntity, "trigger_invalid_payload",
+				"Resolved workflow failed schema validation", nil)
+		}
+		var result opResult
+		nodeID, result = in.matchNode(wf, in.noMatch)
+		if nodeID == "" {
+			return result
+		}
+		effectiveVersionID = version.ID
+
+		// ACCEPT-time rollout assignment: the durable event id is the assignment
+		// key and the selected snapshot is persisted before any run exists.
+		if assignment, assignmentErr := s.engine.ResolveWorkflowRolloutAssignment(ctx, in.orgID, in.workflowID, triggerEventID); assignmentErr == nil && assignment != nil {
+			exactNodeID, exactResult := in.matchNode(assignment.Workflow, opError(
+				http.StatusConflict, "trigger_no_matching_node",
+				"Assigned workflow version no longer contains the trigger node", nil))
+			if exactNodeID == "" || exactNodeID != nodeID {
+				return exactResult
+			}
+			wf = assignment.Workflow
+			effectiveVersionID = assignment.VersionID
+			rolloutID = pgtype.Text{String: assignment.Rollout.ID, Valid: true}
+			rolloutVariant = pgtype.Text{String: assignment.Variant, Valid: true}
+		} else if assignmentErr != nil {
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+
+		payloadJSON, marshalErr := json.Marshal(map[string]any{"event": eventPayload})
+		if marshalErr != nil {
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+		created, err = q.InsertTriggerEvent(ctx, store.InsertTriggerEventParams{
+			ID: triggerEventID, OrgID: in.orgID, TriggerType: in.triggerType,
+			WorkflowID:        pgtype.Text{String: in.workflowID, Valid: true},
+			WorkflowVersionID: effectiveVersionID, NodeID: nodeID,
+			DedupeKey:              pgtype.Text{String: in.dedupeKey, Valid: in.dedupeKey != ""},
+			PayloadJson:            payloadJSON,
+			WorkflowRolloutID:      rolloutID,
+			WorkflowRolloutVariant: rolloutVariant,
+		})
+		if err != nil {
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+		if created == 0 && in.dedupeKey != "" {
+			existing, findErr := q.FindTriggerEventByDedupe(ctx, store.FindTriggerEventByDedupeParams{
+				OrgID: in.orgID, DedupeKey: pgtype.Text{String: in.dedupeKey, Valid: true},
+			})
+			if findErr != nil {
+				return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+			}
+			if existing.Status != "received" {
+				return duplicateResult(existing)
+			}
+			if result := adoptExisting(existing); result.status != 0 {
+				return result
+			}
 		}
 	}
 
@@ -326,16 +381,28 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 		}
 	}
 	ratePerMin := executors.ResolveTriggerRateLimitPerMin(nodeConfig["rateLimitPerMin"])
-	if limitErr := s.limiter.Enforce(ctx, in.orgID, ratelimit.Options{
+	if limitErr := s.limiter.EnforceTriggerEvent(ctx, in.orgID, in.orgID, triggerEventID, ratelimit.Options{
 		Name:   "trigger." + effectiveVersionID + "." + nodeID,
 		Max:    ratePerMin,
 		Window: time.Minute,
 	}); limitErr != nil {
-		if _, err := q.MarkTriggerEventOutcome(ctx, store.MarkTriggerEventOutcomeParams{
-			OrgID: in.orgID, ID: triggerEventID, Status: "skipped",
-			SkippedReason: pgtype.Text{String: "rate_limited", Valid: true},
-		}); err != nil {
-			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		var settled *ratelimit.TriggerEventSettledError
+		if errors.As(limitErr, &settled) {
+			existing, getErr := q.GetTriggerEvent(ctx, store.GetTriggerEventParams{
+				OrgID: in.orgID, ID: triggerEventID,
+			})
+			if getErr != nil {
+				return opError(http.StatusInternalServerError, "internal_error",
+					"Internal error", nil)
+			}
+			return opOK(map[string]any{
+				"ok": true, "duplicate": true,
+				"triggerEventId": existing.ID, "runId": textOrNull(existing.RunID),
+			})
+		}
+		var limited *ratelimit.LimitError
+		if !errors.As(limitErr, &limited) {
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		audit.Write(ctx, s.pool, in.authContext, "trigger.event.skipped", audit.Options{
 			TargetType: "trigger_event", TargetID: triggerEventID,
@@ -356,7 +423,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 			OrgID: in.orgID, ID: triggerEventID, Status: "buffered",
 			SkippedReason: pgtype.Text{String: ownerState.Status, Valid: true},
 		}); err != nil {
-			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		audit.Write(ctx, s.pool, in.authContext, "trigger.event.buffered", audit.Options{
 			TargetType: "trigger_event", TargetID: triggerEventID,
@@ -387,9 +454,9 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 			"event": eventPayload,
 		},
 	}
-	if rolloutAssignment != nil {
-		ingestStart.WorkflowRolloutID = rolloutAssignment.Rollout.ID
-		ingestStart.WorkflowRolloutVariant = rolloutAssignment.Variant
+	if rolloutID.Valid && rolloutVariant.Valid {
+		ingestStart.WorkflowRolloutID = rolloutID.String
+		ingestStart.WorkflowRolloutVariant = rolloutVariant.String
 	}
 	runID, err := s.engine.StartRun(ctx, ingestStart)
 	if err != nil {
@@ -397,7 +464,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 		if errors.As(err, &conflict) {
 			claimed, err := q.GetTriggerEvent(ctx, store.GetTriggerEventParams{OrgID: in.orgID, ID: triggerEventID})
 			if err != nil {
-				return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+				return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 			}
 			return opOK(map[string]any{
 				"ok": true, "duplicate": true,
@@ -405,7 +472,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 			})
 		}
 		// The event row stays `received` so the relay's retry converges.
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	audit.Write(ctx, s.pool, in.authContext, "trigger.event.started", audit.Options{
 		TargetType: "trigger_event", TargetID: triggerEventID,
@@ -465,7 +532,7 @@ func (s *V1Server) runsRedriveCore(r *http.Request, rc v1Request) opResult {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusNotFound, "dlq_not_found", "Not found", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, deadLetterID); err != nil {
 		switch {
@@ -474,7 +541,7 @@ func (s *V1Server) runsRedriveCore(r *http.Request, rc v1Request) opResult {
 		case errors.Is(err, engine.ErrRedriveConflict):
 			return opError(http.StatusConflict, "dlq_replay_conflict", "Dead letter replay already claimed", nil)
 		default:
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "run.redrive", audit.Options{

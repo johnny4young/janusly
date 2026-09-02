@@ -46,6 +46,12 @@ readiness status. The projection is bounded and excludes the workflow DAG,
 configs, credentials, templates, and fixture contents.
 
 `operations.brief` is the same deterministic top-three read model used by Home.
+It accepts any contributing read scope (`recovery.read`, `runs.read`, or
+`dlq.read`) and filters each source independently, so a narrow service account
+does not need unrelated recovery visibility. Ranking, targets and evidence stay
+shared, while `allowedActions` is projected onto the actual MCP catalog: it
+never advertises the UI-only candidate or approval endpoints, and a diagnosed
+case remains actionable through the composite `recovery.cases.diagnose` tool.
 `workflows.propose` performs exact CapabilityCatalog binding without saving a
 workflow or returning its complete DAG. Semantic recovery is exposed as bounded
 inspect/diagnose/validate/apply tools; apply requires a separately created,

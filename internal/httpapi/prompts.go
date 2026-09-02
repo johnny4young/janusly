@@ -69,14 +69,14 @@ func (s *V1Server) createPromptCore(r *http.Request, rc v1Request) opResult {
 		Description: pgtype.Text{String: body.Description, Valid: body.Description != ""},
 		CreatedBy:   pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	audit.Write(ctx, s.pool, rc.authContext, "prompt.created", audit.Options{
 		TargetType: "prompt", TargetID: id, Metadata: map[string]any{"name": body.Name},
 	})
 	created, err := q.GetPromptByName(ctx, store.GetPromptByNameParams{OrgID: rc.orgID, Name: body.Name})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opResult{status: http.StatusCreated, data: map[string]any{"prompt": promptView(created)}}
 }
@@ -109,7 +109,7 @@ func (s *V1Server) createPromptVersionCore(r *http.Request, rc v1Request, name s
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusNotFound, "prompts_not_found", "prompt not found", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	// Bounded unique-violation retry, the shared version-writer policy.
 	var created store.PromptVersion
@@ -118,7 +118,7 @@ func (s *V1Server) createPromptVersionCore(r *http.Request, rc v1Request, name s
 			OrgID: rc.orgID, PromptID: prompt.ID,
 		})
 		if err != nil {
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		id := s.newID()
 		if err := q.InsertPromptVersion(ctx, store.InsertPromptVersionParams{
@@ -130,7 +130,7 @@ func (s *V1Server) createPromptVersionCore(r *http.Request, rc v1Request, name s
 		}
 		created, err = q.GetPromptVersionByID(ctx, store.GetPromptVersionByIDParams{OrgID: rc.orgID, ID: id})
 		if err != nil {
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		audit.Write(ctx, s.pool, rc.authContext, "prompt.version_created", audit.Options{
 			TargetType: "prompt_version", TargetID: id,
@@ -150,7 +150,7 @@ func (s *V1Server) pinPromptVersionCore(r *http.Request, rc v1Request, name stri
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusNotFound, "prompts_not_found", "prompt not found", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	target, err := q.GetPromptVersionByNumber(ctx, store.GetPromptVersionByNumberParams{
 		OrgID: rc.orgID, PromptID: prompt.ID, Version: int32(version),
@@ -159,13 +159,13 @@ func (s *V1Server) pinPromptVersionCore(r *http.Request, rc v1Request, name stri
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusNotFound, "prompts_version_not_found", "prompt version not found", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if _, err := q.PinPromptVersion(ctx, store.PinPromptVersionParams{
 		OrgID: rc.orgID, ID: prompt.ID,
 		PinnedVersionID: pgtype.Text{String: target.ID, Valid: true},
 	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	audit.Write(ctx, s.pool, rc.authContext, "prompt.version_pinned", audit.Options{
 		TargetType: "prompt", TargetID: prompt.ID,
@@ -178,7 +178,7 @@ func (s *V1Server) mountPromptRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /prompts", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		rows, err := store.New(s.pool).ListPrompts(r.Context(), store.ListPromptsParams{OrgID: rc.orgID, Limit: 100})
 		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		views := make([]map[string]any, 0, len(rows))

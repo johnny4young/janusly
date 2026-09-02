@@ -65,7 +65,7 @@ func (s *V1Server) roleDefinedForOrg(r *http.Request, orgID, roleName string) (b
 func (s *V1Server) listMembers(w http.ResponseWriter, r *http.Request, rc v1Request) {
 	rows, err := store.New(s.pool).ListOrgMembers(r.Context(), rc.orgID)
 	if err != nil {
-		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 		return
 	}
 	items := make([]map[string]any, 0, len(rows))
@@ -84,7 +84,7 @@ func (s *V1Server) listMembers(w http.ResponseWriter, r *http.Request, rc v1Requ
 func (s *V1Server) listInvitationsCore(r *http.Request, rc v1Request) opResult {
 	rows, err := store.New(s.pool).ListOrgInvitations(r.Context(), rc.orgID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -112,7 +112,7 @@ func (s *V1Server) inviteMemberCore(r *http.Request, rc v1Request) opResult {
 	}
 	defined, err := s.roleDefinedForOrg(r, rc.orgID, roleName)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if !defined {
 		return opError(http.StatusBadRequest, "members_role_not_defined",
@@ -162,7 +162,7 @@ func (s *V1Server) inviteMemberCore(r *http.Request, rc v1Request) opResult {
 			"Member already exists for this org", map[string]any{"email": email})
 	}
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(map[string]any{"id": inviteID, "status": "pending"})
 }
@@ -202,7 +202,7 @@ func (s *V1Server) revokeInvitationCore(r *http.Request, rc v1Request, id string
 		return opError(http.StatusNotFound, "members_invitation_not_found", "invitation not found or not pending", nil)
 	}
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if revoked == 0 {
 		return opError(http.StatusNotFound, "members_invitation_not_found", "invitation not found or not pending", nil)
@@ -229,7 +229,7 @@ func (s *V1Server) setMemberRoleCore(r *http.Request, rc v1Request) opResult {
 	}
 	defined, err := s.roleDefinedForOrg(r, rc.orgID, roleName)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if !defined {
 		return opError(http.StatusBadRequest, "members_role_not_defined",
@@ -264,7 +264,7 @@ func (s *V1Server) setMemberRoleCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusConflict, "organization_owner_protected", "The organization owner cannot be demoted", nil)
 	}
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if updated == 0 {
 		return opError(http.StatusNotFound, "member_not_found", "member not found", nil)
@@ -313,7 +313,7 @@ func (s *V1Server) removeMemberCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusConflict, "organization_owner_protected", "The organization owner cannot be removed", nil)
 	}
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if removed == 0 {
 		return opError(http.StatusNotFound, "member_not_found", "Member not found", nil)

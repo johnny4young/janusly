@@ -434,7 +434,7 @@ func recoveryValidationWindow(r *http.Request) int {
 func (s *V1Server) recoveryValidationCore(r *http.Request, rc v1Request) opResult {
 	report, err := s.queryRecoveryValidation(r.Context(), rc.orgID, recoveryValidationWindow(r), time.Now().UTC())
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(report)
 }

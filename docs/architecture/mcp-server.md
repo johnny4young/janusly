@@ -8,10 +8,18 @@ Every tool is tenant-scoped in process and passes the same authority envelope:
 
 - an explicit service-account permission ceiling from
   `JANUSLY_MCP_PERMISSIONS` (the omitted default is read-only);
-- a per-tool, per-organization fixed-window rate limit;
+- an authorized per-tool, per-organization fixed-window rate limit;
+- a separate per-tool, per-actor denial bucket, so unauthorized attempts stay
+  bounded without consuming the tenant's authorized tool capacity;
 - one bounded `mcp.tool.invoked` audit record;
 - for business writes, `JANUSLY_MCP_WRITES_ENABLED=true` plus tenant
   `mcp.writeConsent=true`.
+
+Tool requests are explicitly bounded before business parsing and every result
+passes a final 256000-byte fail-closed response gate. Expected errors are
+secret-scrubbed and truncated. Individual projections remain substantially
+smaller where their contract permits it; the global gate is a backstop, not a
+pagination substitute.
 
 Consent never grants a permission missing from the service-account ceiling.
 Long-running operations return durable run IDs that clients poll; the server
@@ -34,11 +42,22 @@ There is deliberately no recovery approval tool. Approval is an independent
 human action created only through authenticated UI/API. `recovery.cases.apply`
 can consume a valid one-use approval, but cannot create or renew it.
 
-`operations.brief` returns the exact deterministic top-three read model used by
-Home. `workflows.propose` compiles a bounded Intent Brief and binds either a
+`operations.brief` accepts any contributing read scope (`recovery.read`,
+`runs.read`, or `dlq.read`) and returns the exact deterministic top-three read
+model used by Home. Ranking, targets and evidence are identical; its
+`allowedActions` are intersected with the MCP catalog so every advertised
+action is actually callable. In particular, a diagnosed case points back to
+the composite `recovery.cases.diagnose` tool for candidate creation, DLQ
+inspection maps to `dlq.list`, and human-only approval actions are omitted.
+`workflows.propose` compiles a bounded Intent Brief and binds either a
 caller draft or the provider-free template to the exact tenant capability
 catalog. Its result contains node id/type summaries and assurance evidence,
 not the complete DAG or node configuration.
+
+`workflows.save` calls the same canonical atomic engine append as HTTP. It does
+not allocate `MAX(version)+1` independently, persist raw caller JSON, or skip
+schedule reconciliation; concurrent API and MCP writers therefore share one
+ordered immutable history.
 
 Recovery diagnose, validate and apply call the same engine operations as HTTP,
 including expected-revision CAS, immutable content-addressed artifacts and

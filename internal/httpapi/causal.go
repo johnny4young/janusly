@@ -67,7 +67,7 @@ func (s *V1Server) causalCore(r *http.Request, rc v1Request) opResult {
 	})
 	raw, err := json.Marshal(result)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	var envelope map[string]any
 	_ = json.Unmarshal(raw, &envelope)

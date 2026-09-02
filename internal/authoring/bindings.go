@@ -37,6 +37,13 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 		CatalogVersion: catalog.Version,
 		Resolved:       []Binding{}, Missing: []Binding{}, Complete: true,
 	}
+	if workflow == nil {
+		report.Missing = append(report.Missing, Binding{
+			Kind: "workflow", Field: "workflow", Alternatives: []string{}, Reason: "workflow_contract_invalid",
+		})
+		report.Complete = false
+		return report
+	}
 	builtin := map[string]tools.CatalogEntry{}
 	for _, entry := range catalog.BuiltinTools {
 		builtin[entry.Name] = entry
@@ -57,9 +64,11 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 		credentials[entry.Name] = entry
 	}
 
-	addResolved := func(binding Binding) { report.Resolved = append(report.Resolved, binding) }
+	addResolved := func(binding Binding) {
+		report.Resolved = append(report.Resolved, bindingForWire(binding))
+	}
 	addMissing := func(binding Binding) {
-		report.Missing = append(report.Missing, binding)
+		report.Missing = append(report.Missing, bindingForWire(binding))
 		report.Complete = false
 	}
 	for _, node := range workflow.Nodes {
@@ -92,12 +101,15 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 			if slices.Contains(entry.Required, "credential") {
 				credential := trimmedString(input["credential"])
 				entry, exists := credentials[credential]
+				expectedKind := credentialKindForTool(name)
 				reason := ""
 				switch {
 				case credential == "":
 					reason = "credential_binding_required"
 				case !exists:
 					reason = "exact_credential_not_found"
+				case expectedKind != "" && entry.Kind != expectedKind:
+					reason = "credential_kind_mismatch"
 				case !entry.Configured:
 					reason = "credential_not_configured"
 				case entry.Expired:
@@ -106,7 +118,7 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 				if reason == "" {
 					addResolved(Binding{Kind: "credential", NodeID: node.ID, Field: "config.input.credential", Requested: credential, ResolvedID: entry.ID, Alternatives: []string{}})
 				} else {
-					addMissing(Binding{Kind: "credential", NodeID: node.ID, Field: "config.input.credential", Requested: credential, Alternatives: availableCredentialNames(catalog, credentialKindForTool(name)), Reason: reason})
+					addMissing(Binding{Kind: "credential", NodeID: node.ID, Field: "config.input.credential", Requested: credential, Alternatives: availableCredentialNames(catalog, expectedKind), Reason: reason})
 				}
 			}
 		case "mcp_tool":
@@ -172,6 +184,27 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 		case "mcp_server_event":
 			requireConfig(&report, node, "connectionAlias")
 			requireConfig(&report, node, "resourceUri")
+		case "pagerduty_incident":
+			credential := trimmedString(node.Config["webhookCredential"])
+			entry, exists := credentials[credential]
+			reason := ""
+			switch {
+			case credential == "":
+				reason = "credential_binding_required"
+			case !exists:
+				reason = "exact_credential_not_found"
+			case entry.Kind != "pagerduty_webhook_secret":
+				reason = "credential_kind_mismatch"
+			case !entry.Configured:
+				reason = "credential_not_configured"
+			case entry.Expired:
+				reason = "credential_expired"
+			}
+			if reason == "" {
+				addResolved(Binding{Kind: "credential", NodeID: node.ID, Field: "config.webhookCredential", Requested: credential, ResolvedID: entry.ID, Alternatives: []string{}})
+			} else {
+				addMissing(Binding{Kind: "credential", NodeID: node.ID, Field: "config.webhookCredential", Requested: credential, Alternatives: availableCredentialNames(catalog, "pagerduty_webhook_secret"), Reason: reason})
+			}
 		}
 	}
 	return report
@@ -200,13 +233,25 @@ func HasUnboundCapabilityIdentity(report BindingReport) bool {
 func BindWorkflowJSON(catalog Catalog, document map[string]any) (BindingReport, *domain.Workflow, []domain.Issue) {
 	raw, err := json.Marshal(document)
 	if err != nil {
-		return BindingReport{CatalogVersion: catalog.Version, Resolved: []Binding{}, Missing: []Binding{{Kind: "workflow", Field: "workflow", Reason: "workflow_not_serializable"}}, Complete: false}, nil, nil
+		return BindingReport{CatalogVersion: catalog.Version, Resolved: []Binding{}, Missing: []Binding{{Kind: "workflow", Field: "workflow", Alternatives: []string{}, Reason: "workflow_not_serializable"}}, Complete: false}, nil, nil
 	}
 	workflow, parseIssues := domain.Parse(raw)
 	if workflow == nil {
-		return BindingReport{CatalogVersion: catalog.Version, Resolved: []Binding{}, Missing: []Binding{{Kind: "workflow", Field: "workflow", Reason: "workflow_contract_invalid"}}, Complete: false}, nil, parseIssues
+		return BindingReport{CatalogVersion: catalog.Version, Resolved: []Binding{}, Missing: []Binding{{Kind: "workflow", Field: "workflow", Alternatives: []string{}, Reason: "workflow_contract_invalid"}}, Complete: false}, nil, parseIssues
 	}
 	return BindWorkflow(catalog, workflow), workflow, parseIssues
+}
+
+// bindingForWire keeps the authoring response contract stable for incomplete
+// proposals. A nil slice marshals as JSON null, but every UI/MCP/OpenAPI
+// consumer treats alternatives as an iterable array, including when there are
+// no safe suggestions. Normalize at the producer boundary instead of teaching
+// each consumer to accept two wire shapes.
+func bindingForWire(binding Binding) Binding {
+	if binding.Alternatives == nil {
+		binding.Alternatives = []string{}
+	}
+	return binding
 }
 
 func requireConfig(report *BindingReport, node domain.Node, field string) {
@@ -293,8 +338,9 @@ func availableCredentialNames(catalog Catalog, kind string) []string {
 			exact = append(exact, entry.Name)
 		}
 	}
-	if len(exact) > 0 {
-		any = exact
+	if kind != "" {
+		slices.Sort(exact)
+		return boundedAlternatives(exact)
 	}
 	slices.Sort(any)
 	return boundedAlternatives(any)

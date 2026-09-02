@@ -13,6 +13,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -443,29 +444,86 @@ func validWorkflowSlo(slo workflowSloBody) bool {
 	return true
 }
 
-func (s *V1Server) setWorkflowSloCore(r *http.Request, rc v1Request, workflowID string) opResult {
-	if !s.ownsActiveWorkflow(r, rc.orgID, workflowID) {
-		return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
-	}
+// decodeWorkflowSloMutation preserves the wire distinction between an absent
+// `slo` property and an explicit null. The route is a replacement operation:
+// callers must either provide the complete declaration or deliberately clear
+// it with null. A pointer field alone cannot represent that distinction after
+// encoding/json has decoded the outer object.
+func decodeWorkflowSloMutation(r *http.Request) (*workflowSloBody, error) {
 	var body struct {
-		Slo *workflowSloBody `json:"slo"`
+		Slo json.RawMessage `json:"slo"`
 	}
 	if err := decodeBody(r, &body); err != nil {
+		return nil, err
+	}
+	if len(body.Slo) == 0 {
+		return nil, errors.New("slo is required")
+	}
+	if bytes.Equal(bytes.TrimSpace(body.Slo), []byte("null")) {
+		return nil, nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body.Slo, &fields) != nil || fields == nil {
+		return nil, errors.New("slo must be an object")
+	}
+	for _, field := range []string{
+		"successRatePercent", "mttrSeconds", "p95DurationMs",
+		"budgetBlocksPerWindow", "stuckWaitingNodesMax", "windowDays",
+	} {
+		if _, present := fields[field]; !present {
+			return nil, errors.New("slo." + field + " is required")
+		}
+	}
+	var slo workflowSloBody
+	decoder := json.NewDecoder(bytes.NewReader(body.Slo))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&slo); err != nil {
+		return nil, err
+	}
+	return &slo, nil
+}
+
+func (s *V1Server) setWorkflowSloCore(r *http.Request, rc v1Request, workflowID string) opResult {
+	slo, err := decodeWorkflowSloMutation(r)
+	if err != nil {
 		return opError(http.StatusUnprocessableEntity, "workflow_slo_invalid", "Invalid SLO body", nil)
 	}
 	var sloJSON json.RawMessage = []byte("null")
-	if body.Slo != nil {
-		if !validWorkflowSlo(*body.Slo) {
+	if slo != nil {
+		if !validWorkflowSlo(*slo) {
 			return opError(http.StatusUnprocessableEntity, "workflow_slo_invalid",
 				"windowDays must be 7, 14 or 30 and every threshold non-negative", nil)
 		}
-		encoded, err := json.Marshal(body.Slo)
+		encoded, err := json.Marshal(slo)
 		if err != nil {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		sloJSON = encoded
 	}
-	versionID, err := store.New(s.pool).SetLatestWorkflowSlo(r.Context(), store.SetLatestWorkflowSloParams{
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	queries := store.New(tx)
+	if _, err := queries.LockWorkflowForRollout(r.Context(), store.LockWorkflowForRolloutParams{
+		OrgID: rc.orgID, ID: workflowID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	latest, err := queries.GetLatestWorkflowVersionReliability(r.Context(), store.GetLatestWorkflowVersionReliabilityParams{
+		OrgID: rc.orgID, WorkflowID: workflowID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "workflow_not_found", "Workflow has no saved version", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	versionID, err := queries.SetLatestWorkflowSlo(r.Context(), store.SetLatestWorkflowSloParams{
 		OrgID: rc.orgID, WorkflowID: workflowID, SloJson: sloJSON,
 	})
 	if err != nil {
@@ -474,13 +532,26 @@ func (s *V1Server) setWorkflowSloCore(r *http.Request, rc v1Request, workflowID 
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
+	if err := tx.Commit(r.Context()); err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.slo.set", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
-		Metadata: map[string]any{"workflowId": workflowID, "versionId": versionID, "cleared": body.Slo == nil},
+		Metadata: map[string]any{
+			"workflowId": workflowID, "versionId": versionID, "cleared": slo == nil,
+			"slo": declaredWorkflowSlo(slo), "previousSlo": rawOrNull(latest.SloJson),
+		},
 	})
 	var declared any
-	if body.Slo != nil {
-		declared = body.Slo
+	if slo != nil {
+		declared = slo
 	}
 	return opOK(map[string]any{"workflowId": workflowID, "slo": declared, "versionId": versionID})
+}
+
+func declaredWorkflowSlo(slo *workflowSloBody) any {
+	if slo == nil {
+		return nil
+	}
+	return slo
 }

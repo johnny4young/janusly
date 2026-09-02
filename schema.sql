@@ -742,7 +742,9 @@ CREATE TABLE public.recovery_approval_grants (
     revoked_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT recovery_approval_grants_revision_check CHECK ((case_revision > 0)),
-    CONSTRAINT recovery_approval_grants_expiry_check CHECK ((expires_at > created_at))
+    CONSTRAINT recovery_approval_grants_expiry_check CHECK ((expires_at = (created_at + '00:30:00'::interval))),
+    CONSTRAINT recovery_approval_grants_lifecycle_check CHECK ((((consumed_at IS NULL) AND (consumed_by IS NULL) AND (revoked_at IS NULL)) OR ((consumed_at IS NOT NULL) AND (consumed_by IS NOT NULL) AND (revoked_at IS NULL)) OR ((consumed_at IS NULL) AND (consumed_by IS NULL) AND (revoked_at IS NOT NULL)))),
+    CONSTRAINT recovery_approval_grants_time_check CHECK ((((consumed_at IS NULL) OR ((consumed_at >= created_at) AND (consumed_at < expires_at))) AND ((revoked_at IS NULL) OR (revoked_at >= created_at))))
 );
 
 
@@ -1356,6 +1358,7 @@ CREATE TABLE public.trigger_events (
     dedupe_key text,
     payload_json jsonb NOT NULL,
     skipped_reason text,
+    rate_admitted_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now(),
     backfill_claim_token text,
     backfill_claimed_at timestamp with time zone,

@@ -5,11 +5,30 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/johnny4young/janusly/internal/signature"
 )
 
 const maxMCPErrorSummaryRunes = 300
+
+const (
+	maxMCPIdentifierRunes = 256
+	maxMCPCursorRunes     = 1024
+)
+
+func validMCPIdentifier(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && utf8.RuneCountInString(value) <= maxMCPIdentifierRunes
+}
+
+func validOptionalMCPIdentifier(value string) bool {
+	return strings.TrimSpace(value) == "" || validMCPIdentifier(value)
+}
+
+func validOptionalMCPCursor(value string) bool {
+	return utf8.RuneCountInString(value) <= maxMCPCursorRunes
+}
 
 func boundedMCPText(value string, maxRunes int) string {
 	value = signature.ScrubSecretShapes(strings.TrimSpace(value))

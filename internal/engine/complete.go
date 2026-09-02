@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/domain"
@@ -315,6 +316,22 @@ func (e *Engine) persistSemanticViolations(
 	if err != nil {
 		return false, err
 	}
+	// A recovery repair target is useful only when the run is pinned to a real
+	// immutable workflow version. Ad-hoc runs carry their run id as snapshot
+	// identity; do not advertise that value as an exact authoring version.
+	exactWorkflowID := pgtype.Text{}
+	if wf.ID != "" {
+		_, versionErr := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
+			ID: run.WorkflowVersionID, OrgID: run.OrgID, WorkflowID: wf.ID,
+		})
+		switch {
+		case versionErr == nil:
+			exactWorkflowID = pgtype.Text{String: wf.ID, Valid: true}
+		case errors.Is(versionErr, pgx.ErrNoRows):
+		default:
+			return false, fmt.Errorf("verify semantic recovery workflow version: %w", versionErr)
+		}
+	}
 	for _, violation := range violations {
 		caseID := StableSemanticID("sem", run.OrgID, claim.RunID, violation.DetectorID)
 		state := "detected"
@@ -328,9 +345,9 @@ func (e *Engine) persistSemanticViolations(
 		detailsJSON, _ := json.Marshal(details)
 		if err := q.InsertRecoveryCase(ctx, store.InsertRecoveryCaseParams{
 			ID: caseID, OrgID: run.OrgID, RunID: claim.RunID,
-			WorkflowID:        pgtype.Text{String: wf.ID, Valid: wf.ID != ""},
-			WorkflowVersionID: wf.ID,
-			Source:            "semantic_violation", DetectorID: violation.DetectorID,
+			WorkflowID:        exactWorkflowID,
+			WorkflowVersionID: run.WorkflowVersionID,
+			Source:            semanticRecoveryCaseSource, DetectorID: violation.DetectorID,
 			SourceNodeID: violation.SourceNodeID, DetectorKind: violation.Kind,
 			Action: violation.Action, Message: violation.Message,
 			DetailsJson: detailsJSON, State: state,

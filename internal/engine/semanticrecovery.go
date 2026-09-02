@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -74,6 +76,13 @@ func (e *Engine) GetRecoveryCaseDetail(ctx context.Context, orgID, caseID string
 		}
 		return RecoveryCaseDetail{}, fmt.Errorf("read recovery case: %w", err)
 	}
+	// The governed detail/API/MCP surface is exclusively for semantic outcome
+	// cases. Treat every other recovery source as absent so a future or legacy
+	// case family cannot accidentally inherit semantic policy projections or
+	// mutation affordances merely because it shares the storage table.
+	if item.Source != semanticRecoveryCaseSource {
+		return RecoveryCaseDetail{}, ErrRecoveryCaseNotFound
+	}
 	// Cases are durable incident evidence and intentionally outlive the run
 	// retention window. A missing run must therefore degrade the derived
 	// autonomy profile rather than make an otherwise valid case disappear.
@@ -90,17 +99,25 @@ func (e *Engine) GetRecoveryCaseDetail(ctx context.Context, orgID, caseID string
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return RecoveryCaseDetail{}, fmt.Errorf("read recovery case run: %w", err)
 	}
-	transitions, err := q.ListRecoveryCaseTransitions(ctx, store.ListRecoveryCaseTransitionsParams{
+	transitionRows, err := q.ListRecoveryCaseTransitions(ctx, store.ListRecoveryCaseTransitionsParams{
 		OrgID: orgID, CaseID: caseID,
 	})
 	if err != nil {
 		return RecoveryCaseDetail{}, fmt.Errorf("read recovery case transitions: %w", err)
 	}
-	artifacts, err := q.ListRecoveryCaseArtifacts(ctx, store.ListRecoveryCaseArtifactsParams{
+	transitions := make([]store.RecoveryCaseTransition, len(transitionRows))
+	for index, row := range transitionRows {
+		transitions[index] = store.RecoveryCaseTransition(row)
+	}
+	artifactRows, err := q.ListRecoveryCaseArtifacts(ctx, store.ListRecoveryCaseArtifactsParams{
 		OrgID: orgID, CaseID: caseID,
 	})
 	if err != nil {
 		return RecoveryCaseDetail{}, fmt.Errorf("read recovery case artifacts: %w", err)
+	}
+	artifacts := make([]store.RecoveryCaseArtifact, len(artifactRows))
+	for index, row := range artifactRows {
+		artifacts[index] = store.RecoveryCaseArtifact(row)
 	}
 	return RecoveryCaseDetail{
 		Case: item, Transitions: transitions, Artifacts: artifacts,
@@ -153,6 +170,18 @@ type SemanticRecoveryValidationPayload struct {
 	Summary             string `json:"summary"`
 }
 
+func isLowerHexSha256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // currentRecoveryValidation binds the artifact to the exact lifecycle point
 // that produced the present awaiting_approval revision. Validation advances
 // candidates_ready -> validating -> awaiting_approval, so any other delta
@@ -167,7 +196,10 @@ func currentRecoveryValidation(validationRevision, caseRevision int64) bool {
 // or returning any authority by itself.
 func ParseSemanticRecoveryCandidatePayload(raw json.RawMessage) (SemanticRecoveryCandidatePayload, error) {
 	var candidate SemanticRecoveryCandidatePayload
-	if json.Unmarshal(raw, &candidate) != nil || !validSemanticRecoveryCandidateEnvelope(candidate) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&candidate) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		!validSemanticRecoveryCandidateEnvelope(candidate) {
 		return SemanticRecoveryCandidatePayload{}, ErrRecoverySemanticInputInvalid
 	}
 	switch candidate.Decision {
@@ -205,6 +237,35 @@ func ParseSemanticRecoveryCandidatePayload(raw json.RawMessage) (SemanticRecover
 	return candidate, nil
 }
 
+// ParseSemanticRecoveryValidationPayload is the only decoder for the
+// content-addressed validation authority consumed by approval, apply, and MCP
+// projection. Presence matters because `passed:false` is a legitimate result,
+// so typed zero values cannot prove that the wire field existed.
+func ParseSemanticRecoveryValidationPayload(raw json.RawMessage) (SemanticRecoveryValidationPayload, error) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil || len(fields) != 5 {
+		return SemanticRecoveryValidationPayload{}, ErrRecoverySemanticInputInvalid
+	}
+	for _, field := range []string{
+		"candidateArtifactId", "candidateSha256", "caseRevision", "passed", "summary",
+	} {
+		if _, present := fields[field]; !present {
+			return SemanticRecoveryValidationPayload{}, ErrRecoverySemanticInputInvalid
+		}
+	}
+	var validation SemanticRecoveryValidationPayload
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&validation) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		strings.TrimSpace(validation.CandidateArtifactID) == "" ||
+		len(validation.CandidateArtifactID) > 256 ||
+		!isLowerHexSha256(validation.CandidateSha256) || validation.CaseRevision < 1 ||
+		strings.TrimSpace(validation.Summary) == "" || utf8.RuneCountInString(validation.Summary) > 500 {
+		return SemanticRecoveryValidationPayload{}, ErrRecoverySemanticInputInvalid
+	}
+	return validation, nil
+}
+
 // ValidateSemanticRecoveryCandidate evaluates an immutable candidate against
 // the run's immutable workflow snapshot without changing run or case state.
 // A business-rule rejection is returned as Passed=false; malformed or
@@ -219,6 +280,9 @@ func (e *Engine) ValidateSemanticRecoveryCandidate(
 			return SemanticRecoveryValidationPayload{}, ErrRecoveryCaseNotFound
 		}
 		return SemanticRecoveryValidationPayload{}, err
+	}
+	if caseRow.Source != semanticRecoveryCaseSource {
+		return SemanticRecoveryValidationPayload{}, ErrRecoveryCaseConflict
 	}
 	artifact, err := q.GetRecoveryCaseArtifact(ctx, store.GetRecoveryCaseArtifactParams{
 		OrgID: orgID, CaseID: caseID, ID: candidateArtifactID,
@@ -325,7 +389,8 @@ func validSemanticRecoveryCandidateEnvelope(candidate SemanticRecoveryCandidateP
 		return false
 	}
 	for _, evidence := range candidate.Evidence {
-		if !domain.RecoveryCaseEvidenceKinds[evidence.Kind] || evidence.ID == "" || len(evidence.ID) > 500 {
+		if !domain.RecoveryCaseEvidenceKinds[evidence.Kind] || evidence.ID == "" || len(evidence.ID) > 500 ||
+			(evidence.Sha256 != "" && !isLowerHexSha256(evidence.Sha256)) {
 			return false
 		}
 	}
@@ -419,9 +484,9 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 		return ResolveSemanticOutcomeResult{}, ErrRecoveryCaseConflict
 	}
 	var candidate SemanticRecoveryCandidatePayload
-	var validation SemanticRecoveryValidationPayload
 	candidate, candidateErr := ParseSemanticRecoveryCandidatePayload(candidateArtifact.PayloadJson)
-	if candidateErr != nil || json.Unmarshal(validationArtifact.PayloadJson, &validation) != nil ||
+	validation, validationErr := ParseSemanticRecoveryValidationPayload(validationArtifact.PayloadJson)
+	if candidateErr != nil || validationErr != nil ||
 		!validation.Passed || validation.CandidateArtifactID != candidateArtifact.ID ||
 		validation.CandidateSha256 != candidateArtifact.PayloadSha256 ||
 		!currentRecoveryValidation(validation.CaseRevision, target.Revision) {
@@ -453,10 +518,10 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 		return ResolveSemanticOutcomeResult{}, ErrRecoveryCaseConflict
 	}
 	decision := candidate.Decision
-	resolvesQuarantine := target.Source == "semantic_violation" &&
+	resolvesQuarantine := target.Source == semanticRecoveryCaseSource &&
 		target.Action == "quarantine" && target.State == "awaiting_approval" &&
 		lockedRun.Status == "waiting"
-	acknowledgesObservation := target.Source == "semantic_violation" &&
+	acknowledgesObservation := target.Source == semanticRecoveryCaseSource &&
 		target.Action == "observe" && target.State == "awaiting_approval" &&
 		decision == "accept_loss"
 	if !resolvesQuarantine && !acknowledgesObservation {
@@ -730,6 +795,7 @@ func (e *Engine) insertSemanticResolutionArtifacts(
 	publication, err := insert("publication", map[string]any{
 		"eventId": eventID, "caseId": item.ID, "caseRevision": item.Revision,
 		"runId": item.RunID, "sourceNodeId": item.SourceNodeID, "decision": decision,
+		"authorityCaseId":     candidate.CaseID,
 		"candidateArtifactId": candidate.ID, "candidateSha256": candidate.PayloadSha256,
 		"validationArtifactId": validation.ID, "validationSha256": validation.PayloadSha256,
 	}, occurredAt)
@@ -781,18 +847,22 @@ func (e *Engine) advanceSemanticResolutionCase(
 			Evidence: []domain.RecoveryCaseEvidenceRef{
 				{Kind: "operator_decision", ID: eventID},
 				{Kind: "run_node", ID: item.RunID + ":" + item.SourceNodeID},
-				{Kind: "case_artifact", ID: candidate.ID, Sha256: candidate.PayloadSha256},
-				{Kind: "validation", ID: validation.ID, Sha256: validation.PayloadSha256},
+				{Kind: "publication", ID: artifacts.publication.ID, Sha256: artifacts.publication.PayloadSha256},
 			},
+		}
+		// Only the authority case owns the approved candidate and validation
+		// artifacts. Sibling detectors closed by the same whole-contract
+		// replacement cite their own publication artifact instead of pretending
+		// those cross-case artifact ids are locally retrievable.
+		if candidate.CaseID == item.ID && validation.CaseID == item.ID {
+			receipt.Evidence = append(receipt.Evidence,
+				domain.RecoveryCaseEvidenceRef{Kind: "case_artifact", ID: candidate.ID, Sha256: candidate.PayloadSha256},
+				domain.RecoveryCaseEvidenceRef{Kind: "validation", ID: validation.ID, Sha256: validation.PayloadSha256},
+			)
 		}
 		if decision == "replace" {
 			receipt.Evidence = append(receipt.Evidence,
 				domain.RecoveryCaseEvidenceRef{Kind: "semantic_detector", ID: item.DetectorID})
-		}
-		if decision == "accept_loss" || to == "publishing" || from == "publishing" || from == "monitoring" {
-			receipt.Evidence = append(receipt.Evidence, domain.RecoveryCaseEvidenceRef{
-				Kind: "publication", ID: artifacts.publication.ID, Sha256: artifacts.publication.PayloadSha256,
-			})
 		}
 		if to == "verified_recovered" || to == "accepted_loss" {
 			receipt.Evidence = append(receipt.Evidence, domain.RecoveryCaseEvidenceRef{
@@ -837,6 +907,8 @@ func (e *Engine) advanceSemanticResolutionCase(
 
 type semanticPublicationBinding struct {
 	CaseID               string `json:"caseId"`
+	AuthorityCaseID      string `json:"authorityCaseId"`
+	CaseRevision         int64  `json:"caseRevision"`
 	RunID                string `json:"runId"`
 	Decision             string `json:"decision"`
 	CandidateArtifactID  string `json:"candidateArtifactId"`
@@ -908,8 +980,11 @@ func (e *Engine) finalizeSemanticRecoveryMonitoring(
 		var binding semanticPublicationBinding
 		if json.Unmarshal(publication.PayloadJson, &binding) != nil ||
 			binding.CaseID != item.ID || binding.RunID != runID ||
-			binding.Decision != "replace" || binding.CandidateArtifactID == "" ||
-			binding.ValidationArtifactID == "" {
+			binding.Decision != "replace" || binding.AuthorityCaseID == "" ||
+			binding.CaseRevision < 1 || binding.CandidateArtifactID == "" ||
+			binding.ValidationArtifactID == "" ||
+			!isLowerHexSha256(binding.CandidateSha256) ||
+			!isLowerHexSha256(binding.ValidationSha256) {
 			return fmt.Errorf("invalid semantic publication binding for case %s", item.ID)
 		}
 
@@ -921,6 +996,7 @@ func (e *Engine) finalizeSemanticRecoveryMonitoring(
 			"terminalStatus":                 terminalStatus,
 			"generationBoundTerminalSuccess": terminalSuccess,
 			"deterministicValidationPassed":  true,
+			"authorityCaseId":                binding.AuthorityCaseID,
 			"publicationArtifactId":          publication.ID,
 			"publicationSha256":              publication.PayloadSha256,
 			"candidateArtifactId":            binding.CandidateArtifactID,

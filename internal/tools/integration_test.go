@@ -89,6 +89,7 @@ func TestGitHubCreateIssueContract(t *testing.T) {
 	}
 
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010/")
 	deps.Post = func(_ context.Context, target string, _ map[string]string, _ []byte) (int, string, string) {
 		if target != "http://provider-simulator:4010/github/repos/acme/incidents/issues" {
@@ -188,6 +189,7 @@ func TestSlackPostContract(t *testing.T) {
 	}
 
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010")
 	deps.Gate = func(context.Context, string, string, string, int) (string, string) {
 		return "http://provider-simulator:4010/slack/services/local/ops", ""
@@ -315,6 +317,7 @@ func TestEmailSendEnvelopes(t *testing.T) {
 
 	// Explicit simulator provider delivers through the guarded Post seam.
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://sim.internal")
 	t.Setenv("JANUSLY_MAILER_PROVIDER", "simulator")
 	result = ExecuteIntegrationTool(ctx, "email.send", map[string]any{

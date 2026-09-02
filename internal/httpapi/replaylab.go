@@ -139,7 +139,7 @@ func (s *V1Server) replayLabCore(r *http.Request, rc v1Request) opResult {
 
 	replayRunID, err := s.engine.ReplayRunAsValidation(r.Context(), rc.orgID, body.SourceRunID, wf, triggerInput, rc.userID, hasPatch)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "replay_lab.started", audit.Options{
 		TargetType: "run", TargetID: body.SourceRunID,
@@ -186,7 +186,7 @@ func (s *V1Server) replayLabForkCore(r *http.Request, rc v1Request) opResult {
 	}
 	result, err := s.engine.ReplayRunAsValidationFork(r.Context(), rc.orgID, body.SourceRunID, wf, body.ForkNodeID, override, triggerInput, rc.userID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if !result.OK {
 		return opError(http.StatusUnprocessableEntity, result.Code, result.Message, nil)

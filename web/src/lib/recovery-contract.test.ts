@@ -3,6 +3,7 @@ import {
   RecoveryContractV1Schema,
   RecoveryContractV2Schema,
   RecoveryCircuitBreakerSchema,
+  WorkflowRecoverySchema,
 } from "./recovery-contract";
 
 function contract(overrides: Record<string, unknown> = {}) {
@@ -456,5 +457,39 @@ describe("RecoveryCircuitBreakerSchema", () => {
     expect(RecoveryCircuitBreakerSchema.safeParse(1).success).toBe(
       false,
     );
+  });
+});
+
+describe("WorkflowRecoverySchema", () => {
+  it("keeps nested recovery policy objects strict and presence-aware", () => {
+    expect(WorkflowRecoverySchema.safeParse({}).success).toBe(true);
+    expect(
+      WorkflowRecoverySchema.safeParse({ contract: contract() }).success,
+    ).toBe(true);
+    for (const candidate of [
+      { contract: null },
+      { circuitBreaker: null },
+      { circuitBreaker: { consecutiveFailures: 7, extra: true } },
+      { unexpected: true },
+      {
+        contract: {
+          ...contract(),
+          failure: {
+            ...contract().failure,
+            technical: { terminalNodeFailure: true },
+          },
+        },
+      },
+      {
+        contract: {
+          ...contract(),
+          effects: null,
+        },
+      },
+    ]) {
+      expect(WorkflowRecoverySchema.safeParse(candidate).success).toBe(
+        false,
+      );
+    }
   });
 });

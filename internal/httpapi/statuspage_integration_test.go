@@ -127,4 +127,15 @@ func TestWorkflowStatusPageLifecycle(t *testing.T) {
 	if res := h.call("GET", "/workflows/"+wfID+"/status-page", nil, ""); res.body["enabled"] != false {
 		t.Fatalf("after revoke: %+v", res.body)
 	}
+	var rotations, revocations int
+	if err := pool.QueryRow(ctx, `SELECT
+		count(*) FILTER (WHERE action='workflow.status_page.rotated'),
+		count(*) FILTER (WHERE action='workflow.status_page.revoked')
+		FROM audit_logs WHERE org_id=$1 AND target_type='workflow' AND target_id=$2`,
+		h.org, wfID).Scan(&rotations, &revocations); err != nil {
+		t.Fatalf("read status-page audit receipts: %v", err)
+	}
+	if rotations != 2 || revocations != 1 {
+		t.Fatalf("status-page audit receipts rotations=%d revocations=%d", rotations, revocations)
+	}
 }

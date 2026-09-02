@@ -1,18 +1,21 @@
-// Workflow lifecycle handlers: save (with upstream tags + SLO carriers),
+// Workflow lifecycle handlers: save (with the upstream-health carrier),
 // list/latest/versions reads, rollback, and circuit-breaker resume. The
 // contract and dual-run suites guard the preserved wire behavior.
 package httpapi
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
@@ -33,19 +36,25 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	if err := decodeBody(r, &raw); err != nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
 	}
-	// Optional workflow-level upstream subscription tags ride the save body
-	// (they live on workflow_versions, not in the DAG JSON).
-	var tagCarrier struct {
-		UpstreamHealthSources []string `json:"upstreamHealthSources"`
+	var rawDocument map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &rawDocument)
+	if field := unknownWorkflowSaveField(rawDocument); field != "" {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
+			map[string]any{"field": field})
 	}
-	_ = json.Unmarshal(raw, &tagCarrier)
-	upstreamTags, tagIssue := validateUpstreamTags(tagCarrier.UpstreamHealthSources)
+	upstreamTagsRaw, upstreamTagsProvided := rawDocument["upstreamHealthSources"]
+	if upstreamTagsProvided && bytes.Equal(bytes.TrimSpace(upstreamTagsRaw), []byte("null")) {
+		return opError(http.StatusBadRequest, "invalid_input", "upstreamHealthSources must be an array", nil)
+	}
+	var upstreamTagValues []string
+	if upstreamTagsProvided {
+		if json.Unmarshal(upstreamTagsRaw, &upstreamTagValues) != nil || upstreamTagValues == nil {
+			return opError(http.StatusBadRequest, "invalid_input", "upstreamHealthSources must be an array of strings", nil)
+		}
+	}
+	upstreamTags, tagIssue := validateUpstreamTags(upstreamTagValues)
 	if tagIssue != "" {
 		return opError(http.StatusBadRequest, "invalid_input", tagIssue, nil)
-	}
-	sloJSON, sloIssue := parseWorkflowSloBody(raw)
-	if sloIssue != "" {
-		return opError(http.StatusBadRequest, "invalid_input", sloIssue, nil)
 	}
 	wf, issues := domain.Parse(raw)
 	if wf == nil {
@@ -68,89 +77,106 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 		return rejection
 	}
 
-	ctx := r.Context()
-	q := store.New(s.pool)
 	workflowID := wf.ID
-	if workflowID == "" {
+	if workflowID == "" || len(workflowID) > 256 {
 		workflowID = s.newID()
 	}
-	if _, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: rc.orgID}); err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-		}
-		name := wf.Name
-		if name == "" {
-			name = workflowID
-		}
-		if err := q.InsertWorkflow(ctx, store.InsertWorkflowParams{
-			ID: workflowID, OrgID: rc.orgID, Name: name,
-			CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-		}); err != nil {
-			if strings.Contains(err.Error(), "workflows_pkey") {
-				// The id exists but the active-parent read missed it: either a
-				// tombstone in THIS org (a save never resurrects one — the
-				// operator restores explicitly first) or another tenant's id.
-				owner, stateErr := q.GetWorkflowOwnerState(ctx, workflowID)
-				if stateErr == nil && owner.OrgID == rc.orgID && owner.DeletedAt != nil {
-					return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
-				}
-				return opError(http.StatusConflict, "workflows_save_conflict",
-					"Workflow id is already taken", nil)
-			}
-			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-		}
+	name := wf.Name
+	if name == "" {
+		name = workflowID
 	}
-	// Version-write locking: a live rollout owns which versions serve
-	// traffic — minting a hidden newer version would silently detach the
-	// canary from "latest". Finish the rollout first.
-	if _, err := q.FindActiveWorkflowRollout(ctx, store.FindActiveWorkflowRolloutParams{
-		OrgID: rc.orgID, WorkflowID: workflowID,
-	}); err == nil {
-		return opError(http.StatusConflict, "workflow_rollout_active",
-			"Finish the active workflow rollout before saving a new version", nil)
+	wf.ID = workflowID
+	wf.Name = name
+	committed, rejection := s.persistWorkflowVersion(
+		r.Context(), rc, wf, upstreamTags, upstreamTagsProvided,
+	)
+	if rejection != nil {
+		return *rejection
 	}
-	version, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{
-		WorkflowID: workflowID, OrgID: rc.orgID,
-	})
-	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
-	versionID := s.newID()
-	// The contract's WorkflowSchema.parse defaults `metadata: {tags: []}`
-	// into the persisted dagJson; mirror it so /workflows/latest and the
-	// version history serve byte-identical snapshots (dual-run pin).
-	dagJSONWithDefaults := raw
-	var dagDoc map[string]any
-	if err := json.Unmarshal(raw, &dagDoc); err == nil {
-		if _, present := dagDoc["metadata"]; !present {
-			dagDoc["metadata"] = map[string]any{"tags": []any{}}
-			if encoded, err := json.Marshal(dagDoc); err == nil {
-				dagJSONWithDefaults = encoded
-			}
-		}
-	}
-	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
-		ID: versionID, OrgID: rc.orgID, WorkflowID: workflowID,
-		Version: version + 1, DagJson: dagJSONWithDefaults,
-		CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-
-		UpstreamHealthSources: upstreamTags,
-		SloJson:               sloJSON,
-	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
-	// The entry set can never drift from the saved DAG: schedules re-sync
-	// from THIS snapshot on every save.
-	if err := s.engine.SyncWorkflowSchedules(ctx, q, rc.orgID, workflowID, versionID, rc.userID, wf); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
-	audit.Write(ctx, s.pool, rc.authContext, "workflow.saved", audit.Options{
+	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.saved", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
-		Metadata: map[string]any{"version": version + 1},
+		Metadata: map[string]any{"version": committed.Version, "attempts": committed.Attempts},
 	})
 	return opOK(map[string]any{
-		"workflowId": workflowID, "versionId": versionID, "version": version + 1,
+		"workflowId": workflowID, "versionId": committed.VersionID, "version": committed.Version,
 	})
+}
+
+var workflowSaveTopLevelFields = map[string]bool{
+	"dslVersion": true, "id": true, "name": true, "metadata": true,
+	"inputs": true, "outputs": true, "templatePolicy": true, "recovery": true,
+	"ui": true, "nodes": true, "edges": true, "upstreamHealthSources": true,
+}
+
+func unknownWorkflowSaveField(document map[string]json.RawMessage) string {
+	var unknown []string
+	for field := range document {
+		if !workflowSaveTopLevelFields[field] {
+			unknown = append(unknown, field)
+		}
+	}
+	sort.Strings(unknown)
+	if len(unknown) == 0 {
+		return ""
+	}
+	return unknown[0]
+}
+
+const workflowRollbackWriteAttempts = 3
+
+type workflowSaveCommit struct {
+	VersionID string
+	Version   int32
+	Attempts  int
+}
+
+// persistWorkflowVersion translates the shared engine operation into the HTTP
+// error contract. The engine owns the transaction so API and MCP saves cannot
+// drift on locking, reliability inheritance or schedule reconciliation.
+func (s *V1Server) persistWorkflowVersion(
+	ctx context.Context,
+	rc v1Request,
+	wf *domain.Workflow,
+	upstreamTags json.RawMessage,
+	upstreamTagsProvided bool,
+) (workflowSaveCommit, *opResult) {
+	committed, err := s.engine.SaveWorkflowVersion(ctx, engine.SaveWorkflowVersionInput{
+		OrgID: rc.orgID, UserID: rc.userID, Workflow: wf,
+		UpstreamHealthSources: upstreamTags, UpstreamHealthSourcesProvided: upstreamTagsProvided,
+		NewID: s.newID,
+	})
+	switch {
+	case err == nil:
+		return workflowSaveCommit{
+			VersionID: committed.VersionID, Version: committed.Version, Attempts: committed.Attempts,
+		}, nil
+	case errors.Is(err, engine.ErrWorkflowSaveNotFound):
+		result := opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+		return workflowSaveCommit{}, &result
+	case errors.Is(err, engine.ErrWorkflowSaveIDTaken):
+		result := opError(http.StatusConflict, "workflows_save_conflict", "Workflow id is already taken", nil)
+		return workflowSaveCommit{}, &result
+	case errors.Is(err, engine.ErrWorkflowSaveRolloutActive):
+		result := opError(http.StatusConflict, "workflow_rollout_active",
+			"Finish the active workflow rollout before saving a new version", nil)
+		return workflowSaveCommit{}, &result
+	case errors.Is(err, engine.ErrWorkflowSaveConflict):
+		result := opError(http.StatusConflict, "workflows_save_conflict",
+			"Concurrent save conflict — please retry", map[string]any{"attempts": engine.WorkflowVersionWriteAttempts})
+		return workflowSaveCommit{}, &result
+	default:
+		result := opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		return workflowSaveCommit{}, &result
+	}
+}
+
+func isRetryableWorkflowVersionWrite(err error) bool {
+	var postgresError *pgconn.PgError
+	if !errors.As(err, &postgresError) || postgresError.Code != "23505" {
+		return false
+	}
+	return postgresError.ConstraintName == "workflow_versions_org_workflow_version_idx" ||
+		postgresError.ConstraintName == "workflows_pkey"
 }
 
 func (s *V1Server) listWorkflows(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -211,7 +237,7 @@ func (s *V1Server) listWorkflowsCore(r *http.Request, rc v1Request) opResult {
 		Tags: tagsJSON, Folder: folder, SearchPattern: searchPattern,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	items := make([]WorkflowListItemView, 0, len(rows))
 	for _, row := range rows {
@@ -230,7 +256,7 @@ func versionView(id, orgID, workflowID string, version int32, dagJSON json.RawMe
 // tombstoned parents read as the same workflow_not_found.
 func (s *V1Server) requireActiveWorkflow(r *http.Request, rc v1Request) (string, *opResult) {
 	workflowID := strings.TrimSpace(r.URL.Query().Get("workflowId"))
-	if workflowID == "" {
+	if workflowID == "" || len(workflowID) > 256 {
 		result := opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "workflowId"})
 		return "", &result
@@ -242,7 +268,7 @@ func (s *V1Server) requireActiveWorkflow(r *http.Request, rc v1Request) (string,
 			result := opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
 			return "", &result
 		}
-		result := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		result := opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		return "", &result
 	}
 	return workflowID, nil
@@ -266,7 +292,7 @@ func (s *V1Server) latestWorkflowVersionCore(r *http.Request, rc v1Request) opRe
 			// versions reads as null, not an error.
 			return opOK(nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(versionView(row.ID, row.OrgID, row.WorkflowID, row.Version,
 		row.DagJson, row.CreatedBy, row.CreatedAt))
@@ -285,7 +311,7 @@ func (s *V1Server) listWorkflowVersionsCore(r *http.Request, rc v1Request) opRes
 		WorkflowID: workflowID, OrgID: rc.orgID,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	items := make([]VersionView, 0, len(rows))
 	for _, row := range rows {
@@ -293,6 +319,41 @@ func (s *V1Server) listWorkflowVersionsCore(r *http.Request, rc v1Request) opRes
 			row.DagJson, row.CreatedBy, row.CreatedAt))
 	}
 	return opOK(items)
+}
+
+// workflowVersionSnapshot reads one immutable workflow document by its exact
+// version id. Recovery and authoring use this bounded endpoint instead of
+// downloading every historical DAG and then guessing which one was attached
+// to an incident. The active parent check keeps deleted and cross-tenant
+// workflows indistinguishable from missing ones.
+func (s *V1Server) workflowVersionSnapshot(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.workflowVersionSnapshotCore(r, rc))
+}
+
+func (s *V1Server) workflowVersionSnapshotCore(r *http.Request, rc v1Request) opResult {
+	workflowID, rejection := s.requireActiveWorkflow(r, rc)
+	if rejection != nil {
+		return *rejection
+	}
+	versionID := strings.TrimSpace(r.PathValue("versionId"))
+	if versionID == "" || len(versionID) > 256 {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
+			map[string]any{"field": "versionId"})
+	}
+	row, err := store.New(s.pool).GetWorkflowVersionByID(r.Context(), store.GetWorkflowVersionByIDParams{
+		ID: versionID, OrgID: rc.orgID, WorkflowID: workflowID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "workflow_version_not_found",
+				"Workflow version not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	return opOK(map[string]any{
+		"id": row.ID, "workflowId": row.WorkflowID,
+		"version": row.Version, "dagJson": normalizedRaw(row.DagJson),
+	})
 }
 
 // cancelRun ports the contract guards exactly — and note the asymmetry
@@ -308,68 +369,132 @@ func (s *V1Server) rollbackCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusBadRequest, "workflows_rollback_ids_required",
 			"workflowId and sourceVersionId are required", nil)
 	}
-	ctx := r.Context()
-	q := store.New(s.pool)
-	owner, err := q.GetWorkflowOwnerState(ctx, body.WorkflowID)
-	if err != nil || owner.OrgID != rc.orgID || owner.DeletedAt != nil {
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-		}
-		return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+	committed, rejection := s.persistWorkflowRollback(r.Context(), rc, body.WorkflowID, body.SourceVersionID)
+	if rejection != nil {
+		return *rejection
 	}
-	if _, err := q.FindActiveWorkflowRollout(ctx, store.FindActiveWorkflowRolloutParams{
-		OrgID: rc.orgID, WorkflowID: body.WorkflowID,
-	}); err == nil {
-		return opError(http.StatusConflict, "workflow_rollout_active",
-			"Finish the active workflow rollout before creating a rollback version", nil)
-	}
-	source, err := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
-		ID: body.SourceVersionID, OrgID: rc.orgID, WorkflowID: body.WorkflowID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return opError(http.StatusNotFound, "workflows_source_version_not_found", "Source version not found", nil)
-		}
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
-	if wf, _ := domain.Parse(source.DagJson); wf == nil {
-		return opError(http.StatusUnprocessableEntity, "workflows_version_malformed",
-			"Workflow version is malformed", nil)
-	}
-	version, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{
-		WorkflowID: body.WorkflowID, OrgID: rc.orgID,
-	})
-	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
-	versionID := s.newID()
-	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
-		ID: versionID, OrgID: rc.orgID, WorkflowID: body.WorkflowID,
-		Version: version + 1, DagJson: source.DagJson,
-		CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-	}); err != nil {
-		if strings.Contains(err.Error(), "duplicate key") {
-			return opError(http.StatusConflict, "workflows_rollback_conflict",
-				"Concurrent rollback conflict — please retry", map[string]any{"attempts": 1})
-		}
-		if rolledWf, _ := domain.Parse(source.DagJson); rolledWf != nil {
-			if err := s.engine.SyncWorkflowSchedules(ctx, q, rc.orgID, body.WorkflowID, versionID, rc.userID, rolledWf); err != nil {
-				return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-			}
-		}
-		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
-	}
-	audit.Write(ctx, s.pool, rc.authContext, "workflow.rolled_back", audit.Options{
+	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.rolled_back", audit.Options{
 		TargetType: "workflow", TargetID: body.WorkflowID,
 		Metadata: map[string]any{
-			"sourceVersionId": body.SourceVersionID, "sourceVersion": source.Version,
-			"newVersion": version + 1,
+			"sourceVersionId": body.SourceVersionID, "sourceVersion": committed.SourceVersion,
+			"newVersion": committed.Version, "attempts": committed.Attempts,
 		},
 	})
 	return opOK(map[string]any{
-		"workflowId": body.WorkflowID, "versionId": versionID,
-		"version": version + 1, "sourceVersion": source.Version,
+		"workflowId": body.WorkflowID, "versionId": committed.VersionID,
+		"version": committed.Version, "sourceVersion": committed.SourceVersion,
 	})
+}
+
+type workflowRollbackCommit struct {
+	VersionID     string
+	Version       int32
+	SourceVersion int32
+	Attempts      int
+}
+
+func (s *V1Server) persistWorkflowRollback(
+	ctx context.Context, rc v1Request, workflowID, sourceVersionID string,
+) (workflowRollbackCommit, *opResult) {
+	for attempt := 1; attempt <= workflowRollbackWriteAttempts; attempt++ {
+		committed, rejection, err := s.persistWorkflowRollbackAttempt(
+			ctx, rc, workflowID, sourceVersionID, attempt,
+		)
+		if rejection != nil {
+			return workflowRollbackCommit{}, rejection
+		}
+		if err == nil {
+			return committed, nil
+		}
+		if isRetryableWorkflowVersionWrite(err) && attempt < workflowRollbackWriteAttempts {
+			continue
+		}
+		if isRetryableWorkflowVersionWrite(err) {
+			result := opError(http.StatusConflict, "workflows_rollback_conflict",
+				"Concurrent rollback conflict — please retry", map[string]any{"attempts": workflowRollbackWriteAttempts})
+			return workflowRollbackCommit{}, &result
+		}
+		result := opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		return workflowRollbackCommit{}, &result
+	}
+	result := opError(http.StatusConflict, "workflows_rollback_conflict",
+		"Concurrent rollback conflict — please retry", map[string]any{"attempts": workflowRollbackWriteAttempts})
+	return workflowRollbackCommit{}, &result
+}
+
+func (s *V1Server) persistWorkflowRollbackAttempt(
+	ctx context.Context, rc v1Request, workflowID, sourceVersionID string, attempt int,
+) (workflowRollbackCommit, *opResult, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return workflowRollbackCommit{}, nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := store.New(tx)
+	if _, err := q.LockWorkflowForRollout(ctx, store.LockWorkflowForRolloutParams{
+		OrgID: rc.orgID, ID: workflowID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			result := opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+			return workflowRollbackCommit{}, &result, nil
+		}
+		return workflowRollbackCommit{}, nil, err
+	}
+	if _, err := q.FindActiveWorkflowRollout(ctx, store.FindActiveWorkflowRolloutParams{
+		OrgID: rc.orgID, WorkflowID: workflowID,
+	}); err == nil {
+		result := opError(http.StatusConflict, "workflow_rollout_active",
+			"Finish the active workflow rollout before creating a rollback version", nil)
+		return workflowRollbackCommit{}, &result, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return workflowRollbackCommit{}, nil, err
+	}
+	source, err := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
+		ID: sourceVersionID, OrgID: rc.orgID, WorkflowID: workflowID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			result := opError(http.StatusNotFound, "workflows_source_version_not_found", "Source version not found", nil)
+			return workflowRollbackCommit{}, &result, nil
+		}
+		return workflowRollbackCommit{}, nil, err
+	}
+	wf, _ := domain.Parse(source.DagJson)
+	if wf == nil {
+		result := opError(http.StatusUnprocessableEntity, "workflows_version_malformed",
+			"Workflow version is malformed", nil)
+		return workflowRollbackCommit{}, &result, nil
+	}
+	canonicalSource, err := domain.CanonicalWorkflowDocument(wf)
+	if err != nil {
+		return workflowRollbackCommit{}, nil, err
+	}
+	latest, err := q.GetLatestWorkflowVersionReliability(ctx, store.GetLatestWorkflowVersionReliabilityParams{
+		WorkflowID: workflowID, OrgID: rc.orgID,
+	})
+	if err != nil {
+		return workflowRollbackCommit{}, nil, err
+	}
+	versionID := s.newID()
+	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
+		ID: versionID, OrgID: rc.orgID, WorkflowID: workflowID,
+		Version: latest.Version + 1, DagJson: canonicalSource,
+		CreatedBy:             pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
+		SloJson:               latest.SloJson,
+		UpstreamHealthSources: latest.UpstreamHealthSources,
+	}); err != nil {
+		return workflowRollbackCommit{}, nil, err
+	}
+	if err := s.engine.SyncWorkflowSchedules(ctx, q, rc.orgID, workflowID, versionID, rc.userID, wf); err != nil {
+		return workflowRollbackCommit{}, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return workflowRollbackCommit{}, nil, err
+	}
+	return workflowRollbackCommit{
+		VersionID: versionID, Version: latest.Version + 1,
+		SourceVersion: source.Version, Attempts: attempt,
+	}, nil, nil
 }
 
 func (s *V1Server) rollbackWorkflow(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -395,7 +520,7 @@ func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID 
 				"Workflow is not paused by its circuit breaker (status: "+notPaused.Status+")",
 				map[string]any{"status": notPaused.Status})
 		default:
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
 	if outcome.Backfilled > 0 || outcome.Failed > 0 {
@@ -421,13 +546,15 @@ func validateUpstreamTags(tags []string) (json.RawMessage, string) {
 	if len(tags) > 50 {
 		return nil, "upstreamHealthSources allows at most 50 names"
 	}
-	for _, tag := range tags {
+	normalized := make([]string, len(tags))
+	for index, tag := range tags {
 		trimmed := strings.TrimSpace(tag)
-		if trimmed == "" || len(tag) > 80 {
+		if trimmed == "" || len(trimmed) > 80 {
 			return nil, "upstreamHealthSources entries must be 1..80 characters"
 		}
+		normalized[index] = trimmed
 	}
-	serialized, err := json.Marshal(tags)
+	serialized, err := json.Marshal(normalized)
 	if err != nil {
 		return nil, "upstreamHealthSources not serializable"
 	}

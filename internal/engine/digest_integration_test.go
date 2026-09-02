@@ -37,6 +37,7 @@ func TestWeeklyDigestSendsOncePerWeekToAdmins(t *testing.T) {
 	}))
 	t.Cleanup(capture.Close)
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", capture.URL)
 
 	seed := func(key, valueJSON, valueType string) {
@@ -165,6 +166,7 @@ func TestWeeklyDigestResumesPartialDelivery(t *testing.T) {
 	}))
 	t.Cleanup(capture.Close)
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", capture.URL)
 
 	for _, row := range []struct{ key, value, valueType string }{

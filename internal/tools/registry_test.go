@@ -93,10 +93,10 @@ func TestRegistryValidationAndCatalog(t *testing.T) {
 	// 4 json tools + 3 buffered csv tools + vector pair + text.uppercase
 	// + webhook.send + github.create_issue + slack.post + email.send + pdf.generate
 	// + sheet.append (integration chokepoint)
-	// + time.window + 4 pagerduty.* + 4 db.*; csv.fetch registers from the
+	// + time.now/time.window + 5 pagerduty.* + 4 db.*; csv.fetch registers from the
 	// executors package on top of this base set.
 	catalog := NewRegistry().Catalog()
-	if len(catalog) != 25 {
+	if len(catalog) != 27 {
 		t.Fatalf("catalog size: %d", len(catalog))
 	}
 	first := catalog[0]
@@ -121,5 +121,24 @@ func TestRegistryValidationAndCatalog(t *testing.T) {
 	encoded, _ := json.Marshal(github["inputFields"])
 	if !strings.Contains(string(encoded), `"kind":"string"`) || strings.Contains(string(encoded), `"type":`) {
 		t.Fatalf("inputFields must use the contract kind wire: %s", encoded)
+	}
+}
+
+func TestRegistryClassifiesExternalToolsConservatively(t *testing.T) {
+	registry := NewRegistry()
+	for _, name := range []string{"json.parse", "time.now", "pagerduty.policy.evaluate", "pagerduty.outcome.verify"} {
+		if registry.IsExternal(name) {
+			t.Fatalf("%s is a deterministic in-process tool", name)
+		}
+	}
+	for _, name := range []string{"pagerduty.incident.get", "db.query.read", "vector.search", "unknown.tool"} {
+		if !registry.IsExternal(name) {
+			t.Fatalf("%s must retain external retry posture", name)
+		}
+	}
+	registry.Register(Definition{Name: "extension.read"})
+	registry.Register(Definition{Name: "extension.local", Local: true})
+	if !registry.IsExternal("extension.read") || registry.IsExternal("extension.local") {
+		t.Fatal("extension tools must default external and opt into local execution explicitly")
 	}
 }

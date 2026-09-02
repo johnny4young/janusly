@@ -63,6 +63,773 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/ai/workflow-briefs/compile": {
+      "post": {
+        "operationId": "post_v1_ai_workflow-briefs_compile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "brief": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "approvals": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "examples": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "expectedOutcome": {
+                        "type": "string"
+                      },
+                      "externalEffects": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "failurePolicy": {
+                        "type": "string"
+                      },
+                      "inputs": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "language": {
+                        "enum": [
+                          "en",
+                          "es"
+                        ],
+                        "type": "string"
+                      },
+                      "objective": {
+                        "type": "string"
+                      },
+                      "trigger": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "brief": {
+                              "properties": {
+                                "approvals": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "examples": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "expectedOutcome": {
+                                  "type": "string"
+                                },
+                                "externalEffects": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "failurePolicy": {
+                                  "type": "string"
+                                },
+                                "inputs": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "language": {
+                                  "enum": [
+                                    "en",
+                                    "es"
+                                  ],
+                                  "type": "string"
+                                },
+                                "objective": {
+                                  "type": "string"
+                                },
+                                "trigger": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "version",
+                                "objective",
+                                "trigger",
+                                "inputs",
+                                "expectedOutcome",
+                                "externalEffects",
+                                "approvals",
+                                "failurePolicy",
+                                "examples",
+                                "language"
+                              ],
+                              "type": "object"
+                            },
+                            "clarifyingQuestions": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "complete": {
+                              "type": "boolean"
+                            },
+                            "mode": {
+                              "const": "deterministic",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "brief",
+                            "clarifyingQuestions",
+                            "complete",
+                            "mode"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Compile a bounded deterministic workflow intent brief"
+      }
+    },
+    "/ai/workflow-proposals": {
+      "post": {
+        "operationId": "post_v1_ai_workflow-proposals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "brief": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "approvals": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "examples": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "expectedOutcome": {
+                        "type": "string"
+                      },
+                      "externalEffects": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "failurePolicy": {
+                        "type": "string"
+                      },
+                      "inputs": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "language": {
+                        "enum": [
+                          "en",
+                          "es"
+                        ],
+                        "type": "string"
+                      },
+                      "objective": {
+                        "type": "string"
+                      },
+                      "trigger": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "catalogVersion": {
+                    "type": "string"
+                  },
+                  "currentWorkflow": {
+                    "properties": {
+                      "edges": {
+                        "items": {
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "nodes": {
+                        "items": {
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "nodes",
+                      "edges"
+                    ],
+                    "type": "object"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "aiError": {
+                              "type": "string"
+                            },
+                            "bindings": {
+                              "properties": {
+                                "catalogVersion": {
+                                  "type": "string"
+                                },
+                                "complete": {
+                                  "type": "boolean"
+                                },
+                                "missing": {
+                                  "items": {
+                                    "properties": {
+                                      "alternatives": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "field": {
+                                        "type": "string"
+                                      },
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "nodeId": {
+                                        "type": "string"
+                                      },
+                                      "reason": {
+                                        "type": "string"
+                                      },
+                                      "requested": {
+                                        "type": "string"
+                                      },
+                                      "resolvedId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "nodeId",
+                                      "field",
+                                      "alternatives"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "resolved": {
+                                  "items": {
+                                    "properties": {
+                                      "alternatives": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "field": {
+                                        "type": "string"
+                                      },
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "nodeId": {
+                                        "type": "string"
+                                      },
+                                      "reason": {
+                                        "type": "string"
+                                      },
+                                      "requested": {
+                                        "type": "string"
+                                      },
+                                      "resolvedId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "nodeId",
+                                      "field",
+                                      "alternatives"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                }
+                              },
+                              "required": [
+                                "catalogVersion",
+                                "resolved",
+                                "missing",
+                                "complete"
+                              ],
+                              "type": "object"
+                            },
+                            "bonBackoff": {
+                              "properties": {
+                                "from": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "to": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "from",
+                                "to"
+                              ],
+                              "type": "object"
+                            },
+                            "brief": {
+                              "properties": {
+                                "approvals": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "examples": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "expectedOutcome": {
+                                  "type": "string"
+                                },
+                                "externalEffects": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "failurePolicy": {
+                                  "type": "string"
+                                },
+                                "inputs": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "language": {
+                                  "enum": [
+                                    "en",
+                                    "es"
+                                  ],
+                                  "type": "string"
+                                },
+                                "objective": {
+                                  "type": "string"
+                                },
+                                "trigger": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "version",
+                                "objective",
+                                "trigger",
+                                "inputs",
+                                "expectedOutcome",
+                                "externalEffects",
+                                "approvals",
+                                "failurePolicy",
+                                "examples",
+                                "language"
+                              ],
+                              "type": "object"
+                            },
+                            "clarifyingQuestions": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "mode": {
+                              "enum": [
+                                "ai",
+                                "fallback",
+                                "error"
+                              ],
+                              "type": "string"
+                            },
+                            "proposal": {
+                              "properties": {
+                                "applicable": {
+                                  "type": "boolean"
+                                },
+                                "assumptions": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "diff": {
+                                  "properties": {
+                                    "edgesAfter": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "edgesBefore": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "nodesAdded": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "nodesChanged": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "nodesRemoved": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    }
+                                  },
+                                  "required": [
+                                    "nodesAdded",
+                                    "nodesRemoved",
+                                    "nodesChanged",
+                                    "edgesBefore",
+                                    "edgesAfter"
+                                  ],
+                                  "type": "object"
+                                },
+                                "intentContract": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "qualification": {
+                                  "properties": {
+                                    "intent": {
+                                      "type": "boolean"
+                                    },
+                                    "recovery": {
+                                      "type": "boolean"
+                                    },
+                                    "semantic": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "intent",
+                                    "recovery",
+                                    "semantic"
+                                  ],
+                                  "type": "object"
+                                },
+                                "readiness": {
+                                  "properties": {
+                                    "issues": {
+                                      "items": {
+                                        "properties": {
+                                          "code": {
+                                            "type": "string"
+                                          },
+                                          "edgeId": {
+                                            "type": "string"
+                                          },
+                                          "message": {
+                                            "type": "string"
+                                          },
+                                          "nodeId": {
+                                            "type": "string"
+                                          },
+                                          "severity": {
+                                            "enum": [
+                                              "info",
+                                              "warn",
+                                              "fail"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "suggestion": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "code",
+                                          "severity",
+                                          "message"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "status": {
+                                      "enum": [
+                                        "pass",
+                                        "warn",
+                                        "fail"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "status",
+                                    "issues"
+                                  ],
+                                  "type": "object"
+                                },
+                                "recoveryContract": {},
+                                "risks": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "workflow": {
+                                  "properties": {
+                                    "dslVersion": {
+                                      "type": "string"
+                                    },
+                                    "edges": {
+                                      "items": {
+                                        "properties": {
+                                          "condition": {
+                                            "type": "string"
+                                          },
+                                          "from": {
+                                            "type": "string"
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "onError": {
+                                            "type": "boolean"
+                                          },
+                                          "to": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "from",
+                                          "to"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "inputs": {},
+                                    "metadata": {
+                                      "additionalProperties": {},
+                                      "type": "object"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "nodes": {
+                                      "items": {
+                                        "properties": {
+                                          "config": {
+                                            "additionalProperties": {},
+                                            "type": "object"
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "label": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "id",
+                                          "type",
+                                          "config"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "outputs": {
+                                      "additionalProperties": {
+                                        "type": "string"
+                                      },
+                                      "type": "object"
+                                    },
+                                    "recovery": {},
+                                    "templatePolicy": {
+                                      "type": "string"
+                                    },
+                                    "ui": {
+                                      "additionalProperties": {},
+                                      "type": "object"
+                                    }
+                                  },
+                                  "required": [
+                                    "nodes",
+                                    "edges"
+                                  ],
+                                  "type": "object"
+                                }
+                              },
+                              "required": [
+                                "workflow",
+                                "intentContract",
+                                "recoveryContract",
+                                "qualification",
+                                "assumptions",
+                                "risks",
+                                "readiness",
+                                "diff",
+                                "applicable"
+                              ],
+                              "type": "object"
+                            },
+                            "providerGuarded": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "brief",
+                            "clarifyingQuestions",
+                            "bindings",
+                            "proposal"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Build a capability-bound workflow proposal without applying it"
+      }
+    },
     "/authoring/capabilities": {
       "get": {
         "operationId": "get_v1_authoring_capabilities",
@@ -88,6 +855,31 @@
                                   "inputExample": {},
                                   "inputFields": {
                                     "items": {
+                                      "properties": {
+                                        "kind": {
+                                          "enum": [
+                                            "string",
+                                            "number",
+                                            "boolean",
+                                            "object",
+                                            "array",
+                                            "json",
+                                            "unknown"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "required": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "name",
+                                        "kind",
+                                        "required"
+                                      ],
                                       "type": "object"
                                     },
                                     "type": "array"
@@ -173,6 +965,31 @@
                                   },
                                   "inputFields": {
                                     "items": {
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "required": {
+                                          "type": "boolean"
+                                        },
+                                        "type": {
+                                          "enum": [
+                                            "string",
+                                            "number",
+                                            "integer",
+                                            "boolean",
+                                            "object",
+                                            "array",
+                                            "unknown"
+                                          ],
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "name",
+                                        "type",
+                                        "required"
+                                      ],
                                       "type": "object"
                                     },
                                     "type": "array"
@@ -978,6 +1795,34 @@
                       "properties": {
                         "data": {
                           "properties": {
+                            "activeApproval": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "candidateArtifactId": {
+                                  "type": "string"
+                                },
+                                "caseRevision": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "validationArtifactId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "candidateArtifactId",
+                                "validationArtifactId",
+                                "caseRevision",
+                                "expiresAt"
+                              ],
+                              "type": [
+                                "object",
+                                "null"
+                              ]
+                            },
                             "artifacts": {
                               "items": {
                                 "properties": {
@@ -1116,7 +1961,8 @@
                             "case",
                             "transitions",
                             "artifacts",
-                            "autonomy"
+                            "autonomy",
+                            "activeApproval"
                           ],
                           "type": "object"
                         }
@@ -1150,6 +1996,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "properties": {
                   "candidateArtifactId": {
                     "type": "string"
@@ -1244,6 +2091,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "properties": {
                   "candidateArtifactId": {
                     "type": "string"
@@ -1347,6 +2195,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "properties": {
                   "acceptLossReason": {
                     "maxLength": 1000,
@@ -1357,6 +2206,7 @@
                     "type": "integer"
                   },
                   "manualReplacement": {
+                    "additionalProperties": false,
                     "properties": {
                       "output": {},
                       "reason": {
@@ -1555,6 +2405,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "properties": {
                   "expectedRevision": {
                     "minimum": 1,
@@ -1745,6 +2596,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "properties": {
                   "candidateArtifactId": {
                     "type": "string"
@@ -2549,19 +3401,37 @@
                       "edges": {
                         "items": {
                           "properties": {
+                            "condition": {
+                              "type": "string"
+                            },
                             "from": {
                               "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "onError": {
+                              "type": "boolean"
                             },
                             "to": {
                               "type": "string"
                             }
                           },
+                          "required": [
+                            "from",
+                            "to"
+                          ],
                           "type": "object"
                         },
                         "type": "array"
                       },
                       "id": {
                         "type": "string"
+                      },
+                      "inputs": {},
+                      "metadata": {
+                        "additionalProperties": {},
+                        "type": "object"
                       },
                       "name": {
                         "type": "string"
@@ -2570,18 +3440,41 @@
                         "items": {
                           "properties": {
                             "config": {
+                              "additionalProperties": {},
                               "type": "object"
                             },
                             "id": {
+                              "type": "string"
+                            },
+                            "label": {
                               "type": "string"
                             },
                             "type": {
                               "type": "string"
                             }
                           },
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ],
                           "type": "object"
                         },
                         "type": "array"
+                      },
+                      "outputs": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "recovery": {},
+                      "templatePolicy": {
+                        "type": "string"
+                      },
+                      "ui": {
+                        "additionalProperties": {},
+                        "type": "object"
                       }
                     },
                     "required": [
@@ -2589,6 +3482,9 @@
                       "edges"
                     ],
                     "type": "object"
+                  },
+                  "workflowVersionId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -2642,7 +3538,7 @@
             "description": "Error — the v1 error envelope"
           }
         },
-        "summary": "Start a run of an inline workflow document"
+        "summary": "Start an exact saved workflow version or an ad-hoc document"
       }
     },
     "/status": {
@@ -3429,19 +4325,37 @@
                       "edges": {
                         "items": {
                           "properties": {
+                            "condition": {
+                              "type": "string"
+                            },
                             "from": {
                               "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "onError": {
+                              "type": "boolean"
                             },
                             "to": {
                               "type": "string"
                             }
                           },
+                          "required": [
+                            "from",
+                            "to"
+                          ],
                           "type": "object"
                         },
                         "type": "array"
                       },
                       "id": {
                         "type": "string"
+                      },
+                      "inputs": {},
+                      "metadata": {
+                        "additionalProperties": {},
+                        "type": "object"
                       },
                       "name": {
                         "type": "string"
@@ -3450,18 +4364,41 @@
                         "items": {
                           "properties": {
                             "config": {
+                              "additionalProperties": {},
                               "type": "object"
                             },
                             "id": {
+                              "type": "string"
+                            },
+                            "label": {
                               "type": "string"
                             },
                             "type": {
                               "type": "string"
                             }
                           },
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ],
                           "type": "object"
                         },
                         "type": "array"
+                      },
+                      "outputs": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "recovery": {},
+                      "templatePolicy": {
+                        "type": "string"
+                      },
+                      "ui": {
+                        "additionalProperties": {},
+                        "type": "object"
                       }
                     },
                     "required": [
@@ -3615,6 +4552,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "properties": {
                   "dslVersion": {
                     "type": "string"
@@ -3622,19 +4560,37 @@
                   "edges": {
                     "items": {
                       "properties": {
+                        "condition": {
+                          "type": "string"
+                        },
                         "from": {
                           "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "onError": {
+                          "type": "boolean"
                         },
                         "to": {
                           "type": "string"
                         }
                       },
+                      "required": [
+                        "from",
+                        "to"
+                      ],
                       "type": "object"
                     },
                     "type": "array"
                   },
                   "id": {
                     "type": "string"
+                  },
+                  "inputs": {},
+                  "metadata": {
+                    "additionalProperties": {},
+                    "type": "object"
                   },
                   "name": {
                     "type": "string"
@@ -3643,17 +4599,49 @@
                     "items": {
                       "properties": {
                         "config": {
+                          "additionalProperties": {},
                           "type": "object"
                         },
                         "id": {
+                          "type": "string"
+                        },
+                        "label": {
                           "type": "string"
                         },
                         "type": {
                           "type": "string"
                         }
                       },
+                      "required": [
+                        "id",
+                        "type",
+                        "config"
+                      ],
                       "type": "object"
                     },
+                    "type": "array"
+                  },
+                  "outputs": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "recovery": {},
+                  "templatePolicy": {
+                    "type": "string"
+                  },
+                  "ui": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "upstreamHealthSources": {
+                    "items": {
+                      "maxLength": 80,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
                     "type": "array"
                   }
                 },
@@ -3807,6 +4795,155 @@
           }
         },
         "summary": "All versions of one workflow"
+      }
+    },
+    "/workflows/versions/{versionId}": {
+      "get": {
+        "operationId": "get_v1_workflows_versions_versionId",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "dagJson": {
+                              "properties": {
+                                "dslVersion": {
+                                  "type": "string"
+                                },
+                                "edges": {
+                                  "items": {
+                                    "properties": {
+                                      "condition": {
+                                        "type": "string"
+                                      },
+                                      "from": {
+                                        "type": "string"
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "onError": {
+                                        "type": "boolean"
+                                      },
+                                      "to": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "from",
+                                      "to"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "inputs": {},
+                                "metadata": {
+                                  "additionalProperties": {},
+                                  "type": "object"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "nodes": {
+                                  "items": {
+                                    "properties": {
+                                      "config": {
+                                        "additionalProperties": {},
+                                        "type": "object"
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "type",
+                                      "config"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "outputs": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "recovery": {},
+                                "templatePolicy": {
+                                  "type": "string"
+                                },
+                                "ui": {
+                                  "additionalProperties": {},
+                                  "type": "object"
+                                }
+                              },
+                              "required": [
+                                "nodes",
+                                "edges"
+                              ],
+                              "type": "object"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "version": {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "workflowId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "workflowId",
+                            "version",
+                            "dagJson"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "One exact immutable workflow version"
       }
     },
     "/workflows/{id}/resume": {

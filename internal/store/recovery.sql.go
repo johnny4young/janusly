@@ -180,6 +180,7 @@ SELECT count(*)::int AS total_open,
        count(*) FILTER (WHERE action = 'quarantine')::int AS open_quarantines
 FROM recovery_cases
 WHERE org_id = $1 AND run_id = $2
+  AND source = 'semantic_violation'
   AND state NOT IN (
     'publishing', 'monitoring',
     'verified_recovered', 'recurred', 'accepted_loss', 'abandoned'
@@ -323,6 +324,57 @@ func (q *Queries) FindActiveRecoveryApprovalGrant(ctx context.Context, arg FindA
 		arg.CaseID,
 		arg.CandidateArtifactID,
 		arg.ValidationArtifactID,
+		arg.CaseRevision,
+		arg.NowAt,
+	)
+	var i RecoveryApprovalGrant
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.CaseID,
+		&i.CandidateArtifactID,
+		&i.ValidationArtifactID,
+		&i.CaseRevision,
+		&i.GrantedBy,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.ConsumedBy,
+		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const findActiveRecoveryApprovalGrantForCase = `-- name: FindActiveRecoveryApprovalGrantForCase :one
+SELECT grant_row.id, grant_row.org_id, grant_row.case_id, grant_row.candidate_artifact_id, grant_row.validation_artifact_id, grant_row.case_revision, grant_row.granted_by, grant_row.expires_at, grant_row.consumed_at, grant_row.consumed_by, grant_row.revoked_at, grant_row.created_at
+FROM recovery_approval_grants grant_row
+JOIN recovery_cases case_row
+  ON case_row.org_id = grant_row.org_id AND case_row.id = grant_row.case_id
+WHERE grant_row.org_id = $1
+  AND grant_row.case_id = $2
+  AND grant_row.case_revision = $3
+  AND case_row.revision = $3
+  AND case_row.state = 'awaiting_approval'
+  AND grant_row.consumed_at IS NULL AND grant_row.revoked_at IS NULL
+  AND grant_row.expires_at > $4
+ORDER BY grant_row.created_at DESC
+LIMIT 1
+`
+
+type FindActiveRecoveryApprovalGrantForCaseParams struct {
+	OrgID        string
+	CaseID       string
+	CaseRevision int64
+	NowAt        time.Time
+}
+
+// HTTP case detail may expose a bounded continuity hint without exposing the
+// grant identity or approving actor. The case join keeps the hint bound to the
+// exact current lifecycle revision; apply still performs its own locked CAS.
+func (q *Queries) FindActiveRecoveryApprovalGrantForCase(ctx context.Context, arg FindActiveRecoveryApprovalGrantForCaseParams) (RecoveryApprovalGrant, error) {
+	row := q.db.QueryRow(ctx, findActiveRecoveryApprovalGrantForCase,
+		arg.OrgID,
+		arg.CaseID,
 		arg.CaseRevision,
 		arg.NowAt,
 	)
@@ -1176,7 +1228,10 @@ WHERE dl.org_id = $1
   AND ($3::text IS NULL OR dl.node_id = $3)
   AND ($4::text IS NULL
        OR wv.workflow_id = $4
-       OR (wv.id IS NULL AND r.workflow_version_id = $4))
+       OR (wv.id IS NULL AND coalesce(
+             nullif(r.input_json->'workflow'->>'id', ''),
+             r.workflow_version_id
+           ) = $4))
 ORDER BY dl.created_at DESC, dl.id DESC
 LIMIT $5
 `
@@ -1504,6 +1559,80 @@ func (q *Queries) ListOpenDeadLettersForHealing(ctx context.Context, arg ListOpe
 	return items, nil
 }
 
+const listOperatorBriefRecoveryCases = `-- name: ListOperatorBriefRecoveryCases :many
+SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at FROM recovery_cases
+WHERE org_id = $1
+  AND source = 'semantic_violation'
+  AND (
+    state = 'awaiting_approval'
+    OR state IN ('detected','contained','diagnosed','candidates_ready','validating')
+    OR (state = 'recurred' AND updated_at >= $2)
+  )
+ORDER BY
+  CASE
+    WHEN state = 'awaiting_approval' THEN 1
+    WHEN state IN ('detected','contained','diagnosed','candidates_ready','validating') THEN 2
+    ELSE 4
+  END ASC,
+  CASE
+    WHEN state IN ('detected','contained','diagnosed','candidates_ready','validating')
+      AND action = 'quarantine' THEN 4
+    ELSE 3
+  END DESC,
+  created_at ASC,
+  id ASC
+LIMIT $3
+`
+
+type ListOperatorBriefRecoveryCasesParams struct {
+	OrgID           string
+	RecurrenceSince time.Time
+	PageLimit       int32
+}
+
+// The shared Operator Brief must rank before it bounds. Reusing the general
+// newest-first recovery list can hide an old approval behind newer terminal
+// history, so this source query selects only actionable rows and applies the
+// same category/severity/age order as internal/operations before LIMIT.
+func (q *Queries) ListOperatorBriefRecoveryCases(ctx context.Context, arg ListOperatorBriefRecoveryCasesParams) ([]RecoveryCase, error) {
+	rows, err := q.db.Query(ctx, listOperatorBriefRecoveryCases, arg.OrgID, arg.RecurrenceSince, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecoveryCase
+	for rows.Next() {
+		var i RecoveryCase
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.RunID,
+			&i.WorkflowID,
+			&i.WorkflowVersionID,
+			&i.Source,
+			&i.DetectorID,
+			&i.SourceNodeID,
+			&i.DetectorKind,
+			&i.Action,
+			&i.Message,
+			&i.DetailsJson,
+			&i.State,
+			&i.Revision,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ResolvedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgsWithFeedback = `-- name: ListOrgsWithFeedback :many
 SELECT DISTINCT org_id FROM recovery_feedback
 WHERE created_at >= now() - make_interval(days => $1::int)
@@ -1531,10 +1660,18 @@ func (q *Queries) ListOrgsWithFeedback(ctx context.Context, windowDays int32) ([
 }
 
 const listRecoveryCaseArtifacts = `-- name: ListRecoveryCaseArtifacts :many
-SELECT id, org_id, case_id, kind, payload_json, payload_sha256, actor_kind, actor_id, created_at FROM recovery_case_artifacts
-WHERE org_id = $1 AND case_id = $2
+WITH bounded AS (
+  SELECT id, org_id, case_id, kind, payload_json, payload_sha256, actor_kind, actor_id, created_at FROM recovery_case_artifacts
+  WHERE org_id = $1 AND case_id = $2
+  ORDER BY
+    CASE WHEN kind IN ('diagnosis', 'candidate') THEN 0 ELSE 1 END,
+    CASE WHEN kind IN ('diagnosis', 'candidate') THEN created_at END ASC,
+    CASE WHEN kind NOT IN ('diagnosis', 'candidate') THEN created_at END DESC,
+    id DESC
+  LIMIT 100
+)
+SELECT id, org_id, case_id, kind, payload_json, payload_sha256, actor_kind, actor_id, created_at FROM bounded
 ORDER BY created_at, id
-LIMIT 100
 `
 
 type ListRecoveryCaseArtifactsParams struct {
@@ -1542,15 +1679,30 @@ type ListRecoveryCaseArtifactsParams struct {
 	CaseID string
 }
 
-func (q *Queries) ListRecoveryCaseArtifacts(ctx context.Context, arg ListRecoveryCaseArtifactsParams) ([]RecoveryCaseArtifact, error) {
+type ListRecoveryCaseArtifactsRow struct {
+	ID            string
+	OrgID         string
+	CaseID        string
+	Kind          string
+	PayloadJson   json.RawMessage
+	PayloadSha256 string
+	ActorKind     string
+	ActorID       pgtype.Text
+	CreatedAt     time.Time
+}
+
+// Candidate and diagnosis artifacts define the actions still visible in the
+// current case UI. Preserve those foundations, then fill the bounded response
+// with the most recent lifecycle evidence before restoring chronological order.
+func (q *Queries) ListRecoveryCaseArtifacts(ctx context.Context, arg ListRecoveryCaseArtifactsParams) ([]ListRecoveryCaseArtifactsRow, error) {
 	rows, err := q.db.Query(ctx, listRecoveryCaseArtifacts, arg.OrgID, arg.CaseID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []RecoveryCaseArtifact
+	var items []ListRecoveryCaseArtifactsRow
 	for rows.Next() {
-		var i RecoveryCaseArtifact
+		var i ListRecoveryCaseArtifactsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrgID,
@@ -1573,10 +1725,14 @@ func (q *Queries) ListRecoveryCaseArtifacts(ctx context.Context, arg ListRecover
 }
 
 const listRecoveryCaseTransitions = `-- name: ListRecoveryCaseTransitions :many
-SELECT id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at FROM recovery_case_transitions
-WHERE org_id = $1 AND case_id = $2
+WITH bounded AS (
+  SELECT id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at FROM recovery_case_transitions
+  WHERE org_id = $1 AND case_id = $2
+  ORDER BY occurred_at DESC, id DESC
+  LIMIT 100
+)
+SELECT id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at FROM bounded
 ORDER BY occurred_at, id
-LIMIT 100
 `
 
 type ListRecoveryCaseTransitionsParams struct {
@@ -1584,15 +1740,28 @@ type ListRecoveryCaseTransitionsParams struct {
 	CaseID string
 }
 
-func (q *Queries) ListRecoveryCaseTransitions(ctx context.Context, arg ListRecoveryCaseTransitionsParams) ([]RecoveryCaseTransition, error) {
+type ListRecoveryCaseTransitionsRow struct {
+	ID           string
+	OrgID        string
+	CaseID       string
+	FromState    string
+	ToState      string
+	ActorKind    string
+	ActorID      pgtype.Text
+	EvidenceJson json.RawMessage
+	Reason       pgtype.Text
+	OccurredAt   time.Time
+}
+
+func (q *Queries) ListRecoveryCaseTransitions(ctx context.Context, arg ListRecoveryCaseTransitionsParams) ([]ListRecoveryCaseTransitionsRow, error) {
 	rows, err := q.db.Query(ctx, listRecoveryCaseTransitions, arg.OrgID, arg.CaseID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []RecoveryCaseTransition
+	var items []ListRecoveryCaseTransitionsRow
 	for rows.Next() {
-		var i RecoveryCaseTransition
+		var i ListRecoveryCaseTransitionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrgID,
@@ -1618,6 +1787,7 @@ func (q *Queries) ListRecoveryCaseTransitions(ctx context.Context, arg ListRecov
 const listRecoveryCases = `-- name: ListRecoveryCases :many
 SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at FROM recovery_cases
 WHERE org_id = $1
+  AND source = 'semantic_violation'
   AND ($2::text IS NULL OR run_id = $2)
   AND (NOT $3::boolean OR state NOT IN ('verified_recovered','recurred','accepted_loss','abandoned'))
 ORDER BY created_at DESC, id DESC
@@ -1907,6 +2077,7 @@ func (q *Queries) LockMonitoringSemanticRecoveryCases(ctx context.Context, arg L
 const lockOpenSemanticRecoveryCases = `-- name: LockOpenSemanticRecoveryCases :many
 SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at FROM recovery_cases
 WHERE org_id = $1 AND run_id = $2 AND source_node_id = $3
+  AND source = 'semantic_violation'
   AND state NOT IN ('verified_recovered', 'recurred', 'accepted_loss', 'abandoned')
 ORDER BY id
 FOR UPDATE

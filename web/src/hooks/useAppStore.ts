@@ -29,6 +29,8 @@ export function useAppStore() {
     currentWorkflowId: state.currentWorkflowId,
     currentWorkflowName: state.currentWorkflowName,
     currentWorkflowSaved: state.currentWorkflowSaved,
+    currentWorkflowVersion: state.currentWorkflowVersion,
+    workflowDirty: state.workflowDirty,
     currentWorkflowInputs: state.currentWorkflowInputs,
     currentWorkflowOutputs: state.currentWorkflowOutputs,
     workflowRevision: state.workflowRevision,

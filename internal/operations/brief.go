@@ -92,25 +92,25 @@ func rankActions(candidates []rankedAction) []Action {
 	return actions
 }
 
-func recoveryCaseActions(rows []store.RecoveryCase, permissions map[string]bool, now time.Time) []rankedAction {
+func recoveryCaseActions(rows []store.RecoveryCase, permissions map[string]bool, now time.Time, humanApproval bool) []rankedAction {
 	actions := make([]rankedAction, 0, len(rows))
 	for _, row := range rows {
 		switch row.State {
 		case "awaiting_approval":
-			actions = append(actions, recoveryCaseAction(row, permissions, 1, "high",
+			actions = append(actions, recoveryCaseAction(row, permissions, humanApproval, 1, "high",
 				"recovery_approval", "operations.brief.recoveryApproval"))
 		case "detected", "contained", "diagnosed", "candidates_ready", "validating":
 			severity := "high"
 			if row.Action == "quarantine" {
 				severity = "critical"
 			}
-			actions = append(actions, recoveryCaseAction(row, permissions, 2, severity,
+			actions = append(actions, recoveryCaseAction(row, permissions, humanApproval, 2, severity,
 				"semantic_case", "operations.brief.semanticCase"))
 		case "recurred":
 			if row.UpdatedAt.Before(now.AddDate(0, 0, -30)) {
 				continue
 			}
-			actions = append(actions, recoveryCaseAction(row, permissions, 4, "high",
+			actions = append(actions, recoveryCaseAction(row, permissions, humanApproval, 4, "high",
 				"recovery_regression", "operations.brief.regression"))
 		}
 	}
@@ -120,6 +120,7 @@ func recoveryCaseActions(rows []store.RecoveryCase, permissions map[string]bool,
 func recoveryCaseAction(
 	row store.RecoveryCase,
 	permissions map[string]bool,
+	humanApproval bool,
 	category int,
 	severity, kind, keyPrefix string,
 ) rankedAction {
@@ -133,7 +134,10 @@ func recoveryCaseAction(
 		case "candidates_ready":
 			allowed = append(allowed, "recovery.cases.validate")
 		case "awaiting_approval":
-			allowed = append(allowed, "recovery.cases.approve", "recovery.cases.apply")
+			if humanApproval {
+				allowed = append(allowed, "recovery.cases.approve")
+			}
+			allowed = append(allowed, "recovery.cases.apply")
 		}
 	}
 	workflowID := ""

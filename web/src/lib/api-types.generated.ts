@@ -57,6 +57,46 @@ export interface ApiRequests {
   "GET /workflows/schedule-preview": undefined
   /** All versions of one workflow */
   "GET /workflows/versions": undefined
+  /** One exact immutable workflow version */
+  "GET /workflows/versions/{versionId}": undefined
+  /** Compile a bounded deterministic workflow intent brief */
+  "POST /ai/workflow-briefs/compile": {
+    "brief"?: {
+      "approvals"?: string[]
+      "examples"?: string[]
+      "expectedOutcome"?: string
+      "externalEffects"?: string[]
+      "failurePolicy"?: string
+      "inputs"?: string[]
+      "language"?: "en" | "es"
+      "objective"?: string
+      "trigger"?: string
+      "version"?: string
+    }
+    "prompt"?: string
+  }
+  /** Build a capability-bound workflow proposal without applying it */
+  "POST /ai/workflow-proposals": {
+    "brief"?: {
+      "approvals"?: string[]
+      "examples"?: string[]
+      "expectedOutcome"?: string
+      "externalEffects"?: string[]
+      "failurePolicy"?: string
+      "inputs"?: string[]
+      "language"?: "en" | "es"
+      "objective"?: string
+      "trigger"?: string
+      "version"?: string
+    }
+    "catalogVersion"?: string
+    "currentWorkflow"?: {
+      "edges": Record<string, unknown>[]
+      "nodes": Record<string, unknown>[]
+    }
+    "model"?: string
+    "prompt"?: string
+  }
   /** Redrive one dead letter */
   "POST /dlq/redrive": {
     "deadLetterId": string
@@ -117,23 +157,34 @@ export interface ApiRequests {
     "nodeId": string
     "runId": string
   }
-  /** Start a run of an inline workflow document */
+  /** Start an exact saved workflow version or an ad-hoc document */
   "POST /start": {
     "input"?: unknown
     "workflow": {
       "dslVersion"?: string
       "edges": {
-        "from"?: string
-        "to"?: string
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
       }[]
       "id"?: string
+      "inputs"?: unknown
+      "metadata"?: Record<string, unknown>
       "name"?: string
       "nodes": {
-        "config"?: Record<string, unknown>
-        "id"?: string
-        "type"?: string
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
       }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: Record<string, unknown>
     }
+    "workflowVersionId"?: string
   }
   /** Ingest a normalized inbound email event */
   "POST /triggers/email/ingest": {
@@ -183,16 +234,26 @@ export interface ApiRequests {
     "workflow": {
       "dslVersion"?: string
       "edges": {
-        "from"?: string
-        "to"?: string
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
       }[]
       "id"?: string
+      "inputs"?: unknown
+      "metadata"?: Record<string, unknown>
       "name"?: string
       "nodes": {
-        "config"?: Record<string, unknown>
-        "id"?: string
-        "type"?: string
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
       }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: Record<string, unknown>
     }
   }
   /** Append a prior snapshot as the new latest version */
@@ -204,16 +265,27 @@ export interface ApiRequests {
   "POST /workflows/save": {
     "dslVersion"?: string
     "edges": {
-      "from"?: string
-      "to"?: string
+      "condition"?: string
+      "from": string
+      "id"?: string
+      "onError"?: boolean
+      "to": string
     }[]
     "id"?: string
+    "inputs"?: unknown
+    "metadata"?: Record<string, unknown>
     "name"?: string
     "nodes": {
-      "config"?: Record<string, unknown>
-      "id"?: string
-      "type"?: string
+      "config": Record<string, unknown>
+      "id": string
+      "label"?: string
+      "type": string
     }[]
+    "outputs"?: Record<string, string>
+    "recovery"?: unknown
+    "templatePolicy"?: string
+    "ui"?: Record<string, unknown>
+    "upstreamHealthSources"?: string[]
   }
 }
 
@@ -221,15 +293,19 @@ export interface ApiRequests {
 export interface ApiResponses {
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": {
-    "builtinTools": {
+    "builtinTools": ({
       "description": string
       "inputExample"?: unknown
-      "inputFields": Record<string, unknown>[]
+      "inputFields": ({
+        "kind": "string" | "number" | "boolean" | "object" | "array" | "json" | "unknown"
+        "name": string
+        "required": boolean
+      })[]
       "name": string
       "optional"?: string[]
       "required": string[]
       "writeSide": boolean
-    }[]
+    })[]
     "credentials": ({
       "configured": boolean
       "expired": boolean
@@ -239,13 +315,17 @@ export interface ApiResponses {
       "name": string
       "updatedAt": string
     })[]
-    "mcpTools": {
+    "mcpTools": ({
       "connectionAlias": string
       "description": string
-      "inputFields": Record<string, unknown>[]
+      "inputFields": ({
+        "name": string
+        "required": boolean
+        "type": "string" | "number" | "integer" | "boolean" | "object" | "array" | "unknown"
+      })[]
       "toolName": string
       "writeSide": boolean
-    }[]
+    })[]
     "primitives": {
       "nodeType": string
       "notes": string
@@ -334,6 +414,12 @@ export interface ApiResponses {
   }
   /** Inspect one governed semantic recovery case */
   "GET /recovery/cases/{caseId}": {
+    "activeApproval": {
+      "candidateArtifactId": string
+      "caseRevision": number
+      "expiresAt": string
+      "validationArtifactId": string
+    } | null
     "artifacts": ({
       "actorId"?: string | null
       "actorKind": string
@@ -439,6 +525,153 @@ export interface ApiResponses {
   }
   /** All versions of one workflow */
   "GET /workflows/versions": Record<string, unknown>[]
+  /** One exact immutable workflow version */
+  "GET /workflows/versions/{versionId}": {
+    "dagJson": {
+      "dslVersion"?: string
+      "edges": {
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
+      }[]
+      "id"?: string
+      "inputs"?: unknown
+      "metadata"?: Record<string, unknown>
+      "name"?: string
+      "nodes": {
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
+      }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: Record<string, unknown>
+    }
+    "id": string
+    "version": number
+    "workflowId": string
+  }
+  /** Compile a bounded deterministic workflow intent brief */
+  "POST /ai/workflow-briefs/compile": {
+    "brief": {
+      "approvals": string[]
+      "examples": string[]
+      "expectedOutcome": string
+      "externalEffects": string[]
+      "failurePolicy": string
+      "inputs": string[]
+      "language": "en" | "es"
+      "objective": string
+      "trigger": string
+      "version": string
+    }
+    "clarifyingQuestions": string[]
+    "complete": boolean
+    "mode": "deterministic"
+  }
+  /** Build a capability-bound workflow proposal without applying it */
+  "POST /ai/workflow-proposals": {
+    "aiError"?: string
+    "bindings": {
+      "catalogVersion": string
+      "complete": boolean
+      "missing": {
+        "alternatives": string[]
+        "field": string
+        "kind": string
+        "nodeId": string
+        "reason"?: string
+        "requested"?: string
+        "resolvedId"?: string
+      }[]
+      "resolved": {
+        "alternatives": string[]
+        "field": string
+        "kind": string
+        "nodeId": string
+        "reason"?: string
+        "requested"?: string
+        "resolvedId"?: string
+      }[]
+    }
+    "bonBackoff"?: {
+      "from": number
+      "to": number
+    }
+    "brief": {
+      "approvals": string[]
+      "examples": string[]
+      "expectedOutcome": string
+      "externalEffects": string[]
+      "failurePolicy": string
+      "inputs": string[]
+      "language": "en" | "es"
+      "objective": string
+      "trigger": string
+      "version": string
+    }
+    "clarifyingQuestions": string[]
+    "mode": "ai" | "fallback" | "error"
+    "proposal": {
+      "applicable": boolean
+      "assumptions": string[]
+      "diff": {
+        "edgesAfter": number
+        "edgesBefore": number
+        "nodesAdded": string[]
+        "nodesChanged": string[]
+        "nodesRemoved": string[]
+      }
+      "intentContract": Record<string, string>
+      "qualification": {
+        "intent": boolean
+        "recovery": boolean
+        "semantic": boolean
+      }
+      "readiness": {
+        "issues": ({
+          "code": string
+          "edgeId"?: string
+          "message": string
+          "nodeId"?: string
+          "severity": "info" | "warn" | "fail"
+          "suggestion"?: string
+        })[]
+        "status": "pass" | "warn" | "fail"
+      }
+      "recoveryContract": unknown
+      "risks": string[]
+      "workflow": {
+        "dslVersion"?: string
+        "edges": {
+          "condition"?: string
+          "from": string
+          "id"?: string
+          "onError"?: boolean
+          "to": string
+        }[]
+        "id"?: string
+        "inputs"?: unknown
+        "metadata"?: Record<string, unknown>
+        "name"?: string
+        "nodes": {
+          "config": Record<string, unknown>
+          "id": string
+          "label"?: string
+          "type": string
+        }[]
+        "outputs"?: Record<string, string>
+        "recovery"?: unknown
+        "templatePolicy"?: string
+        "ui"?: Record<string, unknown>
+      }
+    }
+    "providerGuarded"?: boolean
+  }
   /** Redrive one dead letter */
   "POST /dlq/redrive": {
     "redriven": boolean
@@ -585,7 +818,7 @@ export interface ApiResponses {
     "ok": boolean
     "runId": string
   }
-  /** Start a run of an inline workflow document */
+  /** Start an exact saved workflow version or an ad-hoc document */
   "POST /start": {
     "runId": string
   }
@@ -697,6 +930,12 @@ export interface ApiSuccessStatuses {
   "GET /workflows/schedule-preview": 200
   /** All versions of one workflow */
   "GET /workflows/versions": 200
+  /** One exact immutable workflow version */
+  "GET /workflows/versions/{versionId}": 200
+  /** Compile a bounded deterministic workflow intent brief */
+  "POST /ai/workflow-briefs/compile": 200
+  /** Build a capability-bound workflow proposal without applying it */
+  "POST /ai/workflow-proposals": 200
   /** Redrive one dead letter */
   "POST /dlq/redrive": 200
   /** Replay one dead letter (unversioned wire) */
@@ -719,7 +958,7 @@ export interface ApiSuccessStatuses {
   "POST /run/cancel": 200
   /** Redrive by run and node (revive-in-place) */
   "POST /runs/redrive": 200
-  /** Start a run of an inline workflow document */
+  /** Start an exact saved workflow version or an ad-hoc document */
   "POST /start": 200
   /** Ingest a normalized inbound email event */
   "POST /triggers/email/ingest": 200

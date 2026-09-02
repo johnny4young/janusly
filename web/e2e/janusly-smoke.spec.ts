@@ -207,12 +207,17 @@ test('ai studio against Go: $0 fallback generate, save, run, approve', async ({ 
   // key the Go backend answers with the deterministic $0 approval template,
   // but it must still compile the brief and bind the exact tenant catalog
   // before an explicit Apply may touch the local canvas.
-  await page.locator('.ai-studio-prompt').fill('necesito un flujo con approval humano antes de escribir')
+  await page.locator('.ai-studio-prompt').fill(
+    'Inicia manualmente un flujo que sólo coordine trabajo interno, sin modificar sistemas externos, y requiera aprobación humana antes de continuar.',
+  )
   await page.getByRole('button', { name: 'Compile intent brief', exact: true }).click()
   await expect(page.getByTestId('intent-brief')).toBeVisible()
   await page.getByRole('button', { name: 'Build proposal', exact: true }).click()
-  await expect(page.getByTestId('workflow-proposal')).toBeVisible()
-  await expect(page.getByText('Deterministic local proposal')).toBeVisible()
+  const workflowProposal = page.getByTestId('workflow-proposal')
+  await expect(workflowProposal).toBeVisible()
+  await expect(
+    workflowProposal.getByRole('status').filter({ hasText: 'Deterministic local proposal' }),
+  ).toBeVisible()
 
   await page.getByRole('button', { name: 'Apply proposal to draft', exact: true }).click()
   const discard = page.getByRole('button', { name: 'Discard changes', exact: true })

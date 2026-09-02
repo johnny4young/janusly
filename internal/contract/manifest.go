@@ -6,6 +6,8 @@
 // contract/openapi.json and fails on any diff.
 package contract
 
+import "maps"
+
 // Schema is a loose JSON-Schema fragment (the generator emits it as-is).
 type Schema map[string]any
 
@@ -26,6 +28,12 @@ func obj(props map[string]any, required ...string) Schema {
 	return schema
 }
 
+func closedObj(props map[string]any, required ...string) Schema {
+	schema := obj(props, required...)
+	schema["additionalProperties"] = false
+	return schema
+}
+
 func str() map[string]any   { return map[string]any{"type": "string"} }
 func num() map[string]any   { return map[string]any{"type": "number"} }
 func boolT() map[string]any { return map[string]any{"type": "boolean"} }
@@ -37,10 +45,121 @@ func arr(items any) map[string]any {
 }
 
 var workflowDoc = obj(map[string]any{
-	"id": str(), "name": str(), "dslVersion": str(),
-	"nodes": arr(obj(map[string]any{"id": str(), "type": str(), "config": map[string]any{"type": "object"}})),
-	"edges": arr(obj(map[string]any{"from": str(), "to": str()})),
+	"id": str(), "name": str(), "dslVersion": str(), "templatePolicy": str(),
+	"metadata": map[string]any{"type": "object", "additionalProperties": jsonValue()},
+	"inputs":   jsonValue(),
+	"outputs":  map[string]any{"type": "object", "additionalProperties": str()},
+	"recovery": jsonValue(),
+	"ui":       map[string]any{"type": "object", "additionalProperties": jsonValue()},
+	"nodes": arr(obj(map[string]any{
+		"id": str(), "type": str(), "label": str(),
+		"config": map[string]any{"type": "object", "additionalProperties": jsonValue()},
+	}, "id", "type", "config")),
+	"edges": arr(obj(map[string]any{
+		"id": str(), "from": str(), "to": str(), "condition": str(), "onError": boolT(),
+	}, "from", "to")),
 }, "nodes", "edges")
+
+// currentWorkflow is only a comparison snapshot for proposal diffs. It is not
+// parsed, saved, validated, or executed, so advertising the complete workflow
+// contract here would overstate what this input means while the runtime only
+// consumes node objects and the edge count. Keep the carrier purpose-built and
+// require exactly the structural collections the diff algorithm needs.
+var workflowComparisonSnapshot = obj(map[string]any{
+	"nodes": arr(map[string]any{"type": "object"}),
+	"edges": arr(map[string]any{"type": "object"}),
+}, "nodes", "edges")
+
+func workflowSaveSchema() Schema {
+	baseProperties, _ := workflowDoc["properties"].(map[string]any)
+	properties := make(map[string]any, len(baseProperties)+1)
+	maps.Copy(properties, baseProperties)
+	properties["upstreamHealthSources"] = map[string]any{
+		"type": "array", "maxItems": 50,
+		"items": map[string]any{"type": "string", "minLength": 1, "maxLength": 80},
+	}
+	return Schema{
+		"type": "object", "properties": properties,
+		"required": []string{"nodes", "edges"}, "additionalProperties": false,
+	}
+}
+
+var workflowSaveDoc = workflowSaveSchema()
+
+// A purpose-built immutable authoring snapshot. The exact-version read does
+// not expose tenant ids, SLO internals, or every historical DAG: callers need
+// only enough information to prove and hydrate the incident's source version.
+var workflowVersionSnapshot = closedObj(map[string]any{
+	"id": str(), "workflowId": str(),
+	"version": map[string]any{"type": "integer", "minimum": 1},
+	"dagJson": workflowDoc,
+}, "id", "workflowId", "version", "dagJson")
+
+var workflowIntentBriefInput = closedObj(map[string]any{
+	"version": str(), "objective": str(), "trigger": str(), "inputs": arr(str()),
+	"expectedOutcome": str(), "externalEffects": arr(str()), "approvals": arr(str()),
+	"failurePolicy": str(), "examples": arr(str()),
+	"language": map[string]any{"type": "string", "enum": []any{"en", "es"}},
+})
+
+var workflowIntentBrief = obj(map[string]any{
+	"version": str(), "objective": str(), "trigger": str(), "inputs": arr(str()),
+	"expectedOutcome": str(), "externalEffects": arr(str()), "approvals": arr(str()),
+	"failurePolicy": str(), "examples": arr(str()),
+	"language": map[string]any{"type": "string", "enum": []any{"en", "es"}},
+}, "version", "objective", "trigger", "inputs", "expectedOutcome", "externalEffects",
+	"approvals", "failurePolicy", "examples", "language")
+
+var workflowBriefCompilation = obj(map[string]any{
+	"brief": workflowIntentBrief, "clarifyingQuestions": arr(str()), "complete": boolT(),
+	"mode": map[string]any{"type": "string", "const": "deterministic"},
+}, "brief", "clarifyingQuestions", "complete", "mode")
+
+var workflowCapabilityBinding = obj(map[string]any{
+	"kind": str(), "nodeId": str(), "field": str(), "requested": str(),
+	"resolvedId": str(), "alternatives": arr(str()), "reason": str(),
+}, "kind", "nodeId", "field", "alternatives")
+
+var workflowBindingReport = obj(map[string]any{
+	"catalogVersion": str(), "resolved": arr(workflowCapabilityBinding),
+	"missing": arr(workflowCapabilityBinding), "complete": boolT(),
+}, "catalogVersion", "resolved", "missing", "complete")
+
+var workflowProposalResponse = obj(map[string]any{
+	"mode":            map[string]any{"type": "string", "enum": []any{"ai", "fallback", "error"}},
+	"aiError":         str(),
+	"providerGuarded": boolT(),
+	"bonBackoff": obj(map[string]any{
+		"from": map[string]any{"type": "integer", "minimum": 1},
+		"to":   map[string]any{"type": "integer", "minimum": 1},
+	}, "from", "to"),
+	"brief":               workflowIntentBrief,
+	"clarifyingQuestions": arr(str()),
+	"bindings":            workflowBindingReport,
+	"proposal": obj(map[string]any{
+		"workflow":         workflowDoc,
+		"intentContract":   map[string]any{"type": "object", "additionalProperties": str()},
+		"recoveryContract": jsonValue(),
+		"qualification": obj(map[string]any{
+			"intent": boolT(), "recovery": boolT(), "semantic": boolT(),
+		}, "intent", "recovery", "semantic"),
+		"assumptions": arr(str()),
+		"risks":       arr(str()),
+		"readiness": obj(map[string]any{
+			"status": map[string]any{"type": "string", "enum": []any{"pass", "warn", "fail"}},
+			"issues": arr(obj(map[string]any{
+				"code": str(), "severity": map[string]any{"type": "string", "enum": []any{"info", "warn", "fail"}},
+				"message": str(), "nodeId": str(), "edgeId": str(), "suggestion": str(),
+			}, "code", "severity", "message")),
+		}, "status", "issues"),
+		"diff": obj(map[string]any{
+			"nodesAdded": arr(str()), "nodesRemoved": arr(str()), "nodesChanged": arr(str()),
+			"edgesBefore": map[string]any{"type": "integer", "minimum": 0},
+			"edgesAfter":  map[string]any{"type": "integer", "minimum": 0},
+		}, "nodesAdded", "nodesRemoved", "nodesChanged", "edgesBefore", "edgesAfter"),
+		"applicable": boolT(),
+	}, "workflow", "intentContract", "recoveryContract", "qualification", "assumptions", "risks", "readiness", "diff", "applicable"),
+}, "mode", "brief", "clarifyingQuestions", "bindings", "proposal")
 
 var runView = obj(map[string]any{
 	"run":           map[string]any{"type": "object"},
@@ -70,16 +189,28 @@ var recoveryArtifact = obj(map[string]any{
 	"createdAt": str(),
 }, "id", "caseId", "kind", "payload", "sha256", "actorKind", "createdAt")
 
-var recoveryRevisionRequest = obj(map[string]any{
+var recoveryActiveApproval = map[string]any{
+	"type": []any{"object", "null"},
+	"properties": map[string]any{
+		"candidateArtifactId":  str(),
+		"validationArtifactId": str(),
+		"caseRevision":         map[string]any{"type": "integer", "minimum": 1},
+		"expiresAt":            str(),
+	},
+	"required":             []string{"candidateArtifactId", "validationArtifactId", "caseRevision", "expiresAt"},
+	"additionalProperties": false,
+}
+
+var recoveryRevisionRequest = closedObj(map[string]any{
 	"expectedRevision": map[string]any{"type": "integer", "minimum": 1},
 }, "expectedRevision")
 
-var recoveryCandidateBindingRequest = obj(map[string]any{
+var recoveryCandidateBindingRequest = closedObj(map[string]any{
 	"expectedRevision":    map[string]any{"type": "integer", "minimum": 1},
 	"candidateArtifactId": str(),
 }, "expectedRevision", "candidateArtifactId")
 
-var recoveryApprovalBindingRequest = obj(map[string]any{
+var recoveryApprovalBindingRequest = closedObj(map[string]any{
 	"expectedRevision":     map[string]any{"type": "integer", "minimum": 1},
 	"candidateArtifactId":  str(),
 	"validationArtifactId": str(),
@@ -100,15 +231,31 @@ var workflowHealthScore = obj(map[string]any{
 	"slo":       map[string]any{"type": []any{"object", "null"}},
 }, "score", "status", "breakdown", "signals")
 
+var authoringBuiltinInputField = obj(map[string]any{
+	"name": str(),
+	"kind": map[string]any{"type": "string", "enum": []any{
+		"string", "number", "boolean", "object", "array", "json", "unknown",
+	}},
+	"required": boolT(),
+}, "name", "kind", "required")
+
+var authoringMCPInputField = obj(map[string]any{
+	"name": str(),
+	"type": map[string]any{"type": "string", "enum": []any{
+		"string", "number", "integer", "boolean", "object", "array", "unknown",
+	}},
+	"required": boolT(),
+}, "name", "type", "required")
+
 var authoringCapabilities = obj(map[string]any{
 	"schemaVersion": str(), "version": str(),
 	"builtinTools": arr(obj(map[string]any{
 		"name": str(), "description": str(), "required": arr(str()), "optional": arr(str()),
-		"inputFields": arr(map[string]any{"type": "object"}), "inputExample": jsonValue(), "writeSide": boolT(),
+		"inputFields": arr(authoringBuiltinInputField), "inputExample": jsonValue(), "writeSide": boolT(),
 	}, "name", "description", "required", "inputFields", "writeSide")),
 	"mcpTools": arr(obj(map[string]any{
 		"connectionAlias": str(), "toolName": str(), "description": str(), "writeSide": boolT(),
-		"inputFields": arr(map[string]any{"type": "object"}),
+		"inputFields": arr(authoringMCPInputField),
 	}, "connectionAlias", "toolName", "description", "writeSide", "inputFields")),
 	"triggers": arr(obj(map[string]any{
 		"id": str(), "nodeType": str(), "requiredConfig": arr(str()), "endpoint": str(),
@@ -146,7 +293,7 @@ var operatorBrief = obj(map[string]any{
 // Routes is the closed v1 manifest, one entry per mounted /v1 route.
 var Routes = []Route{
 	{Method: "POST", Path: "/v1/workflows/save", Summary: "Save a workflow as a new immutable version",
-		Request:  workflowDoc,
+		Request:  workflowSaveDoc,
 		Response: obj(map[string]any{"workflowId": str(), "versionId": str(), "version": num()})},
 	{Method: "POST", Path: "/v1/workflows/rollback", Summary: "Append a prior snapshot as the new latest version",
 		Request:  obj(map[string]any{"workflowId": str(), "sourceVersionId": str()}, "workflowId", "sourceVersionId"),
@@ -170,12 +317,16 @@ var Routes = []Route{
 		Response: Schema{"type": []any{"object", "null"}}},
 	{Method: "GET", Path: "/v1/workflows/versions", Summary: "All versions of one workflow",
 		Response: arr(map[string]any{"type": "object"})},
+	{Method: "GET", Path: "/v1/workflows/versions/{versionId}", Summary: "One exact immutable workflow version",
+		Response: workflowVersionSnapshot},
 	{Method: "GET", Path: "/v1/workflows/health", Summary: "Workflow assurance health score",
 		Response: workflowHealthScore},
 	{Method: "GET", Path: "/v1/templates", Summary: "Built-in workflow authoring templates",
 		Response: arr(map[string]any{"type": "object"})},
-	{Method: "POST", Path: "/v1/start", Summary: "Start a run of an inline workflow document",
-		Request:  obj(map[string]any{"workflow": workflowDoc, "input": map[string]any{}}, "workflow"),
+	{Method: "POST", Path: "/v1/start", Summary: "Start an exact saved workflow version or an ad-hoc document",
+		Request: obj(map[string]any{
+			"workflow": workflowDoc, "workflowVersionId": str(), "input": map[string]any{},
+		}, "workflow"),
 		Response: obj(map[string]any{"runId": str()}, "runId")},
 	{Method: "POST", Path: "/v1/webhooks/{workflowId}", Summary: "Ingest one webhook trigger event",
 		Request: obj(map[string]any{
@@ -243,21 +394,22 @@ var Routes = []Route{
 		Response: obj(map[string]any{"cases": arr(recoveryCase)}, "cases")},
 	{Method: "GET", Path: "/v1/recovery/cases/{caseId}", Summary: "Inspect one governed semantic recovery case",
 		Response: obj(map[string]any{
-			"case":        recoveryCase,
-			"transitions": arr(map[string]any{"type": "object"}),
-			"artifacts":   arr(recoveryArtifact),
-			"autonomy":    map[string]any{"type": "object"},
-		}, "case", "transitions", "artifacts", "autonomy")},
+			"case":           recoveryCase,
+			"transitions":    arr(map[string]any{"type": "object"}),
+			"artifacts":      arr(recoveryArtifact),
+			"autonomy":       map[string]any{"type": "object"},
+			"activeApproval": recoveryActiveApproval,
+		}, "case", "transitions", "artifacts", "autonomy", "activeApproval")},
 	{Method: "POST", Path: "/v1/recovery/cases/{caseId}/diagnose", Summary: "Record a bounded diagnosis and advance the recovery case",
 		Request: recoveryRevisionRequest,
 		Response: obj(map[string]any{
 			"case": recoveryCase, "diagnosis": recoveryArtifact, "mode": str(),
 		}, "case", "diagnosis", "mode")},
 	{Method: "POST", Path: "/v1/recovery/cases/{caseId}/candidates", Summary: "Create immutable recovery candidates",
-		Request: obj(map[string]any{
+		Request: closedObj(map[string]any{
 			"expectedRevision": map[string]any{"type": "integer", "minimum": 1},
 			"acceptLossReason": map[string]any{"type": "string", "maxLength": 1000},
-			"manualReplacement": obj(map[string]any{
+			"manualReplacement": closedObj(map[string]any{
 				"output": jsonValue(), "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 1000},
 			}, "output", "reason"),
 		}, "expectedRevision"),
@@ -304,6 +456,17 @@ var Routes = []Route{
 		Response: arr(map[string]any{"type": "object"})},
 	{Method: "GET", Path: "/v1/authoring/capabilities", Summary: "Exact tenant-safe capability catalog for workflow authoring",
 		Response: authoringCapabilities},
+	{Method: "POST", Path: "/v1/ai/workflow-briefs/compile", Summary: "Compile a bounded deterministic workflow intent brief",
+		Request: closedObj(map[string]any{
+			"prompt": str(), "brief": workflowIntentBriefInput,
+		}),
+		Response: workflowBriefCompilation},
+	{Method: "POST", Path: "/v1/ai/workflow-proposals", Summary: "Build a capability-bound workflow proposal without applying it",
+		Request: closedObj(map[string]any{
+			"prompt": str(), "brief": workflowIntentBriefInput,
+			"currentWorkflow": workflowComparisonSnapshot, "catalogVersion": str(), "model": str(),
+		}),
+		Response: workflowProposalResponse},
 	{Method: "GET", Path: "/v1/operations/brief", Summary: "Bounded deterministic Operator Brief shared by UI and MCP",
 		Response: operatorBrief},
 }

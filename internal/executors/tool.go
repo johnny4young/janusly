@@ -60,7 +60,23 @@ func NewToolExecutor(registry *tools.Registry) Func {
 		result := executeRegisteredTool(ctx, registry, name, input, in)
 		if result["ok"] == false && policy == "require_ok" {
 			message, _ := result["error"].(string)
-			return nil, fmt.Errorf("Tool %s returned an unsuccessful result: %s", name, message) //nolint:staticcheck // contract message is the wire contract
+			statusCode := 0
+			switch value := result["statusCode"].(type) {
+			case int:
+				statusCode = value
+			case float64:
+				statusCode = int(value)
+			}
+			return nil, &ExecErrorShape{
+				Message:    fmt.Sprintf("Tool %s returned an unsuccessful result: %s", name, message), //nolint:staticcheck // contract message is the wire contract
+				Name:       "ToolResultError",
+				Code:       "TOOL_RESULT_NOT_OK",
+				StatusCode: statusCode,
+				// The envelope does not prove whether a write-side provider failed
+				// before or after accepting the effect. Conservatively suppress
+				// whole-node retries; an operator can inspect and redrive.
+				WriteSide: registry.IsWriteSide(name),
+			}
 		}
 		return map[string]any{"tool": name, "result": result}, nil
 	}

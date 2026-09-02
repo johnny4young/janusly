@@ -100,7 +100,7 @@ function panelProps(overrides: Partial<Parameters<typeof AiStudioPanel>[0]> = {}
     onLoadAuthoringCapabilities: vi.fn(async () => catalog),
     onCompileWorkflowBrief: vi.fn(async () => compilation),
     onProposeWorkflow: vi.fn(async () => proposal()),
-    onApplyWorkflowProposal: vi.fn(async () => true),
+    onApplyWorkflowProposal: vi.fn(async () => ({ status: 'applied' as const })),
     onExplainWorkflow: vi.fn(async () => ({ mode: 'fallback' as const, explanation: '' })),
     onReviewWorkflow: vi.fn(async () => ({
       mode: 'fallback' as const,

@@ -413,16 +413,30 @@ func TestStartIdempotencyKey(t *testing.T) {
 		t.Fatalf("one run expected, got %d", count)
 	}
 
+	// Without the header every call is a fresh run.
+	plain := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
+	if plain.body["data"].(map[string]any)["runId"].(string) == runA {
+		t.Fatal("headerless starts must not join the idempotent family")
+	}
+
 	// The same key under ANOTHER org is independent.
 	other := call("other-" + h.org)
 	if other.body["data"].(map[string]any)["runId"].(string) == runA {
 		t.Fatal("keys must scope per org")
 	}
 
-	// Without the header every call is a fresh run.
-	plain := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
-	if plain.body["data"].(map[string]any)["runId"].(string) == runA {
-		t.Fatal("headerless starts must not join the idempotent family")
+	// A retry is a read of the already-committed success. Mutable policy that
+	// changed after the first request cannot turn that replay into a rejection.
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1,$2,'runs.requireSavedWorkflow','true','runs','test','boolean')`,
+		h.org+"-saved-only", h.org); err != nil {
+		t.Fatal(err)
+	}
+	replayAfterPolicyChange := call("")
+	if replayAfterPolicyChange.status != http.StatusOK ||
+		replayAfterPolicyChange.body["data"].(map[string]any)["runId"] != runA {
+		t.Fatalf("policy change broke idempotent replay: %d %+v", replayAfterPolicyChange.status, replayAfterPolicyChange.body)
 	}
 
 	// Oversized key: 400.

@@ -20,6 +20,7 @@ export const V1_READ_PATHS = {
   workflowHealth: "/workflows/health",
   schedulePreview: "/workflows/schedule-preview",
   workflowVersions: "/workflows/versions",
+  workflowVersion: "/workflows/versions/{versionId}",
   latestWorkflowVersion: "/workflows/latest",
   runs: "/runs",
   run: "/run",
@@ -69,8 +70,20 @@ export const V1_MCP_PATHS = {
 export type V1McpPath = typeof V1_MCP_PATHS[keyof typeof V1_MCP_PATHS];
 
 const V1_READ_PATH_SET: ReadonlySet<string> = new Set(Object.values(V1_READ_PATHS));
+const V1_READ_PATH_TEMPLATES = Object.values(V1_READ_PATHS)
+  .filter(path => path.includes('{'))
+  .map(path => path.split('/'));
 
-/** True when an exact URL pathname belongs to the stable v1 read lane. */
-export function isV1ReadPath(pathname: string): pathname is V1ReadPath {
-  return V1_READ_PATH_SET.has(pathname);
+/** True when an exact or concrete templated pathname belongs to the v1 lane. */
+export function isV1ReadPath(pathname: string): boolean {
+  if (V1_READ_PATH_SET.has(pathname)) return true;
+  const segments = pathname.split('/');
+  return V1_READ_PATH_TEMPLATES.some(template => (
+    template.length === segments.length
+    && template.every((segment, index) => (
+      segment.startsWith('{') && segment.endsWith('}')
+        ? (segments[index]?.length ?? 0) > 0
+        : segment === segments[index]
+    ))
+  ));
 }

@@ -39,14 +39,14 @@ func (s *V1Server) runUsageCore(r *http.Request, rc v1Request) opResult {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	rows, err := store.New(s.pool).ListRunUsageSlice(r.Context(), store.ListRunUsageSliceParams{
 		OrgID: rc.orgID, RunID: pgtype.Text{String: runID, Valid: true},
 		Limit: runUsageRowCap + 1,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	truncated := len(rows) > runUsageRowCap
 	if truncated {

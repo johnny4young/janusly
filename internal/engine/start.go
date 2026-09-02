@@ -64,8 +64,9 @@ type StartInput struct {
 	OrgID string
 	// Workflow is the validated document to execute.
 	Workflow *domain.Workflow
-	// WorkflowVersionID pins the version identity; empty falls back to the
-	// workflow id and then to the generated run id, like the contract.
+	// WorkflowVersionID pins a verified immutable version identity. An empty
+	// value is an honest ad-hoc execution and falls back to the generated run
+	// id; a workflow id must never masquerade as a version-row id.
 	WorkflowVersionID string
 	// Input is the caller's payload; nil means none was supplied.
 	Input     any
@@ -141,9 +142,6 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 
 	runID := e.newID()
 	versionID := in.WorkflowVersionID
-	if versionID == "" {
-		versionID = in.Workflow.ID
-	}
 	if versionID == "" {
 		versionID = runID
 	}

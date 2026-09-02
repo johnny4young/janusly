@@ -62,6 +62,9 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 			if err != nil {
 				return "", "credential not found: " + credentialName
 			}
+			if credential.ExpiresAt != nil && !credential.ExpiresAt.After(e.now().UTC()) {
+				return "", "credential expired: " + credentialName
+			}
 			secret := secretstore.ResolveCredentialSecretRef(ctx, q, orgID, credential.SecretRef)
 			if secret == "" {
 				// Deliberately generic — never echo the managed/legacy ref.
@@ -112,9 +115,13 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 			}
 			return result.StatusCode, result.Body, ""
 		},
-		Fetch: func(ctx context.Context, method, url string, headers map[string]string, body []byte) (int, string, string) {
+		Fetch: func(ctx context.Context, method, url string, headers map[string]string, body []byte, maxResponseBytes int) (int, string, string) {
+			// PagerDuty requests carry a bearer token and PUT/POST bodies. Do not
+			// replay either across a provider redirect; the caller must target the
+			// configured regional API host directly.
 			result, err := executors.FetchHTTPTarget(ctx, url, executors.FetchOptions{
-				Method: method, Headers: headers, Body: body,
+				Method: method, Headers: headers, Body: body, MaxResponseBytes: maxResponseBytes,
+				DisableRedirects: true,
 			})
 			if err != nil {
 				return 0, "", err.Error()

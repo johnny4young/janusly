@@ -24,7 +24,7 @@ import (
 func (s *V1Server) listOrgConfigCore(r *http.Request, rc v1Request) opResult {
 	rows, err := store.New(s.pool).ListOrgConfigRows(r.Context(), rc.orgID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	tenantRows := make(map[string]json.RawMessage, len(rows))
 	updatedAt := map[string]any{}
@@ -70,7 +70,7 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 	}
 	valueJSON, err := json.Marshal(normalized)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	ctx := r.Context()
 	var previousMemoryEnabled *bool
@@ -93,7 +93,7 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 		Category: def.Category, Description: def.Description, ValueType: def.ValueType,
 		UpdatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	// ai.operatorGuidance summarizes instead of echoing operator prose into
 	// the trail, like the contract.

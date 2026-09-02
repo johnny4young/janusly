@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -75,6 +77,182 @@ func TestEnforceFixedWindow(t *testing.T) {
 	}
 }
 
+func TestEnforceTriggerEventConsumesStormBudgetExactlyOnce(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	orgID := "org-trigger-rate-" + suffix
+	bucket := "trigger.version.node." + suffix
+	base := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	limiter := New(pool, Hooks{})
+	limiter.SetNow(func() time.Time { return base })
+	opts := Options{Name: bucket, Max: 2, Window: time.Minute}
+
+	insertEvent := func(id string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO trigger_events
+			(id,org_id,trigger_type,workflow_id,workflow_version_id,node_id,payload_json)
+			VALUES ($1,$2,'pagerduty_incident','workflow','version','trigger','{}'::jsonb)`, id, orgID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM trigger_events WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM rate_limit_windows WHERE name=$1 AND key=$2`, bucket, orgID)
+	})
+
+	first := "trigger-event-first-" + suffix
+	insertEvent(first)
+	var group sync.WaitGroup
+	errorsByCall := make(chan error, 12)
+	for range 12 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			errorsByCall <- limiter.EnforceTriggerEvent(ctx, orgID, orgID, first, opts)
+		}()
+	}
+	group.Wait()
+	close(errorsByCall)
+	for err := range errorsByCall {
+		if err != nil {
+			t.Fatalf("same accepted event must remain admitted: %v", err)
+		}
+	}
+
+	var count, windows int
+	if err := pool.QueryRow(ctx, `SELECT count FROM rate_limit_windows WHERE name=$1 AND key=$2`, bucket, orgID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("concurrent retries consumed %d storm-budget slots, want 1", count)
+	}
+	var admittedAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT rate_admitted_at FROM trigger_events WHERE org_id=$1 AND id=$2`, orgID, first).Scan(&admittedAt); err != nil {
+		t.Fatal(err)
+	}
+	if admittedAt == nil || !admittedAt.Equal(base) {
+		t.Fatalf("durable admission marker = %v, want %s", admittedAt, base)
+	}
+
+	second := "trigger-event-second-" + suffix
+	insertEvent(second)
+	if err := limiter.EnforceTriggerEvent(ctx, orgID, orgID, second, opts); err != nil {
+		t.Fatalf("second distinct event must use the remaining slot: %v", err)
+	}
+	third := "trigger-event-third-" + suffix
+	insertEvent(third)
+	err := limiter.EnforceTriggerEvent(ctx, orgID, orgID, third, opts)
+	var limited *LimitError
+	if !errors.As(err, &limited) {
+		t.Fatalf("third distinct event must be rate limited: %v", err)
+	}
+	var status, reason string
+	if err := pool.QueryRow(ctx, `SELECT status, skipped_reason FROM trigger_events WHERE org_id=$1 AND id=$2`, orgID, third).Scan(&status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if status != "skipped" || reason != "rate_limited" {
+		t.Fatalf("over-limit event settlement = %s/%s", status, reason)
+	}
+
+	// A delayed relay retry remains admitted even after the fixed window rolls;
+	// it must not consume a slot in the new window.
+	limiter.SetNow(func() time.Time { return base.Add(time.Minute) })
+	if err := limiter.EnforceTriggerEvent(ctx, orgID, orgID, first, opts); err != nil {
+		t.Fatalf("delayed retry of admitted event: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM rate_limit_windows WHERE name=$1 AND key=$2`, bucket, orgID).Scan(&windows); err != nil {
+		t.Fatal(err)
+	}
+	if windows != 1 {
+		t.Fatalf("admitted retry created %d fixed windows, want 1", windows)
+	}
+
+	// Over-limit settlement is also single-winner. A contender that waited on
+	// the same row lock must observe the durable skipped state and return a
+	// settled signal; it may never reinterpret non-received as admission.
+	raceBucket := bucket + "-settlement-race"
+	raceEvent := "trigger-event-settlement-race-" + suffix
+	insertEvent(raceEvent)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM rate_limit_windows WHERE name=$1 AND key=$2`, raceBucket, orgID)
+	})
+	raceResults := make(chan error, 2)
+	startRace := make(chan struct{})
+	for range 2 {
+		go func() {
+			<-startRace
+			raceResults <- limiter.EnforceTriggerEvent(ctx, orgID, orgID, raceEvent, Options{
+				Name: raceBucket, Max: 0, Window: time.Minute,
+			})
+		}()
+	}
+	close(startRace)
+	var limitedResults, settledResults int
+	for range 2 {
+		err := <-raceResults
+		var limit *LimitError
+		var settled *TriggerEventSettledError
+		switch {
+		case errors.As(err, &limit):
+			limitedResults++
+		case errors.As(err, &settled):
+			settledResults++
+		default:
+			t.Fatalf("unexpected settlement-race result: %v", err)
+		}
+	}
+	if limitedResults != 1 || settledResults != 1 {
+		t.Fatalf("settlement race outcomes: limited=%d settled=%d", limitedResults, settledResults)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status, skipped_reason FROM trigger_events WHERE org_id=$1 AND id=$2`,
+		orgID, raceEvent).Scan(&status, &reason); err != nil || status != "skipped" || reason != "rate_limited" {
+		t.Fatalf("settlement race durable outcome=%s/%s err=%v", status, reason, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count FROM rate_limit_windows WHERE name=$1 AND key=$2`,
+		raceBucket, orgID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("settlement race consumed count=%d err=%v", count, err)
+	}
+
+	// A lost Commit acknowledgement is not an ordinary fail-open store error:
+	// the transaction may already have settled the event as skipped. Simulate
+	// exactly that outcome by committing and then returning a transport error.
+	// This attempt must fail closed; its retry observes the durable settlement.
+	ambiguousBucket := bucket + "-ambiguous-commit"
+	ambiguousEvent := "trigger-event-ambiguous-commit-" + suffix
+	insertEvent(ambiguousEvent)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM rate_limit_windows WHERE name=$1 AND key=$2`, ambiguousBucket, orgID)
+	})
+	ambiguousLimiter := New(pool, Hooks{})
+	ambiguousLimiter.SetNow(func() time.Time { return base })
+	ambiguousLimiter.commitTx = func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		return errors.New("lost commit acknowledgement")
+	}
+	err = ambiguousLimiter.EnforceTriggerEvent(ctx, orgID, orgID, ambiguousEvent, Options{
+		Name: ambiguousBucket, Max: 0, Window: time.Minute,
+	})
+	var indeterminate *TriggerAdmissionIndeterminateError
+	if !errors.As(err, &indeterminate) {
+		t.Fatalf("ambiguous commit must fail the attempt closed: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status, skipped_reason FROM trigger_events WHERE org_id=$1 AND id=$2`,
+		orgID, ambiguousEvent).Scan(&status, &reason); err != nil || status != "skipped" || reason != "rate_limited" {
+		t.Fatalf("ambiguous commit durable outcome=%s/%s err=%v", status, reason, err)
+	}
+	retryLimiter := New(pool, Hooks{})
+	retryErr := retryLimiter.EnforceTriggerEvent(ctx, orgID, orgID, ambiguousEvent, Options{
+		Name: ambiguousBucket, Max: 0, Window: time.Minute,
+	})
+	var settledAfterAmbiguity *TriggerEventSettledError
+	if !errors.As(retryErr, &settledAfterAmbiguity) || settledAfterAmbiguity.Status != "skipped" {
+		t.Fatalf("retry must converge from committed settlement: %v", retryErr)
+	}
+}
+
 // Fail-open: a limiter whose pool cannot reach Postgres allows the hit,
 // fires the error hook, and never returns an error.
 func TestEnforceFailsOpenOnStoreError(t *testing.T) {
@@ -98,6 +276,14 @@ func TestEnforceFailsOpenOnStoreError(t *testing.T) {
 	}
 	if hookBucket != "api:start" {
 		t.Fatalf("error hook must fire with the bucket: %q", hookBucket)
+	}
+	if err := limiter.EnforceTriggerEvent(context.Background(), "org-x", "org-x", "event-x", Options{
+		Name: "trigger:start", Max: 1, Window: time.Minute,
+	}); err != nil {
+		t.Fatalf("transactional trigger admission must also fail OPEN: %v", err)
+	}
+	if hookBucket != "trigger:start" {
+		t.Fatalf("trigger admission error hook must fire with the bucket: %q", hookBucket)
 	}
 }
 

@@ -10,66 +10,29 @@ import {
   LockKeyhole,
   ShieldAlert,
   ShieldCheck,
+  WandSparkles,
 } from 'lucide-react'
 import { V1_READ_PATHS } from '@/lib/api-contract'
 import {
-  RECOVERY_AUTONOMY_CAPABILITIES,
-  type RecoveryAutonomyCapability,
-  type RecoveryAutonomyLevel,
-  type RecoveryAutonomyProfile,
-} from '@/lib/recovery-autonomy'
+  candidatePayload,
+  diagnosisPayload,
+  parseRecoveryCaseDetail,
+  parseResolution,
+  selectCandidateId,
+  validationPayload,
+  type RecoveryCandidateKind,
+  type RecoveryCaseDetail,
+} from '@/lib/recovery-case-contract'
 
 import { api, contractApi } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
-import type {
-  RecoveryCase,
-  RecoveryCaseArtifact,
-  RecoveryCaseTransition,
-  SemanticCaseResolution,
-} from '../types'
+import type { RecoveryCase } from '../types'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { Button } from './ui/Button'
 import { FormActions, FormDisclosure, FormField } from './ui/Form'
 
-type RecoveryCaseDetail = {
-  case: RecoveryCase
-  transitions: RecoveryCaseTransition[]
-  artifacts: RecoveryCaseArtifact[]
-  autonomy: RecoveryAutonomyProfile
-}
-
-const RECOVERY_CASE_STATES = new Set<RecoveryCase['state']>([
-  'detected',
-  'contained',
-  'diagnosed',
-  'candidates_ready',
-  'validating',
-  'awaiting_approval',
-  'publishing',
-  'monitoring',
-  'verified_recovered',
-  'recurred',
-  'accepted_loss',
-  'abandoned',
-])
-const RECOVERY_AUTONOMY_CAPABILITY_SET =
-  new Set<RecoveryAutonomyCapability>(RECOVERY_AUTONOMY_CAPABILITIES)
-const RECOVERY_AUTONOMY_SOURCES = new Set<RecoveryAutonomyProfile['source']>([
-  'failure_override',
-  'workflow_default',
-  'strictest_failure',
-  'unavailable',
-])
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isRecoveryCaseState(value: unknown): value is RecoveryCase['state'] {
-  return typeof value === 'string'
-    && RECOVERY_CASE_STATES.has(value as RecoveryCase['state'])
-}
+const AUTHORING_PROMPT_MAX_RUNES = 4000
 
 function recoveryCaseTone(
   state: RecoveryCase['state'],
@@ -82,336 +45,29 @@ function recoveryCaseTone(
   return 'warning'
 }
 
-function isRecoveryCaseActorKind(
-  value: unknown,
-): value is RecoveryCaseTransition['actorKind'] {
-  return value === 'system' || value === 'user' || value === 'agent'
-}
-
-function parseRecoveryCase(value: unknown): RecoveryCase | null {
-  if (!isRecord(value)) return null
-  if (
-    typeof value.id !== 'string'
-    || typeof value.orgId !== 'string'
-    || typeof value.runId !== 'string'
-    || !(value.workflowId === null || typeof value.workflowId === 'string')
-    || typeof value.workflowVersionId !== 'string'
-    || value.source !== 'semantic_violation'
-    || typeof value.detectorId !== 'string'
-    || typeof value.sourceNodeId !== 'string'
-    || (value.detectorKind !== 'expression' && value.detectorKind !== 'schema')
-    || (value.action !== 'observe' && value.action !== 'quarantine')
-    || typeof value.message !== 'string'
-    || !Number.isInteger(value.revision)
-    || (value.revision as number) < 1
-    || !isRecoveryCaseState(value.state)
-    || !(value.createdBy === null || typeof value.createdBy === 'string')
-    || typeof value.createdAt !== 'string'
-    || typeof value.updatedAt !== 'string'
-    || !(value.resolvedAt === null || typeof value.resolvedAt === 'string')
-  ) return null
-  return value as RecoveryCase
-}
-
-const RECOVERY_ARTIFACT_KINDS = new Set<RecoveryCaseArtifact['kind']>([
-  'diagnosis',
-  'candidate',
-  'validation',
-  'publication',
-  'verification',
-])
-
-function parseRecoveryCaseArtifact(value: unknown): RecoveryCaseArtifact | null {
-  if (!isRecord(value)) return null
-  if (
-    typeof value.id !== 'string'
-    || typeof value.caseId !== 'string'
-    || typeof value.kind !== 'string'
-    || !RECOVERY_ARTIFACT_KINDS.has(value.kind as RecoveryCaseArtifact['kind'])
-    || typeof value.sha256 !== 'string'
-    || !/^[a-f0-9]{64}$/.test(value.sha256)
-    || !isRecoveryCaseActorKind(value.actorKind)
-    || !(value.actorId === null || typeof value.actorId === 'string')
-    || typeof value.createdAt !== 'string'
-    || !('payload' in value)
-  ) return null
-  return value as RecoveryCaseArtifact
-}
-
-function parseRecoveryCaseTransition(
-  value: unknown,
-): RecoveryCaseTransition | null {
-  if (!isRecord(value)) return null
-  if (
-    typeof value.id !== 'string'
-    || typeof value.orgId !== 'string'
-    || typeof value.caseId !== 'string'
-    || !isRecoveryCaseState(value.fromState)
-    || !isRecoveryCaseState(value.toState)
-    || !isRecoveryCaseActorKind(value.actorKind)
-    || !(value.actorId === null || typeof value.actorId === 'string')
-    || !('evidenceJson' in value)
-    || !(value.reason === null || typeof value.reason === 'string')
-    || typeof value.occurredAt !== 'string'
-  ) return null
-  return value as RecoveryCaseTransition
-}
-
-function isRecoveryAutonomyLevel(
-  value: unknown,
-): value is RecoveryAutonomyLevel {
-  return Number.isInteger(value)
-    && typeof value === 'number'
-    && value >= 0
-    && value <= 4
-}
-
-function parseRecoveryAutonomyProfile(
-  value: unknown,
-): RecoveryAutonomyProfile | null {
-  if (!isRecord(value) || !isRecord(value.capabilities)) return null
-  if (
-    !(value.level === null || isRecoveryAutonomyLevel(value.level))
-    || typeof value.source !== 'string'
-    || !RECOVERY_AUTONOMY_SOURCES.has(
-      value.source as RecoveryAutonomyProfile['source'],
-    )
-    || !Array.isArray(value.detectorIds)
-    || !value.detectorIds.every(id => typeof id === 'string')
-    || !(
-      value.unavailableReason === null
-      || value.unavailableReason === 'contract_missing'
-      || value.unavailableReason === 'failure_policy_missing'
-    )
-    || typeof value.capabilities.observe !== 'boolean'
-    || typeof value.capabilities.recommend !== 'boolean'
-    || typeof value.capabilities.validate !== 'boolean'
-    || typeof value.capabilities.applyWithApproval !== 'boolean'
-    || typeof value.capabilities.autonomousApply !== 'boolean'
-    || !Array.isArray(value.factors)
-  ) return null
-  const factors = value.factors.map((factor) => {
-    if (
-      !isRecord(factor)
-      || typeof factor.capability !== 'string'
-      || !RECOVERY_AUTONOMY_CAPABILITY_SET.has(
-        factor.capability as RecoveryAutonomyCapability,
-      )
-      || !isRecoveryAutonomyLevel(factor.requiredLevel)
-      || typeof factor.enabled !== 'boolean'
-    ) return null
-    return {
-      capability: factor.capability as RecoveryAutonomyCapability,
-      requiredLevel: factor.requiredLevel,
-      enabled: factor.enabled,
-    }
-  })
-  if (
-    factors.some(factor => factor === null)
-    || factors.length !== RECOVERY_AUTONOMY_CAPABILITY_SET.size
-    || new Set(factors.map(factor => factor?.capability)).size
-      !== RECOVERY_AUTONOMY_CAPABILITY_SET.size
-  ) return null
-  return {
-    level: value.level,
-    source: value.source as RecoveryAutonomyProfile['source'],
-    detectorIds: value.detectorIds,
-    unavailableReason: value.unavailableReason,
-    capabilities: {
-      observe: value.capabilities.observe,
-      recommend: value.capabilities.recommend,
-      validate: value.capabilities.validate,
-      applyWithApproval: value.capabilities.applyWithApproval,
-      autonomousApply: value.capabilities.autonomousApply,
-    },
-    factors: factors as RecoveryAutonomyProfile['factors'],
-  }
-}
-
-function parseRecoveryCaseDetail(value: unknown): RecoveryCaseDetail | null {
-  if (!isRecord(value)) return null
-  const recoveryCase = parseRecoveryCase(value.case)
-  const autonomy = parseRecoveryAutonomyProfile(value.autonomy)
-  if (
-    !recoveryCase
-    || !autonomy
-    || !Array.isArray(value.transitions)
-    || !Array.isArray(value.artifacts)
-  ) return null
-  const transitions = value.transitions
-    .map(parseRecoveryCaseTransition)
-    .filter((item): item is RecoveryCaseTransition => item !== null)
-  if (transitions.length !== value.transitions.length) return null
-  const artifacts = value.artifacts
-    .map(parseRecoveryCaseArtifact)
-    .filter((item): item is RecoveryCaseArtifact => item !== null)
-  if (artifacts.length !== value.artifacts.length) return null
-  return { case: recoveryCase, transitions, artifacts, autonomy }
-}
-
-function parseResolution(value: unknown): SemanticCaseResolution | null {
-  if (!isRecord(value)) return null
-  if (
-    typeof value.runId !== 'string'
-    || typeof value.sourceNodeId !== 'string'
-    || typeof value.resumed !== 'boolean'
-    || !Array.isArray(value.resolvedCaseIds)
-    || !value.resolvedCaseIds.every(id => typeof id === 'string')
-  ) return null
-  return {
-    runId: value.runId,
-    sourceNodeId: value.sourceNodeId,
-    resumed: value.resumed,
-    resolvedCaseIds: value.resolvedCaseIds,
-  }
-}
-
-type RecoveryCandidatePayload = {
-  kind: 'replace_output' | 'repair_workflow' | 'adjust_detector' | 'accept_loss'
-  decision: 'replace' | 'accept_loss' | 'manual_follow_up'
-  reason: string
-  requiredPermissions: string[]
-  output?: unknown
-  target?: {
-    workflowId?: string
-    workflowVersionId?: string
-    detectorId?: string
-  }
-  risk?: 'low' | 'medium' | 'high'
-  expectedResult?: string
-}
-
-type RecoveryCandidateKind = RecoveryCandidatePayload['kind']
-
-type RecoveryDiagnosisHypothesis = {
-  id: string
-  cause: string
-  confidence: number | null
-  evidence: string[]
-  counterEvidence: string[]
-}
-
-type RecoveryDiagnosisPayload = {
-  mode: 'deterministic_fallback' | 'ai_enriched'
-  summary: string
-  hypotheses: RecoveryDiagnosisHypothesis[]
-}
-
-function boundedStringList(value: unknown, limit: number): string[] | null {
-  if (value === undefined) return []
-  if (!Array.isArray(value) || value.length > limit) return null
-  const strings = value.filter((item): item is string => (
-    typeof item === 'string' && item.length <= 1600
-  ))
-  return strings.length === value.length ? strings : null
-}
-
-function diagnosisPayload(
-  artifact: RecoveryCaseArtifact | undefined,
-): RecoveryDiagnosisPayload | null {
-  if (!artifact || artifact.kind !== 'diagnosis' || !isRecord(artifact.payload)) {
-    return null
-  }
-  const payload = artifact.payload
-  if (
-    (payload.mode !== 'deterministic_fallback' && payload.mode !== 'ai_enriched')
-    || typeof payload.summary !== 'string'
-    || payload.summary.length > 3200
-    || !Array.isArray(payload.hypotheses)
-    || payload.hypotheses.length < 1
-    || payload.hypotheses.length > 3
-  ) return null
-  const hypotheses = payload.hypotheses.map((value) => {
-    if (!isRecord(value) || typeof value.id !== 'string' || typeof value.cause !== 'string') {
-      return null
-    }
-    const evidence = boundedStringList(value.evidence, 5)
-    const counterEvidence = boundedStringList(value.counterEvidence, 5)
-    if (
-      !evidence
-      || !counterEvidence
-      || value.id.length > 320
-      || value.cause.length > 3200
-      || !(
-        value.confidence === undefined
-        || (typeof value.confidence === 'number'
-          && Number.isFinite(value.confidence)
-          && value.confidence >= 0
-          && value.confidence <= 1)
-      )
-    ) return null
-    return {
-      id: value.id,
-      cause: value.cause,
-      confidence: typeof value.confidence === 'number' ? value.confidence : null,
-      evidence,
-      counterEvidence,
-    }
-  })
-  if (hypotheses.some(hypothesis => hypothesis === null)) return null
-  return {
-    mode: payload.mode,
-    summary: payload.summary,
-    hypotheses: hypotheses as RecoveryDiagnosisHypothesis[],
-  }
-}
-
-function candidatePayload(artifact: RecoveryCaseArtifact): RecoveryCandidatePayload | null {
-  if (artifact.kind !== 'candidate' || !isRecord(artifact.payload)) return null
-  const payload = artifact.payload
-  if (
-    !['replace_output', 'repair_workflow', 'adjust_detector', 'accept_loss'].includes(String(payload.kind))
-    || !['replace', 'accept_loss', 'manual_follow_up'].includes(String(payload.decision))
-    || typeof payload.reason !== 'string'
-    || !Array.isArray(payload.requiredPermissions)
-    || !payload.requiredPermissions.every(permission => typeof permission === 'string')
-  ) return null
-  return payload as RecoveryCandidatePayload
-}
-
-function selectCandidateId(
-  candidates: RecoveryCaseArtifact[],
-  current: string | null,
-  preferredKind?: RecoveryCandidateKind,
-): string | null {
-  if (preferredKind) {
-    const preferred = candidates.find(candidate => (
-      candidatePayload(candidate)?.kind === preferredKind
-    ))
-    if (preferred) return preferred.id
-  }
-  if (current && candidates.some(candidate => candidate.id === current)) {
-    return current
-  }
-  return candidates.find(candidate => (
-    candidatePayload(candidate)?.kind !== 'accept_loss'
-  ))?.id ?? candidates[0]?.id ?? null
-}
-
-function validationCandidateId(artifact: RecoveryCaseArtifact): string | null {
-  if (artifact.kind !== 'validation' || !isRecord(artifact.payload)) return null
-  return typeof artifact.payload.candidateArtifactId === 'string'
-    ? artifact.payload.candidateArtifactId
-    : null
-}
-
-function validationPayload(artifact: RecoveryCaseArtifact | null): { passed: boolean; summary: string } | null {
-  if (!artifact || artifact.kind !== 'validation' || !isRecord(artifact.payload)) return null
-  if (typeof artifact.payload.passed !== 'boolean' || typeof artifact.payload.summary !== 'string') return null
-  return { passed: artifact.payload.passed, summary: artifact.payload.summary }
-}
-
 export function RecoveryCasePanel({
   caseId,
   canResolve,
+  canInspectWorkflow = false,
+  canAuthorWorkflow = false,
   onBack,
   onOpenRun,
+  onOpenWorkflowVersion,
+  onOpenAiAuthoring,
   onResolved,
 }: {
   caseId: string | null
   canResolve: boolean
+  canInspectWorkflow?: boolean
+  canAuthorWorkflow?: boolean
   onBack: () => void
   onOpenRun: (runId: string) => void | Promise<void>
+  onOpenWorkflowVersion?: (
+    workflowId: string,
+    workflowVersionId: string,
+    targetTab: 'inspector' | 'ai-studio',
+  ) => Promise<boolean>
+  onOpenAiAuthoring?: (prompt: string) => void
   onResolved: () => void | Promise<void>
 }) {
   const { t, i18n } = useT()
@@ -424,7 +80,6 @@ export function RecoveryCasePanel({
   const [mutationError, setMutationError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null)
-  const [approvedCandidateId, setApprovedCandidateId] = useState<string | null>(null)
 
   const loadCase = useCallback(async (
     preferredCandidateKind?: RecoveryCandidateKind,
@@ -433,7 +88,6 @@ export function RecoveryCasePanel({
     if (!caseId) {
       setDetail(null)
       setSelectedCandidateId(null)
-      setApprovedCandidateId(null)
       setLoading(false)
       return
     }
@@ -455,10 +109,9 @@ export function RecoveryCasePanel({
       const candidates = parsed.artifacts.filter(artifact => artifact.kind === 'candidate')
       setSelectedCandidateId(current => selectCandidateId(
         candidates,
-        current,
+        parsed.activeApproval?.candidateArtifactId ?? current,
         preferredCandidateKind,
       ))
-      if (parsed.case.state !== 'awaiting_approval') setApprovedCandidateId(null)
     } catch (error) {
       if (!background) setDetail(null)
       setLoadError(tApiError(error) || t('recoveryCase.loadFailed'))
@@ -485,6 +138,21 @@ export function RecoveryCasePanel({
       window.clearTimeout(timeout)
     }
   }, [detail?.case.state, loadCase])
+
+  useEffect(() => {
+    const expiresAt = detail?.activeApproval?.expiresAt
+    if (!expiresAt) return
+    const remaining = Date.parse(expiresAt) - Date.now()
+    if (remaining <= 0) {
+      void loadCase(undefined, true)
+      return
+    }
+    const timeout = window.setTimeout(
+      () => void loadCase(undefined, true),
+      Math.min(remaining + 50, 2_147_483_647),
+    )
+    return () => window.clearTimeout(timeout)
+  }, [detail?.activeApproval?.expiresAt, loadCase])
 
   const formatter = useMemo(
     () => new Intl.DateTimeFormat(getResolvedLocale(), {
@@ -572,14 +240,64 @@ export function RecoveryCasePanel({
     ))
   }
 
+  const recoveryCase = detail?.case ?? null
+  const transitions = detail?.transitions ?? []
+  const artifacts = detail?.artifacts ?? []
+  const autonomy = detail?.autonomy ?? null
+  const diagnoses = artifacts.filter(artifact => artifact.kind === 'diagnosis')
+  const latestDiagnosis = diagnoses.at(-1)
+  const latestDiagnosisPayload = diagnosisPayload(latestDiagnosis)
+  const candidates = artifacts.filter(artifact => candidatePayload(artifact) !== null)
+  const selectedCandidate = candidates.find(candidate => candidate.id === selectedCandidateId) ?? null
+  const selectedPayload = selectedCandidate ? candidatePayload(selectedCandidate) : null
+  const manualFollowUpTarget = selectedPayload?.decision === 'manual_follow_up'
+    && selectedPayload.target?.workflowId
+    && selectedPayload.target.workflowVersionId
+    ? {
+        workflowId: selectedPayload.target.workflowId,
+        workflowVersionId: selectedPayload.target.workflowVersionId,
+        detectorId: selectedPayload.target.detectorId,
+      }
+    : null
   const selectedValidation = detail?.artifacts
-    .filter(artifact => validationCandidateId(artifact) === selectedCandidateId)
+    .filter((artifact) => {
+      const validation = validationPayload(artifact)
+      if (!validation || !selectedCandidate) return false
+      return validation.candidateArtifactId === selectedCandidate.id
+        && validation.candidateSha256 === selectedCandidate.sha256
+    })
     .at(-1) ?? null
   const selectedValidationPayload = validationPayload(selectedValidation)
 
+  const openManualFollowUp = async (authoring: boolean) => {
+    if (!manualFollowUpTarget || !selectedPayload || !onOpenWorkflowVersion) return
+    setMutationError(null)
+    setBusyAction(authoring ? 'author-successor' : 'inspect-source')
+    try {
+      const opened = await onOpenWorkflowVersion(
+        manualFollowUpTarget.workflowId,
+        manualFollowUpTarget.workflowVersionId,
+        authoring ? 'ai-studio' : 'inspector',
+      )
+      if (!opened || !authoring || !onOpenAiAuthoring) return
+      const prompt = t('recoveryCase.governed.successorPrompt', {
+        workflowId: manualFollowUpTarget.workflowId,
+        versionId: manualFollowUpTarget.workflowVersionId,
+        caseId: recoveryCase?.id ?? '',
+        candidate: t(`recoveryCase.governed.candidate.${selectedPayload.kind}`),
+        reason: selectedPayload.reason,
+        expectedResult: selectedPayload.expectedResult,
+        detector: manualFollowUpTarget.detectorId ?? t('common.none'),
+      })
+      onOpenAiAuthoring([...prompt].slice(0, AUTHORING_PROMPT_MAX_RUNES).join(''))
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
   const approveCandidate = async () => {
     if (!detail || !selectedCandidateId || !selectedValidation) return
-    const result = await finishMutation('approve', () => contractApi(
+    await finishMutation('approve', () => contractApi(
       'POST /recovery/cases/{caseId}/approve',
       governedPath('approve'),
       {
@@ -588,7 +306,6 @@ export function RecoveryCasePanel({
         validationArtifactId: selectedValidation.id,
       },
     ))
-    if (result) setApprovedCandidateId(selectedCandidateId)
   }
 
   const applyCandidate = async () => {
@@ -608,15 +325,12 @@ export function RecoveryCasePanel({
       setMutationError(t('recoveryCase.invalidResponse'))
       return
     }
-    addToast(
-      t(
-        result.resumed
-          ? 'recoveryCenter.tile.semantic.replaced'
-          : 'recoveryCenter.tile.semantic.replacedPending',
-      ),
-      'success',
-    )
-    setApprovedCandidateId(null)
+    const toastKey = selectedPayload?.kind === 'accept_loss'
+      ? 'dlq.drill.outcome.evidence.explicit_resolution'
+      : result.resumed
+        ? 'recoveryCenter.tile.semantic.replaced'
+        : 'recoveryCenter.tile.semantic.replacedPending'
+    addToast(t(toastKey), 'success')
     await onResolved()
   }
 
@@ -637,16 +351,6 @@ export function RecoveryCasePanel({
     )
   }
 
-  const recoveryCase = detail?.case ?? null
-  const transitions = detail?.transitions ?? []
-  const artifacts = detail?.artifacts ?? []
-  const autonomy = detail?.autonomy ?? null
-  const diagnoses = artifacts.filter(artifact => artifact.kind === 'diagnosis')
-  const latestDiagnosis = diagnoses.at(-1)
-  const latestDiagnosisPayload = diagnosisPayload(latestDiagnosis)
-  const candidates = artifacts.filter(artifact => candidatePayload(artifact) !== null)
-  const selectedCandidate = candidates.find(candidate => candidate.id === selectedCandidateId) ?? null
-  const selectedPayload = selectedCandidate ? candidatePayload(selectedCandidate) : null
   const canReplace = Boolean(
     recoveryCase?.action === 'quarantine'
     && autonomy?.capabilities.applyWithApproval,
@@ -661,10 +365,18 @@ export function RecoveryCasePanel({
   )
   const canApprove = Boolean(
     canResolve && recoveryCase?.state === 'awaiting_approval'
-    && selectedCandidate && selectedValidation && selectedValidationPayload?.passed,
+    && selectedCandidate && selectedValidation && selectedValidationPayload?.passed
+    && selectedValidationPayload.caseRevision === recoveryCase.revision - 2,
+  )
+  const activeApprovalMatchesSelection = Boolean(
+    detail?.activeApproval
+    && detail.activeApproval.candidateArtifactId === selectedCandidateId
+    && detail.activeApproval.validationArtifactId === selectedValidation?.id
+    && detail.activeApproval.caseRevision === recoveryCase?.revision
+    && Date.parse(detail.activeApproval.expiresAt) > Date.now(),
   )
   const canApply = Boolean(
-    canApprove && approvedCandidateId === selectedCandidateId,
+    canApprove && activeApprovalMatchesSelection,
   )
   const details = Array.isArray(recoveryCase?.detailsJson)
     ? recoveryCase.detailsJson
@@ -898,14 +610,14 @@ export function RecoveryCasePanel({
                   ['diagnosis', diagnoses.length > 0],
                   ['candidates', candidates.length > 0],
                   ['validation', Boolean(selectedValidation)],
-                  ['approval', approvedCandidateId === selectedCandidateId],
+                  ['approval', activeApprovalMatchesSelection],
                   ['verification', ['verified_recovered', 'accepted_loss'].includes(recoveryCase.state)],
                 ].map(([step, complete], index) => (
                   <li key={String(step)} data-complete={complete} data-current={!complete && index === [
                     diagnoses.length > 0,
                     candidates.length > 0,
                     Boolean(selectedValidation),
-                    approvedCandidateId === selectedCandidateId,
+                    activeApprovalMatchesSelection,
                     ['verified_recovered', 'accepted_loss'].includes(recoveryCase.state),
                   ].findIndex(value => !value)}>
                     <span>{complete ? <ShieldCheck size={14} /> : index + 1}</span>
@@ -990,6 +702,8 @@ export function RecoveryCasePanel({
                     const payload = candidatePayload(candidate)
                     if (!payload) return null
                     const selected = candidate.id === selectedCandidateId
+                    const candidateLabel = t(`recoveryCase.governed.candidate.${payload.kind}`)
+                    const candidateFactsId = `recovery-candidate-facts-${candidate.id}`
                     return (
                       <label key={candidate.id} className="we-recovery-case__candidate" data-selected={selected}>
                         <input
@@ -997,24 +711,92 @@ export function RecoveryCasePanel({
                           name={`recovery-candidate-${recoveryCase.id}`}
                           value={candidate.id}
                           checked={selected}
+                          aria-label={candidateLabel}
+                          aria-describedby={candidateFactsId}
                           onChange={() => {
                             setSelectedCandidateId(candidate.id)
-                            setApprovedCandidateId(null)
                           }}
                         />
                         <span>
-                          <strong>{t(`recoveryCase.governed.candidate.${payload.kind}`)}</strong>
+                          <strong>{candidateLabel}</strong>
                           <small>{payload.reason}</small>
                           {payload.decision === 'manual_follow_up' && (
                             <small>{t('recoveryCase.governed.authoringRequired')}</small>
                           )}
+                          <span
+                            id={candidateFactsId}
+                            className="we-recovery-case__candidate-facts"
+                          >
+                            <small>
+                              <b>{t('aiStudio.brief.outcome')}</b>
+                              {payload.expectedResult}
+                            </small>
+                            <small>
+                              <b>{t('recoveryDialog.passport.evidence')}</b>
+                              {payload.evidence.slice(0, 2).map(reference => (
+                                `${reference.kind}: ${reference.id}`
+                              )).join(' · ')}
+                              {payload.evidence.length > 2 && ` (${t(
+                                'dlq.bulkErrorsMore',
+                                { count: payload.evidence.length - 2 },
+                              )})`}
+                            </small>
+                            <small>
+                              <b>
+                                {t('permissions.add.permissions')} ({t('permissions.required')})
+                              </b>
+                              <code>{payload.requiredPermissions.join(', ')}</code>
+                            </small>
+                          </span>
                         </span>
                         <span className="we-pill" data-tone={payload.kind === 'accept_loss' ? 'warning' : 'neutral'}>
-                          {t(`recoveryCase.governed.risk.${payload.risk ?? (payload.kind === 'accept_loss' ? 'high' : 'medium')}`)}
+                          {t(`recoveryCase.governed.risk.${payload.risk}`)}
                         </span>
                       </label>
                     )
                   })}
+                </div>
+              )}
+
+              {manualFollowUpTarget && onOpenWorkflowVersion
+                && (canInspectWorkflow || (canAuthorWorkflow && onOpenAiAuthoring)) && (
+                <div
+                  className="we-recovery-case__authoring-handoff"
+                  role="group"
+                  aria-label={t('versionHistory.suggest')}
+                >
+                  <div>
+                    <WandSparkles size={17} aria-hidden="true" />
+                    <span>
+                      <strong>{t('versionHistory.suggest')}</strong>
+                      <small>{t('aiStudio.apply.body')}</small>
+                    </span>
+                  </div>
+                  <FormActions>
+                    {canInspectWorkflow && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={busyAction === 'inspect-source'}
+                        onClick={() => void openManualFollowUp(false)}
+                        data-testid={`semantic-recovery-inspect-source-${recoveryCase.id}`}
+                      >
+                        {t('palette.dynamic.openWorkflow')}
+                      </Button>
+                    )}
+                    {canAuthorWorkflow && onOpenAiAuthoring && (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        loading={busyAction === 'author-successor'}
+                        leadingIcon={<WandSparkles size={14} />}
+                        onClick={() => void openManualFollowUp(true)}
+                        data-testid={`semantic-recovery-author-successor-${recoveryCase.id}`}
+                      >
+                        {t('versionHistory.suggest')}
+                      </Button>
+                    )}
+                  </FormActions>
                 </div>
               )}
 

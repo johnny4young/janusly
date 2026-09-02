@@ -123,7 +123,7 @@ func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusBadRequest, "dlq_failing_node_missing",
 				"suggestedWorkflow does not contain the failing node id", nil)
 		default:
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "recovery.validation_started", audit.Options{

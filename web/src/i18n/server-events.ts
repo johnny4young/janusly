@@ -228,7 +228,12 @@ export function tApiError(envelope: ApiErrorLike | Error | unknown): string {
       ? obj.message
       : undefined;
   if (code) {
-    const key = `apiErrors.${code}`;
+    // Exact-version reads reuse the existing localized source-version copy;
+    // the wire code remains endpoint-specific for API clients and telemetry.
+    const catalogCode = code === 'workflow_version_not_found'
+      ? 'workflows_source_version_not_found'
+      : code;
+    const key = `apiErrors.${catalogCode}`;
     const translated = tServerCode(key, {
       ...(obj.params ?? {}),
     });

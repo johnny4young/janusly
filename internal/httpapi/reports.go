@@ -236,7 +236,7 @@ func (s *V1Server) recoveryValidationReportHandler(w http.ResponseWriter, r *htt
 		r.Context(), rc.orgID, recoveryValidationWindow(r), time.Now().UTC(),
 	)
 	if err != nil {
-		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 		return
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "report.recovery_validation.exported", audit.Options{

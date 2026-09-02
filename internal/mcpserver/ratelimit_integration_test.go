@@ -103,3 +103,118 @@ func TestMcpWriteRateLimit(t *testing.T) {
 		t.Fatalf("other bucket must not be limited: %q", redriveText)
 	}
 }
+
+func TestMcpPermissionDenialsCannotConsumeAuthorizedToolBucket(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	org := fmt.Sprintf("mcp-denied-rl-org-%d", time.Now().UnixNano())
+	user := "read-only-agent"
+	t.Setenv("JANUSLY_MCP_WRITES_ENABLED", "true")
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+		 VALUES ($1, $2, 'mcp.writeConsent', 'true', 'mcp', 'test consent', 'boolean')`,
+		org+"-consent", org); err != nil {
+		t.Fatalf("seed consent: %v", err)
+	}
+	permissions := map[string]bool{"workflows.read": true}
+	deps := Deps{
+		Pool: pool, OrgID: org, UserID: user, Permissions: permissions,
+		Limiter: ratelimit.New(pool, ratelimit.Hooks{}),
+	}
+
+	for range 60 {
+		allowed, message := deps.guardTool(ctx, "workflows.save", "workflows.write", true)
+		if allowed || message != "MCP actor lacks permission workflows.write." {
+			t.Fatalf("permission denial drifted: allowed=%v message=%q", allowed, message)
+		}
+	}
+	permissions["workflows.write"] = true
+	allowed, message := deps.guardTool(ctx, "workflows.save", "workflows.write", true)
+	if !allowed || message != "" {
+		t.Fatalf("denied calls consumed authorized capacity: allowed=%v message=%q", allowed, message)
+	}
+
+	var authorizedCount, deniedCount int64
+	deniedKey := fmt.Sprintf("%d:%s%s", len(org), org, user)
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(sum(count), 0) FROM rate_limit_windows
+		WHERE name='mcp.workflows.save' AND key=$1`, org).Scan(&authorizedCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(sum(count), 0) FROM rate_limit_windows
+		WHERE name='mcp.denied.workflows.save' AND key=$1`, deniedKey).Scan(&deniedCount); err != nil {
+		t.Fatal(err)
+	}
+	if authorizedCount != 1 || deniedCount != 60 {
+		t.Fatalf("unexpected limiter isolation: authorized=%d denied=%d", authorizedCount, deniedCount)
+	}
+}
+
+func TestMcpOversizedRequestIsDeniedRateLimitedAndAuditedOnce(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	org := fmt.Sprintf("mcp-bounds-org-%d", time.Now().UnixNano())
+	user := "bounded-agent"
+	server := NewServer(Deps{
+		Pool: pool, OrgID: org, UserID: user,
+		Permissions: map[string]bool{"runs.read": true},
+		Limiter:     ratelimit.New(pool, ratelimit.Hooks{}),
+	})
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		_ = server.Run(context.Background(), serverTransport)
+	}()
+	client := mcp.NewClient(&mcp.Implementation{Name: "bounds-client", Version: "1"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close(); <-serverDone })
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "runs.status",
+		Arguments: map[string]any{"runId": strings.Repeat("x", maxMCPRequestBytes)},
+	})
+	if err != nil || result == nil || !result.IsError {
+		t.Fatalf("oversized call was not an expected denial: result=%+v err=%v", result, err)
+	}
+
+	var auditCount int
+	var phase string
+	if err := pool.QueryRow(ctx, `SELECT count(*), COALESCE(max(metadata->>'phase'),'')
+		FROM audit_logs WHERE org_id=$1 AND action='mcp.tool.invoked' AND target_id='runs.status'`, org).
+		Scan(&auditCount, &phase); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount != 1 || phase != "request_bounds" {
+		t.Fatalf("oversized invocation audit drifted: count=%d phase=%q", auditCount, phase)
+	}
+	var deniedCount int64
+	deniedKey := fmt.Sprintf("%d:%s%s", len(org), org, user)
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(sum(count),0) FROM rate_limit_windows
+		WHERE name='mcp.denied.request_bounds' AND key=$1`, deniedKey).Scan(&deniedCount); err != nil {
+		t.Fatal(err)
+	}
+	if deniedCount != 1 {
+		t.Fatalf("oversized invocation was not denial-rate-limited once: %d", deniedCount)
+	}
+}

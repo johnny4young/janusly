@@ -4,8 +4,10 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -26,6 +28,24 @@ func TestMcpAdminRoutes(t *testing.T) {
 	}, "")
 	if res.status != 400 || res.body["code"] != "mcp_command_not_allowlisted" {
 		t.Fatalf("stdio fail-closed: %d %+v", res.status, res.body)
+	}
+	// Closed env-ref contract: malformed entries never disappear into an
+	// apparently credential-free connection, and rejected names stay off the
+	// error wire.
+	res = h.call("POST", "/mcp/connections", map[string]any{
+		"alias": "malformed", "transport": "http", "url": "https://example.test/mcp",
+		"envRefs": map[string]any{"TOKEN": map[string]any{"kind": "managed", "name": "ACME_TOKEN"}},
+	}, "")
+	if res.status != 400 || res.body["code"] != "mcp_env_refs_invalid" {
+		t.Fatalf("malformed env refs must fail closed: %d %+v", res.status, res.body)
+	}
+	res = h.call("POST", "/mcp/connections", map[string]any{
+		"alias": "reserved", "transport": "http", "url": "https://example.test/mcp",
+		"envRefs": map[string]any{"TOKEN": map[string]any{"kind": "env", "name": "ANTHROPIC_API_KEY"}},
+	}, "")
+	if res.status != 400 || res.body["code"] != "mcp_env_ref_reserved" ||
+		strings.Contains(fmt.Sprint(res.body), "ANTHROPIC_API_KEY") {
+		t.Fatalf("reserved env ref must fail without echo: %d %+v", res.status, res.body)
 	}
 
 	// 2. http create runs discovery against a real fixture server.

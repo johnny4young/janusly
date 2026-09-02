@@ -55,30 +55,50 @@ func PermissionKeys(permissions map[string]bool) []string {
 	return keys
 }
 
-// guardTool is the common MCP authority envelope. Every invocation is
+// guardTool is the common MCP authority envelope. Every scoped invocation is
 // permission checked, rate limited and audited; business writes additionally
-// require both process opt-in and tenant consent.
+// require both process opt-in and tenant consent. Denied actors use a separate
+// per-actor limiter bucket so they cannot consume the tenant's authorized tool
+// capacity while still remaining bounded themselves.
 func (d Deps) guardTool(ctx context.Context, toolName, permission string, write bool) (bool, string) {
+	return d.guardToolAny(ctx, toolName, []string{permission}, write)
+}
+
+// guardToolAny protects composite read models whose rows come from more than
+// one independently permissioned source. Possessing any named read permission
+// admits the invocation; the projection itself still filters every source by
+// the complete permission ceiling. Single-permission tools use guardTool and
+// retain their exact denial message.
+func (d Deps) guardToolAny(
+	ctx context.Context,
+	toolName string,
+	permissions []string,
+	write bool,
+) (bool, string) {
+	required := append([]string(nil), permissions...)
+	sort.Strings(required)
 	allowed := true
 	reason := ""
 	if d.OrgID == "" || d.UserID == "" {
 		allowed = false
 		reason = "MCP actor scope is unavailable."
 	}
-	maxCalls := 120
-	if write {
-		maxCalls = 60
-	}
-	if allowed && d.Limiter != nil {
-		if err := d.Limiter.Enforce(ctx, d.OrgID, ratelimit.Options{
-			Name: "mcp." + toolName, Max: maxCalls, Window: time.Minute,
-		}); err != nil {
-			allowed, reason = false, err.Error()
+	if allowed {
+		hasPermission := false
+		for _, permission := range required {
+			if permission != "" && d.Permissions != nil && d.Permissions[permission] {
+				hasPermission = true
+				break
+			}
 		}
-	}
-	if allowed && (d.Permissions == nil || !d.Permissions[permission]) {
-		allowed = false
-		reason = "MCP actor lacks permission " + permission + "."
+		if !hasPermission {
+			allowed = false
+			if len(required) == 1 {
+				reason = "MCP actor lacks permission " + required[0] + "."
+			} else {
+				reason = "MCP actor lacks any required permission: " + strings.Join(required, ", ") + "."
+			}
+		}
 	}
 	if allowed && write && os.Getenv("JANUSLY_MCP_WRITES_ENABLED") != "true" {
 		allowed = false
@@ -93,7 +113,24 @@ func (d Deps) guardTool(ctx context.Context, toolName, permission string, write 
 			reason = "MCP writes are not consented for this organization (mcp.writeConsent is false)."
 		}
 	}
-	d.auditToolDecision(ctx, toolName, []string{permission}, write, allowed, reason, "guard")
+	maxCalls := 120
+	if write {
+		maxCalls = 60
+	}
+	if d.Limiter != nil && d.OrgID != "" && d.UserID != "" {
+		bucket := "mcp." + toolName
+		key := d.OrgID
+		if !allowed {
+			bucket = "mcp.denied." + toolName
+			key = fmt.Sprintf("%d:%s%s", len(d.OrgID), d.OrgID, d.UserID)
+		}
+		if err := d.Limiter.Enforce(ctx, key, ratelimit.Options{
+			Name: bucket, Max: maxCalls, Window: time.Minute,
+		}); err != nil {
+			allowed, reason = false, err.Error()
+		}
+	}
+	d.recordToolDecision(ctx, toolName, required, write, allowed, reason, "guard")
 	return allowed, reason
 }
 
@@ -122,8 +159,46 @@ func (d Deps) requireAdditionalPermissions(
 	}
 	sort.Strings(missing)
 	reason := "MCP actor lacks candidate permission " + strings.Join(missing, ", ") + "."
-	d.auditToolDecision(ctx, toolName, missing, true, false, reason, "candidate_permissions")
+	d.recordToolDecision(ctx, toolName, missing, true, false, reason, "candidate_permissions")
 	return false, reason
+}
+
+// toolInvocationDecision is installed by the tools/call middleware. Guards
+// update it in memory and the middleware writes exactly one final audit row
+// after dispatch, including a later candidate-specific permission denial.
+// Direct guard unit tests do not carry this value and retain immediate audit.
+type toolInvocationDecision struct {
+	toolName    string
+	permissions []string
+	write       bool
+	allowed     bool
+	reason      string
+	phase       string
+	decided     bool
+}
+
+type toolInvocationDecisionKey struct{}
+
+func (d Deps) recordToolDecision(
+	ctx context.Context,
+	toolName string,
+	permissions []string,
+	write bool,
+	allowed bool,
+	reason string,
+	phase string,
+) {
+	if decision, ok := ctx.Value(toolInvocationDecisionKey{}).(*toolInvocationDecision); ok && decision != nil {
+		decision.toolName = toolName
+		decision.permissions = append([]string(nil), permissions...)
+		decision.write = write
+		decision.allowed = allowed
+		decision.reason = reason
+		decision.phase = phase
+		decision.decided = true
+		return
+	}
+	d.auditToolDecision(ctx, toolName, permissions, write, allowed, reason, phase)
 }
 
 func (d Deps) auditToolDecision(

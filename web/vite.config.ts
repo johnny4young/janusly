@@ -74,6 +74,12 @@ export default defineConfig(({ mode }) => ({
             return 'catalog-es'
           }
           if (
+            id.endsWith('/src/lib/recovery-case-contract.ts')
+            || id.endsWith('/src/lib/recovery-contract.ts')
+          ) {
+            return 'recovery-contract'
+          }
+          if (
             id.endsWith('/src/App.tsx')
             || id.endsWith('/src/AppWorkspace.tsx')
             || id.includes('/src/hooks/app-command')

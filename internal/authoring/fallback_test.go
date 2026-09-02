@@ -64,6 +64,20 @@ func TestDeterministicWorkflowEmitsCompleteSafePrimitives(t *testing.T) {
 	}
 }
 
+func TestDeterministicWorkflowSelectsPagerDutyBeforeGenericIncident(t *testing.T) {
+	document := DeterministicWorkflowWithOptions(
+		"When PagerDuty alerts user PUSER1 outside working hours, acknowledge and snooze for 12 hours. API credential pd-api, webhook credential pd-hook, requester operator@example.com.",
+		DeterministicWorkflowOptions{NewID: func() string { return "abcdef12-0000-4000-8000-000000000000" }},
+	)
+	if document["id"] != "pagerduty_off_hours_abcdef12000040008000000000000000" {
+		t.Fatalf("PagerDuty intent drifted to generic fallback: %+v", document["id"])
+	}
+	raw, _ := json.Marshal(document["nodes"])
+	if !containsAnyFold(string(raw), "pagerduty.policy.evaluate") || containsAnyFold(string(raw), "github.create_issue") {
+		t.Fatalf("wrong deterministic topology: %s", raw)
+	}
+}
+
 func TestGuardedIncompleteWorkflowCarriesNoExecutableIdentity(t *testing.T) {
 	first := GuardedIncompleteWorkflow()
 	second := GuardedIncompleteWorkflow()

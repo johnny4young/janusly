@@ -60,6 +60,51 @@ func TestBuildRecoveryDeltaHonorsSampleAndNullableMetricContracts(t *testing.T) 
 	}
 }
 
+func TestParsePersistedWorkflowSloReusesTheClosedWriteContract(t *testing.T) {
+	valid := json.RawMessage(`{
+		"successRatePercent":99.5,
+		"mttrSeconds":120,
+		"p95DurationMs":5000,
+		"budgetBlocksPerWindow":null,
+		"stuckWaitingNodesMax":0,
+		"windowDays":30
+	}`)
+	slo, err := parsePersistedWorkflowSlo(valid)
+	if err != nil || slo == nil || slo.SuccessRatePercent == nil || *slo.SuccessRatePercent != 99.5 ||
+		slo.MttrSeconds == nil || *slo.MttrSeconds != 120 || slo.P95DurationMs == nil ||
+		*slo.P95DurationMs != 5000 || slo.BudgetBlocksPerWindow != nil ||
+		slo.StuckWaitingNodesMax == nil || *slo.StuckWaitingNodesMax != 0 ||
+		slo.WindowDays == nil || *slo.WindowDays != 30 {
+		t.Fatalf("valid persisted SLO = %+v, err=%v", slo, err)
+	}
+	if cleared, err := parsePersistedWorkflowSlo(json.RawMessage(`null`)); err != nil || cleared != nil {
+		t.Fatalf("null SLO must remain undeclared: %+v err=%v", cleared, err)
+	}
+	for name, raw := range map[string]json.RawMessage{
+		"sql null":               nil,
+		"empty raw message":      {},
+		"whitespace raw message": json.RawMessage(" \n\t"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if undeclared, err := parsePersistedWorkflowSlo(raw); err != nil || undeclared != nil {
+				t.Fatalf("absent SLO must remain undeclared: %+v err=%v", undeclared, err)
+			}
+		})
+	}
+	for name, raw := range map[string]json.RawMessage{
+		"missing":     json.RawMessage(`{"windowDays":30}`),
+		"unknown":     json.RawMessage(`{"successRatePercent":null,"mttrSeconds":null,"p95DurationMs":null,"budgetBlocksPerWindow":null,"stuckWaitingNodesMax":null,"windowDays":30,"extra":true}`),
+		"bad window":  json.RawMessage(`{"successRatePercent":null,"mttrSeconds":null,"p95DurationMs":null,"budgetBlocksPerWindow":null,"stuckWaitingNodesMax":null,"windowDays":15}`),
+		"bad integer": json.RawMessage(`{"successRatePercent":null,"mttrSeconds":1.5,"p95DurationMs":null,"budgetBlocksPerWindow":null,"stuckWaitingNodesMax":null,"windowDays":30}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if parsed, err := parsePersistedWorkflowSlo(raw); err == nil || parsed != nil {
+				t.Fatalf("malformed persisted SLO accepted: %+v err=%v", parsed, err)
+			}
+		})
+	}
+}
+
 func TestRecoveryFeedbackBodyRejectsExplicitNullsAndScrubsMemoryContent(t *testing.T) {
 	validJSON := `{"deadLetterId":"dlq","suggestionMode":"ai","approachLabel":"add_retry","accepted":true}`
 	var body recoveryFeedbackBody

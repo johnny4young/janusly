@@ -30,6 +30,17 @@ var deterministicTemplates = func() map[string]map[string]any {
 }()
 
 func DeterministicWorkflow(prompt string) map[string]any {
+	return DeterministicWorkflowWithOptions(prompt, DeterministicWorkflowOptions{})
+}
+
+// DeterministicWorkflowWithOptions keeps the shared HTTP/MCP fallback path
+// pure from tenant state while allowing request-unique recipe IDs and a fixed
+// clock in tests. Recognized high-impact recipes are selected before generic
+// keyword templates so "PagerDuty incident" can never drift to GitHub/Slack.
+func DeterministicWorkflowWithOptions(prompt string, options DeterministicWorkflowOptions) map[string]any {
+	if workflow, recognized, err := CompilePagerDutyWorkflow(prompt, options); recognized && err == nil && workflow != nil {
+		return deepCopyWorkflow(workflow)
+	}
 	templateID := "http-ai-summary"
 	switch {
 	case containsAnyFold(prompt, "router_llm", "smart router", "bounded router", "enrutador", "ruta rápida", "ruta segura"):
@@ -49,7 +60,11 @@ func DeterministicWorkflow(prompt string) map[string]any {
 	case containsAnyFold(prompt, "transform", "map", "tool", "herramient", "backend"):
 		templateID = "api-transform-tool"
 	}
-	raw, _ := json.Marshal(deterministicTemplates[templateID])
+	return deepCopyWorkflow(deterministicTemplates[templateID])
+}
+
+func deepCopyWorkflow(document map[string]any) map[string]any {
+	raw, _ := json.Marshal(document)
 	copy := map[string]any{}
 	_ = json.Unmarshal(raw, &copy)
 	return copy

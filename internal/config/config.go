@@ -113,6 +113,13 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.Port == cfg.InternalPort {
 		problems = append(problems, "JANUSLY_PORT and JANUSLY_INTERNAL_PORT must differ")
 	}
+	if production {
+		for _, name := range []string{"JANUSLY_LOCAL_STACK", "JANUSLY_LOCAL_INTEGRATION_SIMULATOR"} {
+			if getenv(name) == "true" {
+				problems = append(problems, name+" must not be enabled when JANUSLY_ENV=production")
+			}
+		}
+	}
 	switch cfg.InternalHost {
 	case "127.0.0.1", "0.0.0.0", "::1", "::":
 		// Loopback or wildcard, IPv4 or IPv6. IPv6 matters on hosts whose

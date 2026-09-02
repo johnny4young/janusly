@@ -155,3 +155,38 @@ func assertCase(t *testing.T, pool *pgxpool.Pool, org, caseID, wantState string,
 		t.Fatalf("case state=%s receipts=%d, want %s/%d", state, receipts, wantState, wantReceipts)
 	}
 }
+
+func TestRecoveryApprovalGrantDatabaseInvariants(t *testing.T) {
+	ctx, pool, _, org := newHarness(t)
+	createdAt := time.Now().UTC().Truncate(time.Millisecond)
+	insert := func(id string, expiresAt time.Time, consumedAt, consumedBy, revokedAt any) error {
+		_, err := pool.Exec(ctx, `INSERT INTO recovery_approval_grants
+			(id,org_id,case_id,candidate_artifact_id,validation_artifact_id,
+			 case_revision,granted_by,expires_at,consumed_at,consumed_by,revoked_at,created_at)
+			VALUES ($1,$2,'case','candidate','validation',3,'human',$3,$4,$5,$6,$7)`,
+			id, org, expiresAt, consumedAt, consumedBy, revokedAt, createdAt)
+		return err
+	}
+	if err := insert("valid-"+org, createdAt.Add(30*time.Minute), nil, nil, nil); err != nil {
+		t.Fatalf("valid fixed-duration approval rejected: %v", err)
+	}
+	invalid := []struct {
+		name                   string
+		expiresAt              time.Time
+		consumedAt, consumedBy any
+		revokedAt              any
+	}{
+		{name: "arbitrary ttl", expiresAt: createdAt.Add(31 * time.Minute)},
+		{name: "unattributed consumption", expiresAt: createdAt.Add(30 * time.Minute), consumedAt: createdAt.Add(time.Minute)},
+		{name: "consumed and revoked", expiresAt: createdAt.Add(30 * time.Minute), consumedAt: createdAt.Add(time.Minute), consumedBy: "agent", revokedAt: createdAt.Add(2 * time.Minute)},
+		{name: "consumed at expiry", expiresAt: createdAt.Add(30 * time.Minute), consumedAt: createdAt.Add(30 * time.Minute), consumedBy: "agent"},
+	}
+	for index, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			if err := insert(fmt.Sprintf("invalid-%d-%s", index, org), test.expiresAt,
+				test.consumedAt, test.consumedBy, test.revokedAt); err == nil {
+				t.Fatal("invalid approval lifecycle row bypassed database constraints")
+			}
+		})
+	}
+}

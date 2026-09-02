@@ -19,7 +19,16 @@
  * Pure, zero-I/O — safe to import from web bundle + engine + api + data.
  */
 
-import { z } from 'zod'
+import * as z from 'zod/mini'
+
+const boundedString = (minimum: number, maximum: number) =>
+  z.string().check(z.minLength(minimum), z.maxLength(maximum))
+
+const optionalStringList = (itemMaximum: number, listMaximum: number) =>
+  z.optional(z.array(boundedString(1, itemMaximum)).check(z.maxLength(listMaximum)))
+
+const boundedInt = (minimum: number, maximum: number) =>
+  z.int().check(z.minimum(minimum), z.maximum(maximum))
 
 // ---------- triggers ----------
 
@@ -37,93 +46,73 @@ export const ALERT_TRIGGERS = [
   'workflow.circuit_breaker_tripped',
 ] as const
 
-export const AlertTriggerSchema = z.enum(ALERT_TRIGGERS)
+export const AlertTriggerSchema = /* @__PURE__ */ z.enum(ALERT_TRIGGERS)
 export type AlertTrigger = z.infer<typeof AlertTriggerSchema>
 
 // ---------- per-trigger parameters ----------
 
-export const AlertParamsDlqEntryCreatedSchema = z
-  .object({
-    errorSignaturePattern: z.string().min(1).max(200).optional(),
-    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
-  })
-  .strict()
+export const AlertParamsDlqEntryCreatedSchema = /* @__PURE__ */ z.strictObject({
+  errorSignaturePattern: z.optional(boundedString(1, 200)),
+  workflowIds: optionalStringList(120, 50),
+})
 
-export const AlertParamsFailureClusterThresholdSchema = z
-  .object({
-    minFrequency: z.number().int().min(2).max(1000),
-    windowDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).default(7),
-  })
-  .strict()
+export const AlertParamsFailureClusterThresholdSchema = /* @__PURE__ */ z.strictObject({
+  minFrequency: boundedInt(2, 1000),
+  windowDays: z._default(z.union([z.literal(7), z.literal(14), z.literal(30)]), 7),
+})
 
-export const AlertParamsBudgetBlockedSchema = z
-  .object({
-    scope: z.enum(['org', 'workflow']).optional(),
-    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
-  })
-  .strict()
+export const AlertParamsBudgetBlockedSchema = /* @__PURE__ */ z.strictObject({
+  scope: z.optional(z.enum(['org', 'workflow'])),
+  workflowIds: optionalStringList(120, 50),
+})
 
-export const AlertParamsLimiterDegradedSchema = z
-  .object({
-    buckets: z.array(z.string().min(1).max(120)).max(50).optional(),
-  })
-  .strict()
+export const AlertParamsLimiterDegradedSchema = /* @__PURE__ */ z.strictObject({
+  buckets: optionalStringList(120, 50),
+})
 
-export const AlertParamsWorkflowSloBreachSchema = z
-  .object({
-    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
-    metricNames: z.array(z.enum(['successRate', 'p95'])).max(2).optional(),
-  })
-  .strict()
+export const AlertParamsWorkflowSloBreachSchema = /* @__PURE__ */ z.strictObject({
+  workflowIds: optionalStringList(120, 50),
+  metricNames: z.optional(
+    z.array(z.enum(['successRate', 'p95'])).check(z.maxLength(2)),
+  ),
+})
 
-export const AlertParamsApprovalStalledSchema = z
-  .object({
-    stalledMinutes: z.number().int().min(5).max(43200),
-    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
-  })
-  .strict()
+export const AlertParamsApprovalStalledSchema = /* @__PURE__ */ z.strictObject({
+  stalledMinutes: boundedInt(5, 43200),
+  workflowIds: optionalStringList(120, 50),
+})
 
-export const AlertParamsRecoveryItemCreatedSchema = z
-  .object({
-    severities: z.array(z.enum(['p1', 'p2', 'p3', 'p4'])).max(4).optional(),
-    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
-  })
-  .strict()
+export const AlertParamsRecoveryItemCreatedSchema = /* @__PURE__ */ z.strictObject({
+  severities: z.optional(z.array(z.enum(['p1', 'p2', 'p3', 'p4'])).check(z.maxLength(4))),
+  workflowIds: optionalStringList(120, 50),
+})
 
-export const AlertParamsRecoveryItemSlaBreachedSchema = z
-  .object({
-    severities: z.array(z.enum(['p1', 'p2', 'p3', 'p4'])).max(4).optional(),
-    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
-  })
-  .strict()
+export const AlertParamsRecoveryItemSlaBreachedSchema = /* @__PURE__ */ z.strictObject({
+  severities: z.optional(z.array(z.enum(['p1', 'p2', 'p3', 'p4'])).check(z.maxLength(4))),
+  workflowIds: optionalStringList(120, 50),
+})
 
-export const AlertParamsWorkflowScheduleAnomalySchema = z
-  .object({
+export const AlertParamsWorkflowScheduleAnomalySchema = /* @__PURE__ */ z.strictObject({
     // Optional allowlist of workflow ids to alert on. Empty/absent → every
     // actively-scheduled workflow. The anomaly thresholds + 90-day window are
     // fixed in the engine (not tunable per policy in v1).
-    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
+    workflowIds: optionalStringList(120, 50),
   })
-  .strict()
 
-export const AlertParamsCredentialExpiringSchema = z
-  .object({
+export const AlertParamsCredentialExpiringSchema = /* @__PURE__ */ z.strictObject({
     // Fire when a credential expires within this many days. 1..365.
-    warnDays: z.number().int().min(1).max(365),
+    warnDays: boundedInt(1, 365),
     // Optional allowlists. `credentialKinds` is a free string array (the
     // credentials table intentionally keeps `kind` open — a new integration
     // shouldn't need an alert-schema edit). Empty/absent → all kinds / names.
-    credentialKinds: z.array(z.string().min(1).max(120)).max(10).optional(),
-    credentialNames: z.array(z.string().min(1).max(120)).max(50).optional(),
+    credentialKinds: optionalStringList(120, 10),
+    credentialNames: optionalStringList(120, 50),
   })
-  .strict()
 
-export const AlertParamsWorkflowCircuitBreakerTrippedSchema = z
-  .object({
+export const AlertParamsWorkflowCircuitBreakerTrippedSchema = /* @__PURE__ */ z.strictObject({
     // Optional allowlist — absent/empty means every workflow in the org.
-    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
+    workflowIds: optionalStringList(120, 50),
   })
-  .strict()
 
 /**
  * Per-trigger parameters dispatch table. Caller picks the schema by the
@@ -141,7 +130,7 @@ export const ALERT_PARAMS_SCHEMAS = {
   'workflow.schedule_anomaly': AlertParamsWorkflowScheduleAnomalySchema,
   'credential.expiring': AlertParamsCredentialExpiringSchema,
   'workflow.circuit_breaker_tripped': AlertParamsWorkflowCircuitBreakerTrippedSchema,
-} as const satisfies Record<AlertTrigger, z.ZodTypeAny>
+} as const satisfies Record<AlertTrigger, z.ZodMiniType>
 
 export type AlertParamsByTrigger = {
   'dlq.entry_created': z.infer<typeof AlertParamsDlqEntryCreatedSchema>
@@ -160,7 +149,7 @@ export type AlertParamsByTrigger = {
 // ---------- channels ----------
 
 export const ALERT_DESTINATIONS = ['slack', 'webhook', 'email', 'github'] as const
-export const AlertDestinationSchema = z.enum(ALERT_DESTINATIONS)
+export const AlertDestinationSchema = /* @__PURE__ */ z.enum(ALERT_DESTINATIONS)
 export type AlertDestination = z.infer<typeof AlertDestinationSchema>
 
 /** Stable Block Kit callback ids shared by alert rendering and API verification. */
@@ -168,42 +157,39 @@ export const SLACK_ACTION_ACKNOWLEDGE = 'janusly_recovery_acknowledge'
 export const SLACK_ACTION_ASSIGN_TO_ME = 'janusly_recovery_assign_to_me'
 export const SLACK_ACTION_OPEN = 'janusly_recovery_open'
 
-export const AlertChannelSlackParamsSchema = z
-  .object({
-    channel: z.string().min(1).max(120).optional(),
-    threadTs: z.string().min(1).max(64).optional(),
-    interactionConnectionId: z.string().uuid().optional(),
-  })
-  .strict()
+export const AlertChannelSlackParamsSchema = /* @__PURE__ */ z.strictObject({
+  channel: z.optional(boundedString(1, 120)),
+  threadTs: z.optional(boundedString(1, 64)),
+  interactionConnectionId: z.optional(z.uuid()),
+})
 
-export const AlertChannelWebhookParamsSchema = z
-  .object({
-    url: z.string().url().max(2048),
-  })
-  .strict()
+export const AlertChannelWebhookParamsSchema = /* @__PURE__ */ z.strictObject({
+  url: z.url().check(z.maxLength(2048)),
+})
 
-export const AlertChannelEmailParamsSchema = z
-  .object({
-    to: z.union([z.string().email().max(254), z.array(z.string().email().max(254)).min(1).max(20)]),
-    subject: z.string().min(1).max(200).optional(),
-  })
-  .strict()
+const AlertEmailSchema = /* @__PURE__ */ z.email().check(z.maxLength(254))
 
-export const AlertChannelGithubParamsSchema = z
-  .object({
-    owner: z.string().min(1).max(120),
-    repo: z.string().min(1).max(120),
-    labels: z.array(z.string().min(1).max(60)).max(10).optional(),
-    assignees: z.array(z.string().min(1).max(60)).max(10).optional(),
-  })
-  .strict()
+export const AlertChannelEmailParamsSchema = /* @__PURE__ */ z.strictObject({
+  to: z.union([
+    AlertEmailSchema,
+    z.array(AlertEmailSchema).check(z.minLength(1), z.maxLength(20)),
+  ]),
+  subject: z.optional(boundedString(1, 200)),
+})
+
+export const AlertChannelGithubParamsSchema = /* @__PURE__ */ z.strictObject({
+  owner: boundedString(1, 120),
+  repo: boundedString(1, 120),
+  labels: optionalStringList(60, 10),
+  assignees: optionalStringList(60, 10),
+})
 
 export const ALERT_CHANNEL_PARAMS_SCHEMAS = {
   slack: AlertChannelSlackParamsSchema,
   webhook: AlertChannelWebhookParamsSchema,
   email: AlertChannelEmailParamsSchema,
   github: AlertChannelGithubParamsSchema,
-} as const satisfies Record<AlertDestination, z.ZodTypeAny>
+} as const satisfies Record<AlertDestination, z.ZodMiniType>
 
 export type AlertChannelParamsByDestination = {
   slack: z.infer<typeof AlertChannelSlackParamsSchema>
@@ -217,13 +203,11 @@ export type AlertChannelParamsByDestination = {
  * stays provider-strict friendly. Use `validateAlertChannel` to refine
  * `params` per destination after the base parse.
  */
-export const AlertChannelSchema = z
-  .object({
+export const AlertChannelSchema = /* @__PURE__ */ z.strictObject({
     destination: AlertDestinationSchema,
-    credentialName: z.string().min(1).max(200),
-    params: z.record(z.string(), z.unknown()).optional(),
+    credentialName: boundedString(1, 200),
+    params: z.optional(z.record(z.string(), z.unknown())),
   })
-  .strict()
 
 export type AlertChannel = z.infer<typeof AlertChannelSchema>
 
@@ -241,24 +225,19 @@ export const ALERT_POLICY_NAME_MAX = 120
 export const ALERT_POLICY_CHANNELS_MIN = 1
 export const ALERT_POLICY_CHANNELS_MAX = 5
 
-export const AlertPolicyConfigSchema = z
-  .object({
-    name: z.string().min(1).max(ALERT_POLICY_NAME_MAX),
+export const AlertPolicyConfigSchema = /* @__PURE__ */ z.strictObject({
+    name: boundedString(1, ALERT_POLICY_NAME_MAX),
     trigger: AlertTriggerSchema,
-    parameters: z.record(z.string(), z.unknown()).default({}),
+    parameters: z._default(z.record(z.string(), z.unknown()), {}),
     channels: z
       .array(AlertChannelSchema)
-      .min(ALERT_POLICY_CHANNELS_MIN)
-      .max(ALERT_POLICY_CHANNELS_MAX),
-    cooldownSeconds: z
-      .number()
-      .int()
-      .min(ALERT_COOLDOWN_SECONDS_MIN)
-      .max(ALERT_COOLDOWN_SECONDS_MAX)
-      .default(ALERT_COOLDOWN_SECONDS_DEFAULT),
-    enabled: z.boolean().default(true),
+      .check(z.minLength(ALERT_POLICY_CHANNELS_MIN), z.maxLength(ALERT_POLICY_CHANNELS_MAX)),
+    cooldownSeconds: z._default(
+      boundedInt(ALERT_COOLDOWN_SECONDS_MIN, ALERT_COOLDOWN_SECONDS_MAX),
+      ALERT_COOLDOWN_SECONDS_DEFAULT,
+    ),
+    enabled: z._default(z.boolean(), true),
   })
-  .strict()
 
 export type AlertPolicyConfig = z.infer<typeof AlertPolicyConfigSchema>
 
@@ -315,18 +294,16 @@ export function validateAlertPolicyConfig(policy: AlertPolicyConfig): AlertPolic
 // ---------- dispatch outcomes ----------
 
 export const ALERT_OUTCOMES = ['delivered', 'delivery_failed'] as const
-export const AlertOutcomeSchema = z.enum(ALERT_OUTCOMES)
+export const AlertOutcomeSchema = /* @__PURE__ */ z.enum(ALERT_OUTCOMES)
 export type AlertOutcome = z.infer<typeof AlertOutcomeSchema>
 
-export const AlertChannelResultSchema = z
-  .object({
+export const AlertChannelResultSchema = /* @__PURE__ */ z.strictObject({
     destination: AlertDestinationSchema,
-    credentialName: z.string().min(1).max(200),
+    credentialName: boundedString(1, 200),
     ok: z.boolean(),
-    statusCode: z.number().int().min(100).max(599).nullable().optional(),
-    error: z.string().max(1000).nullable().optional(),
-    latencyMs: z.number().int().min(0),
+    statusCode: z.optional(z.nullable(boundedInt(100, 599))),
+    error: z.optional(z.nullable(z.string().check(z.maxLength(1000)))),
+    latencyMs: z.int().check(z.minimum(0)),
   })
-  .strict()
 
 export type AlertChannelResult = z.infer<typeof AlertChannelResultSchema>

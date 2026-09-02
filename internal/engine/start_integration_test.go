@@ -75,7 +75,7 @@ func TestStartRunCommitsSkeletonAtomically(t *testing.T) {
 
 	q := store.New(pool)
 	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: org})
-	if err != nil || run.Status != "running" || run.WorkflowVersionID != "wf-linear" {
+	if err != nil || run.Status != "running" || run.WorkflowVersionID != runID {
 		t.Fatalf("unexpected run: %+v err=%v", run, err)
 	}
 
@@ -109,7 +109,7 @@ func TestStartRunCommitsSkeletonAtomically(t *testing.T) {
 	}
 	var payload map[string]string
 	_ = json.Unmarshal(events[1].Payload, &payload)
-	if payload["workflowVersionId"] != "wf-linear" {
+	if payload["workflowVersionId"] != runID {
 		t.Fatalf("event payload contract mismatch: %s", events[0].Payload)
 	}
 

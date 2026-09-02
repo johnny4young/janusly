@@ -26,6 +26,8 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
+const semanticRecoveryCaseSource = "semantic_violation"
+
 // StableSemanticID mirrors the contract's deterministic id helper: the
 // same logical entity always gets the same id, so replayed inserts
 // conflict instead of duplicating.
@@ -47,7 +49,7 @@ type RecoveryCaseInput struct {
 	RunID             string
 	WorkflowID        string
 	WorkflowVersionID string
-	Source            string // "semantic_violation"
+	Source            string // semanticRecoveryCaseSource for governed semantic recovery
 	DetectorID        string
 	SourceNodeID      string
 	DetectorKind      string // "expression" | "schema"

@@ -30,7 +30,7 @@ func (s *V1Server) resolvedGateRole(r *http.Request, rc v1Request) (*auth.Resolv
 		)
 	}
 	if err != nil {
-		rejection := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		rejection := opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		return nil, &rejection
 	}
 	return resolved, nil
@@ -92,7 +92,7 @@ func (s *V1Server) permissionsForResolvedRole(
 	}
 	effective, err := auth.EffectivePermissions(r.Context(), store.New(s.pool), rc.orgID, resolved)
 	if err != nil {
-		failed := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		failed := opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		return nil, &failed
 	}
 	return effective, nil

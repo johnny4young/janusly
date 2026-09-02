@@ -5,6 +5,7 @@ import type {
   ReviewFindings,
   WorkflowBriefCompilation,
   WorkflowDefinition,
+  WorkflowProposalApplyOutcome,
   WorkflowProposalResponse,
 } from '../types'
 import { changeAppLanguage } from '../i18n'
@@ -114,7 +115,7 @@ function renderPanel(overrides: Partial<AiStudioProps> = {}) {
     onLoadAuthoringCapabilities: vi.fn(async () => catalog),
     onCompileWorkflowBrief: vi.fn(async () => compilation),
     onProposeWorkflow: vi.fn(async () => workflowProposal()),
-    onApplyWorkflowProposal: vi.fn(async () => true),
+    onApplyWorkflowProposal: vi.fn(async () => ({ status: 'applied' as const })),
     onExplainWorkflow: vi.fn(async () => ({ mode: 'ai' as const, explanation: 'EXPLAIN_BODY_XYZ' })),
     onReviewWorkflow: vi.fn(async () => ({
       mode: 'ai' as const,
@@ -147,10 +148,11 @@ describe('<AiStudioPanel />', () => {
   it('keeps compilation, proposal, and explicit Apply as separate operations', async () => {
     const onCompileWorkflowBrief = vi.fn(async () => compilation)
     const onProposeWorkflow = vi.fn(async () => workflowProposal())
-    const onApplyWorkflowProposal = vi.fn(async () => true)
+    const onApplyWorkflowProposal = vi.fn(async () => ({ status: 'applied' as const }))
     renderPanel({ onCompileWorkflowBrief, onProposeWorkflow, onApplyWorkflowProposal })
 
     await screen.findByTestId('capability-catalog-summary')
+    const sourcePrompt = (screen.getByLabelText('Business intent') as HTMLTextAreaElement).value
     fireEvent.click(screen.getByRole('button', { name: /Compile intent brief/i }))
     await screen.findByTestId('intent-brief')
     expect(onCompileWorkflowBrief).toHaveBeenCalledOnce()
@@ -159,7 +161,7 @@ describe('<AiStudioPanel />', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Build proposal/i }))
     await screen.findByTestId('workflow-proposal')
-    expect(onProposeWorkflow).toHaveBeenCalledWith(compilation.brief, catalog.version)
+    expect(onProposeWorkflow).toHaveBeenCalledWith(compilation.brief, catalog.version, sourcePrompt)
     expect(onApplyWorkflowProposal).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: /Apply proposal to draft/i }))
@@ -183,7 +185,7 @@ describe('<AiStudioPanel />', () => {
       complete: false,
     }
     incomplete.proposal.applicable = false
-    const onApplyWorkflowProposal = vi.fn(async () => true)
+    const onApplyWorkflowProposal = vi.fn(async () => ({ status: 'applied' as const }))
     renderPanel({
       onProposeWorkflow: vi.fn(async () => incomplete),
       onApplyWorkflowProposal,
@@ -192,9 +194,32 @@ describe('<AiStudioPanel />', () => {
     await compileAndPropose()
     expect(screen.getByText('crm.super_power')).toBeInTheDocument()
     expect(screen.getByText(/Available alternatives: http.request/)).toBeInTheDocument()
+    expect(screen.getByText(/Add the missing details to the business intent/i)).toBeInTheDocument()
     expect(screen.getByText('Apply is blocked')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Apply proposal to draft/i })).toBeDisabled()
     expect(onApplyWorkflowProposal).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a catalog change returned by the final Apply boundary', async () => {
+    const changedCatalog: AuthoringCapabilityCatalog = {
+      ...catalog,
+      version: 'catalog-v2',
+    }
+    const onLoadAuthoringCapabilities = vi.fn(async () => catalog)
+    const onApplyWorkflowProposal = vi.fn(async () => ({
+      status: 'catalog_changed' as const,
+      catalog: changedCatalog,
+    }))
+    renderPanel({ onLoadAuthoringCapabilities, onApplyWorkflowProposal })
+
+    await compileAndPropose()
+    fireEvent.click(screen.getByRole('button', { name: /Apply proposal to draft/i }))
+
+    expect(await screen.findByText('Apply is blocked')).toBeInTheDocument()
+    expect(screen.getByText(/compile it again/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Apply proposal to draft/i })).toBeDisabled()
+    expect(onLoadAuthoringCapabilities).toHaveBeenCalledOnce()
+    expect(onApplyWorkflowProposal).toHaveBeenCalledOnce()
   })
 
   it('makes provider-free fallback explicit without blocking the proposal', async () => {
@@ -209,6 +234,105 @@ describe('<AiStudioPanel />', () => {
     expect(screen.getByText('Deterministic local proposal')).toBeInTheDocument()
     expect(screen.getByText(/Anthropic account has no available credits/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Apply proposal to draft/i })).toBeEnabled()
+  })
+
+  it('shows bounded local time-to-value evidence without claiming execution', async () => {
+    renderPanel({
+      onProposeWorkflow: vi.fn(async () => workflowProposal({ mode: 'fallback' })),
+    })
+
+    await compileAndPropose()
+    const preview = screen.getByTestId('authoring-value-preview')
+    expect(preview).toHaveTextContent('Controlled evidence')
+    expect(preview).toHaveTextContent('Deterministic local proposal')
+    expect(preview).toHaveTextContent('Executable assurance:')
+    expect(preview).toHaveTextContent('3/3')
+    expect(preview).toHaveTextContent(/still unsaved and has not been validated or executed/i)
+  })
+
+  it('shows exact configured defaults before the proposal touches the canvas', async () => {
+    const configured = workflowProposal({ mode: 'fallback' })
+    configured.proposal.workflow.inputs = {
+      type: 'object',
+      properties: {
+        timeZone: {
+          type: 'string',
+          description: 'IANA timezone used for the on-call window.',
+          default: 'America/Bogota',
+        },
+        activeUntil: {
+          type: 'string',
+          description: 'Exclusive end of the finite automation campaign.',
+          default: '2026-09-08T10:04:05-05:00',
+        },
+        operatorNote: { type: 'string' },
+      },
+    }
+    renderPanel({
+      onProposeWorkflow: vi.fn(async () => configured),
+    })
+
+    await compileAndPropose()
+    fireEvent.click(screen.getByText('Inputs (2)'))
+
+    expect(screen.getByText('America/Bogota')).toBeVisible()
+    expect(screen.getByText('2026-09-08T10:04:05-05:00')).toBeVisible()
+    expect(screen.getByText('Exclusive end of the finite automation campaign.')).toBeVisible()
+    expect(screen.queryByText('operatorNote')).toBeNull()
+  })
+
+  it('counts exact built-in, MCP, and HTTP writes in the operational preview', async () => {
+    const writeCatalog: AuthoringCapabilityCatalog = {
+      ...catalog,
+      builtinTools: [
+        ...catalog.builtinTools,
+        {
+          name: 'slack.post', description: 'Post to Slack', inputFields: [],
+          required: ['credential'], optional: [], writeSide: true,
+        },
+      ],
+      mcpTools: [{
+        connectionAlias: 'crm', toolName: 'contacts.update', description: 'Update a contact',
+        inputFields: [], writeSide: true,
+      }],
+    }
+    const writeProposal = workflowProposal({ mode: 'fallback' })
+    writeProposal.proposal.workflow.nodes = [
+      { id: 'slack', type: 'tool', config: { tool: 'slack.post' } },
+      { id: 'crm', type: 'mcp_tool', config: { connectionAlias: 'crm', toolName: 'contacts.update' } },
+      { id: 'post', type: 'http', config: { url: 'https://example.test', method: 'POST' } },
+      { id: 'read', type: 'http', config: { url: 'https://example.test', method: 'GET' } },
+    ] as WorkflowDefinition['nodes']
+    renderPanel({
+      onLoadAuthoringCapabilities: vi.fn(async () => writeCatalog),
+      onProposeWorkflow: vi.fn(async () => writeProposal),
+    })
+
+    await compileAndPropose()
+    expect(screen.getByTestId('authoring-value-preview')).toHaveTextContent(/External effects\s*3/)
+  })
+
+  it('opens with the flagship PagerDuty assurance example', async () => {
+    renderPanel()
+    await screen.findByTestId('capability-catalog-summary')
+    expect(screen.getByLabelText('Business intent')).toHaveValue(
+      'For one week, acknowledge PagerDuty incidents assigned to PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
+    )
+  })
+
+  it('localizes the untouched starter without replacing operator input', async () => {
+    renderPanel()
+    await screen.findByTestId('capability-catalog-summary')
+
+    await act(async () => { await changeAppLanguage('es') })
+    const intent = screen.getByLabelText('Intención de negocio')
+    expect(intent).toHaveValue(
+      'Por una semana, reconoce incidentes de PagerDuty asignados a PUSER1 fuera de 09:00–17:00 America/Bogota y aplázalos 12 horas como operator@example.com.',
+    )
+
+    fireEvent.change(intent, { target: { value: 'Mi intención PagerDuty exacta' } })
+    await act(async () => { await changeAppLanguage('en') })
+    expect(screen.getByLabelText('Business intent')).toHaveValue('Mi intención PagerDuty exacta')
   })
 
   it('distinguishes a guarded provider draft from the zero-call local fallback', async () => {
@@ -231,7 +355,7 @@ describe('<AiStudioPanel />', () => {
 
     await compileAndPropose()
     expect(screen.getByTestId('provider-output-guarded')).toHaveTextContent('Unsafe AI draft replaced locally')
-    expect(screen.getByTestId('provider-output-guarded')).toHaveTextContent('Janusly discarded that graph')
+    expect(screen.getByTestId('provider-output-guarded')).toHaveTextContent('Janusly replaced it with a safe incomplete draft')
     expect(screen.queryByText('No external AI call was required.')).not.toBeInTheDocument()
     fireEvent.click(screen.getByText('Assumptions and risks'))
     expect(screen.getByText(/provider graph was discarded because it contained a tool/i)).toBeInTheDocument()
@@ -254,6 +378,147 @@ describe('<AiStudioPanel />', () => {
     expect(screen.queryByText('Question four?')).not.toBeInTheDocument()
   })
 
+  it('keeps proposal generation blocked while the intent needs clarification', async () => {
+    const incompleteCompilation: WorkflowBriefCompilation = {
+      ...compilation,
+      complete: false,
+      clarifyingQuestions: ['What exact time range may Janusly act within?'],
+    }
+    const onProposeWorkflow = vi.fn(async () => workflowProposal())
+    renderPanel({
+      onCompileWorkflowBrief: vi.fn(async () => incompleteCompilation),
+      onProposeWorkflow,
+    })
+
+    await screen.findByTestId('capability-catalog-summary')
+    fireEvent.click(screen.getByRole('button', { name: /Compile intent brief/i }))
+    await screen.findByText('What exact time range may Janusly act within?')
+    expect(screen.getByRole('button', { name: /Build proposal/i })).toBeDisabled()
+    expect(onProposeWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('clears a stale brief when recompilation fails', async () => {
+    const onCompileWorkflowBrief = vi.fn()
+      .mockResolvedValueOnce(compilation)
+      .mockRejectedValueOnce(new Error('brief compiler unavailable'))
+    renderPanel({ onCompileWorkflowBrief })
+
+    await screen.findByTestId('capability-catalog-summary')
+    const compile = screen.getByRole('button', { name: /Compile intent brief/i })
+    fireEvent.click(compile)
+    await screen.findByTestId('intent-brief')
+    fireEvent.click(compile)
+
+    await screen.findByText('brief compiler unavailable')
+    expect(screen.queryByTestId('intent-brief')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Build proposal/i })).toBeDisabled()
+  })
+
+  it('discards a proposal that finishes after the active workflow changes', async () => {
+    let resolveProposal: ((value: WorkflowProposalResponse) => void) | undefined
+    const pendingProposal = new Promise<WorkflowProposalResponse>((resolve) => {
+      resolveProposal = resolve
+    })
+    const onProposeWorkflow = vi.fn(() => pendingProposal)
+    renderPanel({ onProposeWorkflow })
+
+    await screen.findByTestId('capability-catalog-summary')
+    fireEvent.click(screen.getByRole('button', { name: /Compile intent brief/i }))
+    await screen.findByTestId('intent-brief')
+    fireEvent.click(screen.getByRole('button', { name: /Build proposal/i }))
+    await waitFor(() => expect(onProposeWorkflow).toHaveBeenCalledOnce())
+
+    act(() => { useWorkflowStore.setState({ currentWorkflowId: 'wf_2' }) })
+    await act(async () => { resolveProposal?.(workflowProposal()) })
+
+    expect(screen.queryByTestId('workflow-proposal')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Build proposal/i })).toBeEnabled()
+  })
+
+  it('discards an Apply result after the operator switches workflows', async () => {
+    let resolveApply: ((value: WorkflowProposalApplyOutcome) => void) | undefined
+    const pendingApply = new Promise<WorkflowProposalApplyOutcome>((resolve) => {
+      resolveApply = resolve
+    })
+    const onApplyWorkflowProposal = vi.fn(() => pendingApply)
+    renderPanel({ onApplyWorkflowProposal })
+    await compileAndPropose()
+
+    fireEvent.click(screen.getByRole('button', { name: /Apply proposal to draft/i }))
+    await waitFor(() => expect(onApplyWorkflowProposal).toHaveBeenCalledOnce())
+    act(() => { useWorkflowStore.setState({ currentWorkflowId: 'wf_2' }) })
+    await act(async () => { resolveApply?.({ status: 'applied' }) })
+
+    expect(screen.queryByText('Proposal copied to the draft')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-proposal')).not.toBeInTheDocument()
+  })
+
+  it('preserves Apply success when the production boundary hydrates the proposal', async () => {
+    const onApplyWorkflowProposal = vi.fn(async (response: WorkflowProposalResponse) => {
+      useWorkflowStore.getState().hydrateWorkflow(response.proposal.workflow, { saved: false, dirty: true })
+      return { status: 'applied' as const }
+    })
+    renderPanel({ onApplyWorkflowProposal })
+    await compileAndPropose()
+
+    fireEvent.click(screen.getByRole('button', { name: /Apply proposal to draft/i }))
+
+    expect(await screen.findByText('Proposal copied to the draft')).toBeInTheDocument()
+    expect(useWorkflowStore.getState()).toMatchObject({
+      currentWorkflowId: 'wf_proposed',
+      workflowDirty: true,
+      currentWorkflowSaved: false,
+    })
+    expect(screen.queryByTestId('workflow-proposal')).not.toBeInTheDocument()
+  })
+
+  it('clears tenant authoring data and reloads capabilities on an identity switch', async () => {
+    let resolveSecondCatalog: ((value: AuthoringCapabilityCatalog) => void) | undefined
+    const secondCatalog = new Promise<AuthoringCapabilityCatalog>((resolve) => {
+      resolveSecondCatalog = resolve
+    })
+    const onLoadAuthoringCapabilities = vi.fn()
+      .mockResolvedValueOnce(catalog)
+      .mockImplementationOnce(() => secondCatalog)
+    renderPanel({ onLoadAuthoringCapabilities })
+    await compileAndPropose()
+
+    act(() => {
+      useWorkflowStore.setState({ orgId: 'org_2', userId: 'user_2' })
+    })
+
+    expect(screen.queryByTestId('capability-catalog-summary')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-proposal')).not.toBeInTheDocument()
+    expect(screen.getByText(/Loading the exact workspace capability catalog/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Business intent')).toHaveValue(
+      'For one week, acknowledge PagerDuty incidents assigned to PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
+    )
+
+    await act(async () => {
+      resolveSecondCatalog?.({ ...catalog, version: 'catalog-org-2' })
+    })
+    expect(await screen.findByTestId('capability-catalog-summary')).toBeInTheDocument()
+    expect(onLoadAuthoringCapabilities).toHaveBeenCalledTimes(2)
+  })
+
+  it('discards workflow analysis that finishes after navigation', async () => {
+    let resolveExplanation: ((value: { mode: 'ai'; explanation: string }) => void) | undefined
+    const pendingExplanation = new Promise<{ mode: 'ai'; explanation: string }>((resolve) => {
+      resolveExplanation = resolve
+    })
+    const onExplainWorkflow = vi.fn(() => pendingExplanation)
+    renderPanel({ onExplainWorkflow })
+
+    await screen.findByTestId('capability-catalog-summary')
+    fireEvent.click(screen.getByRole('button', { name: /Explain this flow/i }))
+    await waitFor(() => expect(onExplainWorkflow).toHaveBeenCalledOnce())
+    act(() => { useWorkflowStore.setState({ currentWorkflowId: 'wf_2' }) })
+    await act(async () => { resolveExplanation?.({ mode: 'ai', explanation: 'STALE_EXPLANATION' }) })
+
+    expect(screen.queryByText('STALE_EXPLANATION')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Explain this flow/i })).toBeEnabled()
+  })
+
   it('shows all executable assurance contracts in a proposal', async () => {
     await compileAndProposeAfterRender()
     const summary = screen.getByTestId('workflow-assurance-summary')
@@ -271,6 +536,19 @@ describe('<AiStudioPanel />', () => {
     act(() => { useWorkflowStore.setState({ currentWorkflowId: 'wf_2' }) })
     expect(screen.queryByTestId('workflow-proposal')).not.toBeInTheDocument()
     expect(screen.queryByText('EXPLAIN_BODY_XYZ')).not.toBeInTheDocument()
+  })
+
+  it('invalidates a proposal when the active canvas changes in place', async () => {
+    renderPanel()
+    await compileAndPropose()
+
+    act(() => {
+      const current = useWorkflowStore.getState()
+      useWorkflowStore.setState({ workflowRevision: current.workflowRevision + 1 })
+    })
+
+    expect(screen.queryByTestId('workflow-proposal')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Build proposal/i })).toBeEnabled()
   })
 
   it('keeps async results inside a persistent aria-live region', async () => {
@@ -309,8 +587,26 @@ describe('<AiStudioPanel />', () => {
     expect(onApplyWorkflowImprovement).toHaveBeenCalledWith(suggestion)
   })
 
+  it('prefills but never submits a governed successor authoring request', async () => {
+    const prompt = 'Create a qualified successor from exact version version-7.'
+    const { props } = renderPanel({
+      actionRequest: { id: 1, action: 'generate', prompt },
+    })
+
+    const input = await screen.findByLabelText('Business intent')
+    expect(input).toHaveValue(prompt)
+    expect(input).toHaveFocus()
+    expect(props.onCompileWorkflowBrief).not.toHaveBeenCalled()
+    expect(props.onProposeWorkflow).not.toHaveBeenCalled()
+    expect(props.onApplyWorkflowProposal).not.toHaveBeenCalled()
+  })
+
   it('renders the supported Anthropic setup guidance in English and Spanish', async () => {
     renderPanel()
+    await screen.findByTestId('capability-catalog-summary')
+    expect(screen.getByLabelText('Business intent')).toHaveValue(
+      'For one week, acknowledge PagerDuty incidents assigned to PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
+    )
     expect(screen.getByText(/Configure ANTHROPIC_API_KEY for the API and worker/i)).toBeInTheDocument()
     expect(screen.getByText('Root .env has ANTHROPIC_API_KEY')).toBeInTheDocument()
     expect(screen.queryByText(/OPENAI_API_KEY/i)).not.toBeInTheDocument()
@@ -319,6 +615,9 @@ describe('<AiStudioPanel />', () => {
     expect(screen.getByText(/Configura ANTHROPIC_API_KEY para la API y el worker/i)).toBeInTheDocument()
     expect(screen.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeInTheDocument()
     expect(screen.getAllByText('Brief de intención')).not.toHaveLength(0)
+    expect(screen.getByLabelText('Intención de negocio')).toHaveValue(
+      'Por una semana, reconoce incidentes de PagerDuty asignados a PUSER1 fuera de 09:00–17:00 America/Bogota y aplázalos 12 horas como operator@example.com.',
+    )
     expect(screen.queryByText('Root .env has ANTHROPIC_API_KEY')).not.toBeInTheDocument()
   })
 })

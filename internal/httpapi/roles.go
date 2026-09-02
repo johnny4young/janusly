@@ -85,7 +85,7 @@ func (s *V1Server) permissionsCatalogCore(_ *http.Request, _ v1Request) opResult
 func (s *V1Server) listRolesCore(r *http.Request, rc v1Request) opResult {
 	rows, err := store.New(s.pool).ListOrgRoles(r.Context(), rc.orgID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	byName := map[string]bool{}
 	roles := make([]map[string]any, 0, len(rows)+3)
@@ -137,7 +137,7 @@ func (s *V1Server) createRoleCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusConflict, "role_already_exists", "role with this name already exists",
 			map[string]any{"name": name})
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	roleID := s.newID()
@@ -163,11 +163,11 @@ func (s *V1Server) createRoleCore(r *http.Request, rc v1Request) opResult {
 		})
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	row, err := store.New(s.pool).GetOrgRole(ctx, store.GetOrgRoleParams{OrgID: rc.orgID, Name: name})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(roleViewFrom(row.ID, row.OrgID, row.Name, row.InheritsFrom, row.Description, row.IsBuiltin, row.GrantedPermissions))
 }
@@ -209,7 +209,7 @@ func (s *V1Server) updateRoleCore(r *http.Request, rc v1Request, rawName string)
 	existing, err := store.New(s.pool).GetOrgRole(ctx, store.GetOrgRoleParams{OrgID: rc.orgID, Name: name})
 	exists := err == nil
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if !isBuiltinTarget && !exists {
 		return opError(http.StatusNotFound, "role_not_found", "role not found", nil)
@@ -304,11 +304,11 @@ func (s *V1Server) updateRoleCore(r *http.Request, rc v1Request, rawName string)
 		return txAudit(action, audit.Options{TargetType: "org_role", TargetID: savedID, Metadata: metadata})
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	row, err := store.New(s.pool).GetOrgRole(ctx, store.GetOrgRoleParams{OrgID: rc.orgID, Name: name})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(roleViewFrom(row.ID, row.OrgID, row.Name, row.InheritsFrom, row.Description, row.IsBuiltin, row.GrantedPermissions))
 }
@@ -323,7 +323,7 @@ func (s *V1Server) deleteRoleCore(r *http.Request, rc v1Request, rawName string)
 	existing, err := q.GetOrgRole(ctx, store.GetOrgRoleParams{OrgID: rc.orgID, Name: name})
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		if auth.IsBuiltinRole(name) {
 			return opError(http.StatusNotFound, "roles_override_not_found", "no override exists for this built-in role", nil)
@@ -342,14 +342,14 @@ func (s *V1Server) deleteRoleCore(r *http.Request, rc v1Request, rawName string)
 			})
 		})
 		if err != nil {
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		return opOK(map[string]any{"ok": true, "reverted": true})
 	}
 
 	membersAffected, err := q.CountMembersInRole(ctx, store.CountMembersInRoleParams{OrgID: rc.orgID, Role: name})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if membersAffected > 0 {
 		// The contract's envelope carries membersAffected at BOTH levels.
@@ -371,7 +371,7 @@ func (s *V1Server) deleteRoleCore(r *http.Request, rc v1Request, rawName string)
 		})
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(map[string]any{"ok": true})
 }

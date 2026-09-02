@@ -26,7 +26,10 @@ var RecoveryCaseTerminalStates = map[string]bool{
 
 // legalRecoveryCaseTransitions ports the contract map verbatim.
 var legalRecoveryCaseTransitions = map[string][]string{
-	"detected":           {"contained", "accepted_loss", "abandoned"},
+	// Observe-only findings never pause downstream work, so they enter
+	// diagnosis directly. Quarantining findings still use detected -> contained
+	// before diagnosis and retain the durable containment receipt.
+	"detected":           {"contained", "diagnosed", "accepted_loss", "abandoned"},
 	"contained":          {"diagnosed", "accepted_loss", "abandoned"},
 	"diagnosed":          {"candidates_ready", "accepted_loss", "abandoned"},
 	"candidates_ready":   {"validating", "accepted_loss", "abandoned"},

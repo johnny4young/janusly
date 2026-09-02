@@ -36,6 +36,11 @@ type ReadinessOptions struct {
 	// IsWriteSideTool classifies a tool invocation; nil means "unknown →
 	// read-side" (the contract resolves this from its tool registry).
 	IsWriteSideTool func(tool string, input map[string]any) bool
+	// IsExternalTool distinguishes tools that perform I/O from deterministic
+	// in-process helpers. Nil keeps the conservative legacy posture where every
+	// tool is treated as external. Registry-backed implementations must classify
+	// unknown names as external rather than silently exempting them.
+	IsExternalTool func(tool string) bool
 	// RequireEvalCoverage mirrors JANUSLY_REQUIRE_EVAL_COVERAGE: opt-in
 	// warn until eval tracking exists, default-off so a clean workflow can
 	// reach "pass".
@@ -47,6 +52,7 @@ var (
 	sensitiveToolNames   = map[string]bool{
 		"email.send": true, "slack.post": true, "github.create_issue": true,
 		"linear.create_issue": true, "db.query.write": true, "db.query.transaction": true,
+		"pagerduty.incident.acknowledge": true, "pagerduty.incident.snooze": true,
 	}
 	sensitiveToolSuffixes = []string{".write", ".create", ".send", ".delete", ".update"}
 	secretTemplatePattern = regexp.MustCompile(`\{\{\s*(secret|env)\.[A-Za-z0-9_-]+\s*\}\}`)
@@ -123,6 +129,9 @@ func checkExternalRetry(node Node, opts ReadinessOptions, issues *[]ReadinessIss
 		retrySafe = !isSensitiveAction(node, opts)
 	case "tool":
 		toolName, _ := node.Config["tool"].(string)
+		if opts.IsExternalTool != nil && !opts.IsExternalTool(toolName) {
+			return
+		}
 		toolInput, _ := node.Config["input"].(map[string]any)
 		retrySafe = !isWriteSideTool(opts, toolName, toolInput)
 	default:

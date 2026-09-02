@@ -69,7 +69,7 @@ export const nodePresets: Record<string, JsonObject> = {
   email_received: { aliasKey: '', dkimRequired: true },
   file_dropped: { bucket: '', prefix: '' },
   mcp_server_event: { connectionAlias: '', resourceUri: '' },
-  pagerduty_incident: { webhookCredential: 'pagerduty-webhook', rateLimitPerMin: 120 },
+  pagerduty_incident: { webhookCredential: '', rateLimitPerMin: 120 },
 }
 
 /** Ordered list of supported node-type ids — derived from `nodePresets`. */

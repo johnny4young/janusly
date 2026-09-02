@@ -42,7 +42,7 @@
  *    dependency on the workflow schema for a value-only constant.
  */
 
-import { z } from 'zod'
+import * as z from 'zod/mini'
 
 // ---------- category ----------
 
@@ -58,7 +58,7 @@ export const SNIPPET_CATEGORIES = [
   'transform',
   'custom',
 ] as const
-export const SnippetCategorySchema = z.enum(SNIPPET_CATEGORIES)
+export const SnippetCategorySchema = /* @__PURE__ */ z.enum(SNIPPET_CATEGORIES)
 export type SnippetCategory = (typeof SNIPPET_CATEGORIES)[number]
 
 // ---------- bounds ----------
@@ -80,10 +80,10 @@ export const BUILTIN_SNIPPET_ID_PREFIX = 'builtin:'
  * globally-unique id at insertion time. `config` is an opaque per-node
  * record, the same `Record<string, unknown>` the engine node config uses.
  */
-export const SnippetNodeSchema = z.object({
-  id: z.string().trim().min(1),
-  type: z.string().trim().min(1),
-  config: z.record(z.string(), z.unknown()).default({}),
+export const SnippetNodeSchema = /* @__PURE__ */ z.object({
+  id: z.string().check(z.trim(), z.minLength(1)),
+  type: z.string().check(z.trim(), z.minLength(1)),
+  config: z._default(z.record(z.string(), z.unknown()), {}),
 })
 export type SnippetNode = z.infer<typeof SnippetNodeSchema>
 
@@ -91,10 +91,10 @@ export type SnippetNode = z.infer<typeof SnippetNodeSchema>
  * A snippet-internal edge template. `from`/`to` reference the snippet's
  * LOCAL node ids; `insertSnippet` remaps them to the fresh ids.
  */
-export const SnippetEdgeSchema = z.object({
-  from: z.string().trim().min(1),
-  to: z.string().trim().min(1),
-  condition: z.string().trim().min(1).optional(),
+export const SnippetEdgeSchema = /* @__PURE__ */ z.object({
+  from: z.string().check(z.trim(), z.minLength(1)),
+  to: z.string().check(z.trim(), z.minLength(1)),
+  condition: z.optional(z.string().check(z.trim(), z.minLength(1))),
 })
 export type SnippetEdge = z.infer<typeof SnippetEdgeSchema>
 
@@ -106,17 +106,22 @@ export type SnippetEdge = z.infer<typeof SnippetEdgeSchema>
  * operator-selected target node INTO. When omitted, the first node is the
  * entry. `id` is `builtin:<slug>` for built-ins and a UUID for custom rows.
  */
-export const SnippetDefinitionSchema = z.object({
-  id: z.string().trim().min(1),
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().max(400).default(''),
+export const SnippetDefinitionSchema = /* @__PURE__ */ z.object({
+  id: z.string().check(z.trim(), z.minLength(1)),
+  name: z.string().check(z.trim(), z.minLength(1), z.maxLength(120)),
+  description: z._default(z.string().check(z.trim(), z.maxLength(400)), ''),
   category: SnippetCategorySchema,
-  tags: z.array(z.string().trim().min(1).max(40)).max(SNIPPET_MAX_TAGS).default([]),
-  builtin: z.boolean().default(false),
-  nodes: z.array(SnippetNodeSchema).min(1).max(SNIPPET_MAX_NODES),
-  edges: z.array(SnippetEdgeSchema).max(SNIPPET_MAX_EDGES).default([]),
+  tags: z._default(
+    z
+      .array(z.string().check(z.trim(), z.minLength(1), z.maxLength(40)))
+      .check(z.maxLength(SNIPPET_MAX_TAGS)),
+    [],
+  ),
+  builtin: z._default(z.boolean(), false),
+  nodes: z.array(SnippetNodeSchema).check(z.minLength(1), z.maxLength(SNIPPET_MAX_NODES)),
+  edges: z._default(z.array(SnippetEdgeSchema).check(z.maxLength(SNIPPET_MAX_EDGES)), []),
   /** Local id of the snippet's entry node; defaults to `nodes[0].id`. */
-  entryNodeId: z.string().trim().min(1).optional(),
+  entryNodeId: z.optional(z.string().check(z.trim(), z.minLength(1))),
 })
 export type SnippetDefinition = z.infer<typeof SnippetDefinitionSchema>
 
@@ -126,14 +131,19 @@ export type SnippetDefinition = z.infer<typeof SnippetDefinitionSchema>
  * being anything else — every org-authored snippet is `builtin: false`.
  * `id` is server-assigned (not accepted from the client).
  */
-export const CreateSnippetBodySchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().max(400).default(''),
+export const CreateSnippetBodySchema = /* @__PURE__ */ z.object({
+  name: z.string().check(z.trim(), z.minLength(1), z.maxLength(120)),
+  description: z._default(z.string().check(z.trim(), z.maxLength(400)), ''),
   category: SnippetCategorySchema,
-  tags: z.array(z.string().trim().min(1).max(40)).max(SNIPPET_MAX_TAGS).default([]),
-  nodes: z.array(SnippetNodeSchema).min(1).max(SNIPPET_MAX_NODES),
-  edges: z.array(SnippetEdgeSchema).max(SNIPPET_MAX_EDGES).default([]),
-  entryNodeId: z.string().trim().min(1).optional(),
+  tags: z._default(
+    z
+      .array(z.string().check(z.trim(), z.minLength(1), z.maxLength(40)))
+      .check(z.maxLength(SNIPPET_MAX_TAGS)),
+    [],
+  ),
+  nodes: z.array(SnippetNodeSchema).check(z.minLength(1), z.maxLength(SNIPPET_MAX_NODES)),
+  edges: z._default(z.array(SnippetEdgeSchema).check(z.maxLength(SNIPPET_MAX_EDGES)), []),
+  entryNodeId: z.optional(z.string().check(z.trim(), z.minLength(1))),
 })
 export type CreateSnippetBody = z.infer<typeof CreateSnippetBodySchema>
 
@@ -141,14 +151,20 @@ export type CreateSnippetBody = z.infer<typeof CreateSnippetBodySchema>
  * Update-body for `POST /snippets/:id`. Every field optional — only the
  * provided fields are written. `category` stays the closed enum.
  */
-export const UpdateSnippetBodySchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
-  description: z.string().trim().max(400).optional(),
-  category: SnippetCategorySchema.optional(),
-  tags: z.array(z.string().trim().min(1).max(40)).max(SNIPPET_MAX_TAGS).optional(),
-  nodes: z.array(SnippetNodeSchema).min(1).max(SNIPPET_MAX_NODES).optional(),
-  edges: z.array(SnippetEdgeSchema).max(SNIPPET_MAX_EDGES).optional(),
-  entryNodeId: z.string().trim().min(1).optional(),
+export const UpdateSnippetBodySchema = /* @__PURE__ */ z.object({
+  name: z.optional(z.string().check(z.trim(), z.minLength(1), z.maxLength(120))),
+  description: z.optional(z.string().check(z.trim(), z.maxLength(400))),
+  category: z.optional(SnippetCategorySchema),
+  tags: z.optional(
+    z
+      .array(z.string().check(z.trim(), z.minLength(1), z.maxLength(40)))
+      .check(z.maxLength(SNIPPET_MAX_TAGS)),
+  ),
+  nodes: z.optional(
+    z.array(SnippetNodeSchema).check(z.minLength(1), z.maxLength(SNIPPET_MAX_NODES)),
+  ),
+  edges: z.optional(z.array(SnippetEdgeSchema).check(z.maxLength(SNIPPET_MAX_EDGES))),
+  entryNodeId: z.optional(z.string().check(z.trim(), z.minLength(1))),
 })
 export type UpdateSnippetBody = z.infer<typeof UpdateSnippetBodySchema>
 

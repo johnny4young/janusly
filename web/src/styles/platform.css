@@ -5736,6 +5736,68 @@ button.we-ops-metric-card--button {
   line-height: 1.4;
 }
 
+.we-recovery-case__candidate-facts {
+  display: grid;
+  gap: 4px;
+  margin-top: 3px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--we-line) 70%, transparent);
+}
+
+.we-recovery-case__candidate-facts small {
+  overflow-wrap: anywhere;
+}
+
+.we-recovery-case__candidate-facts b {
+  display: block;
+  margin-bottom: 1px;
+  color: var(--we-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.we-recovery-case__candidate-facts code {
+  color: var(--we-text-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.we-recovery-case__authoring-handoff {
+  display: grid;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--we-primary) 30%, var(--we-line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--we-primary) 5%, var(--we-surface));
+}
+
+.we-recovery-case__authoring-handoff > div:first-child {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--we-primary);
+}
+
+.we-recovery-case__authoring-handoff > div:first-child > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.we-recovery-case__authoring-handoff strong {
+  color: var(--we-text-1);
+  font-size: 12px;
+}
+
+.we-recovery-case__authoring-handoff small {
+  color: var(--we-text-2);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .we-recovery-case__validation {
   display: flex;
   align-items: flex-start;
@@ -8217,7 +8279,8 @@ button.we-recovery-heatmap__cell:focus-visible {
 .ai-authoring-stage,
 .ai-brief-summary,
 .ai-binding-report,
-.ai-proposal {
+.ai-proposal,
+.ai-value-preview {
   display: grid;
   gap: 12px;
 }
@@ -8356,6 +8419,27 @@ button.we-recovery-heatmap__cell:focus-visible {
 .ai-proposal-apply {
   border-color: color-mix(in srgb, var(--we-primary) 28%, var(--we-line));
   background: color-mix(in srgb, var(--we-primary) 4%, var(--we-surface));
+}
+
+.ai-value-preview {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--we-primary) 22%, var(--we-line));
+  border-radius: var(--we-radius-sm);
+  background: color-mix(in srgb, var(--we-primary) 3%, var(--we-surface-2));
+}
+
+.ai-value-preview > .helper-text {
+  margin: 0;
+}
+
+.ai-proposal-inputs .helper-text {
+  margin-top: 0;
+}
+
+.ai-proposal-inputs .ai-proposal-facts small {
+  color: var(--we-muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .ai-review-issues {

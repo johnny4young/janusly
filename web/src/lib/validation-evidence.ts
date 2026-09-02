@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod/mini";
 
 export const VALIDATION_EVIDENCE_LEVELS = [
   "static",
@@ -7,7 +7,7 @@ export const VALIDATION_EVIDENCE_LEVELS = [
   "live_canary",
 ] as const;
 
-export const ValidationEvidenceLevelSchema = z.enum(
+export const ValidationEvidenceLevelSchema = /* @__PURE__ */ z.enum(
   VALIDATION_EVIDENCE_LEVELS,
 );
 

@@ -12,6 +12,7 @@ import (
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/workflowreadiness"
 )
 
 const maxAssuranceIssueCodes = 50
@@ -64,7 +65,7 @@ func sortedKeys[V any](values map[string]V) []string {
 }
 
 func assuranceProjection(wf *domain.Workflow, validation domain.ValidationResult) map[string]any {
-	readiness := domain.CheckWorkflowReadiness(wf, domain.ReadinessOptions{})
+	readiness := domain.CheckWorkflowReadiness(wf, mcpReadinessOptions())
 	inputFields := []string{}
 	if wf.Inputs != nil {
 		inputFields = sortedKeys(wf.Inputs.Properties)
@@ -146,6 +147,10 @@ func assuranceProjection(wf *domain.Workflow, validation domain.ValidationResult
 	}
 }
 
+func mcpReadinessOptions() domain.ReadinessOptions {
+	return workflowreadiness.Options()
+}
+
 // assureWorkflow is a tenant-scoped, read-only evidence projection. It never
 // returns the persisted DAG, node configs, templates, credential references,
 // fixture contents, or provider outputs.
@@ -153,8 +158,8 @@ func (d Deps) assureWorkflow(ctx context.Context, workflowID string) (*mcp.CallT
 	if allowed, message := d.guardTool(ctx, "workflows.assure", "workflows.read", false); !allowed {
 		return expected(message)
 	}
-	if workflowID == "" {
-		return expected("workflowId is required")
+	if !validMCPIdentifier(workflowID) {
+		return expected("workflowId is required and must be at most 256 characters")
 	}
 	q := store.New(d.Pool)
 	workflow, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: d.OrgID})
@@ -176,7 +181,7 @@ func (d Deps) assureWorkflow(ctx context.Context, workflowID string) (*mcp.CallT
 	wf, parseIssues := domain.Parse(version.DagJson)
 	if wf == nil {
 		return ok(map[string]any{
-			"workflowId": workflow.ID, "name": workflow.Name,
+			"workflowId": workflow.ID, "name": boundedMCPText(workflow.Name, 240),
 			"versionId": version.ID, "version": version.Version,
 			"status": "invalid",
 			"validation": map[string]any{
@@ -189,7 +194,7 @@ func (d Deps) assureWorkflow(ctx context.Context, workflowID string) (*mcp.CallT
 	)
 	payload := assuranceProjection(wf, validation)
 	payload["workflowId"] = workflow.ID
-	payload["name"] = workflow.Name
+	payload["name"] = boundedMCPText(workflow.Name, 240)
 	payload["versionId"] = version.ID
 	payload["version"] = version.Version
 	return ok(payload)

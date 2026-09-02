@@ -35,6 +35,7 @@ func semanticWorkflow(id, action string, passWhen string) *domain.Workflow {
 		{ID: "fx-violation", SourceNodeID: "calc", Output: map[string]any{"total": "900"}, Expected: "violation"},
 	}
 	contract.Evidence.Required = []string{"failure_snapshot", "audit_trail", "terminal_outcome"}
+	contract.Effects = []domain.RecoveryEffect{}
 	contract.Repairs.Allowed = []string{"retry"}
 	contract.Validation.MinimumEvidenceLevel = "static"
 	contract.Approval.ProductionMutation = "required"
@@ -96,11 +97,44 @@ func TestSemanticOutcomeInterception(t *testing.T) {
 	if outcomeStatus != "semantic_violation" || violationCount != 1 {
 		t.Fatalf("observe outcome: %s/%d", outcomeStatus, violationCount)
 	}
-	var caseState, caseAction string
-	_ = pool.QueryRow(ctx, `SELECT state, action FROM recovery_cases WHERE org_id = $1 AND run_id = $2`, org, runID).
-		Scan(&caseState, &caseAction)
+	var caseID, caseState, caseAction, caseVersionID string
+	var caseWorkflowID *string
+	var caseRevision int64
+	_ = pool.QueryRow(ctx, `SELECT id, state, action, revision, workflow_id, workflow_version_id
+		FROM recovery_cases WHERE org_id = $1 AND run_id = $2`, org, runID).
+		Scan(&caseID, &caseState, &caseAction, &caseRevision, &caseWorkflowID, &caseVersionID)
 	if caseState != "detected" || caseAction != "observe" {
 		t.Fatalf("observe case: %s/%s", caseState, caseAction)
+	}
+	if caseWorkflowID != nil || caseVersionID != runID {
+		t.Fatalf("ad-hoc semantic case advertised an immutable workflow target: workflow=%v version=%q run=%q",
+			caseWorkflowID, caseVersionID, runID)
+	}
+	actor := &auth.Context{OrgID: org, UserID: "operator-observe"}
+	diagnosed, err := eng.DiagnoseRecoveryCase(ctx, DiagnoseRecoveryCaseInput{
+		Auth: actor, CaseID: caseID, ExpectedRevision: caseRevision, Language: "en",
+	})
+	if err != nil || diagnosed.Case.State != "diagnosed" {
+		t.Fatalf("diagnose observed finding: state=%s err=%v", diagnosed.Case.State, err)
+	}
+	var observeTransitions, falseContainments int
+	_ = pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE to_state='contained')
+		FROM recovery_case_transitions WHERE org_id=$1 AND case_id=$2`, org, caseID).
+		Scan(&observeTransitions, &falseContainments)
+	if observeTransitions != 1 || falseContainments != 0 {
+		t.Fatalf("observe diagnosis must not fabricate containment: transitions=%d containment=%d",
+			observeTransitions, falseContainments)
+	}
+	created, err := eng.CreateRecoveryCandidates(ctx, CreateRecoveryCandidatesInput{
+		Auth: actor, CaseID: caseID, ExpectedRevision: diagnosed.Case.Revision,
+	})
+	if err != nil || len(created.Candidates) != 1 {
+		t.Fatalf("ad-hoc case must expose only the safe accept-loss candidate: count=%d err=%v",
+			len(created.Candidates), err)
+	}
+	var adHocCandidate SemanticRecoveryCandidatePayload
+	if err := json.Unmarshal(created.Candidates[0].PayloadJson, &adHocCandidate); err != nil || adHocCandidate.Kind != "accept_loss" {
+		t.Fatalf("ad-hoc candidate target drifted: payload=%s err=%v", created.Candidates[0].PayloadJson, err)
 	}
 
 	// 2. Quarantine: node succeeded + case contained + run WAITING, and the
@@ -202,6 +236,17 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	org := fmt.Sprintf("org-governed-semantic-%d", time.Now().UnixNano())
 	wf := semanticWorkflow("wf-governed", "quarantine", "context.calc.output.total === '10'")
 	wf.Recovery.Contract.AutonomyLevel = 3
+	// Two independent detectors reject the same source output. One approved
+	// whole-contract replacement may resolve both, but each case must retain a
+	// locally navigable evidence chain rather than cross-case artifact ids.
+	wf.Recovery.Contract.Failure.Semantic.Detectors = append(
+		wf.Recovery.Contract.Failure.Semantic.Detectors,
+		domain.RecoverySemanticDetector{
+			ID: "det-total-secondary", SourceNodeID: "calc", Kind: "expression",
+			PassWhen: "context.calc.output.total === '10'", Action: "quarantine",
+			Message: "secondary total contract rejected the output",
+		},
+	)
 	runID, err := eng.StartRun(ctx, StartInput{
 		OrgID: org, Workflow: wf, Input: map[string]any{"total": "900"}, CreatedBy: "editor-1",
 	})
@@ -212,16 +257,47 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	stop()
 	<-workersDone
 
-	var caseID, state string
+	var caseID, state, detectorID string
 	var revision int64
-	if err := pool.QueryRow(ctx, `SELECT id, state, revision FROM recovery_cases WHERE org_id = $1 AND run_id = $2`, org, runID).
-		Scan(&caseID, &state, &revision); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT id, state, revision, detector_id FROM recovery_cases
+		WHERE org_id = $1 AND run_id = $2 ORDER BY detector_id LIMIT 1`, org, runID).
+		Scan(&caseID, &state, &revision, &detectorID); err != nil {
 		t.Fatalf("read contained case: %v", err)
 	}
 	if state != "contained" {
 		t.Fatalf("initial governed state = %s", state)
 	}
+	var siblingCaseID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM recovery_cases
+		WHERE org_id=$1 AND run_id=$2 AND source='semantic_violation' AND id<>$3`,
+		org, runID, caseID).Scan(&siblingCaseID); err != nil {
+		t.Fatalf("read semantic sibling: %v", err)
+	}
 	actor := &auth.Context{OrgID: org, UserID: "editor-1", Mode: auth.ModeDevHeaders, Source: auth.SourceWeb}
+	// A generic recovery record may legitimately share the run and source node,
+	// but it does not belong to the semantic detector cohort. Governed semantic
+	// operations must neither diagnose it nor let it weaken, block, or become
+	// silently closed by this replacement.
+	legacyCaseID := "legacy-contract-" + runID
+	if _, err := pool.Exec(ctx, `INSERT INTO recovery_cases (
+		id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id,
+		source_node_id, detector_kind, action, message, state, revision
+	) SELECT $1, org_id, run_id, workflow_id, workflow_version_id, 'contract',
+		'legacy-contract-detector', source_node_id, detector_kind, 'quarantine',
+		'generic recovery record', 'contained', 1
+	FROM recovery_cases WHERE org_id = $2 AND id = $3`, legacyCaseID, org, caseID); err != nil {
+		t.Fatalf("insert non-semantic sibling: %v", err)
+	}
+	if _, err := eng.LoadRecoveryDiagnosisFacts(ctx, org, legacyCaseID, 1, "en"); !errors.Is(err, ErrRecoveryCaseConflict) {
+		t.Fatalf("non-semantic case entered governed diagnosis: %v", err)
+	}
+	facts, err := eng.LoadRecoveryDiagnosisFacts(ctx, org, caseID, revision, "en")
+	if err != nil {
+		t.Fatalf("load semantic diagnosis facts: %v", err)
+	}
+	if facts.SimilarCases.Total != 0 {
+		t.Fatalf("non-semantic case contaminated comparable semantic evidence: %+v", facts.SimilarCases)
+	}
 
 	diagnosed, err := eng.AdvanceRecoveryCase(ctx, AdvanceRecoveryCaseInput{
 		Auth: actor, CaseID: caseID, ExpectedRevision: revision,
@@ -236,7 +312,7 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	}
 	evidence := []domain.RecoveryCaseEvidenceRef{
 		{Kind: "run", ID: runID}, {Kind: "run_node", ID: runID + ":calc"},
-		{Kind: "semantic_detector", ID: "det-total"},
+		{Kind: "semantic_detector", ID: detectorID},
 	}
 	candidates, err := eng.AdvanceRecoveryCase(ctx, AdvanceRecoveryCaseInput{
 		Auth: actor, CaseID: caseID, ExpectedRevision: diagnosed.Case.Revision,
@@ -348,7 +424,7 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 			t.Fatalf("apply loser must fail closed: %v", applyErr)
 		}
 	}
-	if winners != 1 || !applied.Resumed || applied.Decision != "replace" {
+	if winners != 1 || !applied.Resumed || applied.Decision != "replace" || len(applied.ResolvedCaseIDs) != 2 {
 		t.Fatalf("exactly one governed apply must resume: winners=%d result=%+v errors=%v", winners, applied, errs)
 	}
 	if err := pool.QueryRow(ctx, `SELECT state, revision FROM recovery_cases WHERE org_id = $1 AND id = $2`, org, caseID).
@@ -357,6 +433,72 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	}
 	if state != "monitoring" || revision != validated.Case.Revision+2 {
 		t.Fatalf("apply state/revision = %s/%d, want monitoring/%d", state, revision, validated.Case.Revision+2)
+	}
+	var siblingState string
+	var siblingRevision int64
+	if err := pool.QueryRow(ctx, `SELECT state, revision FROM recovery_cases WHERE org_id=$1 AND id=$2`,
+		org, siblingCaseID).Scan(&siblingState, &siblingRevision); err != nil {
+		t.Fatalf("read semantic sibling after apply: %v", err)
+	}
+	if siblingState != "monitoring" || siblingRevision != 7 {
+		t.Fatalf("semantic sibling state/revision = %s/%d, want monitoring/7", siblingState, siblingRevision)
+	}
+	var siblingPublicationID string
+	var siblingPublicationRaw []byte
+	if err := pool.QueryRow(ctx, `SELECT id, payload_json FROM recovery_case_artifacts
+		WHERE org_id=$1 AND case_id=$2 AND kind='publication'`, org, siblingCaseID).
+		Scan(&siblingPublicationID, &siblingPublicationRaw); err != nil {
+		t.Fatalf("read sibling publication: %v", err)
+	}
+	var siblingPublication map[string]any
+	if json.Unmarshal(siblingPublicationRaw, &siblingPublication) != nil ||
+		siblingPublication["authorityCaseId"] != caseID ||
+		siblingPublication["candidateArtifactId"] != candidate.ID ||
+		siblingPublication["validationArtifactId"] != validation.ID {
+		t.Fatalf("sibling publication lost exact authority: %s", siblingPublicationRaw)
+	}
+	rows, err := pool.Query(ctx, `SELECT evidence_json FROM recovery_case_transitions
+		WHERE org_id=$1 AND case_id=$2 AND actor_id='editor-1'`, org, siblingCaseID)
+	if err != nil {
+		t.Fatalf("read sibling apply receipts: %v", err)
+	}
+	applyReceiptCount := 0
+	for rows.Next() {
+		applyReceiptCount++
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var refs []domain.RecoveryCaseEvidenceRef
+		if json.Unmarshal(raw, &refs) != nil {
+			t.Fatalf("parse sibling evidence: %s", raw)
+		}
+		sawLocalPublication := false
+		for _, ref := range refs {
+			if ref.Kind == "publication" && ref.ID == siblingPublicationID {
+				sawLocalPublication = true
+			}
+			if (ref.Kind == "case_artifact" || ref.Kind == "validation") &&
+				(ref.ID == candidate.ID || ref.ID == validation.ID) {
+				t.Fatalf("sibling receipt exposed inaccessible cross-case artifact: %+v", ref)
+			}
+		}
+		if !sawLocalPublication {
+			t.Fatalf("sibling receipt lacks local publication anchor: %s", raw)
+		}
+	}
+	if err := rows.Err(); err != nil || applyReceiptCount != 6 {
+		t.Fatalf("sibling apply receipts = %d err=%v, want 6", applyReceiptCount, err)
+	}
+	rows.Close()
+	var legacyState string
+	var legacyRevision int64
+	if err := pool.QueryRow(ctx, `SELECT state, revision FROM recovery_cases WHERE org_id=$1 AND id=$2`, org, legacyCaseID).
+		Scan(&legacyState, &legacyRevision); err != nil {
+		t.Fatalf("read non-semantic sibling: %v", err)
+	}
+	if legacyState != "contained" || legacyRevision != 1 {
+		t.Fatalf("semantic apply mutated non-semantic sibling: state=%s revision=%d", legacyState, legacyRevision)
 	}
 	var monitoringOutcome string
 	if err := pool.QueryRow(ctx, `SELECT coalesce(outcome_status, '') FROM runs WHERE id=$1 AND org_id=$2`, runID, org).
@@ -384,6 +526,25 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	}
 	if state != "verified_recovered" || revision != validated.Case.Revision+3 {
 		t.Fatalf("terminal state/revision = %s/%d, want verified_recovered/%d", state, revision, validated.Case.Revision+3)
+	}
+	if err := pool.QueryRow(ctx, `SELECT state, revision FROM recovery_cases WHERE org_id=$1 AND id=$2`,
+		org, siblingCaseID).Scan(&siblingState, &siblingRevision); err != nil {
+		t.Fatalf("read verified semantic sibling: %v", err)
+	}
+	if siblingState != "verified_recovered" || siblingRevision != 8 {
+		t.Fatalf("verified semantic sibling = %s/%d, want verified_recovered/8", siblingState, siblingRevision)
+	}
+	var siblingVerificationRaw []byte
+	if err := pool.QueryRow(ctx, `SELECT payload_json FROM recovery_case_artifacts
+		WHERE org_id=$1 AND case_id=$2 AND kind='verification'`, org, siblingCaseID).
+		Scan(&siblingVerificationRaw); err != nil {
+		t.Fatalf("read sibling verification: %v", err)
+	}
+	var siblingVerification map[string]any
+	if json.Unmarshal(siblingVerificationRaw, &siblingVerification) != nil ||
+		siblingVerification["authorityCaseId"] != caseID ||
+		siblingVerification["publicationArtifactId"] != siblingPublicationID {
+		t.Fatalf("sibling verification lost authority chain: %s", siblingVerificationRaw)
 	}
 	var verifiedOutcome string
 	if err := pool.QueryRow(ctx, `SELECT coalesce(outcome_status, '') FROM runs WHERE id=$1 AND org_id=$2`, runID, org).
@@ -465,7 +626,8 @@ func assertSemanticRecoveryTerminalRecurred(t *testing.T, terminalStatus string)
 		t.Fatalf("insert monitoring case: %v", err)
 	}
 	publicationPayload := map[string]any{
-		"caseId": caseID, "runId": runID, "decision": "replace",
+		"caseId": caseID, "authorityCaseId": caseID, "caseRevision": 6,
+		"runId": runID, "decision": "replace",
 		"candidateArtifactId":  "candidate-terminal",
 		"candidateSha256":      strings.Repeat("a", 64),
 		"validationArtifactId": "validation-terminal",

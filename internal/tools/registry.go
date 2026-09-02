@@ -32,7 +32,11 @@ type Definition struct {
 	// WriteSide marks the static write-capability bit; input-sensitive tools
 	// refine the exact effect at runtime.
 	WriteSide bool
-	Execute   func(ctx context.Context, input map[string]any) (map[string]any, error)
+	// Local must be opted into by deterministic in-process helpers. The zero
+	// value is deliberately external so a newly registered tool cannot bypass
+	// readiness retry requirements by forgetting capability metadata.
+	Local   bool
+	Execute func(ctx context.Context, input map[string]any) (map[string]any, error)
 }
 
 // CatalogEntry is the executable registry's safe, typed projection for
@@ -58,9 +62,11 @@ type Registry struct {
 func NewRegistry() *Registry {
 	registry := &Registry{byName: map[string]Definition{}}
 	for _, definition := range jsonTools() {
+		definition.Local = true
 		registry.byName[definition.Name] = definition
 	}
 	for _, definition := range csvTools() {
+		definition.Local = true
 		registry.byName[definition.Name] = definition
 	}
 	for _, definition := range vectorTools() {
@@ -79,9 +85,11 @@ func NewRegistry() *Registry {
 		registry.byName[definition.Name] = definition
 	}
 	for _, definition := range timeWindowTools() {
+		definition.Local = true
 		registry.byName[definition.Name] = definition
 	}
 	for _, definition := range pagerDutyTools() {
+		definition.Local = !IsIntegrationTool(definition.Name)
 		registry.byName[definition.Name] = definition
 	}
 	for _, definition := range dbTools() {
@@ -93,6 +101,7 @@ func NewRegistry() *Registry {
 		Required:     []string{"value"},
 		Fields:       []Field{{Name: "value", Type: "string", Required: true}},
 		InputExample: map[string]any{"value": "hello"},
+		Local:        true,
 		Execute: func(_ context.Context, input map[string]any) (map[string]any, error) {
 			value, _ := input["value"].(string)
 			return map[string]any{"value": strings.ToUpper(value)}, nil
@@ -130,10 +139,18 @@ func (r *Registry) CatalogEntries() []CatalogEntry {
 	out := make([]CatalogEntry, 0, len(names))
 	for _, name := range names {
 		definition := r.byName[name]
+		required := slices.Clone(definition.Required)
+		if required == nil {
+			required = []string{}
+		}
+		inputFields := slices.Clone(definition.Fields)
+		if inputFields == nil {
+			inputFields = []Field{}
+		}
 		entry := CatalogEntry{
 			Name: definition.Name, Description: definition.Description,
-			Required: slices.Clone(definition.Required), Optional: slices.Clone(definition.Optional),
-			InputFields: slices.Clone(definition.Fields), WriteSide: definition.WriteSide,
+			Required: required, Optional: slices.Clone(definition.Optional),
+			InputFields: inputFields, WriteSide: definition.WriteSide,
 		}
 		if definition.InputExample != nil {
 			entry.InputExample = maps.Clone(definition.InputExample)
@@ -336,6 +353,13 @@ func (r *Registry) Register(definition Definition) {
 func (r *Registry) IsWriteSide(name string) bool {
 	definition, ok := r.byName[name]
 	return ok && definition.WriteSide
+}
+
+// IsExternal reports whether a tool crosses a runtime boundary. Unknown tools
+// are deliberately external so registry drift cannot weaken readiness.
+func (r *Registry) IsExternal(name string) bool {
+	definition, ok := r.byName[name]
+	return !ok || !definition.Local
 }
 
 // vectorTools are catalog entries for the org-scoped memory tools. Their

@@ -120,7 +120,7 @@ func (s *V1Server) organizationCreateCore(r *http.Request, rc identityRequest) o
 func (s *V1Server) organizationsCore(r *http.Request, rc identityRequest) opResult {
 	rows, err := store.New(s.pool).ListUserMemberships(r.Context(), rc.userID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	organizations := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -262,7 +262,7 @@ func (s *V1Server) pluginInstallCore(r *http.Request, rc v1Request) opResult {
 		ID: id, OrgID: rc.orgID, PluginID: body.PluginID,
 		ConfigJson: config, InstalledBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	var metadata map[string]any
 	_ = json.Unmarshal(config, &metadata)

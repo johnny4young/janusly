@@ -74,6 +74,11 @@ func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidat
 	for _, id := range actualEffects {
 		guardedEffects[id] = true
 	}
+	guardedEffectIDs := make([]string, 0, len(guardedEffects))
+	for id := range guardedEffects {
+		guardedEffectIDs = append(guardedEffectIDs, id)
+	}
+	slices.Sort(guardedEffectIDs)
 
 	for _, detector := range semantic.Detectors {
 		sourceNode, known := nodeByID[detector.SourceNodeID]
@@ -99,9 +104,13 @@ func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidat
 		if detector.Action != "quarantine" {
 			continue
 		}
-		for effectNodeID := range guardedEffects {
+		// Reachability depends only on this detector source, not on the target
+		// effect. Traverse once per detector instead of once per detector/effect
+		// pair; V2 permits up to 50 detectors and 100 declared effects.
+		reachable := reachableNodesWithout(wf, detector.SourceNodeID)
+		for _, effectNodeID := range guardedEffectIDs {
 			if detector.SourceNodeID == effectNodeID ||
-				canReachNodeWithout(wf, effectNodeID, detector.SourceNodeID) {
+				reachable[effectNodeID] {
 				push(Issue{Code: "semantic_detector_does_not_guard_effect", NodeID: effectNodeID,
 					Message: "Quarantine detector \"" + detector.ID + "\" must run on every path before recovery effect node \"" + effectNodeID + "\""})
 			}
@@ -153,11 +162,11 @@ func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidat
 	}
 }
 
-// canReachNodeWithout reports whether targetID is still reachable from an
-// original workflow root after removing excludedNodeID. If it is, the
-// excluded node does not dominate the target and cannot truthfully
-// promise pre-effect quarantine.
-func canReachNodeWithout(wf *Workflow, targetID, excludedNodeID string) bool {
+// reachableNodesWithout returns every node still reachable from an original
+// workflow root after removing excludedNodeID. Any guarded effect in the set
+// is not dominated by the excluded detector and cannot truthfully promise
+// pre-effect quarantine.
+func reachableNodesWithout(wf *Workflow, excludedNodeID string) map[string]bool {
 	incoming := map[string]bool{}
 	for _, edge := range wf.Edges {
 		incoming[edge.To] = true
@@ -182,11 +191,8 @@ func canReachNodeWithout(wf *Workflow, targetID, excludedNodeID string) bool {
 		if visited[nodeID] {
 			continue
 		}
-		if nodeID == targetID {
-			return true
-		}
 		visited[nodeID] = true
 		queue = append(queue, outgoing[nodeID]...)
 	}
-	return false
+	return visited
 }

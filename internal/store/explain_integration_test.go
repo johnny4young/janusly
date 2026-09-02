@@ -78,6 +78,18 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 			if _, err := tx.Exec(ctx, "SET LOCAL enable_seqscan = off"); err != nil {
 				t.Fatalf("seqscan off: %v", err)
 			}
+			if requiredIndexes[c.name] != "" {
+				// The controlled tenant key intentionally has no rows. PostgreSQL may
+				// therefore choose the equally index-served per-run nested-loop path
+				// (`runs_org_*` + `run_nodes_run_node_idx`) and never expose whether
+				// the global failed-row path is viable. Disable that alternative only
+				// for the explicit index-capability probe; the ordinary hot-query gate
+				// above still accepts whichever non-sequential production plan is
+				// cheapest for current statistics.
+				if _, err := tx.Exec(ctx, "SET LOCAL enable_nestloop = off"); err != nil {
+					t.Fatalf("nested loop off: %v", err)
+				}
+			}
 			stmt := fmt.Sprintf("explain_probe_%d", index)
 			if _, err := tx.Exec(ctx, fmt.Sprintf("PREPARE %s AS %s", stmt, c.sql)); err != nil {
 				t.Fatalf("prepare: %v", err)

@@ -96,3 +96,41 @@ func TestReadinessBadgeRouteBothWires(t *testing.T) {
 		t.Fatalf("wrapped validation codes missing: %+v", invalid.body["issues"])
 	}
 }
+
+func TestRollbackReadinessStartsOnlyAfterFirstSavedVersion(t *testing.T) {
+	h := newAPIHarness(t)
+	wfID := "wf-rollback-readiness-" + h.org
+	doc := map[string]any{
+		"id": wfID, "name": "Rollback readiness", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "step", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	hasRollbackWarning := func() bool {
+		t.Helper()
+		res := h.call("POST", "/workflows/readiness", map[string]any{"workflow": doc}, "")
+		if res.status != 200 {
+			t.Fatalf("readiness: %d %+v", res.status, res.body)
+		}
+		for _, raw := range res.body["issues"].([]any) {
+			if raw.(map[string]any)["code"] == "workflow_missing_rollback_version" {
+				return true
+			}
+		}
+		return false
+	}
+	if hasRollbackWarning() {
+		t.Fatal("an unsaved draft cannot truthfully claim that one version exists")
+	}
+	if res := h.call("POST", "/v1/workflows/save", doc, ""); res.status != 200 {
+		t.Fatalf("save first version: %d %+v", res.status, res.body)
+	}
+	if !hasRollbackWarning() {
+		t.Fatal("one saved version must warn that rollback is unavailable")
+	}
+	if res := h.call("POST", "/v1/workflows/save", doc, ""); res.status != 200 {
+		t.Fatalf("save second version: %d %+v", res.status, res.body)
+	}
+	if hasRollbackWarning() {
+		t.Fatal("two saved versions must satisfy rollback availability")
+	}
+}

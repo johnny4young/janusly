@@ -378,7 +378,7 @@ func (s *V1Server) recoveryQueueCore(r *http.Request, rc v1Request) opResult {
 	q.limit = pageSize + 1
 	rows, err := s.listRecoveryQueue(r.Context(), rc.orgID, q)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(buildRecoveryQueuePage(rows, pageSize, q.sort))
 }
@@ -400,7 +400,7 @@ func (s *V1Server) dlqListItems(r *http.Request, rc v1Request) ([]map[string]any
 	}
 	rows, err := s.listRecoveryQueue(r.Context(), rc.orgID, q)
 	if err != nil {
-		res := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		res := opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		return nil, &res
 	}
 	items := make([]map[string]any, 0, len(rows))

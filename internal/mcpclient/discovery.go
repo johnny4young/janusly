@@ -121,17 +121,11 @@ func (c *Client) setStatus(ctx context.Context, connection store.McpConnection, 
 // rejection) for the discovery path.
 func (c *Client) resolveEnvRefs(connection store.McpConnection) (map[string]string, string) {
 	resolved := map[string]string{}
-	var refs map[string]struct {
-		Kind string `json:"kind"`
-		Name string `json:"name"`
-	}
-	if len(connection.EnvRefs) > 0 {
-		_ = json.Unmarshal(connection.EnvRefs, &refs)
+	refs, err := ParseEnvRefs(connection.EnvRefs)
+	if err != nil {
+		return nil, "mcp credential references invalid"
 	}
 	for key, ref := range refs {
-		if ref.Kind != "env" {
-			continue
-		}
 		value, err := lookupEnvRef(ref.Name)
 		if err != "" {
 			return nil, fmt.Sprintf("%s for %s", err, key)
@@ -165,9 +159,18 @@ type ExposedMcpInputField struct {
 // contract's synthetic "_truncated" entry so the LLM and the operator
 // SEE the truncation instead of a silently clipped list.
 func (c *Client) ListExposedToolsForAi(ctx context.Context, orgID string) []ExposedMcpTool {
+	tools, _ := c.ListExposedToolsForCatalog(ctx, orgID)
+	return tools
+}
+
+// ListExposedToolsForCatalog preserves discovery failure as an explicit
+// signal. AI prompt enrichment intentionally retains the historical empty-on-
+// failure posture, while the operator-facing CapabilityCatalog must distinguish
+// "no opted-in tools" from "the tenant catalog could not be read".
+func (c *Client) ListExposedToolsForCatalog(ctx context.Context, orgID string) ([]ExposedMcpTool, error) {
 	rows, err := store.New(c.pool).ListExposedMcpToolsForAi(ctx, orgID)
 	if err != nil {
-		return []ExposedMcpTool{}
+		return []ExposedMcpTool{}, err
 	}
 	out := make([]ExposedMcpTool, 0, len(rows))
 	totalBytes := 0
@@ -209,9 +212,10 @@ func (c *Client) ListExposedToolsForAi(ctx context.Context, orgID string) []Expo
 		out = append(out, ExposedMcpTool{
 			ConnectionAlias: "_truncated", ToolName: "_truncated",
 			Description: fmt.Sprintf("(%d more truncated — narrow your opt-ins)", truncated),
+			InputFields: []ExposedMcpInputField{},
 		})
 	}
-	return out
+	return out, nil
 }
 
 const maxExposedInputFields = 30

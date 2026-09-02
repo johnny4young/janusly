@@ -74,6 +74,7 @@ export default function App() {
     currentWorkflowId,
     currentWorkflowName,
     currentWorkflowSaved,
+    currentWorkflowVersion,
     currentWorkflowInputs,
     currentWorkflowOutputs,
     workflowRevision,
@@ -111,7 +112,6 @@ export default function App() {
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
   const [readinessResult, setReadinessResult] = useState<ReadinessResult | null>(null)
   const [aiReviewIssues, setAiReviewIssues] = useState<AiReviewIssue[]>([])
-  const [currentWorkflowVersion, setCurrentWorkflowVersion] = useState<number | null>(null)
   const handleReadinessResult = useCallback((result: ReadinessResult | null) => {
     setReadinessResult(result)
   }, [])
@@ -302,10 +302,11 @@ export default function App() {
     return false
   }, [])
 
-  const openAiAuthoringAction = useCallback((action: AiAuthoringAction): void => {
+  const openAiAuthoringAction = useCallback((action: AiAuthoringAction, prompt?: string): void => {
     setAiActionRequest((current) => ({
       id: (current?.id ?? 0) + 1,
       action,
+      ...(prompt ? { prompt } : {}),
     }))
     setActiveTab('ai-studio')
   }, [setActiveTab])
@@ -412,6 +413,7 @@ export default function App() {
     openRecoveryQueue,
     openRun,
     openWorkflow,
+    openWorkflowVersion,
     proposeWorkflow,
     redriveNode,
     replayDeadLetter,
@@ -439,7 +441,6 @@ export default function App() {
     runPlatformMutation,
     setValidationIssues,
     setAiReviewIssues,
-    setCurrentWorkflowVersion,
     setRunInputOpen,
     setRunInputServerErrors,
     setRunInputSubmitting,
@@ -518,7 +519,7 @@ export default function App() {
         workflowName: currentWorkflowName,
         workflowSaved: currentWorkflowSaved,
         workflowId: currentWorkflowId,
-        workflowVersion: currentWorkflowVersion,
+        workflowVersion: currentWorkflowVersion?.version ?? null,
         workflowRunsCount: runs.length,
         aiHealth,
         streamStatus,
@@ -567,6 +568,7 @@ export default function App() {
           credentials,
           workflows: savedWorkflows,
           onOpenWorkflow: openWorkflow,
+          onOpenWorkflowVersion: openWorkflowVersion,
           onCreateWorkflow: beginWorkflowCreation,
           onUseTemplate: useTemplate,
           onInstallPlugin: installPlugin,

@@ -40,8 +40,10 @@ type IntegrationDeps struct {
 	// Post performs the guarded outbound POST (FetchHTTPTarget wrapper).
 	Post func(ctx context.Context, url string, headers map[string]string, body []byte) (statusCode int, responseBody string, errMessage string)
 	// Fetch is the method-explicit guarded outbound call (the PagerDuty
-	// tools need GET/PUT); same FetchHTTPTarget chokepoint as Post.
-	Fetch func(ctx context.Context, method, url string, headers map[string]string, body []byte) (statusCode int, responseBody string, errMessage string)
+	// tools need GET/PUT); same FetchHTTPTarget chokepoint as Post. Callers
+	// supply their provider-specific response cap instead of inheriting the
+	// generic HTTP tool's larger default.
+	Fetch func(ctx context.Context, method, url string, headers map[string]string, body []byte, maxResponseBytes int) (statusCode int, responseBody string, errMessage string)
 	// RateLimitPerMin resolves the per-tool tenant bound (org config →
 	// env → default), keyed by the tool's family name.
 	RateLimitPerMin func(family string, fallback int) int
@@ -273,7 +275,7 @@ func isSlackHookURL(raw string) bool {
 	if candidate.Scheme == "https" && strings.EqualFold(candidate.Hostname(), "hooks.slack.com") {
 		return true
 	}
-	if os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") != "true" {
+	if !localIntegrationSimulatorEnabled() {
 		return false
 	}
 	base, err := url.Parse(strings.TrimSpace(os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL")))
@@ -364,12 +366,21 @@ func executeSlackPost(
 }
 
 func githubAPIBase() string {
-	if os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") == "true" {
+	if localIntegrationSimulatorEnabled() {
 		if base := strings.TrimSpace(os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL")); base != "" {
 			return strings.TrimRight(base, "/") + "/github"
 		}
 	}
 	return "https://api.github.com"
+}
+
+// localIntegrationSimulatorEnabled is intentionally a double opt-in. The
+// generic integration flag alone is not enough to redirect any outbound
+// provider traffic; the whole process must also declare itself a local stack.
+// Keep this aligned with aiconfig.simulatorBaseURL.
+func localIntegrationSimulatorEnabled() bool {
+	return os.Getenv("JANUSLY_LOCAL_STACK") == "true" &&
+		os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") == "true"
 }
 
 func stringSliceInput(input map[string]any, key string, max int) ([]string, bool) {

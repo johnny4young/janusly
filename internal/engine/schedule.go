@@ -20,6 +20,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -55,20 +56,20 @@ func (e *Engine) SyncWorkflowSchedules(
 			continue
 		}
 		config, err := domain.ResolveScheduleConfig(node.Config)
-		if err != nil || !config.Enabled {
-			// Save-time validation rejects malformed configs; disabled schedules
-			// deliberately have no durable scheduler entry.
+		if err != nil {
+			return fmt.Errorf("resolve schedule node %q: %w", node.ID, err)
+		}
+		if !config.Enabled {
+			// Disabled schedules deliberately have no durable scheduler entry.
 			continue
 		}
 		schedule, err := cron.Parse(config.CronExpression)
 		if err != nil {
-			// Save-time validation rejects bad cron; a snapshot that slipped
-			// past simply registers nothing for this node.
-			continue
+			return fmt.Errorf("parse schedule node %q: %w", node.ID, err)
 		}
 		next, err := schedule.Next(now)
 		if err != nil {
-			continue
+			return fmt.Errorf("advance schedule node %q: %w", node.ID, err)
 		}
 		if err := q.UpsertScheduleEntry(ctx, store.UpsertScheduleEntryParams{
 			ID: e.newID(), OrgID: orgID, WorkflowID: workflowID,

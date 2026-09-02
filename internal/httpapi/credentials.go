@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/secretstore"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -154,9 +155,12 @@ func (s *V1Server) credentialHealthCore(r *http.Request, rc v1Request) opResult 
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	since := time.Now().UTC().AddDate(0, 0, -usageLookbackDays)
-	usageRows, _ := q.ListCredentialUsageRows(ctx, store.ListCredentialUsageRowsParams{
+	usageRows, err := q.ListCredentialUsageRows(ctx, store.ListCredentialUsageRowsParams{
 		OrgID: rc.orgID, CreatedAt: &since,
 	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
 	type aggregate struct {
 		lastUsedAt  *time.Time
 		lastErrorAt *time.Time
@@ -187,7 +191,10 @@ func (s *V1Server) credentialHealthCore(r *http.Request, rc v1Request) opResult 
 		}
 	}
 	// One DAG walk feeds every credential's referencing-workflows list.
-	dags, _ := q.ListLatestWorkflowVersionDags(ctx, rc.orgID)
+	dags, err := q.ListLatestWorkflowVersionDags(ctx, rc.orgID)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
 	references := map[string][]string{}
 	for _, dagRow := range dags {
 		var dag struct {
@@ -196,7 +203,7 @@ func (s *V1Server) credentialHealthCore(r *http.Request, rc v1Request) opResult 
 			} `json:"nodes"`
 		}
 		if json.Unmarshal(dagRow.DagJson, &dag) != nil {
-			continue
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		seen := map[string]bool{}
 		for _, node := range dag.Nodes {
@@ -228,16 +235,18 @@ func (s *V1Server) credentialHealthCore(r *http.Request, rc v1Request) opResult 
 		}
 		entries = append(entries, entry)
 	}
-	// MCP connections ride the same resolver so managed and legacy refs
-	// can't drift: each env ref must resolve for the connection to be ok.
-	mcpRows, _ := q.ListMcpConnectionsForHealth(ctx, rc.orgID)
+	// MCP connections ride the same resolver as execution: each deployment
+	// environment ref must resolve for the connection to be healthy.
+	mcpRows, err := q.ListMcpConnectionsForHealth(ctx, rc.orgID)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
 	mcpEntries := make([]map[string]any, 0, len(mcpRows))
 	for _, connection := range mcpRows {
-		refsPresent := true
-		var envRefs map[string]string
-		_ = json.Unmarshal(connection.EnvRefs, &envRefs)
+		envRefs, parseErr := mcpclient.ParseEnvRefs(connection.EnvRefs)
+		refsPresent := parseErr == nil
 		for _, ref := range envRefs {
-			if !secretstore.HasCredentialSecretRef(ctx, q, rc.orgID, ref) {
+			if !secretstore.HasCredentialSecretRef(ctx, q, rc.orgID, ref.Name) {
 				refsPresent = false
 				break
 			}
@@ -354,7 +363,9 @@ func (s *V1Server) createCredentialCore(r *http.Request, rc v1Request) opResult 
 
 func (s *V1Server) bulkUpdateCredentialCore(r *http.Request, rc v1Request, name string) opResult {
 	var body map[string]any
-	_ = decodeBody(r, &body)
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+	}
 	ctx := r.Context()
 	q := store.New(s.pool)
 	credential, err := q.GetCredentialByOrgName(ctx, store.GetCredentialByOrgNameParams{OrgID: rc.orgID, Name: name})
@@ -499,7 +510,9 @@ func (s *V1Server) deleteCredentialCore(r *http.Request, rc v1Request, name stri
 
 func (s *V1Server) credentialExpiryCore(r *http.Request, rc v1Request, name string) opResult {
 	var body map[string]any
-	_ = decodeBody(r, &body)
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+	}
 	// Clearing must be EXPLICIT on the dedicated endpoint: `expiresAt`
 	// present (future date or null); an omitted field cannot silently
 	// wipe a live expiry.

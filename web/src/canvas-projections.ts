@@ -33,7 +33,13 @@ import type { JsonObject, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNo
  * keeping the flag a boolean (not the resolved string) is what lets
  * the upstream memo skip re-projection on locale toggles.
  */
-export type EdgeData = { condition?: string; onError?: boolean; hasCondition?: boolean; hasOnError?: boolean }
+export type EdgeData = {
+  condition?: string
+  onError?: boolean
+  contractId?: string
+  hasCondition?: boolean
+  hasOnError?: boolean
+}
 
 /**
  * Stable arrow marker shared by every projected workflow edge. Keeping
@@ -59,6 +65,7 @@ function isNonemptyString(value: unknown): value is string {
 }
 
 const WORKFLOW_INPUT_TYPES = new Set<WorkflowInputSchemaShape['type']>(['string', 'number', 'boolean', 'object', 'array'])
+const WORKFLOW_INPUT_SCHEMA_NODE_MAX = 512
 
 /**
  * Validate the recursive workflow-input subset without pulling Zod into the
@@ -83,10 +90,10 @@ function isWorkflowInputSchema(value: unknown): value is WorkflowInputSchemaShap
       pending.push(...Object.values(properties))
     }
 
-    // A valid authoring payload is tiny. Bound adversarial historical input so
-    // validation remains fail-closed instead of monopolising the main thread.
+    // Match the Go contract boundary so a stored/run snapshot cannot be valid
+    // on one side and monopolise the browser main thread on the other.
     visited += 1
-    if (visited > 10_000) return false
+    if (visited > WORKFLOW_INPUT_SCHEMA_NODE_MAX) return false
   }
 
   return true
@@ -97,8 +104,16 @@ export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): Work
   const workflow = asObject(asObject(inputJson)?.workflow)
   let positionKeys: string[] = []
   if (!workflow || !Array.isArray(workflow.nodes) || !Array.isArray(workflow.edges)) return null
+  if (workflow.dslVersion !== undefined && workflow.dslVersion !== '1.0') return null
   if (workflow.id !== undefined && !isNonemptyString(workflow.id)) return null
   if (workflow.name !== undefined && !isNonemptyString(workflow.name)) return null
+  if (workflow.metadata !== undefined) {
+    const metadata = asObject(workflow.metadata)
+    if (!metadata) return null
+    if (metadata.description !== undefined && typeof metadata.description !== 'string') return null
+    if (metadata.tags !== undefined && (!Array.isArray(metadata.tags)
+      || !metadata.tags.every(tag => isNonemptyString(tag)))) return null
+  }
   if (workflow.inputs !== undefined && !isWorkflowInputSchema(workflow.inputs)) return null
   if (workflow.outputs !== undefined) {
     const outputs = asObject(workflow.outputs)
@@ -137,7 +152,9 @@ export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): Work
     const edge = asObject(rawEdge)
     if (!isNonemptyString(edge?.from) || !isNonemptyString(edge.to)) return null
     if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) return null
+    if (edge.id !== undefined && !isNonemptyString(edge.id)) return null
     if (edge.condition !== undefined && !isNonemptyString(edge.condition)) return null
+    if (edge.onError !== undefined && typeof edge.onError !== 'boolean') return null
   }
 
   return workflow as WorkflowDefinition
@@ -161,14 +178,31 @@ export function workflowToGraph(workflow: WorkflowDefinition): {
       data: { label: node.label ?? '', type: node.type, config: node.config ?? {} },
     }))
 
-  const edges = workflow.edges.map((edge, index) => ({
-    id: `e${index}`,
-    source: edge.from,
-    target: edge.to,
-    label: edge.condition ? 'condition' : undefined,
-    animated: Boolean(edge.condition),
-    data: { condition: edge.condition, onError: edge.onError },
-  }))
+  const usedCanvasEdgeIds = new Set<string>()
+  const edges = workflow.edges.map((edge, index) => {
+    const contractId = edge.id?.trim()
+    const fallbackBase = `e${index}`
+    let canvasId = contractId || fallbackBase
+    if (usedCanvasEdgeIds.has(canvasId)) canvasId = fallbackBase
+    let suffix = 1
+    while (usedCanvasEdgeIds.has(canvasId)) {
+      canvasId = `${fallbackBase}-${suffix}`
+      suffix += 1
+    }
+    usedCanvasEdgeIds.add(canvasId)
+    return {
+      id: canvasId,
+      source: edge.from,
+      target: edge.to,
+      label: edge.condition ? 'condition' : undefined,
+      animated: Boolean(edge.condition),
+      data: {
+        condition: edge.condition,
+        onError: edge.onError,
+        ...(contractId ? { contractId } : {}),
+      },
+    }
+  })
 
   return { nodes, edges }
 }

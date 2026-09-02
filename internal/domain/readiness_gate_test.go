@@ -26,7 +26,8 @@ func issueByCode(result ReadinessResult, code string) *ReadinessIssue {
 // Each case cites the contract rule it ports (workflow-readiness.ts).
 func TestReadinessRules(t *testing.T) {
 	writeSide := func(tool string, _ map[string]any) bool { return tool == "fake.write" }
-	opts := ReadinessOptions{IsWriteSideTool: writeSide}
+	external := func(tool string) bool { return tool == "fake.read" || tool == "fake.write" }
+	opts := ReadinessOptions{IsWriteSideTool: writeSide, IsExternalTool: external}
 
 	cases := []struct {
 		name       string
@@ -58,6 +59,18 @@ func TestReadinessRules(t *testing.T) {
 			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"post","type":"http",
 				"config":{"url":"https://x.test","method":"POST","timeoutMs":1}}],"edges":[]}`,
 			absentCode: "external_node_missing_retry",
+		},
+		{
+			name: "local tool without retry stays local",
+			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"clock","type":"tool",
+				"config":{"tool":"fake.local","input":{}}}],"edges":[]}`,
+			absentCode: "external_node_missing_retry",
+		},
+		{
+			name: "external read tool without retry fails",
+			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"read","type":"tool",
+				"config":{"tool":"fake.read","input":{}}}],"edges":[]}`,
+			wantCode: "external_node_missing_retry", severity: "fail",
 		},
 		{
 			name: "write-side tool without result policy fails", // checkToolResultPolicy

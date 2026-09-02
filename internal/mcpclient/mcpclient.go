@@ -187,17 +187,11 @@ func (c *Client) Execute(ctx context.Context, call Call) (envelope executors.Mcp
 	// name; CRLF values rejected so they can't smuggle a header line into
 	// the URL transports' outbound requests.
 	resolvedEnv := map[string]string{}
-	var envRefs map[string]struct {
-		Kind string `json:"kind"`
-		Name string `json:"name"`
-	}
-	if len(connection.EnvRefs) > 0 {
-		_ = json.Unmarshal(connection.EnvRefs, &envRefs)
+	envRefs, err := ParseEnvRefs(connection.EnvRefs)
+	if err != nil {
+		return fail("mcp credential references invalid")
 	}
 	for key, ref := range envRefs {
-		if ref.Kind != "env" {
-			continue
-		}
 		value, refErr := lookupEnvRef(ref.Name)
 		if refErr != "" {
 			return fail(fmt.Sprintf("%s for %s", refErr, key))

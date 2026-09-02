@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -24,7 +22,6 @@ import (
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
-	internaltools "github.com/johnny4young/janusly/internal/tools"
 )
 
 const (
@@ -114,16 +111,23 @@ func registerOperatorTools(server *mcp.Server, deps Deps) {
 }
 
 func (d Deps) operationsBrief(ctx context.Context) (*mcp.CallToolResult, any, error) {
-	if allowed, message := d.guardTool(ctx, "operations.brief", "recovery.read", false); !allowed {
+	if allowed, message := d.guardToolAny(ctx, "operations.brief", []string{
+		"recovery.read", "runs.read", "dlq.read",
+	}, false); !allowed {
 		return expected(message)
 	}
-	brief := operations.Builder{Pool: d.Pool}.Build(ctx, d.OrgID, d.Permissions)
+	brief := operations.Builder{
+		Pool: d.Pool, Surface: operations.ActionSurfaceMCP,
+	}.Build(ctx, d.OrgID, d.Permissions)
 	return ok(brief)
 }
 
 func (d Deps) proposeWorkflow(ctx context.Context, args mcpWorkflowProposalArgs) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "workflows.propose", "ai.write", false); !allowed {
 		return expected(message)
+	}
+	if raw, err := json.Marshal(args); err != nil || len(raw) > maxMCPRequestBytes {
+		return expected("workflow proposal request is invalid or exceeds 256000 bytes")
 	}
 	brief := authoring.IntentBrief{}
 	if args.Brief != nil {
@@ -139,17 +143,37 @@ func (d Deps) proposeWorkflow(ctx context.Context, args mcpWorkflowProposalArgs)
 	catalog := authoring.NewBuilder(d.Pool, d.CatalogSource).Build(ctx, d.OrgID)
 	document := args.Workflow
 	mode := "caller_draft"
-	if document == nil {
-		document = authoring.DeterministicWorkflow(authoring.ProposalPrompt(compiled.Brief))
-		mode = "deterministic_fallback"
-	}
-	raw, err := json.Marshal(document)
-	if err != nil || len(raw) > maxMCPWorkflowDocumentBytes {
-		return expected("workflow draft is invalid or exceeds 128000 bytes")
-	}
-	bindings, workflow, parseIssues := authoring.BindWorkflowJSON(catalog, document)
-	if workflow != nil {
-		bindings = authoring.BindProposal(catalog, compiled.Brief, workflow)
+	var bindings authoring.BindingReport
+	var workflow *domain.Workflow
+	var parseIssues []domain.Issue
+	if document == nil && !compiled.Complete {
+		// MCP combines the Brief and Proposal stages in one bounded read tool.
+		// Return the questions without manufacturing an executable-looking DAG
+		// from unresolved high-impact intent; a caller-supplied draft can still
+		// be inspected and bound below while remaining unappliable.
+		mode = "clarification_required"
+		bindings = authoring.BindingReport{
+			CatalogVersion: catalog.Version,
+			Resolved:       []authoring.Binding{},
+			Missing:        []authoring.Binding{},
+			Complete:       false,
+		}
+	} else {
+		if document == nil {
+			document = authoring.DeterministicWorkflowWithOptions(
+				authoring.ProposalGenerationPrompt(compiled, args.Prompt),
+				authoring.DeterministicWorkflowOptions{Catalog: &catalog, Brief: &compiled.Brief},
+			)
+			mode = "deterministic_fallback"
+		}
+		raw, marshalErr := json.Marshal(document)
+		if marshalErr != nil || len(raw) > maxMCPWorkflowDocumentBytes {
+			return expected("workflow draft is invalid or exceeds 128000 bytes")
+		}
+		bindings, workflow, parseIssues = authoring.BindWorkflowJSON(catalog, document)
+		if workflow != nil {
+			bindings = authoring.BindProposal(catalog, compiled.Brief, workflow)
+		}
 	}
 	if args.CatalogVersion != "" && args.CatalogVersion != catalog.Version {
 		bindings.Missing = append(bindings.Missing, authoring.Binding{
@@ -175,7 +199,7 @@ func mcpWorkflowProposalView(
 		"brief":               mcpBriefView(compiled.Brief),
 		"clarifyingQuestions": stringSliceView(compiled.ClarifyingQuestions, 3, 300),
 		"bindings":            mcpBindingReportView(bindings),
-		"applicable":          bindings.Complete && workflow != nil,
+		"applicable":          compiled.Complete && bindings.Complete && workflow != nil,
 	}
 	if workflow == nil {
 		view["workflow"] = map[string]any{"parseable": false, "nodeCount": 0, "edgeCount": 0, "nodes": []any{}}
@@ -195,10 +219,7 @@ func mcpWorkflowProposalView(
 		types[node.Type] = true
 	}
 	validation := domain.ValidateWithSemanticFixtures(workflow, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
-	registry := internaltools.NewRegistry()
-	readiness := domain.CheckWorkflowReadiness(workflow, domain.ReadinessOptions{
-		IsWriteSideTool: func(name string, _ map[string]any) bool { return registry.IsWriteSide(name) },
-	})
+	readiness := domain.CheckWorkflowReadiness(workflow, mcpReadinessOptions())
 	view["workflow"] = map[string]any{
 		"parseable": true,
 		"id":        boundedMCPText(workflow.ID, 160), "name": boundedMCPText(workflow.Name, 240),
@@ -379,6 +400,18 @@ func (d Deps) diagnoseRecoveryCase(ctx context.Context, args mcpRecoveryDiagnose
 	if caseRow.Revision != args.ExpectedRevision {
 		return expected("recovery case conflict")
 	}
+	preflight := engine.CreateRecoveryCandidatesInput{
+		Auth: d.auditContext(), CaseID: args.CaseID, ExpectedRevision: args.ExpectedRevision,
+		AcceptLossReason: args.AcceptLossReason,
+	}
+	if args.ManualReplacement != nil {
+		preflight.ManualReplacement = &engine.SemanticManualReplacement{
+			Output: args.ManualReplacement.Output, Reason: args.ManualReplacement.Reason,
+		}
+	}
+	if err := d.Engine.PreflightRecoveryCandidates(ctx, preflight); err != nil {
+		return mcpRecoveryError(err)
+	}
 	mode := "existing_diagnosis"
 	var diagnosis *store.RecoveryCaseArtifact
 	if caseRow.State == "detected" || caseRow.State == "contained" {
@@ -396,14 +429,8 @@ func (d Deps) diagnoseRecoveryCase(ctx context.Context, args mcpRecoveryDiagnose
 	} else if caseRow.State != "diagnosed" {
 		return expected("recovery case conflict")
 	}
-	var manual *engine.SemanticManualReplacement
-	if args.ManualReplacement != nil {
-		manual = &engine.SemanticManualReplacement{Output: args.ManualReplacement.Output, Reason: args.ManualReplacement.Reason}
-	}
-	created, err := d.Engine.CreateRecoveryCandidates(ctx, engine.CreateRecoveryCandidatesInput{
-		Auth: d.auditContext(), CaseID: args.CaseID, ExpectedRevision: caseRow.Revision,
-		ManualReplacement: manual, AcceptLossReason: args.AcceptLossReason,
-	})
+	preflight.ExpectedRevision = caseRow.Revision
+	created, err := d.Engine.CreateRecoveryCandidates(ctx, preflight)
 	if err != nil {
 		return mcpRecoveryError(err)
 	}
@@ -425,7 +452,7 @@ func (d Deps) validateRecoveryCase(ctx context.Context, args mcpRecoveryValidate
 	if allowed, message := d.guardTool(ctx, "recovery.cases.validate", "recovery.write", true); !allowed {
 		return expected(message)
 	}
-	if !validMCPCaseID(args.CaseID) || args.ExpectedRevision < 1 || strings.TrimSpace(args.CandidateArtifactID) == "" {
+	if !validMCPCaseID(args.CaseID) || args.ExpectedRevision < 1 || !validMCPArtifactID(args.CandidateArtifactID) {
 		return expected("caseId, candidateArtifactId and a positive expectedRevision are required")
 	}
 	result, err := d.Engine.ValidateRecoveryCaseCandidate(ctx, engine.ValidateRecoveryCaseCandidateInput{
@@ -447,7 +474,7 @@ func (d Deps) applyRecoveryCase(ctx context.Context, args mcpRecoveryApplyArgs) 
 		return expected(message)
 	}
 	if !validMCPCaseID(args.CaseID) || args.ExpectedRevision < 1 ||
-		strings.TrimSpace(args.CandidateArtifactID) == "" || strings.TrimSpace(args.ValidationArtifactID) == "" {
+		!validMCPArtifactID(args.CandidateArtifactID) || !validMCPArtifactID(args.ValidationArtifactID) {
 		return expected("caseId, candidateArtifactId, validationArtifactId and a positive expectedRevision are required")
 	}
 	artifact, err := store.New(d.Pool).GetRecoveryCaseArtifact(ctx, store.GetRecoveryCaseArtifactParams{
@@ -500,8 +527,11 @@ func mcpRecoveryError(err error) (*mcp.CallToolResult, any, error) {
 }
 
 func validMCPCaseID(caseID string) bool {
-	caseID = strings.TrimSpace(caseID)
-	return caseID != "" && utf8.RuneCountInString(caseID) <= 256
+	return validMCPIdentifier(caseID)
+}
+
+func validMCPArtifactID(artifactID string) bool {
+	return validMCPIdentifier(artifactID)
 }
 
 func mcpRecoveryDetailView(detail engine.RecoveryCaseDetail) map[string]any {
@@ -564,8 +594,8 @@ func mcpRecoveryArtifactView(row store.RecoveryCaseArtifact) map[string]any {
 			view["candidate"] = candidateView
 		}
 	case "validation":
-		var validation engine.SemanticRecoveryValidationPayload
-		if json.Unmarshal(row.PayloadJson, &validation) == nil {
+		validation, err := engine.ParseSemanticRecoveryValidationPayload(row.PayloadJson)
+		if err == nil {
 			view["validation"] = map[string]any{
 				"candidateArtifactId": validation.CandidateArtifactID,
 				"candidateSha256":     validation.CandidateSha256,

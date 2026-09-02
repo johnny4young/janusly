@@ -351,7 +351,10 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 			WorkflowID        string  `json:"workflowId"`
 			InsertedNodeCount float64 `json:"insertedNodeCount"`
 		}
-		_ = decodeBody(r, &body)
+		if err := decodeBody(r, &body); err != nil {
+			writeUnversioned(w, opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil))
+			return
+		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "snippet.inserted", audit.Options{
 			TargetType: "snippet", TargetID: id,
 			Metadata: map[string]any{
@@ -399,7 +402,7 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 		}
 		workflowID, versionID, err := s.installPackWorkflow(r, rc, pack)
 		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.pack_imported", audit.Options{
@@ -450,7 +453,7 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 		}
 		wf, _ := domain.Parse(pack.WorkflowJSON)
 		if wf == nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "pack workflow unparseable", nil))
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		// The sample run is a SANDBOX whose external trigger has already fired:
@@ -460,7 +463,7 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 			Input: sample.Input, Source: "pack:" + pack.ID,
 		})
 		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.sample_run_started", audit.Options{
@@ -510,7 +513,7 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 		}
 		wf, _ := domain.Parse(pack.WorkflowJSON)
 		if wf == nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Pack workflow is not executable", nil))
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		// Once this organization installs the pack, drills must exercise that
@@ -527,7 +530,7 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 		case latestErr == nil:
 			wf, _ = domain.Parse(latest.DagJson)
 			if wf == nil {
-				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Installed pack workflow is not executable", nil))
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 				return
 			}
 		case !errors.Is(latestErr, pgx.ErrNoRows):
@@ -554,7 +557,7 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 			if err != nil {
 				slog.Error("solution-pack runtime recovery drill failed",
 					"packId", pack.ID, "fixtureId", fixture.ID, "error", err)
-				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Recovery drill failed", nil))
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 				return
 			}
 			runID, deadLetterID, evidence = result.RunID, result.DeadLetterID, result.Evidence
@@ -563,12 +566,12 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 			if err != nil {
 				slog.Error("solution-pack stalled-node recovery drill failed",
 					"packId", pack.ID, "fixtureId", fixture.ID, "error", err)
-				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Recovery drill failed", nil))
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 				return
 			}
 			runID, deadLetterID, evidence = result.RunID, result.DeadLetterID, result.Evidence
 		default:
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Unsupported recovery drill path", nil))
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.failure_injected", audit.Options{
@@ -808,60 +811,25 @@ func (s *V1Server) packView(r *http.Request, rc v1Request, pack packs.SolutionPa
 // installPackWorkflow persists the pack's workflow as a draft version
 // (repeat installs append versions) and re-syncs its schedules.
 func (s *V1Server) installPackWorkflow(r *http.Request, rc v1Request, pack *packs.SolutionPack) (string, string, error) {
-	ctx := r.Context()
 	wf, _ := domain.Parse(pack.WorkflowJSON)
 	if wf == nil {
-		return "", "", fmt.Errorf("pack workflow unparseable")
+		return "", "", fmt.Errorf("internal error")
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	q := store.New(tx)
 	// workflows.id is a global PK: the installed id is deterministic PER
 	// ORG so two tenants can install the same pack and a re-install in the
 	// same org appends versions to the same workflow.
 	workflowID := wf.ID + "-" + shortHash(rc.orgID, 8)
 	wf.ID = workflowID
-	if _, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: rc.orgID}); err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return "", "", err
-		}
-		if err := q.InsertWorkflow(ctx, store.InsertWorkflowParams{
-			ID: workflowID, OrgID: rc.orgID, Name: wf.Name,
-			CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-		}); err != nil {
-			return "", "", err
-		}
+	if wf.Name == "" {
+		wf.Name = workflowID
 	}
-	version, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{
-		WorkflowID: workflowID, OrgID: rc.orgID,
-	})
-	if err != nil {
-		return "", "", err
+	committed, rejection := s.persistWorkflowVersion(
+		r.Context(), rc, wf, nil, false,
+	)
+	if rejection != nil {
+		return "", "", fmt.Errorf("pack workflow persistence rejected: %s", rejection.code)
 	}
-	versionID := s.newID()
-	var dagDocument map[string]any
-	if err := json.Unmarshal(pack.WorkflowJSON, &dagDocument); err != nil {
-		return "", "", err
-	}
-	dagDocument["id"] = workflowID
-	dagJSON, err := json.Marshal(dagDocument)
-	if err != nil {
-		return "", "", err
-	}
-	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
-		ID: versionID, OrgID: rc.orgID, WorkflowID: workflowID,
-		Version: int32(version) + 1, DagJson: dagJSON,
-		CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-	}); err != nil {
-		return "", "", err
-	}
-	if err := s.engine.SyncWorkflowSchedules(ctx, q, rc.orgID, workflowID, versionID, rc.userID, wf); err != nil {
-		return "", "", err
-	}
-	return workflowID, versionID, tx.Commit(ctx)
+	return workflowID, committed.VersionID, nil
 }
 
 func orEmptySlice(values []string) []string {

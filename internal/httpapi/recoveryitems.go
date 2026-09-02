@@ -51,7 +51,7 @@ func recoveryItemHandoffView(row store.RecoveryItemHandoff) map[string]any {
 func (s *V1Server) listRecoveryItemsCore(r *http.Request, rc v1Request) opResult {
 	rows, err := store.New(s.pool).ListRecoveryItems(r.Context(), rc.orgID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -69,13 +69,13 @@ func (s *V1Server) recoveryItemDetailCore(r *http.Request, rc v1Request, id stri
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusNotFound, "recovery_item_not_found", "Recovery item not found", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	handoffRows, err := q.ListRecoveryItemHandoffs(r.Context(), store.ListRecoveryItemHandoffsParams{
 		OrgID: rc.orgID, RecoveryItemID: id,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	handoffs := make([]map[string]any, 0, len(handoffRows))
 	for _, row := range handoffRows {
@@ -91,14 +91,16 @@ func (s *V1Server) recoveryItemActionCore(r *http.Request, rc v1Request, id, act
 		ResolutionReason string `json:"resolutionReason"`
 		Comment          string `json:"comment"`
 	}
-	_ = decodeBody(r, &body)
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "recovery_item_invalid_body", "Invalid request body", nil)
+	}
 	q := store.New(s.pool)
 	item, err := q.GetRecoveryItemByID(r.Context(), store.GetRecoveryItemByIDParams{OrgID: rc.orgID, ID: id})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return opError(http.StatusNotFound, "recovery_item_not_found", "Recovery item not found", nil)
 		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	newOwner := pgtype.Text{}
@@ -164,7 +166,7 @@ func (s *V1Server) recoveryItemActionCore(r *http.Request, rc v1Request, id, act
 		FromStatuses:     fromStatuses,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if moved == 0 {
 		return opError(http.StatusConflict, "recovery_item_conflict",
@@ -188,7 +190,7 @@ func (s *V1Server) recoveryItemActionCore(r *http.Request, rc v1Request, id, act
 	})
 	updated, err := q.GetRecoveryItemByID(r.Context(), store.GetRecoveryItemByIDParams{OrgID: rc.orgID, ID: id})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	return opOK(map[string]any{"item": recoveryItemView(updated)})
 }
@@ -223,7 +225,7 @@ func (s *V1Server) recoveryItemHandoffCore(r *http.Request, rc v1Request, id str
 		CreatedBy:      pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	auditName := "recovery.handoff." + body.Destination
 	if body.Destination == "webhook" {

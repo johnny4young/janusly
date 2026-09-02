@@ -27,7 +27,7 @@
  *    outage by pausing every tagged workflow).
  */
 
-import { z } from 'zod'
+import * as z from 'zod/mini'
 
 // ---------- provider kind ----------
 
@@ -48,7 +48,7 @@ export const UPSTREAM_HEALTH_KINDS = [
   'http_probe',
   'custom_feed',
 ] as const
-export const UpstreamHealthKindSchema = z.enum(UPSTREAM_HEALTH_KINDS)
+export const UpstreamHealthKindSchema = /* @__PURE__ */ z.enum(UPSTREAM_HEALTH_KINDS)
 export type UpstreamHealthKind = z.infer<typeof UpstreamHealthKindSchema>
 
 // ---------- component / derived status ----------
@@ -72,7 +72,7 @@ export const UPSTREAM_COMPONENT_STATUSES = [
   'under_maintenance',
   'unknown',
 ] as const
-export const UpstreamComponentStatusSchema = z.enum(UPSTREAM_COMPONENT_STATUSES)
+export const UpstreamComponentStatusSchema = /* @__PURE__ */ z.enum(UPSTREAM_COMPONENT_STATUSES)
 export type UpstreamComponentStatus = z.infer<typeof UpstreamComponentStatusSchema>
 
 /**
@@ -115,41 +115,44 @@ export const MAX_EXPECTED_COMPONENTS = 50
  * for `http_probe` / `custom_feed` and for operators who only care about the
  * page-level rollup.
  */
-export const UpstreamHealthSourceConfigSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1)
-    .max(80)
-    .regex(/^[a-zA-Z0-9][a-zA-Z0-9 ._-]*$/, {
+export const UpstreamHealthSourceConfigSchema = /* @__PURE__ */ z.object({
+  name: z.string().check(
+    z.trim(),
+    z.minLength(1),
+    z.maxLength(80),
+    z.regex(/^[a-zA-Z0-9][a-zA-Z0-9 ._-]*$/, {
       message:
         'name must start alphanumeric and contain only letters, numbers, spaces, dots, underscores, or hyphens',
     }),
+  ),
   kind: UpstreamHealthKindSchema,
-  url: z
-    .string()
-    .trim()
-    .url()
-    .max(2048)
-    .refine((u) => u.startsWith('https://') || u.startsWith('http://'), {
-      message: 'url must be an http(s) URL',
-    }),
-  expectedComponents: z
-    .array(z.string().trim().min(1).max(120))
-    .max(MAX_EXPECTED_COMPONENTS)
-    .default([]),
-  checkIntervalSeconds: z
-    .number()
-    .int()
-    .min(MIN_CHECK_INTERVAL_SECONDS)
-    .max(MAX_CHECK_INTERVAL_SECONDS)
-    .default(DEFAULT_CHECK_INTERVAL_SECONDS),
-  enabled: z.boolean().default(true),
+  url: z.pipe(
+    z.string().check(z.trim()),
+    z.url().check(
+      z.maxLength(2048),
+      z.refine((u) => u.startsWith('https://') || u.startsWith('http://'), {
+        message: 'url must be an http(s) URL',
+      }),
+    ),
+  ),
+  expectedComponents: z._default(
+    z
+      .array(z.string().check(z.trim(), z.minLength(1), z.maxLength(120)))
+      .check(z.maxLength(MAX_EXPECTED_COMPONENTS)),
+    [],
+  ),
+  checkIntervalSeconds: z._default(
+    z
+      .int()
+      .check(z.minimum(MIN_CHECK_INTERVAL_SECONDS), z.maximum(MAX_CHECK_INTERVAL_SECONDS)),
+    DEFAULT_CHECK_INTERVAL_SECONDS,
+  ),
+  enabled: z._default(z.boolean(), true),
 })
 export type UpstreamHealthSourceConfig = z.infer<typeof UpstreamHealthSourceConfigSchema>
 
 /** POST body for create/update — the config plus an optional id for upsert. */
-export const UpsertUpstreamHealthSourceBodySchema = z.object({
+export const UpsertUpstreamHealthSourceBodySchema = /* @__PURE__ */ z.object({
   source: UpstreamHealthSourceConfigSchema,
 })
 export type UpsertUpstreamHealthSourceBody = z.infer<
@@ -162,9 +165,9 @@ export type UpsertUpstreamHealthSourceBody = z.infer<
  * JSON), so the save route validates the raw save-body field against this
  * schema. Capped at the same `MAX_EXPECTED_COMPONENTS` to bound the row size.
  */
-export const UpstreamHealthSourceTagsSchema = z
-  .array(z.string().trim().min(1).max(80))
-  .max(MAX_EXPECTED_COMPONENTS)
+export const UpstreamHealthSourceTagsSchema = /* @__PURE__ */ z
+  .array(z.string().check(z.trim(), z.minLength(1), z.maxLength(80)))
+  .check(z.maxLength(MAX_EXPECTED_COMPONENTS))
 export type UpstreamHealthSourceTags = z.infer<typeof UpstreamHealthSourceTagsSchema>
 
 // ---------- feed parsing (PURE) ----------

@@ -54,6 +54,12 @@ make dev
 Open <http://127.0.0.1:5173>. The Go API remains available at
 <http://127.0.0.1:3001>.
 
+Start with the
+[PagerDuty on-call assurance walkthrough](docs/demos/pagerduty-on-call-assurance.md)
+to exercise Janusly's provider-free intent compiler, exact capability binding,
+governed workflow proposal, and isolated outcome-verification path. The local
+qualification never contacts PagerDuty or an AI provider.
+
 The database schema is a fresh-install baseline. Existing databases from any
 other schema generation are not upgradeable. `make db-reset` refuses to remove
 the Compose volume unless `CONFIRM=reset` is supplied.

@@ -54,7 +54,7 @@ func (s *V1Server) clusterMembersCore(r *http.Request, rc v1Request) opResult {
 	rows, err := store.New(s.pool).ListOpenDeadLetterClusterMembers(r.Context(),
 		store.ListOpenDeadLetterClusterMembersParams{OrgID: rc.orgID, CreatedAt: &since})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	matched := make([]string, 0, limit)
 	total := 0
@@ -160,7 +160,7 @@ func (s *V1Server) resolveDeadLetterCore(r *http.Request, rc v1Request) opResult
 	if _, err := store.New(s.pool).MarkDeadLetterResolved(r.Context(), store.MarkDeadLetterResolvedParams{
 		OrgID: rc.orgID, ID: body.ID,
 	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "dlq.resolved", audit.Options{
 		TargetType: "dlq", TargetID: body.ID,
@@ -198,7 +198,9 @@ func (s *V1Server) bulkResolveCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
 		DeadLetterIds []any `json:"deadLetterIds"`
 	}
-	_ = decodeBody(r, &body)
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+	}
 	ids, bad := readBulkDeadLetterIDs(body.DeadLetterIds, body.DeadLetterIds != nil)
 	if bad != nil {
 		return *bad
@@ -237,7 +239,9 @@ func (s *V1Server) bulkReplayCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
 		DeadLetterIds []any `json:"deadLetterIds"`
 	}
-	_ = decodeBody(r, &body)
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+	}
 	ids, bad := readBulkDeadLetterIDs(body.DeadLetterIds, body.DeadLetterIds != nil)
 	if bad != nil {
 		return *bad
@@ -272,12 +276,6 @@ func (s *V1Server) bulkReplayCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) clusterApplyCore(r *http.Request, rc v1Request) opResult {
-	_, settings := aiconfig.Resolve(r.Context(), s.pool, rc.orgID)
-	if limitErr := s.limiter.Enforce(r.Context(), rc.orgID, ratelimit.Options{
-		Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
-	}); limitErr != nil {
-		return opError(http.StatusTooManyRequests, "rate_limited", limitErr.Error(), nil)
-	}
 	var body struct {
 		ClusterSignature             string          `json:"clusterSignature"`
 		DeadLetterIds                []any           `json:"deadLetterIds"`
@@ -286,7 +284,15 @@ func (s *V1Server) clusterApplyCore(r *http.Request, rc v1Request) opResult {
 		RecoveryValidationRunID      string          `json:"recoveryValidationRunId"`
 		RecoveryPlaybookDeadLetterID string          `json:"recoveryPlaybookDeadLetterId"`
 	}
-	_ = decodeBody(r, &body)
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+	}
+	_, settings := aiconfig.Resolve(r.Context(), s.pool, rc.orgID)
+	if limitErr := s.limiter.Enforce(r.Context(), rc.orgID, ratelimit.Options{
+		Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
+	}); limitErr != nil {
+		return opError(http.StatusTooManyRequests, "rate_limited", limitErr.Error(), nil)
+	}
 	if body.ClusterSignature == "" {
 		return opError(http.StatusBadRequest, "dlq_field_required", "clusterSignature is required",
 			map[string]any{"field": "clusterSignature"})

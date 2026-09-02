@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -93,6 +94,62 @@ func TestRunRoundTripKeepsRawJSON(t *testing.T) {
 
 	if _, err := q.GetRun(ctx, GetRunParams{ID: runID, OrgID: "another-org"}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("cross-org read must miss, got: %v", err)
+	}
+}
+
+func TestInsertTriggerEventConcurrentDeterministicIdentityConverges(t *testing.T) {
+	ctx, _, q, org := newHarness(t)
+	runID := uid(org, "run-trigger-anchor")
+	seedRun(t, ctx, q, org, runID)
+	eventID := uid(org, "provider-event")
+	dedupeKey := "provider:" + eventID
+	params := InsertTriggerEventParams{
+		ID: eventID, OrgID: org, TriggerType: "pagerduty_incident",
+		WorkflowID:        text("wf-" + runID),
+		WorkflowVersionID: "wfv-" + runID,
+		NodeID:            "on_provider",
+		DedupeKey:         text(dedupeKey),
+		PayloadJson:       json.RawMessage(`{"event":{"id":"same-delivery"}}`),
+	}
+
+	const contenders = 16
+	start := make(chan struct{})
+	results := make(chan struct {
+		created int64
+		err     error
+	}, contenders)
+	var group sync.WaitGroup
+	for range contenders {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			created, err := q.InsertTriggerEvent(ctx, params)
+			results <- struct {
+				created int64
+				err     error
+			}{created: created, err: err}
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(results)
+
+	var inserts int64
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("same deterministic delivery raised a unique conflict: %v", result.err)
+		}
+		inserts += result.created
+	}
+	if inserts != 1 {
+		t.Fatalf("concurrent delivery inserted %d rows, want 1", inserts)
+	}
+	stored, err := q.FindTriggerEventByDedupe(ctx, FindTriggerEventByDedupeParams{
+		OrgID: org, DedupeKey: text(dedupeKey),
+	})
+	if err != nil || stored.ID != eventID || stored.Status != "received" {
+		t.Fatalf("durable delivery did not converge: row=%+v err=%v", stored, err)
 	}
 }
 

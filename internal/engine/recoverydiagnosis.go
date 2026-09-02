@@ -114,7 +114,8 @@ func (e *Engine) loadRecoveryDiagnosisFacts(
 		}
 		return store.RecoveryCase{}, RecoveryDiagnosisFacts{}, err
 	}
-	if caseRow.Revision != expectedRevision || (caseRow.State != "detected" && caseRow.State != "contained") {
+	if caseRow.Source != semanticRecoveryCaseSource || caseRow.Revision != expectedRevision ||
+		(caseRow.State != "detected" && caseRow.State != "contained") {
 		return store.RecoveryCase{}, RecoveryDiagnosisFacts{}, ErrRecoveryCaseConflict
 	}
 	facts := RecoveryDiagnosisFacts{
@@ -145,7 +146,8 @@ func (e *Engine) loadRecoveryDiagnosisFacts(
 		count(*) FILTER (WHERE state = 'recurred')::int,
 		count(*) FILTER (WHERE state = 'accepted_loss')::int
 		FROM recovery_cases
-		WHERE org_id = $1 AND detector_id = $2 AND id <> $3
+		WHERE org_id = $1 AND source = 'semantic_violation'
+		  AND detector_id = $2 AND id <> $3
 		  AND (($4::text IS NULL AND workflow_id IS NULL) OR workflow_id = $4::text)`,
 		orgID, caseRow.DetectorID, caseRow.ID, workflowID,
 	).Scan(&facts.SimilarCases.Total, &facts.SimilarCases.Recovered,
@@ -253,18 +255,27 @@ func (e *Engine) DiagnoseRecoveryCase(
 		return DiagnoseRecoveryCaseResult{}, err
 	}
 	diagnosis := BuildRecoveryDiagnosis(facts, input.Enrichment)
-	steps := []RecoveryTransitionStep{}
-	if caseRow.State == "detected" {
-		steps = append(steps, RecoveryTransitionStep{
-			From: "detected", To: "contained",
-			Reason: "Contained before diagnosis to prevent unverified downstream effects",
-		})
-	}
 	reason := "Deterministic evidence diagnosis recorded"
 	if diagnosis.Mode == "ai_enriched" {
 		reason = "AI-enriched diagnosis recorded from bounded evidence"
 	}
-	steps = append(steps, RecoveryTransitionStep{From: "contained", To: "diagnosed", Reason: reason})
+	steps := []RecoveryTransitionStep{}
+	if caseRow.State == "detected" && caseRow.Action == "observe" {
+		// Observe is deliberately non-blocking. Moving it through `contained`
+		// would manufacture a containment claim after downstream work was allowed
+		// to continue, so its governed lifecycle enters diagnosis directly.
+		steps = append(steps, RecoveryTransitionStep{
+			From: "detected", To: "diagnosed", Reason: reason,
+		})
+	} else {
+		if caseRow.State == "detected" {
+			steps = append(steps, RecoveryTransitionStep{
+				From: "detected", To: "contained",
+				Reason: "Contained before diagnosis to prevent unverified downstream effects",
+			})
+		}
+		steps = append(steps, RecoveryTransitionStep{From: "contained", To: "diagnosed", Reason: reason})
+	}
 	advanced, err := e.AdvanceRecoveryCase(ctx, AdvanceRecoveryCaseInput{
 		Auth: input.Auth, CaseID: input.CaseID, ExpectedRevision: input.ExpectedRevision,
 		Artifacts: []RecoveryArtifactInput{{Kind: "diagnosis", Payload: diagnosis}}, Steps: steps,

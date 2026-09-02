@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The time.window tool: correct matching plus the REJECTING bias — a
@@ -61,5 +63,19 @@ func TestTimeWindowTool(t *testing.T) {
 	}
 	if _, err = execute(map[string]any{"timeZone": "UTC", "windows": windows, "at": "not-a-date"}); err == nil {
 		t.Fatal("unparseable at must error")
+	}
+}
+
+func TestTimeNowToolReturnsParseableCurrentInstant(t *testing.T) {
+	before := time.Now().UTC().Add(-time.Second)
+	result, err := NewRegistry().Execute(context.Background(), "time.now", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now().UTC().Add(time.Second)
+	at, parseErr := time.Parse(time.RFC3339Nano, fmt.Sprint(result["at"]))
+	if parseErr != nil || at.Before(before) || at.After(after) || result["iso"] != result["at"] ||
+		result["epochMs"] != at.UnixMilli() {
+		t.Fatalf("time.now result=%+v parseErr=%v", result, parseErr)
 	}
 }

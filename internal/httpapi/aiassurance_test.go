@@ -106,7 +106,7 @@ func TestCompileWorkflowAssurancePreservesV2Qualification(t *testing.T) {
 		"contract": map[string]any{
 			"version": "2",
 			"failure": map[string]any{
-				"technical": map[string]any{"terminalNodeFailure": true},
+				"technical": map[string]any{"terminalNodeFailure": true, "stalledNode": false},
 				"semantic": map[string]any{
 					"mode": "deterministic",
 					"detectors": []any{map[string]any{

@@ -33,28 +33,10 @@ type CreateRecoveryCandidatesResult struct {
 	Candidates []store.RecoveryCaseArtifact
 }
 
-// CreateRecoveryCandidates creates only typed immutable envelopes. A caller
-// never supplies arbitrary patch JSON or permission metadata.
-func (e *Engine) CreateRecoveryCandidates(
-	ctx context.Context,
+func buildRecoveryCandidateArtifacts(
+	caseRow store.RecoveryCase,
 	input CreateRecoveryCandidatesInput,
-) (CreateRecoveryCandidatesResult, error) {
-	if input.Auth == nil || input.Auth.OrgID == "" || input.Auth.UserID == "" ||
-		input.CaseID == "" || input.ExpectedRevision < 1 {
-		return CreateRecoveryCandidatesResult{}, ErrRecoverySemanticInputInvalid
-	}
-	caseRow, err := store.New(e.pool).GetRecoveryCase(ctx, store.GetRecoveryCaseParams{
-		OrgID: input.Auth.OrgID, ID: input.CaseID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return CreateRecoveryCandidatesResult{}, ErrRecoveryCaseNotFound
-		}
-		return CreateRecoveryCandidatesResult{}, err
-	}
-	if caseRow.Revision != input.ExpectedRevision || caseRow.State != "diagnosed" {
-		return CreateRecoveryCandidatesResult{}, ErrRecoveryCaseConflict
-	}
+) ([]RecoveryArtifactInput, error) {
 	evidence := []domain.RecoveryCaseEvidenceRef{
 		{Kind: "run", ID: caseRow.RunID},
 		{Kind: "run_node", ID: caseRow.RunID + ":" + caseRow.SourceNodeID},
@@ -62,9 +44,16 @@ func (e *Engine) CreateRecoveryCandidates(
 	}
 	artifacts := make([]RecoveryArtifactInput, 0, 3)
 	if input.ManualReplacement != nil {
+		// An observe detector explicitly allowed downstream work to continue.
+		// Replacing its completed source output later cannot resume or verify that
+		// generation and ResolveSemanticOutcomeCase therefore cannot apply it.
+		// Reject the dead-end candidate before optional AI or any lifecycle write.
+		if caseRow.Action != "quarantine" {
+			return nil, ErrRecoverySemanticInputInvalid
+		}
 		reason := strings.TrimSpace(input.ManualReplacement.Reason)
 		if reason == "" || len([]rune(reason)) > recoveryReasonMaxRunes {
-			return CreateRecoveryCandidatesResult{}, ErrRecoverySemanticInputInvalid
+			return nil, ErrRecoverySemanticInputInvalid
 		}
 		artifacts = append(artifacts, RecoveryArtifactInput{Kind: "candidate", Payload: SemanticRecoveryCandidatePayload{
 			Kind: "replace_output", Decision: "replace", Output: input.ManualReplacement.Output,
@@ -103,7 +92,7 @@ func (e *Engine) CreateRecoveryCandidates(
 	}
 	acceptReason := strings.TrimSpace(input.AcceptLossReason)
 	if len([]rune(acceptReason)) > recoveryReasonMaxRunes {
-		return CreateRecoveryCandidatesResult{}, ErrRecoverySemanticInputInvalid
+		return nil, ErrRecoverySemanticInputInvalid
 	}
 	if acceptReason == "" {
 		acceptReason = "Explicitly accept the business outcome loss after human review"
@@ -115,7 +104,70 @@ func (e *Engine) CreateRecoveryCandidates(
 		RequiredPermissions: []string{"recovery.write"},
 	}})
 	if len(artifacts) < 1 || len(artifacts) > 3 {
+		return nil, ErrRecoverySemanticInputInvalid
+	}
+	return artifacts, nil
+}
+
+// PreflightRecoveryCandidates proves that a combined MCP diagnosis request can
+// create every engine-owned candidate before optional AI or any case mutation.
+// CreateRecoveryCandidates repeats the same checks at its CAS boundary.
+func (e *Engine) PreflightRecoveryCandidates(ctx context.Context, input CreateRecoveryCandidatesInput) error {
+	if input.Auth == nil || input.Auth.OrgID == "" || input.Auth.UserID == "" ||
+		input.CaseID == "" || input.ExpectedRevision < 1 {
+		return ErrRecoverySemanticInputInvalid
+	}
+	caseRow, err := store.New(e.pool).GetRecoveryCase(ctx, store.GetRecoveryCaseParams{
+		OrgID: input.Auth.OrgID, ID: input.CaseID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrRecoveryCaseNotFound
+		}
+		return err
+	}
+	if caseRow.Source != semanticRecoveryCaseSource || caseRow.Revision != input.ExpectedRevision ||
+		(caseRow.State != "detected" && caseRow.State != "contained" && caseRow.State != "diagnosed") {
+		return ErrRecoveryCaseConflict
+	}
+	artifacts, err := buildRecoveryCandidateArtifacts(caseRow, input)
+	if err != nil {
+		return err
+	}
+	for _, artifact := range artifacts {
+		if _, _, err := boundedRecoveryArtifact(artifact.Payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CreateRecoveryCandidates creates only typed immutable envelopes. A caller
+// never supplies arbitrary patch JSON or permission metadata.
+func (e *Engine) CreateRecoveryCandidates(
+	ctx context.Context,
+	input CreateRecoveryCandidatesInput,
+) (CreateRecoveryCandidatesResult, error) {
+	if input.Auth == nil || input.Auth.OrgID == "" || input.Auth.UserID == "" ||
+		input.CaseID == "" || input.ExpectedRevision < 1 {
 		return CreateRecoveryCandidatesResult{}, ErrRecoverySemanticInputInvalid
+	}
+	caseRow, err := store.New(e.pool).GetRecoveryCase(ctx, store.GetRecoveryCaseParams{
+		OrgID: input.Auth.OrgID, ID: input.CaseID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CreateRecoveryCandidatesResult{}, ErrRecoveryCaseNotFound
+		}
+		return CreateRecoveryCandidatesResult{}, err
+	}
+	if caseRow.Source != semanticRecoveryCaseSource ||
+		caseRow.Revision != input.ExpectedRevision || caseRow.State != "diagnosed" {
+		return CreateRecoveryCandidatesResult{}, ErrRecoveryCaseConflict
+	}
+	artifacts, err := buildRecoveryCandidateArtifacts(caseRow, input)
+	if err != nil {
+		return CreateRecoveryCandidatesResult{}, err
 	}
 	advanced, err := e.AdvanceRecoveryCase(ctx, AdvanceRecoveryCaseInput{
 		Auth: input.Auth, CaseID: input.CaseID, ExpectedRevision: input.ExpectedRevision,

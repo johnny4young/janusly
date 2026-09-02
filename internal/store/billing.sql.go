@@ -21,7 +21,7 @@ WHERE r.id = $1
 `
 
 // The dispatcher resolves the run's saved-workflow id for the composite
-// budget gate; doc-posted runs fall back to the version id itself.
+// budget gate; ad-hoc runs fall back to their run-scoped identity.
 func (q *Queries) GetRunWorkflowID(ctx context.Context, id string) (string, error) {
 	row := q.db.QueryRow(ctx, getRunWorkflowID, id)
 	var workflow_id string

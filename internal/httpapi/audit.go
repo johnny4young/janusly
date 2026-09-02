@@ -49,7 +49,7 @@ func (s *V1Server) auditTrail(w http.ResponseWriter, r *http.Request, rc v1Reque
 		PageLimit:       int32(limit + 1),
 	})
 	if err != nil {
-		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 		return
 	}
 	hasMore := len(rows) > limit

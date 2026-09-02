@@ -25,7 +25,6 @@ export type AppCommandsOptions = {
   runPlatformMutation: PlatformMutation
   setValidationIssues: Dispatch<SetStateAction<ValidationIssue[]>>
   setAiReviewIssues: Dispatch<SetStateAction<AiReviewIssue[]>>
-  setCurrentWorkflowVersion: Dispatch<SetStateAction<number | null>>
   setRunInputOpen: Dispatch<SetStateAction<boolean>>
   setRunInputServerErrors: Dispatch<SetStateAction<string[]>>
   setRunInputSubmitting: Dispatch<SetStateAction<boolean>>

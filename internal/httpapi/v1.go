@@ -260,6 +260,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workflows", s.auth(s.listWorkflows))
 	mux.HandleFunc("GET /v1/workflows/latest", s.auth(s.latestWorkflowVersion))
 	mux.HandleFunc("GET /v1/workflows/versions", s.auth(s.listWorkflowVersions))
+	mux.HandleFunc("GET /v1/workflows/versions/{versionId}", s.auth(s.workflowVersionSnapshot))
 	mux.HandleFunc("POST /v1/start", s.auth(s.startRun))
 	mux.HandleFunc("POST /triggers/webhook/ingest", s.auth(s.ingestWebhookBySelector))
 	mux.HandleFunc("POST /v1/webhooks/{workflowId}", s.auth(s.ingestWebhook))
@@ -401,7 +402,7 @@ func (s *V1Server) identity(next identityHandlerFunc) http.HandlerFunc {
 		requestID := requestIDFrom(r)
 		resolved, err := s.resolver.ResolveIdentity(r.Context(), r)
 		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		if resolved == nil {
@@ -429,7 +430,7 @@ func (s *V1Server) optionalIdentity(next identityHandlerFunc) http.HandlerFunc {
 		requestID := requestIDFrom(r)
 		resolved, err := s.resolver.ResolveIdentity(r.Context(), r)
 		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		if !optionalIdentityRoutes[r.Pattern] {
@@ -456,7 +457,7 @@ func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 		resolved, err := s.resolver.Resolve(r.Context(), r)
 		if err != nil {
 			writeV1Error(w, requestID, http.StatusInternalServerError, "internal_error",
-				"Internal error: "+err.Error(), nil)
+				"Internal error", nil)
 			return
 		}
 		if resolved == nil {

@@ -15,14 +15,14 @@
  * Pure, zero-I/O — safe to import from web bundle + engine + api + data.
  */
 
-import { z } from 'zod'
+import * as z from 'zod/mini'
 
 import { scrubSecretShapes } from './error-signature'
 
 // ---------- destinations ----------
 
 export const RECOVERY_HANDOFF_DESTINATIONS = ['slack', 'linear', 'github', 'webhook'] as const
-export const RecoveryHandoffDestinationSchema = z.enum(RECOVERY_HANDOFF_DESTINATIONS)
+export const RecoveryHandoffDestinationSchema = /* @__PURE__ */ z.enum(RECOVERY_HANDOFF_DESTINATIONS)
 export type RecoveryHandoffDestination = z.infer<typeof RecoveryHandoffDestinationSchema>
 
 // ---------- request body ----------
@@ -34,23 +34,24 @@ export type RecoveryHandoffDestination = z.infer<typeof RecoveryHandoffDestinati
  * (`owner`/`repo`/`labels` for github; `url` for webhook/linear; `channel`
  * optional for slack).
  */
-export const HandoffRequestBodySchema = z
-  .object({
+export const HandoffRequestBodySchema = /* @__PURE__ */ z.strictObject({
     destination: RecoveryHandoffDestinationSchema,
-    credentialName: z.string().min(1).max(200),
+    credentialName: z.string().check(z.minLength(1), z.maxLength(200)),
     // GitHub-only fields (validated as required via superRefine below).
-    owner: z.string().min(1).max(120).optional(),
-    repo: z.string().min(1).max(120).optional(),
-    labels: z.array(z.string().min(1).max(60)).max(10).optional(),
-    assignees: z.array(z.string().min(1).max(60)).max(10).optional(),
+    owner: z.optional(z.string().check(z.minLength(1), z.maxLength(120))),
+    repo: z.optional(z.string().check(z.minLength(1), z.maxLength(120))),
+    labels: z.optional(
+      z.array(z.string().check(z.minLength(1), z.maxLength(60))).check(z.maxLength(10)),
+    ),
+    assignees: z.optional(
+      z.array(z.string().check(z.minLength(1), z.maxLength(60))).check(z.maxLength(10)),
+    ),
     // Webhook / Linear: destination URL (required via superRefine).
-    url: z.string().url().max(2048).optional(),
+    url: z.optional(z.url().check(z.maxLength(2048))),
     // Slack-only optional channel override (most operators leave it null
     // because incoming webhooks are channel-bound at credential time).
-    channel: z.string().min(1).max(120).optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
+    channel: z.optional(z.string().check(z.minLength(1), z.maxLength(120))),
+  }).check(z.superRefine((value, ctx) => {
     if (value.destination === 'github' && (!value.owner || !value.repo)) {
       ctx.addIssue({
         code: 'custom',
@@ -65,14 +66,14 @@ export const HandoffRequestBodySchema = z
         path: ['url'],
       })
     }
-  })
+  }))
 
 export type HandoffRequestBody = z.infer<typeof HandoffRequestBodySchema>
 
 // ---------- dispatch outcomes ----------
 
 export const HANDOFF_OUTCOMES = ['delivered', 'delivery_failed'] as const
-export const HandoffOutcomeSchema = z.enum(HANDOFF_OUTCOMES)
+export const HandoffOutcomeSchema = /* @__PURE__ */ z.enum(HANDOFF_OUTCOMES)
 export type HandoffOutcome = z.infer<typeof HandoffOutcomeSchema>
 
 /**
@@ -80,25 +81,24 @@ export type HandoffOutcome = z.infer<typeof HandoffOutcomeSchema>
  * `ok: false` carries the upstream error message verbatim (scrubbed for
  * secret shapes by the dispatcher before persistence).
  */
-export const HandoffDispatchResultSchema = z
-  .object({
+export const HandoffDispatchResultSchema = /* @__PURE__ */ z.strictObject({
     destination: RecoveryHandoffDestinationSchema,
     ok: z.boolean(),
-    statusCode: z.number().int().min(100).max(599).nullable().optional(),
-    error: z.string().max(1000).nullable().optional(),
-    latencyMs: z.number().int().min(0),
-    externalId: z.string().max(200).nullable().optional(),
-    externalUrl: z
-      .string()
-      .url()
-      .max(2048)
-      .refine((v) => /^https?:\/\//i.test(v), { message: "externalUrl must be http(s)" })
-      .nullable()
-      .optional(),
+    statusCode: z.optional(z.nullable(z.int().check(z.minimum(100), z.maximum(599)))),
+    error: z.optional(z.nullable(z.string().check(z.maxLength(1000)))),
+    latencyMs: z.int().check(z.minimum(0)),
+    externalId: z.optional(z.nullable(z.string().check(z.maxLength(200)))),
+    externalUrl: z.optional(
+      z.nullable(
+        z.url().check(
+          z.maxLength(2048),
+          z.refine((v) => /^https?:\/\//i.test(v), { message: "externalUrl must be http(s)" }),
+        ),
+      ),
+    ),
     /** Set on the second-call append branch for GitHub (commentId, etc). */
-    commentId: z.string().max(200).nullable().optional(),
+    commentId: z.optional(z.nullable(z.string().check(z.maxLength(200)))),
   })
-  .strict()
 
 export type HandoffDispatchResult = z.infer<typeof HandoffDispatchResultSchema>
 

@@ -131,28 +131,28 @@ func (s *V1Server) runComparisonCore(r *http.Request, rc v1Request) opResult {
 	if missing := comparisonRunNotFound(err, "base"); missing != nil {
 		return *missing
 	} else if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	replayRun, err := q.GetRun(ctx, store.GetRunParams{ID: replayRunID, OrgID: rc.orgID})
 	if missing := comparisonRunNotFound(err, "replay"); missing != nil {
 		return *missing
 	} else if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	baseRows, err := q.ListRunNodesByRun(ctx, baseRunID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	replayRows, err := q.ListRunNodesByRun(ctx, replayRunID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	usageRows, err := q.ListRunComparisonUsage(ctx, store.ListRunComparisonUsageParams{
 		OrgID: rc.orgID, RunIds: []string{baseRunID, replayRunID},
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	baseByNode := make(map[string]store.ListRunNodesByRunRow, len(baseRows))

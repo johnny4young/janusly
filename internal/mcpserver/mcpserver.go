@@ -26,7 +26,13 @@ import (
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/recovery"
+	"github.com/johnny4young/janusly/internal/runstart"
 	"github.com/johnny4young/janusly/internal/store"
+)
+
+const (
+	maxMCPRequestBytes  = 256_000
+	maxMCPResponseBytes = 256_000
 )
 
 // Deps carries the in-process dependencies every tool shares.
@@ -65,6 +71,7 @@ func NewServer(deps Deps) *mcp.Server {
 		Title:   "Janusly",
 		Version: "0.1.0",
 	}, nil)
+	server.AddReceivingMiddleware(deps.requestGuard)
 
 	type saveArgs struct {
 		Workflow map[string]any `json:"workflow" jsonschema:"the full workflow document to save as a new immutable version"`
@@ -73,26 +80,19 @@ func NewServer(deps Deps) *mcp.Server {
 		"workflows.save", "Save workflow",
 		"Validate a workflow document and save it as a new immutable version.", false, false,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args saveArgs) (*mcp.CallToolResult, any, error) {
-		raw, err := json.Marshal(args.Workflow)
-		if err != nil {
-			return nil, nil, err
-		}
-		return deps.saveWorkflow(ctx, raw)
+		return deps.saveWorkflow(ctx, args.Workflow)
 	})
 
 	type startArgs struct {
-		Workflow map[string]any `json:"workflow" jsonschema:"the workflow document to execute"`
-		Input    map[string]any `json:"input,omitempty" jsonschema:"optional run input payload"`
+		Workflow          map[string]any `json:"workflow" jsonschema:"the workflow document to execute"`
+		WorkflowVersionID string         `json:"workflowVersionId,omitempty" jsonschema:"optional immutable version id that must exactly match the workflow document"`
+		Input             map[string]any `json:"input,omitempty" jsonschema:"optional run input payload"`
 	}
 	mcp.AddTool(server, writeTool(
 		"runs.start", "Start run",
 		"Start a run for the given workflow document; returns the run id.", false, false,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args startArgs) (*mcp.CallToolResult, any, error) {
-		raw, err := json.Marshal(args.Workflow)
-		if err != nil {
-			return nil, nil, err
-		}
-		return deps.startRun(ctx, raw, args.Input)
+		return deps.startRun(ctx, args.Workflow, args.WorkflowVersionID, args.Input)
 	})
 
 	type runArgs struct {
@@ -174,6 +174,9 @@ func ok(payload any) (*mcp.CallToolResult, any, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if len(raw) > maxMCPResponseBytes {
+		return expected("MCP response exceeds the bounded response limit")
+	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
 	}, payload, nil
@@ -182,19 +185,27 @@ func ok(payload any) (*mcp.CallToolResult, any, error) {
 // expected reports an EXPECTED failure as isError, keeping the session
 // alive — agents read these and decide, they are not crashes.
 func expected(message string) (*mcp.CallToolResult, any, error) {
+	message = boundedMCPText(message, maxMCPErrorSummaryRunes)
 	return &mcp.CallToolResult{
 		IsError: true,
 		Content: []mcp.Content{&mcp.TextContent{Text: message}},
 	}, nil, nil
 }
 
-func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallToolResult, any, error) {
+func (d Deps) saveWorkflow(ctx context.Context, document map[string]any) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "workflows.save", "workflows.write", true); !allowed {
 		return expected(message)
+	}
+	raw, err := json.Marshal(document)
+	if err != nil || len(raw) > maxMCPWorkflowDocumentBytes {
+		return expected("workflow document is invalid or exceeds 128000 bytes")
 	}
 	wf, issues := domain.Parse(raw)
 	if wf == nil {
 		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
+	}
+	if !validOptionalMCPIdentifier(wf.ID) {
+		return expected("workflow id must be at most 256 characters")
 	}
 	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	var blocking []domain.Issue
@@ -207,82 +218,121 @@ func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallT
 		return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(blocking)))
 	}
 
-	q := store.New(d.Pool)
 	workflowID := wf.ID
 	if workflowID == "" {
+		if d.NewID == nil {
+			return expected("workflow save is unavailable")
+		}
 		workflowID = d.NewID()
 	}
-	if _, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: d.OrgID}); err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil, err
-		}
-		name := wf.Name
-		if name == "" {
-			name = workflowID
-		}
-		if err := q.InsertWorkflow(ctx, store.InsertWorkflowParams{
-			ID: workflowID, OrgID: d.OrgID, Name: name,
-			CreatedBy: pgtype.Text{String: d.UserID, Valid: d.UserID != ""},
-		}); err != nil {
-			return expected(fmt.Sprintf("workflow id is already taken: %s", workflowID))
-		}
+	name := wf.Name
+	if name == "" {
+		name = workflowID
 	}
-	version, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{
-		WorkflowID: workflowID, OrgID: d.OrgID,
+	wf.ID = workflowID
+	wf.Name = name
+	committed, err := d.Engine.SaveWorkflowVersion(ctx, engine.SaveWorkflowVersionInput{
+		OrgID: d.OrgID, UserID: d.UserID, Workflow: wf, NewID: d.NewID,
 	})
-	if err != nil {
-		return nil, nil, err
-	}
-	versionID := d.NewID()
-	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
-		ID: versionID, OrgID: d.OrgID, WorkflowID: workflowID,
-		Version: version + 1, DagJson: raw,
-		CreatedBy: pgtype.Text{String: d.UserID, Valid: d.UserID != ""},
-	}); err != nil {
-		return nil, nil, err
+	switch {
+	case err == nil:
+	case errors.Is(err, engine.ErrWorkflowSaveNotFound):
+		return expected("workflow not found")
+	case errors.Is(err, engine.ErrWorkflowSaveIDTaken):
+		return expected("workflow id is already taken")
+	case errors.Is(err, engine.ErrWorkflowSaveRolloutActive):
+		return expected("finish the active workflow rollout before saving a new version")
+	case errors.Is(err, engine.ErrWorkflowSaveConflict):
+		return expected("concurrent workflow save conflict; retry with the latest workflow state")
+	default:
+		return expected("workflow save failed")
 	}
 	audit.Write(ctx, d.Pool, d.auditContext(), "workflow.saved", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
-		Metadata: map[string]any{"version": version + 1},
+		Metadata: map[string]any{"version": committed.Version, "attempts": committed.Attempts},
 	})
-	return ok(map[string]any{"workflowId": workflowID, "versionId": versionID, "version": version + 1})
+	return ok(map[string]any{
+		"workflowId": workflowID, "versionId": committed.VersionID, "version": committed.Version,
+	})
 }
 
-func (d Deps) startRun(ctx context.Context, raw json.RawMessage, input map[string]any) (*mcp.CallToolResult, any, error) {
+func (d Deps) startRun(
+	ctx context.Context,
+	document map[string]any,
+	requestedVersionID string,
+	input map[string]any,
+) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "runs.start", "runs.start", true); !allowed {
 		return expected(message)
+	}
+	requestedVersionID = strings.TrimSpace(requestedVersionID)
+	if !validOptionalMCPIdentifier(requestedVersionID) {
+		return expected("workflowVersionId must be at most 256 characters")
+	}
+	requestRaw, err := json.Marshal(map[string]any{
+		"workflow": document, "workflowVersionId": requestedVersionID, "input": input,
+	})
+	if err != nil || len(requestRaw) > maxMCPRequestBytes {
+		return expected("run request is invalid or exceeds 256000 bytes")
+	}
+	raw, err := json.Marshal(document)
+	if err != nil || len(raw) > maxMCPWorkflowDocumentBytes {
+		return expected("workflow document is invalid or exceeds 128000 bytes")
 	}
 	wf, issues := domain.Parse(raw)
 	if wf == nil {
 		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
 	}
-	if result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !result.Valid {
-		return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(result.Issues)))
+	if !validOptionalMCPIdentifier(wf.ID) {
+		return expected("workflow id must be at most 256 characters")
 	}
 	var startInput any
 	if input != nil {
 		startInput = input
 	}
-	runID, err := d.Engine.StartRun(ctx, engine.StartInput{
-		OrgID: d.OrgID, Workflow: wf, Input: startInput, CreatedBy: d.UserID,
+	started, err := (runstart.Service{
+		Engine: d.Engine, Pool: d.Pool, NewID: d.NewID,
+	}).Start(ctx, runstart.Request{
+		OrgID: d.OrgID, CreatedBy: d.UserID, Workflow: wf,
+		RequestedVersionID: requestedVersionID, Input: startInput,
 	})
 	if err != nil {
+		var rejection *runstart.Rejection
+		if errors.As(err, &rejection) {
+			if rejection.Code == runstart.CodeValidationFailed {
+				return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(rejection.Issues)))
+			}
+			return expected(rejection.Code + ": " + rejection.Message)
+		}
 		var invalid *engine.InputValidationError
 		if errors.As(err, &invalid) {
 			return expected(err.Error())
 		}
 		return nil, nil, err
 	}
-	audit.Write(ctx, d.Pool, d.auditContext(), "run.started.adhoc", audit.Options{
-		TargetType: "run", TargetID: runID,
-		Metadata: map[string]any{"workflowId": wf.ID, "adhoc": true},
+	if started.Replayed {
+		return ok(map[string]any{"runId": started.RunID})
+	}
+	startAction := audit.Action("run.started")
+	if !started.Binding.Bound {
+		startAction = "run.started.adhoc"
+	}
+	audit.Write(ctx, d.Pool, d.auditContext(), startAction, audit.Options{
+		TargetType: "run", TargetID: started.RunID,
+		Metadata: map[string]any{
+			"workflowId":        started.Workflow.ID,
+			"workflowVersionId": started.Binding.VersionID, "adhoc": !started.Binding.Bound,
+		},
 	})
-	return ok(map[string]any{"runId": runID})
+	return ok(map[string]any{"runId": started.RunID})
 }
 
 func (d Deps) runStatus(ctx context.Context, runID string) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "runs.status", "runs.read", false); !allowed {
 		return expected(message)
+	}
+	if !validMCPIdentifier(runID) {
+		return expected("runId is required and must be at most 256 characters")
 	}
 	q := store.New(d.Pool)
 	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
@@ -313,6 +363,9 @@ func (d Deps) runStatus(ctx context.Context, runID string) (*mcp.CallToolResult,
 func (d Deps) runInspect(ctx context.Context, runID string) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "runs.inspect", "runs.read", false); !allowed {
 		return expected(message)
+	}
+	if !validMCPIdentifier(runID) {
+		return expected("runId is required and must be at most 256 characters")
 	}
 	q := store.New(d.Pool)
 	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
@@ -392,8 +445,8 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	if allowed, message := d.guardTool(ctx, "dlq.redrive", "dlq.replay", true); !allowed {
 		return expected(message)
 	}
-	if deadLetterID == "" {
-		return expected("deadLetterId is required")
+	if !validMCPIdentifier(deadLetterID) {
+		return expected("deadLetterId is required and must be at most 256 characters")
 	}
 	err := d.Engine.RedriveDeadLetter(ctx, d.OrgID, deadLetterID)
 	switch {
@@ -415,7 +468,7 @@ func issueSummary(issues []domain.Issue) string {
 	if len(issues) == 0 {
 		return "unknown issue"
 	}
-	summary := issues[0].Message
+	summary := boundedMCPText(issues[0].Message, maxMCPErrorSummaryRunes)
 	if len(issues) > 1 {
 		summary = fmt.Sprintf("%s (+%d more)", summary, len(issues)-1)
 	}
@@ -450,6 +503,12 @@ func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, statu
 	if allowed, message := d.guardTool(ctx, "runs.list", "runs.read", false); !allowed {
 		return expected(message)
 	}
+	if !validOptionalMCPCursor(cursor) || !validOptionalMCPIdentifier(workflowID) {
+		return expected("runs list cursor or workflowId exceeds its bounded length")
+	}
+	if status != "" && status != "running" && status != "succeeded" && status != "failed" && status != "cancelled" {
+		return expected("run status must be running, succeeded, failed, or cancelled")
+	}
 	pageLimit, before, beforeID := pageBounds(limit, cursor)
 	rows, err := store.New(d.Pool).ListRunSummaries(ctx, store.ListRunSummariesParams{
 		OrgID: d.OrgID, BeforeCreatedAt: before, BeforeID: beforeID,
@@ -468,8 +527,9 @@ func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, statu
 	for _, row := range rows {
 		item := map[string]any{
 			"runId": row.ID, "status": row.Status,
-			"workflowId": row.WorkflowID, "workflowName": stringOrEmpty(row.WorkflowName),
-			"createdAt": createdAtISO(row.CreatedAt),
+			"workflowId":   row.WorkflowID,
+			"workflowName": boundedMCPText(stringOrEmpty(row.WorkflowName), 240),
+			"createdAt":    createdAtISO(row.CreatedAt),
 		}
 		items = append(items, item)
 	}
@@ -484,6 +544,9 @@ func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, statu
 func (d Deps) workflowsList(ctx context.Context, limit int, cursor string) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "workflows.list", "workflows.read", false); !allowed {
 		return expected(message)
+	}
+	if !validOptionalMCPCursor(cursor) {
+		return expected("workflow list cursor exceeds 1024 characters")
 	}
 	pageLimit, before, beforeID := pageBounds(limit, cursor)
 	rows, err := store.New(d.Pool).ListWorkflowRows(ctx, store.ListWorkflowRowsParams{
@@ -500,7 +563,7 @@ func (d Deps) workflowsList(ctx context.Context, limit int, cursor string) (*mcp
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, map[string]any{
-			"workflowId": row.ID, "name": row.Name,
+			"workflowId": row.ID, "name": boundedMCPText(row.Name, 240),
 			"createdAt": createdAtISO(row.CreatedAt),
 			"runCount":  row.RunCount, "lastRunStatus": row.LastRunStatus,
 		})

@@ -9,6 +9,12 @@ export default defineConfig({
   resolve: {
     alias: { '@': resolve(import.meta.dirname, 'src') },
   },
+  // Browser discovery must not restart after encountering a runtime schema
+  // for the first time. A reload can strand files at "0 test" and invalidate
+  // the entire run, so pre-bundle the production browser contract entrypoint.
+  optimizeDeps: {
+    include: ['zod/mini'],
+  },
   // Mirror the dev/build plugin set so any test that imports `index.css` (or a
   // styled component that depends on the workflow palette tokens) sees the
   // same Tailwind 4 CSS-first output. Production manualChunks are intentionally

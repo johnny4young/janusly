@@ -432,6 +432,38 @@ func (q *Queries) GetActiveRolloutForOutcome(ctx context.Context, arg GetActiveR
 	return i, err
 }
 
+const getLatestWorkflowHealthSnapshot = `-- name: GetLatestWorkflowHealthSnapshot :one
+SELECT id, version, dag_json, slo_json
+FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY version DESC
+LIMIT 1
+`
+
+type GetLatestWorkflowHealthSnapshotParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+type GetLatestWorkflowHealthSnapshotRow struct {
+	ID      string
+	Version int32
+	DagJson json.RawMessage
+	SloJson json.RawMessage
+}
+
+func (q *Queries) GetLatestWorkflowHealthSnapshot(ctx context.Context, arg GetLatestWorkflowHealthSnapshotParams) (GetLatestWorkflowHealthSnapshotRow, error) {
+	row := q.db.QueryRow(ctx, getLatestWorkflowHealthSnapshot, arg.OrgID, arg.WorkflowID)
+	var i GetLatestWorkflowHealthSnapshotRow
+	err := row.Scan(
+		&i.ID,
+		&i.Version,
+		&i.DagJson,
+		&i.SloJson,
+	)
+	return i, err
+}
+
 const getLatestWorkflowRolloutRow = `-- name: GetLatestWorkflowRolloutRow :one
 SELECT wr.id, wr.org_id, wr.workflow_id, wr.baseline_version_id, wr.canary_version_id, wr.traffic_percent, wr.minimum_sample_size, wr.minimum_success_rate_percent, wr.status, wr.baseline_succeeded, wr.baseline_failed, wr.canary_succeeded, wr.canary_failed, wr.rolled_back_reason, wr.created_by, wr.created_at, wr.updated_at, wr.ended_at, wr.last_outcome_at FROM workflow_rollouts wr
 JOIN workflows w ON w.id = wr.workflow_id AND w.org_id = wr.org_id
@@ -526,6 +558,32 @@ func (q *Queries) GetLatestWorkflowVersion(ctx context.Context, arg GetLatestWor
 		&i.CreatedBy,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const getLatestWorkflowVersionReliability = `-- name: GetLatestWorkflowVersionReliability :one
+SELECT version, slo_json, upstream_health_sources
+FROM workflow_versions
+WHERE workflow_id = $1 AND org_id = $2
+ORDER BY version DESC
+LIMIT 1
+`
+
+type GetLatestWorkflowVersionReliabilityParams struct {
+	WorkflowID string
+	OrgID      string
+}
+
+type GetLatestWorkflowVersionReliabilityRow struct {
+	Version               int32
+	SloJson               json.RawMessage
+	UpstreamHealthSources json.RawMessage
+}
+
+func (q *Queries) GetLatestWorkflowVersionReliability(ctx context.Context, arg GetLatestWorkflowVersionReliabilityParams) (GetLatestWorkflowVersionReliabilityRow, error) {
+	row := q.db.QueryRow(ctx, getLatestWorkflowVersionReliability, arg.WorkflowID, arg.OrgID)
+	var i GetLatestWorkflowVersionReliabilityRow
+	err := row.Scan(&i.Version, &i.SloJson, &i.UpstreamHealthSources)
 	return i, err
 }
 
@@ -1069,7 +1127,7 @@ JOIN workflow_versions wv ON wv.workflow_id = w.id AND wv.org_id = w.org_id
 WHERE w.org_id = $1 AND w.deleted_at IS NULL
 GROUP BY w.id, w.name, w.status
 ORDER BY w.name, w.id
-LIMIT 200
+LIMIT 201
 `
 
 type ListAuthoringSubworkflowCapabilitiesRow struct {
@@ -2343,6 +2401,22 @@ func (q *Queries) SoftDeleteWorkflow(ctx context.Context, arg SoftDeleteWorkflow
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateWorkflowName = `-- name: UpdateWorkflowName :exec
+UPDATE workflows SET name = $3
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
+`
+
+type UpdateWorkflowNameParams struct {
+	ID    string
+	OrgID string
+	Name  string
+}
+
+func (q *Queries) UpdateWorkflowName(ctx context.Context, arg UpdateWorkflowNameParams) error {
+	_, err := q.db.Exec(ctx, updateWorkflowName, arg.ID, arg.OrgID, arg.Name)
+	return err
 }
 
 const upsertWorkflowInputPreset = `-- name: UpsertWorkflowInputPreset :one

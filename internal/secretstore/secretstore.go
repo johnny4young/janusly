@@ -35,6 +35,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/store"
@@ -56,6 +57,10 @@ var (
 	ErrRootKeyInvalid = errors.New("credential_secret_root_key_invalid")
 	ErrRootKeyMissing = errors.New("credential_secret_root_key_missing")
 	ErrValueInvalid   = errors.New("credential_secret_value_invalid")
+	// ErrResolutionUnavailable is an internal availability signal. Provider
+	// ingress may map it to an opaque retryable response; it never carries key,
+	// ciphertext, reference, or storage details.
+	ErrResolutionUnavailable = errors.New("credential_secret_resolution_unavailable")
 )
 
 var (
@@ -289,12 +294,24 @@ func RevokeCredentialSecretRef(ctx context.Context, q *store.Queries, orgID, sec
 // from an org-scoped, non-revoked row; other refs keep the legacy
 // environment behavior. Any decrypt/config error fails closed as "".
 func ResolveCredentialSecretRef(ctx context.Context, q *store.Queries, orgID, secretRef string) string {
+	value, _ := ResolveCredentialSecretRefWithError(ctx, q, orgID, secretRef)
+	return value
+}
+
+// ResolveCredentialSecretRefWithError preserves the same secret-safe output
+// while distinguishing a legitimate absent authority from infrastructure or
+// cryptographic unavailability. The error is a stable sentinel only.
+func ResolveCredentialSecretRefWithError(
+	ctx context.Context,
+	q *store.Queries,
+	orgID, secretRef string,
+) (string, error) {
 	id := ParseCredentialSecretRef(secretRef)
 	if id == "" {
 		// A damaged or forged managed reference must never fall through to
 		// the legacy environment provider.
 		if strings.HasPrefix(secretRef, secretRefPrefix) {
-			return ""
+			return "", nil
 		}
 		// The legacy environment provider is restricted: see envpolicy.go.
 		// Enforced HERE and not only at the write path, because the
@@ -303,29 +320,33 @@ func ResolveCredentialSecretRef(ctx context.Context, q *store.Queries, orgID, se
 		if !EnvRefAllowed(secretRef) {
 			slog.Error("[secret-store] refused a credential reference to a reserved environment variable",
 				"orgId", orgID, "secretRef", secretRef)
-			return ""
+			return "", nil
 		}
 		value := os.Getenv(secretRef)
 		if strings.TrimSpace(value) == "" {
-			return ""
+			return "", nil
 		}
-		return value
+		return value, nil
 	}
 	row, err := q.GetCredentialSecretVersion(ctx, store.GetCredentialSecretVersionParams{
 		ID: id, OrgID: orgID,
 	})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		// Missing row = legitimate nil (revoked, deleted, foreign org).
-		return ""
+		return "", nil
+	}
+	if err != nil {
+		warnResolutionFailure("store_unavailable", orgID, id)
+		return "", ErrResolutionUnavailable
 	}
 	if row.KeyVersion != keyVersion {
 		warnResolutionFailure("unsupported_key_version", orgID, id)
-		return ""
+		return "", ErrResolutionUnavailable
 	}
 	rootKey, err := loadRootKey()
 	if err != nil {
 		warnResolutionFailure("root_key_unavailable", orgID, id)
-		return ""
+		return "", ErrResolutionUnavailable
 	}
 	b64 := func(value string) []byte {
 		decoded, _ := base64.StdEncoding.DecodeString(value)
@@ -336,7 +357,7 @@ func ResolveCredentialSecretRef(ctx context.Context, q *store.Queries, orgID, se
 		aad("wrap", row.OrgID, row.CredentialID, row.Version))
 	if err != nil {
 		warnResolutionFailure("decrypt_failed", orgID, id)
-		return ""
+		return "", ErrResolutionUnavailable
 	}
 	defer zero(dataKey)
 	plaintext, err := openAesGcm(
@@ -344,9 +365,9 @@ func ResolveCredentialSecretRef(ctx context.Context, q *store.Queries, orgID, se
 		aad("data", row.OrgID, row.CredentialID, row.Version))
 	if err != nil {
 		warnResolutionFailure("decrypt_failed", orgID, id)
-		return ""
+		return "", ErrResolutionUnavailable
 	}
-	return string(plaintext)
+	return string(plaintext), nil
 }
 
 // ResolveCredentialSecret resolves by tenant, kind, and name without

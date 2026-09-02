@@ -27,7 +27,10 @@ WHERE dl.org_id = $1
   AND (sqlc.narg(filter_node_id)::text IS NULL OR dl.node_id = sqlc.narg(filter_node_id))
   AND (sqlc.narg(filter_workflow_id)::text IS NULL
        OR wv.workflow_id = sqlc.narg(filter_workflow_id)
-       OR (wv.id IS NULL AND r.workflow_version_id = sqlc.narg(filter_workflow_id)))
+       OR (wv.id IS NULL AND coalesce(
+             nullif(r.input_json->'workflow'->>'id', ''),
+             r.workflow_version_id
+           ) = sqlc.narg(filter_workflow_id)))
 ORDER BY dl.created_at DESC, dl.id DESC
 LIMIT sqlc.arg(page_limit);
 
@@ -215,9 +218,38 @@ SELECT * FROM recovery_cases WHERE org_id = $1 AND id = $2;
 -- name: ListRecoveryCases :many
 SELECT * FROM recovery_cases
 WHERE org_id = $1
+  AND source = 'semantic_violation'
   AND (sqlc.narg(run_id)::text IS NULL OR run_id = sqlc.narg(run_id))
   AND (NOT sqlc.arg(open_only)::boolean OR state NOT IN ('verified_recovered','recurred','accepted_loss','abandoned'))
 ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- The shared Operator Brief must rank before it bounds. Reusing the general
+-- newest-first recovery list can hide an old approval behind newer terminal
+-- history, so this source query selects only actionable rows and applies the
+-- same category/severity/age order as internal/operations before LIMIT.
+-- name: ListOperatorBriefRecoveryCases :many
+SELECT * FROM recovery_cases
+WHERE org_id = sqlc.arg(org_id)
+  AND source = 'semantic_violation'
+  AND (
+    state = 'awaiting_approval'
+    OR state IN ('detected','contained','diagnosed','candidates_ready','validating')
+    OR (state = 'recurred' AND updated_at >= sqlc.arg(recurrence_since))
+  )
+ORDER BY
+  CASE
+    WHEN state = 'awaiting_approval' THEN 1
+    WHEN state IN ('detected','contained','diagnosed','candidates_ready','validating') THEN 2
+    ELSE 4
+  END ASC,
+  CASE
+    WHEN state IN ('detected','contained','diagnosed','candidates_ready','validating')
+      AND action = 'quarantine' THEN 4
+    ELSE 3
+  END DESC,
+  created_at ASC,
+  id ASC
 LIMIT sqlc.arg(page_limit);
 
 -- name: TransitionRecoveryCaseState :execrows
@@ -243,10 +275,14 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (id) DO NOTHING;
 
 -- name: ListRecoveryCaseTransitions :many
-SELECT * FROM recovery_case_transitions
-WHERE org_id = $1 AND case_id = $2
-ORDER BY occurred_at, id
-LIMIT 100;
+WITH bounded AS (
+  SELECT * FROM recovery_case_transitions
+  WHERE org_id = $1 AND case_id = $2
+  ORDER BY occurred_at DESC, id DESC
+  LIMIT 100
+)
+SELECT * FROM bounded
+ORDER BY occurred_at, id;
 
 -- name: GetRecoveryCaseForUpdate :one
 SELECT * FROM recovery_cases WHERE org_id = $1 AND id = $2 FOR UPDATE;
@@ -267,10 +303,21 @@ SELECT * FROM recovery_case_artifacts
 WHERE org_id = $1 AND case_id = $2 AND id = $3;
 
 -- name: ListRecoveryCaseArtifacts :many
-SELECT * FROM recovery_case_artifacts
-WHERE org_id = $1 AND case_id = $2
-ORDER BY created_at, id
-LIMIT 100;
+-- Candidate and diagnosis artifacts define the actions still visible in the
+-- current case UI. Preserve those foundations, then fill the bounded response
+-- with the most recent lifecycle evidence before restoring chronological order.
+WITH bounded AS (
+  SELECT * FROM recovery_case_artifacts
+  WHERE org_id = $1 AND case_id = $2
+  ORDER BY
+    CASE WHEN kind IN ('diagnosis', 'candidate') THEN 0 ELSE 1 END,
+    CASE WHEN kind IN ('diagnosis', 'candidate') THEN created_at END ASC,
+    CASE WHEN kind NOT IN ('diagnosis', 'candidate') THEN created_at END DESC,
+    id DESC
+  LIMIT 100
+)
+SELECT * FROM bounded
+ORDER BY created_at, id;
 
 -- name: InsertRecoveryApprovalGrant :one
 INSERT INTO recovery_approval_grants
@@ -291,6 +338,24 @@ WHERE grant_row.org_id = sqlc.arg(org_id)
   AND grant_row.validation_artifact_id = sqlc.arg(validation_artifact_id)
   AND grant_row.case_revision = sqlc.arg(case_revision)
   AND case_row.revision = grant_row.case_revision
+  AND grant_row.consumed_at IS NULL AND grant_row.revoked_at IS NULL
+  AND grant_row.expires_at > sqlc.arg(now_at)
+ORDER BY grant_row.created_at DESC
+LIMIT 1;
+
+-- HTTP case detail may expose a bounded continuity hint without exposing the
+-- grant identity or approving actor. The case join keeps the hint bound to the
+-- exact current lifecycle revision; apply still performs its own locked CAS.
+-- name: FindActiveRecoveryApprovalGrantForCase :one
+SELECT grant_row.*
+FROM recovery_approval_grants grant_row
+JOIN recovery_cases case_row
+  ON case_row.org_id = grant_row.org_id AND case_row.id = grant_row.case_id
+WHERE grant_row.org_id = sqlc.arg(org_id)
+  AND grant_row.case_id = sqlc.arg(case_id)
+  AND grant_row.case_revision = sqlc.arg(case_revision)
+  AND case_row.revision = sqlc.arg(case_revision)
+  AND case_row.state = 'awaiting_approval'
   AND grant_row.consumed_at IS NULL AND grant_row.revoked_at IS NULL
   AND grant_row.expires_at > sqlc.arg(now_at)
 ORDER BY grant_row.created_at DESC
@@ -330,6 +395,7 @@ FOR UPDATE;
 -- name: LockOpenSemanticRecoveryCases :many
 SELECT * FROM recovery_cases
 WHERE org_id = $1 AND run_id = $2 AND source_node_id = $3
+  AND source = 'semantic_violation'
   AND state NOT IN ('verified_recovered', 'recurred', 'accepted_loss', 'abandoned')
 ORDER BY id
 FOR UPDATE;
@@ -368,6 +434,7 @@ SELECT count(*)::int AS total_open,
        count(*) FILTER (WHERE action = 'quarantine')::int AS open_quarantines
 FROM recovery_cases
 WHERE org_id = $1 AND run_id = $2
+  AND source = 'semantic_violation'
   AND state NOT IN (
     'publishing', 'monitoring',
     'verified_recovered', 'recurred', 'accepted_loss', 'abandoned'

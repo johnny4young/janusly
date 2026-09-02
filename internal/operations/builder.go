@@ -14,6 +14,14 @@ import (
 type Builder struct {
 	Pool *pgxpool.Pool
 	Now  func() time.Time
+	// Surface projects the shared, permission-aware business actions onto the
+	// actual executable catalog returned to the authenticated transport.
+	Surface ActionSurface
+	// HumanApproval reports whether the authenticated transport can create a
+	// recovery approval grant. Service-token/MCP principals may consume an
+	// independently created grant through apply, but must never be told that
+	// approval itself is an allowed action.
+	HumanApproval bool
 }
 
 func (b Builder) Build(ctx context.Context, orgID string, permissions map[string]bool) Brief {
@@ -33,13 +41,13 @@ func (b Builder) Build(ctx context.Context, orgID string, permissions map[string
 	var candidates []rankedAction
 	q := store.New(b.Pool)
 	if permissions["recovery.read"] {
-		cases, err := q.ListRecoveryCases(ctx, store.ListRecoveryCasesParams{
-			OrgID: orgID, OpenOnly: false, PageLimit: 200,
+		cases, err := q.ListOperatorBriefRecoveryCases(ctx, store.ListOperatorBriefRecoveryCasesParams{
+			OrgID: orgID, RecurrenceSince: now.AddDate(0, 0, -30), PageLimit: maxSourceRows,
 		})
 		if err != nil {
 			brief.Warnings = append(brief.Warnings, "recovery_cases_unavailable")
 		} else {
-			candidates = append(candidates, recoveryCaseActions(cases, permissions, now)...)
+			candidates = append(candidates, recoveryCaseActions(cases, permissions, now, b.HumanApproval)...)
 		}
 	}
 
@@ -90,6 +98,12 @@ func (b Builder) Build(ctx context.Context, orgID string, permissions map[string
 	}
 
 	brief.Actions = rankActions(candidates)
+	for index := range brief.Actions {
+		brief.Actions[index].AllowedActions = projectAllowedActions(
+			b.Surface,
+			brief.Actions[index].AllowedActions,
+		)
+	}
 	sort.Strings(brief.Warnings)
 	return brief
 }

@@ -3,7 +3,7 @@ import { api, contractApi } from '../api'
 import { useConfirm } from '../components/ConfirmDialog'
 import type { WorkflowCreationMode } from '../components/WorkflowsDashboard'
 import { getResolvedLocale } from '../i18n'
-import { useWorkflowStore } from '../store'
+import { useWorkflowStore, type WorkflowVersionIdentity } from '../store'
 import {
   parseAiCandidateBackoff,
   type ActiveTab,
@@ -16,10 +16,13 @@ import {
   type WorkflowDefinition,
   type WorkflowImprovementResult,
   type WorkflowImprovementSuggestion,
+  type WorkflowProposalApplyOutcome,
   type WorkflowProposalResponse,
 } from '../types'
 import type { AppCommandsOptions } from './app-command-types'
 import { clearDraft, readDraft } from './useDraftPersistence'
+
+const loadAuthoringContract = () => import('../lib/authoring-contract')
 
 type ValidationResponse = {
   valid: boolean
@@ -45,6 +48,44 @@ type ReviewWorkflowResponse = {
   aiError?: string
 }
 
+type CanvasAuthority = {
+  workflowId: string | null
+  revision: number
+  orgId: string | null
+  userId: string | null
+}
+
+function workflowVersionIdentity(
+  value: { workflowId?: unknown; versionId?: unknown; id?: unknown; version?: unknown },
+  expectedWorkflowId: string,
+): WorkflowVersionIdentity | null {
+  const id = typeof value.versionId === 'string' ? value.versionId : value.id
+  if (value.workflowId !== expectedWorkflowId
+    || typeof id !== 'string' || id.length === 0 || id.length > 256
+    || typeof value.version !== 'number' || !Number.isSafeInteger(value.version) || value.version < 1) {
+    return null
+  }
+  return { id, version: value.version }
+}
+
+function currentCanvasAuthority(): CanvasAuthority {
+  const current = useWorkflowStore.getState()
+  return {
+    workflowId: current.currentWorkflowId,
+    revision: current.workflowRevision,
+    orgId: current.orgId,
+    userId: current.userId,
+  }
+}
+
+function canvasAuthorityMatches(expected: CanvasAuthority): boolean {
+  const current = currentCanvasAuthority()
+  return current.workflowId === expected.workflowId
+    && current.revision === expected.revision
+    && current.orgId === expected.orgId
+    && current.userId === expected.userId
+}
+
 export function useWorkflowCommands(options: AppCommandsOptions) {
   const {
     store,
@@ -52,7 +93,6 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     refreshPlatform,
     setValidationIssues,
     setAiReviewIssues,
-    setCurrentWorkflowVersion,
     t,
   } = options
   const {
@@ -79,17 +119,25 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     })
   }, [confirm, t])
 
+  const prepareCanvasReplacement = useCallback(async (): Promise<CanvasAuthority | null> => {
+    const expected = currentCanvasAuthority()
+    if (!await confirmReplaceCanvas()) return null
+    if (!canvasAuthorityMatches(expected)) {
+      addToast(t('toasts.workflowOpenFailed'), 'info')
+      return null
+    }
+    return expected
+  }, [addToast, confirmReplaceCanvas, t])
+
   const createNewWorkflow = useCallback(async (targetTab?: ActiveTab): Promise<void> => {
-    if (!await confirmReplaceCanvas()) return
+    if (!await prepareCanvasReplacement()) return
     newWorkflow()
     setValidationIssues([])
-    setCurrentWorkflowVersion(null)
     if (targetTab) setActiveTab(targetTab)
   }, [
-    confirmReplaceCanvas,
     newWorkflow,
+    prepareCanvasReplacement,
     setActiveTab,
-    setCurrentWorkflowVersion,
     setValidationIssues,
   ])
 
@@ -104,6 +152,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
   const maybeRestoreDraft = useCallback(async (
     workflowId: string,
     savedBase = false,
+    version: WorkflowVersionIdentity | null = null,
   ): Promise<void> => {
     const draft = readDraft(workflowId)
     if (!draft) return
@@ -116,7 +165,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
       cancelLabel: t('draftRestore.discard'),
     })
     if (restore) {
-      hydrateWorkflow(draft.workflow, { saved: savedBase, dirty: true })
+      hydrateWorkflow(draft.workflow, { saved: savedBase, dirty: true, version })
     } else {
       clearDraft(workflowId)
     }
@@ -125,13 +174,13 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
   const validateWorkflow = useCallback(async () => {
     if (!canWriteWorkflows) return false
     try {
-      const revisionAtRequest = useWorkflowStore.getState().workflowRevision
+      const authorityAtRequest = currentCanvasAuthority()
       const workflow = getWorkflowJson()
       const result = await api('/validate', {
         method: 'POST',
         body: JSON.stringify(workflow),
       }) as ValidationResponse
-      if (useWorkflowStore.getState().workflowRevision !== revisionAtRequest) return false
+      if (!canvasAuthorityMatches(authorityAtRequest)) return false
       setValidationIssues(result.issues ?? [])
       addToast(
         result.valid ? t('toasts.validationOk') : t('toasts.validationNeedsFix'),
@@ -145,16 +194,22 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
   }, [addToast, canWriteWorkflows, getWorkflowJson, setValidationIssues, t])
 
   const saveWorkflow = useCallback(async () => {
+    const authorityBeforeValidation = currentCanvasAuthority()
     if (!canWriteWorkflows || !await validateWorkflow()) return
+    if (!canvasAuthorityMatches(authorityBeforeValidation)) return
     try {
       const workflow = getWorkflowJson()
+      const authorityAtSave = currentCanvasAuthority()
       const result = await api('/workflows/save', {
         method: 'POST',
         body: JSON.stringify(workflow),
-      }) as { version?: number }
-      if (typeof result.version === 'number') setCurrentWorkflowVersion(result.version)
-      markWorkflowSaved()
-      addToast(t('toasts.savedVersion', { version: result.version ?? '?' }), 'success')
+      }) as { workflowId?: unknown; versionId?: unknown; version?: unknown }
+      const committedVersion = workflowVersionIdentity(result, workflow.id ?? '')
+      if (!committedVersion) throw new Error(t('apiErrors.workflows_version_malformed'))
+      if (canvasAuthorityMatches(authorityAtSave)) {
+        markWorkflowSaved(committedVersion)
+      }
+      addToast(t('toasts.savedVersion', { version: committedVersion.version }), 'success')
       bumpPlatformVersion()
       await refreshPlatform()
     } catch (error) {
@@ -167,31 +222,98 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     getWorkflowJson,
     markWorkflowSaved,
     refreshPlatform,
-    setCurrentWorkflowVersion,
     t,
     validateWorkflow,
   ])
 
-  const openWorkflow = useCallback(async (id: string) => {
-    if (!await confirmReplaceCanvas()) return
+  const openWorkflow = useCallback(async (id: string): Promise<boolean> => {
+    const authority = await prepareCanvasReplacement()
+    if (!authority) return false
     try {
-      const data = await api(
-        `/workflows/latest?workflowId=${encodeURIComponent(id)}`,
-      ) as { dagJson?: WorkflowDefinition }
-      if (!data.dagJson) return
-      hydrateWorkflow(data.dagJson)
+      const [data, { isWorkflowDefinition }] = await Promise.all([
+        api(`/workflows/latest?workflowId=${encodeURIComponent(id)}`) as Promise<{
+          id?: unknown
+          workflowId?: unknown
+          dagJson?: unknown
+          version?: unknown
+        }>,
+        loadAuthoringContract(),
+      ])
+      if (!canvasAuthorityMatches(authority)) {
+        addToast(t('toasts.workflowOpenFailed'), 'info')
+        return false
+      }
+      if (!isWorkflowDefinition(data.dagJson) || data.dagJson.id !== id
+        || !workflowVersionIdentity(data, id)) {
+        throw new Error(t('apiErrors.workflows_version_malformed'))
+      }
+      const version = workflowVersionIdentity(data, id)!
+      hydrateWorkflow(structuredClone(data.dagJson), { version })
       setValidationIssues([])
+      setAiReviewIssues([])
       setActiveTab('inspector')
-      await maybeRestoreDraft(id, true)
+      await maybeRestoreDraft(id, true, version)
+      return true
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.workflowOpenFailed'), 'error')
+      return false
     }
   }, [
     addToast,
-    confirmReplaceCanvas,
     hydrateWorkflow,
     maybeRestoreDraft,
+    prepareCanvasReplacement,
     setActiveTab,
+    setAiReviewIssues,
+    setValidationIssues,
+    t,
+  ])
+
+  const openWorkflowVersion = useCallback(async (
+    workflowId: string,
+    versionId: string,
+    targetTab: ActiveTab = 'inspector',
+  ): Promise<boolean> => {
+    if (!workflowId || workflowId.length > 256 || !versionId || versionId.length > 256) {
+      addToast(t('apiErrors.workflows_version_malformed'), 'error')
+      return false
+    }
+    const authority = await prepareCanvasReplacement()
+    if (!authority) return false
+    try {
+      const path = `/workflows/versions/${encodeURIComponent(versionId)}?workflowId=${encodeURIComponent(workflowId)}`
+      const [response, { parseWorkflowVersionSnapshot }] = await Promise.all([
+        contractApi(
+          'GET /workflows/versions/{versionId}',
+          path,
+          undefined,
+        ),
+        loadAuthoringContract(),
+      ])
+      if (!canvasAuthorityMatches(authority)) {
+        addToast(t('toasts.workflowOpenFailed'), 'info')
+        return false
+      }
+      const snapshot = parseWorkflowVersionSnapshot(response, workflowId, versionId)
+      if (!snapshot) throw new Error(t('apiErrors.workflows_version_malformed'))
+      hydrateWorkflow(structuredClone(snapshot.dagJson), {
+        version: { id: snapshot.id, version: snapshot.version },
+      })
+      setValidationIssues([])
+      setAiReviewIssues([])
+      setActiveTab(targetTab)
+      addToast(t('versionHistory.loaded', { version: snapshot.version }), 'info')
+      return true
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : t('toasts.workflowOpenFailed'), 'error')
+      return false
+    }
+  }, [
+    addToast,
+    hydrateWorkflow,
+    prepareCanvasReplacement,
+    setActiveTab,
+    setAiReviewIssues,
     setValidationIssues,
     t,
   ])
@@ -205,11 +327,15 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
   }, [])
 
   const compileWorkflowBrief = useCallback(async (prompt: string): Promise<WorkflowBriefCompilation> => {
-    const result = await api('/ai/workflow-briefs/compile', {
-      method: 'POST',
-      body: JSON.stringify({ prompt }),
-    }) as WorkflowBriefCompilation
-    if (!result?.brief || !Array.isArray(result.clarifyingQuestions)) {
+    const [result, { isWorkflowBriefCompilation }] = await Promise.all([
+      contractApi(
+        'POST /ai/workflow-briefs/compile',
+        '/ai/workflow-briefs/compile',
+        { prompt },
+      ),
+      loadAuthoringContract(),
+    ])
+    if (!isWorkflowBriefCompilation(result)) {
       throw new Error(t('toasts.aiResponseInvalid'))
     }
     return result
@@ -218,21 +344,22 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
   const proposeWorkflow = useCallback(async (
     brief: WorkflowIntentBrief,
     catalogVersion: string,
+    sourcePrompt: string,
   ): Promise<WorkflowProposalResponse> => {
-    const result = await api('/ai/workflow-proposals', {
-      method: 'POST',
-      body: JSON.stringify({
-        brief,
-        catalogVersion,
-        currentWorkflow: getWorkflowJson(),
-      }),
-    }) as WorkflowProposalResponse & { bonBackoff?: unknown }
-    if (
-      !result?.proposal
-      || !result.bindings
-      || !Array.isArray(result.proposal.workflow?.nodes)
-      || !Array.isArray(result.proposal.workflow?.edges)
-    ) {
+    const [result, { isWorkflowProposalResponse }] = await Promise.all([
+      contractApi(
+        'POST /ai/workflow-proposals',
+        '/ai/workflow-proposals',
+        {
+          prompt: sourcePrompt,
+          brief,
+          catalogVersion,
+          currentWorkflow: getWorkflowJson(),
+        },
+      ),
+      loadAuthoringContract(),
+    ])
+    if (!isWorkflowProposalResponse(result)) {
       throw new Error(t('toasts.aiResponseInvalid'))
     }
     return {
@@ -243,18 +370,51 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
 
   const applyWorkflowProposal = useCallback(async (
     response: WorkflowProposalResponse,
-  ): Promise<boolean> => {
-    if (!response.proposal.applicable || !response.bindings.complete) return false
-    if (!await confirmReplaceCanvas()) return false
-    hydrateWorkflow(response.proposal.workflow, { saved: false, dirty: true })
+  ): Promise<WorkflowProposalApplyOutcome> => {
+    const sourceAuthority = currentCanvasAuthority()
+    // Detach Apply from the review component's live object before the first
+    // asynchronous import, confirmation, or catalog boundary. The exact
+    // snapshot validated below, not a later mutation of shared UI state, is
+    // the only object that may eventually be copied to the canvas.
+    let proposalSnapshot: WorkflowProposalResponse
+    try {
+      proposalSnapshot = structuredClone(response)
+    } catch {
+      addToast(t('toasts.aiResponseInvalid'), 'error')
+      return { status: 'blocked' }
+    }
+    if (!proposalSnapshot.proposal.applicable || !proposalSnapshot.bindings.complete) {
+      return { status: 'blocked' }
+    }
+    const { isWorkflowProposalApplySafe } = await loadAuthoringContract()
+    if (!await isWorkflowProposalApplySafe(proposalSnapshot)) {
+      addToast(t('toasts.aiResponseInvalid'), 'error')
+      return { status: 'blocked' }
+    }
+    if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+    if (!await confirmReplaceCanvas()) return { status: 'cancelled' }
+    // The confirmation is asynchronous. Never replace a different or newly
+    // edited canvas if the operator navigated while the dialog was open.
+    if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+
+    // Capability membership can change after Proposal or while the unsaved
+    // canvas confirmation is open. Re-read it after confirmation and then
+    // re-check the canvas again at the final synchronous copy boundary.
+    const currentCatalog = await loadAuthoringCapabilities()
+    if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+    if (currentCatalog.version !== proposalSnapshot.bindings.catalogVersion) {
+      return { status: 'catalog_changed', catalog: currentCatalog }
+    }
+    hydrateWorkflow(proposalSnapshot.proposal.workflow, { saved: false, dirty: true })
     setValidationIssues([])
     setAiReviewIssues([])
     addToast(t('toasts.aiProposalApplied'), 'success')
-    return true
+    return { status: 'applied' }
   }, [
     addToast,
     confirmReplaceCanvas,
     hydrateWorkflow,
+    loadAuthoringCapabilities,
     setAiReviewIssues,
     setValidationIssues,
     t,
@@ -277,7 +437,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
 
   const reviewWorkflow = useCallback(async () => {
     setAiReviewIssues([])
-    const revisionAtRequest = useWorkflowStore.getState().workflowRevision
+    const authorityAtRequest = currentCanvasAuthority()
     const workflow = getWorkflowJson()
     const result = await api('/ai/review-workflow', {
       method: 'POST',
@@ -285,7 +445,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     }) as ReviewWorkflowResponse
     if (result.error) throw new Error(result.error)
     const review = result.review ?? { status: 'fail' as const, issues: [] }
-    if (useWorkflowStore.getState().workflowRevision === revisionAtRequest) {
+    if (canvasAuthorityMatches(authorityAtRequest)) {
       setAiReviewIssues(review.issues)
     }
     return {
@@ -320,7 +480,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
   const applyWorkflowImprovement = useCallback(async (
     suggestion: WorkflowImprovementSuggestion,
   ): Promise<boolean> => {
-    if (!await confirmReplaceCanvas()) return false
+    if (!await prepareCanvasReplacement()) return false
     hydrateWorkflow(suggestion.workflow, { saved: false, dirty: true })
     setValidationIssues([])
     setAiReviewIssues([])
@@ -329,8 +489,8 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     return true
   }, [
     addToast,
-    confirmReplaceCanvas,
     hydrateWorkflow,
+    prepareCanvasReplacement,
     setActiveTab,
     setAiReviewIssues,
     setValidationIssues,
@@ -347,14 +507,14 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
 
   const useTemplate = useCallback((workflow: WorkflowDefinition) => {
     void (async () => {
-      if (!await confirmReplaceCanvas()) return
+      if (!await prepareCanvasReplacement()) return
       hydrateWorkflow(workflow, { saved: false, dirty: true })
       setValidationIssues([])
       setActiveTab('inspector')
     })()
   }, [
-    confirmReplaceCanvas,
     hydrateWorkflow,
+    prepareCanvasReplacement,
     setActiveTab,
     setValidationIssues,
   ])
@@ -370,6 +530,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     loadAuthoringCapabilities,
     maybeRestoreDraft,
     openWorkflow,
+    openWorkflowVersion,
     proposeWorkflow,
     reviewWorkflow,
     saveWorkflow,
