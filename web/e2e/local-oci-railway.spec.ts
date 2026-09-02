@@ -82,7 +82,9 @@ test('production OCI works without Anthropic and explains local mode in both loc
   await expect(page.getByText('Root .env has ANTHROPIC_API_KEY')).toBeVisible()
   await page.locator('.ai-studio-prompt').fill('Create a flow with human approval before writing')
   const englishProposal = await buildWorkflowProposal(page)
-  await expect(englishProposal.getByText('Deterministic local proposal')).toBeVisible()
+  await expect(
+    englishProposal.getByRole('status').filter({ hasText: 'Deterministic local proposal' }),
+  ).toBeVisible()
   await applyBuiltWorkflowProposal(page)
   await expectHealthySurface(page, 'English production OCI AI Studio without provider')
   await capture(page, 'oci-no-key-ai-studio-en')
@@ -96,7 +98,9 @@ test('production OCI works without Anthropic and explains local mode in both loc
   await expect(page.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeVisible()
   await page.locator('.ai-studio-prompt').fill('Crea un flujo con aprobación humana antes de escribir')
   const spanishProposal = await buildWorkflowProposal(page, 'es')
-  await expect(spanishProposal.getByText('Propuesta local determinista')).toBeVisible()
+  await expect(
+    spanishProposal.getByRole('status').filter({ hasText: 'Propuesta local determinista' }),
+  ).toBeVisible()
   await applyBuiltWorkflowProposal(page, 'es')
   await expectHealthySurface(page, 'Spanish production OCI AI Studio without provider')
   await capture(page, 'oci-no-key-ai-studio-es')

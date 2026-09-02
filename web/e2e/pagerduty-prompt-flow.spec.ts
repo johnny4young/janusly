@@ -114,7 +114,9 @@ for (const scenario of scenarios) {
       scenario.prompt(apiCredential, webhookCredential),
     )
     const proposal = await buildWorkflowProposal(page, scenario.locale)
-    await expect(proposal.getByText(scenario.proposalTitle)).toBeVisible()
+    await expect(
+      proposal.getByRole('status').filter({ hasText: scenario.proposalTitle }),
+    ).toBeVisible()
     await proposal.getByText(scenario.configuredDefaults, { exact: true }).click()
     await expect(proposal.getByText('America/Bogota', { exact: true })).toBeVisible()
     await expect(proposal.getByText('outside', { exact: true })).toBeVisible()

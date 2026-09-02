@@ -26,7 +26,9 @@ test('AI Studio drafts a flow from a business prompt', async ({ page }) => {
   await openWorkflowAiAction(page, 'Workflows')
   await page.getByPlaceholder('Example: when a customer asks for a refund, check policy, summarize risk, and ask for approval.').fill('When a refund is risky, pause for approval before notifying the customer.')
   const proposal = await buildWorkflowProposal(page)
-  await expect(proposal.getByText('Deterministic local proposal')).toBeVisible()
+  await expect(
+    proposal.getByRole('status').filter({ hasText: 'Deterministic local proposal' }),
+  ).toBeVisible()
   await applyBuiltWorkflowProposal(page)
   await expect(page.locator('.workflow-node').filter({ hasText: 'Ask approval' })).toBeVisible()
   await expect(page.locator('.workflow-node').filter({ hasText: 'Approve the refund before sending the customer update.' })).toBeVisible()
