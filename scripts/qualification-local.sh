@@ -53,6 +53,16 @@ die() {
   exit 2
 }
 
+# The immutable PagerDuty snapshot mounts the already-installed dependency
+# tree as web/node_modules. A trailing-slash node_modules/ ignore rule does not
+# match that symlink, so plain `git status` reports the harness-owned mount as
+# untracked and makes the snapshot reject itself. Exclude only that dependency
+# mount while retaining a full status check for every candidate source path.
+pagerduty_source_status() {
+  git -C "$root" status --porcelain --untracked-files=normal -- \
+    . ':(exclude)web/node_modules'
+}
+
 validate_configuration() {
   case "$profile" in
     clean|identity|security|tenant|recovery|pagerduty|load|all|selftest) ;;
@@ -70,7 +80,7 @@ validate_configuration() {
   done
   [[ "$app_port" != "$postgres_port" && "$app_port" != "$metrics_port" && "$postgres_port" != "$metrics_port" ]] ||
     die "qualification ports must be distinct"
-  if [[ "$profile" == pagerduty ]] && [[ -n $(git -C "$root" status --porcelain --untracked-files=normal) ]]; then
+  if [[ "$profile" == pagerduty ]] && [[ -n $(pagerduty_source_status) ]]; then
     die "pagerduty qualification requires a clean worktree so build provenance matches the tested source"
   fi
   if [[ "$profile" == pagerduty ]] && [[ ! -x "$root/web/node_modules/.bin/playwright" ]]; then
@@ -95,7 +105,7 @@ validate_configuration() {
 pagerduty_candidate_unchanged() {
   [[ $(git -C "$root" rev-parse HEAD) == "$qualification_commit" ]] &&
     [[ $(git -C "$root" rev-parse 'HEAD^{tree}') == "$qualification_tree" ]] &&
-    [[ -z $(git -C "$root" status --porcelain --untracked-files=normal) ]]
+    [[ -z $(pagerduty_source_status) ]]
 }
 
 remove_qualification_snapshot() {

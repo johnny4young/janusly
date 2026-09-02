@@ -46,6 +46,11 @@ grep -F 'worktree add --quiet --detach "$qualification_snapshot" "$qualification
   "$root/scripts/qualification-local.sh" >/dev/null
 grep -F 'JANUSLY_QUALIFICATION_SOURCE_COMMIT="$qualification_commit"' \
   "$root/scripts/qualification-local.sh" >/dev/null
+grep -F "':(exclude)web/node_modules'" "$root/scripts/qualification-local.sh" >/dev/null
+[[ $(grep -c 'pagerduty_source_status' "$root/scripts/qualification-local.sh") -eq 3 ]] || {
+  echo "PagerDuty source checks do not consistently exclude only the harness dependency mount" >&2
+  exit 1
+}
 grep -F 'failed to write complete evidence summary' "$root/scripts/qualification-local.sh" >/dev/null
 grep -F 'failed to capture final diagnostics' "$root/scripts/qualification-local.sh" >/dev/null
 grep -F 'project_has_resources && die "refusing pre-existing resources for project $project"' \
