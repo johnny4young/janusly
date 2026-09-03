@@ -1980,7 +1980,7 @@
   "aiStudio.readiness.check": "Check",
   "aiStudio.askAboutRun": "Ask about a run",
   "aiStudio.browseRecipes": "Browse recipes",
-  "aiStudio.starter1": "For one week, acknowledge PagerDuty incidents assigned to PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.",
+  "aiStudio.starter1": "Starting now for one week, acknowledge PagerDuty incidents assigned to PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.",
   "aiStudio.starter2": "Collect customer feedback, classify urgency, and route critical issues to a person.",
   "aiStudio.starter3": "Check an order status, explain what changed, and retry failed handoff steps.",
   "aiStudio.modeCopy.ai": "Generated with the connected model.",

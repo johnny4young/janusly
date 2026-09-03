@@ -1980,7 +1980,7 @@
   "aiStudio.readiness.check": "Revisar",
   "aiStudio.askAboutRun": "Preguntar sobre una ejecución",
   "aiStudio.browseRecipes": "Ver recetas",
-  "aiStudio.starter1": "Por una semana, reconoce incidentes de PagerDuty asignados a PUSER1 fuera de 09:00–17:00 America/Bogota y aplázalos 12 horas como operator@example.com.",
+  "aiStudio.starter1": "Desde ahora y durante una semana, reconoce incidentes de PagerDuty asignados a PUSER1 fuera de 09:00–17:00 America/Bogota y aplázalos 12 horas como operator@example.com.",
   "aiStudio.starter2": "Recolecta feedback de clientes, clasifica la urgencia y deriva los issues críticos a una persona.",
   "aiStudio.starter3": "Revisa el estado de un pedido, explica qué cambió y reintenta pasos de handoff fallidos.",
   "aiStudio.modeCopy.ai": "Generado con el modelo conectado.",
