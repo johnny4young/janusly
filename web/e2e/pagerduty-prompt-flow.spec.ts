@@ -27,7 +27,7 @@ const scenarios = [
     savedVersion: 'Saved version 1',
     webhookCredentialLabel: 'Webhook signing credential',
     callbackLabel: 'PagerDuty callback URL',
-    signatureCopy: /signature is verified before an event or run is persisted/i,
+    signatureCopy: /verifies the signature before persisting anything/i,
     incompletePrompt: 'I am on call 24x7 for one week. When PagerDuty alerts in certain ranges, move it to reviewing for 12 hours.',
     prompt: (apiCredential: string, webhookCredential: string) => (
       `Starting now for one week, when PagerDuty alerts user PLOCALUSER outside working hours 09:00 to 17:00 in America/Bogota, acknowledge it and snooze it for 12 hours. Use API credential ${apiCredential} and webhook credential ${webhookCredential} for operator@example.com.`
@@ -52,7 +52,7 @@ const scenarios = [
     savedVersion: 'Versión 1 guardada',
     webhookCredentialLabel: 'Credencial para firmar el webhook',
     callbackLabel: 'URL de retorno de PagerDuty',
-    signatureCopy: /la firma se verifica antes de guardar un evento o iniciar una ejecución/i,
+    signatureCopy: /verifica la firma antes de persistir datos/i,
     incompletePrompt: 'Yo, como usuario, tengo disponibilidad laboral 24x7 por una semana y uso PagerDuty para resolver casos; quiero que las alertas que salten en ciertos rangos de horas pasen automáticamente a revisando por 12 horas.',
     prompt: (apiCredential: string, webhookCredential: string) => (
       `Desde ahora y durante una semana, cuando PagerDuty asigne un incidente al usuario PLOCALUSER fuera de 09:00–17:00 en America/Bogota, muévelo a revisando y aplázalo por 12 horas como operator@example.com. Usa credencial de API ${apiCredential} y credencial del webhook ${webhookCredential}.`
