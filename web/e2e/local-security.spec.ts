@@ -6,6 +6,14 @@ import { openWorkspaceSection } from './_helpers/workspace-navigation'
 const enabled = process.env.JANUSLY_LOCAL_SECURITY_E2E === '1'
 const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
 const apiUrl = process.env.JANUSLY_SECURITY_API_URL ?? 'http://127.0.0.1:7311'
+const runtimeOrigin = new URL(
+  process.env.JANUSLY_E2E_RUNTIME_BASE_URL ?? 'http://127.0.0.1:7310',
+)
+runtimeOrigin.hostname = 'localhost'
+runtimeOrigin.pathname = ''
+runtimeOrigin.search = ''
+runtimeOrigin.hash = ''
+const allowedCorsOrigin = runtimeOrigin.origin
 const email = process.env.JANUSLY_SECURITY_EMAIL ?? 'security@identity.local'
 const password = process.env.JANUSLY_SECURITY_PASSWORD ?? 'Security-identity-2026!'
 const organizationName = process.env.JANUSLY_SECURITY_ORG_NAME ?? 'Security Lab'
@@ -104,10 +112,10 @@ test('local API rejects alternate auth paths and exposes only bounded public hea
     expect(response.headers()['access-control-allow-credentials']).toBeUndefined()
   }
   const allowedOrigin = await request.get(`${apiUrl}/health`, {
-    headers: { Origin: 'http://localhost:7310' },
+    headers: { Origin: allowedCorsOrigin },
   })
   expect(allowedOrigin.headers()['access-control-allow-origin']).toBe(
-    'http://localhost:7310',
+    allowedCorsOrigin,
   )
   expect(allowedOrigin.headers()['access-control-allow-credentials']).toBe('true')
 
