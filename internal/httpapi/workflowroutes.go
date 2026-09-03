@@ -21,9 +21,8 @@ import (
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
-	"github.com/johnny4young/janusly/internal/grammar"
-	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 func (s *V1Server) saveWorkflow(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -63,7 +62,7 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	}
 	// Save accepts the full platform vocabulary — a node type this backend
 	// cannot execute yet is a START-time concern, not a save-time one.
-	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
+	result := workflowvalidation.Validate(wf)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
 		if issue.Code != domain.CodeNodeTypeNotExecutable {

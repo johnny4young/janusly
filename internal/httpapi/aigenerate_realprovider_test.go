@@ -408,7 +408,7 @@ func evaluateRealAuthoringCase(
 	defer cancel()
 	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
 		ctx, client, authoring.ProposalPrompt(compiledBrief.Brief), "", v1Request{}, 1,
-		authoring.CapabilityPromptBlock(catalog),
+		authoring.CapabilityPromptBlock(catalog), 0,
 	)
 	result.Repaired = meta.attempts > 1 || meta.repairAttempts > 0
 	if aiErr != nil {

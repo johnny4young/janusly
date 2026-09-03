@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/httpcontract"
 )
 
 // Issue codes emitted by Parse and Validate. Closed set; additions must
@@ -20,6 +22,9 @@ const (
 	CodeNodeIDReserved              = "node_id_reserved"
 	CodeUnsupportedNodeType         = "unsupported_node_type"
 	CodeHTTPMissingURL              = "http_missing_url"
+	CodeHTTPInvalidConfig           = "http_invalid_config"
+	CodeToolMissingName             = "tool_missing_name"
+	CodeToolInvalidInput            = "tool_invalid_input"
 	CodeConditionMissingExpr        = "condition_missing_expression"
 	CodeConditionInvalidExpr        = "condition_invalid_expression"
 	CodeTransformMissingMapping     = "transform_missing_mapping"
@@ -33,6 +38,35 @@ const (
 	CodeHumanFormInvalidSchema      = "human_form_invalid_schema"
 	CodeHumanFormEmptySchema        = "human_form_empty_schema"
 	CodeHumanFormInvalidInitial     = "human_form_invalid_initial_values"
+	CodeAIMissingPrompt             = "ai_missing_prompt"
+	CodeAIInvalidPromptRef          = "ai_invalid_prompt_ref"
+	CodeAIInvalidPromptVariables    = "ai_invalid_prompt_variables"
+	CodeAIInvalidOutputSchema       = "ai_invalid_output_schema"
+	CodeAgentMissingGoal            = "agent_missing_goal"
+	CodeAgentInvalidPlanner         = "agent_invalid_planner"
+	CodeAgentInvalidMaxSteps        = "agent_invalid_max_steps"
+	CodeAgentInvalidTimeout         = "agent_invalid_timeout"
+	CodeAgentInvalidBoolean         = "agent_invalid_boolean"
+	CodeAgentInvalidConfig          = "agent_invalid_config"
+	CodeAgentInvalidTool            = "agent_invalid_tool"
+	CodeMultiAgentMissingAgents     = "multi_agent_missing_agents"
+	CodeMultiAgentInvalidAgents     = "multi_agent_invalid_agents"
+	CodeMultiAgentInvalidMode       = "multi_agent_invalid_mode"
+	CodeMultiAgentInvalidAgg        = "multi_agent_invalid_aggregation"
+	CodeMultiAgentInvalidBoolean    = "multi_agent_invalid_boolean"
+	CodeMultiAgentInvalidConfig     = "multi_agent_invalid_config"
+	CodeLoopMissingItems            = "loop_missing_items"
+	CodeLoopInvalidMode             = "loop_invalid_mode"
+	CodeLoopForEachMissingTool      = "loop_for_each_missing_tool"
+	CodeLoopForEachUnknownTool      = "loop_for_each_unknown_tool"
+	CodeLoopInvalidConcurrency      = "loop_invalid_concurrency"
+	CodeLoopInvalidFailureCount     = "loop_invalid_failure_count"
+	CodeLoopInvalidFailurePercent   = "loop_invalid_failure_percentage"
+	CodeLoopConflictingFailureLimit = "loop_conflicting_failure_budgets"
+	CodeParallelForkInvalidBranches = "parallel_fork_invalid_branches"
+	CodeJoinInvalidSources          = "join_invalid_sources"
+	CodeTriggerInvalidConfig        = "trigger_invalid_config"
+	CodeRetryInvalidConfig          = "retry_invalid_config"
 	CodeSubworkflowMissingWorkflow  = "subworkflow_missing_workflow"
 	CodeSubworkflowSelfReference    = "subworkflow_self_reference"
 	CodeSubworkflowInvalidVersion   = "subworkflow_invalid_version"
@@ -68,6 +102,16 @@ type ValidationResult struct {
 // real grammar plugs in through this seam; until then the permissive
 // validator accepts everything non-empty, and tests inject strict fakes.
 type ExpressionValidator func(expression string) (valid bool, message string)
+
+// ToolConfigValidator validates one exact executable tool name and, when
+// strictInput is true, its required authored inputs. It is injected by the
+// runtime composition layer so domain does not own executable callbacks.
+type ToolConfigValidator func(name string, input map[string]any, strictInput bool) error
+
+type ValidationOptions struct {
+	ToolValidator             ToolConfigValidator
+	AllowIncompleteToolInputs bool
+}
 
 // PermissiveExpressions accepts any expression. Placeholder wiring only.
 func PermissiveExpressions(string) (bool, string) { return true, "" }
@@ -115,6 +159,13 @@ func Validate(wf *Workflow, validExpression ExpressionValidator) ValidationResul
 // stays grammar-free; every product surface passes the real evaluator
 // from internal/recovery, mirroring the contract's single validator).
 func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValidator, replayFixtures SemanticFixtureEvaluator) ValidationResult {
+	return ValidateWithOptions(wf, validExpression, replayFixtures, ValidationOptions{})
+}
+
+// ValidateWithOptions is the fully composed workflow gate. Product surfaces
+// inject the exact executable tool registry; pure domain callers still retain
+// every shape check and required tool-name check without importing runtime.
+func ValidateWithOptions(wf *Workflow, validExpression ExpressionValidator, replayFixtures SemanticFixtureEvaluator, options ValidationOptions) ValidationResult {
 	if validExpression == nil {
 		validExpression = PermissiveExpressions
 	}
@@ -157,8 +208,41 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 		} else if !ExecutableNodeTypes[node.Type] {
 			push(Issue{Code: CodeNodeTypeNotExecutable, Message: fmt.Sprintf("Node type %q is not executable by this backend yet", node.Type), NodeID: node.ID})
 		}
-		if node.Type == "http" && isJSFalsy(node.Config["url"]) {
-			push(Issue{Code: CodeHTTPMissingURL, Message: "HTTP node requires config.url", NodeID: node.ID})
+		if retry, present := node.Config["retry"]; present {
+			if _, err := ResolveRetryPolicy(retry); err != nil {
+				push(Issue{Code: CodeRetryInvalidConfig, Message: err.Error(), NodeID: node.ID})
+			}
+		}
+		if node.Type == "http" {
+			if _, err := httpcontract.ResolveNodeConfig(node.Config, true); err != nil {
+				code := CodeHTTPInvalidConfig
+				if configError, ok := err.(*httpcontract.NodeConfigError); ok && configError.Kind == httpcontract.NodeConfigMissingURL {
+					code = CodeHTTPMissingURL
+				}
+				push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
+			}
+		}
+		if node.Type == "tool" {
+			toolName, _ := node.Config["tool"].(string)
+			toolName = strings.TrimSpace(toolName)
+			if toolName == "" {
+				push(Issue{Code: CodeToolMissingName, Message: "Tool node requires config.tool", NodeID: node.ID})
+			} else if options.ToolValidator != nil {
+				input := map[string]any{}
+				if raw, present := node.Config["input"]; present {
+					var valid bool
+					input, valid = raw.(map[string]any)
+					if !valid || input == nil {
+						push(Issue{Code: CodeToolInvalidInput, Message: "Tool node config.input must be an object", NodeID: node.ID})
+						input = nil
+					}
+				}
+				if input != nil {
+					if err := options.ToolValidator(toolName, input, !options.AllowIncompleteToolInputs); err != nil {
+						push(Issue{Code: CodeToolInvalidInput, Message: err.Error(), NodeID: node.ID})
+					}
+				}
+			}
 		}
 		if node.Type == "subworkflow" {
 			workflowID, _ := node.Config["workflowId"].(string)
@@ -258,6 +342,67 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 				}
 			}
 		}
+		if node.Type == "ai" {
+			prompt, _ := node.Config["prompt"].(string)
+			_, promptRefPresent, promptRefErr := ResolvePromptReference(node.Config, "promptRef")
+			if promptRefErr != nil {
+				push(Issue{Code: CodeAIInvalidPromptRef, Message: promptRefErr.Error(), NodeID: node.ID})
+			}
+			if _, err := ResolvePromptVariables(node.Config); err != nil {
+				push(Issue{Code: CodeAIInvalidPromptVariables, Message: err.Error(), NodeID: node.ID})
+			}
+			if strings.TrimSpace(prompt) == "" && !promptRefPresent {
+				push(Issue{Code: CodeAIMissingPrompt,
+					Message: "AI node requires config.prompt or config.promptRef", NodeID: node.ID})
+			}
+			if schema, present := node.Config["outputSchema"]; present {
+				if _, valid := ParseInputSchemaValue(schema); !valid {
+					push(Issue{Code: CodeAIInvalidOutputSchema,
+						Message: "AI node config.outputSchema must use the supported JSON Schema subset", NodeID: node.ID})
+				}
+			}
+		}
+		if node.Type == "agent" {
+			goal, _ := node.Config["goal"].(string)
+			if strings.TrimSpace(goal) == "" {
+				push(Issue{Code: CodeAgentMissingGoal, Message: "Agent node requires config.goal", NodeID: node.ID})
+			}
+			if _, err := ResolveAgentRuntimeConfig(node.Config, AgentDefaultMaxSteps, false); err != nil {
+				push(Issue{Code: agentConfigIssueCode(err, false), Message: err.Error(), NodeID: node.ID})
+			} else {
+				validateAgentTool(node.Config, node.ID, CodeAgentInvalidTool, options, push)
+			}
+		}
+		if node.Type == "multi_agent" {
+			resolved, err := ResolveMultiAgentRuntimeConfig(node.Config)
+			if err != nil {
+				push(Issue{Code: agentConfigIssueCode(err, true), Message: err.Error(), NodeID: node.ID})
+			} else {
+				for _, raw := range resolved.Agents {
+					agent, _ := raw.(map[string]any)
+					validateAgentTool(agent, node.ID, CodeMultiAgentInvalidConfig, options, push)
+				}
+			}
+		}
+		if node.Type == "loop" {
+			validateLoopConfig(node, options, push)
+		}
+		if node.Type == "parallel_fork" {
+			if _, err := ResolveParallelForkBranches(node.Config); err != nil {
+				push(Issue{Code: CodeParallelForkInvalidBranches, Message: err.Error(), NodeID: node.ID})
+			}
+		}
+		if node.Type == "join" {
+			if _, err := ResolveJoinSources(node.Config); err != nil {
+				push(Issue{Code: CodeJoinInvalidSources, Message: err.Error(), NodeID: node.ID})
+			}
+		}
+		switch node.Type {
+		case "webhook_received", "email_received", "file_dropped", "mcp_server_event", "pagerduty_incident":
+			if err := ValidateTriggerConfig(node.Type, node.Config); err != nil {
+				push(Issue{Code: CodeTriggerInvalidConfig, Message: err.Error(), NodeID: node.ID})
+			}
+		}
 		if node.Type == "approval" {
 			if _, err := ResolveApprovalWaitingConfig(node.Config, time.Now()); err != nil {
 				code := "approval_invalid_deadline"
@@ -340,6 +485,136 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 	}
 
 	return ValidationResult{Valid: len(issues) == 0, Issues: issues}
+}
+
+func agentConfigIssueCode(err error, multi bool) string {
+	configError, ok := err.(*AgentConfigError)
+	if !ok {
+		if multi {
+			return CodeMultiAgentInvalidConfig
+		}
+		return CodeAgentInvalidConfig
+	}
+	if multi {
+		switch configError.Kind {
+		case MultiAgentConfigMissingAgents:
+			return CodeMultiAgentMissingAgents
+		case MultiAgentConfigInvalidAgents:
+			return CodeMultiAgentInvalidAgents
+		case MultiAgentConfigInvalidMode:
+			return CodeMultiAgentInvalidMode
+		case MultiAgentConfigInvalidAgg:
+			return CodeMultiAgentInvalidAgg
+		case MultiAgentConfigInvalidBool:
+			return CodeMultiAgentInvalidBoolean
+		default:
+			return CodeMultiAgentInvalidConfig
+		}
+	}
+	switch configError.Kind {
+	case AgentConfigInvalidPlanner:
+		return CodeAgentInvalidPlanner
+	case AgentConfigInvalidMaxSteps:
+		return CodeAgentInvalidMaxSteps
+	case AgentConfigInvalidTimeout:
+		return CodeAgentInvalidTimeout
+	case AgentConfigInvalidBoolean:
+		return CodeAgentInvalidBoolean
+	default:
+		return CodeAgentInvalidConfig
+	}
+}
+
+func validateAgentTool(config map[string]any, nodeID, issueCode string, options ValidationOptions, push func(Issue)) {
+	tool, input, err := AgentConfiguredTool(config)
+	if err != nil {
+		push(Issue{Code: issueCode, Message: err.Error(), NodeID: nodeID})
+		return
+	}
+	if tool == "" || options.ToolValidator == nil {
+		return
+	}
+	if err := options.ToolValidator(tool, input, !options.AllowIncompleteToolInputs); err != nil {
+		push(Issue{Code: issueCode, Message: err.Error(), NodeID: nodeID})
+	}
+}
+
+func validateLoopConfig(node Node, options ValidationOptions, push func(Issue)) {
+	if isJSFalsy(node.Config["items"]) {
+		push(Issue{Code: CodeLoopMissingItems, Message: "Loop node requires config.items", NodeID: node.ID})
+	}
+	mode := "map"
+	if raw, present := node.Config["mode"]; present {
+		value, ok := raw.(string)
+		if !ok || (value != "map" && value != "for_each") {
+			push(Issue{Code: CodeLoopInvalidMode, Message: "Loop mode must be map or for_each", NodeID: node.ID})
+			mode = ""
+		} else {
+			mode = value
+		}
+	}
+	if mode == "for_each" {
+		toolName, _ := node.Config["tool"].(string)
+		toolName = strings.TrimSpace(toolName)
+		if toolName == "" {
+			push(Issue{Code: CodeLoopForEachMissingTool, Message: "For-each loop requires config.tool", NodeID: node.ID})
+		} else if options.ToolValidator != nil {
+			if err := options.ToolValidator(toolName, map[string]any{}, false); err != nil {
+				push(Issue{Code: CodeLoopForEachUnknownTool, Message: "Unknown tool: " + toolName, NodeID: node.ID})
+			}
+		}
+	}
+	if raw, present := node.Config["concurrency"]; present && !boundedWholeNumber(raw, 1, 20) {
+		push(Issue{Code: CodeLoopInvalidConcurrency,
+			Message: "Loop concurrency must be an integer from 1 to 20", NodeID: node.ID})
+	}
+	_, hasCount := node.Config["toleratedFailureCount"]
+	if raw, present := node.Config["toleratedFailureCount"]; present && !boundedWholeNumber(raw, 0, 1_000) {
+		push(Issue{Code: CodeLoopInvalidFailureCount,
+			Message: "Loop tolerated failure count must be an integer from 0 to 1000", NodeID: node.ID})
+	}
+	_, hasPercentage := node.Config["toleratedFailurePercentage"]
+	if raw, present := node.Config["toleratedFailurePercentage"]; present {
+		value, ok := validationFiniteNumber(raw)
+		if !ok || value < 0 || value > 100 {
+			push(Issue{Code: CodeLoopInvalidFailurePercent,
+				Message: "Loop tolerated failure percentage must be from 0 to 100", NodeID: node.ID})
+		}
+	}
+	if hasCount && hasPercentage {
+		push(Issue{Code: CodeLoopConflictingFailureLimit,
+			Message: "Loop failure budget must use either count or percentage, not both", NodeID: node.ID})
+	}
+}
+
+func boundedWholeNumber(value any, minimum, maximum float64) bool {
+	number, ok := validationFiniteNumber(value)
+	return ok && math.Trunc(number) == number && number >= minimum && number <= maximum
+}
+
+func validationFiniteNumber(value any) (float64, bool) {
+	var number float64
+	switch typed := value.(type) {
+	case float64:
+		number = typed
+	case float32:
+		number = float64(typed)
+	case int:
+		number = float64(typed)
+	case int32:
+		number = float64(typed)
+	case int64:
+		number = float64(typed)
+	case uint:
+		number = float64(typed)
+	case uint32:
+		number = float64(typed)
+	case uint64:
+		number = float64(typed)
+	default:
+		return 0, false
+	}
+	return number, !math.IsNaN(number) && !math.IsInf(number, 0)
 }
 
 const workflowVersionMax = int64(2_147_483_647)

@@ -19,10 +19,9 @@ import (
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
-	"github.com/johnny4young/janusly/internal/grammar"
-	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/runstart"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 func (s *V1Server) startRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -492,7 +491,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusBadRequest, "dlq_workflow_schema_invalid",
 				"suggestedWorkflow failed schema validation: "+reason, map[string]any{"reason": reason})
 		}
-		validation := domain.ValidateWithSemanticFixtures(parsed, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
+		validation := workflowvalidation.Validate(parsed)
 		for _, issue := range validation.Issues {
 			if issue.Code != domain.CodeNodeTypeNotExecutable {
 				return opError(http.StatusBadRequest, "dlq_workflow_schema_invalid",

@@ -23,11 +23,10 @@ import (
 	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
-	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/ratelimit"
-	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/runstart"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 const (
@@ -207,7 +206,7 @@ func (d Deps) saveWorkflow(ctx context.Context, document map[string]any) (*mcp.C
 	if !validOptionalMCPIdentifier(wf.ID) {
 		return expected("workflow id must be at most 256 characters")
 	}
-	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
+	result := workflowvalidation.Validate(wf)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
 		if issue.Code != domain.CodeNodeTypeNotExecutable {

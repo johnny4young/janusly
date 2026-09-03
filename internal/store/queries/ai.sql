@@ -80,6 +80,38 @@ DELETE FROM eval_datasets WHERE org_id = $1 AND id = $2;
 -- name: DeleteEvalExamplesForDataset :exec
 DELETE FROM eval_examples WHERE org_id = $1 AND dataset_id = $2;
 
+-- Dataset retention is dataset-owned rather than a tenant-wide window. One
+-- statement claims a bounded group of expired parents and removes their
+-- consented examples atomically. Experiment summaries intentionally survive:
+-- they are immutable comparison evidence and do not contain the dataset rows.
+-- SKIP LOCKED lets HA maintenance replicas divide a backlog without waiting on
+-- or double-counting the same datasets.
+-- name: PurgeExpiredEvalDatasetsBatch :one
+WITH expired AS (
+  SELECT dataset.id, dataset.org_id
+  FROM eval_datasets dataset
+  WHERE dataset.retention_days IS NOT NULL
+    AND dataset.retention_days BETWEEN 1 AND 3650
+    AND dataset.created_at + dataset.retention_days * interval '1 day'
+        <= sqlc.arg(now_at)::timestamptz
+  ORDER BY dataset.created_at ASC, dataset.id ASC
+  FOR UPDATE OF dataset SKIP LOCKED
+  LIMIT sqlc.arg(batch_size)
+), deleted_examples AS (
+  DELETE FROM eval_examples example
+  USING expired
+  WHERE example.org_id = expired.org_id
+    AND example.dataset_id = expired.id
+  RETURNING example.id
+), deleted_datasets AS (
+  DELETE FROM eval_datasets dataset
+  USING expired
+  WHERE dataset.org_id = expired.org_id
+    AND dataset.id = expired.id
+  RETURNING dataset.id
+)
+SELECT count(*)::bigint FROM deleted_datasets;
+
 -- name: InsertEvalExample :exec
 INSERT INTO eval_examples (id, org_id, dataset_id, source_feedback_id, workflow_id,
                            dead_letter_id, failure_signature, input_context,

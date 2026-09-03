@@ -11,6 +11,7 @@ import (
 type scriptedClient struct {
 	responses []string
 	calls     []ai.GenerateTextInput
+	nilResult bool
 }
 
 func (s *scriptedClient) Configured() bool { return true }
@@ -21,12 +22,23 @@ func (s *scriptedClient) GenerateText(_ context.Context, input ai.GenerateTextIn
 	if index >= len(s.responses) {
 		return nil, &ai.AIError{Class: "unexpected", Message: "too many calls"}
 	}
+	if s.nilResult {
+		return nil, nil
+	}
 	cost := 0.01
 	return &ai.GenerateTextResult{
 		Text: s.responses[index], Provider: "anthropic", Model: ai.DefaultModel,
 		Usage:     ai.Usage{InputTokens: 20, OutputTokens: 10, TotalTokens: 30},
 		LatencyMs: 4, CostUsd: &cost,
 	}, nil
+}
+
+func TestGenerateTreatsNilProviderResultAsClassifiedFailure(t *testing.T) {
+	client := &scriptedClient{responses: []string{"unused"}, nilResult: true}
+	result, aiErr := Generate(context.Background(), client, GenerateInput{Evidence: Evidence{Message: "mismatch"}})
+	if aiErr == nil || aiErr.Class != "unknown" || len(client.calls) != 1 || len(result.Calls) != 0 {
+		t.Fatalf("nil provider result must fail closed: result=%+v err=%v calls=%d", result, aiErr, len(client.calls))
+	}
 }
 
 func validResponse(summary string) string {
@@ -69,11 +81,44 @@ func TestGenerateUsesExactlyOneExplicitRepairCall(t *testing.T) {
 	}
 }
 
+func TestGenerateReadmitsBeforeRepairAndDoesNotReachProviderWhenDenied(t *testing.T) {
+	client := &scriptedClient{responses: []string{
+		`{"summary":"bad","actions":["approve"]}`,
+		validResponse("This response must never be requested."),
+	}}
+	admissions := 0
+	result, aiErr := Generate(context.Background(), client, GenerateInput{
+		Evidence: Evidence{Message: "detector mismatch", DetectorKind: "schema", Action: "observe"},
+		AdmitCall: func(context.Context) *ai.AIError {
+			admissions++
+			if admissions == 2 {
+				return &ai.AIError{Class: "budget_blocked", Message: "monthly AI budget exceeded"}
+			}
+			return nil
+		},
+	})
+	if aiErr == nil || aiErr.Class != "budget_blocked" || admissions != 2 || len(client.calls) != 1 || len(result.Calls) != 0 {
+		t.Fatalf("repair must be re-admitted before egress: admissions=%d providerCalls=%d result=%+v err=%v",
+			admissions, len(client.calls), result, aiErr)
+	}
+}
+
 func TestGenerateFailsClosedAfterSecondInvalidEnvelope(t *testing.T) {
 	client := &scriptedClient{responses: []string{`not json`, `{"summary":"still missing hypotheses"}`}}
 	result, aiErr := Generate(context.Background(), client, GenerateInput{Evidence: Evidence{Message: "mismatch"}})
 	if aiErr == nil || aiErr.Class != "invalid_output" || len(client.calls) != 2 || len(result.Calls) != 0 {
 		t.Fatalf("invalid output must fail after two calls: %+v %v calls=%d", result, aiErr, len(client.calls))
+	}
+}
+
+func TestGenerateRejectsOversizedOutputWithoutRepairCall(t *testing.T) {
+	client := &scriptedClient{responses: []string{
+		strings.Repeat(" ", MaxDiagnosisOutputBytes) + validResponse("oversized"),
+		validResponse("must not be requested"),
+	}}
+	result, aiErr := Generate(context.Background(), client, GenerateInput{Evidence: Evidence{Message: "mismatch"}})
+	if aiErr == nil || aiErr.Class != "invalid_output" || len(client.calls) != 1 || len(result.Calls) != 0 {
+		t.Fatalf("oversized output must stop before repair: result=%+v err=%v calls=%d", result, aiErr, len(client.calls))
 	}
 }
 
@@ -92,5 +137,8 @@ func TestParseRejectsAuthorityUnknownFieldsAndBounds(t *testing.T) {
 	parsed, err := Parse(validResponse("saw " + secret))
 	if err != nil || strings.Contains(parsed.Summary, secret) || !strings.Contains(parsed.Summary, "[redacted]") {
 		t.Fatalf("provider output must be scrubbed: %+v %v", parsed, err)
+	}
+	if parsed, err := Parse(strings.Repeat(" ", MaxDiagnosisOutputBytes) + validResponse("too large")); err == nil {
+		t.Fatalf("oversized envelope was parsed: %+v", parsed)
 	}
 }

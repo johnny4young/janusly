@@ -14,6 +14,7 @@ import (
 	"fmt"
 
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/httpcontract"
 	"github.com/johnny4young/janusly/internal/tools"
 )
 
@@ -35,6 +36,11 @@ type Input struct {
 	// resolved from org config; nil keeps the platform constants. Node
 	// config always wins over these.
 	HTTPBounds *HTTPBounds
+	// RedactedValues are the exact secret/env literals resolved while the
+	// dispatcher rendered config. Executors keep the real config for the
+	// intended call but must scrub these values from every model-facing
+	// projection. Persistence is independently protected by the engine.
+	RedactedValues []string
 	// AI carries the tenant-resolved seams for `ai`/`agent` nodes; nil
 	// behaves as "no provider configured" (the $0 fallback).
 	AI *AIDeps
@@ -46,6 +52,23 @@ type Input struct {
 	// Integrations carries the engine-built chokepoint seams (credential
 	// gate + usage recorder + guarded egress) for integration tools.
 	Integrations *tools.IntegrationDeps
+	// AgentWritesAuthorized is the dispatcher's four-part grant for an
+	// agent or multi_agent node: explicit workflow capability, process
+	// enablement, tenant consent, and a dominating human approval. The
+	// executor still checks the selected tool's static write metadata at
+	// the last responsible moment. False is the fail-closed default.
+	AgentWritesAuthorized bool
+	// AgentAllowedHTTPRequests maps each literal workflow-authored URL to the
+	// exact rendered HTTP request that may execute. The model may choose a
+	// request, but cannot manufacture its target, method, headers, or body.
+	// Nil/empty denies http.request while explicit http nodes remain available
+	// for dynamic endpoint patterns governed by their own contract.
+	AgentAllowedHTTPRequests map[string]map[string]any
+	// AgentAllowedHTTPRequestsByIndex carries the same authority scoped to
+	// each child of a multi_agent crew. runMultiAgent installs only the current
+	// child's map before entering its planner loop, so siblings cannot borrow
+	// each other's egress targets.
+	AgentAllowedHTTPRequestsByIndex []map[string]map[string]any
 	// DryRun marks a validation (sandbox) execution: write-side tools and
 	// sensitive http methods SKIP instead of producing external effects.
 	DryRun bool
@@ -64,12 +87,7 @@ type MemoryDeps struct {
 }
 
 // HTTPBounds are the tenant-effective outbound HTTP defaults.
-type HTTPBounds struct {
-	TimeoutMs          float64
-	MaxResponseBytes   int
-	MaxRedirects       int
-	StreamPreviewBytes int
-}
+type HTTPBounds = httpcontract.Bounds
 
 // Func executes one node and returns its output value.
 type Func func(ctx context.Context, in Input) (any, error)
@@ -80,7 +98,7 @@ func Registry() map[string]Func {
 	toolRegistry := NewToolRegistry()
 	httpExec := NewHTTPExecutor(HTTPOptions{})
 	return map[string]Func{
-		"tool":               NewToolExecutor(toolRegistry),
+		"tool":               NewToolExecutor(toolRegistry, httpExec),
 		"agent":              NewAgentExecutor(toolRegistry, httpExec),
 		"multi_agent":        NewMultiAgentExecutor(toolRegistry, httpExec),
 		"noop":               executeNoop,
@@ -91,9 +109,9 @@ func Registry() map[string]Func {
 		"webhook":            executeWebhook,
 		"approval":           executeApproval,
 		"human_form":         executeHumanForm,
-		"http":               NewHTTPExecutor(HTTPOptions{}),
+		"http":               httpExec,
 		"parallel_fork":      executeParallelFork,
-		"loop":               NewLoopExecutor(toolRegistry),
+		"loop":               NewLoopExecutor(toolRegistry, httpExec),
 		"join":               executeJoin,
 		"webhook_received":   executeWebhookReceived,
 		"pagerduty_incident": executePagerDutyIncident,

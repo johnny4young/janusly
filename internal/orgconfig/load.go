@@ -15,6 +15,14 @@ import (
 // pgx.Tx both satisfy store.DBTX.
 type Querier = store.DBTX
 
+// ValueWithSource is one effective value plus its resolution provenance.
+// Consumers that make a security decision from provenance (for example,
+// tenant-authored URLs versus operator environment URLs) must use this form.
+type ValueWithSource struct {
+	Value  any
+	Source string
+}
+
 // LoadResolved reads the org's tenant rows once and resolves the whole
 // catalog against the process environment.
 func LoadResolved(ctx context.Context, db Querier, orgID string) ([]Resolved, error) {
@@ -66,16 +74,28 @@ func LoadValueWithSource(ctx context.Context, db Querier, orgID, key string) (an
 // LISTEN). Read failures degrade to catalog defaults, same as LoadValue —
 // config reads must never take the governed operation down.
 func LoadValues(ctx context.Context, db Querier, orgID string, keys ...string) map[string]any {
+	resolved := LoadValuesWithSources(ctx, db, orgID, keys...)
+	values := make(map[string]any, len(resolved))
+	for key, item := range resolved {
+		values[key] = item.Value
+	}
+	return values
+}
+
+// LoadValuesWithSources resolves several keys and their provenance from one
+// tenant-row snapshot. Store failures retain the ordinary fail-soft contract:
+// every requested known key resolves from environment/default policy.
+func LoadValuesWithSources(ctx context.Context, db Querier, orgID string, keys ...string) map[string]ValueWithSource {
 	tenantRows := map[string]json.RawMessage{}
 	if rows, err := store.New(db).ListOrgConfigRows(ctx, orgID); err == nil {
 		for _, row := range rows {
 			tenantRows[row.Key] = row.ValueJson
 		}
 	}
-	values := make(map[string]any, len(keys))
+	values := make(map[string]ValueWithSource, len(keys))
 	for _, key := range keys {
-		value, _ := ResolveValue(key, tenantRows, os.LookupEnv)
-		values[key] = value
+		value, source := ResolveValue(key, tenantRows, os.LookupEnv)
+		values[key] = ValueWithSource{Value: value, Source: source}
 	}
 	return values
 }

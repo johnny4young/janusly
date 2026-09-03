@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/httpcontract"
 	"github.com/johnny4young/janusly/internal/tools"
 )
 
@@ -26,15 +28,45 @@ func httpRequestDefinition() tools.Definition {
 			{Name: "url", Type: "string", Required: true},
 			{Name: "method", Type: "string"},
 			{Name: "headers", Type: "object"},
-			{Name: "body", Type: "object"},
+			{Name: "body", Type: "unknown"},
 			{Name: "timeoutMs", Type: "number"},
 			{Name: "maxResponseBytes", Type: "number"},
 			{Name: "maxRedirects", Type: "number"},
 		},
 		InputExample: map[string]any{"url": "https://example.com", "method": "GET"},
+		Validate:     validateHTTPRequestInput,
 		WriteSide:    true,
 		Execute:      executeHTTPRequestTool,
 	}
+}
+
+func validateHTTPRequestInput(input map[string]any, options tools.InputValidationOptions) error {
+	config := maps.Clone(input)
+	if _, present := config["url"]; !present {
+		// Required-field presence is owned by the registry. A partial proposal
+		// may omit it, but any supplied method/header/bound still needs semantic
+		// validation instead of hiding behind that unresolved binding.
+		config["url"] = "https://example.invalid"
+	}
+	_, err := httpcontract.ResolveNodeConfig(config, options.AllowWholeTemplates)
+	if err != nil {
+		return err
+	}
+	if raw, present := input["body"]; present {
+		if text, ok := raw.(string); ok && options.AllowWholeTemplates {
+			if _, whole := grammar.WholeTemplateReference(text); whole {
+				return nil
+			}
+		}
+		encoded, marshalErr := json.Marshal(raw)
+		if marshalErr != nil {
+			return fmt.Errorf("http.body must be valid JSON")
+		}
+		if len(encoded) > httpcontract.MaxRequestBodyBytes {
+			return fmt.Errorf("http.body exceeds %d bytes", httpcontract.MaxRequestBodyBytes)
+		}
+	}
+	return nil
 }
 
 func executeHTTPRequestTool(ctx context.Context, input map[string]any) (map[string]any, error) {
@@ -59,15 +91,17 @@ func executeHTTPRequestTool(ctx context.Context, input map[string]any) (map[stri
 		}
 		body = encoded
 	}
-	intOf := func(field string) int {
-		value, _ := input[field].(float64)
-		return int(value)
+	intOf := func(field string, maximum int) int {
+		value, _ := httpcontract.WholeNumber(input[field], 0, maximum)
+		return value
 	}
+	_, maxRedirectsSet := input["maxRedirects"]
 	result, err := FetchHTTPTarget(ctx, rawURL, FetchOptions{
 		Method: method, Headers: headers, Body: body,
-		TimeoutMs:        intOf("timeoutMs"),
-		MaxResponseBytes: intOf("maxResponseBytes"),
-		MaxRedirects:     intOf("maxRedirects"),
+		TimeoutMs:        intOf("timeoutMs", httpcontract.MaxTimeoutMS),
+		MaxResponseBytes: intOf("maxResponseBytes", httpcontract.MaxResponseBytes),
+		MaxRedirects:     intOf("maxRedirects", httpcontract.MaxRedirects),
+		MaxRedirectsSet:  maxRedirectsSet,
 	})
 	if err != nil {
 		return nil, err

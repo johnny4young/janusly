@@ -13,21 +13,156 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/johnny4young/janusly/internal/objectstore"
 )
 
 const (
-	pdfTemplateMax  = 200_000
-	pdfVariablesMax = 50
+	pdfTemplateMax         = 200_000
+	pdfVariablesMax        = 50
+	pdfVariableValueMax    = 16 << 10
+	pdfVariablesPayloadMax = 64 << 10
+	pdfExpandedTemplateMax = 1 << 20
+	pdfFilenameMaxRunes    = 128
+	pdfFilenameMaxBytes    = 512
 )
 
 // PdfKeyBuilder assembles the tenant-scoped object key (engine seam).
 type PdfKeyBuilder func(filename string) string
+
+func validatePDFFilename(filename string) error {
+	if filename == "" || filename != strings.TrimSpace(filename) || filename == "." || filename == ".." ||
+		strings.Contains(filename, "..") || strings.ContainsAny(filename, `/\\`) ||
+		len(filename) > pdfFilenameMaxBytes || utf8.RuneCountInString(filename) > pdfFilenameMaxRunes {
+		return fmt.Errorf("filename must be a safe base name of at most %d characters", pdfFilenameMaxRunes)
+	}
+	for _, character := range filename {
+		if unicode.IsControl(character) {
+			return fmt.Errorf("filename must not contain control characters")
+		}
+	}
+	return nil
+}
+
+func pdfVariableString(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return typed, true
+	case bool:
+		return strconv.FormatBool(typed), true
+	case int:
+		return strconv.FormatInt(int64(typed), 10), true
+	case int8:
+		return strconv.FormatInt(int64(typed), 10), true
+	case int16:
+		return strconv.FormatInt(int64(typed), 10), true
+	case int32:
+		return strconv.FormatInt(int64(typed), 10), true
+	case int64:
+		return strconv.FormatInt(typed, 10), true
+	case uint:
+		return strconv.FormatUint(uint64(typed), 10), true
+	case uint8:
+		return strconv.FormatUint(uint64(typed), 10), true
+	case uint16:
+		return strconv.FormatUint(uint64(typed), 10), true
+	case uint32:
+		return strconv.FormatUint(uint64(typed), 10), true
+	case uint64:
+		return strconv.FormatUint(typed, 10), true
+	case float32:
+		value := float64(typed)
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return "", false
+		}
+		return strconv.FormatFloat(value, 'g', -1, 32), true
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return "", false
+		}
+		return strconv.FormatFloat(typed, 'g', -1, 64), true
+	case json.Number:
+		if !validJSONNumber(typed) {
+			return "", false
+		}
+		return typed.String(), true
+	default:
+		return "", false
+	}
+}
+
+func normalizePDFVariables(raw any) (map[string]string, error) {
+	if raw == nil {
+		return map[string]string{}, nil
+	}
+	rawVariables, ok := raw.(map[string]any)
+	if !ok || len(rawVariables) > pdfVariablesMax {
+		return nil, fmt.Errorf("variables must be an object with at most %d entries", pdfVariablesMax)
+	}
+	serialized, err := json.Marshal(rawVariables)
+	if err != nil || len(serialized) > pdfVariablesPayloadMax {
+		return nil, fmt.Errorf("variables exceed %d bytes", pdfVariablesPayloadMax)
+	}
+	variables := make(map[string]string, len(rawVariables))
+	for key, rawValue := range rawVariables {
+		if !placeholderNamePattern.MatchString(key) {
+			return nil, fmt.Errorf("variable names must match %s", placeholderNamePattern.String())
+		}
+		value, valid := pdfVariableString(rawValue)
+		if !valid || len(value) > pdfVariableValueMax {
+			return nil, fmt.Errorf("variable values must be bounded JSON scalar values")
+		}
+		variables[key] = value
+	}
+	return variables, nil
+}
+
+func validatePDFInput(input map[string]any, options InputValidationOptions) error {
+	templateRaw, templatePresent := input["template"]
+	templateDeferred := templatePresent && isDeferredWholeTemplate(templateRaw, options)
+	if templatePresent && !templateDeferred {
+		template := templateRaw.(string)
+		if strings.TrimSpace(template) == "" || len(template) > pdfTemplateMax {
+			return fmt.Errorf("template must be non-empty and at most %d bytes", pdfTemplateMax)
+		}
+	}
+	if raw, present := input["format"]; present && !isDeferredWholeTemplate(raw, options) {
+		format := raw.(string)
+		if format != "markdown" && format != "html" {
+			return fmt.Errorf("format must be markdown or html")
+		}
+	}
+	if raw, present := input["filename"]; present && !isDeferredWholeTemplate(raw, options) {
+		if err := validatePDFFilename(raw.(string)); err != nil {
+			return err
+		}
+	}
+	variablesRaw, variablesPresent := input["variables"]
+	variablesDeferred := variablesPresent && isDeferredWholeTemplate(variablesRaw, options)
+	variables := map[string]string{}
+	if variablesPresent && !variablesDeferred {
+		var err error
+		variables, err = normalizePDFVariables(variablesRaw)
+		if err != nil {
+			return err
+		}
+	}
+	if templatePresent && !templateDeferred && !variablesDeferred {
+		if _, ok := substitutePDFVariablesBounded(templateRaw.(string), variables, pdfExpandedTemplateMax); !ok {
+			return fmt.Errorf("expanded template exceeds %d bytes", pdfExpandedTemplateMax)
+		}
+	}
+	return nil
+}
 
 func pdfTools() []Definition {
 	unavailable := func(_ context.Context, _ map[string]any) (map[string]any, error) {
@@ -49,16 +184,57 @@ func pdfTools() []Definition {
 			"variables": map[string]any{"number": "INV-001", "amount": "$100.00"},
 			"filename":  "invoice.pdf",
 		},
+		Validate:  validatePDFInput,
 		WriteSide: true,
 		Execute:   unavailable,
 	}}
 }
 
-var placeholderPattern = regexp.MustCompile(`\{\{([A-Za-z0-9_]{1,64})\}\}`)
+var (
+	placeholderNamePattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+	placeholderPattern     = regexp.MustCompile(`\{\{([A-Za-z0-9_]{1,64})\}\}`)
+)
+
+func substitutePDFVariablesBounded(template string, variables map[string]string, maximum int) (string, bool) {
+	locations := placeholderPattern.FindAllStringSubmatchIndex(template, -1)
+	if len(locations) == 0 {
+		return template, len(template) <= maximum
+	}
+	var out strings.Builder
+	out.Grow(min(len(template), maximum))
+	last := 0
+	appendBounded := func(value string) bool {
+		if len(value) > maximum-out.Len() {
+			return false
+		}
+		out.WriteString(value)
+		return true
+	}
+	for _, location := range locations {
+		if !appendBounded(template[last:location[0]]) {
+			return "", false
+		}
+		name := template[location[2]:location[3]]
+		replacement, known := variables[name]
+		if !known {
+			replacement = template[location[0]:location[1]]
+		}
+		if !appendBounded(replacement) {
+			return "", false
+		}
+		last = location[1]
+	}
+	if !appendBounded(template[last:]) {
+		return "", false
+	}
+	return out.String(), true
+}
 
 // SubstituteVariables replaces known {{name}} placeholders; unknown ones
 // stay intact (the contract's visible-typo posture).
 func SubstituteVariables(template string, variables map[string]string) string {
+	// Kept as the public pure helper for callers and compatibility tests. The
+	// executable path below applies the hard expansion ceiling.
 	return placeholderPattern.ReplaceAllStringFunc(template, func(match string) string {
 		name := placeholderPattern.FindStringSubmatch(match)[1]
 		if value, known := variables[name]; known {
@@ -80,14 +256,9 @@ func executePdfGenerate(ctx context.Context, input map[string]any, deps *Integra
 		return map[string]any{"ok": false, "provider": "noop",
 			"error": "pdf.generate format \"" + format + "\" is not supported (markdown or html)"}
 	}
-	variables := map[string]string{}
-	if rawVariables, ok := input["variables"].(map[string]any); ok {
-		if len(rawVariables) > pdfVariablesMax {
-			return map[string]any{"ok": false, "provider": "noop", "error": "pdf.generate supports at most 50 variables"}
-		}
-		for key, value := range rawVariables {
-			variables[key] = fmt.Sprint(value)
-		}
+	variables, variablesError := normalizePDFVariables(input["variables"])
+	if variablesError != nil {
+		return map[string]any{"ok": false, "provider": "noop", "error": variablesError.Error()}
 	}
 	filename, _ := input["filename"].(string)
 	// The filename is WORKFLOW-AUTHOR input feeding an object key: keep
@@ -100,7 +271,7 @@ func executePdfGenerate(ctx context.Context, input map[string]any, deps *Integra
 	if filename == "" || filename == ".pdf" {
 		filename = "document.pdf"
 	}
-	if !strings.HasSuffix(filename, ".pdf") {
+	if !strings.HasSuffix(strings.ToLower(filename), ".pdf") {
 		filename += ".pdf"
 	}
 	record := func(provider string, ok bool, errMessage string) {
@@ -120,7 +291,10 @@ func executePdfGenerate(ctx context.Context, input map[string]any, deps *Integra
 		}
 	}
 
-	substituted := SubstituteVariables(template, variables)
+	substituted, withinLimit := substitutePDFVariablesBounded(template, variables, pdfExpandedTemplateMax)
+	if !withinLimit {
+		return map[string]any{"ok": false, "provider": "noop", "error": "pdf.generate expanded template exceeds the size cap"}
+	}
 	var document []byte
 	if format == "html" {
 		document = RenderHTMLPDF(substituted)

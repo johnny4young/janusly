@@ -29,11 +29,9 @@ import (
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
-	"github.com/johnny4young/janusly/internal/executors"
-	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/ratelimit"
-	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 // webhookIngestMaxBytes mirrors the contract's trigger-ingest JSON cap.
@@ -93,7 +91,10 @@ func (s *V1Server) webhookSelectorIngestCore(r *http.Request, rc v1Request) opRe
 	resolved, ambiguous, err := resolveUniqueTriggerNode(
 		r.Context(), store.New(s.pool), rc.orgID, "webhook_received",
 		func(config map[string]any) bool {
-			configured, configErr := executors.ResolveWebhookEndpointKey(config)
+			if domain.ValidateWebhookReceivedConfig(config) != nil {
+				return false
+			}
+			configured, configErr := domain.ResolveWebhookEndpointKey(config)
 			return configErr == nil && strings.EqualFold(configured, endpointKey)
 		},
 	)
@@ -380,7 +381,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 			break
 		}
 	}
-	ratePerMin := executors.ResolveTriggerRateLimitPerMin(nodeConfig["rateLimitPerMin"])
+	ratePerMin := domain.ResolveTriggerRateLimitPerMin(nodeConfig["rateLimitPerMin"])
 	if limitErr := s.limiter.EnforceTriggerEvent(ctx, in.orgID, in.orgID, triggerEventID, ratelimit.Options{
 		Name:   "trigger." + effectiveVersionID + "." + nodeID,
 		Max:    ratePerMin,
@@ -437,7 +438,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 		}}
 	}
 
-	if valid := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !valid.Valid {
+	if valid := workflowvalidation.Validate(wf); !valid.Valid {
 		_, _ = q.MarkTriggerEventOutcome(ctx, store.MarkTriggerEventOutcomeParams{
 			OrgID: in.orgID, ID: triggerEventID, Status: "failed",
 			SkippedReason: pgtype.Text{String: "workflow_parse_failed", Valid: true},
@@ -493,7 +494,7 @@ func matchWebhookNode(wf *domain.Workflow, endpointKey string, noMatch opResult)
 		if node.Type != "webhook_received" {
 			continue
 		}
-		key, err := executors.ResolveWebhookEndpointKey(node.Config)
+		key, err := domain.ResolveWebhookEndpointKey(node.Config)
 		if err != nil || key == "" {
 			continue
 		}

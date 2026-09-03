@@ -30,6 +30,7 @@ const (
 	MaxStatements           = 5
 	MaxStatementRunes       = 400
 	MaxDiagnosisOutputUnits = 700
+	MaxDiagnosisOutputBytes = 32 * 1024
 )
 
 var hypothesisIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]*$`)
@@ -100,6 +101,11 @@ type GenerateInput struct {
 	Evidence  Evidence
 	Context   ai.CallContext
 	ModelHint string
+	// AdmitCall runs immediately before every provider call, including the
+	// single JSON-repair call. Callers use it to re-apply tenant rate and
+	// budget policy after the first call has recorded usage. Nil keeps the
+	// pure generator usable by bounded offline qualification harnesses.
+	AdmitCall func(context.Context) *ai.AIError
 }
 
 const systemPrompt = `You are Janusly's recovery diagnosis assistant. Return ONLY one JSON object with exactly this shape:
@@ -171,6 +177,11 @@ func Generate(ctx context.Context, client ai.Client, input GenerateInput) (Resul
 	prompt := "BEGIN_UNTRUSTED_INCIDENT_EVIDENCE_JSON\n" + string(rawEvidence) + "\nEND_UNTRUSTED_INCIDENT_EVIDENCE_JSON"
 	result := Result{Calls: make([]CallMeta, 0, 2)}
 	call := func(currentPrompt string) (string, *ai.AIError) {
+		if input.AdmitCall != nil {
+			if aiErr := input.AdmitCall(ctx); aiErr != nil {
+				return "", aiErr
+			}
+		}
 		generated, aiErr := client.GenerateText(ctx, ai.GenerateTextInput{
 			System: system, Prompt: currentPrompt, ResponseFormat: "json",
 			ModelHint: input.ModelHint, CacheSystemPrompt: true,
@@ -179,10 +190,16 @@ func Generate(ctx context.Context, client ai.Client, input GenerateInput) (Resul
 		if aiErr != nil {
 			return "", aiErr
 		}
+		if generated == nil {
+			return "", &ai.AIError{Class: "unknown", Message: "provider returned an empty result"}
+		}
 		result.Calls = append(result.Calls, CallMeta{
 			Provider: generated.Provider, Model: generated.Model, Usage: generated.Usage,
 			LatencyMs: generated.LatencyMs, CostUsd: generated.CostUsd,
 		})
+		if len(generated.Text) > MaxDiagnosisOutputBytes {
+			return "", &ai.AIError{Class: "invalid_output", Message: "diagnosis output exceeded the bounded JSON envelope"}
+		}
 		return generated.Text, nil
 	}
 	text, aiErr := call(prompt)
@@ -213,7 +230,7 @@ func Generate(ctx context.Context, client ai.Client, input GenerateInput) (Resul
 // validation. A syntactically repaired prefix is acceptable only if the
 // resulting complete envelope passes every semantic bound.
 func Parse(text string) (Enrichment, error) {
-	value, ok := ai.ParseJSONValue(text)
+	value, ok := ai.ParseJSONValueBounded(text, MaxDiagnosisOutputBytes)
 	if !ok {
 		return Enrichment{}, errors.New("response is not a JSON object")
 	}

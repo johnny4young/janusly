@@ -9,10 +9,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/johnny4young/janusly/internal/domain"
-	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/workflowreadiness"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 const maxAssuranceIssueCodes = 50
@@ -189,9 +189,7 @@ func (d Deps) assureWorkflow(ctx context.Context, workflowID string) (*mcp.CallT
 			},
 		})
 	}
-	validation := domain.ValidateWithSemanticFixtures(
-		wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation,
-	)
+	validation := workflowvalidation.Validate(wf)
 	payload := assuranceProjection(wf, validation)
 	payload["workflowId"] = workflow.ID
 	payload["name"] = boundedMCPText(workflow.Name, 240)

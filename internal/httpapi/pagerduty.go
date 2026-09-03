@@ -26,7 +26,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
-	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/secretstore"
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/webhooksig"
@@ -202,7 +201,7 @@ func pagerDutyWebhookCredentialForNode(wf *domain.Workflow, nodeID string) (stri
 	}
 	for _, node := range wf.Nodes {
 		if node.ID != nodeID || node.Type != "pagerduty_incident" ||
-			executors.ValidatePagerDutyIncidentConfig(node.Config) != nil {
+			domain.ValidatePagerDutyIncidentConfig(node.Config) != nil {
 			continue
 		}
 		credential, _ := node.Config["webhookCredential"].(string)
@@ -345,7 +344,7 @@ func (s *V1Server) pagerDutyCallbackHandler(w http.ResponseWriter, r *http.Reque
 			for _, node := range wf.Nodes {
 				if node.ID == nodeID && node.Type == "pagerduty_incident" {
 					currentConfigured = true
-					if executors.ValidatePagerDutyIncidentConfig(node.Config) != nil {
+					if domain.ValidatePagerDutyIncidentConfig(node.Config) != nil {
 						currentInvalid = true
 						break
 					}

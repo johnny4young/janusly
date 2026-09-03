@@ -222,6 +222,7 @@ func TestRecoveryFeedbackRejectsInvalidOrUntrustedInputs(t *testing.T) {
 func TestAcceptedRecoveryFeedbackSchedulesConsentedMemory(t *testing.T) {
 	var embeddingCalls atomic.Int32
 	embedding := make([]float64, 1024)
+	embedding[0] = 1
 	embeddingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/embeddings" {
 			http.NotFound(w, r)
@@ -317,6 +318,7 @@ func TestFeedbackMemorySaturationKeepsPrimaryFeedbackAccepted(t *testing.T) {
 	var releaseOnce sync.Once
 	defer releaseOnce.Do(func() { close(release) })
 	embedding := make([]float64, 1024)
+	embedding[0] = 1
 	embeddingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/embeddings" {
 			http.NotFound(w, r)

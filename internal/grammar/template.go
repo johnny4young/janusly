@@ -29,6 +29,22 @@ const MaxRecordedUnresolvedPaths = 20
 var singleRefPattern = regexp.MustCompile(`^\s*\{\{\s*([^}]+?)\s*\}\}\s*$`)
 var multiRefPattern = regexp.MustCompile(`\{\{\s*([^}]+?)\s*\}\}`)
 
+// WholeTemplateReference reports the expression carried by a string whose
+// entire value is exactly one Janusly template reference. Whole references
+// are special because rendering preserves the referenced value's native JSON
+// type; interpolated references always render as strings.
+func WholeTemplateReference(value string) (expression string, ok bool) {
+	match := singleRefPattern.FindStringSubmatch(value)
+	if match == nil {
+		return "", false
+	}
+	expression = strings.TrimSpace(match[1])
+	if expression == "" {
+		return "", false
+	}
+	return expression, true
+}
+
 // RenderOptions injects the environment and secret sources plus the
 // executor-owned roots whose resolution is deferred to a later lifecycle
 // point (loop item/index, sequential previousAgents).
@@ -193,8 +209,7 @@ func renderString(value string, scope map[string]any, state *renderState) (any, 
 	// Single-template-contract shape: the whole string is one {{...}}, so
 	// the resolved value keeps its native type — without this, a templated
 	// array would degrade into its JSON string form.
-	if match := singleRefPattern.FindStringSubmatch(value); match != nil {
-		expr := strings.TrimSpace(match[1])
+	if expr, wholeReference := WholeTemplateReference(value); wholeReference {
 		if state.deferredRoots[pathRoot(expr)] {
 			return value, nil
 		}

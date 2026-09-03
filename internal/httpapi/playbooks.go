@@ -333,7 +333,7 @@ func (s *V1Server) usePlaybookCore(r *http.Request, rc v1Request, id string) opR
 			"workflow": workflow, "rationale": playbook.InstructionsMarkdown,
 			"approachLabel": playbook.ApproachLabel, "confidence": 100,
 			"calibratedConfidence":   100,
-			"safety":                 domain.ComputeSuggestionSafety(workflow, item.NodeID),
+			"safety":                 domain.ComputeSuggestionSafetyWithOptions(workflow, item.NodeID, s.readinessOptions()),
 			"consideredAlternatives": []any{},
 		}},
 		"evidence": []any{map[string]any{

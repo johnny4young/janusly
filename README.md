@@ -98,7 +98,7 @@ See [local deployment](docs/local-deployment.md),
 | `make test-e2e` | Exercise the embedded React application and real API image. |
 | `make test-e2e-full` | Opt-in full Playwright suite against a running `make dev` stack. |
 | `make verify` | Run the complete local acceptance ladder. |
-| `make qualify-real-provider` | Explicit-cost Anthropic product check; requires consent, a local key, and is capped at two calls / USD 1. |
+| `make qualify-real-provider` | Explicit-cost Anthropic product check over 20 EN/ES cases; requires consent and a local key, with at most two calls per case, 40 calls total, and USD 3 total. |
 
 ## Configuration
 

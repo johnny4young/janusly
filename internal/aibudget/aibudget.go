@@ -2,9 +2,11 @@
 // the monthly usage_events cost aggregate measured against the catalog's
 // org budget (ai.budgetMonthlyUsd / ai.budgetWarnPercent /
 // ai.budgetExceededPolicy). allowed=false ONLY when the policy is "block"
-// AND the spend crossed the limit; "warn" proceeds with a deduped warning
-// audit. Fail-soft everywhere: a broken spend query keeps the gate OPEN
-// (the rate-limit posture) — cost governance must never become an outage.
+// AND recorded spend crossed the threshold; "warn" proceeds with a deduped
+// warning audit. This is a pre-call guard over completed usage, not an atomic
+// reservation: concurrent/in-flight requests may finish above the configured
+// amount. Fail-soft everywhere: a broken spend query keeps the gate OPEN (the
+// rate-limit posture) — cost governance must never become an outage.
 // The org scope is the runtime's v1; per-workflow workflow_budgets rows are
 // deferred with their surface.
 package aibudget
@@ -175,7 +177,7 @@ func GuardedGenerateText(ctx context.Context, pool *pgxpool.Pool, client ai.Clie
 	userID, action string, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
 	gate := Gate(ctx, pool, input.Context.OrgID, userID, action)
 	if !gate.Allowed {
-		return nil, &ai.AIError{Class: "budget_blocked", Message: "monthly AI budget exceeded"}
+		return nil, &ai.AIError{Class: "budget_blocked", Message: "monthly AI budget exceeded", BeforeEgress: true}
 	}
 	return client.GenerateText(ctx, input)
 }

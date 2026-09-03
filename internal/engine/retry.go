@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/johnny4young/janusly/internal/domain"
 )
 
 // ExecError is the structured executor error — the Go shape of the
@@ -90,56 +92,21 @@ func serializeError(err error) map[string]any {
 	return map[string]any{"message": err.Error(), "name": "Error"}
 }
 
-// RetryPolicy mirrors the contract's node-config retry shape.
-type RetryPolicy struct {
-	MaxAttempts int
-	DelayMs     float64
-	MaxDelayMs  *float64
-	Backoff     string
-	Jitter      bool
-	RetryOn     []string
-	IgnoreOn    []string
-}
+// RetryPolicy remains a package-local alias for callers and tests while the
+// domain package owns the one save-time/runtime retry grammar.
+type RetryPolicy = domain.RetryPolicy
 
 // parseRetryPolicy reads node.config.retry; nil means no policy (no retry).
 func parseRetryPolicy(config map[string]any) *RetryPolicy {
-	raw, ok := config["retry"].(map[string]any)
-	if !ok {
+	raw, present := config["retry"]
+	if !present {
 		return nil
 	}
-	policy := &RetryPolicy{DelayMs: 1000}
-	if v, ok := raw["maxAttempts"].(float64); ok {
-		policy.MaxAttempts = int(v)
+	policy, err := domain.ResolveRetryPolicy(raw)
+	if err != nil {
+		return nil
 	}
-	if v, ok := raw["delayMs"].(float64); ok {
-		policy.DelayMs = v
-	}
-	if v, ok := raw["maxDelayMs"].(float64); ok {
-		policy.MaxDelayMs = &v
-	}
-	if v, ok := raw["backoff"].(string); ok {
-		policy.Backoff = v
-	}
-	if v, ok := raw["jitter"].(bool); ok {
-		policy.Jitter = v
-	}
-	policy.RetryOn = stringList(raw["retryOn"])
-	policy.IgnoreOn = stringList(raw["ignoreOn"])
 	return policy
-}
-
-func stringList(value any) []string {
-	items, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	var out []string
-	for _, item := range items {
-		if s, ok := item.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 var httpStatusPattern = regexp.MustCompile(`^(\d)xx$`)
@@ -227,6 +194,7 @@ func computeRetryDelay(attempt int, policy *RetryPolicy, rand func() float64) fl
 	if policy.MaxDelayMs != nil {
 		capped = math.Min(raw, *policy.MaxDelayMs)
 	}
+	capped = math.Min(capped, domain.RetryMaxDelayMS)
 	if !policy.Jitter {
 		return capped
 	}

@@ -18,11 +18,26 @@ is unhealthy and cannot authorize an execution.
 All outbound HTTP uses the shared policy: scheme and target validation, DNS
 pinning, redirect revalidation, timeout, and response byte limits. Streamed
 responses must be consumed inside the same executor invocation.
+Tenant defaults and per-node overrides share one strict integer grammar and
+retain process ceilings of 600,000 ms, 64 MiB, and 20 redirects; malformed or
+larger values fail before DNS/provider egress instead of overflowing an integer
+or silently weakening the bound. HTTP header maps must retain string values,
+and the body mode is the closed `buffer|stream` enum.
+The same tenant-resolved bounds apply when an agent invokes `http.request`;
+agent execution is not a path around organization timeout, byte, redirect, or
+preview policy. Agent HTTP targets must also be exact literal URLs authored in
+that node. A context-, input-, secret-, or environment-templated URL is not
+delegable to a planner; use an explicit HTTP/tool node for that request.
 
 Local provider simulators require the double opt-in
 `JANUSLY_LOCAL_STACK=true` and
 `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true`; either flag alone cannot redirect
-provider traffic, and production configuration refuses both gates.
+provider traffic, and production configuration refuses both gates. Completion
+simulation additionally requires `anthropic` in
+`JANUSLY_LLM_SIMULATED_PROVIDERS` and a valid non-Anthropic HTTP(S)
+`JANUSLY_LLM_SIMULATOR_BASE_URL`. Janusly replaces any live Anthropic key with
+a fixed non-secret simulator credential before constructing that client; an
+invalid fully requested binding degrades to the provider-free path.
 
 Mail, object storage, Slack, GitHub, PagerDuty, webhooks, and external runtime
 projections preserve idempotency and audit boundaries. Validation replay skips
@@ -98,6 +113,24 @@ An unsuccessful `require_ok` envelope from any write-capable tool is persisted
 with `writeSide=true`, even when the provider response is ambiguous. Declared
 whole-node retry policies cannot replay that effect automatically; it enters
 the ordinary operator-gated dead-letter/recovery path instead.
+
+Structured tools use the same closed input contract during authoring and
+execution. JSON transforms accept at most 2 MiB and 64 nesting levels; paths
+are bounded exact segments and reject JavaScript prototype keys so their output
+is safe to feed back into the web/API contract. Buffered CSV is limited to
+2 MiB, 10,000 data rows, 500 columns, and 256 KiB per cell. The streaming CSV
+parser enforces the same quote and shape grammar across chunk boundaries and
+reports a bounded terminal error instead of returning a partial success.
+
+Database tools connect only through an organization-scoped `postgres`
+credential. They accept parameterized, single-statement SQL from a closed
+`SELECT|INSERT|UPDATE|DELETE` grammar, with contiguous placeholders and bounded
+parameters, rows, statement count, and timeout. `db.schema.describe` and
+`db.query.read` additionally execute inside a PostgreSQL read-only transaction;
+the database, not the lexical classifier, is the final write-prevention
+authority. External pools are bounded per organization and process, use one
+connection each, and are replaced when the credential fingerprint changes.
+Validation mode suppresses every write-capable database operation.
 
 `sheet.append` serializes each tenant/object key with a PostgreSQL advisory
 lock held across the bounded object read and atomic replacement. This is the

@@ -154,8 +154,11 @@ func (s *V1Server) emailIngestCore(r *http.Request, rc v1Request) opResult {
 	}
 
 	resolved, ambiguous, err := resolveUniqueTriggerNode(ctx, q, rc.orgID, "email_received", func(config map[string]any) bool {
+		if domain.ValidateEmailReceivedConfig(config) != nil {
+			return false
+		}
 		configured, _ := config["aliasKey"].(string)
-		return strings.EqualFold(strings.TrimSpace(configured), aliasKey)
+		return strings.EqualFold(configured, aliasKey)
 	})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
@@ -347,6 +350,9 @@ func (s *V1Server) fileIngestCore(r *http.Request, rc v1Request) opResult {
 	}
 
 	resolved, ambiguous, err := resolveUniqueTriggerNode(ctx, q, rc.orgID, "file_dropped", func(config map[string]any) bool {
+		if domain.ValidateFileDroppedConfig(config) != nil {
+			return false
+		}
 		configuredBucket, _ := config["bucket"].(string)
 		if configuredBucket != bucket {
 			return false
@@ -442,6 +448,9 @@ func (s *V1Server) mcpIngestCore(r *http.Request, rc v1Request) opResult {
 	}
 
 	resolved, ambiguous, err := resolveUniqueTriggerNode(ctx, q, rc.orgID, "mcp_server_event", func(config map[string]any) bool {
+		if domain.ValidateMcpServerEventConfig(config) != nil {
+			return false
+		}
 		configuredAlias, _ := config["connectionAlias"].(string)
 		configuredResource, _ := config["resourceUri"].(string)
 		if configuredAlias != alias || configuredResource != resourceURI {

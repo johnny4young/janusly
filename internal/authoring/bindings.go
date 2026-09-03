@@ -71,6 +71,65 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 		report.Missing = append(report.Missing, bindingForWire(binding))
 		report.Complete = false
 	}
+	bindBuiltin := func(nodeID, fieldPrefix, name string, input map[string]any) (tools.CatalogEntry, bool) {
+		toolField := fieldPrefix + ".tool"
+		inputPrefix := fieldPrefix + ".input."
+		entry, exists := builtin[name]
+		if name == "" {
+			addMissing(Binding{Kind: "builtin_tool", NodeID: nodeID, Field: toolField, Alternatives: sortedBuiltinNames(catalog), Reason: "tool_binding_required"})
+			return tools.CatalogEntry{}, false
+		}
+		if !exists {
+			addMissing(Binding{Kind: "builtin_tool", NodeID: nodeID, Field: toolField, Requested: name, Alternatives: sortedBuiltinNames(catalog), Reason: "exact_tool_not_found"})
+			return tools.CatalogEntry{}, false
+		}
+		addResolved(Binding{Kind: "builtin_tool", NodeID: nodeID, Field: toolField, Requested: name, ResolvedID: name, Alternatives: []string{}})
+		for _, field := range entry.Required {
+			if field == "credential" {
+				continue
+			}
+			if !configuredInputField(input, field) {
+				addMissing(Binding{Kind: "configuration", NodeID: nodeID, Field: inputPrefix + field, Reason: "tool_input_required"})
+			}
+		}
+		if slices.Contains(entry.Required, "credential") {
+			credential := trimmedString(input["credential"])
+			credentialEntry, credentialExists := credentials[credential]
+			expectedKind := credentialKindForTool(name)
+			reason := ""
+			switch {
+			case credential == "":
+				reason = "credential_binding_required"
+			case !credentialExists:
+				reason = "exact_credential_not_found"
+			case expectedKind != "" && credentialEntry.Kind != expectedKind:
+				reason = "credential_kind_mismatch"
+			case !credentialEntry.Configured:
+				reason = "credential_not_configured"
+			case credentialEntry.Expired:
+				reason = "credential_expired"
+			}
+			credentialField := inputPrefix + "credential"
+			if reason == "" {
+				addResolved(Binding{Kind: "credential", NodeID: nodeID, Field: credentialField, Requested: credential, ResolvedID: credentialEntry.ID, Alternatives: []string{}})
+			} else {
+				addMissing(Binding{Kind: "credential", NodeID: nodeID, Field: credentialField, Requested: credential, Alternatives: availableCredentialNames(catalog, expectedKind), Reason: reason})
+			}
+		}
+		return entry, true
+	}
+	bindAgentTool := func(nodeID, fieldPrefix string, config map[string]any) bool {
+		name, input, err := domain.AgentConfiguredTool(config)
+		if err != nil {
+			addMissing(Binding{Kind: "configuration", NodeID: nodeID, Field: fieldPrefix + ".tool", Reason: "agent_tool_configuration_invalid"})
+			return false
+		}
+		if name == "" {
+			return false
+		}
+		entry, resolved := bindBuiltin(nodeID, fieldPrefix, name, input)
+		return resolved && agentToolWriteSide(entry, name, input)
+	}
 	for _, node := range workflow.Nodes {
 		if !domain.ExecutableNodeTypes[node.Type] {
 			addMissing(Binding{Kind: "node_type", NodeID: node.ID, Field: "type", Requested: node.Type, Reason: "node_type_not_executable"})
@@ -79,48 +138,8 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 		switch node.Type {
 		case "tool":
 			name := trimmedString(node.Config["tool"])
-			entry, exists := builtin[name]
-			if name == "" {
-				addMissing(Binding{Kind: "builtin_tool", NodeID: node.ID, Field: "config.tool", Alternatives: sortedBuiltinNames(catalog), Reason: "tool_binding_required"})
-				continue
-			}
-			if !exists {
-				addMissing(Binding{Kind: "builtin_tool", NodeID: node.ID, Field: "config.tool", Requested: name, Alternatives: sortedBuiltinNames(catalog), Reason: "exact_tool_not_found"})
-				continue
-			}
-			addResolved(Binding{Kind: "builtin_tool", NodeID: node.ID, Field: "config.tool", Requested: name, ResolvedID: name, Alternatives: []string{}})
 			input, _ := node.Config["input"].(map[string]any)
-			for _, field := range entry.Required {
-				if field == "credential" {
-					continue
-				}
-				if !configuredInputField(input, field) {
-					addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.input." + field, Reason: "tool_input_required"})
-				}
-			}
-			if slices.Contains(entry.Required, "credential") {
-				credential := trimmedString(input["credential"])
-				entry, exists := credentials[credential]
-				expectedKind := credentialKindForTool(name)
-				reason := ""
-				switch {
-				case credential == "":
-					reason = "credential_binding_required"
-				case !exists:
-					reason = "exact_credential_not_found"
-				case expectedKind != "" && entry.Kind != expectedKind:
-					reason = "credential_kind_mismatch"
-				case !entry.Configured:
-					reason = "credential_not_configured"
-				case entry.Expired:
-					reason = "credential_expired"
-				}
-				if reason == "" {
-					addResolved(Binding{Kind: "credential", NodeID: node.ID, Field: "config.input.credential", Requested: credential, ResolvedID: entry.ID, Alternatives: []string{}})
-				} else {
-					addMissing(Binding{Kind: "credential", NodeID: node.ID, Field: "config.input.credential", Requested: credential, Alternatives: availableCredentialNames(catalog, expectedKind), Reason: reason})
-				}
-			}
+			bindBuiltin(node.ID, "config", name, input)
 		case "mcp_tool":
 			alias := trimmedString(node.Config["connectionAlias"])
 			name := trimmedString(node.Config["toolName"])
@@ -167,9 +186,32 @@ func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
 			if _, err := domain.ResolveScheduleConfig(node.Config); err != nil {
 				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.cronExpression", Requested: trimmedString(node.Config["cronExpression"]), Reason: "schedule_configuration_invalid"})
 			}
+		case "loop":
+			if trimmedString(node.Config["mode"]) == "for_each" {
+				input, _ := node.Config["input"].(map[string]any)
+				bindBuiltin(node.ID, "config", trimmedString(node.Config["tool"]), input)
+			}
+		case "agent":
+			needsWriteOptIn := bindAgentTool(node.ID, "config", node.Config)
+			allowWrites, _ := node.Config["allowWriteTools"].(bool)
+			if needsWriteOptIn && !allowWrites {
+				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.allowWriteTools", Reason: "agent_write_opt_in_required"})
+			}
 		case "multi_agent":
-			if !completeMultiAgent(node.Config) {
+			resolved, err := domain.ResolveMultiAgentRuntimeConfig(node.Config)
+			if err != nil {
 				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.agents", Reason: "multi_agent_configuration_incomplete"})
+				break
+			}
+			needsWriteOptIn := false
+			for index, raw := range resolved.Agents {
+				agent, _ := raw.(map[string]any)
+				fieldPrefix := fmt.Sprintf("config.agents[%d]", index)
+				needsWriteOptIn = bindAgentTool(node.ID, fieldPrefix, agent) || needsWriteOptIn
+			}
+			allowWrites, _ := node.Config["allowWriteTools"].(bool)
+			if needsWriteOptIn && !allowWrites {
+				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.allowWriteTools", Reason: "agent_write_opt_in_required"})
 			}
 		case "router_llm":
 			if !completeRouter(node, workflow) {
@@ -264,20 +306,6 @@ func requireConfig(report *BindingReport, node domain.Node, field string) {
 
 func completeWaitUntil(config map[string]any) bool {
 	return domain.ValidateWaitUntilConfig(config) == nil
-}
-
-func completeMultiAgent(config map[string]any) bool {
-	agents, ok := config["agents"].([]any)
-	if !ok || len(agents) == 0 || len(agents) > 12 {
-		return false
-	}
-	for _, raw := range agents {
-		agent, ok := raw.(map[string]any)
-		if !ok || trimmedString(agent["goal"]) == "" {
-			return false
-		}
-	}
-	return true
 }
 
 func completeRouter(node domain.Node, workflow *domain.Workflow) bool {
@@ -395,6 +423,25 @@ func configuredInputField(input map[string]any, field string) bool {
 		return strings.TrimSpace(text) != ""
 	}
 	return true
+}
+
+func agentToolWriteSide(entry tools.CatalogEntry, name string, input map[string]any) bool {
+	if !entry.WriteSide {
+		return false
+	}
+	if name != "http.request" {
+		return true
+	}
+	method, ok := input["method"].(string)
+	if !ok && input["method"] != nil {
+		return true
+	}
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case "", "GET", "HEAD", "OPTIONS":
+		return false
+	default:
+		return true
+	}
 }
 
 func mcpIdentifier(alias, name string) string {

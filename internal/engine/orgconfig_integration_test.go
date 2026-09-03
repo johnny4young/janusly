@@ -95,6 +95,37 @@ func TestTenantHTTPBoundsGovernExecution(t *testing.T) {
 	if status, _ := waitTerminal(start(freeOrg)); status != "succeeded" {
 		t.Fatalf("default-bound org must succeed: %s", status)
 	}
+
+	// The agent's http.request special path must receive the exact same
+	// tenant bounds. Agent call failures are bounded result envelopes, not
+	// node failures, so inspect its persisted finalResult.
+	agentDoc := `{"nodes":[{"id":"agent","type":"agent","config":{"planner":"rules","tool":"http.request","input":{"url":"` + slow.URL + `","method":"GET"},"maxSteps":1}}],"edges":[]}`
+	agentWorkflow, _ := domain.Parse([]byte(agentDoc))
+	agentResult := func(org string) map[string]any {
+		runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: agentWorkflow})
+		if err != nil {
+			t.Fatalf("start agent: %v", err)
+		}
+		waitRunStatus(t, pool, runID, "succeeded", 0)
+		var raw []byte
+		if err := pool.QueryRow(ctx,
+			`SELECT state_json->'output'->'finalResult' FROM run_nodes WHERE run_id=$1 AND node_id='agent'`,
+			runID).Scan(&raw); err != nil {
+			t.Fatalf("agent result: %v", err)
+		}
+		var result map[string]any
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("decode agent result: %v", err)
+		}
+		return result
+	}
+	boundedResult := agentResult(boundedOrg)
+	if boundedResult["ok"] != false || !strings.Contains(fmt.Sprint(boundedResult["error"]), "timed out after 50ms") {
+		t.Fatalf("tenant bound must also cut agent http.request: %+v", boundedResult)
+	}
+	if freeResult := agentResult(freeOrg); freeResult["ok"] != true {
+		t.Fatalf("default-bound agent request must succeed: %+v", freeResult)
+	}
 }
 
 // The deferred hard cascade: expired tombstones purge with their versions

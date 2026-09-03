@@ -10,9 +10,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/internal/ai"
 	"github.com/johnny4young/janusly/internal/aibudget"
 	"github.com/johnny4young/janusly/internal/aiconfig"
 	"github.com/johnny4young/janusly/internal/domain"
@@ -20,6 +25,7 @@ import (
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/memory"
+	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/prompts"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/secretstore"
@@ -33,6 +39,7 @@ type Dispatcher struct {
 	registry   map[string]executors.Func
 	renderOpts grammar.RenderOptions
 	mcp        *mcpclient.Client
+	aiLimiter  *ratelimit.Limiter
 }
 
 // RouterExecution carries the internal routing plan from deterministic
@@ -44,6 +51,94 @@ type RouterExecution struct {
 	SuccessorIDs map[string]bool
 }
 
+const agentWritesEnabledEnv = "JANUSLY_AGENT_WRITES_ENABLED"
+
+// literalAgentHTTPRequests binds agent egress to exact request templates with
+// literal workflow-authored targets. A URL that contains any template is
+// intentionally excluded: its runtime value may originate in run input,
+// prior output, or memory and must be modeled as an explicit http node instead
+// of planner-selected egress. The rendered request retains authored secret and
+// context substitutions for execution; model-facing projections are redacted
+// independently.
+func literalAgentHTTPRequests(raw, rendered map[string]any) map[string]map[string]any {
+	allowed := map[string]map[string]any{}
+	add := func(rawValue, renderedValue any, request map[string]any) bool {
+		rawURL, rawOK := rawValue.(string)
+		renderedURL, renderedOK := renderedValue.(string)
+		if !rawOK || !renderedOK || strings.Contains(rawURL, "{{") {
+			return false
+		}
+		if target := strings.TrimSpace(renderedURL); target != "" {
+			request = maps.Clone(request)
+			request["url"] = target
+			allowed[target] = request
+			return true
+		}
+		return false
+	}
+	rawInput, _ := raw["input"].(map[string]any)
+	renderedInput, _ := rendered["input"].(map[string]any)
+	tool, _ := raw["tool"].(string)
+	// An explicit http.request tool uses its input object as the sole request
+	// contract. This mirrors the deterministic planner's precedence.
+	if tool == "http.request" {
+		if rawInput != nil && renderedInput != nil {
+			add(rawInput["url"], renderedInput["url"], renderedInput)
+		}
+		return allowed
+	}
+
+	request := map[string]any{}
+	for _, key := range []string{
+		"url", "method", "headers", "body", "timeoutMs", "maxResponseBytes",
+		"maxRedirects", "bodyMode", "streamPreviewBytes",
+	} {
+		if value, ok := rendered[key]; ok {
+			request[key] = value
+		}
+	}
+	if add(raw["url"], rendered["url"], request) {
+		return allowed
+	}
+	// LLM-authored agents may declare the request under input without setting
+	// config.tool. Accept it only when no top-level request exists, keeping the
+	// per-agent authority unambiguous.
+	if rawInput != nil && renderedInput != nil {
+		add(rawInput["url"], renderedInput["url"], renderedInput)
+	}
+	return allowed
+}
+
+func literalMultiAgentHTTPRequests(raw, rendered map[string]any) []map[string]map[string]any {
+	rawAgents, _ := raw["agents"].([]any)
+	renderedAgents, _ := rendered["agents"].([]any)
+	requests := make([]map[string]map[string]any, len(renderedAgents))
+	for index := range renderedAgents {
+		rawAgent, _ := valueAt(rawAgents, index).(map[string]any)
+		renderedAgent, _ := renderedAgents[index].(map[string]any)
+		if rawAgent != nil && renderedAgent != nil {
+			requests[index] = literalAgentHTTPRequests(rawAgent, renderedAgent)
+		}
+	}
+	return requests
+}
+
+func valueAt(values []any, index int) any {
+	if index < 0 || index >= len(values) {
+		return nil
+	}
+	return values[index]
+}
+
+// authoredAgentWritesOptIn reads the workflow author's immutable policy, not
+// the rendered config. A template in allowWriteTools may resolve from trigger
+// input to a native boolean; runtime data must never be able to mint one of the
+// independent grants required for a write-capable agent.
+func authoredAgentWritesOptIn(config map[string]any) bool {
+	allowed, _ := config["allowWriteTools"].(bool)
+	return allowed
+}
+
 // NewDispatcher wires the executor registry over this engine. Env access
 // defaults to the process environment filtered through the credential policy;
 // secrets default to none (every {{secret.X}} is a hard failure) until a
@@ -52,9 +147,10 @@ func (e *Engine) NewDispatcher(opts grammar.RenderOptions) *Dispatcher {
 	if opts.LookupEnv == nil {
 		opts.LookupEnv = secretstore.LookupAllowedEnv
 	}
+	limiter := ratelimit.New(e.pool, ratelimit.Hooks{})
 	return &Dispatcher{
 		engine: e, registry: executors.Registry(), renderOpts: opts,
-		mcp: mcpclient.New(e.pool, ratelimit.New(e.pool, ratelimit.Hooks{})),
+		mcp: mcpclient.New(e.pool, limiter), aiLimiter: limiter,
 	}
 }
 
@@ -159,7 +255,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		return nil, fmt.Errorf("No executor for node type: %s", node.Type) //nolint:staticcheck // contract message is the wire contract
 	}
 	var httpBounds *executors.HTTPBounds
-	if node.Type == "http" {
+	if node.Type == "http" || node.Type == "tool" || node.Type == "loop" || node.Type == "agent" || node.Type == "multi_agent" {
 		bounds := LoadOrgHTTPBounds(ctx, q, claim.OrgID, d.renderOpts.LookupEnv)
 		httpBounds = &bounds
 	}
@@ -172,11 +268,11 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		aiDeps = d.buildAIDeps(ctx, claim)
 	}
 	var memoryDeps *executors.MemoryDeps
-	if node.Type == "tool" || node.Type == "agent" || node.Type == "multi_agent" {
-		memoryDeps = d.buildMemoryDeps(ctx, claim, wf.ID)
+	if node.Type == "tool" || node.Type == "loop" || node.Type == "agent" || node.Type == "multi_agent" {
+		memoryDeps = d.buildMemoryDeps(ctx, claim, wf.ID, rendered.RedactedValues)
 	}
 	var integrationDeps *tools.IntegrationDeps
-	if node.Type == "tool" || node.Type == "agent" || node.Type == "multi_agent" {
+	if node.Type == "tool" || node.Type == "loop" || node.Type == "agent" || node.Type == "multi_agent" {
 		integrationDeps = d.engine.buildIntegrationDeps(claim.OrgID, claim.RunID, claim.NodeID)
 	}
 	var mcpDeps *executors.McpDeps
@@ -192,15 +288,34 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 			},
 		}
 	}
+	agentWritesAuthorized := false
+	var agentAllowedHTTPRequests map[string]map[string]any
+	var agentAllowedHTTPRequestsByIndex []map[string]map[string]any
+	if node.Type == "agent" || node.Type == "multi_agent" {
+		if node.Type == "agent" {
+			agentAllowedHTTPRequests = literalAgentHTTPRequests(config, renderedConfig)
+		} else {
+			agentAllowedHTTPRequestsByIndex = literalMultiAgentHTTPRequests(config, renderedConfig)
+		}
+		agentWritesAuthorized = !dryRun && authoredAgentWritesOptIn(config) &&
+			os.Getenv(agentWritesEnabledEnv) == "true" &&
+			orgconfig.LoadBool(ctx, d.engine.pool, claim.OrgID, "ai.agentWriteConsent") &&
+			domain.HasApprovalAncestorIn(wf, node.ID)
+	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
-		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps, Memory: memoryDeps, Mcp: mcpDeps, Integrations: integrationDeps, DryRun: dryRun,
+		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds,
+		RedactedValues: rendered.RedactedValues,
+		AI:             aiDeps, Memory: memoryDeps, Mcp: mcpDeps, Integrations: integrationDeps,
+		AgentWritesAuthorized:           agentWritesAuthorized,
+		AgentAllowedHTTPRequests:        agentAllowedHTTPRequests,
+		AgentAllowedHTTPRequestsByIndex: agentAllowedHTTPRequestsByIndex,
+		DryRun:                          dryRun,
 		Emit: func(eventType string, payload map[string]any) string {
 			eventAt := eventNow()
-			raw, err := json.Marshal(payload)
-			if err != nil {
-				return ""
-			}
+			raw := grammar.SafePersistPayload(payload, grammar.PersistOptions{
+				RedactedValues: rendered.RedactedValues,
+			})
 			eventID := d.engine.newID()
 			_ = q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 				ID: eventID, RunID: claim.RunID,
@@ -332,23 +447,35 @@ func runContextFromRows(rows []store.ListRunNodesByRunRow) map[string]any {
 // must never touch the SDK).
 func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *executors.AIDeps {
 	pool := d.engine.pool
-	client, _ := aiconfig.Resolve(ctx, pool, claim.OrgID)
+	client, settings := aiconfig.Resolve(ctx, pool, claim.OrgID)
+	workflowID, _ := store.New(pool).GetRunWorkflowID(ctx, claim.RunID)
 	dryRun := false
 	if run, err := store.New(pool).GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
 		dryRun = run.ReplayMode.String == "validation"
 	}
 	return &executors.AIDeps{
-		Client: client, OrgID: claim.OrgID, DryRun: dryRun,
+		Client: client, OrgID: claim.OrgID, WorkflowID: workflowID, DryRun: dryRun,
+		PromptMaxChars: settings.PromptMaxChars,
 		BudgetAllowed: func() (bool, map[string]any) {
 			// Composite gate: the run's workflow override bites
 			// before the org default; resolution failure degrades to org.
-			workflowID, _ := store.New(pool).GetRunWorkflowID(ctx, claim.RunID)
 			result := aibudget.CheckScoped(ctx, pool, claim.OrgID, workflowID)
 			budget := map[string]any{
 				"monthlyUsdSpent": result.MonthlyUsdSpent, "monthlyUsdLimit": result.MonthlyUsdLimit,
 				"policy": result.Policy, "exceededAt": result.ExceededAt,
 			}
 			return result.Allowed, budget
+		},
+		RateAllowed: func() *ai.AIError {
+			if d.aiLimiter == nil {
+				return nil
+			}
+			if err := d.aiLimiter.Enforce(ctx, claim.OrgID, ratelimit.Options{
+				Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
+			}); err != nil {
+				return &ai.AIError{Class: "rate_limit", Message: err.Error(), BeforeEgress: true}
+			}
+			return nil
 		},
 		ResolvePrompt: func(name string, version int, variables map[string]string) (string, error) {
 			return prompts.ResolveTemplate(ctx, pool, claim.OrgID, name, version, variables)
@@ -358,8 +485,9 @@ func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *execut
 
 // buildMemoryDeps wires the vector tools to the memory substrate with
 // the run's org/run identity and the validation dry-run flag.
-func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode, workflowID string) *executors.MemoryDeps {
+func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode, workflowID string, redactedValues []string) *executors.MemoryDeps {
 	pool := d.engine.pool
+	redactedValues = append([]string(nil), redactedValues...)
 	dryRun := false
 	if run, err := store.New(pool).GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
 		dryRun = run.ReplayMode.String == "validation"
@@ -368,8 +496,8 @@ func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode, wor
 		DryRun: dryRun,
 		Commit: func(content string, metadata map[string]any) map[string]any {
 			result := memory.Commit(ctx, pool, memory.CommitInput{
-				OrgID: claim.OrgID, RunID: claim.RunID, Kind: "workflow_vector",
-				Content: content, Metadata: metadata,
+				OrgID: claim.OrgID, WorkflowID: workflowID, RunID: claim.RunID, Kind: "workflow_vector",
+				Content: content, Metadata: metadata, RedactedValues: redactedValues,
 			})
 			out := map[string]any{"ok": result.OK}
 			if result.Error != "" {
@@ -381,15 +509,16 @@ func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode, wor
 			return out
 		},
 		RecallEpisodes: func(goal string) (string, int, []string) {
-			recall := memory.RecallAgentEpisodes(ctx, pool, claim.OrgID, workflowID, claim.RunID, goal)
+			recall := memory.RecallAgentEpisodes(ctx, pool, claim.OrgID, workflowID, claim.RunID, goal, redactedValues)
 			return recall.Block, recall.Count, recall.Fingerprints
 		},
 		RecordEpisode: func(goal, outcome string, success bool, stepCount int) {
-			memory.RecordAgentEpisode(ctx, pool, claim.OrgID, workflowID, claim.RunID, goal, outcome, success, stepCount)
+			memory.RecordAgentEpisode(ctx, pool, claim.OrgID, workflowID, claim.RunID, goal, outcome, success, stepCount, redactedValues)
 		},
 		Recall: func(query string) []map[string]any {
 			entries := memory.Recall(ctx, pool, memory.RecallInput{
-				OrgID: claim.OrgID, RunID: claim.RunID, Kind: "workflow_vector", Query: query,
+				OrgID: claim.OrgID, WorkflowID: workflowID, RunID: claim.RunID, Kind: "workflow_vector", Query: query,
+				RedactedValues: redactedValues,
 			})
 			out := make([]map[string]any, 0, len(entries))
 			for _, entry := range entries {

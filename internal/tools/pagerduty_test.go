@@ -16,7 +16,6 @@ import (
 // input, so it can never authorize a mutation. (The independent rejecting bias
 // is tested on time.window.)
 func TestPagerDutyPolicyEvaluate(t *testing.T) {
-	registry := NewRegistry()
 	weekdays := []any{1.0, 2.0, 3.0, 4.0, 5.0}
 	workingHours := []any{map[string]any{"days": weekdays, "start": "09:00", "end": "17:00"}}
 	incident := func(overrides map[string]any) map[string]any {
@@ -38,7 +37,11 @@ func TestPagerDutyPolicyEvaluate(t *testing.T) {
 			"snoozeSeconds": 43_200.0, "timeZone": "UTC", "workingHours": workingHours,
 		}
 		maps.Copy(input, overrides)
-		result, err := registry.Execute(context.Background(), "pagerduty.policy.evaluate", input)
+		// Exercise the policy's defensive result contract directly. The registry
+		// independently rejects a statically wrong top-level field type before
+		// dispatch; the evaluator still has to fail closed if malformed data ever
+		// reaches it through an internal call or a dynamic value.
+		result, err := executePagerDutyPolicyEvaluate(context.Background(), input)
 		if err != nil {
 			t.Fatalf("policy.evaluate must never error: %v", err)
 		}
@@ -299,6 +302,94 @@ func TestPagerDutyPolicyCatalogMarksEvaluationTimeRequired(t *testing.T) {
 		}
 	}
 	t.Fatal("policy catalog missing evaluatedAt input field")
+}
+
+func TestPagerDutyDefinitionsRejectInvalidStaticPolicyBeforeRun(t *testing.T) {
+	registry := NewRegistry()
+	valid := map[string]any{
+		"eventType": "{{context.event.output.type}}", "occurredAt": "{{context.event.output.occurredAt}}",
+		"receivedAt": "{{context.event.output.receivedAt}}", "evaluatedAt": "{{context.clock.output.result.at}}",
+		"incident": "{{context.load.output.result.incident}}", "pagerDutyUserId": "PUSER1",
+		"snoozeSeconds": int64(43_200), "timeZone": "America/Bogota",
+		"workingHours": []any{map[string]any{
+			"days": []int{1, 2, 3, 4, 5}, "start": "{{context.input.start}}", "end": "{{context.input.end}}",
+		}},
+	}
+	if err := registry.ValidateInput("pagerduty.policy.evaluate", valid); err != nil {
+		t.Fatalf("valid mixed literal/deferred policy rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"snooze ceiling": func(input map[string]any) { input["snoozeSeconds"] = 604_801 },
+		"unknown zone":   func(input map[string]any) { input["timeZone"] = "Not/AZone" },
+		"ambiguous clock": func(input map[string]any) {
+			input["workingHours"] = []any{map[string]any{"days": []any{1.0}, "start": "09:00", "end": "09:00"}}
+		},
+		"unknown event filter": func(input map[string]any) {
+			input["actionableEventTypes"] = []any{"incident.future_mutation"}
+		},
+		"partial activation": func(input map[string]any) { input["activeFrom"] = "2026-01-01T00:00:00Z" },
+		"reversed chronology": func(input map[string]any) {
+			input["occurredAt"] = "2026-01-02T00:00:00Z"
+			input["receivedAt"] = "2026-01-01T00:00:00Z"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := maps.Clone(valid)
+			mutate(input)
+			if err := registry.ValidateInput("pagerduty.policy.evaluate", input); err == nil {
+				t.Fatal("invalid static policy was accepted")
+			}
+		})
+	}
+
+	partial := maps.Clone(valid)
+	partial["activeFrom"] = "2026-01-01T00:00:00Z"
+	delete(partial, "activeUntil")
+	if err := registry.ValidatePartialInput("pagerduty.policy.evaluate", partial); err != nil {
+		t.Fatalf("draft must be able to expose one unresolved activation binding: %v", err)
+	}
+}
+
+func TestPagerDutyAPIDefinitionsRejectInvalidStaticAuthority(t *testing.T) {
+	registry := NewRegistry()
+	base := map[string]any{
+		"credential": "pagerduty-api", "requesterEmail": "operator@example.com", "incidentId": "PINC1",
+	}
+	for name, input := range map[string]map[string]any{
+		"header injection": maps.Clone(base),
+		"unknown region":   maps.Clone(base),
+		"fractional rate":  maps.Clone(base),
+		"short snooze":     maps.Clone(base),
+	} {
+		switch name {
+		case "header injection":
+			input["requesterEmail"] = "operator@example.com\r\nX-Evil: yes"
+		case "unknown region":
+			input["region"] = "global"
+		case "fractional rate":
+			input["rateLimitPerMin"] = 1.5
+		case "short snooze":
+			input["durationSeconds"] = 59
+		}
+		tool := "pagerduty.incident.get"
+		if name == "short snooze" {
+			tool = "pagerduty.incident.snooze"
+		}
+		if err := registry.ValidateInput(tool, input); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+
+	templated := map[string]any{
+		"credential": "pagerduty-api", "requesterEmail": "{{context.input.email}}",
+		"incidentId": "{{context.event.output.incidentId}}", "durationSeconds": "{{context.input.seconds}}",
+	}
+	if err := registry.ValidateInput("pagerduty.incident.snooze", templated); err != nil {
+		t.Fatalf("persisted exact references rejected: %v", err)
+	}
+	if err := registry.ValidateResolvedInput("pagerduty.incident.snooze", templated); err == nil {
+		t.Fatal("unresolved PagerDuty authority reached runtime")
+	}
 }
 
 func TestPagerDutyActivePeriodUsesCalendarBoundAcrossDST(t *testing.T) {

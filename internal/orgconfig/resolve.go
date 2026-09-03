@@ -5,8 +5,6 @@ package orgconfig
 
 import (
 	"encoding/json"
-	"math"
-	"slices"
 	"strconv"
 )
 
@@ -65,23 +63,8 @@ func parseStored(def *Definition, raw json.RawMessage) (any, bool) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return nil, false
 	}
-	switch def.ValueType {
-	case "boolean":
-		v, ok := decoded.(bool)
-		return v, ok
-	case "number":
-		v, ok := decoded.(float64)
-		if !ok || !inRange(def, v) {
-			return nil, false
-		}
-		return v, true
-	default:
-		v, ok := decoded.(string)
-		if !ok || !inAllowedValues(def, v) {
-			return nil, false
-		}
-		return v, true
-	}
+	value, err := Normalize(def, decoded)
+	return value, err == nil
 }
 
 // parseEnv interprets an env string per the definition's type; invalid or
@@ -110,28 +93,4 @@ func parseEnv(def *Definition, raw string) (any, bool) {
 		value, err := Normalize(def, raw)
 		return value, err == nil
 	}
-}
-
-// inAllowedValues enforces the closed enum on BOTH layers: a stored or
-// env value outside AllowedValues falls through instead of half-applying
-// (defense in depth over the write-path validation — rows can predate an
-// enum tightening).
-func inAllowedValues(def *Definition, v string) bool {
-	if len(def.AllowedValues) == 0 {
-		return true
-	}
-	return slices.Contains(def.AllowedValues, v)
-}
-
-func inRange(def *Definition, v float64) bool {
-	if math.IsNaN(v) || math.IsInf(v, 0) {
-		return false
-	}
-	if def.Min != nil && v < *def.Min {
-		return false
-	}
-	if def.Max != nil && v > *def.Max {
-		return false
-	}
-	return true
 }

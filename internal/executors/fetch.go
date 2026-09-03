@@ -26,6 +26,11 @@ type FetchOptions struct {
 	TimeoutMs        int
 	MaxResponseBytes int
 	MaxRedirects     int
+	// MaxRedirectsSet distinguishes an explicit zero-hop policy from the
+	// zero-value default. Existing fixed-endpoint integrations normally use
+	// DisableRedirects; generic callers set this bit when the input contains
+	// maxRedirects, including zero.
+	MaxRedirectsSet bool
 	// DisableRedirects is for credential-bearing fixed-endpoint calls. A
 	// 307/308 otherwise replays the request body — including form secrets —
 	// to the redirect target even when credential headers are stripped.
@@ -52,13 +57,22 @@ func FetchHTTPTarget(ctx context.Context, rawURL string, opts FetchOptions) (Fet
 	if timeoutMs <= 0 {
 		timeoutMs = httpDefaultTimeoutMs
 	}
+	if timeoutMs > httpMaxTimeoutMs {
+		return FetchResult{}, fmt.Errorf("HTTP timeoutMs exceeds platform maximum %d", httpMaxTimeoutMs)
+	}
 	maxBytes := opts.MaxResponseBytes
 	if maxBytes <= 0 {
 		maxBytes = httpDefaultMaxBytes
 	}
+	if maxBytes > httpMaxResponseBytes {
+		return FetchResult{}, fmt.Errorf("HTTP maxResponseBytes exceeds platform maximum %d", httpMaxResponseBytes)
+	}
 	maxRedirects := opts.MaxRedirects
-	if maxRedirects <= 0 {
+	if maxRedirects == 0 && !opts.MaxRedirectsSet {
 		maxRedirects = httpDefaultMaxRedirect
+	}
+	if maxRedirects < 0 || maxRedirects > httpMaxRedirects {
+		return FetchResult{}, fmt.Errorf("HTTP maxRedirects must be between 0 and %d", httpMaxRedirects)
 	}
 
 	pins := &pinnedDialer{byHost: map[string]net.IP{}}

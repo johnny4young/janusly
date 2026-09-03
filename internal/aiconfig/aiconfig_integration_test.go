@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -32,8 +33,9 @@ func testPool(t *testing.T) *pgxpool.Pool {
 }
 
 // Catalog-governed AI config: org overrides land in the resolved
-// settings, no API key means every call falls back cleanly (the $0
-// posture), and a tenant on a foreign provider gets no client at all.
+// settings and no API key means every call falls back cleanly (the $0
+// posture). Retired provider-selector rows cannot alter the fixed Anthropic
+// completion capability.
 func TestResolveTenantAIConfig(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
@@ -68,14 +70,12 @@ func TestResolveTenantAIConfig(t *testing.T) {
 		t.Fatalf("org overrides must win: %+v", settings)
 	}
 
-	// A tenant configured onto a foreign provider: unconfigured client
-	// even when the Anthropic key IS present — fallback, never silent
-	// rerouting.
+	// A stale row from the retired provider selector has no runtime authority.
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	seed("ai.provider", `"openai"`, "string")
-	client, _ = Resolve(ctx, pool, org)
-	if client.Configured() {
-		t.Fatal("foreign provider must not silently route to anthropic")
+	client, settings = Resolve(ctx, pool, org)
+	if !client.Configured() || settings.Provider != "anthropic" {
+		t.Fatalf("retired provider row must be inert: configured=%v settings=%+v", client.Configured(), settings)
 	}
 }
 
@@ -87,8 +87,12 @@ func TestTruncatePrompt(t *testing.T) {
 		t.Fatalf("under cap must pass: %q %v", prompt, truncated)
 	}
 	long := strings.Repeat("é", 100) // 200 bytes of two-byte runes
-	prompt, truncated = TruncatePrompt(long, 101)
-	if !truncated || len(prompt) != 100 || !strings.HasSuffix(prompt, "é") {
-		t.Fatalf("truncation must cut on a rune boundary: len=%d", len(prompt))
+	prompt, truncated = TruncatePrompt(long, 51)
+	if !truncated || utf8.RuneCountInString(prompt) != 51 || len(prompt) != 102 || !strings.HasSuffix(prompt, "é") {
+		t.Fatalf("truncation must count runes and preserve UTF-8: bytes=%d runes=%d", len(prompt), utf8.RuneCountInString(prompt))
+	}
+	prompt, truncated = TruncatePrompt("áéíóú", 3)
+	if !truncated || prompt != "áéí" {
+		t.Fatalf("unicode truncation must count characters: %q truncated=%v", prompt, truncated)
 	}
 }

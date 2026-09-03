@@ -18,7 +18,7 @@ in `org_configs`; secrets never do.
 | `JANUSLY_API_POOL_SIZE` | `10` | Public-request PostgreSQL pool size. |
 | `JANUSLY_WORKER_POOL_SIZE` | derived | Execution PostgreSQL pool size; `0` derives concurrency plus two. |
 | `JANUSLY_POLL_MS` | `250` | Durable-queue fallback poll interval, range 50–5000 ms. |
-| `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Default outbound HTTP timeout. |
+| `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Default outbound HTTP timeout; integer range 1..600000 ms. |
 | `JANUSLY_FEEDBACK_MEMORY_WORKERS` | `4` | Fixed workers for optional feedback-derived memory commits, range 1–32. |
 | `JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY` | `256` | Waiting-task bound for optional feedback-derived memory, range 1–4096; saturation never rejects durable feedback. |
 | `JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS` | `15000` | Per-task deadline for feedback-derived memory, range 1000–300000 ms. |
@@ -68,26 +68,48 @@ The frontend has no API URL variable. It calls the page origin in production.
 
 | Variable | Purpose |
 | --- | --- |
-| `JANUSLY_LLM_PROVIDER` | Completion provider; the supported default is `anthropic`. |
 | `ANTHROPIC_API_KEY` | Anthropic completion credential. |
 | `ANTHROPIC_MODEL` | Completion model identifier. |
+| `JANUSLY_LLM_TIMEOUT_MS` | Timeout for one completion request. |
+| `JANUSLY_LLM_MAX_RETRIES` | SDK retry count for ordinary completion requests. Evaluation runs force zero. |
 | `JANUSLY_LLM_MAX_OUTPUT_UNITS` | Default output limit. |
-| `JANUSLY_AI_GENERATION_MODE` | Workflow generation mode; default `free_json`. |
+| `JANUSLY_LLM_PRICE_<MODEL>` | Temporary positive finite USD-per-1M-token rates. A catalogued model accepts `input,output` and retains its known cache multipliers. A model absent from the catalog requires `input,output,cache_write_5m,cache_read`; incomplete pricing fails closed. The model token is uppercase with punctuation replaced by `_`. |
 | `JANUSLY_AI_GENERATION_CANDIDATES` | Bounded candidate count for generation. |
+| `JANUSLY_AGENT_WRITES_ENABLED` | Process kill switch for write-capable tools selected by `agent` or `multi_agent`. A write also requires tenant `ai.agentWriteConsent=true`, node `allowWriteTools=true`, and human approval on every incoming path. |
+| `JANUSLY_LLM_SIMULATED_PROVIDERS` | Comma-separated completion providers routed to a simulator only after both local simulator gates are enabled. Currently the only recognized value is `anthropic`. |
+| `JANUSLY_LLM_SIMULATOR_BASE_URL` | Explicit HTTP(S) endpoint for the Anthropic-compatible local simulator. A fully requested but invalid endpoint fails to the provider-free path; the simulator receives a fixed non-secret credential. |
 | `JANUSLY_MEMORY_ENABLED` | Process-level memory gate. |
 | `JANUSLY_FEEDBACK_MEMORY_WORKERS` | Bounded optional-memory worker count. |
 | `JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY` | Bounded optional-memory waiting queue. |
 | `JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS` | Deadline for one optional feedback-memory task. |
-| `JANUSLY_EMBEDDING_PROVIDER` | Embedding provider; local default is Ollama. |
-| `JANUSLY_EMBEDDING_MODEL` | Embedding model; local default is `bge-m3`. |
+| `JANUSLY_EMBEDDING_MODEL` | Ollama embedding model; local default is `bge-m3`. |
 | `OLLAMA_BASE_URL` | Ollama endpoint. |
 
 AI paths must degrade to deterministic fallback results when the provider is
 missing or unavailable. Tenant model, budget, and behavior settings belong in
 the closed `org_configs` catalog. The root Compose service explicitly forwards
-the process memory gate, bounded feedback-memory controls, and embedding
-provider/model variables; setting them in `.env` therefore changes the
+the process memory gate, bounded feedback-memory controls, and Ollama
+model/endpoint variables; setting them in `.env` therefore changes the
 application container rather than only the sibling Ollama service.
+Real-provider calls fail closed before egress when the selected model has no
+finite price in the static catalog or a server-only price override. This keeps
+budget aggregation complete instead of treating unknown paid usage as zero;
+measured cost includes uncached input, five-minute cache creation, cache reads,
+and output tokens at their distinct rates.
+
+`ai.budgetMonthlyUsd` is a pre-call guard over recorded completed usage, not an
+atomic prepaid reservation. With policy `block`, Janusly stops admitting new
+calls after recorded spend reaches the threshold; concurrent or already
+in-flight calls may still settle above it. Use the separately bounded
+qualification harness for an exact call/cost breaker during provider tests.
+
+The catalog applies the same normalization to API writes and stored rows.
+Operator guidance is capped at 8 KiB and rejects secret-like content;
+`memory.allowedKinds`, `memory.retentionDaysByKind`, and
+`recovery.slaPolicies` use closed identifiers and bounded numeric values.
+Invalid legacy/direct-SQL rows fall through to the next safe configuration
+layer instead of becoming effective. See [memory policy](memory-policy.md) for
+the per-kind retention table.
 
 ## Integrations
 
@@ -98,10 +120,21 @@ Outbound safety and integration settings include:
   either flag alone is inert, and both are refused in production
 - `JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL`, the base URL used only after that
   double local gate
+- `JANUSLY_LLM_SIMULATED_PROVIDERS=anthropic` plus
+  `JANUSLY_LLM_SIMULATOR_BASE_URL`, the additional AI-specific binding. If
+  Anthropic is not explicitly listed, the AI simulator configuration is inert;
+  when it is listed, a missing/invalid URL fails closed without sending the
+  real `ANTHROPIC_API_KEY`
 - `ALLOW_PRIVATE_HTTP_TARGETS`
 - `JANUSLY_HTTP_MAX_RESPONSE_BYTES`
 - `JANUSLY_HTTP_MAX_REDIRECTS`
 - `JANUSLY_HTTP_STREAM_PREVIEW_BYTES`
+
+Outbound HTTP settings remain bounded even when configured per tenant or per
+workflow node: response bodies are capped at 67,108,864 bytes (64 MiB), redirect
+chains at 20 hops, and timeouts at 600,000 ms. Values outside those ranges fall
+back when read from legacy/environment configuration and are rejected on new
+tenant or workflow writes.
 - `JANUSLY_MCP_WRITES_ENABLED` (server-side write tools) and
   `JANUSLY_MCP_CLIENT_WRITES_ENABLED` (`mcp_tool` steps against external
   servers)

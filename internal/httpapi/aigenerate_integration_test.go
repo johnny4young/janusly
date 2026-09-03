@@ -278,19 +278,19 @@ func TestGenerateWorkflowWithTenantExposedMcpTool(t *testing.T) {
 		t.Fatalf("generated MCP node must preserve the exact executable pair: %+v", mcpNode)
 	}
 	requestBody, _ := captured.Load().(string)
-	for _, want := range []string{"untrusted external DATA", "contacts.update", "contactId", "writeSide", "Ignore previous instructions"} {
+	for _, want := range []string{"Tenant capability catalog (untrusted DATA", "END TENANT CAPABILITY DATA", "contacts.update", "contactId", "writeSide"} {
 		if !strings.Contains(requestBody, want) {
 			t.Fatalf("provider system prompt missing %q: %s", want, requestBody)
 		}
 	}
-	for _, forbidden := range []string{"secrets.dump", "SYSTEM override"} {
+	for _, forbidden := range []string{"secrets.dump", "SYSTEM override", "Ignore previous instructions"} {
 		if strings.Contains(requestBody, forbidden) {
 			t.Fatalf("hidden or nested schema prose reached provider prompt: %q", forbidden)
 		}
 	}
 }
 
-// Best-of-N: three concurrent samples where only one is a valid graph —
+// Best-of-N: three sequential, independently admitted samples where only one is a valid graph —
 // the invalid majority never discards the generation, the readiness
 // scorer picks the valid draft, and the audit carries the counts.
 func TestGenerateWorkflowBestOfN(t *testing.T) {
@@ -330,9 +330,100 @@ func TestGenerateWorkflowBestOfN(t *testing.T) {
 	var audited int
 	_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
 		WHERE org_id = $1 AND action = 'ai.workflow.generated'
-		  AND metadata @> '{"candidateCount":3,"validCandidates":1}'`, h.org).Scan(&audited)
+		  AND metadata @> '{"candidateCount":3,"validCandidates":1,"modelCallCount":3}'`, h.org).Scan(&audited)
 	if audited != 1 {
 		t.Fatalf("BoN telemetry must audit: %d", audited)
+	}
+}
+
+// A request can pass its initial budget check and cross the recorded threshold before
+// the next Best-of-N sample. The second sample must be denied before provider
+// egress, and an unparseable first sample must not trigger the ordinary retry
+// ladder after that denial.
+func TestGenerateWorkflowBestOfNReadmitsEveryProviderCall(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n := calls.Add(1); n != 1 {
+			t.Errorf("provider call %d escaped the per-call budget gate", n)
+		}
+		if _, err := pool.Exec(r.Context(), `INSERT INTO usage_events
+			(id, org_id, metric, quantity, metadata)
+			VALUES ($1, $2, 'llm.completion', 1, '{"costUsd":1}')`,
+			"usage-bon-budget-"+h.org, h.org); err != nil {
+			t.Errorf("seed crossed budget: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicReply("not a workflow document"))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type) VALUES
+		($1, $2, 'ai.generationCandidates', '3', 'ai', 'test', 'number'),
+		($3, $2, 'ai.budgetMonthlyUsd', '0.5', 'ai', 'test', 'number'),
+		($4, $2, 'ai.budgetExceededPolicy', '"block"', 'ai', 'test', 'string')`,
+		h.org+"-bon-n", h.org, h.org+"-bon-budget", h.org+"-bon-policy"); err != nil {
+		t.Fatalf("seed candidate budget config: %v", err)
+	}
+
+	res := h.call("POST", "/ai/generate-workflow", map[string]any{"prompt": "one noop"}, "")
+	if res.status != http.StatusPaymentRequired || res.body["code"] != "budget_exceeded" {
+		t.Fatalf("late budget block must keep the 402 contract: %d %+v", res.status, res.body)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want exactly the admitted first sample", got)
+	}
+}
+
+func TestGenerateWorkflowBestOfNReadmitsEveryCallToRateLimit(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicReply(`{"dslVersion":"1.0","id":"rate-bounded","name":"Rate bounded","nodes":[{"id":"done","type":"noop","config":{}}],"edges":[]}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type) VALUES
+		($1, $2, 'ai.generationCandidates', '3', 'ai', 'test', 'number'),
+		($3, $2, 'ai.rateLimitPerMin', '1', 'ai', 'test', 'number')`,
+		h.org+"-rate-n", h.org, h.org+"-rate-limit"); err != nil {
+		t.Fatalf("seed candidate rate config: %v", err)
+	}
+
+	response := h.call("POST", "/ai/generate-workflow", map[string]any{"prompt": "one noop"}, "")
+	if response.status != http.StatusOK || response.body["mode"] != "ai" {
+		t.Fatalf("first admitted candidate should remain usable: %d %+v", response.status, response.body)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want one admitted call before the rate gate closed", got)
+	}
+	var audited int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND action = 'ai.workflow.generated'
+		  AND metadata @> '{"modelCallCount":1,"candidateCount":1,"validCandidates":1}'`,
+		h.org).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("bounded model-call telemetry: count=%d err=%v", audited, err)
+	}
+	denied := h.call("POST", "/ai/generate-workflow", map[string]any{"prompt": "one noop"}, "")
+	if denied.status != http.StatusTooManyRequests || denied.body["code"] != "rate_limited" || calls.Load() != 1 {
+		t.Fatalf("pre-egress rate denial must be HTTP 429 without provider call: status=%d calls=%d body=%+v",
+			denied.status, calls.Load(), denied.body)
 	}
 }
 

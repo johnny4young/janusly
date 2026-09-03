@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -24,6 +25,7 @@ import (
 	"github.com/johnny4young/janusly/internal/ai"
 	"github.com/johnny4young/janusly/internal/aibudget"
 	"github.com/johnny4young/janusly/internal/aiconfig"
+	"github.com/johnny4young/janusly/internal/aiguidance"
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/experiment"
 	"github.com/johnny4young/janusly/internal/prompts"
@@ -31,6 +33,20 @@ import (
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
 )
+
+const experimentFinalizeTimeout = 5 * time.Second
+
+func init() {
+	audit.RegisterRuntimeAction("experiment.run.failed")
+}
+
+// experimentFinalizeContext preserves tracing/actor values but not request
+// cancellation. A client can disconnect during a bounded comparison; the
+// already-created experiment must still leave "running" durably as either a
+// completed or failed terminal row.
+func experimentFinalizeContext(requestCtx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(requestCtx), experimentFinalizeTimeout)
+}
 
 // experimentGuardedClient applies governance to every logical model call,
 // including LLM-judge calls hidden inside the scorer. The evaluation client
@@ -59,6 +75,17 @@ func parseExperimentPromptRef(ref string) (string, int) {
 	return name, version
 }
 
+func normalizeExperimentModelRef(ref string) (string, bool) {
+	ref = strings.TrimSpace(ref)
+	if provider, model, qualified := strings.Cut(ref, "/"); qualified {
+		if provider != "anthropic" || strings.Contains(model, "/") {
+			return "", false
+		}
+		return ai.NormalizeModelID(model)
+	}
+	return ai.NormalizeModelID(ref)
+}
+
 func evalDatasetView(row store.EvalDataset) map[string]any {
 	return map[string]any{
 		"id": row.ID, "name": row.Name, "description": row.Description,
@@ -68,6 +95,37 @@ func evalDatasetView(row store.EvalDataset) map[string]any {
 	}
 }
 
+// evalExportFilename projects an operator-controlled dataset name into a
+// conservative ASCII attachment name. Content-Disposition is a protocol
+// boundary: quotes, control characters and path separators from the stored
+// display name must never become header syntax or a filesystem-looking path.
+func evalExportFilename(name string, exampleCount int, format string) string {
+	const maxSlugBytes = 48
+	var slug strings.Builder
+	lastDash := false
+	for _, char := range strings.ToLower(strings.TrimSpace(name)) {
+		valid := char >= 'a' && char <= 'z' || char >= '0' && char <= '9'
+		if valid {
+			if slug.Len() >= maxSlugBytes {
+				break
+			}
+			slug.WriteRune(char)
+			lastDash = false
+		} else if slug.Len() > 0 && !lastDash {
+			if slug.Len() >= maxSlugBytes {
+				break
+			}
+			slug.WriteByte('-')
+			lastDash = true
+		}
+	}
+	datasetSlug := strings.Trim(slug.String(), "-")
+	if datasetSlug == "" {
+		datasetSlug = "dataset"
+	}
+	return fmt.Sprintf("evals-%s-examples-%d.%s", datasetSlug, exampleCount, format)
+}
+
 // evalExampleView re-scrubs at read time — defense in depth over the
 // write-time scrub.
 func evalExampleView(row store.EvalExample) map[string]any {
@@ -75,7 +133,7 @@ func evalExampleView(row store.EvalExample) map[string]any {
 		"id": row.ID, "workflowId": textOrNull(row.WorkflowID),
 		"deadLetterId":          textOrNull(row.DeadLetterID),
 		"failureSignature":      row.FailureSignature,
-		"inputContext":          signature.ScrubSecretShapes(row.InputContext),
+		"inputContext":          aiguidance.ScrubGuidanceSecrets(row.InputContext),
 		"expectedApproachLabel": row.ExpectedApproachLabel,
 		"accepted":              row.Accepted, "suggestionMode": row.SuggestionMode,
 	}
@@ -116,6 +174,9 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusConflict, "eval_dataset_name_exists",
 				"An eval dataset with that name already exists", nil))
 			return
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
 		}
 		// The opt-in gate: accepted AND eval_consent, nothing else.
 		eligible, err := q.QueryEligibleFeedbackForEval(r.Context(), store.QueryEligibleFeedbackForEvalParams{
@@ -155,10 +216,8 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 			}
 			comment := ""
 			if row.Comment.Valid {
-				comment = signature.ScrubSecretShapes(row.Comment.String)
-				if len(comment) > 4000 {
-					comment = comment[:4000]
-				}
+				comment = aiguidance.ScrubGuidanceSecrets(row.Comment.String)
+				comment, _ = aiconfig.TruncatePrompt(comment, 4000)
 			}
 			if err := txq.InsertEvalExample(r.Context(), store.InsertEvalExampleParams{
 				ID: s.newID(), OrgID: rc.orgID, DatasetID: datasetID,
@@ -173,11 +232,15 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 				return
 			}
 		}
+		dataset, err := txq.GetEvalDataset(r.Context(), store.GetEvalDatasetParams{OrgID: rc.orgID, ID: datasetID})
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
 		if err := tx.Commit(r.Context()); err != nil {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
-		dataset, _ := q.GetEvalDataset(r.Context(), store.GetEvalDatasetParams{OrgID: rc.orgID, ID: datasetID})
 		audit.Write(r.Context(), s.pool, rc.authContext, "eval.dataset.created", audit.Options{
 			TargetType: "eval-dataset", TargetID: datasetID,
 			Metadata: map[string]any{"name": body.Name, "workflowId": body.WorkflowID, "exampleCount": len(eligible)},
@@ -192,7 +255,11 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusNotFound, "eval_dataset_not_found", "Eval dataset not found", nil))
 			return
 		}
-		rows, _ := q.ListEvalExamples(r.Context(), store.ListEvalExamplesParams{OrgID: rc.orgID, DatasetID: dataset.ID})
+		rows, err := q.ListEvalExamples(r.Context(), store.ListEvalExamplesParams{OrgID: rc.orgID, DatasetID: dataset.ID})
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
 		examples := make([]map[string]any, 0, len(rows))
 		for _, row := range rows {
 			examples = append(examples, evalExampleView(row))
@@ -216,7 +283,11 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusNotFound, "eval_dataset_not_found", "Eval dataset not found", nil))
 			return
 		}
-		rows, _ := q.ListEvalExamples(r.Context(), store.ListEvalExamplesParams{OrgID: rc.orgID, DatasetID: dataset.ID})
+		rows, err := q.ListEvalExamples(r.Context(), store.ListEvalExamplesParams{OrgID: rc.orgID, DatasetID: dataset.ID})
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
 		examples := make([]map[string]any, 0, len(rows))
 		for _, row := range rows {
 			examples = append(examples, evalExampleView(row))
@@ -225,7 +296,7 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 			TargetType: "eval-dataset", TargetID: dataset.ID,
 			Metadata: map[string]any{"name": dataset.Name, "format": format, "exampleCount": len(examples)},
 		})
-		filename := fmt.Sprintf("evals-%s-examples-%d.%s", dataset.Name, len(examples), format)
+		filename := evalExportFilename(dataset.Name, len(examples), format)
 		if format == "json" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
@@ -241,14 +312,31 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 	}))
 
 	mux.HandleFunc("DELETE /eval/datasets/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		q := store.New(s.pool)
 		id := r.PathValue("id")
-		_ = q.DeleteEvalExamplesForDataset(r.Context(), store.DeleteEvalExamplesForDatasetParams{
+		tx, err := s.pool.Begin(r.Context())
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		defer func() { _ = tx.Rollback(r.Context()) }()
+		q := store.New(tx)
+		if err := q.DeleteEvalExamplesForDataset(r.Context(), store.DeleteEvalExamplesForDatasetParams{
 			OrgID: rc.orgID, DatasetID: id,
-		})
+		}); err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
 		deleted, err := q.DeleteEvalDataset(r.Context(), store.DeleteEvalDatasetParams{OrgID: rc.orgID, ID: id})
-		if err != nil || deleted == 0 {
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		if deleted == 0 {
 			writeUnversioned(w, opError(http.StatusNotFound, "eval_dataset_not_found", "Eval dataset not found", nil))
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "eval.dataset.deleted", audit.Options{
@@ -320,7 +408,11 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusNotFound, "eval_dataset_not_found", "Eval dataset not found", nil))
 			return
 		}
-		rows, _ := q.ListEvalExamples(ctx, store.ListEvalExamplesParams{OrgID: rc.orgID, DatasetID: dataset.ID})
+		rows, err := q.ListEvalExamples(ctx, store.ListEvalExamplesParams{OrgID: rc.orgID, DatasetID: dataset.ID})
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
 		if len(rows) == 0 {
 			writeUnversioned(w, opError(http.StatusUnprocessableEntity, "experiment_dataset_empty",
 				"The evaluation dataset has no examples", nil))
@@ -338,7 +430,7 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 		examples := make([]experiment.Example, 0, len(rows))
 		for _, row := range rows {
 			examples = append(examples, experiment.Example{
-				Input:    signature.ScrubSecretShapes(row.InputContext),
+				Input:    aiguidance.ScrubGuidanceSecrets(row.InputContext),
 				Expected: row.ExpectedApproachLabel,
 			})
 		}
@@ -349,7 +441,16 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 		// Literal refs are deliberately not sent to the provider as fake prompts.
 		controlArm, candidateArm := experiment.Arm{}, experiment.Arm{}
 		if body.Kind == "model" {
-			controlArm.ModelHint, candidateArm.ModelHint = body.ControlRef, body.CandidateRef
+			controlModel, controlValid := normalizeExperimentModelRef(body.ControlRef)
+			candidateModel, candidateValid := normalizeExperimentModelRef(body.CandidateRef)
+			if !controlValid || !candidateValid ||
+				(client != nil && client.Configured() && !settings.ProviderSimulated &&
+					(ai.GetModelPrice(controlModel) == nil || ai.GetModelPrice(candidateModel) == nil)) {
+				writeUnversioned(w, opError(http.StatusUnprocessableEntity, "experiment_model_ref_invalid",
+					"Control and candidate must reference valid, priced Anthropic models", nil))
+				return
+			}
+			controlArm.ModelHint, candidateArm.ModelHint = controlModel, candidateModel
 		} else {
 			controlName, controlVersion := parseExperimentPromptRef(body.ControlRef)
 			candidateName, candidateVersion := parseExperimentPromptRef(body.CandidateRef)
@@ -361,7 +462,8 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 				return
 			}
 			if settings.PromptMaxChars > 0 &&
-				(len(controlPrompt) > settings.PromptMaxChars || len(candidatePrompt) > settings.PromptMaxChars) {
+				(utf8.RuneCountInString(controlPrompt) > settings.PromptMaxChars ||
+					utf8.RuneCountInString(candidatePrompt) > settings.PromptMaxChars) {
 				writeUnversioned(w, opError(http.StatusRequestEntityTooLarge, "experiment_prompt_too_long",
 					"Resolved experiment prompt exceeds the tenant AI prompt limit",
 					map[string]any{"maxChars": settings.PromptMaxChars}))
@@ -370,17 +472,19 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 			controlArm.SystemPrompt, candidateArm.SystemPrompt = controlPrompt, candidatePrompt
 		}
 
-		gate := aibudget.Gate(ctx, s.pool, rc.orgID, rc.userID, "experiment.run.call")
-		if !gate.Allowed {
-			writeUnversioned(w, opResult{status: http.StatusPaymentRequired, data: map[string]any{
-				"error": "budget_exceeded", "code": "budget_exceeded",
-				"params": map[string]any{
-					"monthlyUsdSpent": gate.MonthlyUsdSpent, "monthlyUsdLimit": gate.MonthlyUsdLimit,
-					"policy": gate.Policy, "warningPercent": gate.WarningPercent,
-				},
-				"budget": gate,
-			}})
-			return
+		if client != nil && client.Configured() {
+			gate := aibudget.Gate(ctx, s.pool, rc.orgID, rc.userID, "experiment.run.call")
+			if !gate.Allowed {
+				writeUnversioned(w, opResult{status: http.StatusPaymentRequired, data: map[string]any{
+					"error": "budget_exceeded", "code": "budget_exceeded",
+					"params": map[string]any{
+						"monthlyUsdSpent": gate.MonthlyUsdSpent, "monthlyUsdLimit": gate.MonthlyUsdLimit,
+						"policy": gate.Policy, "warningPercent": gate.WarningPercent,
+					},
+					"budget": gate,
+				}})
+				return
+			}
 		}
 
 		experimentID := s.newID()
@@ -408,7 +512,7 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 				if limitErr := s.limiter.Enforce(callCtx, rc.orgID, ratelimit.Options{
 					Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
 				}); limitErr != nil {
-					return nil, &ai.AIError{Class: "rate_limit", Message: limitErr.Error()}
+					return nil, &ai.AIError{Class: "rate_limit", Message: limitErr.Error(), BeforeEgress: true}
 				}
 				return aibudget.GuardedGenerateText(callCtx, s.pool, client, rc.userID,
 					"experiment.run.call", input)
@@ -417,26 +521,35 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 		summary := experiment.Run(ctx, guardedClient, body.ScorerKind, controlArm, candidateArm, examples,
 			ai.CallContext{OrgID: rc.orgID, UserID: rc.userID}, nil)
 		summaryJSON, _ := json.Marshal(summary)
-		if _, err := q.CompleteExperiment(ctx, store.CompleteExperimentParams{
-			OrgID: rc.orgID, ID: experimentID, Status: "completed", SummaryJson: summaryJSON,
-		}); err != nil {
+		completionStatus := "completed"
+		completionAction := audit.Action("experiment.run.completed")
+		if ctx.Err() != nil {
+			completionStatus = "failed"
+			completionAction = "experiment.run.failed"
+		}
+		finalizeCtx, cancelFinalize := experimentFinalizeContext(ctx)
+		defer cancelFinalize()
+		updated, err := q.CompleteExperiment(finalizeCtx, store.CompleteExperimentParams{
+			OrgID: rc.orgID, ID: experimentID, Status: completionStatus, SummaryJson: summaryJSON,
+		})
+		if err != nil || updated != 1 {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
-		audit.Write(ctx, s.pool, rc.authContext, "experiment.run.completed", audit.Options{
+		audit.Write(finalizeCtx, s.pool, rc.authContext, completionAction, audit.Options{
 			TargetType: "experiment", TargetID: experimentID,
 			Metadata: map[string]any{
 				"recommendation": summary.Recommendation, "scoreDelta": summary.ScoreDelta,
-				"exampleCount": summary.ExampleCount,
+				"exampleCount": summary.ExampleCount, "status": completionStatus,
 			},
 		})
-		if summary.Recommendation == "promote_candidate" {
-			audit.Write(ctx, s.pool, rc.authContext, "experiment.run.promotion_suggested", audit.Options{
+		if completionStatus == "completed" && summary.Recommendation == "promote_candidate" {
+			audit.Write(finalizeCtx, s.pool, rc.authContext, "experiment.run.promotion_suggested", audit.Options{
 				TargetType: "experiment", TargetID: experimentID,
 				Metadata: map[string]any{"scoreDelta": summary.ScoreDelta},
 			})
 		}
-		completed, err := q.GetExperiment(ctx, store.GetExperimentParams{OrgID: rc.orgID, ID: experimentID})
+		completed, err := q.GetExperiment(finalizeCtx, store.GetExperimentParams{OrgID: rc.orgID, ID: experimentID})
 		if err != nil {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
@@ -466,6 +579,3 @@ func experimentView(row store.Experiment) map[string]any {
 		"completedAt": timeOrNull(row.CompletedAt),
 	}
 }
-
-var _ = errors.Is
-var _ = pgx.ErrNoRows

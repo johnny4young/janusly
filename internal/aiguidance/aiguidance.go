@@ -11,15 +11,12 @@
 package aiguidance
 
 import (
-	"context"
 	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/signature"
-	"github.com/johnny4young/janusly/internal/store"
 )
 
 const (
@@ -117,23 +114,6 @@ func ComposeBlock(orgGuidance, workflowGuidance string) string {
 		body = strings.TrimRight(truncateUTF8(section, bodyBudget), " \t\n")
 	}
 	return prefix + body + suffix
-}
-
-// Load composes the tenant's block: org guidance from the catalog
-// (ai.operatorGuidance) and, when a workflow id is given, the workflow's
-// aiGuidanceMarkdown — best-effort, a metadata read failure never breaks
-// an AI route.
-func Load(ctx context.Context, db orgconfig.Querier, orgID, workflowID string) string {
-	orgGuidance, _ := orgconfig.LoadValue(ctx, db, orgID, "ai.operatorGuidance").(string)
-	workflowGuidance := ""
-	if workflowID != "" {
-		if value, err := store.New(db).GetWorkflowAiGuidance(ctx, store.GetWorkflowAiGuidanceParams{
-			OrgID: orgID, WorkflowID: workflowID,
-		}); err == nil && value.Valid {
-			workflowGuidance = value.String
-		}
-	}
-	return ComposeBlock(orgGuidance, workflowGuidance)
 }
 
 // truncateUTF8 cuts to at most maxBytes without splitting a rune.

@@ -13,11 +13,15 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 	"sync"
 
+	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/tools"
 )
+
+const multiAgentMaxAgents = domain.MultiAgentMaxAgents
 
 // NewMultiAgentExecutor builds the crew executor over the same registry
 // and http machinery as the single agent.
@@ -28,16 +32,14 @@ func NewMultiAgentExecutor(registry *tools.Registry, httpExec Func) Func {
 }
 
 func runMultiAgent(ctx context.Context, in Input, registry *tools.Registry, httpExec Func) (any, error) {
-	agentsRaw, _ := in.Config["agents"].([]any)
-	mode, _ := in.Config["mode"].(string)
-	if mode == "" {
-		mode = "sequential"
+	settings, err := domain.ResolveMultiAgentRuntimeConfig(in.Config)
+	if err != nil {
+		return nil, err
 	}
-	aggregation, _ := in.Config["aggregation"].(string)
-	if aggregation == "" {
-		aggregation = "last"
-	}
-	continueOnError, _ := in.Config["continueOnError"].(bool)
+	agentsRaw := settings.Agents
+	mode := settings.Mode
+	aggregation := settings.Aggregation
+	continueOnError := settings.ContinueOnError
 	emit := func(eventType string, payload map[string]any) {
 		if in.Emit != nil {
 			in.Emit(eventType, payload)
@@ -46,6 +48,9 @@ func runMultiAgent(ctx context.Context, in Input, registry *tools.Registry, http
 	sharedContext := map[string]any{}
 	maps.Copy(sharedContext, in.Context)
 	results := make([]any, 0, len(agentsRaw))
+	// The crew is one governed node execution, so all sequential or parallel
+	// children compete for the same single write-attempt lease.
+	writeBudget := &agentWriteBudget{}
 	emit("multi_agent.started", map[string]any{
 		"mode": mode, "aggregation": aggregation, "count": len(agentsRaw), "goal": in.Config["goal"],
 	})
@@ -58,7 +63,12 @@ func runMultiAgent(ctx context.Context, in Input, registry *tools.Registry, http
 		})
 		inner := in
 		inner.Context = contextSnapshot
-		result, err := runAgentLoop(ctx, inner, agentConfig, fmt.Sprintf("multi_agent.agent.%d", index), registry, httpExec)
+		inner.AgentAllowedHTTPRequests = nil
+		if index >= 0 && index < len(in.AgentAllowedHTTPRequestsByIndex) {
+			inner.AgentAllowedHTTPRequests = in.AgentAllowedHTTPRequestsByIndex[index]
+		}
+		inner.AgentAllowedHTTPRequestsByIndex = nil
+		result, err := runAgentLoop(ctx, inner, agentConfig, fmt.Sprintf("multi_agent.agent.%d", index), registry, httpExec, writeBudget)
 		if err != nil {
 			return nil, err
 		}
@@ -156,9 +166,9 @@ func runMultiAgent(ctx context.Context, in Input, registry *tools.Registry, http
 // defaults and renders its goal against {context, previousAgents} —
 // the late-bound scope with the strict-policy hook applied here.
 func resolveCrewAgentConfig(in Input, raw any, index int, sharedContext map[string]any, results []any) (map[string]any, error) {
-	agent, _ := raw.(map[string]any)
-	if agent == nil {
-		agent = map[string]any{}
+	agent, valid := raw.(map[string]any)
+	if !valid || agent == nil {
+		return nil, fmt.Errorf("multi_agent agent at index %d must be an object", index)
 	}
 	merged := map[string]any{}
 	maps.Copy(merged, agent)
@@ -177,6 +187,11 @@ func resolveCrewAgentConfig(in Input, raw any, index int, sharedContext map[stri
 			merged["maxSteps"] = float64(2)
 		}
 	}
+	if merged["timeoutMs"] == nil {
+		if timeout, ok := in.Config["timeoutMs"]; ok {
+			merged["timeoutMs"] = timeout
+		}
+	}
 	if merged["reflection"] == nil {
 		if reflection, ok := in.Config["reflection"]; ok {
 			merged["reflection"] = reflection
@@ -184,12 +199,9 @@ func resolveCrewAgentConfig(in Input, raw any, index int, sharedContext map[stri
 			merged["reflection"] = true
 		}
 	}
-	goal := merged["goal"]
-	if goal == nil {
-		goal = in.Config["goal"]
-	}
-	if goal == nil {
-		goal = "Complete the task"
+	goal, ok := merged["goal"].(string)
+	if !ok || strings.TrimSpace(goal) == "" {
+		return nil, fmt.Errorf("multi_agent agent at index %d requires a non-empty goal", index)
 	}
 	rendered, err := grammar.RenderTemplateWithRedactions(goal, map[string]any{
 		"context":        sharedContext,
@@ -205,7 +217,11 @@ func resolveCrewAgentConfig(in Input, raw any, index int, sharedContext map[stri
 			return nil, err
 		}
 	}
-	merged["goal"] = fmt.Sprint(rendered.Rendered)
+	resolvedGoal := fmt.Sprint(rendered.Rendered)
+	if strings.TrimSpace(resolvedGoal) == "" {
+		return nil, fmt.Errorf("multi_agent agent at index %d resolved to an empty goal", index)
+	}
+	merged["goal"] = resolvedGoal
 	return merged, nil
 }
 

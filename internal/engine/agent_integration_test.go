@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -116,12 +117,96 @@ func TestAgentLoopRulesPlanner(t *testing.T) {
 	}))
 	defer writeTarget.Close()
 	_, output = agentRun("wf-agent-dry", map[string]any{
-		"goal": "call api to mutate", "url": writeTarget.URL, "method": "POST", "maxSteps": float64(1),
+		"goal": "call api to mutate", "url": writeTarget.URL, "method": "POST", "maxSteps": float64(50),
 	}, "validation")
 	steps = output["steps"].([]any)
+	if len(steps) != 1 {
+		t.Fatalf("dry-run write skip must terminate instead of repeating: %+v", steps)
+	}
 	dryResult := steps[0].(map[string]any)["result"].(map[string]any)
 	if dryResult["skipped"] != true || hits != 0 {
 		t.Fatalf("dry run must skip the write: %+v hits=%d", dryResult, hits)
+	}
+
+	// Fixture 5: an ordinary agent write needs all four independent grants.
+	// Missing tenant consent or a dominating approval returns a bounded
+	// denial envelope and never reaches the target; a fully governed write
+	// executes exactly once after the approval resumes.
+	var governedHits atomic.Int32
+	governedTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		governedHits.Add(1)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer governedTarget.Close()
+	t.Setenv(agentWritesEnabledEnv, "true")
+
+	governedRun := func(id string, allowWrites any, withApproval bool, input ...any) map[string]any {
+		agent := domain.Node{ID: "agent", Type: "agent", Config: map[string]any{
+			"planner": "rules", "tool": "http.request", "maxSteps": float64(50),
+			"allowWriteTools": allowWrites,
+			"input": map[string]any{
+				"url": governedTarget.URL, "method": "POST", "body": map[string]any{"ok": true},
+			},
+		}}
+		wf := &domain.Workflow{
+			ID: id, Name: "Governed agent", DSLVersion: "1.0",
+			Nodes: []domain.Node{agent}, Edges: []domain.Edge{},
+		}
+		if withApproval {
+			wf.Nodes = append([]domain.Node{{
+				ID: "gate", Type: "approval", Config: map[string]any{"message": "Approve agent write"},
+			}}, wf.Nodes...)
+			wf.Edges = []domain.Edge{{From: "gate", To: "agent"}}
+		}
+		var runInput any
+		if len(input) > 0 {
+			runInput = input[0]
+		}
+		runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: wf, Input: runInput})
+		if err != nil {
+			t.Fatalf("start %s: %v", id, err)
+		}
+		if withApproval {
+			waitForNodeStatus(t, ctx, pool, runID, "gate", "waiting", 10*time.Second)
+			if err := eng.ResumeRun(ctx, runID, "gate"); err != nil {
+				t.Fatalf("resume %s: %v", id, err)
+			}
+		}
+		waitRunStatus(t, pool, runID, "succeeded", 0)
+		var raw []byte
+		if err := pool.QueryRow(ctx,
+			`SELECT state_json->'output'->'finalResult' FROM run_nodes WHERE run_id=$1 AND node_id='agent'`,
+			runID).Scan(&raw); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		var result map[string]any
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("decode %s: %v", id, err)
+		}
+		return result
+	}
+
+	if result := governedRun("wf-agent-no-tenant-consent", true, true); result["error"] != "agent_write_not_authorized" || governedHits.Load() != 0 {
+		t.Fatalf("tenant consent must fail closed: result=%+v hits=%d", result, governedHits.Load())
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1,$2,'ai.agentWriteConsent','true','ai','test','boolean')`,
+		org+"-agent-write-consent", org); err != nil {
+		t.Fatalf("seed agent consent: %v", err)
+	}
+	if result := governedRun("wf-agent-no-approval", true, false); result["error"] != "agent_write_not_authorized" || governedHits.Load() != 0 {
+		t.Fatalf("approval must fail closed: result=%+v hits=%d", result, governedHits.Load())
+	}
+	if result := governedRun("wf-agent-no-workflow-opt-in", false, true); result["error"] != "agent_write_not_authorized" || governedHits.Load() != 0 {
+		t.Fatalf("workflow opt-in must fail closed: result=%+v hits=%d", result, governedHits.Load())
+	}
+	if result := governedRun("wf-agent-runtime-opt-in", "{{context.input.allowWrites}}", true,
+		map[string]any{"allowWrites": true}); result["error"] != "agent_write_not_authorized" || governedHits.Load() != 0 {
+		t.Fatalf("runtime input must not mint workflow opt-in: result=%+v hits=%d", result, governedHits.Load())
+	}
+	if result := governedRun("wf-agent-governed-write", true, true); result["ok"] != true || governedHits.Load() != 1 {
+		t.Fatalf("fully governed write must execute once: result=%+v hits=%d", result, governedHits.Load())
 	}
 }
 
@@ -168,7 +253,7 @@ func TestAgentLLMPlannerMatrix(t *testing.T) {
 			ID: id, Name: "LLM Agent", DSLVersion: "1.0",
 			Nodes: []domain.Node{{ID: "a", Type: "agent", Config: map[string]any{
 				"goal": "uppercase something", "value": "hola",
-				"planner": "openai", "maxSteps": float64(1),
+				"planner": "ai", "maxSteps": float64(1),
 			}}},
 			Edges: []domain.Edge{},
 		}
@@ -195,7 +280,7 @@ func TestAgentLLMPlannerMatrix(t *testing.T) {
 	wf := &domain.Workflow{
 		ID: "wf-llm-nokey", Name: "LLM Agent", DSLVersion: "1.0",
 		Nodes: []domain.Node{{ID: "a", Type: "agent", Config: map[string]any{
-			"goal": "uppercase it", "value": "hola", "planner": "openai", "maxSteps": float64(1),
+			"goal": "uppercase it", "value": "hola", "planner": "ai", "maxSteps": float64(1),
 		}}},
 		Edges: []domain.Edge{},
 	}
@@ -302,7 +387,7 @@ func TestAgentEpisodicMemory(t *testing.T) {
 		wf := &domain.Workflow{
 			ID: "wf-episodes", Name: "Agente", DSLVersion: "1.0",
 			Nodes: []domain.Node{{ID: "a", Type: "agent", Config: map[string]any{
-				"goal": "arregla los timeouts del webhook", "planner": "openai", "maxSteps": float64(1),
+				"goal": "arregla los timeouts del webhook", "planner": "ai", "maxSteps": float64(1),
 			}}},
 			Edges: []domain.Edge{},
 		}

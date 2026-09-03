@@ -2,10 +2,12 @@ package engine
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/grammar"
 )
@@ -89,12 +91,12 @@ func TestComputeRetryDelayLadder(t *testing.T) {
 	if got := computeRetryDelay(2, nil, fixedRand); got != 0 {
 		t.Fatalf("no policy must mean zero delay, got %v", got)
 	}
-	fixed := policyFromConfig(t, map[string]any{"retry": map[string]any{"delayMs": float64(500)}})
+	fixed := policyFromConfig(t, map[string]any{"retry": map[string]any{"maxAttempts": float64(5), "delayMs": float64(500)}})
 	if got := computeRetryDelay(4, fixed, fixedRand); got != 500 {
 		t.Fatalf("fixed backoff ignores attempt, got %v", got)
 	}
 	expo := policyFromConfig(t, map[string]any{"retry": map[string]any{
-		"delayMs": float64(1000), "backoff": "exponential",
+		"maxAttempts": float64(5), "delayMs": float64(1000), "backoff": "exponential",
 	}})
 	for attempt, want := range map[int]float64{1: 1000, 2: 2000, 3: 4000, 4: 8000} {
 		if got := computeRetryDelay(attempt, expo, fixedRand); got != want {
@@ -102,7 +104,7 @@ func TestComputeRetryDelayLadder(t *testing.T) {
 		}
 	}
 	capped := policyFromConfig(t, map[string]any{"retry": map[string]any{
-		"delayMs": float64(1000), "backoff": "exponential", "maxDelayMs": float64(3000),
+		"maxAttempts": float64(5), "delayMs": float64(1000), "backoff": "exponential", "maxDelayMs": float64(3000),
 	}})
 	if got := computeRetryDelay(4, capped, fixedRand); got != 3000 {
 		t.Fatalf("cap must bound the ladder, got %v", got)
@@ -113,13 +115,32 @@ func TestComputeRetryDelayFullJitterRange(t *testing.T) {
 	// The contract samples uniformly in [delay/2, delay] — pin both ends
 	// with injected randomness.
 	jittered := policyFromConfig(t, map[string]any{"retry": map[string]any{
-		"delayMs": float64(1000), "jitter": true,
+		"maxAttempts": float64(2), "delayMs": float64(1000), "jitter": true,
 	}})
 	if got := computeRetryDelay(1, jittered, func() float64 { return 0 }); got != 500 {
 		t.Fatalf("rand=0 must land on delay/2, got %v", got)
 	}
 	if got := computeRetryDelay(1, jittered, func() float64 { return 0.999 }); got < 990 || got > 1000 {
 		t.Fatalf("rand→1 must approach the full delay, got %v", got)
+	}
+}
+
+func TestParseRetryPolicyFailsClosedAndGlobalDelayIsBounded(t *testing.T) {
+	for _, config := range []map[string]any{
+		{"retry": map[string]any{"maxAttempts": float64(1_000_000_000)}},
+		{"retry": map[string]any{"delayMs": float64(1)}},
+		{"retry": map[string]any{"maxAttempts": float64(2), "delayMs": math.Inf(1)}},
+	} {
+		if policy := parseRetryPolicy(config); policy != nil {
+			t.Fatalf("unsafe legacy policy must disable retries, got %+v", policy)
+		}
+	}
+
+	policy := policyFromConfig(t, map[string]any{"retry": map[string]any{
+		"maxAttempts": float64(10), "delayMs": float64(600_000), "backoff": "exponential",
+	}})
+	if got := computeRetryDelay(10, policy, func() float64 { return 0 }); got != domain.RetryMaxDelayMS {
+		t.Fatalf("uncapped exponential delay = %v, want global cap %d", got, domain.RetryMaxDelayMS)
 	}
 }
 

@@ -9,9 +9,11 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strconv"
 
 	"github.com/johnny4young/janusly/internal/executors"
+	"github.com/johnny4young/janusly/internal/httpcontract"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -19,14 +21,15 @@ type httpBoundSpec struct {
 	key    string
 	envKey string
 	min    float64
+	max    float64
 	def    float64
 }
 
 var httpBoundSpecs = []httpBoundSpec{
-	{key: "http.timeoutMs", envKey: "JANUSLY_HTTP_TIMEOUT_MS", min: 1, def: 30_000},
-	{key: "http.maxResponseBytes", envKey: "JANUSLY_HTTP_MAX_RESPONSE_BYTES", min: 1, def: 1_000_000},
-	{key: "http.maxRedirects", envKey: "JANUSLY_HTTP_MAX_REDIRECTS", min: 0, def: 5},
-	{key: "http.streamPreviewBytes", envKey: "JANUSLY_HTTP_STREAM_PREVIEW_BYTES", min: 1_024, def: 65_536},
+	{key: "http.timeoutMs", envKey: "JANUSLY_HTTP_TIMEOUT_MS", min: 1, max: httpcontract.MaxTimeoutMS, def: httpcontract.DefaultTimeoutMS},
+	{key: "http.maxResponseBytes", envKey: "JANUSLY_HTTP_MAX_RESPONSE_BYTES", min: 1, max: httpcontract.MaxResponseBytes, def: httpcontract.DefaultMaxResponseBytes},
+	{key: "http.maxRedirects", envKey: "JANUSLY_HTTP_MAX_REDIRECTS", min: 0, max: httpcontract.MaxRedirects, def: httpcontract.DefaultMaxRedirects},
+	{key: "http.streamPreviewBytes", envKey: "JANUSLY_HTTP_STREAM_PREVIEW_BYTES", min: httpcontract.MinStreamPreview, max: httpcontract.MaxStreamPreview, def: httpcontract.DefaultStreamPreview},
 }
 
 // resolveHTTPBounds applies the precedence chain over already-loaded tenant
@@ -36,25 +39,26 @@ func resolveHTTPBounds(tenant map[string]float64, lookupEnv func(string) (string
 	for i, spec := range httpBoundSpecs {
 		value := spec.def
 		if env, ok := lookupEnv(spec.envKey); ok {
-			if parsed, err := strconv.ParseFloat(env, 64); err == nil && parsed >= spec.min {
+			if parsed, err := strconv.ParseFloat(env, 64); err == nil && validHTTPBound(parsed, spec) {
 				value = parsed
 			}
 		}
-		if row, ok := tenant[spec.key]; ok && row >= spec.min {
+		if row, ok := tenant[spec.key]; ok && validHTTPBound(row, spec) {
 			value = row
 		}
 		resolved[i] = value
-	}
-	preview := resolved[3]
-	if preview > 1_048_576 {
-		preview = 1_048_576 // catalog max — above it falls to the cap, not the default
 	}
 	return executors.HTTPBounds{
 		TimeoutMs:          resolved[0],
 		MaxResponseBytes:   int(resolved[1]),
 		MaxRedirects:       int(resolved[2]),
-		StreamPreviewBytes: int(preview),
+		StreamPreviewBytes: int(resolved[3]),
 	}
+}
+
+func validHTTPBound(value float64, spec httpBoundSpec) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && math.Trunc(value) == value &&
+		value >= spec.min && value <= spec.max
 }
 
 // LoadOrgHTTPBounds reads the tenant's http-category rows and resolves the

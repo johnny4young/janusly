@@ -65,6 +65,16 @@ func ParseJSONValue(text string) (any, bool) {
 	return nil, false
 }
 
+// ParseJSONValueBounded rejects oversized model output before extraction,
+// repair, copying, or decoding. The caller owns the surface-specific byte
+// budget; non-positive budgets fail closed.
+func ParseJSONValueBounded(text string, maxBytes int) (any, bool) {
+	if maxBytes <= 0 || len(text) > maxBytes {
+		return nil, false
+	}
+	return ParseJSONValue(text)
+}
+
 // repairTruncated walks a JSON prefix with a string/escape-aware stack;
 // when the text is a structurally valid prefix cut mid-stream, it closes
 // the open string and brackets. A dangling partial token (`"key":` or a

@@ -15,37 +15,39 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/internal/aiguidance"
 	"github.com/johnny4young/janusly/internal/executors"
+	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/httpjson"
+	"github.com/johnny4young/janusly/internal/memorypolicy"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 )
-
-// Kinds is the closed memory-kind vocabulary.
-var Kinds = map[string]bool{
-	"recovery_rationale": true, "run_summary": true, "runbook_fragment": true,
-	"patch_rationale": true, "generated_workflow": true,
-	"workflow_vector": true, "agent_episode": true,
-}
-
-// defaultRetentionDays mirrors the contract table.
-var defaultRetentionDays = map[string]int{
-	"recovery_rationale": 180, "run_summary": 90, "runbook_fragment": 365,
-	"patch_rationale": 365, "generated_workflow": 365,
-	"workflow_vector": 180, "agent_episode": 180,
-}
 
 const (
 	embeddingDimension        = 1024
 	embeddingResponseMaxBytes = 256 << 10
+	// Memory inputs may be workflow-authored or model-produced. Keep both the
+	// embedding request and the durable row bounded independently from the
+	// recall response budget configured by each organization.
+	memoryTextMaxBytes         = 64 << 10
+	memoryMetadataMaxBytes     = 16 << 10
+	memoryMetadataScanMaxBytes = 64 << 10
+	embeddingModelMaxBytes     = 256
+	embeddingBaseURLMaxBytes   = 2048
 )
+
+var embeddingModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 
 // CommitInput is one memory write.
 type CommitInput struct {
@@ -55,6 +57,9 @@ type CommitInput struct {
 	Kind       string
 	Content    string
 	Metadata   map[string]any
+	// RedactedValues are exact secret/env literals resolved by the dispatcher.
+	// Shape-based scrubbing remains mandatory when this list is empty.
+	RedactedValues []string
 }
 
 // CommitResult mirrors the contract.
@@ -71,6 +76,13 @@ type RecallInput struct {
 	RunID      string
 	Kind       string
 	Query      string
+	// PreferWorkflow orders rows from WorkflowID before organization-wide
+	// fallbacks, before LIMIT is applied. It does not filter cross-workflow
+	// organizational memory.
+	PreferWorkflow bool
+	// RedactedValues protects both the provider-bound query and legacy rows
+	// returned to the current execution.
+	RedactedValues []string
 }
 
 // RecallEntry is one recalled row.
@@ -97,12 +109,35 @@ func Enabled(ctx context.Context, pool *pgxpool.Pool, orgID string) bool {
 	return true
 }
 
-// consent evaluates the two-flag gate + kind allowlist.
-func consent(ctx context.Context, pool *pgxpool.Pool, orgID, kind string) (bool, string) {
-	if !Enabled(ctx, pool, orgID) {
+var operationConfigKeys = []string{
+	"memory.enabled",
+	"memory.allowedKinds",
+	"memory.retentionDaysByKind",
+	"memory.recallMaxEntries",
+	"memory.recallMaxBytes",
+	"memory.embeddingModel",
+	"memory.embeddingBaseUrl",
+}
+
+type operationConfig map[string]orgconfig.ValueWithSource
+
+func loadOperationConfig(ctx context.Context, pool *pgxpool.Pool, orgID string) operationConfig {
+	return orgconfig.LoadValuesWithSources(ctx, pool, orgID, operationConfigKeys...)
+}
+
+func (c operationConfig) value(key string) any { return c[key].Value }
+
+// consent evaluates the process/tenant gates and kind allowlist against one
+// immutable config snapshot for this operation.
+func (c operationConfig) consent(kind string) (bool, string) {
+	if os.Getenv("JANUSLY_MEMORY_ENABLED") != "true" {
 		return false, "memory_disabled"
 	}
-	allowed, _ := orgconfig.LoadValue(ctx, pool, orgID, "memory.allowedKinds").(string)
+	enabled, _ := c.value("memory.enabled").(bool)
+	if !enabled {
+		return false, "memory_disabled"
+	}
+	allowed, _ := c.value("memory.allowedKinds").(string)
 	for entry := range strings.SplitSeq(allowed, ",") {
 		if strings.TrimSpace(entry) == kind {
 			return true, ""
@@ -111,27 +146,102 @@ func consent(ctx context.Context, pool *pgxpool.Pool, orgID, kind string) (bool,
 	return false, "memory_disabled"
 }
 
+// prepareMemoryText validates one caller-controlled content/query value before
+// it may cross either the embedding-provider or persistence boundary. It
+// rejects oversize input rather than silently changing its semantic meaning.
+func prepareMemoryText(value string, redactedValues []string, field string) (string, string) {
+	if strings.TrimSpace(value) == "" {
+		return "", field + "_required"
+	}
+	if len(value) > memoryTextMaxBytes {
+		return "", field + "_too_large"
+	}
+	safe := grammar.RedactString(aiguidance.ScrubGuidanceSecrets(value), redactedValues)
+	// Redaction usually shrinks credentials, but exact-value lists are an
+	// execution seam and may contain very short strings. Replacing a repeated
+	// one-byte value with "[redacted]" can expand an otherwise admitted input
+	// by an order of magnitude, so enforce the provider/storage bound again on
+	// the actual sanitized representation.
+	if len(safe) > memoryTextMaxBytes {
+		return "", field + "_too_large"
+	}
+	return safe, ""
+}
+
+// scrubNormalizedMemoryValue sanitizes a previously normalized metadata tree
+// without mutating the caller's containers.
+func scrubNormalizedMemoryValue(value any, redactedValues []string) any {
+	switch typed := value.(type) {
+	case string:
+		return grammar.RedactString(aiguidance.ScrubGuidanceSecrets(typed), redactedValues)
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = scrubNormalizedMemoryValue(item, redactedValues)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = scrubNormalizedMemoryValue(item, redactedValues)
+		}
+		return out
+	default:
+		return typed
+	}
+}
+
+func safeMemoryMetadata(value any, redactedValues []string) json.RawMessage {
+	normalized := grammar.NormalizeJSON(value)
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	if len(raw) > memoryMetadataScanMaxBytes {
+		// Do not include a preview: this branch deliberately avoids running
+		// secret-shape regexes over an attacker-sized legacy/direct-SQL value.
+		return json.RawMessage(`{"__truncated":true}`)
+	}
+	return grammar.SafePersistPayload(scrubNormalizedMemoryValue(normalized, redactedValues), grammar.PersistOptions{
+		RedactedValues: redactedValues,
+		MaxBytes:       memoryMetadataMaxBytes,
+	})
+}
+
 // Commit embeds and persists one entry under consent. Never throws.
 func Commit(ctx context.Context, pool *pgxpool.Pool, input CommitInput) CommitResult {
 	startedAt := time.Now()
-	provider, model, baseURL, tenantURL := embeddingConfig(ctx, pool, input.OrgID)
+	config := loadOperationConfig(ctx, pool, input.OrgID)
+	provider, model, baseURL, tenantURL := config.embeddingConfig()
 	fail := func(reason string) CommitResult {
 		fireMemoryUsage(ctx, pool, "memory.commit", input.OrgID, input.RunID, input.WorkflowID,
 			input.Kind, provider, model, false, reason, time.Since(startedAt))
 		return CommitResult{OK: false, Error: reason}
 	}
-	if !Kinds[input.Kind] {
+	if !memorypolicy.IsKind(input.Kind) {
 		return fail("unknown_kind")
 	}
-	if allowed, reason := consent(ctx, pool, input.OrgID, input.Kind); !allowed {
+	if allowed, reason := config.consent(input.Kind); !allowed {
 		return fail(reason)
 	}
-	embedding, err := embed(ctx, baseURL, model, input.Content, tenantURL)
+	content, reason := prepareMemoryText(input.Content, input.RedactedValues, "content")
+	if reason != "" {
+		return fail(reason)
+	}
+	embedding, err := embed(ctx, baseURL, model, content, tenantURL)
 	if err != nil {
 		return fail("embedding_failed")
 	}
-	retention := defaultRetentionDays[input.Kind]
-	metadataJSON, _ := json.Marshal(input.Metadata)
+	retention, _ := memorypolicy.DefaultRetentionDays(input.Kind)
+	if raw, _ := config.value("memory.retentionDaysByKind").(string); raw != "" {
+		var overrides map[string]int
+		if json.Unmarshal([]byte(raw), &overrides) == nil {
+			if configured, ok := overrides[input.Kind]; ok {
+				retention = configured
+			}
+		}
+	}
+	metadataJSON := safeMemoryMetadata(input.Metadata, input.RedactedValues)
 	id := uuid.NewString()
 	tag, err := pool.Exec(ctx, `INSERT INTO memory_entries
 		(id, org_id, workflow_id, run_id, kind, content, embedding, embedding_provider,
@@ -140,7 +250,7 @@ func Commit(ctx context.Context, pool *pgxpool.Pool, input CommitInput) CommitRe
 		ON CONFLICT (org_id, run_id, kind)
 		WHERE kind = 'run_summary' AND run_id IS NOT NULL
 		DO NOTHING`,
-		id, input.OrgID, input.WorkflowID, input.RunID, input.Kind, input.Content,
+		id, input.OrgID, input.WorkflowID, input.RunID, input.Kind, content,
 		vectorLiteral(embedding), provider, model, embeddingDimension, metadataJSON, fmt.Sprint(retention))
 	if err != nil {
 		return fail("persist_failed")
@@ -159,24 +269,34 @@ func Commit(ctx context.Context, pool *pgxpool.Pool, input CommitInput) CommitRe
 // failure returns an empty list.
 func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []RecallEntry {
 	startedAt := time.Now()
-	provider, model, baseURL, tenantURL := embeddingConfig(ctx, pool, input.OrgID)
+	config := loadOperationConfig(ctx, pool, input.OrgID)
+	provider, model, baseURL, tenantURL := config.embeddingConfig()
 	fail := func(reason string) []RecallEntry {
 		fireMemoryUsage(ctx, pool, "memory.recall", input.OrgID, input.RunID, input.WorkflowID,
 			input.Kind, provider, model, false, reason, time.Since(startedAt))
 		return []RecallEntry{}
 	}
-	if allowed, reason := consent(ctx, pool, input.OrgID, input.Kind); !allowed {
+	if !memorypolicy.IsKind(input.Kind) {
+		return fail("unknown_kind")
+	}
+	if allowed, reason := config.consent(input.Kind); !allowed {
 		return fail(reason)
 	}
-	maxEntries := int(orgconfig.LoadNumber(ctx, pool, input.OrgID, "memory.recallMaxEntries"))
+	maxEntriesValue, _ := config.value("memory.recallMaxEntries").(float64)
+	maxEntries := int(maxEntriesValue)
 	if maxEntries <= 0 {
 		maxEntries = 8
 	}
-	maxBytes := int(orgconfig.LoadNumber(ctx, pool, input.OrgID, "memory.recallMaxBytes"))
+	maxBytesValue, _ := config.value("memory.recallMaxBytes").(float64)
+	maxBytes := int(maxBytesValue)
 	if maxBytes <= 0 {
 		maxBytes = 8192
 	}
-	embedding, err := embed(ctx, baseURL, model, input.Query, tenantURL)
+	query, reason := prepareMemoryText(input.Query, input.RedactedValues, "query")
+	if reason != "" {
+		return fail(reason)
+	}
+	embedding, err := embed(ctx, baseURL, model, query, tenantURL)
 	if err != nil {
 		return fail("embedding_failed")
 	}
@@ -185,8 +305,9 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 		FROM memory_entries
 		WHERE org_id = $1 AND kind = $2 AND retain_until > now()
 		  AND (hold_until IS NULL OR hold_until <= now())
-		ORDER BY embedding <=> $3::vector
-		LIMIT $4`, input.OrgID, input.Kind, vectorLiteral(embedding), maxEntries)
+		ORDER BY CASE WHEN $4::boolean AND workflow_id = NULLIF($5::text, '') THEN 0 ELSE 1 END,
+		         embedding <=> $3::vector, id
+		LIMIT $6`, input.OrgID, input.Kind, vectorLiteral(embedding), input.PreferWorkflow, input.WorkflowID, maxEntries)
 	if err != nil {
 		return fail("query_failed")
 	}
@@ -199,12 +320,21 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 		if err := rows.Scan(&entry.ID, &entry.Kind, &entry.Content, &entry.WorkflowID, &entry.RunID, &entry.Similarity, &metadataRaw); err != nil {
 			continue
 		}
-		_ = json.Unmarshal(metadataRaw, &entry.Metadata)
-		totalBytes += len(entry.Content)
-		if totalBytes > maxBytes {
+		if len(entry.Content) > memoryTextMaxBytes {
+			continue
+		}
+		entry.Content = grammar.RedactString(aiguidance.ScrubGuidanceSecrets(entry.Content), input.RedactedValues)
+		safeMetadata := safeMemoryMetadata(json.RawMessage(metadataRaw), input.RedactedValues)
+		_ = json.Unmarshal(safeMetadata, &entry.Metadata)
+		encoded, marshalErr := json.Marshal(entry)
+		if marshalErr != nil || totalBytes+len(encoded) > maxBytes {
 			break // the byte budget bounds what any prompt can absorb
 		}
+		totalBytes += len(encoded)
 		entries = append(entries, entry)
+	}
+	if rows.Err() != nil {
+		return fail("query_failed")
 	}
 	fireMemoryUsage(ctx, pool, "memory.recall", input.OrgID, input.RunID, input.WorkflowID,
 		input.Kind, provider, model, true, "", time.Since(startedAt))
@@ -214,26 +344,21 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 	return entries
 }
 
-// embeddingConfig resolves provider/model/base URL: catalog first, env
-// defaults after (ollama / bge-m3 / OLLAMA_BASE_URL). tenantURL reports
-// whether the base URL came from tenant-writable org config rather than
-// the operator's process environment.
-func embeddingConfig(ctx context.Context, pool *pgxpool.Pool, orgID string) (provider, model, baseURL string, tenantURL bool) {
-	provider, _ = orgconfig.LoadValue(ctx, pool, orgID, "memory.embeddingProvider").(string)
-	model, _ = orgconfig.LoadValue(ctx, pool, orgID, "memory.embeddingModel").(string)
-	baseValue, baseSource := orgconfig.LoadValueWithSource(ctx, pool, orgID, "memory.embeddingBaseUrl")
-	baseURL, _ = baseValue.(string)
+// embeddingConfig resolves the supported Ollama model/base URL from the
+// operation's one config snapshot. tenantURL reports whether the base URL came
+// from tenant-writable org config rather than the operator's process
+// environment. The provider remains explicit in persistence and usage records,
+// but is deliberately not configurable until another protocol is implemented.
+func (c operationConfig) embeddingConfig() (provider, model, baseURL string, tenantURL bool) {
+	provider = "ollama"
+	model, _ = c.value("memory.embeddingModel").(string)
+	base := c["memory.embeddingBaseUrl"]
+	baseURL, _ = base.Value.(string)
 	// Only an org_configs row is tenant input; the same key also resolves
 	// OLLAMA_BASE_URL, which is the operator's own infrastructure.
-	tenantURL = baseSource == "tenant" && baseURL != ""
-	if provider == "" {
-		provider = "ollama"
-	}
+	tenantURL = base.Source == "tenant" && baseURL != ""
 	if model == "" {
 		model = "bge-m3"
-	}
-	if baseURL == "" {
-		baseURL = os.Getenv("OLLAMA_BASE_URL")
 	}
 	if baseURL == "" {
 		baseURL = "http://ollama:11434"
@@ -247,10 +372,17 @@ func embeddingConfig(ctx context.Context, pool *pgxpool.Pool, orgID string) (pro
 // so it goes through the outbound SSRF policy (validation + DNS pinning;
 // ALLOW_PRIVATE_HTTP_TARGETS keeps development loopback working).
 func embed(ctx context.Context, baseURL, model, text string, tenantURL bool) ([]float64, error) {
+	model = strings.TrimSpace(model)
+	if len(model) == 0 || len(model) > embeddingModelMaxBytes || !embeddingModelPattern.MatchString(model) {
+		return nil, fmt.Errorf("invalid embedding model id")
+	}
+	endpoint, err := embeddingEndpoint(baseURL)
+	if err != nil {
+		return nil, err
+	}
 	payload, _ := json.Marshal(map[string]any{"model": model, "prompt": text})
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	endpoint := strings.TrimRight(baseURL, "/") + "/api/embeddings"
 	client := http.DefaultClient
 	if tenantURL {
 		pinned, err := executors.NewPinnedHTTPClient(callCtx, endpoint, executors.HTTPOptions{})
@@ -258,6 +390,15 @@ func embed(ctx context.Context, baseURL, model, text string, tenantURL bool) ([]
 			return nil, err
 		}
 		client = pinned
+	}
+	// Embedding endpoints are fixed, credential-free service contracts. A
+	// 307/308 redirect would replay the memory text to a second destination;
+	// reject every redirect instead of delegating that authority to the peer.
+	redirectPolicy := func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	if client == http.DefaultClient {
+		client = &http.Client{CheckRedirect: redirectPolicy}
+	} else {
+		client.CheckRedirect = redirectPolicy
 	}
 	req, err := http.NewRequestWithContext(callCtx, http.MethodPost,
 		endpoint, bytes.NewReader(payload))
@@ -279,10 +420,49 @@ func embed(ctx context.Context, baseURL, model, text string, tenantURL bool) ([]
 	if err := httpjson.Decode(res.Body, embeddingResponseMaxBytes, &decoded); err != nil {
 		return nil, err
 	}
-	if len(decoded.Embedding) != embeddingDimension {
-		return nil, fmt.Errorf("embedding dimension %d, want %d", len(decoded.Embedding), embeddingDimension)
+	if err := validateEmbedding(decoded.Embedding); err != nil {
+		return nil, err
 	}
 	return decoded.Embedding, nil
+}
+
+// validateEmbedding rejects vectors pgvector cannot safely compare. JSON
+// decoding already rejects textual NaN/Infinity, but a finite float64 may
+// still overflow pgvector's float32 element representation. An all-zero vector
+// has no cosine similarity and would make recall ordering undefined.
+func validateEmbedding(embedding []float64) error {
+	if len(embedding) != embeddingDimension {
+		return fmt.Errorf("embedding dimension %d, want %d", len(embedding), embeddingDimension)
+	}
+	nonZero := false
+	for _, value := range embedding {
+		value32 := float32(value)
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.IsInf(float64(value32), 0) {
+			return fmt.Errorf("embedding contains a non-finite or out-of-range element")
+		}
+		if value32 != 0 {
+			nonZero = true
+		}
+	}
+	if !nonZero {
+		return fmt.Errorf("embedding must not be a zero vector")
+	}
+	return nil
+}
+
+func embeddingEndpoint(baseURL string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if len(baseURL) == 0 || len(baseURL) > embeddingBaseURLMaxBytes {
+		return "", fmt.Errorf("invalid embedding base URL")
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed == nil || !parsed.IsAbs() || parsed.Host == "" || parsed.User != nil ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("invalid embedding base URL")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/api/embeddings"
+	parsed.RawPath = ""
+	return parsed.String(), nil
 }
 
 func vectorLiteral(embedding []float64) string {

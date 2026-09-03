@@ -146,6 +146,46 @@ func TestToolNodeDryRunWriteSkip(t *testing.T) {
 	}
 }
 
+func TestToolNodeValidatesRenderedInputBeforeDryRunOrSpecialDispatch(t *testing.T) {
+	registry := tools.NewRegistry()
+	fired := false
+	registry.Register(tools.Definition{
+		Name: "test.typed-write", Required: []string{"value"},
+		Fields:    []tools.Field{{Name: "value", Type: "string", Required: true}},
+		WriteSide: true,
+		Execute: func(context.Context, map[string]any) (map[string]any, error) {
+			fired = true
+			return map[string]any{"ok": true}, nil
+		},
+	})
+	exec := NewToolExecutor(registry)
+	output, err := exec(context.Background(), Input{
+		Config: map[string]any{
+			"tool": "test.typed-write", "input": map[string]any{"value": false},
+		},
+		DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("typed dry-run envelope: %v", err)
+	}
+	result := output.(map[string]any)["result"].(map[string]any)
+	if result["ok"] != false || result["skipped"] == true || fired ||
+		!strings.Contains(result["error"].(string), "value: Expected string") {
+		t.Fatalf("invalid rendered input bypassed validation: %+v fired=%v", result, fired)
+	}
+
+	vectorOutput, err := exec(context.Background(), Input{Config: map[string]any{
+		"tool": "vector.search", "input": map[string]any{"query": []any{"not", "text"}},
+	}})
+	if err != nil {
+		t.Fatalf("vector type envelope: %v", err)
+	}
+	vectorResult := vectorOutput.(map[string]any)["result"].(map[string]any)
+	if vectorResult["ok"] != false || !strings.Contains(vectorResult["error"].(string), "query: Expected string") {
+		t.Fatalf("vector seam bypassed rendered validation: %+v", vectorResult)
+	}
+}
+
 func TestToolRequireOKMarksAmbiguousWriteFailure(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.Definition{

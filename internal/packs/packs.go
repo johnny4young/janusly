@@ -13,8 +13,7 @@ import (
 	"fmt"
 
 	"github.com/johnny4young/janusly/internal/domain"
-	"github.com/johnny4young/janusly/internal/grammar"
-	"github.com/johnny4young/janusly/internal/recovery"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 //go:embed packs/*/pack.json
@@ -100,9 +99,7 @@ func init() {
 		if wf == nil {
 			panic(fmt.Sprintf("solution-packs: %s: workflowJson failed the domain parser", entry.Name()))
 		}
-		validation := domain.ValidateWithSemanticFixtures(
-			wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation,
-		)
+		validation := workflowvalidation.Validate(wf)
 		if !validation.Valid {
 			panic(fmt.Sprintf("solution-packs: %s: workflowJson failed validation: %+v", entry.Name(), validation.Issues))
 		}

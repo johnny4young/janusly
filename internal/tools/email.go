@@ -12,9 +12,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/mail"
 	"os"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // EmailSettings are the tenant-resolved posture knobs (org config
@@ -30,7 +33,73 @@ const (
 	emailTextMax     = 200_000
 	emailHTMLMax     = 500_000
 	emailMetadataMax = 20
+	emailAddressMax  = 320
 )
+
+var emailMetadataKey = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+func validEmailMailbox(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > emailAddressMax || crlfPattern.MatchString(value) {
+		return false
+	}
+	address, err := mail.ParseAddress(value)
+	return err == nil && address.Name == "" && address.Address == value
+}
+
+func validateEmailInput(input map[string]any, options InputValidationOptions) error {
+	for _, field := range []string{"to", "from"} {
+		raw, present := input[field]
+		if !present || isDeferredWholeTemplate(raw, options) {
+			continue
+		}
+		if !validEmailMailbox(raw.(string)) {
+			return fmt.Errorf("%s must be one valid email address of at most %d bytes", field, emailAddressMax)
+		}
+	}
+	if raw, present := input["subject"]; present && !isDeferredWholeTemplate(raw, options) {
+		subject := raw.(string)
+		if strings.TrimSpace(subject) == "" || len(subject) > emailSubjectMax || crlfPattern.MatchString(subject) {
+			return fmt.Errorf("subject must be non-empty, single-line, and at most %d bytes", emailSubjectMax)
+		}
+	}
+
+	textRaw, textPresent := input["text"]
+	htmlRaw, htmlPresent := input["html"]
+	textPotential := textPresent && isDeferredWholeTemplate(textRaw, options)
+	htmlPotential := htmlPresent && isDeferredWholeTemplate(htmlRaw, options)
+	if textPresent && !textPotential {
+		text := textRaw.(string)
+		if len(text) > emailTextMax {
+			return fmt.Errorf("text exceeds %d bytes", emailTextMax)
+		}
+		textPotential = strings.TrimSpace(text) != ""
+	}
+	if htmlPresent && !htmlPotential {
+		html := htmlRaw.(string)
+		if len(html) > emailHTMLMax {
+			return fmt.Errorf("html exceeds %d bytes", emailHTMLMax)
+		}
+		htmlPotential = strings.TrimSpace(html) != ""
+	}
+	if !textPotential && !htmlPotential && (options.RequireAll || textPresent || htmlPresent) {
+		return fmt.Errorf("text or html is required")
+	}
+
+	if raw, present := input["metadata"]; present && !isDeferredWholeTemplate(raw, options) {
+		metadata := raw.(map[string]any)
+		if len(metadata) > emailMetadataMax {
+			return fmt.Errorf("metadata supports at most %d entries", emailMetadataMax)
+		}
+		for key, rawValue := range metadata {
+			value, ok := rawValue.(string)
+			if !ok || !emailMetadataKey.MatchString(key) || value == "" || value != strings.TrimSpace(value) ||
+				utf8.RuneCountInString(value) > 256 || crlfPattern.MatchString(value) {
+				return fmt.Errorf("metadata must use safe 1..64 byte keys and trimmed single-line string values of at most 256 characters")
+			}
+		}
+	}
+	return nil
+}
 
 func emailTools() []Definition {
 	unavailable := func(_ context.Context, _ map[string]any) (map[string]any, error) {
@@ -50,6 +119,7 @@ func emailTools() []Definition {
 			{Name: "metadata", Type: "object"},
 		},
 		InputExample: map[string]any{"to": "user@example.com", "subject": "Hello", "text": "Body of the email."},
+		Validate:     validateEmailInput,
 		WriteSide:    true,
 		Execute:      unavailable,
 	}}
@@ -142,6 +212,9 @@ func executeEmailSend(ctx context.Context, input map[string]any, deps *Integrati
 	}
 	if from == "" {
 		from = "onboarding@resend.dev"
+	}
+	if !validEmailMailbox(from) {
+		return emailEnvelope(false, "noop", "", "configured mailer from address is invalid")
 	}
 	latency := func() int { return int(time.Since(start).Milliseconds()) }
 	record := func(provider string, ok bool, errMessage string) {

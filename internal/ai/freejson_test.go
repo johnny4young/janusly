@@ -70,6 +70,20 @@ func TestExtractAndParseFreeJSON(t *testing.T) {
 	}
 }
 
+func TestParseJSONValueBoundedRejectsBeforeParsing(t *testing.T) {
+	if value, ok := ParseJSONValueBounded(validJSON, len(validJSON)); !ok || value == nil {
+		t.Fatal("value at the exact byte boundary must parse")
+	}
+	if value, ok := ParseJSONValueBounded(validJSON, len(validJSON)-1); ok || value != nil {
+		t.Fatalf("oversized value must fail closed: value=%#v ok=%v", value, ok)
+	}
+	for _, limit := range []int{0, -1} {
+		if value, ok := ParseJSONValueBounded(validJSON, limit); ok || value != nil {
+			t.Fatalf("non-positive limit %d must fail closed: value=%#v ok=%v", limit, value, ok)
+		}
+	}
+}
+
 // The contract's property posture: ~1000 arbitrary strings never panic,
 // extraction always returns a string, and every successful parse is
 // genuinely an object or array.

@@ -12,13 +12,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/signature"
 )
 
@@ -41,36 +39,22 @@ var whitespaceRun = regexp.MustCompile(`\s+`)
 
 // RecallAgentEpisodes recalls prior episodes for a goal. Never throws;
 // consent off (or a blank goal) short-circuits BEFORE any embedding call.
-func RecallAgentEpisodes(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID, runID, goal string) EpisodeRecall {
+func RecallAgentEpisodes(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID, runID, goal string, redactedValues []string) EpisodeRecall {
 	goal = strings.TrimSpace(goal)
 	if orgID == "" || goal == "" {
 		return EpisodeRecall{}
 	}
-	// Short-circuit before recall/embedding when the tenant is off.
-	if os.Getenv("JANUSLY_MEMORY_ENABLED") != "true" ||
-		!orgconfig.LoadBool(ctx, pool, orgID, "memory.enabled") {
-		return EpisodeRecall{}
-	}
-	allowed, _ := orgconfig.LoadValue(ctx, pool, orgID, "memory.allowedKinds").(string)
-	kindAllowed := false
-	for entry := range strings.SplitSeq(allowed, ",") {
-		if strings.TrimSpace(entry) == agentEpisodeKind {
-			kindAllowed = true
-			break
-		}
-	}
-	if !kindAllowed {
-		return EpisodeRecall{}
-	}
-
+	// Recall owns the single immutable consent/config snapshot and returns
+	// before provider egress whenever process, tenant, or kind consent is off.
 	entries := Recall(ctx, pool, RecallInput{
 		OrgID: orgID, WorkflowID: workflowID, RunID: runID,
-		Kind: agentEpisodeKind, Query: goal,
+		Kind: agentEpisodeKind, Query: goal, PreferWorkflow: true, RedactedValues: redactedValues,
 	})
 	if len(entries) == 0 {
 		return EpisodeRecall{}
 	}
-	// Same-workflow episodes first; recall already ordered by similarity.
+	// Recall ranks same-workflow rows before applying its database limit. Keep
+	// this projection defensive if a future repository implementation changes.
 	ranked := make([]RecallEntry, 0, len(entries))
 	for _, entry := range entries {
 		if entry.WorkflowID == workflowID {
@@ -118,7 +102,7 @@ func RecallAgentEpisodes(ctx context.Context, pool *pgxpool.Pool, orgID, workflo
 
 // RecordAgentEpisode commits one episode summary. Fire-and-forget: any
 // failure is a silent no-op. The CALLER skips this in dry-run.
-func RecordAgentEpisode(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID, runID, goal, outcome string, success bool, stepCount int) {
+func RecordAgentEpisode(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID, runID, goal, outcome string, success bool, stepCount int, redactedValues []string) {
 	goal = strings.TrimSpace(goal)
 	if orgID == "" || goal == "" {
 		return
@@ -128,8 +112,9 @@ func RecordAgentEpisode(ctx context.Context, pool *pgxpool.Pool, orgID, workflow
 	}
 	Commit(ctx, pool, CommitInput{
 		OrgID: orgID, WorkflowID: workflowID, RunID: runID, Kind: agentEpisodeKind,
-		Content:  "Goal: " + goal + "\nOutcome: " + outcome,
-		Metadata: map[string]any{"success": success, "stepCount": stepCount},
+		Content:        "Goal: " + goal + "\nOutcome: " + outcome,
+		Metadata:       map[string]any{"success": success, "stepCount": stepCount},
+		RedactedValues: redactedValues,
 	})
 }
 

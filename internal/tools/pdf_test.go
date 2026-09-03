@@ -60,7 +60,7 @@ func TestPdfGenerateEnvelope(t *testing.T) {
 	result = ExecuteIntegrationTool(ctx, "pdf.generate", map[string]any{
 		"template": "x", "format": "docx",
 	}, deps)
-	if result["ok"] != false || !strings.Contains(result["error"].(string), "not supported") {
+	if result["ok"] != false || !strings.Contains(result["error"].(string), "markdown or html") {
 		t.Fatalf("unknown format refuse: %+v", result)
 	}
 	// Local provider round-trip with the tenant key.
@@ -78,17 +78,54 @@ func TestPdfGenerateEnvelope(t *testing.T) {
 	if err != nil || !strings.Contains(string(stored), "(Invoice INV-9)") {
 		t.Fatalf("stored artifact: %v", err)
 	}
-	// A hostile FILENAME (workflow-author input) cannot climb out of the
-	// tenant prefix: only its last segment survives, dot-segments drop.
+	// A hostile filename is rejected at the shared semantic boundary rather
+	// than being silently rewritten into a different artifact name.
 	deps.PdfKey = func(filename string) string { return "orgs/org-t/pdf/fixed/" + filename }
 	result = ExecuteIntegrationTool(ctx, "pdf.generate", map[string]any{
 		"template": "# X", "filename": "../../evil/escape.pdf",
 	}, deps)
-	if result["ok"] != true || !strings.HasPrefix(result["key"].(string), "orgs/org-t/pdf/fixed/") ||
-		strings.Contains(result["key"].(string), "..") {
-		t.Fatalf("hostile filename must stay under the tenant prefix: %+v", result)
+	if result["ok"] != false || !strings.Contains(result["error"].(string), "safe base name") {
+		t.Fatalf("hostile filename must fail before storage: %+v", result)
 	}
 	if _, err := os.Stat(root + "/evil"); err == nil {
 		t.Fatal("traversal escaped the tenant prefix")
+	}
+}
+
+func TestPdfInputContractBoundsExpansionAndVariables(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.ValidatePartialInput("pdf.generate", map[string]any{
+		"variables": "{{context.prepare.output.variables}}",
+	}); err != nil {
+		t.Fatalf("an incomplete proposal may defer the variables binding: %v", err)
+	}
+	if err := registry.ValidateInput("pdf.generate", map[string]any{
+		"template": "# Invoice {{number}}", "variables": map[string]any{"number": 42},
+		"filename": "invoice.PDF",
+	}); err != nil {
+		t.Fatalf("bounded scalar variables should validate: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		input   map[string]any
+		message string
+	}{
+		{name: "empty template", input: map[string]any{"template": "   "}, message: "template must be non-empty"},
+		{name: "unknown format", input: map[string]any{"template": "x", "format": "docx"}, message: "markdown or html"},
+		{name: "nested variable", input: map[string]any{"template": "{{x}}", "variables": map[string]any{"x": map[string]any{"secret": true}}}, message: "bounded JSON scalar"},
+		{name: "invalid variable name", input: map[string]any{"template": "x", "variables": map[string]any{"bad.name": "x"}}, message: "variable names"},
+		{name: "unsafe filename", input: map[string]any{"template": "x", "filename": `dir\\report.pdf`}, message: "safe base name"},
+		{name: "amplified template", input: map[string]any{
+			"template": strings.Repeat("{{x}}", 65), "variables": map[string]any{"x": strings.Repeat("z", pdfVariableValueMax)},
+		}, message: "expanded template exceeds"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := registry.ValidateInput("pdf.generate", test.input)
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("expected %q rejection, got %v", test.message, err)
+			}
+		})
 	}
 }

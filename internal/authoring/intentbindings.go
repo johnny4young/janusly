@@ -27,6 +27,7 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 	type nodeFact struct {
 		ID, Type, Tool, MCP, Subworkflow string
 		ToolWrite, MCPWrite, HTTPWrite   bool
+		AgentWrite                       bool
 	}
 	builtinWrite := map[string]bool{}
 	for _, entry := range catalog.BuiltinTools {
@@ -36,19 +37,57 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 	for _, entry := range catalog.McpTools {
 		mcpWrite[entry.ConnectionAlias+"/"+entry.ToolName] = entry.WriteSide
 	}
-	facts := make([]nodeFact, 0, len(workflow.Nodes))
+	toolFact := func(node domain.Node, tool string, input map[string]any, writesAuthorized bool) nodeFact {
+		fact := nodeFact{ID: node.ID, Type: node.Type, Tool: tool}
+		fact.ToolWrite = builtinWrite[tool]
+		if tool == "http.request" {
+			method := strings.ToUpper(trimmedString(input["method"]))
+			fact.HTTPWrite = method != "" && method != "GET" && method != "HEAD" && method != "OPTIONS"
+			fact.ToolWrite = fact.HTTPWrite
+		}
+		if !writesAuthorized {
+			fact.ToolWrite = false
+			fact.HTTPWrite = false
+		}
+		return fact
+	}
+	facts := make([]nodeFact, 0, len(workflow.Nodes)*2)
 	for _, node := range workflow.Nodes {
 		fact := nodeFact{ID: node.ID, Type: node.Type}
 		switch node.Type {
 		case "tool":
-			fact.Tool = trimmedString(node.Config["tool"])
-			fact.ToolWrite = builtinWrite[fact.Tool]
-			if fact.Tool == "http.request" {
+			input, _ := node.Config["input"].(map[string]any)
+			fact = toolFact(node, trimmedString(node.Config["tool"]), input, true)
+		case "loop":
+			if trimmedString(node.Config["mode"]) == "for_each" {
 				input, _ := node.Config["input"].(map[string]any)
-				method := strings.ToUpper(trimmedString(input["method"]))
-				fact.HTTPWrite = method != "" && method != "GET" && method != "HEAD" && method != "OPTIONS"
-				fact.ToolWrite = fact.HTTPWrite
+				fact = toolFact(node, trimmedString(node.Config["tool"]), input, true)
 			}
+		case "agent":
+			allowWrites, _ := node.Config["allowWriteTools"].(bool)
+			tool, input, _ := domain.AgentConfiguredTool(node.Config)
+			if tool != "" {
+				fact = toolFact(node, tool, input, allowWrites)
+			} else if allowWrites {
+				fact.AgentWrite = true
+			}
+		case "multi_agent":
+			facts = append(facts, fact)
+			resolved, err := domain.ResolveMultiAgentRuntimeConfig(node.Config)
+			if err != nil {
+				continue
+			}
+			allowWrites, _ := node.Config["allowWriteTools"].(bool)
+			for _, raw := range resolved.Agents {
+				member, _ := raw.(map[string]any)
+				tool, input, _ := domain.AgentConfiguredTool(member)
+				if tool != "" {
+					facts = append(facts, toolFact(node, tool, input, allowWrites))
+				} else if allowWrites {
+					facts = append(facts, nodeFact{ID: node.ID, Type: node.Type, AgentWrite: true})
+				}
+			}
+			continue
 		case "mcp_tool":
 			fact.MCP = trimmedString(node.Config["connectionAlias"]) + "/" + trimmedString(node.Config["toolName"])
 			fact.MCPWrite = mcpWrite[fact.MCP]
@@ -138,6 +177,10 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 			require("intent_effect", "brief.externalEffects", effect, sortedMcpNames(catalog), func(f nodeFact) bool {
 				return f.MCPWrite
 			})
+		case "agent_write":
+			require("intent_effect", "brief.externalEffects", effect, []string{"agent with allowWriteTools"}, func(f nodeFact) bool {
+				return f.AgentWrite
+			})
 		default:
 			switch {
 			case strings.HasPrefix(effect, "tool:"):
@@ -193,6 +236,9 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 		}
 		if proposedEffect == "" && fact.MCPWrite {
 			proposedEffect = "mcp_write"
+		}
+		if proposedEffect == "" && fact.AgentWrite {
+			proposedEffect = "agent_write"
 		}
 		if proposedEffect == "" && fact.ToolWrite {
 			// Future registered write tools fail closed until the operator names

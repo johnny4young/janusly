@@ -92,6 +92,7 @@ func TestMemoryConsentAndRecall(t *testing.T) {
 	}
 	seed("memory.enabled", "true", "boolean")
 	seed("memory.allowedKinds", `"workflow_vector"`, "string")
+	seed("memory.retentionDaysByKind", `"{\"workflow_vector\":45}"`, "string")
 	ollama := fakeOllama(t)
 	seed("memory.embeddingBaseUrl", fmt.Sprintf("%q", ollama.URL), "string")
 
@@ -117,8 +118,8 @@ func TestMemoryConsentAndRecall(t *testing.T) {
 	var retainDays float64
 	_ = pool.QueryRow(ctx, `SELECT EXTRACT(epoch FROM retain_until - now())/86400
 		FROM memory_entries WHERE org_id = $1 AND id = $2`, org, committed.ID).Scan(&retainDays)
-	if retainDays < 179 || retainDays > 181 {
-		t.Fatalf("workflow_vector retention must be ~180d: %f", retainDays)
+	if retainDays < 44 || retainDays > 46 {
+		t.Fatalf("workflow_vector tenant retention must be ~45d: %f", retainDays)
 	}
 
 	// Recall: similarity ordering + runId attribution on the usage row.
@@ -144,5 +145,47 @@ func TestMemoryConsentAndRecall(t *testing.T) {
 	}
 	if entries := Recall(ctx, pool, RecallInput{OrgID: org, Kind: "workflow_vector", Query: "y"}); len(entries) != 0 {
 		t.Fatalf("dead ollama recall must empty: %d", len(entries))
+	}
+}
+
+func TestAgentEpisodeRecallAppliesWorkflowTierBeforeLimit(t *testing.T) {
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
+	pool := testPool(t)
+	ctx := context.Background()
+	org := fmt.Sprintf("org-episode-rank-%d", time.Now().UnixNano())
+	seed := func(key, valueJSON, valueType string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO org_configs
+			(id, org_id, key, value_json, category, description, value_type)
+			VALUES ($1, $2, $3, $4, 'memory', 'test', $5)`,
+			org+"-"+key, org, key, valueJSON, valueType); err != nil {
+			t.Fatalf("seed %s: %v", key, err)
+		}
+	}
+	seed("memory.enabled", "true", "boolean")
+	seed("memory.allowedKinds", `"agent_episode"`, "string")
+	seed("memory.recallMaxEntries", "1", "number")
+	ollama := fakeOllama(t)
+	seed("memory.embeddingBaseUrl", fmt.Sprintf("%q", ollama.URL), "string")
+
+	if result := Commit(ctx, pool, CommitInput{
+		OrgID: org, WorkflowID: "workflow-current", RunID: "run-current-old", Kind: agentEpisodeKind,
+		Content: "A deliberately different historic outcome for this workflow",
+	}); !result.OK {
+		t.Fatalf("commit same-workflow episode: %+v", result)
+	}
+	goal := "exact semantic goal about a pager duty escalation"
+	if result := Commit(ctx, pool, CommitInput{
+		OrgID: org, WorkflowID: "workflow-other", RunID: "run-other", Kind: agentEpisodeKind,
+		Content: goal,
+	}); !result.OK {
+		t.Fatalf("commit globally closer episode: %+v", result)
+	}
+
+	recall := RecallAgentEpisodes(ctx, pool, org, "workflow-current", "run-current", goal, nil)
+	if recall.Count != 1 || !strings.Contains(recall.Block, "this workflow") ||
+		!strings.Contains(recall.Block, "deliberately different") || strings.Contains(recall.Block, "exact semantic goal") {
+		t.Fatalf("same-workflow tier must apply before LIMIT: %+v", recall)
 	}
 }

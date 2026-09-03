@@ -11,7 +11,9 @@ package usage
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 
 	"github.com/google/uuid"
@@ -92,6 +94,18 @@ func NewDBRecorder(pool *pgxpool.Pool) Recorder {
 		quantity := 0
 		if record.TotalTokens != nil {
 			quantity = *record.TotalTokens
+		}
+		for name, value := range map[string]*int{
+			"inputTokens": record.InputTokens, "outputTokens": record.OutputTokens,
+			"totalTokens": record.TotalTokens, "cachedInputTokens": record.CachedInputTokens,
+			"cacheCreationInputTokens": record.CacheCreationInputTokens,
+		} {
+			if value != nil && (*value < 0 || int64(*value) > int64(math.MaxInt32)) {
+				return fmt.Errorf("%s is outside the usage storage range", name)
+			}
+		}
+		if record.CostUsd != nil && (*record.CostUsd < 0 || math.IsNaN(*record.CostUsd) || math.IsInf(*record.CostUsd, 0)) {
+			return fmt.Errorf("costUsd must be finite and non-negative")
 		}
 		metadata, err := json.Marshal(map[string]any{
 			"provider":                 record.Provider,

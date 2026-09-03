@@ -17,11 +17,10 @@ import (
 	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
-	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/operations"
 	"github.com/johnny4young/janusly/internal/ratelimit"
-	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 const (
@@ -218,7 +217,7 @@ func mcpWorkflowProposalView(
 		})
 		types[node.Type] = true
 	}
-	validation := domain.ValidateWithSemanticFixtures(workflow, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
+	validation := workflowvalidation.ValidateDraft(workflow)
 	readiness := domain.CheckWorkflowReadiness(workflow, mcpReadinessOptions())
 	view["workflow"] = map[string]any{
 		"parseable": true,
@@ -360,19 +359,22 @@ func (d Deps) optionalRecoveryDiagnosisEnrichment(
 	if err != nil {
 		return nil
 	}
-	if d.Limiter != nil {
-		if err := d.Limiter.Enforce(ctx, d.OrgID, ratelimit.Options{
-			Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
-		}); err != nil {
-			return nil
-		}
-	}
-	if gate := aibudget.Gate(ctx, d.Pool, d.OrgID, d.UserID, "ai.recovery.diagnosed"); !gate.Allowed {
-		return nil
-	}
 	generated, aiErr := aidiagnosis.Generate(ctx, client, aidiagnosis.GenerateInput{
 		Evidence: facts.AIEvidence(),
 		Context:  ai.CallContext{OrgID: d.OrgID, UserID: d.UserID},
+		AdmitCall: func(callCtx context.Context) *ai.AIError {
+			if d.Limiter != nil {
+				if err := d.Limiter.Enforce(callCtx, d.OrgID, ratelimit.Options{
+					Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
+				}); err != nil {
+					return &ai.AIError{Class: "rate_limit", Message: err.Error(), BeforeEgress: true}
+				}
+			}
+			if gate := aibudget.Gate(callCtx, d.Pool, d.OrgID, d.UserID, "ai.recovery.diagnosed"); !gate.Allowed {
+				return &ai.AIError{Class: "budget_blocked", Message: "monthly AI budget exceeded", BeforeEgress: true}
+			}
+			return nil
+		},
 	})
 	if aiErr != nil {
 		return nil

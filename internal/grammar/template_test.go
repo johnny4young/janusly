@@ -101,6 +101,29 @@ func TestSingleRefPreservesArrayReference(t *testing.T) {
 	}
 }
 
+func TestWholeTemplateReferenceDistinguishesNativeReferencesFromInterpolation(t *testing.T) {
+	tests := []struct {
+		value      string
+		expression string
+		whole      bool
+	}{
+		{value: "{{context.step.output.value}}", expression: "context.step.output.value", whole: true},
+		{value: "  {{ inputs.payload }}  ", expression: "inputs.payload", whole: true},
+		{value: "{{item}}", expression: "item", whole: true},
+		{value: "prefix {{context.step.output.value}}", whole: false},
+		{value: "{{context.a}} {{context.b}}", whole: false},
+		{value: "{{   }}", whole: false},
+		{value: "plain text", whole: false},
+	}
+	for _, test := range tests {
+		expression, whole := WholeTemplateReference(test.value)
+		if expression != test.expression || whole != test.whole {
+			t.Fatalf("WholeTemplateReference(%q) = (%q, %t), want (%q, %t)",
+				test.value, expression, whole, test.expression, test.whole)
+		}
+	}
+}
+
 func TestSubstitutesEnvAndSecretPlaceholders(t *testing.T) {
 	// "substitutes env and secret placeholders when available" — names are
 	// uppercased before lookup.

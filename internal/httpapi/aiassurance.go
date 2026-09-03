@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/johnny4young/janusly/internal/domain"
 )
 
 // assuranceCompilation records deterministic, provider-independent additions
@@ -19,6 +21,22 @@ type assuranceCompilation struct {
 // the minimum executable assurance contracts Janusly can infer truthfully.
 // The resulting document must pass the exact save-time domain validator.
 func compileWorkflowAssurance(prompt string, raw []byte) ([]byte, assuranceCompilation, error) {
+	return compileWorkflowAssuranceWithValidator(prompt, raw, validateGeneratedWorkflow)
+}
+
+// compileWorkflowAssuranceCandidate completes an untrusted provider draft
+// while deferring only unknown capability identities to the exact tenant
+// catalog finalizer. Saved workflows and all non-provider compilation retain
+// the strict validator above.
+func compileWorkflowAssuranceCandidate(prompt string, raw []byte) ([]byte, assuranceCompilation, error) {
+	return compileWorkflowAssuranceWithValidator(prompt, raw, validateGeneratedWorkflowCandidate)
+}
+
+func compileWorkflowAssuranceWithValidator(
+	prompt string,
+	raw []byte,
+	validate func([]byte) []domain.Issue,
+) ([]byte, assuranceCompilation, error) {
 	var document map[string]any
 	if err := json.Unmarshal(raw, &document); err != nil || document == nil {
 		if err == nil {
@@ -35,7 +53,7 @@ func compileWorkflowAssurance(prompt string, raw []byte) ([]byte, assuranceCompi
 	if err != nil {
 		return nil, meta, fmt.Errorf("encode assurance workflow: %w", err)
 	}
-	if issues := validateGeneratedWorkflow(encoded); len(issues) > 0 {
+	if issues := validate(encoded); len(issues) > 0 {
 		return nil, meta, fmt.Errorf("compiled workflow failed validation: %s", issueSummary(issues))
 	}
 	return encoded, meta, nil

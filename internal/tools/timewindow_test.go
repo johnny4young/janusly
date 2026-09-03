@@ -42,6 +42,11 @@ func TestTimeWindowTool(t *testing.T) {
 	}); err != nil || result["inWindow"] != true {
 		t.Fatalf("epoch input: %+v %v", result, err)
 	}
+	if result, err = execute(map[string]any{
+		"timeZone": "UTC", "windows": windows, "at": int64(1767798000000),
+	}); err != nil || result["inWindow"] != true {
+		t.Fatalf("integer epoch input: %+v %v", result, err)
+	}
 
 	// The rejecting bias: bad zone, bad clock, ambiguous window all ERROR.
 	if _, err = execute(map[string]any{"timeZone": "Not/AZone", "windows": windows}); err == nil ||
@@ -63,6 +68,31 @@ func TestTimeWindowTool(t *testing.T) {
 	}
 	if _, err = execute(map[string]any{"timeZone": "UTC", "windows": windows, "at": "not-a-date"}); err == nil {
 		t.Fatal("unparseable at must error")
+	}
+}
+
+func TestTimeWindowDefinitionValidatesStaticConfigButDefersReferences(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.ValidateInput("time.window", map[string]any{
+		"timeZone": "Not/AZone",
+		"windows":  []any{map[string]any{"days": []int{1}, "start": "09:00", "end": "17:00"}},
+	}); err == nil || !strings.Contains(err.Error(), "Invalid IANA time zone") {
+		t.Fatalf("static invalid zone was accepted: %v", err)
+	}
+	if err := registry.ValidateInput("time.window", map[string]any{
+		"timeZone": "{{context.input.timeZone}}",
+		"windows": []any{map[string]any{
+			"days": []int{1, 2, 3}, "start": "{{context.input.start}}", "end": "{{context.input.end}}",
+		}},
+		"at": "{{context.event.output.occurredAt}}",
+	}); err != nil {
+		t.Fatalf("deferred window references rejected at save time: %v", err)
+	}
+	if err := registry.ValidateInput("time.window", map[string]any{
+		"timeZone": "UTC",
+		"windows":  []any{map[string]any{"days": []any{1.0, 1.0}, "start": "09:00", "end": "17:00"}},
+	}); err == nil {
+		t.Fatal("duplicate static weekdays were accepted")
 	}
 }
 

@@ -264,3 +264,72 @@ func TestBindWorkflowHandlesNilAndNeverSuggestsWrongCredentialKind(t *testing.T)
 		t.Fatalf("an incompatible credential must never be suggested as a valid alternative: %+v", report)
 	}
 }
+
+func TestBindWorkflowTraversesEveryNestedToolLocation(t *testing.T) {
+	catalog := bindingTestCatalog()
+	invented := &domain.Workflow{Nodes: []domain.Node{
+		{ID: "batch", Type: "loop", Config: map[string]any{
+			"mode": "for_each", "tool": "invented.batch", "items": []any{"x"}, "input": map[string]any{},
+		}},
+		{ID: "agent", Type: "agent", Config: map[string]any{
+			"goal": "Inspect", "tool": "invented.agent", "input": map[string]any{},
+		}},
+		{ID: "crew", Type: "multi_agent", Config: map[string]any{
+			"agents": []any{map[string]any{"goal": "Inspect", "tool": "invented.member", "input": map[string]any{}}},
+		}},
+	}}
+	report := BindWorkflow(catalog, invented)
+	if report.Complete || !HasUnboundCapabilityIdentity(report) {
+		t.Fatalf("nested invented tools must fail exact binding: %+v", report)
+	}
+	for _, field := range []string{"config.tool", "config.agents[0].tool"} {
+		found := false
+		for _, missing := range report.Missing {
+			found = found || (missing.Field == field && missing.Reason == "exact_tool_not_found")
+		}
+		if !found {
+			t.Fatalf("missing nested identity at %s: %+v", field, report.Missing)
+		}
+	}
+
+	valid := &domain.Workflow{Nodes: []domain.Node{
+		{ID: "batch", Type: "loop", Config: map[string]any{
+			"mode": "for_each", "tool": "text.uppercase", "items": []any{"x"},
+			"input": map[string]any{"value": "{{item}}"},
+		}},
+		{ID: "agent", Type: "agent", Config: map[string]any{
+			"goal": "Notify", "tool": "slack.post", "allowWriteTools": true,
+			"input": map[string]any{"credential": "incidents", "text": "Ready"},
+		}},
+		{ID: "crew", Type: "multi_agent", Config: map[string]any{
+			"agents": []any{map[string]any{
+				"goal": "Normalize", "tool": "text.uppercase", "input": map[string]any{"value": "ready"},
+			}},
+		}},
+	}}
+	report = BindWorkflow(catalog, valid)
+	if !report.Complete || len(report.Missing) != 0 || len(report.Resolved) != 4 {
+		t.Fatalf("valid nested bindings rejected: %+v", report)
+	}
+}
+
+func TestBindWorkflowRequiresNodeLevelAgentWriteOptIn(t *testing.T) {
+	for name, node := range map[string]domain.Node{
+		"agent": {ID: "agent", Type: "agent", Config: map[string]any{
+			"goal": "Remember", "tool": "vector.upsert", "input": map[string]any{"content": "fact"},
+		}},
+		"multi_agent": {ID: "crew", Type: "multi_agent", Config: map[string]any{
+			"agents": []any{map[string]any{
+				"goal": "Remember", "tool": "vector.upsert", "input": map[string]any{"content": "fact"},
+			}},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			report := BindWorkflow(bindingTestCatalog(), &domain.Workflow{Nodes: []domain.Node{node}})
+			if report.Complete || HasUnboundCapabilityIdentity(report) ||
+				!bindingReasonRequested(report, "agent_write_opt_in_required", "") {
+				t.Fatalf("agent write opt-in must be explicit and non-identity: %+v", report)
+			}
+		})
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -18,8 +19,8 @@ import (
 // The chokepoint writes one usage_events row per attempt through the
 // recorder: the exact reference row on success (tokens, cache
 // counts, computed cost) and the fallback row with the classified error;
-// an unknown model never invents a cost, a simulated provider always
-// records zero.
+// an unpriced real model is rejected before egress, while a simulated provider
+// always records zero.
 func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
 	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
@@ -45,9 +46,10 @@ func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
 	if aiErr != nil {
 		t.Fatalf("success call: %v", aiErr)
 	}
-	// costUsd from the table: 10 in x $1/M + 5 out x $5/M.
-	wantCost := (10*1.0 + 5*5.0) / 1_000_000
-	if result.CostUsd == nil || *result.CostUsd != wantCost {
+	// costUsd from the table: ordinary input + 5m cache creation + cache read
+	// + output, each at its own measured rate.
+	wantCost := (10*1.0 + 1*1.25 + 2*0.1 + 5*5.0) / 1_000_000
+	if result.CostUsd == nil || math.Abs(*result.CostUsd-wantCost) > 1e-12 {
 		t.Fatalf("computed cost: %v want %f", result.CostUsd, wantCost)
 	}
 
@@ -66,15 +68,19 @@ func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
 	}
 	row := readRow("ai")
 	for key, want := range map[string]any{
-		"__quantity": float64(15), "provider": "anthropic",
+		"__quantity": float64(18), "provider": "anthropic",
 		"model": "claude-haiku-4-5-20251001", "inputTokens": float64(10),
 		"outputTokens": float64(5), "cachedInputTokens": float64(2),
-		"cacheCreationInputTokens": float64(1), "costUsd": wantCost,
-		"providerSimulated": false, "nodeId": "n1", "aiError": nil,
+		"cacheCreationInputTokens": float64(1),
+		"providerSimulated":        false, "nodeId": "n1", "aiError": nil,
 	} {
 		if row[key] != want {
 			t.Fatalf("ai row %s: want %v got %v", key, want, row[key])
 		}
+	}
+	rowCost, ok := row["costUsd"].(float64)
+	if !ok || math.Abs(rowCost-wantCost) > 1e-12 {
+		t.Fatalf("ai row costUsd: want %.12f got %v", wantCost, row["costUsd"])
 	}
 
 	// A fallback attempt records too, with the classified error.
@@ -89,16 +95,14 @@ func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
 		t.Fatalf("fallback row: %+v", fallback)
 	}
 
-	// Unknown model: null cost on the row, never a guess.
+	// Unknown real model: fail closed before the paid call rather than creating
+	// an unpriced usage row that budget aggregation could not count.
 	unknown, aiErr := client.GenerateText(ctx, GenerateTextInput{
 		Prompt: "x", ModelHint: "claude-mystery-9",
 		Context: CallContext{OrgID: org + "-unknown"},
 	})
-	if aiErr != nil {
-		t.Fatalf("unknown-model call: %v", aiErr)
-	}
-	if unknown.CostUsd != nil {
-		t.Fatalf("unknown model must not invent cost: %v", *unknown.CostUsd)
+	if unknown != nil || aiErr == nil || aiErr.Class != "invalid_request" {
+		t.Fatalf("unknown model must be rejected before egress: result=%+v err=%v", unknown, aiErr)
 	}
 
 	// Simulated provider: zero cost even for a PRICED model.
@@ -115,8 +119,8 @@ func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
 	overridden, aiErr := client.GenerateText(ctx, GenerateTextInput{
 		Prompt: "x", Context: CallContext{OrgID: org + "-override"},
 	})
-	wantOverridden := (10*2.0 + 5*10.0) / 1_000_000
-	if aiErr != nil || overridden.CostUsd == nil || *overridden.CostUsd != wantOverridden {
+	wantOverridden := (10*2.0 + 1*2.5 + 2*0.2 + 5*10.0) / 1_000_000
+	if aiErr != nil || overridden.CostUsd == nil || math.Abs(*overridden.CostUsd-wantOverridden) > 1e-12 {
 		t.Fatalf("env override: %v (%v)", overridden.CostUsd, aiErr)
 	}
 }

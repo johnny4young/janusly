@@ -202,7 +202,7 @@ func primitiveCapabilities() []PrimitiveCapability {
 	entries := []PrimitiveCapability{
 		{NodeType: "wait_until", RequiredConfig: []string{"duration|until"}, Notes: "Exactly one ISO-8601 duration or timezone-qualified instant."},
 		{NodeType: "schedule", RequiredConfig: []string{"cronExpression"}, Notes: "Valid five-field cron expression."},
-		{NodeType: "multi_agent", RequiredConfig: []string{"agents"}, Notes: "At least one agent with an explicit goal."},
+		{NodeType: "multi_agent", RequiredConfig: []string{"agents"}, Notes: "One to 16 agents with explicit goals; sequential or parallel; bounded to 50 steps per member."},
 		{NodeType: "router_llm", RequiredConfig: []string{"candidates"}, Notes: "At least two direct-successor candidates."},
 		{NodeType: "subworkflow", RequiredConfig: []string{"workflowId"}, Notes: "Exact saved workflow from subworkflows catalog."},
 	}

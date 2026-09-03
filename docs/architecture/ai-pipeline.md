@@ -70,13 +70,58 @@ before calling the client.
   is complete. Compatibility generation without that catalog keeps descriptive
   noop placeholders.
 - Retrieved memory and run evidence are scrubbed and framed as untrusted data.
+- Every provider boundary applies both protections independently: the system
+  prompt defines a non-overridable trust hierarchy, while operator text,
+  generated drafts, run context, workflow JSON, errors, guidance, memory, and
+  external catalogs are projected through sensitive-key/value redaction and
+  explicit DATA framing. Literal secret shapes are removed before egress;
+  supported `{{secret.NAME}}` references remain machine-canonical. Model input
+  and durable events use separate sanitization chokepoints so a safe response
+  cannot hide an unsafe prompt or event write.
 - Model judgments never grant permissions or direct write authority.
+- Workflow validation replay is provider-free by construction. AI nodes run
+  their local size, schema, PromptOps, and configuration checks and then emit a
+  skipped validation result; agent and multi-agent nodes validate their local
+  planner/tool authority without calling either the completion provider or the
+  episodic-memory embedding service. These replays consume no AI budget or
+  provider rate admission, so readiness cannot spend money or become dependent
+  on provider availability.
+- `agent` and `multi_agent` may plan read-only tools by default. Any statically
+  write-capable tool requires all four independent authorities: process
+  `JANUSLY_AGENT_WRITES_ENABLED=true`, organization
+  `ai.agentWriteConsent=true`, node `allowWriteTools=true`, and a human
+  approval that dominates every graph path into the agent. The planner hides
+  tools the request cannot exercise and the executor rechecks authority before
+  dispatch. Authorization grants eligibility, not unlimited cardinality: one
+  atomic write-attempt lease is shared by the whole node, including every
+  parallel `multi_agent` child, and is consumed before dispatch. It cannot be
+  retried inside that execution; later AI-planned steps may only read to
+  verify. `http.request` is method-sensitive: GET/HEAD/OPTIONS remain read
+  side, every other or unknown method is write side, and only exact literal
+  URLs already present in that node's authored config are eligible. A model
+  cannot synthesize a target or promote a read into a write.
 - Semantic recovery always builds a deterministic diagnosis from the detector,
   retained snapshot/contract availability, and aggregate comparable-case
   counts. `internal/aidiagnosis` may enrich only bounded explanatory prose in a
   closed JSON envelope. Candidate kinds, evidence references, validation,
   approval, apply, and verification remain engine-controlled; provider failure
   or absence never blocks recovery.
+- Evaluation experiments snapshot only recovery feedback with explicit eval
+  consent. Dataset creation/deletion is transactional. An optional 1..3650 day
+  retention policy is enforced by the supervised hourly retention runner using
+  bounded `FOR UPDATE SKIP LOCKED` batches; it atomically removes raw examples
+  with each expired dataset while retaining aggregate experiment summaries.
+- Experiment admission normalizes a closed Anthropic model-reference grammar.
+  A real provider requires known complete pricing for both arms before budget
+  or rate admission; an explicit simulator may use fixture model ids, and a
+  provider-free run remains deterministic. Each plan accounts for generation
+  and optional judge requests under the 20-call ceiling, with SDK retries off.
+  Summary cost and latency include the judge calls that influenced scoring.
+  Invalid/out-of-range or failed judge replies are visible as scoring fallbacks
+  and force an inconclusive recommendation; a candidate with more failed arm
+  outputs than the control is never recommended. Request cancellation is
+  terminalized through a detached five-second context and a checked
+  running-to-terminal CAS, so experiments cannot remain silently stranded.
 
 Terminal run summaries do not spawn request- or worker-owned goroutines.
 Completion enqueues one row in `run_summary_memory_jobs`; a supervised sweep
@@ -93,6 +138,19 @@ Contract-first authoring lives in `internal/httpapi/authoring.go`. Its
 compile/proposal operations are canonical versioned routes in OpenAPI and keep
 the corresponding unversioned `/ai/...` aliases for existing callers; both
 lanes share one core, one strict decoder, and the `ai.write` gate.
+
+Anthropic model pricing lives once in `internal/ai/pricing.go`. `make generate`
+projects that dated catalog into `web/src/lib/llm-pricing.generated.ts`; the UI
+never maintains an independent hand-copied price table. Unknown models remain
+explicitly unpriced rather than inheriting an optimistic estimate. The real
+provider chokepoint rejects an unpriced model before egress. A catalogued model
+can temporarily override its positive finite `input,output` rates while
+retaining the catalogued cache multipliers. A newly released model absent from
+the catalog must provide all four billable rates explicitly as
+`JANUSLY_LLM_PRICE_<MODEL>=<input>,<output>,<cache-write-5m>,<cache-read>`;
+Janusly never guesses unknown cache pricing. Cache creation/read tokens are
+recorded at their distinct prices. Explicit simulator calls remain zero-cost
+and do not require a price entry.
 
 ## Qualification layers
 

@@ -1,6 +1,11 @@
 package engine
 
-import "testing"
+import (
+	"math"
+	"testing"
+
+	"github.com/johnny4young/janusly/internal/httpcontract"
+)
 
 func env(pairs map[string]string) func(string) (string, bool) {
 	return func(key string) (string, bool) {
@@ -39,5 +44,21 @@ func TestHTTPBoundPrecedenceChain(t *testing.T) {
 	// maxRedirects: 0 is a VALID tenant value (min 0 — redirects can be off).
 	if got := resolveHTTPBounds(map[string]float64{"http.maxRedirects": 0}, none); got.MaxRedirects != 0 {
 		t.Fatalf("zero redirects must be honored: %+v", got)
+	}
+
+	// Non-finite, fractional, and above-platform values fall through instead
+	// of overflowing an int/duration or weakening the process-wide ceiling.
+	for _, tenant := range []map[string]float64{
+		{"http.timeoutMs": math.Inf(1)},
+		{"http.maxResponseBytes": float64(httpcontract.MaxResponseBytes + 1)},
+		{"http.maxRedirects": float64(httpcontract.MaxRedirects + 1)},
+		{"http.maxRedirects": 1.5},
+	} {
+		got := resolveHTTPBounds(tenant, none)
+		if got.TimeoutMs != httpcontract.DefaultTimeoutMS ||
+			got.MaxResponseBytes != httpcontract.DefaultMaxResponseBytes ||
+			got.MaxRedirects != httpcontract.DefaultMaxRedirects {
+			t.Fatalf("invalid tenant bounds did not fall back: tenant=%+v got=%+v", tenant, got)
+		}
 	}
 }

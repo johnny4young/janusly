@@ -16,20 +16,25 @@ import (
 // enum, secret-shaped value), tenant-layer precedence after a write, and
 // the admin gate.
 //
-// The count is a ratchet, not a ceiling: it starts at the contract's 69
-// extracted keys, and every addition past that is a deliberate runtime
-// capability recorded here. 70 = + retention.archiveRunEvents (run-event
-// archival before the retention sweep deletes); 71 = + digest.weeklyEnabled
-// (weekly admin digest opt-in).
+// The count is a ratchet, not a ceiling. The Go baseline carried 69 reference
+// keys plus run-event archival and weekly digest, then retired four controls
+// that did not represent executable capabilities: provider selection,
+// generation mode, the retired alternate-provider model, and the unused per-surface model map;
+// governed agent-write consent adds one real executable control; the fictitious
+// embedding-provider selector was then retired because only Ollama's protocol
+// is implemented.
 func TestOrgConfigCatalogSurface(t *testing.T) {
-	if len(orgconfig.Definitions) != 71 {
-		t.Fatalf("catalog must pin at 71 definitions, got %d", len(orgconfig.Definitions))
+	if len(orgconfig.Definitions) != 67 {
+		t.Fatalf("catalog must pin at 67 definitions, got %d", len(orgconfig.Definitions))
 	}
-	for _, key := range []string{"ai.provider", "http.timeoutMs", "runs.requireSavedWorkflow",
+	for _, key := range []string{"ai.anthropic.model", "http.timeoutMs", "runs.requireSavedWorkflow",
 		"mcp.writeConsent", "retention.deletedWorkflowsDays", "onboarding.enabled"} {
 		if orgconfig.Get(key) == nil {
 			t.Fatalf("expected reference key missing: %s", key)
 		}
+	}
+	if orgconfig.Get("memory.embeddingProvider") != nil {
+		t.Fatal("catalog must not advertise an embedding provider the runtime cannot speak")
 	}
 	// The catalog itself must never admit a credential-shaped name.
 	for _, def := range orgconfig.Definitions {
@@ -69,9 +74,9 @@ func TestOrgConfigCatalogSurface(t *testing.T) {
 	reject(map[string]any{"key": "made.up", "value": 1}, "Unknown org config key")
 	reject(map[string]any{"key": "http.timeoutMs", "value": "fast"}, "must be a finite number")
 	reject(map[string]any{"key": "http.timeoutMs", "value": float64(0)}, "must be >=")
-	reject(map[string]any{"key": "ai.provider", "value": "grok"}, "must be one of")
+	reject(map[string]any{"key": "email.provider", "value": "grok"}, "must be one of")
 	reject(map[string]any{"key": "email.from", "value": "sk-ant-secret123"}, "must not contain secret-like values")
-	reject(map[string]any{"key": "ai.provider", "value": "   "}, "non-empty")
+	reject(map[string]any{"key": "email.provider", "value": "   "}, "non-empty")
 
 	// A valid write lands as the tenant layer and audits.
 	ok := h.call("POST", "/org/config", map[string]any{"key": "http.timeoutMs", "value": float64(5000)}, "")

@@ -5,7 +5,10 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -251,7 +254,7 @@ func TestToolFailureFollowsResultPolicy(t *testing.T) {
 	runDispatcherToTerminal(t, eng, pool, runID, "succeeded")
 	var state []byte
 	_ = pool.QueryRow(ctx, "select state_json->'output'->'result' from run_nodes where run_id=$1", runID).Scan(&state)
-	if !strings.Contains(string(state), `"ok": false`) || !strings.Contains(string(state), "invalid JSON") {
+	if !strings.Contains(string(state), `"ok": false`) || !strings.Contains(string(state), "value must contain valid JSON") {
 		t.Fatalf("lenient policy must carry the failure envelope: %s", state)
 	}
 
@@ -281,6 +284,40 @@ func TestToolFailureFollowsResultPolicy(t *testing.T) {
 	if attempts != 1 || !strings.Contains(errorJSON, `"writeSide": true`) ||
 		!strings.Contains(errorJSON, `"code": "TOOL_RESULT_NOT_OK"`) {
 		t.Fatalf("ambiguous write failure retried or lost identity: attempts=%d error=%s", attempts, errorJSON)
+	}
+}
+
+func TestHTTPMutatingFailureDoesNotRetry(t *testing.T) {
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	ctx, pool, eng, org := newHarness(t)
+	doc := `{"nodes":[{"id":"dav","type":"http","config":{
+		"url":"` + server.URL + `","method":"PROPFIND",
+		"retry":{"maxAttempts":3,"delayMs":1,"retryOn":["5xx"]}
+	}}],"edges":[]}`
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	runDispatcherToTerminal(t, eng, pool, runID, "failed")
+
+	var attempts int
+	var errorJSON string
+	if err := pool.QueryRow(ctx, `SELECT attempts, error_json::text FROM run_nodes
+		WHERE run_id=$1 AND node_id='dav'`, runID).Scan(&attempts, &errorJSON); err != nil {
+		t.Fatal(err)
+	}
+	if got := hits.Load(); got != 1 || attempts != 1 ||
+		!strings.Contains(errorJSON, `"writeSide": true`) ||
+		!strings.Contains(errorJSON, `"statusCode": 503`) {
+		t.Fatalf("ambiguous HTTP write retried or lost identity: hits=%d attempts=%d error=%s",
+			got, attempts, errorJSON)
 	}
 }
 

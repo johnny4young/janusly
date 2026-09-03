@@ -3,9 +3,11 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,10 +15,10 @@ import (
 	"github.com/johnny4young/janusly/internal/engine"
 )
 
-// The healing proposal may come from the LLM behind the extra
-// autoHealing.llmProposals opt-in + the budget gate — same wave-5
-// non-structural patch grammar, sandbox validation unchanged. Every
-// degradation keeps the deterministic harden_retries proposal.
+// The healing proposal may come from the LLM behind the org opt-in + budget
+// gate, but only through the closed retry/timeout patch grammar. Sandbox
+// validation remains unchanged and every degradation keeps the deterministic
+// harden_retries proposal.
 
 // healingFixture seeds an opted-in org with a same-signature DLQ cluster
 // (two failed runs against a flaky endpoint) and returns the flaky server
@@ -74,14 +76,13 @@ func proposalRow(t *testing.T, h *apiHarness) (label string, confidence float64,
 
 func TestAutoHealingLlmProposal(t *testing.T) {
 	h := newAPIHarness(t)
-	// Fixture first: the simulated model reply must patch the REAL flaky
-	// URL (a replacement config swaps the whole node config, so a made-up
-	// url would sink the sandbox validation on its own).
-	calls, flakyURL := healingFixtureWithURL(t, h)
+	// Fixture first: the simulated model may harden resilience controls but
+	// cannot repeat or change the destination from the workflow snapshot.
+	calls, _ := healingFixtureWithURL(t, h)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("content-type", "application/json")
 		_, _ = fmt.Fprint(w, anthropicReply(
-			`{"patchedConfig":{"url":"`+flakyURL+`","retry":{"maxAttempts":4,"delayMs":500,"backoff":"exponential"},"timeoutMs":8000},"confidence":72}`))
+			`{"patchedConfig":{"retry":{"maxAttempts":4,"delayMs":500,"backoff":"exponential"},"timeoutMs":8000},"confidence":72}`))
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
@@ -104,6 +105,37 @@ func TestAutoHealingLlmProposal(t *testing.T) {
 	eng := engine.New(testPool(t))
 	if result := eng.SweepAutoHealing(t.Context()); result.Promoted != 1 {
 		t.Fatalf("promotion: %+v", result)
+	}
+}
+
+func TestAutoHealingLlmCannotMutateWorkflowAuthority(t *testing.T) {
+	h := newAPIHarness(t)
+	calls, _ := healingFixtureWithURL(t, h)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicReply(
+			`{"patchedConfig":{"url":"https://attacker.invalid","method":"POST","retry":{"maxAttempts":4}},"confidence":99}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+	calls.Store(100)
+	if res := h.call("POST", "/auto-healing/scan", nil, ""); res.body["proposed"] != float64(1) {
+		t.Fatalf("scan: %+v", res.body)
+	}
+	if label, _, _ := proposalRow(t, h); label != "harden_retries" {
+		t.Fatalf("authority-changing model patch must fall back, got %s", label)
+	}
+	var patch json.RawMessage
+	if err := testPool(t).QueryRow(t.Context(),
+		`SELECT proposed_patch_json FROM auto_healing_runs WHERE org_id = $1`, h.org).Scan(&patch); err != nil {
+		t.Fatalf("stored patch: %v", err)
+	}
+	if strings.Contains(string(patch), "attacker") || strings.Contains(string(patch), `"method"`) {
+		t.Fatalf("authority-changing fields reached persistence: %s", patch)
 	}
 }
 

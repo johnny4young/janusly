@@ -10,9 +10,8 @@ import (
 	"net/http"
 
 	"github.com/johnny4young/janusly/internal/domain"
-	"github.com/johnny4young/janusly/internal/grammar"
-	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/workflowreadiness"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 // readinessOptions wires the pure checks' seams: the tool registry's static
@@ -47,7 +46,7 @@ func (s *V1Server) validateCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opOK(map[string]any{"valid": false, "issues": issues})
 	}
-	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
+	result := workflowvalidation.Validate(wf)
 	issues := result.Issues
 	if issues == nil {
 		issues = []domain.Issue{}
@@ -75,7 +74,7 @@ func (s *V1Server) readinessCore(r *http.Request, rc v1Request) opResult {
 	wf, _ := domain.Parse(candidate)
 	var validation domain.ValidationResult
 	if wf != nil {
-		validation = domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
+		validation = workflowvalidation.Validate(wf)
 	}
 	if wf == nil || !validation.Valid {
 		issues := make([]domain.ReadinessIssue, 0, len(validation.Issues))

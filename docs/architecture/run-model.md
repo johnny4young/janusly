@@ -29,3 +29,37 @@ its source node fails terminally. A failure with at least one on-error route
 is handled — the run continues down the error branch, the success branch is
 skipped as not taken, and no dead letter or recovery case is produced. A
 failure without an on-error route fails the run and dead-letters, unchanged.
+
+## Agent authority
+
+Agent planning is not an authorization boundary. The dispatcher computes one
+per-node write grant from process policy, tenant consent, workflow opt-in, run
+mode, and graph-dominating human approval. That grant and the node's exact
+literal HTTP target set travel to the executor; the executor rejects a planned
+write or a different/dynamic URL even if a provider emits it. Dry-run and
+validation modes always suppress writes.
+
+One authorized `agent` node execution owns a single write-attempt lease. A
+`multi_agent` crew shares that same lease across every sequential or parallel
+child; it does not receive one mutation per child or per `maxSteps`. The lease
+is consumed immediately before dispatch and remains spent after validation,
+timeout, or an ambiguous transport result. Deterministic planners stop after
+the attempt; an AI planner may use remaining steps only for read-side
+verification. Another mutation requires a new approved run.
+
+Approval ancestry means dominance, not mere reachability: every path that can
+enter a write-enabled agent must cross an approval. Alternate unapproved paths,
+missing predecessors, and malformed cycles fail closed. Explicit `http`,
+`tool`, and `mcp_tool` nodes remain the preferred representation when the
+mutation is known during authoring because their effect, inputs, retries, and
+approval topology stay directly inspectable.
+
+## Retry policy
+
+`config.retry` uses one closed grammar at authoring and execution. A present
+policy requires `maxAttempts` (the first execution counts as attempt one), with
+a range of 1–10. Initial delay is limited to 1–600,000 ms, an authored maximum
+to 1–3,600,000 ms, and the scheduler applies the one-hour ceiling even when the
+author omits `maxDelayMs`. Backoff is fixed or exponential; jitter is boolean;
+retry/ignore matcher lists are bounded. Invalid legacy policy data fails closed
+to no retry rather than being partially interpreted.

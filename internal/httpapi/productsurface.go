@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -32,6 +33,8 @@ import (
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/packs"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/workflowreadiness"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 /* ---------------------------- built-in snippets ------------------------ */
@@ -57,29 +60,29 @@ func (s builtinSnippet) view() map[string]any {
 	}
 }
 
-// builtinSnippets ports the contract BUILTIN_SNIPPETS catalog (9 entries).
+// builtinSnippets is the executable server-owned catalog (9 entries).
 var builtinSnippets = []builtinSnippet{
 	{ID: "builtin:retry-with-backoff", Name: "Retry with backoff", Category: "retry",
 		Description: "An HTTP call wrapped with bounded exponential-backoff retries.",
 		Tags:        []string{"http", "resilience"},
 		Nodes: []map[string]any{{"id": "call", "type": "http", "config": map[string]any{
 			"method": "GET", "url": "https://api.example.com/resource",
-			"retryPolicy": map[string]any{"maxAttempts": 4, "backoff": "exponential", "initialDelayMs": 500},
+			"retry": map[string]any{"maxAttempts": 4, "backoff": "exponential", "delayMs": 500},
 		}}},
 		Edges: []map[string]any{}, EntryNodeID: "call"},
 	{ID: "builtin:approval-with-timeout", Name: "Approval with timeout", Category: "approval",
-		Description: "A human approval gate followed by a timed wait before the action proceeds.",
+		Description: "A human approval gate that fails closed when its one-hour decision deadline expires.",
 		Tags:        []string{"approval", "human-in-the-loop"},
-		Nodes: []map[string]any{
-			{"id": "approve", "type": "approval", "config": map[string]any{"message": "Approve before continuing?"}},
-			{"id": "wait", "type": "wait_until", "config": map[string]any{"durationSeconds": 3600}},
-		},
-		Edges: []map[string]any{{"from": "approve", "to": "wait"}}, EntryNodeID: "approve"},
+		Nodes: []map[string]any{{"id": "approve", "type": "approval", "config": map[string]any{
+			"message": "Approve before continuing?", "decisionTimeoutMs": 3_600_000, "onTimeout": "fail",
+		}}},
+		Edges: []map[string]any{}, EntryNodeID: "approve"},
 	{ID: "builtin:slack-on-failure", Name: "Slack on failure", Category: "notification",
 		Description: "Post a Slack message when an upstream step fails (wire the condition edge to your failure branch).",
 		Tags:        []string{"slack", "alerting"},
 		Nodes: []map[string]any{{"id": "notify", "type": "tool", "config": map[string]any{
-			"tool": "slack.post", "input": map[string]any{"credentialName": "slack_webhook", "text": "A workflow step failed."},
+			"tool": "slack.post", "resultPolicy": "require_ok",
+			"input": map[string]any{"credential": "slack_webhook", "text": "A workflow step failed."},
 		}}},
 		Edges: []map[string]any{}, EntryNodeID: "notify"},
 	{ID: "builtin:condition-then-branch", Name: "Condition then branch", Category: "transform",
@@ -98,7 +101,9 @@ var builtinSnippets = []builtinSnippet{
 		Description: "Fork into two parallel branches and join their results.",
 		Tags:        []string{"parallel", "fan-out"},
 		Nodes: []map[string]any{
-			{"id": "fork", "type": "parallel_fork", "config": map[string]any{"branches": []any{"a", "b"}}},
+			{"id": "fork", "type": "parallel_fork", "config": map[string]any{"branches": []any{
+				map[string]any{"label": "a"}, map[string]any{"label": "b"},
+			}}},
 			{"id": "branch_a", "type": "noop", "config": map[string]any{}},
 			{"id": "branch_b", "type": "noop", "config": map[string]any{}},
 			{"id": "join", "type": "join", "config": map[string]any{"sources": map[string]any{"a": "branch_a", "b": "branch_b"}}},
@@ -107,18 +112,20 @@ var builtinSnippets = []builtinSnippet{
 			{"from": "fork", "to": "branch_a"}, {"from": "fork", "to": "branch_b"},
 			{"from": "branch_a", "to": "join"}, {"from": "branch_b", "to": "join"},
 		}, EntryNodeID: "fork"},
-	{ID: "builtin:transform-and-cache", Name: "Transform and cache", Category: "transform",
-		Description: "Reshape an upstream payload then persist the result for downstream reuse.",
+	{ID: "builtin:transform-and-enrich", Name: "Transform and enrich", Category: "transform",
+		Description: "Reshape an upstream payload, then add a deterministic metadata field.",
 		Tags:        []string{"transform", "mapping"},
 		Nodes: []map[string]any{
 			{"id": "shape", "type": "transform", "config": map[string]any{"mapping": map[string]any{
 				"id": "{{context.fetch.output.id}}", "total": "{{context.fetch.output.amount}}",
 			}}},
-			{"id": "cache", "type": "tool", "config": map[string]any{
-				"tool": "kv.set", "input": map[string]any{"key": "last_result", "value": "{{context.shape.output}}"},
+			{"id": "enrich", "type": "tool", "config": map[string]any{
+				"tool": "json.set", "input": map[string]any{
+					"path": "metadata.prepared", "value": true, "source": "{{context.shape.output}}",
+				},
 			}},
 		},
-		Edges: []map[string]any{{"from": "shape", "to": "cache"}}, EntryNodeID: "shape"},
+		Edges: []map[string]any{{"from": "shape", "to": "enrich"}}, EntryNodeID: "shape"},
 	{ID: "builtin:http-with-circuit-breaker", Name: "HTTP with circuit breaker", Category: "error_handling",
 		Description: "An HTTP call guarded by a condition that short-circuits when the upstream is unhealthy.",
 		Tags:        []string{"http", "circuit-breaker", "resilience"},
@@ -126,7 +133,6 @@ var builtinSnippets = []builtinSnippet{
 			{"id": "breaker", "type": "condition", "config": map[string]any{"expression": "context.health.output.healthy == true"}},
 			{"id": "request", "type": "http", "config": map[string]any{
 				"method": "POST", "url": "https://api.example.com/action",
-				"retryPolicy": map[string]any{"maxAttempts": 2, "backoff": "fixed", "initialDelayMs": 250},
 			}},
 			{"id": "short_circuit", "type": "noop", "config": map[string]any{"note": "upstream unhealthy — skipped"}},
 		},
@@ -135,22 +141,12 @@ var builtinSnippets = []builtinSnippet{
 			{"from": "breaker", "to": "short_circuit"},
 		}, EntryNodeID: "breaker"},
 	{ID: "builtin:dlq-friendly-error-flow", Name: "DLQ-friendly error flow", Category: "error_handling",
-		Description: "An action node with capped retries that lands in the dead-letter queue on exhaustion, plus a failure notifier.",
+		Description: "A write action that fails closed into governed recovery without an unsafe blind retry.",
 		Tags:        []string{"dlq", "error-handling", "resilience"},
-		Nodes: []map[string]any{
-			{"id": "action", "type": "http", "config": map[string]any{
-				"method": "POST", "url": "https://api.example.com/submit",
-				"retryPolicy": map[string]any{"maxAttempts": 3, "backoff": "exponential", "initialDelayMs": 1000},
-			}},
-			{"id": "on_failure", "type": "condition", "config": map[string]any{"expression": "context.action.output.ok == false"}},
-			{"id": "alert", "type": "tool", "config": map[string]any{
-				"tool": "slack.post", "input": map[string]any{"credentialName": "slack_webhook", "text": "Submit failed after retries — check the DLQ."},
-			}},
-		},
-		Edges: []map[string]any{
-			{"from": "action", "to": "on_failure"},
-			{"from": "on_failure", "to": "alert", "condition": "context.action.output.ok == false"},
-		}, EntryNodeID: "action"},
+		Nodes: []map[string]any{{"id": "action", "type": "http", "config": map[string]any{
+			"method": "POST", "url": "https://api.example.com/submit",
+		}}},
+		Edges: []map[string]any{}, EntryNodeID: "action"},
 	{ID: "builtin:webhook-to-transform", Name: "Webhook to transform", Category: "trigger",
 		Description: "An inbound webhook trigger feeding a payload reshape — the smallest event-driven starter.",
 		Tags:        []string{"webhook", "trigger"},
@@ -197,14 +193,22 @@ type snippetBody struct {
 
 var snippetCategories = map[string]bool{
 	"retry": true, "approval": true, "notification": true,
-	"transform": true, "error_handling": true, "trigger": true,
+	"transform": true, "error_handling": true, "trigger": true, "custom": true,
 }
+
+const (
+	snippetBodyMaxBytes        = 256 << 10
+	snippetDescriptionMaxRunes = 400
+	snippetTagMaxRunes         = 40
+)
 
 func validateSnippetBody(body *snippetBody) string {
 	body.Name = strings.TrimSpace(body.Name)
 	switch {
-	case body.Name == "" || len(body.Name) > 120:
+	case body.Name == "" || utf8.RuneCountInString(body.Name) > 120:
 		return "name must be 1..120 characters"
+	case utf8.RuneCountInString(body.Description) > snippetDescriptionMaxRunes:
+		return "description must be at most 400 characters"
 	case !snippetCategories[body.Category]:
 		return "unknown snippet category"
 	case len(body.Tags) > 10:
@@ -213,6 +217,54 @@ func validateSnippetBody(body *snippetBody) string {
 		return "snippets carry 1..20 nodes"
 	case len(body.Edges) > 40:
 		return "at most 40 edges"
+	}
+	seenTags := make(map[string]bool, len(body.Tags))
+	for index, tag := range body.Tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" || utf8.RuneCountInString(tag) > snippetTagMaxRunes {
+			return "tags must be non-empty and at most 40 characters"
+		}
+		if seenTags[tag] {
+			return "tags must be unique"
+		}
+		seenTags[tag] = true
+		body.Tags[index] = tag
+	}
+
+	if body.Edges == nil {
+		body.Edges = []map[string]any{}
+	}
+	raw, err := json.Marshal(map[string]any{"nodes": body.Nodes, "edges": body.Edges})
+	if err != nil {
+		return "snippet nodes and edges must be valid JSON"
+	}
+	workflow, parseIssues := domain.Parse(raw)
+	if workflow == nil {
+		if len(parseIssues) > 0 {
+			return parseIssues[0].Code + ": " + parseIssues[0].Message
+		}
+		return "snippet nodes and edges are invalid"
+	}
+	if result := workflowvalidation.ValidateDraft(workflow); !result.Valid {
+		return result.Issues[0].Code + ": " + result.Issues[0].Message
+	}
+	if body.EntryNodeID != "" {
+		body.EntryNodeID = strings.TrimSpace(body.EntryNodeID)
+		found := false
+		for _, node := range workflow.Nodes {
+			if node.ID == body.EntryNodeID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "entryNodeId must reference a snippet node"
+		}
+	}
+	for _, issue := range domain.CheckWorkflowReadiness(workflow, workflowreadiness.Options()).Issues {
+		if issue.Code == "raw_secret_in_config" {
+			return issue.Code + ": " + issue.Message
+		}
 	}
 	return ""
 }
@@ -239,7 +291,7 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /snippets", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		var body snippetBody
-		if err := decodeBody(r, &body); err != nil {
+		if err := decodeBodyBounded(r, &body, snippetBodyMaxBytes); err != nil {
 			writeUnversioned(w, opError(http.StatusUnprocessableEntity, "snippet_invalid", "invalid snippet body", nil))
 			return
 		}
@@ -282,7 +334,7 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 			return
 		}
 		var body snippetBody
-		if err := decodeBody(r, &body); err != nil {
+		if err := decodeBodyBounded(r, &body, snippetBodyMaxBytes); err != nil {
 			writeUnversioned(w, opError(http.StatusUnprocessableEntity, "snippet_invalid", "invalid snippet body", nil))
 			return
 		}

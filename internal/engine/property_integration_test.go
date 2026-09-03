@@ -102,7 +102,15 @@ func waitRunStatus(t *testing.T, pool *pgxpool.Pool, runID, want string, seed in
 			`SELECT status FROM runs WHERE id = $1`, runID).Scan(&status); err == nil && status == want {
 			return
 		} else if status == "failed" || status == "cancelled" {
-			t.Fatalf("seed %d: run reached %s", seed, status)
+			var nodeID string
+			var errorJSON []byte
+			_ = pool.QueryRow(context.Background(), `
+				SELECT node_id, COALESCE(error_json, '{}'::jsonb)
+				FROM run_nodes
+				WHERE run_id = $1 AND status = 'failed'
+				ORDER BY finished_at DESC NULLS LAST, node_id
+				LIMIT 1`, runID).Scan(&nodeID, &errorJSON)
+			t.Fatalf("seed %d: run reached %s; node=%s error=%s", seed, status, nodeID, errorJSON)
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("seed %d: run never reached %s", seed, want)

@@ -48,8 +48,7 @@ type ReadinessOptions struct {
 }
 
 var (
-	sensitiveHTTPMethods = map[string]bool{"POST": true, "PUT": true, "PATCH": true, "DELETE": true}
-	sensitiveToolNames   = map[string]bool{
+	sensitiveToolNames = map[string]bool{
 		"email.send": true, "slack.post": true, "github.create_issue": true,
 		"linear.create_issue": true, "db.query.write": true, "db.query.transaction": true,
 		"pagerduty.incident.acknowledge": true, "pagerduty.incident.snooze": true,
@@ -220,16 +219,26 @@ func isWriteSideTool(opts ReadinessOptions, tool string, input map[string]any) b
 func isSensitiveAction(node Node, opts ReadinessOptions) bool {
 	switch node.Type {
 	case "http":
-		method := "GET"
-		if raw, ok := node.Config["method"].(string); ok && raw != "" {
-			method = strings.ToUpper(raw)
+		method, _ := node.Config["method"].(string)
+		switch strings.ToUpper(strings.TrimSpace(method)) {
+		case "", "GET", "HEAD", "OPTIONS":
+			return false
+		default:
+			// Extension and unknown methods are effect-capable until proven
+			// otherwise; a denylist would classify WebDAV writes as reads.
+			return true
 		}
-		return sensitiveHTTPMethods[method]
 	case "tool":
 		tool, ok := node.Config["tool"].(string)
 		if !ok {
 			return false
 		}
+		if opts.IsWriteSideTool != nil {
+			input, _ := node.Config["input"].(map[string]any)
+			return opts.IsWriteSideTool(tool, input)
+		}
+		// Pure callers without the registry retain the conservative legacy
+		// name/suffix fallback.
 		if sensitiveToolNames[tool] {
 			return true
 		}
@@ -250,26 +259,62 @@ func isSensitiveAction(node Node, opts ReadinessOptions) bool {
 		// External MCP invocations are write-side by default (fail-safe,
 		// matching the descriptor table's own posture).
 		return true
+	case "agent", "multi_agent":
+		// Agent writes are impossible unless the workflow opts into the
+		// capability explicitly. Process and tenant consent are runtime
+		// concerns; readiness owns the graph-visible approval requirement.
+		allowed, _ := node.Config["allowWriteTools"].(bool)
+		return allowed
 	}
 	return false
 }
 
 func hasApprovalAncestor(wf *Workflow, nodeID string, cache map[string]bool) bool {
-	if cached, ok := cache[nodeID]; ok {
-		return cached
-	}
 	typesByID := map[string]string{}
+	predecessors := map[string][]string{}
 	for _, node := range wf.Nodes {
 		typesByID[node.ID] = node.Type
 	}
-	for id := range collectAncestors(wf, nodeID) {
-		if typesByID[id] == "approval" {
-			cache[nodeID] = true
-			return true
-		}
+	for _, edge := range wf.Edges {
+		predecessors[edge.To] = append(predecessors[edge.To], edge.From)
 	}
-	cache[nodeID] = false
-	return false
+
+	// Approval is authority only when it dominates the target: every path
+	// that can reach the write must pass through a human checkpoint. Merely
+	// finding an approval on one alternate branch would let an unguarded
+	// predecessor bypass it. Workflows are validated as DAGs, but the
+	// visiting set keeps this helper fail-closed for malformed callers.
+	visiting := map[string]bool{}
+	var guarded func(string) bool
+	guarded = func(current string) bool {
+		if cached, ok := cache[current]; ok {
+			return cached
+		}
+		if visiting[current] {
+			cache[current] = false
+			return false
+		}
+		visiting[current] = true
+		defer delete(visiting, current)
+
+		incoming := predecessors[current]
+		if len(incoming) == 0 {
+			cache[current] = false
+			return false
+		}
+		for _, predecessor := range incoming {
+			if typesByID[predecessor] == "approval" {
+				continue
+			}
+			if !guarded(predecessor) {
+				cache[current] = false
+				return false
+			}
+		}
+		cache[current] = true
+		return true
+	}
+	return guarded(nodeID)
 }
 
 func walkConfig(value any, visit func(key string, value any)) {
@@ -444,6 +489,14 @@ type SuggestionSafety struct {
 
 // ComputeSuggestionSafety mirrors the contract's recoverySuggestionSafety.
 func ComputeSuggestionSafety(wf *Workflow, nodeID string) SuggestionSafety {
+	return ComputeSuggestionSafetyWithOptions(wf, nodeID, ReadinessOptions{})
+}
+
+// ComputeSuggestionSafetyWithOptions uses the executable registry classifier
+// when the caller has one. The compatibility wrapper above retains the legacy
+// name/suffix fallback for pure callers, but API recovery surfaces must not
+// mislabel a newly registered write tool as read-side.
+func ComputeSuggestionSafetyWithOptions(wf *Workflow, nodeID string, opts ReadinessOptions) SuggestionSafety {
 	if wf == nil {
 		return SuggestionSafety{WriteSide: true, ApprovalRequired: true}
 	}
@@ -457,7 +510,7 @@ func ComputeSuggestionSafety(wf *Workflow, nodeID string) SuggestionSafety {
 	if target == nil {
 		return SuggestionSafety{WriteSide: true, ApprovalRequired: true}
 	}
-	writeSide := isSensitiveAction(*target, ReadinessOptions{})
+	writeSide := isSensitiveAction(*target, opts)
 	approvalPresent := !writeSide || hasApprovalAncestor(wf, nodeID, map[string]bool{})
 	return SuggestionSafety{WriteSide: writeSide, ApprovalRequired: writeSide, ApprovalPresent: approvalPresent}
 }
@@ -465,7 +518,17 @@ func ComputeSuggestionSafety(wf *Workflow, nodeID string) SuggestionSafety {
 // IsSensitiveActionNode exposes the write-side classifier for dispatch.
 func IsSensitiveActionNode(node Node) bool { return isSensitiveAction(node, ReadinessOptions{}) }
 
-// HasApprovalAncestorIn exposes the ancestor scan for dispatch.
+// IsSensitiveActionNodeWithOptions classifies the node with the executable
+// registry seams supplied by the caller. Runtime automation must use this
+// variant so a newly registered write-side tool cannot be mistaken for a
+// read-only action by the legacy name fallback.
+func IsSensitiveActionNodeWithOptions(node Node, opts ReadinessOptions) bool {
+	return isSensitiveAction(node, opts)
+}
+
+// HasApprovalAncestorIn reports whether human approval dominates every path
+// into nodeID. It is the graph authority used by dispatch, not a loose
+// "approval exists somewhere upstream" hint.
 func HasApprovalAncestorIn(wf *Workflow, nodeID string) bool {
 	return hasApprovalAncestor(wf, nodeID, map[string]bool{})
 }

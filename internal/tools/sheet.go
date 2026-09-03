@@ -11,9 +11,13 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/johnny4young/janusly/internal/objectstore"
@@ -24,7 +28,114 @@ const (
 	sheetMaxRowsPerCall = 1000
 	sheetMaxColumns     = 200
 	sheetMaxHeaderRunes = 120
+	sheetNameMaxRunes   = 128
+	sheetNameMaxBytes   = 512
+	sheetInputMaxBytes  = 4 << 20
+	sheetCellMaxBytes   = 64 << 10
 )
+
+func validateSheetName(name string) error {
+	if name == "" || name != strings.TrimSpace(name) || name == "." || name == ".." ||
+		strings.Contains(name, "..") || strings.ContainsAny(name, `/\\`) ||
+		len(name) > sheetNameMaxBytes || utf8.RuneCountInString(name) > sheetNameMaxRunes {
+		return fmt.Errorf("name must be a safe base name of at most %d characters", sheetNameMaxRunes)
+	}
+	for _, character := range name {
+		if unicode.IsControl(character) {
+			return fmt.Errorf("name must not contain control characters")
+		}
+	}
+	return nil
+}
+
+func validateSheetCell(value any) bool {
+	switch typed := value.(type) {
+	case nil, bool:
+		return true
+	case string:
+		return len(typed) <= sheetCellMaxBytes
+	default:
+		return validJSONNumber(typed)
+	}
+}
+
+func validateSheetRows(raw any) ([]any, error) {
+	rows, ok := arrayItems(raw)
+	if !ok || len(rows) == 0 || len(rows) > sheetMaxRowsPerCall {
+		return nil, fmt.Errorf("rows must contain 1..%d arrays or objects", sheetMaxRowsPerCall)
+	}
+	serialized, err := json.Marshal(raw)
+	if err != nil || len(serialized) > sheetInputMaxBytes {
+		return nil, fmt.Errorf("rows exceed the %d byte input bound", sheetInputMaxBytes)
+	}
+	for _, rawRow := range rows {
+		var cells []any
+		switch row := rawRow.(type) {
+		case map[string]any:
+			if len(row) == 0 || len(row) > sheetMaxColumns {
+				return nil, fmt.Errorf("object rows must contain 1..%d columns", sheetMaxColumns)
+			}
+			header := make([]string, 0, len(row))
+			for key, value := range row {
+				header = append(header, key)
+				cells = append(cells, value)
+			}
+			if message := validateSheetHeader(header); message != "" {
+				return nil, fmt.Errorf("object row keys are invalid: %s", message)
+			}
+		default:
+			var rowOK bool
+			cells, rowOK = arrayItems(rawRow)
+			if !rowOK || len(cells) == 0 || len(cells) > sheetMaxColumns {
+				return nil, fmt.Errorf("array rows must contain 1..%d cells", sheetMaxColumns)
+			}
+		}
+		for _, cell := range cells {
+			if !validateSheetCell(cell) {
+				return nil, fmt.Errorf("cells must be JSON scalar values bounded to %d bytes", sheetCellMaxBytes)
+			}
+		}
+	}
+	return rows, nil
+}
+
+func validateSheetInput(input map[string]any, options InputValidationOptions) error {
+	if raw, present := input["name"]; present && !isDeferredWholeTemplate(raw, options) {
+		name, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("name must be a string")
+		}
+		if err := validateSheetName(name); err != nil {
+			return err
+		}
+	}
+	rowsRaw, rowsPresent := input["rows"]
+	rowsDeferred := rowsPresent && isDeferredWholeTemplate(rowsRaw, options)
+	var rows []any
+	if rowsPresent && !rowsDeferred {
+		var err error
+		rows, err = validateSheetRows(rowsRaw)
+		if err != nil {
+			return err
+		}
+	}
+	headerRaw, headerPresent := input["header"]
+	headerDeferred := headerPresent && isDeferredWholeTemplate(headerRaw, options)
+	var header []string
+	if headerPresent && !headerDeferred {
+		var message string
+		header, message = normalizeSheetHeader(headerRaw, true)
+		if message != "" {
+			return errors.New(message)
+		}
+	}
+	if len(rows) > 0 && len(header) > 0 {
+		if _, message := normalizeSheetRows(rows, header); message != "" {
+			return errors.New(message)
+		}
+	}
+	return nil
+}
 
 // sheetObjectKey namespaces the sheet under its tenant; the name is
 // WORKFLOW-AUTHOR input feeding an object key, so it is reduced to its
@@ -48,7 +159,7 @@ func normalizeSheetHeader(raw any, present bool) ([]string, string) {
 	if !present {
 		return nil, ""
 	}
-	cells, ok := raw.([]any)
+	cells, ok := arrayItems(raw)
 	if !ok || len(cells) == 0 || len(cells) > sheetMaxColumns {
 		return nil, "sheet.append header must contain 1 to 200 strings"
 	}
@@ -58,7 +169,10 @@ func normalizeSheetHeader(raw any, present bool) ([]string, string) {
 		if !ok {
 			return nil, "sheet.append header must contain only strings"
 		}
-		header = append(header, strings.TrimSpace(text))
+		if text != strings.TrimSpace(text) {
+			return nil, "sheet.append header names must be trimmed"
+		}
+		header = append(header, text)
 	}
 	if errMessage := validateSheetHeader(header); errMessage != "" {
 		return nil, errMessage
@@ -72,7 +186,7 @@ func validateSheetHeader(header []string) string {
 	}
 	seen := make(map[string]bool, len(header))
 	for _, name := range header {
-		if name == "" || utf8.RuneCountInString(name) > sheetMaxHeaderRunes || strings.ContainsAny(name, "\r\n") {
+		if name == "" || name != strings.TrimSpace(name) || utf8.RuneCountInString(name) > sheetMaxHeaderRunes || strings.ContainsAny(name, "\r\n") {
 			return "sheet.append header names must be non-empty, single-line, and at most 120 characters"
 		}
 		if seen[name] {
@@ -108,15 +222,25 @@ func sheetSafeCell(value any) any {
 func normalizeSheetRows(rows []any, header []string) ([]any, string) {
 	normalized := make([]any, 0, len(rows))
 	if header != nil {
+		knownColumns := make(map[string]bool, len(header))
+		for _, name := range header {
+			knownColumns[name] = true
+		}
 		for _, raw := range rows {
-			switch row := raw.(type) {
-			case map[string]any:
+			if row, ok := raw.(map[string]any); ok {
+				for name := range row {
+					if !knownColumns[name] {
+						return nil, "sheet.append object row contains columns outside the sheet header"
+					}
+				}
 				copyRow := make(map[string]any, len(header))
 				for _, name := range header {
 					copyRow[name] = sheetSafeCell(row[name])
 				}
 				normalized = append(normalized, copyRow)
-			case []any:
+				continue
+			}
+			if row, ok := arrayItems(raw); ok {
 				if len(row) > len(header) {
 					return nil, "sheet.append row has more cells than the sheet header"
 				}
@@ -127,16 +251,16 @@ func normalizeSheetRows(rows []any, header []string) ([]any, string) {
 					}
 				}
 				normalized = append(normalized, copyRow)
-			default:
-				return nil, "sheet.append rows must contain only objects or arrays"
+				continue
 			}
+			return nil, "sheet.append rows must contain only objects or arrays"
 		}
 		return normalized, ""
 	}
 
 	width := -1
 	for _, raw := range rows {
-		row, ok := raw.([]any)
+		row, ok := arrayItems(raw)
 		if !ok {
 			return nil, "sheet.append object rows require a header"
 		}
@@ -163,9 +287,19 @@ func sheetHeaderFor(rows []any, header []string) []string {
 	if len(header) > 0 {
 		return header
 	}
-	if first, ok := rows[0].(map[string]any); ok {
-		keys := make([]string, 0, len(first))
-		for key := range first {
+	if _, ok := rows[0].(map[string]any); ok {
+		unique := map[string]bool{}
+		for _, rawRow := range rows {
+			row, rowOK := rawRow.(map[string]any)
+			if !rowOK {
+				continue
+			}
+			for key := range row {
+				unique[key] = true
+			}
+		}
+		keys := make([]string, 0, len(unique))
+		for key := range unique {
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
@@ -190,6 +324,7 @@ func sheetTools() []Definition {
 		InputExample: map[string]any{
 			"name": "weekly-report", "rows": []any{map[string]any{"customer": "acme", "total": 42}},
 		},
+		Validate:  validateSheetInput,
 		WriteSide: true,
 		Execute: func(_ context.Context, _ map[string]any) (map[string]any, error) {
 			return map[string]any{"ok": false, "provider": "noop", "error": "integration tools require run context"}, nil
@@ -204,13 +339,11 @@ func executeSheetAppend(ctx context.Context, input map[string]any, deps *Integra
 			deps.Record("sheet.append", "", ok, 0, errMessage, int(time.Since(start).Milliseconds()))
 		}
 	}
-	rows, rowsOk := input["rows"].([]any)
-	if !rowsOk || len(rows) == 0 {
-		return map[string]any{"ok": false, "provider": "noop", "error": "sheet.append requires non-empty rows"}
+	if err := validateSheetInput(input, InputValidationOptions{RequireAll: true}); err != nil {
+		record(false, err.Error())
+		return map[string]any{"ok": false, "provider": "noop", "error": err.Error()}
 	}
-	if len(rows) > sheetMaxRowsPerCall {
-		return map[string]any{"ok": false, "provider": "noop", "error": "sheet.append accepts at most 1000 rows per call"}
-	}
+	rows, _ := arrayItems(input["rows"])
 	orgID := ""
 	if deps != nil && deps.OrgID != nil {
 		orgID = deps.OrgID()

@@ -122,3 +122,75 @@ func TestReadinessMcpToolApprovalGate(t *testing.T) {
 		}
 	}
 }
+
+func TestApprovalMustDominateEveryPathToSensitiveAction(t *testing.T) {
+	wf := &Workflow{
+		ID: "wf", Name: "w", DSLVersion: "1.0",
+		Nodes: []Node{
+			{ID: "approved_root", Type: "noop", Config: map[string]any{}},
+			{ID: "approval", Type: "approval", Config: map[string]any{}},
+			{ID: "bypass_root", Type: "noop", Config: map[string]any{}},
+			{ID: "write", Type: "http", Config: map[string]any{"method": "POST"}},
+		},
+		Edges: []Edge{
+			{From: "approved_root", To: "approval"},
+			{From: "approval", To: "write"},
+			{From: "bypass_root", To: "write"},
+		},
+	}
+	if HasApprovalAncestorIn(wf, "write") {
+		t.Fatal("an approval on only one incoming path must not authorize the bypass path")
+	}
+	issue := findReadiness(CheckWorkflowReadiness(wf, ReadinessOptions{}).Issues,
+		"sensitive_action_missing_approval")
+	if issue == nil || issue.NodeID != "write" {
+		t.Fatalf("bypass path must retain the readiness warning: %+v", issue)
+	}
+
+	wf.Edges = append(wf.Edges[:2], Edge{From: "bypass_root", To: "approval"})
+	if !HasApprovalAncestorIn(wf, "write") {
+		t.Fatal("one unavoidable approval must dominate every path into the write")
+	}
+}
+
+func TestAgentWriteOptInRequiresDominatingApproval(t *testing.T) {
+	bare := &Workflow{
+		ID: "wf", Name: "w", DSLVersion: "1.0",
+		Nodes: []Node{{
+			ID: "agent", Type: "agent",
+			Config: map[string]any{"allowWriteTools": true},
+		}},
+	}
+	issue := findReadiness(CheckWorkflowReadiness(bare, ReadinessOptions{}).Issues,
+		"sensitive_action_missing_approval")
+	if issue == nil || issue.NodeID != "agent" {
+		t.Fatalf("write-enabled agent without approval must be visible: %+v", issue)
+	}
+
+	readOnly := &Workflow{
+		ID: "wf", Name: "w", DSLVersion: "1.0",
+		Nodes: []Node{{ID: "agent", Type: "agent", Config: map[string]any{}}},
+	}
+	if issue := findReadiness(CheckWorkflowReadiness(readOnly, ReadinessOptions{}).Issues,
+		"sensitive_action_missing_approval"); issue != nil {
+		t.Fatalf("read-only agent must not claim write authority: %+v", issue)
+	}
+}
+
+func TestSuggestionSafetyUsesRegistryWriteMetadata(t *testing.T) {
+	wf := &Workflow{
+		ID: "wf", Name: "w", DSLVersion: "1.0",
+		Nodes: []Node{{
+			ID: "mutate", Type: "tool",
+			Config: map[string]any{"tool": "future.arbitrary", "input": map[string]any{}},
+		}},
+	}
+	safety := ComputeSuggestionSafetyWithOptions(wf, "mutate", ReadinessOptions{
+		IsWriteSideTool: func(tool string, _ map[string]any) bool {
+			return tool == "future.arbitrary"
+		},
+	})
+	if !safety.WriteSide || !safety.ApprovalRequired || safety.ApprovalPresent {
+		t.Fatalf("registry write metadata must govern recovery safety: %+v", safety)
+	}
+}

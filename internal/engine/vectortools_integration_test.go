@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,7 +38,12 @@ func TestVectorToolsThroughRuns(t *testing.T) {
 	}
 	defer pool.Close()
 	eng := New(pool)
-	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	const resolvedSecret = "opaque-vector-secret-918274"
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{
+		LookupSecret: func(name string) (string, bool) {
+			return resolvedSecret, name == "VECTOR_TOKEN"
+		},
+	})
 	workerCtx, stop := context.WithCancel(context.Background())
 	defer stop()
 	go func() { _ = eng.RunWorkers(workerCtx, 2, 20*time.Millisecond, dispatcher.Execute, quietLogger()) }()
@@ -87,11 +93,16 @@ func TestVectorToolsThroughRuns(t *testing.T) {
 
 	// 2. Consent ON: upsert lands, search finds it.
 	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
+	var promptMu sync.Mutex
+	var embeddingPrompts []string
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Prompt string `json:"prompt"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		promptMu.Lock()
+		embeddingPrompts = append(embeddingPrompts, body.Prompt)
+		promptMu.Unlock()
 		vector := make([]float64, 1024)
 		for i, ch := range body.Prompt {
 			vector[i%1024] += float64(ch%23) / 23
@@ -110,15 +121,46 @@ func TestVectorToolsThroughRuns(t *testing.T) {
 	seed("memory.embeddingBaseUrl", fmt.Sprintf("%q", ollama.URL), "string")
 
 	result = runTool("wf-vec-up", "vector.upsert", map[string]any{
-		"content": "el backoff arregló los timeouts", "metadata": map[string]any{"origen": "smoke"},
+		"content":  "el backoff {{secret.VECTOR_TOKEN}} arregló los timeouts",
+		"metadata": map[string]any{"origen": "smoke", "opaque": "Bearer {{secret.VECTOR_TOKEN}}"},
 	}, "")
 	if result["ok"] != true || result["id"] == nil {
 		t.Fatalf("consented upsert: %+v", result)
 	}
-	result = runTool("wf-vec-search", "vector.search", map[string]any{"query": "timeouts y backoff"}, "")
+	var storedContent string
+	var storedMetadata []byte
+	var storedWorkflowID string
+	if err := pool.QueryRow(ctx, `SELECT content, metadata, COALESCE(workflow_id, '') FROM memory_entries
+		WHERE org_id = $1 AND kind = 'workflow_vector'`, org).Scan(&storedContent, &storedMetadata, &storedWorkflowID); err != nil {
+		t.Fatalf("stored memory: %v", err)
+	}
+	if storedWorkflowID != "wf-vec-up" {
+		t.Fatalf("vector memory lost workflow attribution: %q", storedWorkflowID)
+	}
+	if strings.Contains(storedContent, resolvedSecret) || strings.Contains(string(storedMetadata), resolvedSecret) {
+		t.Fatalf("resolved secret reached memory: content=%q metadata=%s", storedContent, storedMetadata)
+	}
+	if !strings.Contains(storedContent, grammar.RedactedPlaceholder) || !strings.Contains(string(storedMetadata), grammar.RedactedPlaceholder) {
+		t.Fatalf("memory must preserve explicit redaction evidence: content=%q metadata=%s", storedContent, storedMetadata)
+	}
+
+	result = runTool("wf-vec-search", "vector.search", map[string]any{
+		"query": "{{secret.VECTOR_TOKEN}} timeouts y backoff",
+	}, "")
 	entries := result["entries"].([]any)
 	if len(entries) != 1 || !strings.Contains(entries[0].(map[string]any)["content"].(string), "backoff") {
 		t.Fatalf("search must find the upsert: %+v", entries)
+	}
+	promptMu.Lock()
+	prompts := append([]string(nil), embeddingPrompts...)
+	promptMu.Unlock()
+	if len(prompts) < 2 {
+		t.Fatalf("expected commit and recall embedding prompts: %v", prompts)
+	}
+	for _, prompt := range prompts {
+		if strings.Contains(prompt, resolvedSecret) {
+			t.Fatalf("resolved secret reached embedding provider: %q", prompt)
+		}
 	}
 
 	// 3. Validation replay: the WRITE side skips (no new row).

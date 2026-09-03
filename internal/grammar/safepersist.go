@@ -13,6 +13,7 @@ package grammar
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"strconv"
 	"unicode/utf8"
@@ -73,42 +74,121 @@ func SafePersistPayload(value any, opts PersistOptions) json.RawMessage {
 	return BoundPersistPayload(raw, cap)
 }
 
-// NormalizeJSON round-trips non-basic values through JSON so the redaction
-// walkers see plain maps/slices regardless of the caller's types.
+// NormalizeJSON returns a value tree whose containers are visible to the
+// redaction walkers. A fully transparent JSON tree is returned unchanged;
+// typed maps/slices, structs, RawMessages, aliases, and other opaque values
+// force a whole-tree JSON round trip so an opaque child cannot conceal a
+// sensitive key or resolved value. Unsupported, cyclic, invalid-number, or
+// panicking marshalers fail closed to an empty object.
 func NormalizeJSON(value any) any {
-	switch value.(type) {
-	case nil, bool, float64, string, map[string]any, []any:
+	if isTransparentJSONTree(value, 0) {
 		return value
+	}
+	raw, ok := marshalJSON(value)
+	if !ok {
+		return map[string]any{}
+	}
+	var out any
+	if json.Unmarshal(raw, &out) != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+// normalizeFastPathMaxDepth bounds the zero-allocation transparency scan.
+// Deeper valid JSON falls back to encoding/json; cyclic maps/slices also fall
+// back, where encoding/json rejects them instead of letting recursion escape.
+const normalizeFastPathMaxDepth = 64
+
+func isTransparentJSONTree(value any, depth int) bool {
+	if depth > normalizeFastPathMaxDepth {
+		return false
+	}
+	switch typed := value.(type) {
+	case nil, bool, string,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, uintptr:
+		return true
+	case float32:
+		return !math.IsNaN(float64(typed)) && !math.IsInf(float64(typed), 0)
+	case float64:
+		return !math.IsNaN(typed) && !math.IsInf(typed, 0)
+	case []any:
+		for _, item := range typed {
+			if !isTransparentJSONTree(item, depth+1) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		for _, item := range typed {
+			if !isTransparentJSONTree(item, depth+1) {
+				return false
+			}
+		}
+		return true
 	default:
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return value
-		}
-		var out any
-		if json.Unmarshal(raw, &out) != nil {
-			return value
-		}
-		return out
+		return false
 	}
 }
 
-// BoundPersistPayload returns raw unchanged when it fits, or the
-// contract's truncation sentinel with the leading half-cap bytes as
-// preview, cut on a rune boundary.
+func marshalJSON(value any) (raw []byte, ok bool) {
+	defer func() {
+		if recover() != nil {
+			raw, ok = nil, false
+		}
+	}()
+	raw, err := json.Marshal(value)
+	return raw, err == nil
+}
+
+// BoundPersistPayload returns raw unchanged when it fits, or a truncation
+// sentinel that itself fits inside maxBytes. The preview is chosen with a
+// binary search over the already-marshaled JSON prefix because quoting that
+// prefix a second time can expand backslashes and quotes. A fixed "half the
+// cap" preview therefore is not, by itself, a real byte bound.
 func BoundPersistPayload(raw json.RawMessage, maxBytes int) json.RawMessage {
 	if len(raw) <= maxBytes {
 		return raw
 	}
-	sentinel, err := json.Marshal(map[string]any{
-		"__truncated":   true,
-		"originalBytes": len(raw),
-		"maxBytes":      maxBytes,
-		"preview":       slicePersistUTF8(string(raw), maxBytes/persistPreviewDivisor),
-	})
-	if err != nil {
-		return json.RawMessage(`{"__truncated":true}`)
+	build := func(previewBytes int) json.RawMessage {
+		sentinel, err := json.Marshal(map[string]any{
+			"__truncated":   true,
+			"originalBytes": len(raw),
+			"maxBytes":      maxBytes,
+			"preview":       slicePersistUTF8(string(raw), previewBytes),
+		})
+		if err != nil {
+			return nil
+		}
+		return sentinel
 	}
-	return sentinel
+
+	// Preserve the historical half-cap privacy/diagnostic ceiling, but shrink
+	// further when JSON escaping plus sentinel metadata would cross the cap.
+	low, high := 0, min(len(raw), maxBytes/persistPreviewDivisor)
+	best := build(0)
+	if len(best) == 0 || len(best) > maxBytes {
+		minimal := json.RawMessage(`{"__truncated":true}`)
+		if len(minimal) <= maxBytes {
+			return minimal
+		}
+		// Pathological caller caps smaller than the marker cannot carry both a
+		// valid marker and the promised byte bound. Return the smallest JSON
+		// object; production call sites use caps of at least several KiB.
+		return json.RawMessage(`{}`)
+	}
+	for low <= high {
+		mid := low + (high-low)/2
+		candidate := build(mid)
+		if len(candidate) > 0 && len(candidate) <= maxBytes {
+			best = candidate
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+	return best
 }
 
 // slicePersistUTF8 cuts s to at most limit bytes without splitting a rune.

@@ -475,6 +475,65 @@ func TestMcpRecoveryDiagnosisAIRespectsExplicitPermissionCeiling(t *testing.T) {
 	}
 }
 
+func TestMcpRecoveryDiagnosisReadmitsRepairAgainstRecordedBudget(t *testing.T) {
+	pool := poolForTest(t)
+	var calls atomic.Int64
+	var orgID string
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if call := calls.Add(1); call != 1 {
+			t.Errorf("MCP provider repair call %d escaped per-call admission", call)
+		}
+		if _, err := pool.Exec(r.Context(), `INSERT INTO usage_events
+			(id, org_id, metric, quantity, metadata)
+			VALUES ($1, $2, 'llm.completion', 1, '{"costUsd":1}')`,
+			"usage-mcp-diagnosis-"+orgID, orgID); err != nil {
+			t.Errorf("record crossed MCP diagnosis budget: %v", err)
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicMCPReply(`{"summary":"unsafe","actions":["approve"]}`))
+	}))
+	t.Cleanup(provider.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", provider.URL)
+
+	session, sessionOrg := newMCPSession(t)
+	orgID = sessionOrg
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type) VALUES
+		($1, $2, 'ai.budgetMonthlyUsd', '0.5', 'ai', 'test', 'number'),
+		($3, $2, 'ai.budgetExceededPolicy', '"block"', 'ai', 'test', 'string')`,
+		orgID+"-diagnosis-budget", orgID, orgID+"-diagnosis-policy"); err != nil {
+		t.Fatalf("seed MCP diagnosis budget: %v", err)
+	}
+	runID := "mcp-budget-run-" + uuid.NewString()
+	caseID := "mcp-budget-case-" + uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO runs
+		(id,org_id,workflow_version_id,status,input_json) VALUES ($1,$2,'version','waiting','{}')`, runID, orgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO recovery_cases
+		(id,org_id,run_id,workflow_id,workflow_version_id,source,detector_id,source_node_id,detector_kind,action,message,state,revision)
+		VALUES ($1,$2,$3,'workflow','version','semantic_violation','detector','source','expression','quarantine','bounded mismatch','contained',1)`,
+		caseID, orgID, runID); err != nil {
+		t.Fatal(err)
+	}
+
+	result, payload := callTool(t, session, "recovery.cases.diagnose", map[string]any{
+		"caseId": caseID, "expectedRevision": 1,
+	})
+	if result.IsError || payload["mode"] != "deterministic_fallback" || calls.Load() != 1 {
+		t.Fatalf("MCP late diagnosis budget block: error=%v calls=%d payload=%+v", result.IsError, calls.Load(), payload)
+	}
+	var blocked int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id=$1 AND action='billing.budget.exceeded'`, orgID).Scan(&blocked); err != nil || blocked != 1 {
+		t.Fatalf("MCP repair budget denial must be audited once: count=%d err=%v", blocked, err)
+	}
+}
+
 func TestMcpWorkflowProposalBindsExactCatalogWithoutReturningDAG(t *testing.T) {
 	session, _ := newMCPSession(t)
 	res, proposed := callTool(t, session, "workflows.propose", map[string]any{

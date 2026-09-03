@@ -52,6 +52,24 @@ func TestResolutionRejectsOutOfContract(t *testing.T) {
 	if value, source := ResolveValue("ai.budgetExceededPolicy", rows, noEnv); source != "tenant" || value != "block" {
 		t.Fatalf("enum accept: %v %q", value, source)
 	}
+	// Stored rows pass through the same complete normalizer as writes. This
+	// protects against legacy/direct SQL rows after a policy is tightened.
+	rows = map[string]json.RawMessage{"ai.operatorGuidance": json.RawMessage(`"use postgres://user:pass@db/prod"`)}
+	if value, source := ResolveValue("ai.operatorGuidance", rows, noEnv); source != "default" || value != "" {
+		t.Fatalf("stored guidance secret must fall through: %v %q", value, source)
+	}
+	rows = map[string]json.RawMessage{"memory.allowedKinds": json.RawMessage(`"run_summary,unknown"`)}
+	if value, source := ResolveValue("memory.allowedKinds", rows, noEnv); source != "default" || value != "" {
+		t.Fatalf("stored custom-validator violation must fall through: %v %q", value, source)
+	}
+	rows = map[string]json.RawMessage{"email.provider": json.RawMessage(`" simulator "`)}
+	if value, source := ResolveValue("email.provider", rows, noEnv); source != "tenant" || value != "simulator" {
+		t.Fatalf("stored strings must normalize: %v %q", value, source)
+	}
+	rows = map[string]json.RawMessage{"ai.generationCandidates": json.RawMessage(`3.9`)}
+	if value, source := ResolveValue("ai.generationCandidates", rows, noEnv); source != "tenant" || value != float64(3) {
+		t.Fatalf("stored integers must normalize: %v %q", value, source)
+	}
 	// Unknown keys resolve to nothing.
 	if value, source := ResolveValue("not.a.key", nil, noEnv); value != nil || source != "" {
 		t.Fatalf("unknown key: %v %q", value, source)
@@ -68,7 +86,7 @@ func TestResolveAllCoversTheCatalog(t *testing.T) {
 func TestResolutionNormalizesEnvironmentValues(t *testing.T) {
 	envValues := map[string]string{
 		"JANUSLY_AI_GENERATION_CANDIDATES": "3.9",
-		"JANUSLY_LLM_PROVIDER":             " anthropic ",
+		"JANUSLY_MAILER_PROVIDER":          " simulator ",
 		"JANUSLY_MAILER_FROM":              " sender@example.com ",
 		"JANUSLY_MCP_ALLOWED_COMMANDS":     "",
 	}
@@ -81,8 +99,8 @@ func TestResolutionNormalizesEnvironmentValues(t *testing.T) {
 	if source != "env" || value != float64(3) {
 		t.Fatalf("integer env normalization: %v %q", value, source)
 	}
-	value, source = ResolveValue("ai.provider", nil, env)
-	if source != "env" || value != "anthropic" {
+	value, source = ResolveValue("email.provider", nil, env)
+	if source != "env" || value != "simulator" {
 		t.Fatalf("string env normalization: %v %q", value, source)
 	}
 	value, source = ResolveValue("email.from", nil, env)
@@ -101,5 +119,9 @@ func TestResolutionNormalizesEnvironmentValues(t *testing.T) {
 	envValues["JANUSLY_MAILER_FROM"] = "Bearer abc"
 	if value, source = ResolveValue("email.from", nil, env); source != "default" || value != "onboarding@resend.dev" {
 		t.Fatalf("secret-shaped env must fall through: %v %q", value, source)
+	}
+	envValues["OLLAMA_BASE_URL"] = "https://user:password@embeddings.example/path"
+	if value, source = ResolveValue("memory.embeddingBaseUrl", nil, env); source != "default" || value != "" {
+		t.Fatalf("invalid embedding URL env must fall through: %v %q", value, source)
 	}
 }

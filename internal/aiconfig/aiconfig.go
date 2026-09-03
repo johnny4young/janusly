@@ -10,8 +10,10 @@ package aiconfig
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/johnny4young/janusly/internal/ai"
 	"github.com/johnny4young/janusly/internal/orgconfig"
@@ -19,11 +21,15 @@ import (
 
 // Settings carries the catalog knobs callers enforce OUTSIDE the client.
 type Settings struct {
-	Provider        string
-	Model           string
-	PromptMaxChars  int
-	RateLimitPerMin int
+	Provider          string
+	Model             string
+	ProviderSimulated bool
+	PromptMaxChars    int
+	RateLimitPerMin   int
 }
+
+const completionProvider = "anthropic"
+const localSimulatorAPIKey = "janusly-local-simulator"
 
 // Resolve builds the tenant's chokepoint client + settings from the
 // catalog. db is any store.DBTX (pool or tx).
@@ -40,63 +46,93 @@ func ResolveForEvaluation(ctx context.Context, db orgconfig.Querier, orgID strin
 }
 
 func resolve(ctx context.Context, db orgconfig.Querier, orgID string, maxRetriesOverride *int) (ai.Client, Settings) {
-	provider, _ := orgconfig.LoadValue(ctx, db, orgID, "ai.provider").(string)
-	model, _ := orgconfig.LoadValue(ctx, db, orgID, "ai.anthropic.model").(string)
+	values := orgconfig.LoadValues(ctx, db, orgID,
+		"ai.anthropic.model", "ai.promptMaxChars", "ai.rateLimitPerMin",
+		"ai.timeoutMs", "ai.maxRetries", "ai.maxOutputUnits",
+	)
+	model, _ := values["ai.anthropic.model"].(string)
+	number := func(key string) int {
+		value, _ := values[key].(float64)
+		return int(value)
+	}
 	settings := Settings{
-		Provider:        provider,
+		Provider:        completionProvider,
 		Model:           model,
-		PromptMaxChars:  int(orgconfig.LoadNumber(ctx, db, orgID, "ai.promptMaxChars")),
-		RateLimitPerMin: int(orgconfig.LoadNumber(ctx, db, orgID, "ai.rateLimitPerMin")),
+		PromptMaxChars:  number("ai.promptMaxChars"),
+		RateLimitPerMin: number("ai.rateLimitPerMin"),
 	}
 
 	cfg := ai.Config{
 		Model:           model,
-		TimeoutMs:       int(orgconfig.LoadNumber(ctx, db, orgID, "ai.timeoutMs")),
-		MaxRetries:      int(orgconfig.LoadNumber(ctx, db, orgID, "ai.maxRetries")),
-		MaxOutputTokens: int(orgconfig.LoadNumber(ctx, db, orgID, "ai.maxOutputUnits")),
+		TimeoutMs:       number("ai.timeoutMs"),
+		MaxRetries:      number("ai.maxRetries"),
+		MaxOutputTokens: number("ai.maxOutputUnits"),
 	}
 	if maxRetriesOverride != nil {
 		cfg.MaxRetries = *maxRetriesOverride
 	}
-	// The runtime's supported completion posture is Anthropic-only (the
-	// contract's operating posture too). A tenant configured onto another
-	// provider gets an unconfigured client — every call degrades to the
-	// fallback contract instead of silently routing to Anthropic.
-	if provider == "anthropic" {
-		cfg.APIKey = os.Getenv("ANTHROPIC_API_KEY")
-	}
-	cfg.BaseURL, cfg.ProviderSimulated = simulatorBaseURL()
+	// Completion is an Anthropic capability, not a fake one-option tenant
+	// selector. An absent key leaves the client unconfigured and every caller
+	// follows the deterministic fallback contract.
+	cfg.APIKey = os.Getenv("ANTHROPIC_API_KEY")
+	applySimulatorConfig(&cfg)
+	settings.ProviderSimulated = cfg.ProviderSimulated
 	return ai.New(cfg), settings
+}
+
+func applySimulatorConfig(cfg *ai.Config) {
+	if cfg == nil {
+		return
+	}
+	if baseURL, requested, valid := simulatorEndpoint(); requested {
+		// A partially configured simulator must never fall through to the real
+		// Anthropic default endpoint while still carrying a live key. A valid
+		// simulator also receives a fixed non-secret credential, never the
+		// operator's Anthropic credential.
+		if !valid {
+			cfg.APIKey = ""
+		} else {
+			cfg.APIKey, cfg.BaseURL, cfg.ProviderSimulated = localSimulatorAPIKey, baseURL, true
+		}
+	}
 }
 
 // TruncatePrompt bounds a prompt to the tenant's ai.promptMaxChars —
 // over the cap it TRUNCATES (documented posture), never errors. Returns
 // the bounded prompt and whether truncation happened.
 func TruncatePrompt(prompt string, maxChars int) (string, bool) {
-	if maxChars <= 0 || len(prompt) <= maxChars {
+	if maxChars <= 0 || utf8.RuneCountInString(prompt) <= maxChars {
 		return prompt, false
 	}
-	cut := maxChars
-	for cut > 0 && (prompt[cut]&0xC0) == 0x80 { // don't split a rune
-		cut--
-	}
-	return prompt[:cut], true
+	return string([]rune(prompt)[:maxChars]), true
 }
 
-// simulatorBaseURL honours the contract's DOUBLE explicit gate: only
+// simulatorEndpoint honours the contract's DOUBLE explicit gate: only
 // JANUSLY_LOCAL_STACK=true AND JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true
 // enable a simulated provider endpoint, and only when anthropic is in
-// the simulated list. Simulated usage persists but never bills.
-func simulatorBaseURL() (string, bool) {
+// the simulated list. It distinguishes an invalid requested simulator from an
+// inert configuration so a missing/bad base URL can fail closed instead of
+// reverting to the real paid endpoint. Simulated usage persists but never bills.
+func simulatorEndpoint() (baseURL string, requested bool, valid bool) {
 	if os.Getenv("JANUSLY_LOCAL_STACK") != "true" ||
 		os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") != "true" {
-		return "", false
+		return "", false, false
 	}
 	simulated := strings.SplitSeq(os.Getenv("JANUSLY_LLM_SIMULATED_PROVIDERS"), ",")
 	for name := range simulated {
 		if strings.TrimSpace(name) == "anthropic" {
-			return os.Getenv("JANUSLY_LLM_SIMULATOR_BASE_URL"), true
+			baseURL = strings.TrimSpace(os.Getenv("JANUSLY_LLM_SIMULATOR_BASE_URL"))
+			parsed, err := url.Parse(baseURL)
+			if err != nil || parsed == nil || parsed.User != nil || parsed.Host == "" ||
+				(parsed.Scheme != "http" && parsed.Scheme != "https") {
+				return "", true, false
+			}
+			host := strings.ToLower(parsed.Hostname())
+			if host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com") {
+				return "", true, false
+			}
+			return baseURL, true, true
 		}
 	}
-	return "", false
+	return "", false, false
 }

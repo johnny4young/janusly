@@ -15,7 +15,7 @@ package tools
 import (
 	"context"
 	"fmt"
-	"math"
+	"strings"
 	"time"
 
 	"github.com/johnny4young/janusly/internal/zonedwindow"
@@ -24,6 +24,11 @@ import (
 // timeWindowMax bounds windows per call — enough for a weekly schedule
 // with splits.
 const timeWindowMax = 14
+
+const (
+	minUnixMillisecond = int64(-62_135_596_800_000) // 0001-01-01T00:00:00Z
+	maxUnixMillisecond = int64(253_402_300_799_999) // 9999-12-31T23:59:59.999Z
+)
 
 type localWindow struct {
 	days  []int
@@ -34,12 +39,10 @@ type localWindow struct {
 // parseEpochValue accepts an ISO-8601/RFC3339 string or a numeric epoch in
 // milliseconds — the contract's toEpochMs contract.
 func parseEpochValue(value any) (time.Time, error) {
+	if milliseconds, ok := boundedWholeNumber(value, minUnixMillisecond, maxUnixMillisecond); ok {
+		return time.UnixMilli(milliseconds).UTC(), nil
+	}
 	switch typed := value.(type) {
-	case float64:
-		if math.IsNaN(typed) || math.IsInf(typed, 0) {
-			return time.Time{}, fmt.Errorf("Invalid date/time: %v", typed) //nolint:staticcheck // contract message is the wire contract
-		}
-		return time.UnixMilli(int64(typed)).UTC(), nil
 	case string:
 		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z0700", "2006-01-02"} {
 			if parsed, err := time.Parse(layout, typed); err == nil {
@@ -53,7 +56,7 @@ func parseEpochValue(value any) (time.Time, error) {
 }
 
 func parseTimeWindows(raw any) ([]localWindow, error) {
-	items, ok := raw.([]any)
+	items, ok := arrayItems(raw)
 	if !ok || len(items) == 0 || len(items) > timeWindowMax {
 		return nil, fmt.Errorf("time.window requires 1..%d windows", timeWindowMax)
 	}
@@ -63,14 +66,14 @@ func parseTimeWindows(raw any) ([]localWindow, error) {
 		if !ok {
 			return nil, fmt.Errorf("time.window windows must be objects")
 		}
-		rawDays, ok := entry["days"].([]any)
+		rawDays, ok := arrayItems(entry["days"])
 		if !ok || len(rawDays) == 0 || len(rawDays) > 7 {
 			return nil, fmt.Errorf("time.window days must list 1..7 weekdays (0=Sunday..6=Saturday)")
 		}
 		days := make([]int, 0, len(rawDays))
 		for _, rawDay := range rawDays {
-			day, ok := rawDay.(float64)
-			if !ok || day != math.Trunc(day) || day < 0 || day > 6 {
+			day, ok := boundedWholeNumber(rawDay, 0, 6)
+			if !ok {
 				return nil, fmt.Errorf("time.window days must list 1..7 weekdays (0=Sunday..6=Saturday)")
 			}
 			days = append(days, int(day))
@@ -80,6 +83,30 @@ func parseTimeWindows(raw any) ([]localWindow, error) {
 		windows = append(windows, localWindow{days: days, start: start, end: end})
 	}
 	return windows, nil
+}
+
+func validateTimeWindowDefinition(input map[string]any, options InputValidationOptions) error {
+	if !options.AllowWholeTemplates {
+		return nil
+	}
+	if raw, present := input["timeZone"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		if value == "" || value != strings.TrimSpace(value) {
+			return fmt.Errorf("timeZone must be a canonical IANA time zone")
+		}
+		if _, err := time.LoadLocation(value); err != nil {
+			return fmt.Errorf("Invalid IANA time zone: %s", value) //nolint:staticcheck // contract message is intentionally stable
+		}
+	}
+	if raw, present := input["windows"]; present && !validatePagerDutyWindows(raw, options) {
+		return fmt.Errorf("time.window requires 1..%d valid, unambiguous windows", timeWindowMax)
+	}
+	if raw, present := input["at"]; present && raw != nil && !isDeferredWholeTemplate(raw, options) {
+		if _, err := parseEpochValue(raw); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func timeWindowTools() []Definition {
@@ -108,13 +135,14 @@ func timeWindowTools() []Definition {
 			Fields: []Field{
 				{Name: "timeZone", Type: "string", Required: true},
 				{Name: "windows", Type: "array", Required: true},
-				{Name: "at", Type: "string"},
+				{Name: "at", Type: "json", AcceptedTypes: []string{"string", "number"}},
 			},
 			InputExample: map[string]any{
 				"timeZone": "America/Bogota",
 				"windows":  []any{map[string]any{"days": []any{1.0, 2.0, 3.0, 4.0, 5.0}, "start": "09:00", "end": "17:00"}},
 			},
-			Execute: executeTimeWindow,
+			Validate: validateTimeWindowDefinition,
+			Execute:  executeTimeWindow,
 		},
 	}
 }

@@ -251,6 +251,8 @@ func finalizeAuthoringProposal(
 	guardReason := ""
 	if mode == "ai" && workflow != nil {
 		switch {
+		case workflowContainsUnsafeProviderSecret(workflow):
+			guardReason = "unsafe_provider_secret_material"
 		case authoring.HasUnboundCapabilityIdentity(graphBindings):
 			guardReason = "unsafe_provider_capability_reference"
 		case bindingHasReason(bindings, "proposed_effect_not_declared"):

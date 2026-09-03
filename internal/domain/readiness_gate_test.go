@@ -25,8 +25,8 @@ func issueByCode(result ReadinessResult, code string) *ReadinessIssue {
 
 // Each case cites the contract rule it ports (workflow-readiness.ts).
 func TestReadinessRules(t *testing.T) {
-	writeSide := func(tool string, _ map[string]any) bool { return tool == "fake.write" }
-	external := func(tool string) bool { return tool == "fake.read" || tool == "fake.write" }
+	writeSide := func(tool string, _ map[string]any) bool { return tool == "fake.write" || tool == "fake.mutate" }
+	external := func(tool string) bool { return tool == "fake.read" || tool == "fake.write" || tool == "fake.mutate" }
 	opts := ReadinessOptions{IsWriteSideTool: writeSide, IsExternalTool: external}
 
 	cases := []struct {
@@ -61,6 +61,13 @@ func TestReadinessRules(t *testing.T) {
 			absentCode: "external_node_missing_retry",
 		},
 		{
+			name: "unknown http method fails closed as write-side",
+			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"dav","type":"http",
+				"config":{"url":"https://x.test","method":"PROPFIND","timeoutMs":1}}],"edges":[]}`,
+			wantCode: "sensitive_action_missing_approval", severity: "warn",
+			absentCode: "external_node_missing_retry",
+		},
+		{
 			name: "local tool without retry stays local",
 			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"clock","type":"tool",
 				"config":{"tool":"fake.local","input":{}}}],"edges":[]}`,
@@ -77,6 +84,32 @@ func TestReadinessRules(t *testing.T) {
 			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"send","type":"tool",
 				"config":{"tool":"fake.write","input":{}}}],"edges":[]}`,
 			wantCode: "tool_result_policy_missing", severity: "fail",
+		},
+		{
+			name: "registry write bit governs arbitrary tool approval",
+			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"mutate","type":"tool",
+				"config":{"tool":"fake.mutate","input":{},"resultPolicy":"require_ok"}}],"edges":[]}`,
+			wantCode: "sensitive_action_missing_approval", severity: "warn",
+		},
+		{
+			name: "for-each inherits the selected tool write bit",
+			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"batch","type":"loop",
+				"config":{"mode":"for_each","items":[1],"tool":"fake.mutate","input":{}}}],"edges":[]}`,
+			wantCode: "sensitive_action_missing_approval", severity: "warn",
+		},
+		{
+			name: "for-each over a read tool is not a sensitive action",
+			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"batch","type":"loop",
+				"config":{"mode":"for_each","items":[1],"tool":"fake.read","input":{}}}],"edges":[]}`,
+			absentCode: "sensitive_action_missing_approval",
+		},
+		{
+			name: "dominating approval covers a write-side for-each",
+			doc: `{"outputs":{"r":"x"},"nodes":[
+				{"id":"gate","type":"approval","config":{}},
+				{"id":"batch","type":"loop","config":{"mode":"for_each","items":[1],"tool":"fake.mutate","input":{}}}],
+				"edges":[{"from":"gate","to":"batch"}]}`,
+			absentCode: "sensitive_action_missing_approval",
 		},
 		{
 			name: "require_ok satisfies the policy",

@@ -15,7 +15,6 @@ grep -F 'http://janusly:9464/metrics' "$script" >/dev/null
 compose_config=$(mktemp "${TMPDIR:-/tmp}/janusly-compose-config.XXXXXX.json")
 trap 'rm -f -- "$compose_config"' EXIT
 JANUSLY_MEMORY_ENABLED=true \
-JANUSLY_EMBEDDING_PROVIDER=ollama \
 JANUSLY_EMBEDDING_MODEL=test-model \
 JANUSLY_FEEDBACK_MEMORY_WORKERS=6 \
 JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY=512 \
@@ -24,7 +23,7 @@ JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS=20000 \
 jq -e '
   .services.janusly.environment.JANUSLY_INTERNAL_HOST == "0.0.0.0" and
   .services.janusly.environment.JANUSLY_MEMORY_ENABLED == "true" and
-  .services.janusly.environment.JANUSLY_EMBEDDING_PROVIDER == "ollama" and
+  (.services.janusly.environment | has("JANUSLY_EMBEDDING_PROVIDER") | not) and
   .services.janusly.environment.JANUSLY_EMBEDDING_MODEL == "test-model" and
   .services.janusly.environment.JANUSLY_FEEDBACK_MEMORY_WORKERS == "6" and
   .services.janusly.environment.JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY == "512" and

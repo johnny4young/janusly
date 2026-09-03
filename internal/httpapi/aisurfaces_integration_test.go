@@ -182,6 +182,70 @@ func TestExplainWorkflowAiReceivesOperatorQuestion(t *testing.T) {
 	}
 }
 
+func TestAiSurfaceLocalFailuresDoNotConsumeProviderAdmission(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+
+	var providerCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerCalls.Add(1)
+		w.Header().Set("content-type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicReply("Grounded answer"))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1,$2,'ai.rateLimitPerMin','1','ai','test','number')`,
+		h.org+"-surface-rate", h.org); err != nil {
+		t.Fatalf("seed AI rate: %v", err)
+	}
+
+	// None of these requests can reach a provider: their local prerequisite is
+	// invalid or absent. They must not spend the sole provider admission.
+	if res := h.call("POST", "/ai/review-workflow", map[string]any{
+		"workflow": map[string]any{"id": "broken"},
+	}, ""); res.status != http.StatusOK || res.body["mode"] != "fallback" {
+		t.Fatalf("invalid review shape: %d %+v", res.status, res.body)
+	}
+	if res := h.call("POST", "/ai/suggest-improvement", map[string]any{
+		"workflow": map[string]any{"id": "broken"},
+	}, ""); res.status != http.StatusOK || res.body["mode"] != "fallback" {
+		t.Fatalf("invalid improvement shape: %d %+v", res.status, res.body)
+	}
+	if res := h.call("POST", "/ai/explain-run", map[string]any{
+		"runId": "missing-run",
+	}, ""); res.status != http.StatusNotFound {
+		t.Fatalf("missing run: %d %+v", res.status, res.body)
+	}
+	if got := providerCalls.Load(); got != 0 {
+		t.Fatalf("local failures reached provider: calls=%d", got)
+	}
+
+	workflow := map[string]any{
+		"id": "admitted-after-local-failures", "name": "Valid", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "start", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	if res := h.call("POST", "/ai/explain-workflow", map[string]any{
+		"workflow": workflow,
+	}, ""); res.status != http.StatusOK || res.body["mode"] != "ai" {
+		t.Fatalf("first real provider call should retain admission: %d %+v", res.status, res.body)
+	}
+	if got := providerCalls.Load(); got != 1 {
+		t.Fatalf("provider calls=%d, want one", got)
+	}
+	if res := h.call("POST", "/ai/explain-workflow", map[string]any{
+		"workflow": workflow,
+	}, ""); res.status != http.StatusTooManyRequests || res.body["code"] != "rate_limited" {
+		t.Fatalf("second provider call should exhaust the one-call bucket: %d %+v", res.status, res.body)
+	}
+}
+
 // The gates: ai.write (editor default) on all four mutations, editor RANK
 // additionally required by suggest-improvement; viewers bounce with the
 // permission 403 everywhere.
@@ -226,11 +290,13 @@ func TestAiSurfacesSimulatedAiMode(t *testing.T) {
 				`{"code":"missing_retry","severity":"warn","message":"http node b has no retry","rationale":"r","suggestion":"s","nodeId":"b"},`+
 				`{"code":"fake","severity":"catastrophic","message":"x","rationale":"r","suggestion":"s"},`+
 				`{"code":"ghost","severity":"fail","message":"x","rationale":"r","suggestion":"s","nodeId":"not-a-node"}]}`))
-		default: // suggest: one valid full replacement + one structurally invalid
+		default: // suggest: one valid replacement, one invalid, one identity swap
+			wrongIdentity := "{\\\"id\\\":\\\"invented-workflow\\\",\\\"name\\\":\\\"Wrong identity\\\",\\\"dslVersion\\\":\\\"1.0\\\",\\\"nodes\\\":[{\\\"id\\\":\\\"a\\\",\\\"type\\\":\\\"noop\\\",\\\"config\\\":{}}],\\\"edges\\\":[]}"
 			valid := `{\"id\":\"ai-surf-2\",\"name\":\"Improved\",\"dslVersion\":\"1.0\",\"nodes\":[{\"id\":\"a\",\"type\":\"noop\",\"config\":{}}],\"edges\":[]}`
 			invalid := `{\"id\":\"ai-surf-2\",\"nodes\":[{\"id\":\"a\",\"type\":\"noop\",\"config\":{}}],\"edges\":[{\"from\":\"a\",\"to\":\"ghost\"}]}`
 			_, _ = fmt.Fprint(w, anthropicReply(`{"rationale":"tighten it","suggestions":[`+
 				`{"patchedWorkflowJson":"`+invalid+`","rationale":"bad","approachLabel":"other","confidence":0.9},`+
+				`{"patchedWorkflowJson":"`+wrongIdentity+`","rationale":"identity swap","approachLabel":"replace","confidence":0.99},`+
 				`{"patchedWorkflowJson":"`+valid+`","rationale":"good","approachLabel":"simplify","confidence":0.7}]}`))
 		}
 	}))
@@ -279,7 +345,7 @@ func TestAiSurfacesSimulatedAiMode(t *testing.T) {
 	}
 	items, _ := suggested.body["suggestions"].([]any)
 	if len(items) != 1 {
-		t.Fatalf("the invalid replacement must be dropped: %+v", suggested.body)
+		t.Fatalf("invalid or identity-changing replacements must be dropped: %+v", suggested.body)
 	}
 	only := items[0].(map[string]any)
 	if only["rationale"] != "good" {
@@ -287,5 +353,37 @@ func TestAiSurfacesSimulatedAiMode(t *testing.T) {
 	}
 	if picked, _ := suggested.body["suggestedWorkflow"].(map[string]any); picked["name"] != "Improved" {
 		t.Fatalf("suggestedWorkflow must be the top validated pick: %+v", suggested.body["suggestedWorkflow"])
+	}
+}
+
+func TestAiImprovementRejectsEmptyValidatedCandidateSet(t *testing.T) {
+	h := newAPIHarness(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		wrongIdentity := `{\"id\":\"invented-workflow\",\"name\":\"Wrong identity\",\"dslVersion\":\"1.0\",\"nodes\":[{\"id\":\"a\",\"type\":\"noop\",\"config\":{}}],\"edges\":[]}`
+		_, _ = fmt.Fprint(w, anthropicReply(`{"rationale":"ship it","suggestions":[`+
+			`{"patchedWorkflowJson":"`+wrongIdentity+`","rationale":"replace identity","approachLabel":"replace","confidence":0.99}]}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+
+	workflow := map[string]any{
+		"id": "improvement-identity", "name": "Original", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "a", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	res := h.call("POST", "/ai/suggest-improvement", map[string]any{"workflow": workflow}, "")
+	if res.status != http.StatusOK || res.body["mode"] != "fallback" || res.body["aiError"] != "no_valid_suggestions" {
+		t.Fatalf("an AI reply without an executable candidate must degrade explicitly: %d %+v", res.status, res.body)
+	}
+	if items, _ := res.body["suggestions"].([]any); len(items) != 0 {
+		t.Fatalf("rejected candidates must never reach the wire: %+v", res.body)
+	}
+	if original, _ := res.body["suggestedWorkflow"].(map[string]any); original["id"] != workflow["id"] {
+		t.Fatalf("fallback must preserve the original workflow: %+v", res.body["suggestedWorkflow"])
 	}
 }

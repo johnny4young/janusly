@@ -12,10 +12,10 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,16 +24,20 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/httpcontract"
 )
 
 // HTTP bounds mirror the contract defaults.
 const (
-	httpDefaultTimeoutMs = 30_000
+	httpDefaultTimeoutMs = httpcontract.DefaultTimeoutMS
 	// A node-level override may lower the resolved tenant bound, but it may
 	// never remove the deadline or hold a worker through an entire deploy.
-	httpMaxTimeoutMs       = 600_000
-	httpDefaultMaxBytes    = 1_000_000
-	httpDefaultMaxRedirect = 5
+	httpMaxTimeoutMs       = httpcontract.MaxTimeoutMS
+	httpDefaultMaxBytes    = httpcontract.DefaultMaxResponseBytes
+	httpMaxResponseBytes   = httpcontract.MaxResponseBytes
+	httpDefaultMaxRedirect = httpcontract.DefaultMaxRedirects
+	httpMaxRedirects       = httpcontract.MaxRedirects
 	httpJSONProjectionMax  = 64 * 1024
 )
 
@@ -242,12 +246,43 @@ func (e *ExecErrorShape) ErrorStatusCode() int { return e.StatusCode }
 // ErrorDetails exposes bounded structured diagnostics for persistence.
 func (e *ExecErrorShape) ErrorDetails() any { return e.Details }
 
-func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
-	rawURL, _ := in.Config["url"].(string)
-	method := "GET"
-	if m, ok := in.Config["method"].(string); ok && m != "" {
-		method = strings.ToUpper(m)
+// httpMethodWriteSide is deliberately a safe-method allowlist. Extension and
+// unknown methods can mutate external state and therefore cannot inherit the
+// retry posture of GET merely because they were absent from a denylist.
+func httpMethodWriteSide(method string) bool {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case "", "GET", "HEAD", "OPTIONS":
+		return false
+	default:
+		return true
 	}
+}
+
+// markHTTPWriteSide preserves a rich error's classification while attaching
+// the retry-stopping marker. client.Do is the ambiguity boundary: once it is
+// entered, a mutating request may have reached the peer even when no response
+// (or only a partial response) reaches Janusly.
+func markHTTPWriteSide(err error) error {
+	if err == nil {
+		return nil
+	}
+	var shape *ExecErrorShape
+	if errors.As(err, &shape) {
+		return &ExecErrorShape{
+			Message: err.Error(), Name: shape.Name, Code: shape.Code,
+			StatusCode: shape.StatusCode, Details: shape.Details, WriteSide: true,
+		}
+	}
+	return &ExecErrorShape{Message: err.Error(), WriteSide: true}
+}
+
+func (e *httpExecutor) execute(ctx context.Context, in Input) (result any, execErr error) {
+	resolvedConfig, err := httpcontract.ResolveNodeConfig(in.Config, false)
+	if err != nil {
+		return nil, err
+	}
+	rawURL := resolvedConfig.URL
+	method := resolvedConfig.Method
 	// The sandbox gate: a validation replay skips write-side methods —
 	// read-side GET/HEAD still execute so validation produces real signal.
 	if in.DryRun && method != "GET" && method != "HEAD" && method != "OPTIONS" {
@@ -258,22 +293,18 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 	}
 	// Bound precedence: node config → tenant defaults (org config/env,
 	// resolved by the dispatcher) → platform constants.
-	timeoutMs := float64(httpDefaultTimeoutMs)
-	maxBytes := httpDefaultMaxBytes
-	maxRedirects := httpDefaultMaxRedirect
-	if in.HTTPBounds != nil {
-		timeoutMs = in.HTTPBounds.TimeoutMs
-		maxBytes = in.HTTPBounds.MaxResponseBytes
-		maxRedirects = in.HTTPBounds.MaxRedirects
+	resolvedBounds := httpcontract.Normalize(in.HTTPBounds)
+	timeoutMs := resolvedBounds.TimeoutMs
+	maxBytes := resolvedBounds.MaxResponseBytes
+	maxRedirects := resolvedBounds.MaxRedirects
+	if resolvedConfig.MaxResponseBytes != nil {
+		maxBytes = *resolvedConfig.MaxResponseBytes
 	}
-	if v, ok := in.Config["timeoutMs"].(float64); ok && v >= 1 {
-		timeoutMs = min(v, float64(httpMaxTimeoutMs))
+	if resolvedConfig.MaxRedirects != nil {
+		maxRedirects = *resolvedConfig.MaxRedirects
 	}
-	if v, ok := in.Config["maxResponseBytes"].(float64); ok {
-		maxBytes = int(v)
-	}
-	if v, ok := in.Config["maxRedirects"].(float64); ok {
-		maxRedirects = int(v)
+	if resolvedConfig.TimeoutMS != nil {
+		timeoutMs = float64(*resolvedConfig.TimeoutMS)
 	}
 
 	pins := &pinnedDialer{byHost: map[string]net.IP{}}
@@ -324,14 +355,16 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if headers, ok := in.Config["headers"].(map[string]any); ok {
-		for name, value := range headers {
-			if s, ok := value.(string); ok {
-				req.Header.Set(name, s)
-			}
-		}
+	for name, value := range resolvedConfig.Headers {
+		req.Header.Set(name, value)
 	}
 
+	requestDispatched := true
+	defer func() {
+		if execErr != nil && requestDispatched && httpMethodWriteSide(method) {
+			execErr = markHTTPWriteSide(execErr)
+		}
+	}()
 	res, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil || strings.Contains(err.Error(), "Client.Timeout") {
@@ -351,13 +384,10 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 	// Streaming opt-in: consume the body into a bounded preview instead of
 	// buffering it whole. The persisted output is JSON-safe — a string
 	// preview plus counters, never a live stream and never JSON-projected.
-	if mode, _ := in.Config["bodyMode"].(string); mode == "stream" {
-		previewCap := streamPreviewDefault
-		if in.HTTPBounds != nil && in.HTTPBounds.StreamPreviewBytes > 0 {
-			previewCap = in.HTTPBounds.StreamPreviewBytes
-		}
-		if v, ok := in.Config["streamPreviewBytes"].(float64); ok {
-			previewCap = int(math.Max(streamPreviewMin, math.Min(v, streamPreviewMax)))
+	if resolvedConfig.BodyMode == "stream" {
+		previewCap := resolvedBounds.StreamPreviewBytes
+		if resolvedConfig.StreamPreviewBytes != nil {
+			previewCap = *resolvedConfig.StreamPreviewBytes
 		}
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
 			return nil, &ExecErrorShape{
@@ -441,12 +471,6 @@ func effectivePort(u *url.URL) string {
 	}
 	return "80"
 }
-
-const (
-	streamPreviewDefault = 65_536
-	streamPreviewMin     = 1_024
-	streamPreviewMax     = 1_048_576
-)
 
 // consumeStreamToPreview drains the body counting every byte (the response
 // byte cap still aborts mid-stream) while buffering only the first

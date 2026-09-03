@@ -82,10 +82,13 @@ func TestCsvFetchFailurePaths(t *testing.T) {
 		t.Fatalf("non-2xx envelope: %+v", bad)
 	}
 
-	// Pre-stream rejection (unsupported scheme): statusCode 0, not truncated.
-	pre := csvFetch(t, map[string]any{"url": "ftp://example.com/x.csv"})
-	if pre["ok"] != false || pre["statusCode"] != 0 || pre["streamTruncated"] != false {
-		t.Fatalf("pre-stream envelope: %+v", pre)
+	// A literal unsupported scheme is rejected by the shared authoring/runtime
+	// contract before a network envelope can be mistaken for a provider call.
+	_, preErr := NewToolRegistry().Execute(context.Background(), "csv.fetch", map[string]any{
+		"url": "ftp://example.com/x.csv",
+	})
+	if preErr == nil || !strings.Contains(preErr.Error(), "absolute HTTP(S)") {
+		t.Fatalf("unsupported scheme validation: %v", preErr)
 	}
 
 	// Out-of-range bounds are validation errors, not envelopes.
@@ -94,5 +97,89 @@ func TestCsvFetchFailurePaths(t *testing.T) {
 		map[string]any{"url": big.URL, "sampleRows": float64(501)})
 	if err == nil || !strings.Contains(err.Error(), "sampleRows") {
 		t.Fatalf("bounds validation: %v", err)
+	}
+
+	malformed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Transfer-Encoding", "chunked")
+		_, _ = fmt.Fprint(w, "id,status\n1,open\n2,\"unterminated")
+	}))
+	t.Cleanup(malformed.Close)
+	decoded := csvFetch(t, map[string]any{"url": malformed.URL})
+	if decoded["ok"] != false || decoded["streamTruncated"] != true ||
+		!strings.Contains(decoded["error"].(string), "unterminated quoted field") || decoded["totalRows"] != 1 {
+		t.Fatalf("stream grammar failure must retain bounded partial evidence: %+v", decoded)
+	}
+}
+
+func TestCsvFetchDefinitionValidatesPersistedAndResolvedInputs(t *testing.T) {
+	registry := NewToolRegistry()
+	for _, test := range []struct {
+		name  string
+		input map[string]any
+		want  string
+	}{
+		{
+			name:  "blank URL",
+			input: map[string]any{"url": "   "},
+			want:  "url must be a non-empty string",
+		},
+		{
+			name:  "fractional sample",
+			input: map[string]any{"url": "https://example.com/data.csv", "sampleRows": 1.5},
+			want:  "sampleRows must be an integer",
+		},
+		{
+			name:  "non-string header",
+			input: map[string]any{"url": "https://example.com/data.csv", "headers": map[string]any{"X-Count": true}},
+			want:  `http.headers["X-Count"] must be a string`,
+		},
+		{
+			name:  "header injection",
+			input: map[string]any{"url": "https://example.com/data.csv", "headers": map[string]any{"X-Trace": "ok\r\nevil"}},
+			want:  "valid bounded HTTP names and values",
+		},
+		{
+			name:  "non-string filter",
+			input: map[string]any{"url": "https://example.com/data.csv", "filter": map[string]any{"status": true}},
+			want:  "string values",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := registry.ValidateInput("csv.fetch", test.input); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("validation = %v, want %q", err, test.want)
+			}
+		})
+	}
+
+	templated := map[string]any{
+		"url": "{{context.input.url}}", "sampleRows": "{{context.policy.output.sampleRows}}",
+	}
+	if err := registry.ValidateInput("csv.fetch", templated); err != nil {
+		t.Fatalf("save-time template references rejected: %v", err)
+	}
+	if err := registry.ValidateResolvedInput("csv.fetch", templated); err == nil || !strings.Contains(err.Error(), "sampleRows: Expected number") {
+		t.Fatalf("unresolved runtime input accepted: %v", err)
+	}
+}
+
+func TestCsvFetchAcceptsSafeInternalIntegerBounds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "id,status\n1,open\n2,closed\n")
+	}))
+	t.Cleanup(server.Close)
+
+	out := csvFetch(t, map[string]any{
+		"url": server.URL, "sampleRows": 1, "maxBytes": int64(4096),
+		"timeoutMs": uint32(2_000), "maxRedirects": 0,
+	})
+	if out["ok"] != true || len(out["sampleRows"].([]any)) != 1 {
+		t.Fatalf("safe integer representations drifted: %+v", out)
+	}
+}
+
+func TestCsvStreamRejectsAmbiguousHeader(t *testing.T) {
+	summary := streamCsvSummary(strings.NewReader("id,id\n1,2\n"), 10, 1024, nil)
+	if summary.ok || !summary.truncated || !strings.Contains(summary.err, "unique") || summary.totalRows != 0 {
+		t.Fatalf("duplicate headers must fail before row projection: %+v", summary)
 	}
 }

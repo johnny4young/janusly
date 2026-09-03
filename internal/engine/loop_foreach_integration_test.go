@@ -65,4 +65,35 @@ func TestForEachLoopThroughDispatcher(t *testing.T) {
 	if budgetEvents != 1 {
 		t.Fatalf("budget event count: %d", budgetEvents)
 	}
+	var memoryUsage int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM usage_events
+		WHERE org_id = $1 AND run_id = $2 AND metric = 'memory.commit'`, org, runID).Scan(&memoryUsage)
+	if memoryUsage != 2 {
+		t.Fatalf("for_each vector tool must receive memory deps for every item: usage rows=%d", memoryUsage)
+	}
+
+	// A write integration invoked from for_each receives the same tenant/run
+	// chokepoint as a direct tool node. The safe noop mailer proves the call
+	// reached provider resolution without making external egress.
+	emailDoc := `{"id":"wf-loop-email","name":"loop","dslVersion":"1.0","nodes":[
+		{"id":"batch","type":"loop","config":{
+			"mode":"for_each","tool":"email.send","items":["one@example.com"],
+			"input":{"to":"{{item}}","subject":"Loop dependency check","text":"No external delivery"},
+			"toleratedFailureCount":1}}
+	],"edges":[]}`
+	runID, err = eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, emailDoc)})
+	if err != nil {
+		t.Fatalf("start email loop: %v", err)
+	}
+	runDispatcherToTerminal(t, eng, pool, runID, "succeeded")
+	_ = pool.QueryRow(ctx, `SELECT state_json::text FROM run_nodes WHERE run_id = $1 AND node_id = 'batch'`, runID).Scan(&state)
+	if !strings.Contains(state, "Mailer not configured") || strings.Contains(state, "integration tools require run context") {
+		t.Fatalf("for_each integration deps were not propagated: %s", state)
+	}
+	var emailUsage int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM usage_events
+		WHERE org_id = $1 AND run_id = $2 AND metric = 'tool.email.send'`, org, runID).Scan(&emailUsage)
+	if emailUsage != 1 {
+		t.Fatalf("for_each integration usage attribution: %d", emailUsage)
+	}
 }

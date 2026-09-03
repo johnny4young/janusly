@@ -8,6 +8,28 @@ import (
 	"time"
 )
 
+func TestIntegrationChokepointValidatesInputBeforeCredentialOrEgress(t *testing.T) {
+	gateCalled := false
+	postCalled := false
+	deps := &IntegrationDeps{
+		Gate: func(context.Context, string, string, string, int) (string, string) {
+			gateCalled = true
+			return "secret", ""
+		},
+		Post: func(context.Context, string, map[string]string, []byte) (int, string, string) {
+			postCalled = true
+			return 200, `{}`, ""
+		},
+	}
+	result := ExecuteIntegrationTool(context.Background(), "slack.post", map[string]any{
+		"credential": false, "text": "hello",
+	}, deps)
+	if result["ok"] != false || gateCalled || postCalled ||
+		!strings.Contains(result["error"].(string), "credential: Expected string") {
+		t.Fatalf("invalid input crossed the integration boundary: %+v gate=%v post=%v", result, gateCalled, postCalled)
+	}
+}
+
 func TestGitHubCreateIssueContract(t *testing.T) {
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "")
 	ctx := context.Background()
@@ -47,7 +69,7 @@ func TestGitHubCreateIssueContract(t *testing.T) {
 		},
 	}
 	result := ExecuteIntegrationTool(ctx, "github.create_issue", map[string]any{
-		"credential": "bot-github", "owner": "weird/owner", "repo": "weird repo",
+		"credential": "bot-github", "owner": "weird-owner", "repo": "weird.repo",
 		"title": "Incident", "body": "Details", "labels": []any{"sev-1"},
 		"assignees": []string{"octocat"},
 	}, deps)
@@ -59,7 +81,7 @@ func TestGitHubCreateIssueContract(t *testing.T) {
 		gate.credential != "bot-github" || gate.rate != 17 {
 		t.Fatalf("credential gate: %+v", gate)
 	}
-	if posted.url != "https://api.github.com/repos/weird%2Fowner/weird%20repo/issues" ||
+	if posted.url != "https://api.github.com/repos/weird-owner/weird.repo/issues" ||
 		posted.headers["authorization"] != "Bearer ghp-never-echo" ||
 		posted.headers["x-github-api-version"] != "2022-11-28" ||
 		posted.body["title"] != "Incident" {
@@ -84,7 +106,7 @@ func TestGitHubCreateIssueContract(t *testing.T) {
 		"credential": "bot-github", "owner": "janusly", "repo": "demo", "title": "Incident",
 		"labels": []any{""},
 	}, deps)
-	if invalid["ok"] != false || !strings.Contains(invalid["error"].(string), "requires valid") {
+	if invalid["ok"] != false || !strings.Contains(invalid["error"].(string), "labels entries") {
 		t.Fatalf("invalid labels: %+v", invalid)
 	}
 
@@ -259,7 +281,8 @@ func TestIntegrationEnvelopeNeverThrows(t *testing.T) {
 		"credential": "x", "url": "https://example.com", "payload": map[string]any{},
 		"headers": map[string]any{"x-evil": "a\r\nb"},
 	}
-	if result := ExecuteIntegrationTool(ctx, "webhook.send", bad, deps); result["error"] != "invalid custom header" {
+	if result := ExecuteIntegrationTool(ctx, "webhook.send", bad, deps); result["ok"] != false ||
+		!strings.Contains(result["error"].(string), "valid names and values") {
 		t.Fatalf("CRLF must refuse: %+v", result)
 	}
 	many := map[string]any{}
@@ -267,8 +290,111 @@ func TestIntegrationEnvelopeNeverThrows(t *testing.T) {
 		many[strings.Repeat("h", i+1)] = "v"
 	}
 	bad["headers"] = many
-	if result := ExecuteIntegrationTool(ctx, "webhook.send", bad, deps); result["error"] != "max 10 custom headers" {
+	if result := ExecuteIntegrationTool(ctx, "webhook.send", bad, deps); result["ok"] != false ||
+		!strings.Contains(result["error"].(string), "at most 10") {
 		t.Fatalf("header cap must refuse: %+v", result)
+	}
+}
+
+func TestIntegrationSemanticValidationStopsCredentialAndEgress(t *testing.T) {
+	gateCalls := 0
+	postCalls := 0
+	deps := &IntegrationDeps{
+		Gate: func(context.Context, string, string, string, int) (string, string) {
+			gateCalls++
+			return "secret", ""
+		},
+		Post: func(context.Context, string, map[string]string, []byte) (int, string, string) {
+			postCalls++
+			return 200, `{}`, ""
+		},
+	}
+
+	tests := []struct {
+		name    string
+		tool    string
+		input   map[string]any
+		message string
+	}{
+		{
+			name: "slack empty content", tool: "slack.post",
+			input: map[string]any{"credential": "slack", "text": "   "}, message: "text or non-empty blocks",
+		},
+		{
+			name: "slack oversized text", tool: "slack.post",
+			input:   map[string]any{"credential": "slack", "text": strings.Repeat("x", slackTextMaxBytes+1)},
+			message: "text exceeds",
+		},
+		{
+			name: "github path traversal", tool: "github.create_issue",
+			input:   map[string]any{"credential": "github", "owner": "acme/ops", "repo": "incidents", "title": "Page"},
+			message: "URL-safe GitHub path segment",
+		},
+		{
+			name: "github multiline title", tool: "github.create_issue",
+			input:   map[string]any{"credential": "github", "owner": "acme", "repo": "incidents", "title": "Page\nnow"},
+			message: "single-line",
+		},
+		{
+			name: "github duplicate labels", tool: "github.create_issue",
+			input:   map[string]any{"credential": "github", "owner": "acme", "repo": "incidents", "title": "Page", "labels": []string{"Sev-1", "sev-1"}},
+			message: "unique case-insensitively",
+		},
+		{
+			name: "webhook non http URL", tool: "webhook.send",
+			input:   map[string]any{"credential": "webhook", "url": "file:///tmp/exfiltrate", "payload": map[string]any{}},
+			message: "absolute HTTP(S) URL",
+		},
+		{
+			name: "webhook userinfo", tool: "webhook.send",
+			input:   map[string]any{"credential": "webhook", "url": "https://user:pass@example.com/hook", "payload": map[string]any{}},
+			message: "absolute HTTP(S) URL",
+		},
+		{
+			name: "webhook reserved header", tool: "webhook.send",
+			input:   map[string]any{"credential": "webhook", "url": "https://example.com/hook", "payload": map[string]any{}, "headers": map[string]any{"Authorization": "secret"}},
+			message: "cannot override reserved",
+		},
+		{
+			name: "webhook duplicate header", tool: "webhook.send",
+			input:   map[string]any{"credential": "webhook", "url": "https://example.com/hook", "payload": map[string]any{}, "headers": map[string]any{"X-Trace": "one", "x-trace": "two"}},
+			message: "unique case-insensitively",
+		},
+		{
+			name: "webhook signature collision", tool: "webhook.send",
+			input:   map[string]any{"credential": "webhook", "url": "https://example.com/hook", "payload": map[string]any{}, "signatureHeader": "X-Signature", "headers": map[string]any{"x-signature": "forged"}},
+			message: "cannot override reserved or signature",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			beforeGate, beforePost := gateCalls, postCalls
+			result := ExecuteIntegrationTool(context.Background(), test.tool, test.input, deps)
+			if result["ok"] != false || !strings.Contains(result["error"].(string), test.message) {
+				t.Fatalf("unexpected validation envelope: %+v", result)
+			}
+			if gateCalls != beforeGate || postCalls != beforePost {
+				t.Fatalf("invalid input crossed boundary: gate %d→%d post %d→%d", beforeGate, gateCalls, beforePost, postCalls)
+			}
+		})
+	}
+}
+
+func TestIntegrationAuthoringAllowsMissingOrDeferredAlternatives(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.ValidatePartialInput("slack.post", map[string]any{"credential": "slack"}); err != nil {
+		t.Fatalf("incomplete proposal should remain representable: %v", err)
+	}
+	if err := registry.ValidateInput("slack.post", map[string]any{
+		"credential": "slack", "blocks": "{{context.compose.output.blocks}}",
+	}); err != nil {
+		t.Fatalf("deferred authoring binding should validate: %v", err)
+	}
+	if err := registry.ValidateResolvedInput("slack.post", map[string]any{
+		"credential": "slack", "blocks": []map[string]any{{"type": "section"}},
+	}); err != nil {
+		t.Fatalf("typed runtime slice should validate: %v", err)
 	}
 }
 
@@ -302,8 +428,25 @@ func TestEmailSendEnvelopes(t *testing.T) {
 	}
 	if result := ExecuteIntegrationTool(ctx, "email.send", map[string]any{
 		"to": "a@b.c", "subject": "hi",
-	}, deps); result["error"] != "email.send requires `text` or `html` (or both)." {
+	}, deps); result["ok"] != false || !strings.Contains(result["error"].(string), "text or html is required") {
 		t.Fatalf("text-or-html: %+v", result)
+	}
+	for name, input := range map[string]map[string]any{
+		"display mailbox":     {"to": "Alice <a@b.c>", "subject": "hi", "text": "body"},
+		"header injection":    {"to": "a@b.c", "subject": "hello\r\nBcc: attacker@example.com", "text": "body"},
+		"empty explicit body": {"to": "a@b.c", "subject": "hi", "html": "   "},
+		"unsafe metadata":     {"to": "a@b.c", "subject": "hi", "text": "body", "metadata": map[string]any{"bad key": "x"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			before := posted.url
+			invalid := ExecuteIntegrationTool(ctx, "email.send", input, deps)
+			if invalid["ok"] != false || !strings.Contains(invalid["error"].(string), "Invalid tool input") {
+				t.Fatalf("invalid email input: %+v", invalid)
+			}
+			if posted.url != before {
+				t.Fatalf("invalid input reached provider: before=%q after=%q", before, posted.url)
+			}
+		})
 	}
 
 	// Unconfigured → noop envelope, never a throw.
@@ -314,6 +457,15 @@ func TestEmailSendEnvelopes(t *testing.T) {
 		!strings.Contains(result["error"].(string), "Mailer not configured") {
 		t.Fatalf("noop default: %+v", result)
 	}
+
+	deps.Email = func() EmailSettings { return EmailSettings{From: "Bad <from@example.com>"} }
+	invalidFrom := ExecuteIntegrationTool(ctx, "email.send", map[string]any{
+		"to": "a@b.c", "subject": "hi", "text": "body",
+	}, deps)
+	if invalidFrom["ok"] != false || !strings.Contains(invalidFrom["error"].(string), "from address is invalid") {
+		t.Fatalf("invalid configured from: %+v", invalidFrom)
+	}
+	deps.Email = func() EmailSettings { return EmailSettings{} }
 
 	// Explicit simulator provider delivers through the guarded Post seam.
 	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")

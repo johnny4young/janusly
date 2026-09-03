@@ -11,6 +11,7 @@ package executors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 
@@ -21,7 +22,47 @@ import (
 // interception ladder and ALWAYS answers an envelope map — a thrown
 // registry error becomes {ok:false, error} (callers needing hard failure
 // semantics, like require_ok, re-raise from the envelope).
-func executeRegisteredTool(ctx context.Context, registry *tools.Registry, name string, input map[string]any, in Input) map[string]any {
+func executeRegisteredTool(ctx context.Context, registry *tools.Registry, httpExec Func, name string, input map[string]any, in Input) map[string]any {
+	// Validate the RENDERED input before every interception branch. Save-time
+	// validation cannot know the native type of a whole template reference,
+	// and neither vector seams nor dry-run skips may turn a type mismatch into
+	// an apparently successful invocation.
+	if err := registry.ValidateResolvedInput(name, input); err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	// http.request must be semantically identical whether selected by a tool,
+	// loop, or agent node. The shared HTTP executor is the only path that
+	// applies tenant bounds, method-aware dry-run behavior, SSRF protection,
+	// redirect policy, and write-side error classification together.
+	if name == "http.request" {
+		httpInput := in
+		httpInput.Config = maps.Clone(input)
+		output, err := httpExec(ctx, httpInput)
+		if err != nil {
+			result := map[string]any{"ok": false, "error": err.Error()}
+			var shape *ExecErrorShape
+			if errors.As(err, &shape) {
+				if shape.Code != "" {
+					result["code"] = shape.Code
+				}
+				if shape.StatusCode > 0 {
+					result["statusCode"] = shape.StatusCode
+				}
+				if shape.Details != nil {
+					result["details"] = shape.Details
+				}
+				if shape.WriteSide {
+					result["writeSide"] = true
+				}
+			}
+			return result
+		}
+		result := map[string]any{"ok": true}
+		if outputMap, ok := output.(map[string]any); ok {
+			maps.Copy(result, outputMap)
+		}
+		return result
+	}
 	if name == "vector.search" || name == "vector.upsert" {
 		return executeVectorTool(name, input, in.Memory)
 	}
@@ -45,7 +86,11 @@ func executeRegisteredTool(ctx context.Context, registry *tools.Registry, name s
 }
 
 // NewToolExecutor builds the tool-node executor over a registry.
-func NewToolExecutor(registry *tools.Registry) Func {
+func NewToolExecutor(registry *tools.Registry, httpExecutors ...Func) Func {
+	httpExec := NewHTTPExecutor(HTTPOptions{})
+	if len(httpExecutors) > 0 && httpExecutors[0] != nil {
+		httpExec = httpExecutors[0]
+	}
 	return func(ctx context.Context, in Input) (any, error) {
 		name, _ := in.Config["tool"].(string)
 		if name == "" {
@@ -57,7 +102,7 @@ func NewToolExecutor(registry *tools.Registry) Func {
 		}
 		policy, _ := in.Config["resultPolicy"].(string)
 
-		result := executeRegisteredTool(ctx, registry, name, input, in)
+		result := executeRegisteredTool(ctx, registry, httpExec, name, input, in)
 		if result["ok"] == false && policy == "require_ok" {
 			message, _ := result["error"].(string)
 			statusCode := 0
@@ -67,6 +112,11 @@ func NewToolExecutor(registry *tools.Registry) Func {
 			case float64:
 				statusCode = int(value)
 			}
+			writeSide := registry.IsWriteSide(name)
+			if name == "http.request" {
+				method, _ := input["method"].(string)
+				writeSide = httpMethodWriteSide(method)
+			}
 			return nil, &ExecErrorShape{
 				Message:    fmt.Sprintf("Tool %s returned an unsuccessful result: %s", name, message), //nolint:staticcheck // contract message is the wire contract
 				Name:       "ToolResultError",
@@ -75,7 +125,7 @@ func NewToolExecutor(registry *tools.Registry) Func {
 				// The envelope does not prove whether a write-side provider failed
 				// before or after accepting the effect. Conservatively suppress
 				// whole-node retries; an operator can inspect and redrive.
-				WriteSide: registry.IsWriteSide(name),
+				WriteSide: writeSide,
 			}
 		}
 		return map[string]any{"tool": name, "result": result}, nil

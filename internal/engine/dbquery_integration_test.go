@@ -46,11 +46,16 @@ func TestDbQueryToolsLoop(t *testing.T) {
 	org := fmt.Sprintf("org-db-%d", time.Now().UnixNano())
 
 	table := fmt.Sprintf("customer_orders_%d", time.Now().UnixNano())
+	sequence := fmt.Sprintf("customer_read_guard_%d", time.Now().UnixNano())
 	if _, err := pool.Exec(ctx, fmt.Sprintf(
 		`CREATE TABLE %s (id text primary key, status text not null, total numeric not null)`, table)); err != nil {
 		t.Fatalf("scratch table: %v", err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DROP TABLE IF EXISTS "+table) })
+	if _, err := pool.Exec(ctx, "CREATE SEQUENCE "+sequence); err != nil {
+		t.Fatalf("scratch sequence: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DROP SEQUENCE IF EXISTS "+sequence) })
 	if _, err := pool.Exec(ctx, fmt.Sprintf(
 		`INSERT INTO %s VALUES ('ord-1', 'pending', 99.50), ('ord-2', 'paid', 12.00)`, table)); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -87,7 +92,7 @@ func TestDbQueryToolsLoop(t *testing.T) {
 	}
 
 	// describe: only the scratch table, shaped columns.
-	result := call("db.schema.describe", map[string]any{"schema": "public", "tables": []any{table}})
+	result := call("db.schema.describe", map[string]any{"schema": "public", "tables": []string{table}})
 	if result["ok"] != true || len(result["tables"].([]any)) != 1 {
 		t.Fatalf("describe: %+v", result)
 	}
@@ -99,8 +104,8 @@ func TestDbQueryToolsLoop(t *testing.T) {
 	// read: parameterized + bounded (maxRows 1 → truncated).
 	result = call("db.query.read", map[string]any{
 		"sql":     fmt.Sprintf("select id, status from %s where status = $1 order by id", table),
-		"params":  []any{"pending"},
-		"maxRows": 1.0,
+		"params":  []string{"pending"},
+		"maxRows": 1,
 	})
 	if result["ok"] != true || len(result["rows"].([]any)) != 1 {
 		t.Fatalf("read: %+v", result)
@@ -110,6 +115,23 @@ func TestDbQueryToolsLoop(t *testing.T) {
 	})
 	if result["ok"] != true || result["truncated"] != true {
 		t.Fatalf("bounded read must truncate: %+v", result)
+	}
+
+	// SQL text classification is not an authority boundary: SELECT can call
+	// side-effecting functions. The database transaction itself must enforce
+	// read-only posture before the statement reaches PostgreSQL.
+	result = call("db.query.read", map[string]any{
+		"sql": "select nextval('" + sequence + "') as value",
+	})
+	if result["ok"] != false || !strings.Contains(strings.ToLower(result["error"].(string)), "read-only") {
+		t.Fatalf("read tool must reject side-effecting SELECT functions: %+v", result)
+	}
+	var sequenceCalled bool
+	if err := pool.QueryRow(ctx, "select is_called from "+sequence).Scan(&sequenceCalled); err != nil {
+		t.Fatalf("inspect guarded sequence: %v", err)
+	}
+	if sequenceCalled {
+		t.Fatal("db.query.read mutated a sequence despite its read-only contract")
 	}
 
 	// write: the customer row actually changes.

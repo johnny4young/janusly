@@ -33,7 +33,7 @@ func TestPromptOpsHotSwapAndResolver(t *testing.T) {
 		t.Fatalf("v1: %d %+v", v1.status, v1.body)
 	}
 	v2 := h.call("POST", "/prompts/triage/versions", map[string]any{
-		"templateText": "v2: analiza {{var.topic}} con {{include.tono}}",
+		"templateText": "v2: analiza {{var.topic}} con {{include.tono}} y {{include.tono}}",
 	}, "")
 	if v2.status != 201 {
 		t.Fatalf("v2: %d %+v", v2.status, v2.body)
@@ -53,7 +53,7 @@ func TestPromptOpsHotSwapAndResolver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve latest: %v", err)
 	}
-	if resolved != "v2: analiza errores con tono profesional" {
+	if resolved != "v2: analiza errores con tono profesional y tono profesional" {
 		t.Fatalf("latest resolution: %q", resolved)
 	}
 
@@ -94,5 +94,85 @@ func TestPromptOpsHotSwapAndResolver(t *testing.T) {
 		if got := countAudit(t, pool, h.org, action); got == 0 {
 			t.Fatalf("%s must audit", action)
 		}
+	}
+}
+
+func TestPromptOpsWriteContractRejectsUnaddressableNamesAndVariables(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+
+	for _, name := range []string{" triage", ".hidden", "triage/es", "triagé", strings.Repeat("x", 129)} {
+		res := h.call("POST", "/prompts", map[string]any{"name": name}, "")
+		if res.status != 400 || res.body["code"] != "prompts_name_invalid" {
+			t.Fatalf("invalid prompt name %q: %d %+v", name, res.status, res.body)
+		}
+	}
+
+	if res := h.call("POST", "/prompts", map[string]any{
+		"name": "unicode-description", "description": strings.Repeat("á", promptDescriptionMax),
+	}, ""); res.status != 201 {
+		t.Fatalf("description at character limit: %d %+v", res.status, res.body)
+	}
+	if res := h.call("POST", "/prompts", map[string]any{
+		"name": "long-description", "description": strings.Repeat("á", promptDescriptionMax+1),
+	}, ""); res.status != 400 || res.body["code"] != "prompts_description_too_long" {
+		t.Fatalf("description over character limit: %d %+v", res.status, res.body)
+	}
+
+	if res := h.call("POST", "/prompts", map[string]any{"name": "strict-vars"}, ""); res.status != 201 {
+		t.Fatalf("create strict-vars: %d %+v", res.status, res.body)
+	}
+	invalidVariables := []any{
+		nil,
+		map[string]any{"name": "topic"},
+		[]any{map[string]any{"name": "topic", "unknown": true}},
+		[]any{map[string]any{"name": "topic"}, map[string]any{"name": "topic"}},
+		[]any{map[string]any{"name": "topic/id"}},
+		[]any{map[string]any{"name": "topic", "default": strings.Repeat("x", prompts.MaxVariableDefaultBytes+1)}},
+	}
+	for i, variables := range invalidVariables {
+		res := h.call("POST", "/prompts/strict-vars/versions", map[string]any{
+			"templateText": "Analyze {{var.topic}}", "variables": variables,
+		}, "")
+		if res.status != 400 || res.body["code"] != "prompts_variables_invalid" {
+			t.Fatalf("invalid variables case %d: %d %+v", i, res.status, res.body)
+		}
+	}
+
+	if res := h.call("POST", "/prompts/.hidden/versions", map[string]any{
+		"templateText": "never persisted",
+	}, ""); res.status != 400 || res.body["code"] != "prompts_name_invalid" {
+		t.Fatalf("invalid path name: %d %+v", res.status, res.body)
+	}
+}
+
+func TestPromptOpsResolutionBoundsIncludeWorkAndOutput(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	ctx := t.Context()
+
+	create := func(name, template string) {
+		t.Helper()
+		if res := h.call("POST", "/prompts", map[string]any{"name": name}, ""); res.status != 201 {
+			t.Fatalf("create %s: %d %+v", name, res.status, res.body)
+		}
+		if res := h.call("POST", "/prompts/"+name+"/versions", map[string]any{
+			"templateText": template,
+		}, ""); res.status != 201 {
+			t.Fatalf("version %s: %d %+v", name, res.status, res.body)
+		}
+	}
+
+	create("large-piece", strings.Repeat("x", promptTemplateMax))
+	create("large-parent", strings.Repeat("{{include.large-piece}}", 5))
+	if _, err := prompts.ResolveTemplate(ctx, pool, h.org, "large-parent", 0, nil); err == nil ||
+		!strings.Contains(err.Error(), "resolved prompt exceeds") {
+		t.Fatalf("include amplification must reject: %v", err)
+	}
+
+	create("small-piece", "x")
+	create("many-parent", strings.Repeat("{{include.small-piece}}", prompts.MaxIncludeReferences+1))
+	if _, err := prompts.ResolveTemplate(ctx, pool, h.org, "many-parent", 0, nil); err == nil ||
+		!strings.Contains(err.Error(), "includes exceed") {
+		t.Fatalf("include work cap must reject: %v", err)
 	}
 }

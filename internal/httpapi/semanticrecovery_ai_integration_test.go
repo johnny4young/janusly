@@ -118,3 +118,43 @@ func TestRecoveryDiagnosisInvalidProviderOutputFallsBackAfterTwoCalls(t *testing
 		t.Fatalf("unsafe provider envelope reached artifact: %s", serialized)
 	}
 }
+
+func TestRecoveryDiagnosisReadmitsRepairAgainstRecordedBudget(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	caseID := "diagnosis-repair-budget-" + suffix
+	seedRecoveryCase(t, h.org, caseID, "missing-run", "detected")
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type) VALUES
+		($1, $2, 'ai.budgetMonthlyUsd', '0.5', 'ai', 'test', 'number'),
+		($3, $2, 'ai.budgetExceededPolicy', '"block"', 'ai', 'test', 'string')`,
+		h.org+"-diagnosis-budget", h.org, h.org+"-diagnosis-policy"); err != nil {
+		t.Fatalf("seed diagnosis budget: %v", err)
+	}
+
+	var calls atomic.Int64
+	configureDiagnosisSimulator(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if call := calls.Add(1); call != 1 {
+			t.Errorf("provider repair call %d escaped per-call admission", call)
+		}
+		if _, err := pool.Exec(r.Context(), `INSERT INTO usage_events
+			(id, org_id, metric, quantity, metadata)
+			VALUES ($1, $2, 'llm.completion', 1, '{"costUsd":1}')`,
+			"usage-diagnosis-budget-"+suffix, h.org); err != nil {
+			t.Errorf("record crossed diagnosis budget: %v", err)
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicReply(`{"summary":"unsafe","actions":["approve"]}`))
+	}))
+
+	res := h.call("POST", "/recovery/cases/"+caseID+"/diagnose", map[string]any{"expectedRevision": 1}, "")
+	if res.status != http.StatusOK || res.body["mode"] != "deterministic_fallback" || calls.Load() != 1 {
+		t.Fatalf("late diagnosis budget block: status=%d calls=%d body=%+v", res.status, calls.Load(), res.body)
+	}
+	var blocked int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id=$1 AND action='billing.budget.exceeded'`, h.org).Scan(&blocked); err != nil || blocked != 1 {
+		t.Fatalf("repair budget denial must be audited once: count=%d err=%v", blocked, err)
+	}
+}

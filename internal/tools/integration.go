@@ -27,6 +27,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 // IntegrationDeps are the engine-built runtime seams.
@@ -66,7 +69,204 @@ type IntegrationDeps struct {
 
 const webhookSignatureHeader = "x-janusly-signature"
 
+const (
+	integrationCredentialMaxRunes = 200
+	integrationPayloadMaxBytes    = 256 << 10
+	slackTextMaxBytes             = 40_000
+	githubOwnerRepoMaxRunes       = 100
+	githubTitleMaxRunes           = 256
+	githubBodyMaxBytes            = 256 << 10
+	githubListEntryMaxRunes       = 100
+	webhookURLMaxBytes            = 4_096
+)
+
 var crlfPattern = regexp.MustCompile(`[\r\n]`)
+
+var githubPathSegment = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+var forbiddenWebhookHeaders = map[string]bool{
+	"authorization": true, "connection": true, "content-length": true,
+	"content-type": true, "host": true, "proxy-authorization": true,
+	"te": true, "trailer": true, "transfer-encoding": true, "upgrade": true,
+}
+
+func validateTrimmedIdentifier(input map[string]any, field string, maxRunes int, options InputValidationOptions) error {
+	raw, present := input[field]
+	if !present || isDeferredWholeTemplate(raw, options) {
+		return nil
+	}
+	value, _ := raw.(string)
+	if value == "" || value != strings.TrimSpace(value) || utf8.RuneCountInString(value) > maxRunes {
+		return fmt.Errorf("%s must be a trimmed 1..%d character string", field, maxRunes)
+	}
+	return nil
+}
+
+func validateStringList(input map[string]any, field string, maximum, maxRunes int, options InputValidationOptions) error {
+	raw, present := input[field]
+	if !present || isDeferredWholeTemplate(raw, options) {
+		return nil
+	}
+	items, ok := arrayItems(raw)
+	if !ok || len(items) > maximum {
+		return fmt.Errorf("%s must contain at most %d strings", field, maximum)
+	}
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
+		value, ok := item.(string)
+		if !ok || value == "" || value != strings.TrimSpace(value) || utf8.RuneCountInString(value) > maxRunes {
+			return fmt.Errorf("%s entries must be trimmed 1..%d character strings", field, maxRunes)
+		}
+		canonical := strings.ToLower(value)
+		if seen[canonical] {
+			return fmt.Errorf("%s entries must be unique case-insensitively", field)
+		}
+		seen[canonical] = true
+	}
+	return nil
+}
+
+func validateSlackInput(input map[string]any, options InputValidationOptions) error {
+	if err := validateTrimmedIdentifier(input, "credential", integrationCredentialMaxRunes, options); err != nil {
+		return err
+	}
+	textRaw, textPresent := input["text"]
+	blocksRaw, blocksPresent := input["blocks"]
+	textPotential := textPresent && isDeferredWholeTemplate(textRaw, options)
+	blocksPotential := blocksPresent && isDeferredWholeTemplate(blocksRaw, options)
+	if textPresent && !textPotential {
+		text, _ := textRaw.(string)
+		if len(text) > slackTextMaxBytes {
+			return fmt.Errorf("text exceeds %d bytes", slackTextMaxBytes)
+		}
+		textPotential = strings.TrimSpace(text) != ""
+	}
+	if blocksPresent && !blocksPotential {
+		blocks, ok := arrayItems(blocksRaw)
+		if !ok || len(blocks) > 50 {
+			return fmt.Errorf("blocks must contain at most 50 objects")
+		}
+		for _, rawBlock := range blocks {
+			if block, ok := rawBlock.(map[string]any); !ok || block == nil {
+				return fmt.Errorf("blocks must contain only objects")
+			}
+		}
+		serialized, err := json.Marshal(blocksRaw)
+		if err != nil || len(serialized) > integrationPayloadMaxBytes {
+			return fmt.Errorf("blocks exceed %d bytes", integrationPayloadMaxBytes)
+		}
+		blocksPotential = len(blocks) > 0
+	}
+	// Partial authoring may omit both optional content fields, but once an
+	// author supplies either field it must already describe a deliverable
+	// message. This prevents an explicitly empty value from surviving draft
+	// validation only to fail at the egress boundary.
+	if !textPotential && !blocksPotential && (options.RequireAll || textPresent || blocksPresent) {
+		return fmt.Errorf("text or non-empty blocks is required")
+	}
+	if !isDeferredWholeTemplate(textRaw, options) && !isDeferredWholeTemplate(blocksRaw, options) {
+		payload := map[string]any{}
+		if textPresent {
+			payload["text"] = textRaw
+		}
+		if blocksPresent {
+			payload["blocks"] = blocksRaw
+		}
+		serialized, err := json.Marshal(payload)
+		if err != nil || len(serialized) > integrationPayloadMaxBytes {
+			return fmt.Errorf("message payload exceeds %d bytes", integrationPayloadMaxBytes)
+		}
+	}
+	return nil
+}
+
+func validateGitHubIssueInput(input map[string]any, options InputValidationOptions) error {
+	if err := validateTrimmedIdentifier(input, "credential", integrationCredentialMaxRunes, options); err != nil {
+		return err
+	}
+	for _, field := range []string{"owner", "repo"} {
+		if err := validateTrimmedIdentifier(input, field, githubOwnerRepoMaxRunes, options); err != nil {
+			return err
+		}
+		if raw, present := input[field]; present && !isDeferredWholeTemplate(raw, options) {
+			value, _ := raw.(string)
+			if !githubPathSegment.MatchString(value) || value == "." || value == ".." {
+				return fmt.Errorf("%s must be a URL-safe GitHub path segment", field)
+			}
+		}
+	}
+	if err := validateTrimmedIdentifier(input, "title", githubTitleMaxRunes, options); err != nil {
+		return err
+	}
+	if raw, present := input["title"]; present && !isDeferredWholeTemplate(raw, options) {
+		if crlfPattern.MatchString(raw.(string)) {
+			return fmt.Errorf("title must be single-line")
+		}
+	}
+	if raw, present := input["body"]; present && !isDeferredWholeTemplate(raw, options) {
+		if len(raw.(string)) > githubBodyMaxBytes {
+			return fmt.Errorf("body exceeds %d bytes", githubBodyMaxBytes)
+		}
+	}
+	if err := validateStringList(input, "labels", 50, githubListEntryMaxRunes, options); err != nil {
+		return err
+	}
+	return validateStringList(input, "assignees", 10, githubListEntryMaxRunes, options)
+}
+
+func validateWebhookInput(input map[string]any, options InputValidationOptions) error {
+	if err := validateTrimmedIdentifier(input, "credential", integrationCredentialMaxRunes, options); err != nil {
+		return err
+	}
+	if raw, present := input["url"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		parsed, err := url.ParseRequestURI(value)
+		if value == "" || value != strings.TrimSpace(value) || len(value) > webhookURLMaxBytes || err != nil ||
+			parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("url must be an absolute HTTP(S) URL of at most %d bytes", webhookURLMaxBytes)
+		}
+	}
+	if raw, present := input["payload"]; present && !isDeferredWholeTemplate(raw, options) {
+		serialized, err := json.Marshal(raw)
+		if err != nil || len(serialized) > integrationPayloadMaxBytes {
+			return fmt.Errorf("payload exceeds %d bytes", integrationPayloadMaxBytes)
+		}
+	}
+	signatureName := webhookSignatureHeader
+	if raw, present := input["signatureHeader"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		if value == "" || value != strings.TrimSpace(value) || len(value) > 60 || !httpguts.ValidHeaderFieldName(value) {
+			return fmt.Errorf("signatureHeader must be a valid 1..60 byte HTTP header name")
+		}
+		signatureName = strings.ToLower(value)
+		if forbiddenWebhookHeaders[signatureName] {
+			return fmt.Errorf("signatureHeader uses a reserved HTTP header")
+		}
+	}
+	if raw, present := input["headers"]; present && !isDeferredWholeTemplate(raw, options) {
+		headers, _ := raw.(map[string]any)
+		if len(headers) > 10 {
+			return fmt.Errorf("headers supports at most 10 entries")
+		}
+		seen := make(map[string]bool, len(headers))
+		for key, rawValue := range headers {
+			value, ok := rawValue.(string)
+			lower := strings.ToLower(key)
+			if !ok || key == "" || value == "" || len(key) > 60 || len(value) > 200 ||
+				!httpguts.ValidHeaderFieldName(key) || !httpguts.ValidHeaderFieldValue(value) {
+				return fmt.Errorf("headers must use valid names and values bounded to 60/200 bytes")
+			}
+			if forbiddenWebhookHeaders[lower] || lower == signatureName {
+				return fmt.Errorf("headers cannot override reserved or signature headers")
+			}
+			if seen[lower] {
+				return fmt.Errorf("headers must be unique case-insensitively")
+			}
+			seen[lower] = true
+		}
+	}
+	return nil
+}
 
 // SignWebhookPayload returns the Stripe-style `t=<unix>,v1=<hex>` HMAC
 // over `${t}.${body}` — the exact bytes POSTed are the bytes signed.
@@ -113,9 +313,10 @@ func integrationTools() []Definition {
 			Fields: []Field{
 				{Name: "credential", Type: "string", Required: true},
 				{Name: "text", Type: "string"},
-				{Name: "blocks", Type: "json"},
+				{Name: "blocks", Type: "json", AcceptedTypes: []string{"array"}},
 			},
 			InputExample: map[string]any{"credential": "incidents-slack", "text": "Incident detected."},
+			Validate:     validateSlackInput,
 			WriteSide:    true,
 			Execute:      unavailable,
 		},
@@ -130,13 +331,14 @@ func integrationTools() []Definition {
 				{Name: "repo", Type: "string", Required: true},
 				{Name: "title", Type: "string", Required: true},
 				{Name: "body", Type: "string"},
-				{Name: "labels", Type: "json"},
-				{Name: "assignees", Type: "json"},
+				{Name: "labels", Type: "json", AcceptedTypes: []string{"array"}},
+				{Name: "assignees", Type: "json", AcceptedTypes: []string{"array"}},
 			},
 			InputExample: map[string]any{
 				"credential": "bot-github", "owner": "janusly", "repo": "demo",
 				"title": "Incident triage", "body": "Details…",
 			},
+			Validate:  validateGitHubIssueInput,
 			WriteSide: true,
 			Execute:   unavailable,
 		},
@@ -157,6 +359,7 @@ func integrationTools() []Definition {
 				"url":        "https://partner.example.com/hooks/incident",
 				"payload":    map[string]any{"event": "incident", "severity": "high"},
 			},
+			Validate:  validateWebhookInput,
 			WriteSide: true,
 			Execute:   unavailable,
 		},
@@ -167,6 +370,11 @@ func envelopeError(message string, latencyMs int) map[string]any {
 	return map[string]any{"ok": false, "error": message, "latencyMs": latencyMs}
 }
 
+// API-level deliveries can call ExecuteIntegrationTool without passing through
+// the workflow executor. Keep one immutable built-in registry so those paths
+// receive the same input contract without rebuilding the catalog per call.
+var integrationInputRegistry = NewRegistry()
+
 // ExecuteIntegrationTool dispatches one integration call through the
 // chokepoint. NEVER returns an error — the envelope carries every
 // failure mode.
@@ -174,6 +382,17 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 	start := time.Now()
 	if deps == nil || deps.Gate == nil || (deps.Post == nil && deps.Fetch == nil) {
 		return envelopeError("integration tools require run context", 0)
+	}
+	if err := integrationInputRegistry.ValidateResolvedInput(name, input); err != nil {
+		latencyMs := int(time.Since(start).Milliseconds())
+		credential, _ := input["credential"].(string)
+		if credential != strings.TrimSpace(credential) || utf8.RuneCountInString(credential) > integrationCredentialMaxRunes {
+			credential = ""
+		}
+		if deps.Record != nil {
+			deps.Record(name, credential, false, 0, err.Error(), latencyMs)
+		}
+		return envelopeError(err.Error(), latencyMs)
 	}
 	now := time.Now
 	if deps.Now != nil {
@@ -291,7 +510,7 @@ func slackBlocksInput(input map[string]any) ([]map[string]any, bool, bool) {
 	if !present {
 		return nil, false, true
 	}
-	values, ok := raw.([]any)
+	values, ok := arrayItems(raw)
 	if !ok || len(values) > 50 {
 		return nil, true, false
 	}

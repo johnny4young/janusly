@@ -9,17 +9,19 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/prompts"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
 const (
-	promptNameMax        = 128
 	promptDescriptionMax = 2000
 	promptTemplateMax    = 32_000
 )
@@ -49,11 +51,11 @@ func (s *V1Server) createPromptCore(r *http.Request, rc v1Request) opResult {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
-	if err := decodeBody(r, &body); err != nil || body.Name == "" || len(body.Name) > promptNameMax {
+	if err := decodeBody(r, &body); err != nil || domain.ValidatePromptName(body.Name) != nil {
 		return opError(http.StatusBadRequest, "prompts_name_invalid",
-			"name is required and must be 1..128 chars", nil)
+			"name must be a URL-safe 1..128 character identifier", nil)
 	}
-	if len(body.Description) > promptDescriptionMax {
+	if utf8.RuneCountInString(body.Description) > promptDescriptionMax {
 		return opError(http.StatusBadRequest, "prompts_description_too_long",
 			"description too long", map[string]any{"max": promptDescriptionMax})
 	}
@@ -62,6 +64,8 @@ func (s *V1Server) createPromptCore(r *http.Request, rc v1Request) opResult {
 	if _, err := q.GetPromptByName(ctx, store.GetPromptByNameParams{OrgID: rc.orgID, Name: body.Name}); err == nil {
 		return opError(http.StatusConflict, "prompts_name_duplicate",
 			"a prompt with this name already exists", nil)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	id := s.newID()
 	if err := q.InsertPrompt(ctx, store.InsertPromptParams{
@@ -69,6 +73,10 @@ func (s *V1Server) createPromptCore(r *http.Request, rc v1Request) opResult {
 		Description: pgtype.Text{String: body.Description, Valid: body.Description != ""},
 		CreatedBy:   pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 	}); err != nil {
+		if isUniqueViolation(err) {
+			return opError(http.StatusConflict, "prompts_name_duplicate",
+				"a prompt with this name already exists", nil)
+		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	audit.Write(ctx, s.pool, rc.authContext, "prompt.created", audit.Options{
@@ -82,11 +90,15 @@ func (s *V1Server) createPromptCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) createPromptVersionCore(r *http.Request, rc v1Request, name string) opResult {
+	if domain.ValidatePromptName(name) != nil {
+		return opError(http.StatusBadRequest, "prompts_name_invalid",
+			"name must be a URL-safe 1..128 character identifier", nil)
+	}
 	var body struct {
 		TemplateText string          `json:"templateText"`
 		Variables    json.RawMessage `json:"variables"`
 	}
-	if err := decodeBody(r, &body); err != nil || body.TemplateText == "" {
+	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.TemplateText) == "" {
 		return opError(http.StatusBadRequest, "prompts_template_required", "templateText is required", nil)
 	}
 	if len(body.TemplateText) > promptTemplateMax {
@@ -97,10 +109,14 @@ func (s *V1Server) createPromptVersionCore(r *http.Request, rc v1Request, name s
 	if len(variables) == 0 {
 		variables = json.RawMessage(`[]`)
 	}
-	var declared []prompts.Variable
-	if err := json.Unmarshal(variables, &declared); err != nil {
+	declared, err := prompts.DecodeVariables(variables)
+	if err != nil {
 		return opError(http.StatusBadRequest, "prompts_variables_invalid",
-			"variables: must be an array of {name, required?, default?}", nil)
+			err.Error(), nil)
+	}
+	variables, err = json.Marshal(declared)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	ctx := r.Context()
 	q := store.New(s.pool)
@@ -126,7 +142,10 @@ func (s *V1Server) createPromptVersionCore(r *http.Request, rc v1Request, name s
 			TemplateText: body.TemplateText, Variables: variables,
 			CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 		}); err != nil {
-			continue // a concurrent writer took the number; recompute
+			if isUniqueViolation(err) {
+				continue // a concurrent writer took the number; recompute
+			}
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		created, err = q.GetPromptVersionByID(ctx, store.GetPromptVersionByIDParams{OrgID: rc.orgID, ID: id})
 		if err != nil {
@@ -143,6 +162,10 @@ func (s *V1Server) createPromptVersionCore(r *http.Request, rc v1Request, name s
 }
 
 func (s *V1Server) pinPromptVersionCore(r *http.Request, rc v1Request, name string, version int) opResult {
+	if domain.ValidatePromptName(name) != nil {
+		return opError(http.StatusBadRequest, "prompts_name_invalid",
+			"name must be a URL-safe 1..128 character identifier", nil)
+	}
 	ctx := r.Context()
 	q := store.New(s.pool)
 	prompt, err := q.GetPromptByName(ctx, store.GetPromptByNameParams{OrgID: rc.orgID, Name: name})

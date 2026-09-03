@@ -122,6 +122,18 @@ func TestHTTPNonOKStatusFailsTheNodeClassifiably(t *testing.T) {
 		rich.Code != "E_HTTP_STATUS" || rich.StatusCode != 503 {
 		t.Fatalf("classification identity broken: %+v", rich)
 	}
+	if rich.WriteSide {
+		t.Fatalf("GET failure must remain retryable: %+v", rich)
+	}
+
+	// Extension methods fail closed as write-side once dispatched. Preserve
+	// the same status identity while preventing an ambiguous whole-node retry.
+	_, err = execHTTP(t, map[string]any{"url": server.URL, "method": " propfind "})
+	rich = nil
+	if !asExecErrorShape(err, &rich) || rich.Name != "HttpResponseError" ||
+		rich.Code != "E_HTTP_STATUS" || rich.StatusCode != 503 || !rich.WriteSide {
+		t.Fatalf("mutating classification identity broken: %+v err=%v", rich, err)
+	}
 }
 
 func asExecErrorShape(err error, target **ExecErrorShape) bool {
@@ -182,6 +194,39 @@ func TestHTTPRedirectLimitAndBodyCap(t *testing.T) {
 	_, err = execHTTP(t, map[string]any{"url": server.URL + "/big", "maxResponseBytes": float64(1024)})
 	if err == nil || !strings.Contains(err.Error(), "HTTP response exceeds maxResponseBytes") {
 		t.Fatalf("body cap must fail the request: %v", err)
+	}
+}
+
+func TestHTTPConfigFailsBeforeEgressWhenBoundsOrHeadersAreInvalid(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	for _, config := range []map[string]any{
+		{"url": server.URL, "timeoutMs": float64(httpMaxTimeoutMs + 1)},
+		{"url": server.URL, "maxResponseBytes": float64(httpMaxResponseBytes + 1)},
+		{"url": server.URL, "maxRedirects": float64(httpMaxRedirects + 1)},
+		{"url": server.URL, "maxRedirects": 1.5},
+		{"url": server.URL, "headers": map[string]any{"x-attempt": 2}},
+		{"url": server.URL, "bodyMode": "unbounded"},
+	} {
+		if _, err := execHTTP(t, config); err == nil {
+			t.Fatalf("invalid config was accepted: %+v", config)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("invalid local config reached the upstream %d times", hits.Load())
+	}
+
+	out, err := execHTTP(t, map[string]any{
+		"url": server.URL, "timeoutMs": int32(1_000),
+		"maxResponseBytes": uint64(1_024), "maxRedirects": 0,
+	})
+	if err != nil || out["ok"] != true || hits.Load() != 1 {
+		t.Fatalf("valid internal numeric representations failed: out=%+v err=%v hits=%d", out, err, hits.Load())
 	}
 }
 
@@ -320,14 +365,12 @@ func TestStreamingBodyModeProducesBoundedPreview(t *testing.T) {
 		t.Fatalf("byte cap must abort the stream: %v", err)
 	}
 
-	// Preview cap clamps to the catalog range (below 1024 → 1024).
-	clamped, err := execHTTP(t, map[string]any{
+	// Per-node values outside the catalog range fail locally rather than
+	// silently changing the operator's authored persistence contract.
+	_, err = execHTTP(t, map[string]any{
 		"url": server.URL, "bodyMode": "stream", "streamPreviewBytes": float64(10),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(clamped["body"].(string)) != 1024 {
-		t.Fatalf("clamp floor: %d", len(clamped["body"].(string)))
+	if err == nil || !strings.Contains(err.Error(), "streamPreviewBytes") {
+		t.Fatalf("below-minimum preview must fail locally: %v", err)
 	}
 }

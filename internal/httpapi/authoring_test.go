@@ -29,6 +29,21 @@ func TestFinalizeAuthoringProposalDiscardsUncataloguedAIIdentities(t *testing.T)
 		{name: "tool", unsafe: "invented.send", node: map[string]any{
 			"id": "step", "type": "tool", "config": map[string]any{"tool": "invented.send", "input": map[string]any{}},
 		}},
+		{name: "loop tool", unsafe: "invented.batch", node: map[string]any{
+			"id": "step", "type": "loop", "config": map[string]any{
+				"mode": "for_each", "tool": "invented.batch", "items": []any{"x"}, "input": map[string]any{},
+			},
+		}},
+		{name: "agent tool", unsafe: "invented.agent", node: map[string]any{
+			"id": "step", "type": "agent", "config": map[string]any{
+				"goal": "Inspect", "tool": "invented.agent", "input": map[string]any{},
+			},
+		}},
+		{name: "multi-agent member tool", unsafe: "invented.member", node: map[string]any{
+			"id": "step", "type": "multi_agent", "config": map[string]any{
+				"agents": []any{map[string]any{"goal": "Inspect", "tool": "invented.member", "input": map[string]any{}}},
+			},
+		}},
 		{name: "mcp", unsafe: "contacts.delete", node: map[string]any{
 			"id": "step", "type": "mcp_tool", "config": map[string]any{"connectionAlias": "crm", "toolName": "contacts.delete"},
 		}},
@@ -118,6 +133,41 @@ func TestFinalizeAuthoringProposalReturnsCanonicalInspectedWorkflow(t *testing.T
 	}
 }
 
+func TestFinalizeAuthoringProposalDiscardsProviderSecretMaterial(t *testing.T) {
+	catalog := authoring.NewBuilder(nil, nil).Build(t.Context(), "secret-guard-test")
+	brief := authoring.IntentBrief{
+		Version: "1", Objective: "Prepare a local result", Trigger: "manual", Language: "en",
+	}
+	document := proposalTestDocument(map[string]any{
+		"id": "step", "type": "noop", "config": map[string]any{
+			"authorization": "Bearer provider-invented-secret",
+		},
+	})
+
+	finalized := finalizeAuthoringProposal("Prepare a local result", brief, catalog, document, "ai")
+	if !finalized.ProviderGuarded || finalized.GuardReason != "unsafe_provider_secret_material" ||
+		finalized.Mode != "fallback" || finalized.Workflow == nil || finalized.Workflow.ID != "capability-binding-required" ||
+		finalized.Bindings.Complete || !bindingReasonPresent(finalized.Bindings, "unsafe_provider_secret_material") {
+		t.Fatalf("provider secret material must fail closed: %+v", finalized)
+	}
+	raw, err := json.Marshal(finalized.WorkflowDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "provider-invented-secret") {
+		t.Fatalf("guarded graph retained provider secret material: %s", raw)
+	}
+
+	safeReference := proposalTestDocument(map[string]any{
+		"id": "step", "type": "noop", "config": map[string]any{
+			"authorization": "{{secret.API_TOKEN}}",
+		},
+	})
+	if safe := finalizeAuthoringProposal("Prepare a local result", brief, catalog, safeReference, "ai"); safe.ProviderGuarded {
+		t.Fatalf("a supported secret reference must remain reviewable: %+v", safe)
+	}
+}
+
 func TestFinalizeAuthoringProposalDiscardsUndeclaredProviderEffect(t *testing.T) {
 	catalog := authoring.NewBuilder(nil, nil).Build(t.Context(), "guard-test")
 	brief := authoring.IntentBrief{
@@ -160,6 +210,23 @@ func TestFinalizeAuthoringProposalDiscardsUndeclaredCatalogWrites(t *testing.T) 
 		{name: "registered built-in write", forbidden: "vector.upsert", node: map[string]any{
 			"id": "step", "type": "tool", "config": map[string]any{
 				"tool": "vector.upsert", "input": map[string]any{"content": "unrequested memory mutation"},
+			},
+		}},
+		{name: "loop built-in write", forbidden: "vector.upsert", node: map[string]any{
+			"id": "step", "type": "loop", "config": map[string]any{
+				"mode": "for_each", "tool": "vector.upsert", "items": []any{"fact"},
+				"input": map[string]any{"content": "{{item}}"},
+			},
+		}},
+		{name: "agent built-in write", forbidden: "vector.upsert", node: map[string]any{
+			"id": "step", "type": "agent", "config": map[string]any{
+				"goal": "Remember", "allowWriteTools": true, "tool": "vector.upsert",
+				"input": map[string]any{"content": "fact"},
+			},
+		}},
+		{name: "planner-selected agent write", forbidden: "allowWriteTools", node: map[string]any{
+			"id": "step", "type": "agent", "config": map[string]any{
+				"goal": "Choose an operational action", "allowWriteTools": true,
 			},
 		}},
 		{name: "tenant MCP write", forbidden: "contacts.update", node: map[string]any{

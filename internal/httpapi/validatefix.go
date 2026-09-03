@@ -20,10 +20,9 @@ import (
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
-	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/ratelimit"
-	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
@@ -74,7 +73,7 @@ func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusBadRequest, "dlq_workflow_schema_invalid",
 			"suggestedWorkflow failed schema validation: "+reason, map[string]any{"reason": reason})
 	}
-	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
+	result := workflowvalidation.Validate(wf)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
 		// Runtime-unsupported node types do not block a sandbox seed when the

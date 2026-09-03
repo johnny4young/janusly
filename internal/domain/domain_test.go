@@ -142,6 +142,32 @@ func TestHTTPMissingURLTreatsJSFalsyAsMissing(t *testing.T) {
 	}
 }
 
+func TestHTTPConfigRejectsAmbiguousShapesAndUnboundedResources(t *testing.T) {
+	for _, config := range []string{
+		`{"url":"https://example.com","method":7}`,
+		`{"url":"https://example.com","method":"GET bad"}`,
+		`{"url":"https://example.com","headers":{"x-attempt":2}}`,
+		`{"url":"https://example.com","timeoutMs":600001}`,
+		`{"url":"https://example.com","maxResponseBytes":67108865}`,
+		`{"url":"https://example.com","maxRedirects":21}`,
+		`{"url":"https://example.com","maxRedirects":1.5}`,
+		`{"url":"https://example.com","bodyMode":"unbounded"}`,
+		`{"url":"https://example.com","streamPreviewBytes":1023}`,
+	} {
+		result := Validate(parseOK(t, `{"nodes":[{"id":"a","type":"http","config":`+config+`}],"edges":[]}`), nil)
+		requireIssue(t, result, CodeHTTPInvalidConfig, "http.")
+	}
+
+	valid := Validate(parseOK(t, `{"nodes":[{"id":"a","type":"http","config":{
+		"url":"{{context.input.url}}","method":"{{context.input.method}}",
+		"headers":"{{context.input.headers}}","timeoutMs":"{{context.input.timeoutMs}}",
+		"maxResponseBytes":67108864,"maxRedirects":0,"bodyMode":"stream","streamPreviewBytes":1048576
+	}}],"edges":[]}`), nil)
+	if !valid.Valid {
+		t.Fatalf("valid bounded/dynamic HTTP config rejected: %+v", valid.Issues)
+	}
+}
+
 func TestConditionExpressionChecks(t *testing.T) {
 	// wv:146-153 — missing expression and invalid expression are distinct
 	// codes; the grammar plugs in through the validator seam.
@@ -178,6 +204,135 @@ func TestHumanFormSchemaAndInitialValues(t *testing.T) {
 	if !valid.Valid {
 		t.Fatalf("valid initial values rejected: %+v", valid.Issues)
 	}
+}
+
+func TestAIOutputSchemaMustUseSupportedContractSubset(t *testing.T) {
+	invalid := Validate(parseOK(t, `{"nodes":[{"id":"draft","type":"ai","config":{
+		"prompt":"Return JSON","outputSchema":{"type":"secret"}}}],"edges":[]}`), nil)
+	issue := requireIssue(t, invalid, CodeAIInvalidOutputSchema, "supported JSON Schema subset")
+	if issue.NodeID != "draft" {
+		t.Fatalf("wrong AI node attribution: %+v", issue)
+	}
+
+	valid := Validate(parseOK(t, `{"nodes":[{"id":"draft","type":"ai","config":{
+		"prompt":"Return JSON","outputSchema":{"type":"object","required":["message"],
+		"properties":{"message":{"type":"string"}}}}}],"edges":[]}`), nil)
+	if !valid.Valid {
+		t.Fatalf("valid AI output schema rejected: %+v", valid.Issues)
+	}
+}
+
+func TestAIAgentAndMultiAgentRequiredAuthoringFields(t *testing.T) {
+	result := Validate(parseOK(t, `{"nodes":[
+		{"id":"ai","type":"ai","config":{}},
+		{"id":"agent","type":"agent","config":{"goal":"   "}},
+		{"id":"crew","type":"multi_agent","config":{"agents":[]}}
+	],"edges":[]}`), nil)
+	requireIssue(t, result, CodeAIMissingPrompt, "config.prompt")
+	requireIssue(t, result, CodeAgentMissingGoal, "config.goal")
+	requireIssue(t, result, CodeMultiAgentMissingAgents, "at least one agent")
+
+	valid := Validate(parseOK(t, `{"nodes":[
+		{"id":"ai","type":"ai","config":{"promptRef":{"name":"summarize"}}},
+		{"id":"agent","type":"agent","config":{"goal":"Inspect the record"}},
+		{"id":"crew","type":"multi_agent","config":{"agents":[{"goal":"Review it"}]}}
+	],"edges":[]}`), nil)
+	if !valid.Valid {
+		t.Fatalf("complete AI/agent authoring fields rejected: %+v", valid.Issues)
+	}
+}
+
+func TestAIPromptOpsReferencesFailClosedAtSave(t *testing.T) {
+	result := Validate(parseOK(t, `{"nodes":[
+		{"id":"shape","type":"ai","config":{"promptRef":"triage"}},
+		{"id":"version","type":"ai","config":{"promptRef":{"name":"triage","version":1.5}}},
+		{"id":"variables","type":"ai","config":{"promptRef":{"name":"triage"},"variables":{"priority":7}}}
+	],"edges":[]}`), nil)
+	requireIssue(t, result, CodeAIInvalidPromptRef, "promptRef must be an object")
+	requireIssue(t, result, CodeAIInvalidPromptVariables, `variables["priority"] must be a string`)
+}
+
+func TestAgentAndMultiAgentRuntimeConfigFailsAtSave(t *testing.T) {
+	result := Validate(parseOK(t, `{"nodes":[
+		{"id":"planner","type":"agent","config":{"goal":"Inspect","planner":"other"}},
+		{"id":"steps","type":"agent","config":{"goal":"Inspect","maxSteps":51}},
+		{"id":"timeout","type":"agent","config":{"goal":"Inspect","timeoutMs":0}},
+		{"id":"switch","type":"agent","config":{"goal":"Inspect","reflection":"yes"}},
+		{"id":"member","type":"multi_agent","config":{"agents":[{"goal":"Inspect","maxSteps":51}]}},
+		{"id":"mode","type":"multi_agent","config":{"mode":"race","agents":[{}]}},
+		{"id":"aggregate","type":"multi_agent","config":{"aggregation":"random","agents":[{}]}},
+		{"id":"continue","type":"multi_agent","config":{"continueOnError":"yes","agents":[{}]}}
+	],"edges":[]}`), nil)
+	for _, code := range []string{
+		CodeAgentInvalidPlanner,
+		CodeAgentInvalidMaxSteps,
+		CodeAgentInvalidTimeout,
+		CodeAgentInvalidBoolean,
+		CodeMultiAgentInvalidAgents,
+		CodeMultiAgentInvalidMode,
+		CodeMultiAgentInvalidAgg,
+		CodeMultiAgentInvalidBoolean,
+	} {
+		if requireIssue(t, result, code, "").NodeID == "" {
+			t.Fatalf("issue %s lost node attribution", code)
+		}
+	}
+}
+
+func TestMultiAgentRequiresEveryMemberGoal(t *testing.T) {
+	result := Validate(parseOK(t, `{"nodes":[
+		{"id":"missing","type":"multi_agent","config":{"agents":[{}]}},
+		{"id":"empty","type":"multi_agent","config":{"agents":[{"goal":"  "}]}},
+		{"id":"wrong_type","type":"multi_agent","config":{"agents":[{"goal":{"task":"inspect"}}]}}
+	],"edges":[]}`), nil)
+	seen := map[string]bool{}
+	for _, issue := range result.Issues {
+		if issue.Code == CodeMultiAgentInvalidAgents && strings.Contains(issue.Message, "requires a non-empty goal") {
+			seen[issue.NodeID] = true
+		}
+	}
+	for _, nodeID := range []string{"missing", "empty", "wrong_type"} {
+		if !seen[nodeID] {
+			t.Fatalf("multi-agent goal issue missing for %s: %+v", nodeID, result.Issues)
+		}
+	}
+}
+
+func TestForkJoinAndTriggerConfigFailAtValidationInsteadOfRuntime(t *testing.T) {
+	result := Validate(parseOK(t, `{"nodes":[
+		{"id":"fork","type":"parallel_fork","config":{"branches":[{"label":"only"}]}},
+		{"id":"join","type":"join","config":{"sources":{"one":"a"}}},
+		{"id":"trigger","type":"pagerduty_incident","config":{}}
+	],"edges":[]}`), nil)
+	requireIssue(t, result, CodeParallelForkInvalidBranches, "at least 2 branches")
+	requireIssue(t, result, CodeJoinInvalidSources, "at least 2 branches")
+	requireIssue(t, result, CodeTriggerInvalidConfig, "webhookCredential is required")
+
+	valid := Validate(parseOK(t, `{"nodes":[
+		{"id":"fork","type":"parallel_fork","config":{"branches":[{"label":"a"},{"label":"b"}]}},
+		{"id":"a","type":"noop","config":{}},
+		{"id":"b","type":"noop","config":{}},
+		{"id":"join","type":"join","config":{"sources":{"a":"a","b":"b"}}},
+		{"id":"trigger","type":"pagerduty_incident","config":{"webhookCredential":"pagerduty-hook"}}
+	],"edges":[]}`), nil)
+	if !valid.Valid {
+		t.Fatalf("valid fork/join/trigger config rejected: %+v", valid.Issues)
+	}
+}
+
+func TestToolAndLoopStructuralConfigValidation(t *testing.T) {
+	result := Validate(parseOK(t, `{"nodes":[
+		{"id":"tool","type":"tool","config":{}},
+		{"id":"loop","type":"loop","config":{"mode":"for_each","concurrency":21,
+		 "toleratedFailureCount":1001,"toleratedFailurePercentage":101}}
+	],"edges":[]}`), nil)
+	requireIssue(t, result, CodeToolMissingName, "config.tool")
+	requireIssue(t, result, CodeLoopMissingItems, "config.items")
+	requireIssue(t, result, CodeLoopForEachMissingTool, "config.tool")
+	requireIssue(t, result, CodeLoopInvalidConcurrency, "1 to 20")
+	requireIssue(t, result, CodeLoopInvalidFailureCount, "0 to 1000")
+	requireIssue(t, result, CodeLoopInvalidFailurePercent, "0 to 100")
+	requireIssue(t, result, CodeLoopConflictingFailureLimit, "either count or percentage")
 }
 
 func TestEdgeEndpointsMustExist(t *testing.T) {

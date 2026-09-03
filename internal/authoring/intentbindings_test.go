@@ -159,6 +159,53 @@ func TestBindProposalRequiresExactSubworkflowDelegation(t *testing.T) {
 	}
 }
 
+func TestBindProposalAccountsForNestedAndPlannerSelectedWrites(t *testing.T) {
+	catalog := bindingTestCatalog()
+	for name, node := range map[string]domain.Node{
+		"loop": {ID: "batch", Type: "loop", Config: map[string]any{
+			"mode": "for_each", "tool": "vector.upsert", "items": []any{"fact"},
+			"input": map[string]any{"content": "{{item}}"},
+		}},
+		"agent explicit": {ID: "agent", Type: "agent", Config: map[string]any{
+			"goal": "Remember", "tool": "vector.upsert", "allowWriteTools": true,
+			"input": map[string]any{"content": "fact"},
+		}},
+		"multi agent explicit": {ID: "crew", Type: "multi_agent", Config: map[string]any{
+			"allowWriteTools": true,
+			"agents": []any{map[string]any{
+				"goal": "Remember", "tool": "vector.upsert", "input": map[string]any{"content": "fact"},
+			}},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			report := BindProposal(catalog, IntentBrief{
+				Objective: "Prepare a local preview", Trigger: "manual", ExternalEffects: []string{},
+			}, &domain.Workflow{Nodes: []domain.Node{node}})
+			if report.Complete || !bindingReasonRequested(report, "proposed_effect_not_declared", "vector_memory_write") {
+				t.Fatalf("nested write escaped intent binding: %+v", report)
+			}
+		})
+	}
+
+	workflow := &domain.Workflow{Nodes: []domain.Node{{
+		ID: "agent", Type: "agent", Config: map[string]any{
+			"goal": "Choose a safe operational tool", "allowWriteTools": true,
+		},
+	}}}
+	undeclared := BindProposal(catalog, IntentBrief{
+		Objective: "Operate on the incident", Trigger: "manual", ExternalEffects: []string{},
+	}, workflow)
+	if undeclared.Complete || !bindingReasonRequested(undeclared, "proposed_effect_not_declared", "agent_write") {
+		t.Fatalf("planner-selected write authority must be declared: %+v", undeclared)
+	}
+	declared := BindProposal(catalog, IntentBrief{
+		Objective: "Operate on the incident", Trigger: "manual", ExternalEffects: []string{"agent_write"},
+	}, workflow)
+	if !declared.Complete {
+		t.Fatalf("explicit generic agent write authority rejected: %+v", declared)
+	}
+}
+
 func bindingReasonRequested(report BindingReport, reason, requested string) bool {
 	for _, binding := range report.Missing {
 		if binding.Reason == reason && binding.Requested == requested {

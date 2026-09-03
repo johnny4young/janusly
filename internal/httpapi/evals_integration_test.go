@@ -84,7 +84,7 @@ func TestEvalDatasetsAndExperiments(t *testing.T) {
 		t.Fatalf("run response must expose its admitted call plan: %+v", plan)
 	}
 	summary := res.body["summary"].(map[string]any)
-	if summary["exampleCount"] != float64(1) || summary["recommendation"] != "keep_control" {
+	if summary["exampleCount"] != float64(1) || summary["recommendation"] != "inconclusive" {
 		t.Fatalf("no-client experiment: %+v", summary)
 	}
 	experimentID := res.body["experimentId"].(string)
@@ -101,13 +101,19 @@ func TestEvalDatasetsAndExperiments(t *testing.T) {
 	}
 
 	// Prompt experiments resolve real PromptOps references instead of
-	// sending names such as triage@1 as literal system instructions.
+	// sending names such as triage@1 as literal system instructions. The
+	// tenant cap is measured in Unicode characters rather than UTF-8 bytes.
+	if configured := h.call("POST", "/org/config", map[string]any{
+		"key": "ai.promptMaxChars", "value": float64(64),
+	}, ""); configured.status != 200 {
+		t.Fatalf("configure prompt cap: %d %+v", configured.status, configured.body)
+	}
 	for _, name := range []string{"eval-control-" + suffix, "eval-candidate-" + suffix} {
 		if created := h.call("POST", "/prompts", map[string]any{"name": name}, ""); created.status != 201 {
 			t.Fatalf("create prompt %s: %d %+v", name, created.status, created.body)
 		}
 		if version := h.call("POST", "/prompts/"+name+"/versions", map[string]any{
-			"templateText": "Classify this recovery outcome precisely.",
+			"templateText": strings.Repeat("á", 40), // 40 characters, 80 UTF-8 bytes.
 		}, ""); version.status != 201 {
 			t.Fatalf("create prompt version %s: %d %+v", name, version.status, version.body)
 		}
@@ -189,6 +195,27 @@ func TestExperimentAdmissionRejectsEmptyAndOversizedPlans(t *testing.T) {
 	if params["providerCallEstimate"] != float64(24) || params["maxProviderCalls"] != float64(20) {
 		t.Fatalf("limit envelope: %+v", res.body)
 	}
+	res = h.call("POST", "/experiments/run", map[string]any{
+		"name": "foreign-provider", "kind": "model",
+		"controlRef": "openai/gpt-5", "candidateRef": "claude-haiku-4-5-20251001",
+		"evalDatasetId": largeID, "scorerKind": "string_equality",
+	}, "")
+	if res.status != 422 || res.body["code"] != "experiment_model_ref_invalid" {
+		t.Fatalf("foreign model provider must fail before admission: %d %+v", res.status, res.body)
+	}
+
+	// Once real provider egress is configured, an otherwise well-shaped but
+	// unpriced model also fails once at plan admission rather than once per
+	// example. No provider endpoint is contacted by this request.
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	res = h.call("POST", "/experiments/run", map[string]any{
+		"name": "unpriced-model", "kind": "model",
+		"controlRef": "claude-future-99", "candidateRef": "claude-haiku-4-5-20251001",
+		"evalDatasetId": largeID, "scorerKind": "string_equality",
+	}, "")
+	if res.status != 422 || res.body["code"] != "experiment_model_ref_invalid" {
+		t.Fatalf("unpriced real model must fail before admission: %d %+v", res.status, res.body)
+	}
 
 	// A monthly block policy is enforced before an experiment row or provider
 	// call is started.
@@ -222,7 +249,8 @@ func TestExperimentAdmissionRejectsEmptyAndOversizedPlans(t *testing.T) {
 		t.Fatalf("seed budget spend: %v", err)
 	}
 	res = h.call("POST", "/experiments/run", map[string]any{
-		"name": "budget-blocked", "kind": "model", "controlRef": "a", "candidateRef": "b",
+		"name": "budget-blocked", "kind": "model",
+		"controlRef": "claude-haiku-4-5-20251001", "candidateRef": "claude-sonnet-5",
 		"evalDatasetId": budgetDatasetID, "scorerKind": "string_equality",
 	}, "")
 	if res.status != 402 || res.body["code"] != "budget_exceeded" {

@@ -58,7 +58,11 @@ func normalizeItems(raw any) []any {
 // NewLoopExecutor builds the loop executor over the shared tool registry
 // (for_each dispatches through the same interception ladder as the tool
 // node).
-func NewLoopExecutor(registry *tools.Registry) Func {
+func NewLoopExecutor(registry *tools.Registry, httpExecutors ...Func) Func {
+	httpExec := NewHTTPExecutor(HTTPOptions{})
+	if len(httpExecutors) > 0 && httpExecutors[0] != nil {
+		httpExec = httpExecutors[0]
+	}
 	return func(ctx context.Context, in Input) (any, error) {
 		mode, _ := in.Config["mode"].(string)
 		if mode != "" && mode != "map" && mode != "for_each" {
@@ -79,7 +83,7 @@ func NewLoopExecutor(registry *tools.Registry) Func {
 			}
 		}
 		if mode == "for_each" {
-			return executeForEachLoop(ctx, registry, in, items)
+			return executeForEachLoop(ctx, registry, httpExec, in, items)
 		}
 		return executeMapLoop(in, items)
 	}
@@ -169,7 +173,7 @@ func loopBudgetExceeded(failedCount, totalCount int, toleratedCount, toleratedPe
 	return false
 }
 
-func executeForEachLoop(ctx context.Context, registry *tools.Registry, in Input, items []any) (any, error) {
+func executeForEachLoop(ctx context.Context, registry *tools.Registry, httpExec Func, in Input, items []any) (any, error) {
 	tool, _ := in.Config["tool"].(string)
 	if tool == "" {
 		return nil, fmt.Errorf("loop for_each requires config.tool")
@@ -186,14 +190,14 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, in Input,
 	var toleratedCount, toleratedPercentage *float64
 	if raw, present := in.Config["toleratedFailureCount"]; present {
 		value, ok := raw.(float64)
-		if !ok || value != math.Trunc(value) || value < 0 {
-			return nil, fmt.Errorf("loop toleratedFailureCount must be a non-negative integer")
+		if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value != math.Trunc(value) || value < 0 || value > loopMaxItems {
+			return nil, fmt.Errorf("loop toleratedFailureCount must be an integer between 0 and %d", loopMaxItems)
 		}
 		toleratedCount = &value
 	}
 	if raw, present := in.Config["toleratedFailurePercentage"]; present {
 		value, ok := raw.(float64)
-		if !ok || value < 0 || value > 100 {
+		if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 100 {
 			return nil, fmt.Errorf("loop toleratedFailurePercentage must be between 0 and 100")
 		}
 		toleratedPercentage = &value
@@ -261,7 +265,7 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, in Input,
 				if index >= len(items) || ctx.Err() != nil {
 					return
 				}
-				result := executeRegisteredTool(ctx, registry, tool, renderedInputs[index], in)
+				result := executeRegisteredTool(ctx, registry, httpExec, tool, renderedInputs[index], in)
 				outcome := loopItemOutcome{index: index}
 				switch {
 				case result["skipped"] == true:

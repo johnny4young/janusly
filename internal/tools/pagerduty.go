@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/url"
 	"os"
 	"slices"
@@ -175,7 +174,7 @@ func projectPagerDutyIncident(record map[string]any) *pagerDutyIncident {
 			incident.ServiceID = &serviceID
 		}
 	}
-	if assignments, ok := record["assignments"].([]any); ok {
+	if assignments, ok := arrayItems(record["assignments"]); ok {
 		if len(assignments) > pagerDutyAssignmentsMax {
 			return nil
 		}
@@ -216,7 +215,7 @@ func projectPagerDutyIncident(record map[string]any) *pagerDutyIncident {
 func parseProjectedPagerDutyIncident(record map[string]any) *pagerDutyIncident {
 	id, _ := record["id"].(string)
 	status, _ := record["status"].(string)
-	rawUsers, hasUsers := record["assignedUserIds"].([]any)
+	rawUsers, hasUsers := arrayItems(record["assignedUserIds"])
 	if id == "" || len(id) > pagerDutyIdentifierMaxBytes || !pagerDutyIncidentStatuses[status] ||
 		!hasUsers || len(rawUsers) > pagerDutyAssignmentsMax {
 		return nil
@@ -266,7 +265,7 @@ func parsePagerDutyPendingActions(raw any) ([]pagerDutyPendingAction, bool) {
 	if raw == nil {
 		return []pagerDutyPendingAction{}, true
 	}
-	items, ok := raw.([]any)
+	items, ok := arrayItems(raw)
 	if !ok || len(items) > pagerDutyPendingActionsMax {
 		return nil, false
 	}
@@ -342,6 +341,269 @@ func (i *pagerDutyIncident) toMap() map[string]any {
 	}
 }
 
+func validatePagerDutyAPIInput(input map[string]any, options InputValidationOptions) error {
+	for _, field := range []string{"credential", "incidentId"} {
+		raw, present := input[field]
+		if !present || isDeferredWholeTemplate(raw, options) {
+			continue
+		}
+		value, _ := raw.(string)
+		if strings.TrimSpace(value) == "" || len(value) > pagerDutyIdentifierMaxBytes || strings.TrimSpace(value) != value {
+			return fmt.Errorf("%s must be a canonical non-empty identifier of at most %d bytes", field, pagerDutyIdentifierMaxBytes)
+		}
+	}
+	if raw, present := input["requesterEmail"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		if !validPagerDutyRequesterEmail(value) || strings.TrimSpace(value) != value {
+			return fmt.Errorf("requesterEmail must be a valid single-line email address")
+		}
+	}
+	if raw, present := input["region"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		if value != "us" && value != "eu" {
+			return fmt.Errorf("region must be us or eu")
+		}
+	}
+	if raw, present := input["rateLimitPerMin"]; present && !isDeferredWholeTemplate(raw, options) {
+		if _, ok := boundedWholeNumber(raw, 1, 10_000); !ok {
+			return fmt.Errorf("rateLimitPerMin must be an integer between 1 and 10000")
+		}
+	}
+	return nil
+}
+
+func validatePagerDutySnoozeInput(input map[string]any, options InputValidationOptions) error {
+	if err := validatePagerDutyAPIInput(input, options); err != nil {
+		return err
+	}
+	if raw, present := input["durationSeconds"]; present && !isDeferredWholeTemplate(raw, options) {
+		if _, ok := boundedWholeNumber(raw, pagerDutySnoozeMinSeconds, pagerDutySnoozeMaxSeconds); !ok {
+			return fmt.Errorf("durationSeconds must be an integer between %d and %d", pagerDutySnoozeMinSeconds, pagerDutySnoozeMaxSeconds)
+		}
+	}
+	return nil
+}
+
+func validatePagerDutyStringList(raw any, options InputValidationOptions, allowed func(string) bool) bool {
+	if isDeferredWholeTemplate(raw, options) {
+		return true
+	}
+	items, ok := arrayItems(raw)
+	if !ok || len(items) > 100 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		if isDeferredWholeTemplate(item, options) {
+			continue
+		}
+		value, ok := item.(string)
+		if !ok || value == "" || value != strings.TrimSpace(value) || len(value) > pagerDutyIdentifierMaxBytes ||
+			seen[value] || allowed != nil && !allowed(value) {
+			return false
+		}
+		seen[value] = true
+	}
+	return true
+}
+
+func validatePagerDutyWindows(raw any, options InputValidationOptions) bool {
+	if isDeferredWholeTemplate(raw, options) {
+		return true
+	}
+	items, ok := arrayItems(raw)
+	if !ok || len(items) == 0 || len(items) > pagerDutyWorkingWindowsMax {
+		return false
+	}
+	for _, item := range items {
+		entry, ok := item.(map[string]any)
+		if !ok || entry == nil {
+			return false
+		}
+		rawDays, present := entry["days"]
+		if !present {
+			return false
+		}
+		if !isDeferredWholeTemplate(rawDays, options) {
+			days, ok := arrayItems(rawDays)
+			if !ok || len(days) == 0 || len(days) > 7 {
+				return false
+			}
+			seen := map[int64]bool{}
+			for _, rawDay := range days {
+				if isDeferredWholeTemplate(rawDay, options) {
+					continue
+				}
+				day, ok := boundedWholeNumber(rawDay, 0, 6)
+				if !ok || seen[day] {
+					return false
+				}
+				seen[day] = true
+			}
+		}
+		startRaw, startPresent := entry["start"]
+		endRaw, endPresent := entry["end"]
+		if !startPresent || !endPresent {
+			return false
+		}
+		startDeferred := isDeferredWholeTemplate(startRaw, options)
+		endDeferred := isDeferredWholeTemplate(endRaw, options)
+		start, startOK := startRaw.(string)
+		end, endOK := endRaw.(string)
+		if !startDeferred {
+			_, startOK = zonedwindow.ParseLocalMinute(start)
+		}
+		if !endDeferred {
+			_, endOK = zonedwindow.ParseLocalMinute(end)
+		}
+		if !startOK || !endOK {
+			return false
+		}
+		if !startDeferred && !endDeferred {
+			startMinute, _ := zonedwindow.ParseLocalMinute(start)
+			endMinute, _ := zonedwindow.ParseLocalMinute(end)
+			if startMinute == endMinute {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// validatePagerDutyPolicyDefinition validates literal policy authored into a
+// workflow. Rendered dynamic provider evidence still reaches the deterministic
+// evaluator, whose structured invalid_runtime_input outcome is part of the
+// recovery contract rather than a thrown registry error.
+func validatePagerDutyPolicyDefinition(input map[string]any, options InputValidationOptions) error {
+	if !options.AllowWholeTemplates {
+		return nil
+	}
+	if raw, present := input["eventType"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		if value == "" || value != strings.TrimSpace(value) || len(value) > pagerDutyIdentifierMaxBytes {
+			return fmt.Errorf("eventType must be a canonical non-empty identifier")
+		}
+	}
+	if raw, present := input["pagerDutyUserId"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		if value == "" || value != strings.TrimSpace(value) || len(value) > pagerDutyIdentifierMaxBytes {
+			return fmt.Errorf("pagerDutyUserId must be a canonical non-empty identifier")
+		}
+	}
+	if raw, present := input["snoozeSeconds"]; present && !isDeferredWholeTemplate(raw, options) {
+		if _, ok := boundedWholeNumber(raw, pagerDutySnoozeMinSeconds, pagerDutySnoozeMaxSeconds); !ok {
+			return fmt.Errorf("snoozeSeconds must be an integer between %d and %d", pagerDutySnoozeMinSeconds, pagerDutySnoozeMaxSeconds)
+		}
+	}
+	timeZone := ""
+	timeZoneConcrete := false
+	if raw, present := input["timeZone"]; present && !isDeferredWholeTemplate(raw, options) {
+		timeZone, _ = raw.(string)
+		if timeZone == "" || timeZone != strings.TrimSpace(timeZone) {
+			return fmt.Errorf("timeZone must be a canonical IANA time zone")
+		}
+		if _, err := time.LoadLocation(timeZone); err != nil {
+			return fmt.Errorf("timeZone must be a valid IANA time zone")
+		}
+		timeZoneConcrete = true
+	}
+	if raw, present := input["workingHours"]; present && !validatePagerDutyWindows(raw, options) {
+		return fmt.Errorf("workingHours must contain 1..%d valid, unambiguous local windows", pagerDutyWorkingWindowsMax)
+	}
+	if raw, present := input["windowMode"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		if value != "outside" && value != "inside" {
+			return fmt.Errorf("windowMode must be outside or inside")
+		}
+	}
+	for _, spec := range []struct {
+		field   string
+		allowed func(string) bool
+	}{
+		{field: "serviceIds"},
+		{field: "urgencies", allowed: func(value string) bool { return value == "high" || value == "low" }},
+		{field: "actionableEventTypes", allowed: func(value string) bool { return pagerDutyActionableDefaults[value] }},
+	} {
+		if raw, present := input[spec.field]; present && !validatePagerDutyStringList(raw, options, spec.allowed) {
+			return fmt.Errorf("%s must be a bounded list of unique supported identifiers", spec.field)
+		}
+	}
+
+	parsedTimes := map[string]time.Time{}
+	for _, field := range []string{"occurredAt", "receivedAt", "evaluatedAt"} {
+		raw, present := input[field]
+		if !present || isDeferredWholeTemplate(raw, options) {
+			continue
+		}
+		value, _ := raw.(string)
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return fmt.Errorf("%s must be RFC3339", field)
+		}
+		parsedTimes[field] = parsed
+	}
+	if occurred, ok := parsedTimes["occurredAt"]; ok {
+		if received, ok := parsedTimes["receivedAt"]; ok && received.Before(occurred) {
+			return fmt.Errorf("receivedAt must not precede occurredAt")
+		}
+	}
+	if received, ok := parsedTimes["receivedAt"]; ok {
+		if evaluated, ok := parsedTimes["evaluatedAt"]; ok && evaluated.Before(received) {
+			return fmt.Errorf("evaluatedAt must not precede receivedAt")
+		}
+	}
+
+	fromRaw, fromPresent := input["activeFrom"]
+	untilRaw, untilPresent := input["activeUntil"]
+	if options.RequireAll && fromPresent != untilPresent {
+		return fmt.Errorf("activeFrom and activeUntil must be supplied together")
+	}
+	if fromPresent && untilPresent && !isDeferredWholeTemplate(fromRaw, options) && !isDeferredWholeTemplate(untilRaw, options) {
+		fromText, _ := fromRaw.(string)
+		untilText, _ := untilRaw.(string)
+		from, fromErr := time.Parse(time.RFC3339, fromText)
+		until, untilErr := time.Parse(time.RFC3339, untilText)
+		if fromErr != nil || untilErr != nil || !until.After(from) {
+			return fmt.Errorf("activeFrom and activeUntil must form an increasing RFC3339 interval")
+		}
+		if timeZoneConcrete && !pagerDutyPeriodWithinMax(from, until, timeZone) {
+			return fmt.Errorf("active period must not exceed 31 local calendar days")
+		}
+	}
+	if raw, present := input["incident"]; present && !isDeferredWholeTemplate(raw, options) {
+		record, _ := raw.(map[string]any)
+		if parseProjectedPagerDutyIncident(record) == nil {
+			return fmt.Errorf("incident must match the bounded authoritative PagerDuty projection")
+		}
+	}
+	return nil
+}
+
+func validatePagerDutyOutcomeDefinition(input map[string]any, options InputValidationOptions) error {
+	if !options.AllowWholeTemplates {
+		return nil
+	}
+	if raw, present := input["expectedIncidentId"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		if value == "" || value != strings.TrimSpace(value) || len(value) > pagerDutyIdentifierMaxBytes {
+			return fmt.Errorf("expectedIncidentId must be a canonical non-empty identifier")
+		}
+	}
+	if raw, present := input["expectedSnoozeUntil"]; present && !isDeferredWholeTemplate(raw, options) {
+		value, _ := raw.(string)
+		if _, err := time.Parse(time.RFC3339, value); err != nil {
+			return fmt.Errorf("expectedSnoozeUntil must be RFC3339")
+		}
+	}
+	if raw, present := input["incident"]; present && !isDeferredWholeTemplate(raw, options) {
+		record, _ := raw.(map[string]any)
+		if parseProjectedPagerDutyIncident(record) == nil {
+			return fmt.Errorf("incident must match the bounded authoritative PagerDuty projection")
+		}
+	}
+	return nil
+}
+
 func pagerDutyTools() []Definition {
 	unavailable := func(_ context.Context, _ map[string]any) (map[string]any, error) {
 		return map[string]any{"ok": false, "error": "integration tools require run context", "latencyMs": 0}, nil
@@ -366,6 +628,7 @@ func pagerDutyTools() []Definition {
 			Optional:     []string{"region", "rateLimitPerMin"},
 			Fields:       incidentFields,
 			InputExample: connectionExample,
+			Validate:     validatePagerDutyAPIInput,
 			WriteSide:    false,
 			Execute:      unavailable,
 		},
@@ -402,6 +665,7 @@ func pagerDutyTools() []Definition {
 				"timeZone":        "UTC",
 				"workingHours":    []any{map[string]any{"days": []any{1.0, 2.0, 3.0, 4.0, 5.0}, "start": "09:00", "end": "17:00"}},
 			},
+			Validate:  validatePagerDutyPolicyDefinition,
 			WriteSide: false,
 			Execute:   executePagerDutyPolicyEvaluate,
 		},
@@ -419,6 +683,7 @@ func pagerDutyTools() []Definition {
 				"expectedIncidentId":  "{{context.snooze_incident.output.result.incident.id}}",
 				"expectedSnoozeUntil": "{{context.snooze_incident.output.result.snoozeUntil}}",
 			},
+			Validate:  validatePagerDutyOutcomeDefinition,
 			WriteSide: false,
 			Execute:   executePagerDutyOutcomeVerify,
 		},
@@ -429,6 +694,7 @@ func pagerDutyTools() []Definition {
 			Optional:     []string{"region", "rateLimitPerMin"},
 			Fields:       incidentFields,
 			InputExample: connectionExample,
+			Validate:     validatePagerDutyAPIInput,
 			WriteSide:    true,
 			Execute:      unavailable,
 		},
@@ -444,6 +710,7 @@ func pagerDutyTools() []Definition {
 				"region": "us", "incidentId": "{{context.on_pagerduty.output.event.incidentId}}",
 				"durationSeconds": 43_200,
 			},
+			Validate:  validatePagerDutySnoozeInput,
 			WriteSide: true,
 			Execute:   unavailable,
 		},
@@ -508,7 +775,7 @@ func executePagerDutyPolicyEvaluate(_ context.Context, input map[string]any) (ma
 	}
 	eventType, _ := input["eventType"].(string)
 	pagerDutyUserID, _ := input["pagerDutyUserId"].(string)
-	snoozeSeconds, snoozeSecondsOK := input["snoozeSeconds"].(float64)
+	_, snoozeSecondsOK := boundedWholeNumber(input["snoozeSeconds"], pagerDutySnoozeMinSeconds, pagerDutySnoozeMaxSeconds)
 	timeZone, _ := input["timeZone"].(string)
 	windowMode := "outside"
 	windowModeValid := true
@@ -541,8 +808,7 @@ func executePagerDutyPolicyEvaluate(_ context.Context, input map[string]any) (ma
 	})
 	if incident == nil || occurredErr != nil || receivedErr != nil || evaluatedErr != nil || !evaluatedAtValid ||
 		receivedAt.Before(occurredAt) || evaluatedAt.Before(receivedAt) ||
-		!snoozeSecondsOK || snoozeSeconds != math.Trunc(snoozeSeconds) ||
-		snoozeSeconds < pagerDutySnoozeMinSeconds || snoozeSeconds > pagerDutySnoozeMaxSeconds ||
+		!snoozeSecondsOK ||
 		(windowMode != "outside" && windowMode != "inside") || !activeValid ||
 		!actionableValid || !serviceIDsValid || !urgenciesValid ||
 		!validPagerDutyWindowPolicy(timeZone, input["workingHours"]) {
@@ -650,7 +916,7 @@ func pagerDutyOptionalStringList(input map[string]any, key string, allowed func(
 	if raw == nil {
 		return nil, false
 	}
-	items, ok := raw.([]any)
+	items, ok := arrayItems(raw)
 	if !ok || len(items) > 100 {
 		return nil, false
 	}
@@ -673,7 +939,7 @@ func validPagerDutyWindowPolicy(timeZone string, raw any) bool {
 	if _, err := time.LoadLocation(timeZone); err != nil {
 		return false
 	}
-	items, ok := raw.([]any)
+	items, ok := arrayItems(raw)
 	if !ok || len(items) == 0 || len(items) > pagerDutyWorkingWindowsMax {
 		return false
 	}
@@ -682,14 +948,14 @@ func validPagerDutyWindowPolicy(timeZone string, raw any) bool {
 		if !ok {
 			return false
 		}
-		rawDays, ok := entry["days"].([]any)
+		rawDays, ok := arrayItems(entry["days"])
 		if !ok || len(rawDays) == 0 || len(rawDays) > 7 {
 			return false
 		}
 		seenDays := map[int]bool{}
 		for _, rawDay := range rawDays {
-			day, ok := rawDay.(float64)
-			if !ok || day != math.Trunc(day) || day < 0 || day > 6 {
+			day, ok := boundedWholeNumber(rawDay, 0, 6)
+			if !ok {
 				return false
 			}
 			integerDay := int(day)
@@ -713,7 +979,7 @@ func validPagerDutyWindowPolicy(timeZone string, raw any) bool {
 // defensive because this helper is package-visible to tests and future call
 // sites, but executePagerDutyPolicyEvaluate never reaches it with bad input.
 func parseWorkingWindows(raw any) []WorkingWindow {
-	items, ok := raw.([]any)
+	items, ok := arrayItems(raw)
 	if !ok || len(items) == 0 || len(items) > pagerDutyWorkingWindowsMax {
 		return nil
 	}
@@ -728,11 +994,11 @@ func parseWorkingWindows(raw any) []WorkingWindow {
 		}
 		window := WorkingWindow{}
 		daysValid := false
-		if rawDays, ok := entry["days"].([]any); ok && len(rawDays) > 0 && len(rawDays) <= 7 {
+		if rawDays, ok := arrayItems(entry["days"]); ok && len(rawDays) > 0 && len(rawDays) <= 7 {
 			daysValid = true
 			seenDays := map[int]bool{}
 			for _, rawDay := range rawDays {
-				if day, ok := rawDay.(float64); ok && day == math.Trunc(day) && day >= 0 && day <= 6 {
+				if day, ok := boundedWholeNumber(rawDay, 0, 6); ok {
 					integerDay := int(day)
 					if seenDays[integerDay] {
 						daysValid = false
@@ -780,9 +1046,8 @@ func executePagerDutyAPICall(ctx context.Context, name string, input map[string]
 	}
 	var snoozeDuration int
 	if name == "pagerduty.incident.snooze" {
-		duration, ok := input["durationSeconds"].(float64)
-		if !ok || duration != math.Trunc(duration) ||
-			duration < pagerDutySnoozeMinSeconds || duration > pagerDutySnoozeMaxSeconds {
+		duration, ok := boundedWholeNumber(input["durationSeconds"], pagerDutySnoozeMinSeconds, pagerDutySnoozeMaxSeconds)
+		if !ok {
 			return envelopeError("pagerduty.incident.snooze requires durationSeconds in 60..604800", latency())
 		}
 		snoozeDuration = int(duration)
@@ -798,8 +1063,8 @@ func executePagerDutyAPICall(ctx context.Context, name string, input map[string]
 		rateLimit = deps.RateLimitPerMin("pagerduty", pagerDutyDefaultRateLimitMin)
 	}
 	if rawOverride, present := input["rateLimitPerMin"]; present {
-		override, ok := rawOverride.(float64)
-		if !ok || override != math.Trunc(override) || override < 1 || override > 10_000 {
+		override, ok := boundedWholeNumber(rawOverride, 1, 10_000)
+		if !ok {
 			return envelopeError(name+" requires an integer rateLimitPerMin in 1..10000", latency())
 		}
 		// Workflow configuration may reduce provider pressure for one flow, but

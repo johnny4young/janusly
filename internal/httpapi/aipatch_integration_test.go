@@ -58,7 +58,7 @@ func TestPatchWorkflowLadder(t *testing.T) {
 	// alternatives (one secret-laden) + one INVALID patch (broken config
 	// type) — the invalid one must never reach the wire.
 	validPatch := `{"suggestions":[
-		{"patchedConfig":{"url":"https://api.example.com/v2","timeoutMs":300},"rationale":"fix the port","approachLabel":"url_fix","confidence":0.9,
+		{"patchedConfig":{"url":"https://api.example.com/v2","timeoutMs":300},"rationale":"fix the port","approachLabel":"fix_url","confidence":0.9,
 		 "consideredAlternatives":[
 		   {"approach":"retry harder","rejectedBecause":"the target is gone"},
 		   {"approach":"use sk-ant-abcdefghijklmnopqrstuvwx directly","rejectedBecause":"leaks a key sk-ant-abcdefghijklmnopqrstuvwx"},
@@ -87,6 +87,9 @@ func TestPatchWorkflowLadder(t *testing.T) {
 		t.Fatalf("the invalid patch must be dropped: %d survived", len(aiSuggestions))
 	}
 	winner := aiSuggestions[0].(map[string]any)
+	if winner["approachLabel"] != "fix_url" || winner["confidence"] != float64(90) || winner["calibratedConfidence"] != float64(90) {
+		t.Fatalf("patch metadata must match the feedback/UI contract: %+v", winner)
+	}
 	workflow := winner["workflow"].(map[string]any)
 	nodes := workflow["nodes"].([]any)
 	patchedNode := nodes[0].(map[string]any)

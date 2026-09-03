@@ -26,8 +26,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -56,6 +56,8 @@ const (
 	dbTimeoutMsMax           = 120_000
 	dbSchemaDescribeRowLimit = 2_000
 	dbDefaultRateLimitPerMin = 60
+	dbParamsMaxBytes         = 256 << 10
+	dbTransactionMaxBytes    = 512 << 10
 )
 
 var (
@@ -140,6 +142,197 @@ func validateDbPlaceholders(sql string, paramsLen int) string {
 		return fmt.Sprintf("params length (%d) must match highest placeholder ($%d)", paramsLen, max)
 	}
 	return ""
+}
+
+func dbPlaceholderArity(sql string) int {
+	maximum := 0
+	for _, match := range dbPlaceholder.FindAllStringSubmatch(sql, -1) {
+		value, err := strconv.Atoi(match[1])
+		if err == nil && value > maximum {
+			maximum = value
+		}
+	}
+	return maximum
+}
+
+func validateDbIdentifier(value, field string) error {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > dbMaxIdentifierLength ||
+		!dbSafeIdentifier.MatchString(value) {
+		return fmt.Errorf("%s must be a simple Postgres identifier of at most %d bytes", field, dbMaxIdentifierLength)
+	}
+	return nil
+}
+
+func validateDbStringArray(raw any, field string, maximum int) ([]any, error) {
+	items, ok := arrayItems(raw)
+	if !ok || len(items) > maximum {
+		return nil, fmt.Errorf("%s allows at most %d names", field, maximum)
+	}
+	seen := make(map[string]bool, len(items))
+	for _, rawItem := range items {
+		item, ok := rawItem.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s entries must be strings", field)
+		}
+		if err := validateDbIdentifier(item, "table"); err != nil {
+			return nil, err
+		}
+		canonical := strings.ToLower(item)
+		if seen[canonical] {
+			return nil, fmt.Errorf("%s entries must be unique case-insensitively", field)
+		}
+		seen[canonical] = true
+	}
+	return items, nil
+}
+
+func validateDbParams(raw any) ([]any, error) {
+	params, ok := arrayItems(raw)
+	if !ok || len(params) > 100 {
+		return nil, fmt.Errorf("params allows at most 100 JSON values")
+	}
+	serialized, err := json.Marshal(raw)
+	if err != nil || len(serialized) > dbParamsMaxBytes {
+		return nil, fmt.Errorf("params exceed the %d byte bound", dbParamsMaxBytes)
+	}
+	return params, nil
+}
+
+func validateDbBound(input map[string]any, key string, maximum int, options InputValidationOptions) error {
+	raw, present := input[key]
+	if !present || isDeferredWholeTemplate(raw, options) {
+		return nil
+	}
+	if _, ok := boundedWholeNumber(raw, 1, int64(maximum)); !ok {
+		return fmt.Errorf("%s must be a whole number from 1 to %d", key, maximum)
+	}
+	return nil
+}
+
+func validateDbStatementInput(
+	sqlRaw any,
+	paramsRaw any,
+	paramsPresent bool,
+	kind string,
+	options InputValidationOptions,
+) error {
+	paramsKnown := false
+	paramsLength := 0
+	if paramsPresent {
+		if !isDeferredWholeTemplate(paramsRaw, options) {
+			params, err := validateDbParams(paramsRaw)
+			if err != nil {
+				return err
+			}
+			paramsKnown = true
+			paramsLength = len(params)
+		}
+	} else if options.RequireAll {
+		paramsKnown = true
+	}
+	if isDeferredWholeTemplate(sqlRaw, options) {
+		return nil
+	}
+	sql, ok := sqlRaw.(string)
+	if !ok {
+		return fmt.Errorf("sql must be a string")
+	}
+	if !paramsKnown {
+		paramsLength = dbPlaceholderArity(sql)
+	}
+	if message := ValidateDbSQL(sql, paramsLength, kind); message != "" {
+		return errors.New(message)
+	}
+	return nil
+}
+
+func validateDbCommonInput(input map[string]any, options InputValidationOptions) error {
+	if err := validateTrimmedIdentifier(input, "credential", integrationCredentialMaxRunes, options); err != nil {
+		return err
+	}
+	if err := validateDbBound(input, "timeoutMs", dbTimeoutMsMax, options); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateDbSchemaInput(input map[string]any, options InputValidationOptions) error {
+	if err := validateDbCommonInput(input, options); err != nil {
+		return err
+	}
+	if raw, present := input["schema"]; present && !isDeferredWholeTemplate(raw, options) {
+		if err := validateDbIdentifier(raw.(string), "schema"); err != nil {
+			return err
+		}
+	}
+	if raw, present := input["tables"]; present && !isDeferredWholeTemplate(raw, options) {
+		_, err := validateDbStringArray(raw, "tables", 50)
+		return err
+	}
+	return nil
+}
+
+func validateDbQueryInput(kind string) func(map[string]any, InputValidationOptions) error {
+	return func(input map[string]any, options InputValidationOptions) error {
+		if err := validateDbCommonInput(input, options); err != nil {
+			return err
+		}
+		if err := validateDbBound(input, "maxRows", dbMaxRowsLimit, options); err != nil {
+			return err
+		}
+		sqlRaw, sqlPresent := input["sql"]
+		if !sqlPresent {
+			return nil
+		}
+		paramsRaw, paramsPresent := input["params"]
+		return validateDbStatementInput(sqlRaw, paramsRaw, paramsPresent, kind, options)
+	}
+}
+
+func validateDbTransactionInput(input map[string]any, options InputValidationOptions) error {
+	if err := validateDbCommonInput(input, options); err != nil {
+		return err
+	}
+	if err := validateDbBound(input, "maxRowsPerStatement", dbMaxRowsLimit, options); err != nil {
+		return err
+	}
+	raw, present := input["statements"]
+	if !present || isDeferredWholeTemplate(raw, options) {
+		return nil
+	}
+	statements, ok := arrayItems(raw)
+	if !ok || len(statements) == 0 || len(statements) > dbMaxTransactionStmts {
+		return fmt.Errorf("statements must list 1..%d entries", dbMaxTransactionStmts)
+	}
+	serialized, err := json.Marshal(raw)
+	if err != nil || len(serialized) > dbTransactionMaxBytes {
+		return fmt.Errorf("statements exceed the %d byte bound", dbTransactionMaxBytes)
+	}
+	for index, rawStatement := range statements {
+		statement, ok := rawStatement.(map[string]any)
+		if !ok {
+			return fmt.Errorf("statements[%d] must be an object", index)
+		}
+		unknown := make([]string, 0)
+		for field := range statement {
+			if field != "sql" && field != "params" {
+				unknown = append(unknown, field)
+			}
+		}
+		sort.Strings(unknown)
+		if len(unknown) > 0 {
+			return fmt.Errorf("statements[%d] contains unsupported field %s", index, unknown[0])
+		}
+		sqlRaw, sqlPresent := statement["sql"]
+		if !sqlPresent {
+			return fmt.Errorf("statements[%d].sql is required", index)
+		}
+		paramsRaw, paramsPresent := statement["params"]
+		if err := validateDbStatementInput(sqlRaw, paramsRaw, paramsPresent, "any", options); err != nil {
+			return fmt.Errorf("statements[%d]: %w", index, err)
+		}
+	}
+	return nil
 }
 
 /* ------------------------------ pool cache ----------------------------- */
@@ -336,6 +529,7 @@ func dbTools() []Definition {
 				{Name: "tables", Type: "array"},
 			},
 			InputExample: map[string]any{"credential": "customer-postgres", "schema": "public", "tables": []any{"customers"}},
+			Validate:     validateDbSchemaInput,
 			Execute:      unavailable,
 		},
 		{
@@ -354,7 +548,8 @@ func dbTools() []Definition {
 				"credential": "customer-postgres",
 				"sql":        "select id, email from customers where status = $1", "params": []any{"active"},
 			},
-			Execute: unavailable,
+			Validate: validateDbQueryInput("read"),
+			Execute:  unavailable,
 		},
 		{
 			Name:        "db.query.write",
@@ -372,6 +567,7 @@ func dbTools() []Definition {
 				"credential": "customer-postgres",
 				"sql":        "update customers set status = $1 where id = $2", "params": []any{"active", "cus_123"},
 			},
+			Validate:  validateDbQueryInput("write"),
 			WriteSide: true,
 			Execute:   unavailable,
 		},
@@ -393,6 +589,7 @@ func dbTools() []Definition {
 					map[string]any{"sql": "select id, status from customers where id = $1", "params": []any{"cus_123"}},
 				},
 			},
+			Validate:  validateDbTransactionInput,
 			WriteSide: true,
 			Execute:   unavailable,
 		},
@@ -411,8 +608,8 @@ func dbBoundedInt(input map[string]any, key string, fallback, max int) (int, str
 	if !present {
 		return fallback, ""
 	}
-	value, ok := raw.(float64)
-	if !ok || value != math.Trunc(value) || value < 1 || value > float64(max) {
+	value, ok := boundedWholeNumber(raw, 1, int64(max))
+	if !ok {
 		return 0, key + " out of range"
 	}
 	return int(value), ""
@@ -459,11 +656,15 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 		if schema, present := input["schema"].(string); present && !dbSafeIdentifier.MatchString(schema) {
 			return answerError("schema must be a simple Postgres identifier")
 		}
-		if rawTables, present := input["tables"].([]any); present {
-			if len(rawTables) > 50 {
+		if rawTables, present := input["tables"]; present {
+			tables, ok := arrayItems(rawTables)
+			if !ok {
+				return answerError("tables must be an array")
+			}
+			if len(tables) > 50 {
 				return answerError("tables allows at most 50 names")
 			}
-			for _, rawTable := range rawTables {
+			for _, rawTable := range tables {
 				table, ok := rawTable.(string)
 				if !ok || len(table) > dbMaxIdentifierLength || !dbSafeIdentifier.MatchString(table) {
 					return answerError("table names must be simple Postgres identifiers")
@@ -472,7 +673,10 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 		}
 	case "db.query.read", "db.query.write":
 		sql, _ := input["sql"].(string)
-		params, _ := input["params"].([]any)
+		params := []any(nil)
+		if rawParams, present := input["params"]; present {
+			params, _ = arrayItems(rawParams)
+		}
 		if len(params) > 100 {
 			return answerError("params allows at most 100 values")
 		}
@@ -485,7 +689,7 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 		}
 		statements = []dbStatement{{sql: strings.TrimSpace(sql), params: params}}
 	case "db.query.transaction":
-		rawStatements, ok := input["statements"].([]any)
+		rawStatements, ok := arrayItems(input["statements"])
 		if !ok || len(rawStatements) == 0 || len(rawStatements) > dbMaxTransactionStmts {
 			return answerError(fmt.Sprintf("statements must list 1..%d entries", dbMaxTransactionStmts))
 		}
@@ -495,7 +699,10 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 				return answerError("statements entries must be objects")
 			}
 			sql, _ := entry["sql"].(string)
-			params, _ := entry["params"].([]any)
+			params := []any(nil)
+			if rawParams, present := entry["params"]; present {
+				params, _ = arrayItems(rawParams)
+			}
 			if len(params) > 100 {
 				return answerError("params allows at most 100 values")
 			}
@@ -525,7 +732,11 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 		return answerError(safeErr(err))
 	}
 
-	tx, err := pool.Begin(ctx)
+	txOptions := pgx.TxOptions{}
+	if name == "db.schema.describe" || name == "db.query.read" {
+		txOptions.AccessMode = pgx.ReadOnly
+	}
+	tx, err := pool.BeginTx(ctx, txOptions)
 	if err != nil {
 		return answerError(safeErr(err))
 	}
@@ -537,7 +748,10 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 	switch name {
 	case "db.schema.describe":
 		schema, _ := input["schema"].(string)
-		rawTables, _ := input["tables"].([]any)
+		rawTables := []any(nil)
+		if value, present := input["tables"]; present {
+			rawTables, _ = arrayItems(value)
+		}
 		sql, params := buildSchemaDescribeQuery(schema, rawTables)
 		rows, err := tx.Query(ctx, sql, params...)
 		if err != nil {

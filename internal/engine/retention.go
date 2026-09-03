@@ -106,6 +106,12 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 				logger.Error("worker-instance cleanup failed", "error", err)
 			}
 		}
+		// Eval datasets own optional finite retention windows. Their consented
+		// examples expire atomically with the parent while immutable experiment
+		// summaries remain available as aggregate evidence.
+		if err := e.runEvalDatasetRetention(ctx, logger); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
 		// Per-org data retention (run_events / audit_logs / usage_events).
 		e.runDataRetention(ctx, logger)
 		// Weekly digests ride the same cadence; the state-row claim keeps

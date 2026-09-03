@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -106,19 +107,22 @@ func (s *V1Server) optionalRecoveryDiagnosisEnrichment(
 	if err != nil {
 		return nil
 	}
-	if s.limiter != nil {
-		if err := s.limiter.Enforce(r.Context(), rc.orgID, ratelimit.Options{
-			Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
-		}); err != nil {
-			return nil
-		}
-	}
-	if gate := aibudget.Gate(r.Context(), s.pool, rc.orgID, rc.userID, "ai.recovery.diagnosed"); !gate.Allowed {
-		return nil
-	}
 	generated, aiErr := aidiagnosis.Generate(r.Context(), client, aidiagnosis.GenerateInput{
 		Evidence: facts.AIEvidence(),
 		Context:  ai.CallContext{OrgID: rc.orgID, UserID: rc.userID},
+		AdmitCall: func(ctx context.Context) *ai.AIError {
+			if s.limiter != nil {
+				if err := s.limiter.Enforce(ctx, rc.orgID, ratelimit.Options{
+					Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
+				}); err != nil {
+					return &ai.AIError{Class: "rate_limit", Message: err.Error(), BeforeEgress: true}
+				}
+			}
+			if gate := aibudget.Gate(ctx, s.pool, rc.orgID, rc.userID, "ai.recovery.diagnosed"); !gate.Allowed {
+				return &ai.AIError{Class: "budget_blocked", Message: "monthly AI budget exceeded", BeforeEgress: true}
+			}
+			return nil
+		},
 	})
 	if aiErr != nil {
 		return nil
