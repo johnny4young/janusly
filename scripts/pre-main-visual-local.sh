@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+baseline_ref=${JANUSLY_VISUAL_BASELINE_REF:-a18a0478d547a956885b4187b1ead303ea021524}
+profile=${1:-all}
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+evidence_root=${JANUSLY_EVIDENCE_DIR:-$root/output/qualification/pre-main-visual/$stamp}
+if [[ "$evidence_root" != /* ]]; then
+  evidence_root="$root/$evidence_root"
+fi
+run_id=${JANUSLY_VISUAL_RUN_ID:-${UID:-0}-$$}
+current_project=${JANUSLY_VISUAL_AFTER_PROJECT:-janusly-visual-after-$run_id}
+baseline_project=${JANUSLY_VISUAL_BEFORE_PROJECT:-janusly-visual-before-$run_id}
+current_app_port=${JANUSLY_VISUAL_AFTER_PORT:-37332}
+baseline_app_port=${JANUSLY_VISUAL_BEFORE_PORT:-37331}
+current_postgres_port=${JANUSLY_VISUAL_AFTER_POSTGRES_PORT:-35434}
+baseline_postgres_port=${JANUSLY_VISUAL_BEFORE_POSTGRES_PORT:-35433}
+current_metrics_port=${JANUSLY_VISUAL_AFTER_METRICS_PORT:-39464}
+baseline_metrics_port=${JANUSLY_VISUAL_BEFORE_METRICS_PORT:-39463}
+credential_master_key=0a6ee99978435f3e242e19aa61839045c6c1a5f1f5e63558f9d40706702570c7
+docker_bin=${JANUSLY_VISUAL_DOCKER_BIN:-docker}
+baseline_source=
+active_source=
+active_project=
+active_app_port=
+active_postgres_port=
+active_metrics_port=
+active_commit=
+active_tree=
+active_image=
+active_attempted=0
+
+usage() {
+  cat <<'EOF'
+usage: scripts/pre-main-visual-local.sh [all|before|after|selftest]
+
+Captures a provider-free, isolated EN/ES x light/dark x desktop/tablet/mobile
+matrix. "before" reconstructs JANUSLY_VISUAL_BASELINE_REF through git archive;
+"after" uses the clean current HEAD. Every Compose project is isolated and is
+uniquely owned by one invocation before its volumes may be removed. Capture
+profiles require CONFIRM=reset; selftest does not touch Docker.
+EOF
+}
+
+die() {
+  printf 'pre-main visual: %s\n' "$*" >&2
+  exit 2
+}
+
+compose() {
+  COMPOSE_PROJECT_NAME="$active_project" \
+  IMAGE="$active_image" \
+  JANUSLY_HOST_PORT="$active_app_port" \
+  JANUSLY_POSTGRES_HOST_PORT="$active_postgres_port" \
+  JANUSLY_INTERNAL_HOST_PORT="$active_metrics_port" \
+  JANUSLY_BUILD_COMMIT="$active_commit" \
+  JANUSLY_BUILD_TREE="$active_tree" \
+  JANUSLY_BUILD_ID="${active_commit:0:8}" \
+  JANUSLY_CREDENTIAL_MASTER_KEY="$credential_master_key" \
+  ALLOW_PRIVATE_HTTP_TARGETS=true \
+  ANTHROPIC_API_KEY= \
+    "$docker_bin" compose -f "$active_source/docker-compose.yml" -p "$active_project" "$@"
+}
+
+stop_active_stack() {
+  if ((active_attempted)) && [[ -n "$active_source" && -n "$active_project" ]]; then
+    compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  fi
+  active_attempted=0
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT INT TERM
+  stop_active_stack
+  if [[ -n "$baseline_source" ]]; then
+    rm -rf "$baseline_source"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT INT TERM
+
+validate() {
+  case "$profile" in
+    all|before|after|selftest) ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "unknown profile: $profile" ;;
+  esac
+  [[ "$current_project" =~ ^janusly-visual-after-[a-z0-9][a-z0-9_-]*$ ]] ||
+    die 'after Compose project must use a unique janusly-visual-after- prefix'
+  [[ "$baseline_project" =~ ^janusly-visual-before-[a-z0-9][a-z0-9_-]*$ ]] ||
+    die 'before Compose project must use a unique janusly-visual-before- prefix'
+  [[ "$current_project" != "$baseline_project" ]] ||
+    die 'before and after Compose projects must differ'
+  [[ "$credential_master_key" =~ ^[0-9a-fA-F]{64}$ ]] ||
+    die 'visual credential master key must be exactly 32 bytes encoded as hex'
+  for port in \
+    "$current_app_port" "$baseline_app_port" \
+    "$current_postgres_port" "$baseline_postgres_port" \
+    "$current_metrics_port" "$baseline_metrics_port"; do
+    [[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1024 && port <= 65535)) ||
+      die "invalid port: $port"
+  done
+  [[ "$current_app_port" != "$current_postgres_port" &&
+     "$current_app_port" != "$current_metrics_port" &&
+     "$current_postgres_port" != "$current_metrics_port" ]] ||
+    die 'after ports must be distinct'
+  [[ "$baseline_app_port" != "$baseline_postgres_port" &&
+     "$baseline_app_port" != "$baseline_metrics_port" &&
+     "$baseline_postgres_port" != "$baseline_metrics_port" ]] ||
+    die 'before ports must be distinct'
+  if [[ "$profile" == selftest ]]; then return 0; fi
+  [[ ${CONFIRM:-} == reset ]] || die 'isolated volume cleanup requires CONFIRM=reset'
+  command -v "$docker_bin" >/dev/null 2>&1 || die 'docker is required'
+  command -v jq >/dev/null 2>&1 || die 'jq is required'
+  git -C "$root" cat-file -e "${baseline_ref}^{commit}" 2>/dev/null ||
+    die "baseline ref does not resolve: $baseline_ref"
+  if [[ -n $(git -C "$root" status --porcelain --untracked-files=all) ]]; then
+    die 'current source must be clean so after evidence has exact provenance'
+  fi
+}
+
+validate_visual_evidence() {
+  local phase=$1
+  local phase_dir="$evidence_root/$phase"
+  local matrix="$phase_dir/${phase}-visual-matrix.json"
+  local expected_screenshots=84
+  local actual_screenshots
+
+  [[ -f "$matrix" && ! -L "$matrix" ]] ||
+    die "$phase visual matrix is missing from the canonical evidence directory"
+  jq -e --arg phase "$phase" '
+    .phase == $phase and
+    (.combinations | length) == 12 and
+    all(.combinations[];
+      (.surfaces | length) == 7 and
+      all(.surfaces[];
+        (.screenshot | type) == "string" and
+        (.screenshot | length) > 0
+      )
+    )
+  ' "$matrix" >/dev/null || die "$phase visual matrix is incomplete"
+
+  while IFS= read -r screenshot; do
+    [[ -f "$phase_dir/$screenshot" && ! -L "$phase_dir/$screenshot" ]] ||
+      die "$phase visual screenshot is missing: $screenshot"
+  done < <(jq -r '.combinations[].surfaces[].screenshot' "$matrix")
+
+  if [[ "$phase" == after ]]; then
+    local recovery_dir="$phase_dir/governed-recovery"
+    local recovery_manifest="$recovery_dir/semantic-outcome-evidence.json"
+    [[ -f "$recovery_manifest" && ! -L "$recovery_manifest" ]] ||
+      die 'governed recovery evidence manifest is missing from the canonical evidence directory'
+    jq -e '
+      .evidenceLevel == "deterministic_local_runtime" and
+      (.fixtures | type) == "object" and
+      (.fixtures | length) == 3
+    ' "$recovery_manifest" >/dev/null || die 'governed recovery evidence manifest is incomplete'
+    jq -e '
+      all(.combinations[];
+        all(.surfaces[];
+          .overflowPx == 0 and
+          (.blockingViolations | length) == 0
+        ) and
+        (.browserErrors | length) == 0 and
+        (.interactionFindings | length) == 0
+      )
+    ' "$matrix" >/dev/null || die 'after visual matrix contains blocking findings'
+    expected_screenshots=97
+  fi
+
+  actual_screenshots=$(find "$phase_dir" -type f -name '*.png' | wc -l | tr -d ' ')
+  [[ "$actual_screenshots" == "$expected_screenshots" ]] ||
+    die "$phase evidence contains $actual_screenshots screenshots; expected $expected_screenshots"
+}
+
+project_has_resources() {
+  local project=$1
+  [[ -n $("$docker_bin" ps -aq --filter "label=com.docker.compose.project=$project") ]] ||
+    [[ -n $("$docker_bin" volume ls -q --filter "label=com.docker.compose.project=$project") ]] ||
+    [[ -n $("$docker_bin" network ls -q --filter "label=com.docker.compose.project=$project") ]]
+}
+
+wait_for_app() {
+  local origin=$1
+  local _
+  for _ in $(seq 1 120); do
+    if curl --fail --silent "$origin/healthz" >/dev/null; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+
+prepare_baseline() {
+  baseline_source=$(mktemp -d "${TMPDIR:-/tmp}/janusly-visual-before.XXXXXX")
+  git -C "$root" archive --format=tar "$baseline_ref" | tar -xf - -C "$baseline_source"
+}
+
+select_phase() {
+  local phase=$1
+  stop_active_stack
+  if [[ "$phase" == before ]]; then
+    [[ -n "$baseline_source" ]] || prepare_baseline
+    active_source=$baseline_source
+    active_project=$baseline_project
+    active_app_port=$baseline_app_port
+    active_postgres_port=$baseline_postgres_port
+    active_metrics_port=$baseline_metrics_port
+    active_commit=$(git -C "$root" rev-parse "${baseline_ref}^{commit}")
+    active_tree=$(git -C "$root" rev-parse "${baseline_ref}^{tree}")
+  else
+    active_source=$root
+    active_project=$current_project
+    active_app_port=$current_app_port
+    active_postgres_port=$current_postgres_port
+    active_metrics_port=$current_metrics_port
+    active_commit=$(git -C "$root" rev-parse HEAD)
+    active_tree=$(git -C "$root" rev-parse 'HEAD^{tree}')
+  fi
+  active_image="janusly:visual-${phase}-${active_commit:0:8}"
+  active_attempted=0
+}
+
+start_active_stack() {
+  project_has_resources "$active_project" &&
+    die "refusing pre-existing resources for project $active_project"
+  active_attempted=1
+  compose up -d --wait postgres
+  compose build janusly
+  compose run --rm janusly migrate
+  compose up -d janusly
+  if ! wait_for_app "http://127.0.0.1:${active_app_port}"; then
+    printf 'pre-main visual: %s runtime did not become healthy\n' "$active_project" >&2
+    compose ps >&2 || true
+    compose logs --no-color --tail=200 janusly postgres >&2 || true
+    return 1
+  fi
+}
+
+run_visual_phase() {
+  local phase=$1
+  local phase_dir="$evidence_root/$phase"
+  local origin="http://127.0.0.1:${active_app_port}"
+  mkdir -p "$phase_dir"
+  chmod 700 "$evidence_root" "$phase_dir" || true
+  (
+    cd "$root/web"
+    env \
+      PLAYWRIGHT_SKIP_WEB_SERVER=1 \
+      JANUSLY_PRE_MAIN_VISUAL_E2E=1 \
+      JANUSLY_VISUAL_PHASE="$phase" \
+      JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
+      E2E_API_URL="$origin" \
+      JANUSLY_EVIDENCE_DIR="$phase_dir" \
+      ./node_modules/.bin/playwright test \
+        e2e/pre-main-visual-matrix.spec.ts \
+        --project=chromium --workers=1
+  )
+  if [[ "$phase" == after ]]; then
+    (
+      cd "$root/web"
+      env \
+        PLAYWRIGHT_SKIP_WEB_SERVER=1 \
+        JANUSLY_SEMANTIC_OUTCOME_E2E=1 \
+        JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
+        E2E_API_URL="$origin" \
+        JANUSLY_EVIDENCE_DIR="$phase_dir/governed-recovery" \
+        ./node_modules/.bin/playwright test \
+          e2e/semantic-outcome-recovery.spec.ts \
+          --project=chromium --workers=1
+    )
+  fi
+}
+
+capture_phase() {
+  local phase=$1
+  printf 'pre-main visual: capturing %s\n' "$phase"
+  select_phase "$phase"
+  start_active_stack
+  run_visual_phase "$phase"
+  validate_visual_evidence "$phase"
+  stop_active_stack
+  active_source=
+  active_project=
+}
+
+write_summary() {
+  local current_commit current_tree baseline_commit baseline_tree
+  current_commit=$(git -C "$root" rev-parse HEAD)
+  current_tree=$(git -C "$root" rev-parse 'HEAD^{tree}')
+  baseline_commit=$(git -C "$root" rev-parse "${baseline_ref}^{commit}")
+  baseline_tree=$(git -C "$root" rev-parse "${baseline_ref}^{tree}")
+  jq -n \
+    --arg status passed \
+    --arg profile "$profile" \
+    --arg generatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg baselineCommit "$baseline_commit" \
+    --arg baselineTree "$baseline_tree" \
+    --arg currentCommit "$current_commit" \
+    --arg currentTree "$current_tree" \
+    --argjson beforeScreenshots "$(find "$evidence_root/before" -type f -name '*.png' 2>/dev/null | wc -l | tr -d ' ')" \
+    --argjson afterScreenshots "$(find "$evidence_root/after" -type f -name '*.png' 2>/dev/null | wc -l | tr -d ' ')" \
+    '{status:$status,profile:$profile,generatedAt:$generatedAt,providerCalls:0,providerCostUsd:0,baseline:{commit:$baselineCommit,tree:$baselineTree,screenshots:$beforeScreenshots},after:{commit:$currentCommit,tree:$currentTree,screenshots:$afterScreenshots}}' \
+    >"$evidence_root/summary.json"
+  (
+    cd "$evidence_root"
+    find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 shasum -a 256
+  ) >"$evidence_root/SHA256SUMS"
+}
+
+validate
+if [[ "$profile" == selftest ]]; then
+  jq -n \
+    --arg beforeProject "$baseline_project" \
+    --arg afterProject "$current_project" \
+    --argjson beforeAppPort "$baseline_app_port" \
+    --argjson afterAppPort "$current_app_port" \
+    --arg evidenceRoot "$evidence_root" \
+    '{projects:{before:$beforeProject,after:$afterProject},ports:{beforeApplication:$beforeAppPort,afterApplication:$afterAppPort},evidenceRoot:$evidenceRoot}'
+  exit 0
+fi
+mkdir -p "$evidence_root"
+case "$profile" in
+  all)
+    capture_phase before
+    capture_phase after
+    ;;
+  before|after)
+    capture_phase "$profile"
+    ;;
+esac
+write_summary
+printf 'pre-main visual: evidence written to %s\n' "$evidence_root"

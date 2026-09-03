@@ -18,8 +18,8 @@ maintained.
 
 ## Dependency scanning
 
-CI runs `pnpm audit --audit-level moderate` on every push and pull request.
-The repository currently carries no ignored advisory. If an upstream-locked
-finding ever requires a temporary exception, it must be documented here with
-the parent chain, why the vector does not apply, a removal condition, and a
-review date before it is added to `pnpm-workspace.yaml`.
+CI runs `pnpm audit --audit-level moderate` for `/web` and
+`go tool govulncheck ./...` for the Go runtime on every push and pull request.
+The repository carries no ignored advisory. A temporary exception must be
+documented here with the dependency chain, applicability analysis, removal
+condition, and review date.

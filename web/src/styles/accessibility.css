@@ -1,0 +1,51 @@
+/**
+ * Accessibility primitives and the universal keyboard/contrast floor.
+ *
+ * Used by: web/src/index.css in declaration order; do not import directly.
+ * Invariant: preserve module order because later feature rules intentionally refine shared primitives.
+ */
+
+/* ==========================================================================
+   Accessibility primitives
+   ========================================================================== */
+
+/* Universal motion-off for users who opt in via OS settings. Component-level
+   @media (prefers-reduced-motion: reduce) blocks remain for surfaces that
+   need a stronger override (e.g. animation: none) — this universal block
+   only collapses durations so layout-essential transforms (React Flow pan,
+   inertial scroll) still run, just instantly. The !important is load-bearing
+   because the universal selector has zero specificity and would otherwise
+   lose to any class-scoped transition declaration. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ==========================================================================
+   C10 — Accessibility floor. Universal keyboard focus ring + placeholder
+   contrast. `:where()` keeps these at zero specificity so the handful of
+   components with bespoke `:focus-visible` rings keep their treatment;
+   everything else (generic buttons, inputs, selects, links, role-cards,
+   tab chips) gets a visible cobalt ring for free. Critical for the
+   shortcut-driven flow (`/`, `g r`).
+   ========================================================================== */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--we-primary-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Placeholders must clear AA: lift the browser-default faint gray to the
+   `--we-muted` token (which passes on white). opacity:1 defeats Firefox's
+   default placeholder dimming. */
+input::placeholder,
+textarea::placeholder {
+  color: var(--we-muted);
+  opacity: 1;
+}

@@ -3,219 +3,150 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
-
-concurrency:
-  group: ci-${{ github.ref }}
-  # Cancel queued PR runs but never an in-flight push to main, so a fast
-  # follow-up commit can't drop a green-on-main signal silently.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    branches: [develop, main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build_test:
-    name: Build + jsdom test (Node 24)
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 11.17.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit:ci
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm test:scripts
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:browser
+      - run: pnpm build
+      - run: pnpm bundle-check
+
+  backend:
+    name: Backend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
-      # Version comes from the root package.json `packageManager` field —
-      # single source of truth (action-setup v6 reads it when `version` is
-      # omitted, and erroring on a dual spec is why we don't pass it here).
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint (Oxlint)
-        run: pnpm lint
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Check generated API contract
-        run: pnpm contract:check
-
+          go-version: 1.26.6
+          cache: true
+      - name: Format
+        run: test -z "$(find cmd internal e2e -name '*.go' -type f -exec gofmt -l {} +)"
       - name: Build
-        run: pnpm build
+        run: go build ./...
+      - name: Local database port contract
+        run: bash scripts/local-db-port.test.sh
+      - name: Generated contract and SQL
+        run: |
+          go tool sqlc generate
+          go run ./cmd/contract
+          git diff --exit-code -- schema.sql internal/store contract
+      - uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
+        with:
+          version: v2.7.2
+          args: --timeout=10m
+      - name: Reachable vulnerabilities
+        run: go tool govulncheck ./...
+      - name: Unit and race tests
+        run: go test -race ./...
 
-      - name: Test (jsdom)
-        run: pnpm test
-
-      - name: Test script utilities
-        run: pnpm test:scripts
-
-  test_browser:
-    name: Browser tests
+  integration:
+    name: PostgreSQL 18 integration
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      # Version comes from the root package.json `packageManager` field —
-      # single source of truth (action-setup v6 reads it when `version` is
-      # omitted, and erroring on a dual spec is why we don't pass it here).
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ms-playwright
-          # apps/web/package.json pins @playwright/test, so its hash flips only
-          # when the Playwright version actually moves — unlike pnpm-lock.yaml,
-          # which churns on every dep bump and would force needless re-downloads.
-          key: playwright-${{ runner.os }}-${{ hashFiles('apps/web/package.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install Playwright Chromium with system deps
-        run: pnpm --filter @janusly/web exec playwright install --with-deps chromium
-
-      - name: Test (browser mode)
-        run: pnpm test:browser
-
-      - name: Build production web bundle
-        run: pnpm --filter @janusly/web build
-
-      - name: Enforce bundle budgets
-        run: pnpm bundle-check
-
-      - name: Test route performance budgets
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
         env:
-          JANUSLY_PERF_REPORT: artifacts/web-route-performance.json
-        run: pnpm --filter @janusly/web test:performance
-
-      - name: Upload web performance evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: web-performance
-          path: artifacts/
-          if-no-files-found: ignore
-          retention-days: 30
-
-  test_e2e:
-    name: E2E (Compose + Playwright)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      # Version comes from the root package.json `packageManager` field —
-      # single source of truth (action-setup v6 reads it when `version` is
-      # omitted, and erroring on a dual spec is why we don't pass it here).
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ms-playwright
-          # apps/web/package.json pins @playwright/test, so its hash flips only
-          # when the Playwright version actually moves — unlike pnpm-lock.yaml,
-          # which churns on every dep bump and would force needless re-downloads.
-          key: playwright-${{ runner.os }}-${{ hashFiles('apps/web/package.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install Playwright Chromium with system deps
-        run: pnpm --filter @janusly/web exec playwright install --with-deps chromium
-
-      - name: Test (e2e — boots Compose, runs migrate, runs Playwright, brings Compose down)
-        run: pnpm test:e2e
-
-      - name: Upload Playwright report on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-report
-          path: apps/web/playwright-report/
-          retention-days: 7
-
-  test_compat_pg15:
-    name: Integration lanes on Postgres 15 (oldest supported)
-    runs-on: ubuntu-latest
+          POSTGRES_USER: janusly
+          POSTGRES_PASSWORD: janusly-local
+          POSTGRES_DB: janusly
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U janusly -d janusly"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     env:
-      # The compose file parametrizes the postgres image; the script owns the
-      # full lifecycle (AGENTS.md: no compose orchestration in workflow YAML).
-      JANUSLY_POSTGRES_IMAGE: pgvector/pgvector:pg15
+      JANUSLY_DATABASE_URL: postgres://janusly:janusly-local@127.0.0.1:5432/janusly?sslmode=disable
     steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          node-version: 24
-          cache: pnpm
-      - name: Install
-        run: pnpm install --frozen-lockfile
-      - name: Integration lanes (real Postgres 15)
-        run: pnpm test:integration
+          go-version: 1.26.6
+          cache: true
+      - run: go run ./cmd/api migrate
+      - run: go run ./cmd/api migrate
+      - run: go test -race -tags integration -p 1 -count=1 ./...
 
-  dep_audit:
-    name: Dependency audit
+  e2e:
+    name: Single-runtime E2E
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
-      # Version comes from the root package.json `packageManager` field —
-      # single source of truth (action-setup v6 reads it when `version` is
-      # omitted, and erroring on a dual spec is why we don't pass it here).
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
-          node-version: 24
+          version: 11.17.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.18.0
           cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web exec playwright install --with-deps chromium
+      - run: bash scripts/test-e2e.sh
 
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Audit (fails on MODERATE+)
-        run: pnpm audit --audit-level moderate
-
-  test_sdk_python:
-    name: SDK (Python) tests
+  artifact:
+    name: Artifact
     runs-on: ubuntu-latest
-    # First Python package in the monorepo — runs alongside the Node lanes
-    # in parallel but in its own job so a Python failure never blocks the
-    # rest of CI from reporting status.
+    needs: [frontend, backend, integration, e2e]
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: packages/sdk-python/pyproject.toml
-
-      - name: Install (editable + dev deps)
-        working-directory: packages/sdk-python
-        run: pip install -e ".[dev]"
-
-      - name: Test (pytest)
-        working-directory: packages/sdk-python
-        run: pytest -q
-
-      - name: Type-check (mypy --strict)
-        working-directory: packages/sdk-python
-        run: mypy src/janusly
+          go-version: 1.26.6
+          cache: true
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 11.17.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web build
+      - run: go run ./cmd/artifact
+      - run: ./artifacts/janusly provenance
+      - run: make supply-chain IMAGE=janusly:supply-chain-${{ github.sha }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: janusly-${{ github.sha }}
+          path: |
+            artifacts/janusly
+            artifacts/manifest.json
+            artifacts/supply-chain/
+          if-no-files-found: error
+          retention-days: 14

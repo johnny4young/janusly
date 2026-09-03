@@ -1,0 +1,238 @@
+/**
+ * Demand-loaded React Flow and workflow-node chrome.
+ *
+ * Used by: CanvasWorkspace.tsx after the canvas boundary activates.
+ * Invariant: keep global navigation, account, feedback, and Home styles out of
+ * this file so every non-canvas route remains correctly styled.
+ */
+
+/* ==========================================================================
+   React Flow and workflow nodes
+   Styles third-party React Flow chrome and Janusly custom workflow step nodes.
+   Keep React Flow class overrides scoped to .react-flow__* selectors.
+   ========================================================================== */
+.react-flow__node {
+  border-radius: 8px;
+  color: var(--we-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.react-flow__node-workflowStep {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.workflow-node {
+  background: var(--we-surface);
+  border: 1.5px solid var(--we-line-strong);
+  border-radius: 8px;
+  box-sizing: border-box;
+  box-shadow: 0 18px 34px -26px var(--we-shadow-ink-45);
+  min-width: 238px;
+  padding: 11px;
+  position: relative;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  width: 238px;
+}
+
+.workflow-node[data-selected="true"] {
+  border-color: var(--we-primary);
+  box-shadow: 0 0 0 4px var(--we-primary-ring), 0 22px 42px -28px var(--we-primary-shadow);
+}
+
+.workflow-node[data-status="running"] {
+  background: var(--we-info-soft);
+  border-color: var(--we-info);
+}
+
+.canvas-frame[data-mode="observe"] .workflow-node[data-status="running"] {
+  animation: we-running-node-pulse 1.8s ease-out infinite;
+  box-shadow: 0 0 0 0 var(--we-info-border-30);
+}
+.workflow-node[data-status="waiting"],
+.workflow-node[data-status="queued"] { border-color: var(--we-warning); background: var(--we-warning-soft); }
+.workflow-node[data-status="succeeded"] { border-color: var(--we-success); background: var(--we-success-soft); }
+.workflow-node[data-status="failed"],
+.workflow-node[data-status="error"] { border-color: var(--we-danger); background: var(--we-danger-soft); }
+
+@keyframes we-running-node-pulse {
+  50% { box-shadow: 0 0 0 8px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-frame[data-mode="observe"] .workflow-node[data-status="running"] {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--we-info-border-30), 0 18px 34px -26px var(--we-shadow-ink-45);
+  }
+}
+
+/* Custom React Flow edge — selection state rides on the data-selected
+ * attribute set by `WorkflowEdge.tsx`, so the upstream `visibleEdges`
+ * memo doesn't need to rebuild inline style objects per render.
+ *
+ * Selectors include the `path` element + RF's class + our class to
+ * outrank `@xyflow/react`'s defaults. RF ships
+ * `.react-flow__edge.selected .react-flow__edge-path` at specificity
+ * 0,0,3,0 — class-only combinations tie it and lose on load order
+ * (RF's stylesheet is bundled after ours via Vite). Adding the `path`
+ * element selector adds one tag weight so our rules win at 0,0,2,1
+ * (base, against RF's 0,0,1,0) and 0,0,3,1 (selected, against RF's
+ * 0,0,3,0). Without it the edge renders as RF's default 1px grey →
+ * grey-on-select instead of faint 1.8px → cobalt 2.8px on selection. */
+path.react-flow__edge-path.we-edge {
+  stroke: var(--we-faint);
+  stroke-width: 1.8px;
+  transition: stroke-width 80ms ease-out, stroke 80ms ease-out;
+}
+path.react-flow__edge-path.we-edge[data-selected="true"] {
+  stroke: var(--we-primary);
+  stroke-width: 2.8px;
+}
+.we-edge-label {
+  position: absolute;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 4px;
+  color: var(--we-text-secondary);
+  font-size: 12px;
+  padding: 2px 6px;
+  pointer-events: all;
+}
+.we-edge-label[data-selected="true"] {
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+/* On-error routes read as the exception path: dashed + danger-toned. */
+path.react-flow__edge-path.we-edge[data-on-error="true"] {
+  stroke: var(--we-danger);
+  stroke-dasharray: 6 4;
+}
+path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
+  stroke: var(--we-danger);
+}
+.we-edge-label[data-on-error="true"] {
+  border-color: var(--we-danger);
+  color: var(--we-danger);
+}
+
+.canvas-toolbar__history {
+  display: inline-flex;
+  gap: 4px;
+  margin-right: 10px;
+}
+
+
+
+/* Virtualized list container — used by `useVirtualList`. Becomes the
+ * scroll surface for unbounded operator lists (DLQ rows + future
+ * panels). `overscroll-behavior: contain` prevents the scroll chain
+ * from propagating to the outer page when the user scrolls past the
+ * panel's ends. */
+.we-virtual-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.workflow-node-head {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+}
+
+.workflow-node-icon {
+  align-items: center;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  color: var(--we-primary);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.workflow-node-title {
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-node-status {
+  font-size: 9px;
+  padding: 3px 7px;
+}
+
+.workflow-node p {
+  color: var(--we-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  margin: 8px 0 0;
+}
+
+.workflow-node-summary {
+  background: var(--we-surface-node-summary);
+  border: 1px solid var(--we-line);
+  border-radius: 7px;
+  color: var(--we-ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 10px;
+  overflow: hidden;
+  padding: 7px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-handle {
+  background: var(--we-ink);
+  border: 2px solid var(--we-surface);
+  height: 10px;
+  width: 10px;
+}
+
+.workflow-handle-target { top: -5px; }
+.workflow-handle-source { bottom: -5px; }
+
+.react-flow__controls {
+  border: 1px solid var(--we-line-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px -8px var(--we-shadow-ink-20);
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: var(--we-surface);
+  color: var(--we-ink-soft);
+  border-bottom: 1px solid var(--we-line);
+}
+
+.react-flow__edge-textbg {
+  fill: var(--we-surface);
+  stroke: var(--we-line);
+  stroke-width: 1px;
+}
+
+.react-flow__edge-text {
+  fill: var(--we-ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.react-flow__attribution { background: transparent; }
+
+@media (max-width: 760px) {
+  .workflow-node {
+    min-width: 218px;
+  }
+}

@@ -1,80 +1,102 @@
+name: ${COMPOSE_PROJECT_NAME:-janusly}
+
 services:
-  redis:
-    image: redis:8-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    ports:
-      - "6379:6379"
-
   postgres:
-    # Parametrized so the CI compat job (and any self-host operator) can run
-    # the SAME lifecycle against the oldest supported Postgres. Default stays
-    # the dev/prod baseline.
-    image: ${JANUSLY_POSTGRES_IMAGE:-pgvector/pgvector:pg18}
+    image: pgvector/pgvector:pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
+    # Keep Docker exec/healthcheck processes parented to an init process rather
+    # than the PostgreSQL postmaster. A timed-out pg_isready can otherwise be
+    # reaped by postgres as an unknown child with exit code 2, forcing recovery.
+    init: true
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: workflow
+      POSTGRES_USER: janusly
+      POSTGRES_PASSWORD: janusly-local
+      POSTGRES_DB: janusly
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d workflow"]
+      test: ["CMD-SHELL", "pg_isready -U janusly -d janusly"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${JANUSLY_POSTGRES_HOST_PORT:-15473}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
 
-  # Self-hosted embeddings model for the memory substrate (bge-m3, 1024-dim).
-  # Dev brings this up automatically via scripts/run-dev.mjs. Production
-  # operators who keep memory disabled can omit `ollama` from their
-  # `docker compose up <services>` invocation. First boot pulls the bge-m3
-  # model (~1.2 GB) into the named volume; subsequent boots reuse the cache.
-  ollama:
-    # Pinned (was :latest — unreproducible builds). 0.24.0 is the version the
-    # dev fleet already runs; bump deliberately, not via silent pulls.
-    image: ollama/ollama:0.24.0
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        set -e
-        ollama serve &
-        OLLAMA_PID=$$!
-        until ollama list >/dev/null 2>&1; do sleep 1; done
-        ollama pull "$${OLLAMA_EMBED_MODEL:-bge-m3}" || true
-        wait $$OLLAMA_PID
+  janusly:
+    image: ${IMAGE:-janusly:local}
+    build:
+      context: .
+      args:
+        JANUSLY_BUILD_COMMIT: ${JANUSLY_BUILD_COMMIT:-0000000000000000000000000000000000000000}
+        JANUSLY_BUILD_TREE: ${JANUSLY_BUILD_TREE:-0000000000000000000000000000000000000000}
+        JANUSLY_BUILD_ID: ${JANUSLY_BUILD_ID:-local}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        JANUSLY_WEB_SUPABASE_PUBLISHABLE: ${VITE_SUPABASE_ANON_KEY:-}
+        VITE_DOCS_URL: ${VITE_DOCS_URL:-}
     environment:
-      OLLAMA_EMBED_MODEL: bge-m3
+      JANUSLY_DATABASE_URL: postgres://janusly:janusly-local@postgres:5432/janusly?sslmode=disable
+      JANUSLY_ENV: ${JANUSLY_ENV:-development}
+      # Railway's router reads PORT while Janusly deliberately reads only its
+      # own stable contract. Keep both aligned without adding a runtime alias.
+      PORT: ${PORT:-3001}
+      JANUSLY_PORT: ${JANUSLY_PORT:-3001}
+      # Inside the container, bind the privileged listener to its private
+      # interface so the loopback-only host mapping and sibling collectors can
+      # reach it. The process default remains 127.0.0.1 outside Compose.
+      JANUSLY_INTERNAL_HOST: ${JANUSLY_INTERNAL_HOST:-0.0.0.0}
+      JANUSLY_INTERNAL_PORT: 9464
+      JANUSLY_WORKER_CONCURRENCY: ${JANUSLY_WORKER_CONCURRENCY:-8}
+      JANUSLY_API_POOL_SIZE: ${JANUSLY_API_POOL_SIZE:-10}
+      JANUSLY_WORKER_POOL_SIZE: ${JANUSLY_WORKER_POOL_SIZE:-0}
+      JANUSLY_POLL_MS: ${JANUSLY_POLL_MS:-250}
+      JANUSLY_HTTP_TIMEOUT_MS: ${JANUSLY_HTTP_TIMEOUT_MS:-30000}
+      JANUSLY_FEEDBACK_MEMORY_WORKERS: ${JANUSLY_FEEDBACK_MEMORY_WORKERS:-4}
+      JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY: ${JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY:-256}
+      JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS: ${JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS:-15000}
+      JANUSLY_RESUME_TOKEN_SECRET: ${JANUSLY_RESUME_TOKEN_SECRET:-}
+      JANUSLY_CREDENTIAL_MASTER_KEY: ${JANUSLY_CREDENTIAL_MASTER_KEY:-}
+      JANUSLY_WEB_BASE_URL: ${JANUSLY_WEB_BASE_URL:-}
+      JANUSLY_BROWSER_CONNECT_ORIGINS: ${JANUSLY_BROWSER_CONNECT_ORIGINS:-}
+      API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS:-}
+      ALLOW_DEV_AUTH_HEADERS: ${ALLOW_DEV_AUTH_HEADERS:-false}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      JANUSLY_LLM_TIMEOUT_MS: ${JANUSLY_LLM_TIMEOUT_MS:-30000}
+      JANUSLY_LLM_MAX_RETRIES: ${JANUSLY_LLM_MAX_RETRIES:-2}
+      JANUSLY_LLM_MAX_OUTPUT_UNITS: ${JANUSLY_LLM_MAX_OUTPUT_UNITS:-4096}
+      JANUSLY_AI_GENERATION_CANDIDATES: ${JANUSLY_AI_GENERATION_CANDIDATES:-1}
+      JANUSLY_AGENT_WRITES_ENABLED: ${JANUSLY_AGENT_WRITES_ENABLED:-false}
+      JANUSLY_LOCAL_STACK: ${JANUSLY_LOCAL_STACK:-false}
+      JANUSLY_LOCAL_INTEGRATION_SIMULATOR: ${JANUSLY_LOCAL_INTEGRATION_SIMULATOR:-false}
+      JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL: ${JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL:-}
+      JANUSLY_LLM_SIMULATED_PROVIDERS: ${JANUSLY_LLM_SIMULATED_PROVIDERS:-}
+      JANUSLY_LLM_SIMULATOR_BASE_URL: ${JANUSLY_LLM_SIMULATOR_BASE_URL:-}
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-}
+      JANUSLY_MEMORY_ENABLED: ${JANUSLY_MEMORY_ENABLED:-false}
+      JANUSLY_EMBEDDING_MODEL: ${JANUSLY_EMBEDDING_MODEL:-bge-m3}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      ALLOW_PRIVATE_HTTP_TARGETS: ${ALLOW_PRIVATE_HTTP_TARGETS:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${JANUSLY_HOST_PORT:-3001}:3001"
+      - "127.0.0.1:${JANUSLY_INTERNAL_HOST_PORT:-9464}:9464"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.24.0@sha256:a6149234667efc71d37766d61c1a16f24c33e4cd7a0bf4125c44a7e47e2419c4
+    profiles: ["embeddings"]
+    environment:
+      OLLAMA_EMBED_MODEL: ${JANUSLY_EMBEDDING_MODEL:-bge-m3}
     volumes:
       - ollama_models:/root/.ollama
     ports:
-      - "11434:11434"
-    # The healthcheck only flips `healthy` once the embed model is
-    # actually pulled into the volume — `ollama list` alone returns 0
-    # while the daemon is up but the model is still downloading, which
-    # would mislead `docker compose ps` into showing `healthy` before
-    # the service can answer an embedding call. The shell-form check
-    # below greps for the configured model name so the signal is
-    # honest. `start_period` is generous because the first-boot pull
-    # of bge-m3 (~1.2 GB) can take several minutes on a slow
-    # connection; subsequent boots reuse the cached weights and the
-    # check passes within seconds.
-    healthcheck:
-      # `$${...}` keeps the variable un-interpolated by Compose at parse time
-      # so it expands inside the container's shell against the running
-      # service's env — matching the entrypoint's behaviour above. With
-      # a single `$`, Compose would resolve from the HOST shell at parse
-      # time (usually unset → literal "bge-m3"), so an operator running
-      # a different embed model via env override would get a check that
-      # greps for the wrong model and never flips healthy.
-      test: ["CMD-SHELL", "ollama list | grep -q \"$${OLLAMA_EMBED_MODEL:-bge-m3}\""]
-      interval: 15s
-      timeout: 5s
-      retries: 6
-      start_period: 600s
+      - "127.0.0.1:${OLLAMA_HOST_PORT:-11434}:11434"
 
 volumes:
+  postgres_data:
   ollama_models:

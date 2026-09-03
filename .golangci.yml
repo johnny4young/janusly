@@ -1,0 +1,54 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - depguard
+    - modernize
+  exclusions:
+    rules:
+      # The grammar package ports the contract evaluator's error messages
+      # verbatim — they are a wire/consistency contract, capitalization included.
+      - path: internal/grammar/
+        linters: [staticcheck]
+        text: "ST1005"
+
+  settings:
+    # Keep the dependency arrows that make the workflow core testable and the
+    # generated persistence layer replaceable. These are architectural
+    # boundaries, not a blanket ban on useful dependencies.
+    depguard:
+      rules:
+        pure-workflow-core:
+          files:
+            - "**/internal/domain/**"
+            - "**/internal/grammar/**"
+          deny:
+            - pkg: net/http
+              desc: domain and grammar must remain independent of transport I/O
+            - pkg: database/sql
+              desc: domain and grammar must remain independent of persistence I/O
+            - pkg: github.com/jackc/pgx
+              desc: domain and grammar must remain independent of PostgreSQL
+            - pkg: github.com/johnny4young/janusly/internal/store
+              desc: persistence belongs to callers of the workflow core
+            - pkg: github.com/johnny4young/janusly/internal/httpapi
+              desc: the HTTP surface is downstream of the workflow core
+            - pkg: github.com/johnny4young/janusly/internal/engine
+              desc: execution orchestration is downstream of the workflow core
+
+        no-inbound-httpapi:
+          files:
+            - "**/internal/**"
+            - "!**/internal/httpapi/**"
+            - "!**/_test.go"
+          deny:
+            - pkg: github.com/johnny4young/janusly/internal/httpapi
+              desc: mount the HTTP leaf from cmd; never import it into internal services
+
+        generated-store-imports-nothing-internal:
+          files:
+            - "**/internal/store/**"
+          deny:
+            - pkg: github.com/johnny4young/janusly/internal
+              desc: generated sqlc output must not depend on hand-written internal packages

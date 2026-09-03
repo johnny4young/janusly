@@ -1,6 +1,6 @@
 # Demo: Failed workflow recovery
 
-**Template:** [`failed-workflow-recovery`](../../apps/api/src/templates.ts)
+**Template:** `failed-workflow-recovery` in `internal/httpapi/assets/templates.json`
 **Audience:** Every buyer. The wedge demo.
 **Time:** 4-5 minutes
 **Story:** "This is what makes Janusly different. The workflow breaks — twice, on purpose — and Janusly tells you what's wrong, suggests the fix, validates it in a sandbox, and shows exactly what has to be wired before a live replay. One demo, two recovery patterns, zero developer paged."
@@ -11,7 +11,7 @@
 | --- | --- |
 | No credentials | The template ships with `requiredCredentials: []`. The secret reference `{{secret.BILLING_API_KEY}}` is **intentionally unbound** — that is the failure we recover from. |
 | Optional live-success endpoint | The checked-in URL is `https://billing.example.com/charges`. For a live green replay, change it in the Inspector to a reachable billing sandbox / RequestBin / local test endpoint and bind the replacement secret env-var before the final run. |
-| No env tweaks | The demo runs in dev mode out of the box. For production-mode (`JANUSLY_PRODUCTION_MODE=true`), the readiness gate blocks `/start` until approval is added — which is itself the demo. |
+| No env tweaks | The demo runs in dev mode out of the box. For production-mode (`JANUSLY_ENV=production`), the readiness gate blocks `/start` until approval is added — which is itself the demo. |
 | Sample payload | `{ "customer": "leah@example.com", "amountUsd": 49.00 }` |
 
 ## Run sequence (the full recovery loop)
@@ -62,7 +62,10 @@ Both go through the SAME flow: review → sandbox → apply → replay. The sand
 
 ## Closing metric
 
-**Mean Time To Recovery for failed automations.** Without Janusly: discover the failure (alert → ticket → triage), fix the secret in the secrets manager, redeploy, retry — 30 minutes to 2 hours, multiple people involved. With Janusly: ~3 minutes, one operator, no redeploy, audit-clean.
+**Time to verified recovery.** Read the actual production-only elapsed time from
+the Recovery Center after the generation-bound replay succeeds. “30 minutes to
+2 hours without Janusly” and “about 3 minutes with Janusly” are rehearsal
+assumptions for the talk track, not measured customer or product evidence.
 
 ## 3-5 minute talk track
 
@@ -79,4 +82,4 @@ Both go through the SAME flow: review → sandbox → apply → replay. The sand
 > Re-run. New approval pauses. I approve. http call fires — and fails again. This time the AI says "Your secret is unbound. Swap to one that's wired." Diff, sandbox, apply. For the live green finish, I point the placeholder billing URL at my sandbox endpoint and bind the replacement secret. Re-run. Approval pauses, I approve, billing call succeeds, customer email sends.
 >
 > **(3:30–4:30, the close)**
-> Two failures, two recovery patterns, all reviewable, all replayable. The number we track is Mean Time To Recovery — what just took five minutes used to take an hour and four people. This is the Janusly difference: workflows that explain, recover, and safely evolve.
+> Two failures, two recovery patterns, all reviewable, all replayable. Janusly records the production clock from detected failure to generation-bound verified recovery; compare that measured value with your own baseline. This is the Janusly difference: workflows that explain, recover, and safely evolve.

@@ -1,0 +1,5024 @@
+{
+  "components": {
+    "schemas": {
+      "V1Envelope": {
+        "description": "The v1 success envelope: apiVersion + requestId (echoed as X-Request-Id) around the data payload.",
+        "properties": {
+          "apiVersion": {
+            "const": "v1",
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "V1ErrorEnvelope": {
+        "description": "The v1 error envelope: a stable code, a human message, and optional params.",
+        "properties": {
+          "apiVersion": {
+            "const": "v1",
+            "type": "string"
+          },
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "params": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "requestId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "requestId",
+          "error"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Generated from the side-effect-free route manifest in internal/contract. Every response wraps in the v1 envelope; the envelope is documented once in components and referenced everywhere.",
+    "title": "Janusly — v1 API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/ai/workflow-briefs/compile": {
+      "post": {
+        "operationId": "post_v1_ai_workflow-briefs_compile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "brief": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "approvals": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "examples": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "expectedOutcome": {
+                        "type": "string"
+                      },
+                      "externalEffects": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "failurePolicy": {
+                        "type": "string"
+                      },
+                      "inputs": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "language": {
+                        "enum": [
+                          "en",
+                          "es"
+                        ],
+                        "type": "string"
+                      },
+                      "objective": {
+                        "type": "string"
+                      },
+                      "trigger": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "brief": {
+                              "properties": {
+                                "approvals": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "examples": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "expectedOutcome": {
+                                  "type": "string"
+                                },
+                                "externalEffects": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "failurePolicy": {
+                                  "type": "string"
+                                },
+                                "inputs": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "language": {
+                                  "enum": [
+                                    "en",
+                                    "es"
+                                  ],
+                                  "type": "string"
+                                },
+                                "objective": {
+                                  "type": "string"
+                                },
+                                "trigger": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "version",
+                                "objective",
+                                "trigger",
+                                "inputs",
+                                "expectedOutcome",
+                                "externalEffects",
+                                "approvals",
+                                "failurePolicy",
+                                "examples",
+                                "language"
+                              ],
+                              "type": "object"
+                            },
+                            "clarifyingQuestions": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "complete": {
+                              "type": "boolean"
+                            },
+                            "mode": {
+                              "const": "deterministic",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "brief",
+                            "clarifyingQuestions",
+                            "complete",
+                            "mode"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Compile a bounded deterministic workflow intent brief"
+      }
+    },
+    "/ai/workflow-proposals": {
+      "post": {
+        "operationId": "post_v1_ai_workflow-proposals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "brief": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "approvals": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "examples": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "expectedOutcome": {
+                        "type": "string"
+                      },
+                      "externalEffects": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "failurePolicy": {
+                        "type": "string"
+                      },
+                      "inputs": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "language": {
+                        "enum": [
+                          "en",
+                          "es"
+                        ],
+                        "type": "string"
+                      },
+                      "objective": {
+                        "type": "string"
+                      },
+                      "trigger": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "catalogVersion": {
+                    "type": "string"
+                  },
+                  "currentWorkflow": {
+                    "properties": {
+                      "edges": {
+                        "items": {
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "nodes": {
+                        "items": {
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "nodes",
+                      "edges"
+                    ],
+                    "type": "object"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "aiError": {
+                              "type": "string"
+                            },
+                            "bindings": {
+                              "properties": {
+                                "catalogVersion": {
+                                  "type": "string"
+                                },
+                                "complete": {
+                                  "type": "boolean"
+                                },
+                                "missing": {
+                                  "items": {
+                                    "properties": {
+                                      "alternatives": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "field": {
+                                        "type": "string"
+                                      },
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "nodeId": {
+                                        "type": "string"
+                                      },
+                                      "reason": {
+                                        "type": "string"
+                                      },
+                                      "requested": {
+                                        "type": "string"
+                                      },
+                                      "resolvedId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "nodeId",
+                                      "field",
+                                      "alternatives"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "resolved": {
+                                  "items": {
+                                    "properties": {
+                                      "alternatives": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "field": {
+                                        "type": "string"
+                                      },
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "nodeId": {
+                                        "type": "string"
+                                      },
+                                      "reason": {
+                                        "type": "string"
+                                      },
+                                      "requested": {
+                                        "type": "string"
+                                      },
+                                      "resolvedId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "nodeId",
+                                      "field",
+                                      "alternatives"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                }
+                              },
+                              "required": [
+                                "catalogVersion",
+                                "resolved",
+                                "missing",
+                                "complete"
+                              ],
+                              "type": "object"
+                            },
+                            "bonBackoff": {
+                              "properties": {
+                                "from": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "to": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "from",
+                                "to"
+                              ],
+                              "type": "object"
+                            },
+                            "brief": {
+                              "properties": {
+                                "approvals": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "examples": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "expectedOutcome": {
+                                  "type": "string"
+                                },
+                                "externalEffects": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "failurePolicy": {
+                                  "type": "string"
+                                },
+                                "inputs": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "language": {
+                                  "enum": [
+                                    "en",
+                                    "es"
+                                  ],
+                                  "type": "string"
+                                },
+                                "objective": {
+                                  "type": "string"
+                                },
+                                "trigger": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "version",
+                                "objective",
+                                "trigger",
+                                "inputs",
+                                "expectedOutcome",
+                                "externalEffects",
+                                "approvals",
+                                "failurePolicy",
+                                "examples",
+                                "language"
+                              ],
+                              "type": "object"
+                            },
+                            "clarifyingQuestions": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "mode": {
+                              "enum": [
+                                "ai",
+                                "fallback",
+                                "error"
+                              ],
+                              "type": "string"
+                            },
+                            "proposal": {
+                              "properties": {
+                                "applicable": {
+                                  "type": "boolean"
+                                },
+                                "assumptions": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "diff": {
+                                  "properties": {
+                                    "edgesAfter": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "edgesBefore": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "nodesAdded": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "nodesChanged": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "nodesRemoved": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    }
+                                  },
+                                  "required": [
+                                    "nodesAdded",
+                                    "nodesRemoved",
+                                    "nodesChanged",
+                                    "edgesBefore",
+                                    "edgesAfter"
+                                  ],
+                                  "type": "object"
+                                },
+                                "intentContract": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "qualification": {
+                                  "properties": {
+                                    "intent": {
+                                      "type": "boolean"
+                                    },
+                                    "recovery": {
+                                      "type": "boolean"
+                                    },
+                                    "semantic": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "intent",
+                                    "recovery",
+                                    "semantic"
+                                  ],
+                                  "type": "object"
+                                },
+                                "readiness": {
+                                  "properties": {
+                                    "issues": {
+                                      "items": {
+                                        "properties": {
+                                          "code": {
+                                            "type": "string"
+                                          },
+                                          "edgeId": {
+                                            "type": "string"
+                                          },
+                                          "message": {
+                                            "type": "string"
+                                          },
+                                          "nodeId": {
+                                            "type": "string"
+                                          },
+                                          "severity": {
+                                            "enum": [
+                                              "info",
+                                              "warn",
+                                              "fail"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "suggestion": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "code",
+                                          "severity",
+                                          "message"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "status": {
+                                      "enum": [
+                                        "pass",
+                                        "warn",
+                                        "fail"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "status",
+                                    "issues"
+                                  ],
+                                  "type": "object"
+                                },
+                                "recoveryContract": {},
+                                "risks": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "workflow": {
+                                  "properties": {
+                                    "dslVersion": {
+                                      "type": "string"
+                                    },
+                                    "edges": {
+                                      "items": {
+                                        "properties": {
+                                          "condition": {
+                                            "type": "string"
+                                          },
+                                          "from": {
+                                            "type": "string"
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "onError": {
+                                            "type": "boolean"
+                                          },
+                                          "to": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "from",
+                                          "to"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "inputs": {},
+                                    "metadata": {
+                                      "additionalProperties": {},
+                                      "type": "object"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "nodes": {
+                                      "items": {
+                                        "properties": {
+                                          "config": {
+                                            "additionalProperties": {},
+                                            "type": "object"
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "label": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "id",
+                                          "type",
+                                          "config"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "outputs": {
+                                      "additionalProperties": {
+                                        "type": "string"
+                                      },
+                                      "type": "object"
+                                    },
+                                    "recovery": {},
+                                    "templatePolicy": {
+                                      "type": "string"
+                                    },
+                                    "ui": {
+                                      "additionalProperties": {},
+                                      "type": "object"
+                                    }
+                                  },
+                                  "required": [
+                                    "nodes",
+                                    "edges"
+                                  ],
+                                  "type": "object"
+                                }
+                              },
+                              "required": [
+                                "workflow",
+                                "intentContract",
+                                "recoveryContract",
+                                "qualification",
+                                "assumptions",
+                                "risks",
+                                "readiness",
+                                "diff",
+                                "applicable"
+                              ],
+                              "type": "object"
+                            },
+                            "providerGuarded": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "brief",
+                            "clarifyingQuestions",
+                            "bindings",
+                            "proposal"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Build a capability-bound workflow proposal without applying it"
+      }
+    },
+    "/authoring/capabilities": {
+      "get": {
+        "operationId": "get_v1_authoring_capabilities",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "builtinTools": {
+                              "items": {
+                                "properties": {
+                                  "description": {
+                                    "type": "string"
+                                  },
+                                  "inputExample": {},
+                                  "inputFields": {
+                                    "items": {
+                                      "properties": {
+                                        "kind": {
+                                          "enum": [
+                                            "string",
+                                            "number",
+                                            "boolean",
+                                            "object",
+                                            "array",
+                                            "json",
+                                            "unknown"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "required": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "name",
+                                        "kind",
+                                        "required"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "optional": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "required": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "writeSide": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "description",
+                                  "required",
+                                  "inputFields",
+                                  "writeSide"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "credentials": {
+                              "items": {
+                                "properties": {
+                                  "configured": {
+                                    "type": "boolean"
+                                  },
+                                  "expired": {
+                                    "type": "boolean"
+                                  },
+                                  "expiresAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "updatedAt": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name",
+                                  "kind",
+                                  "configured",
+                                  "expired",
+                                  "updatedAt"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "mcpTools": {
+                              "items": {
+                                "properties": {
+                                  "connectionAlias": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  },
+                                  "inputFields": {
+                                    "items": {
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "required": {
+                                          "type": "boolean"
+                                        },
+                                        "type": {
+                                          "enum": [
+                                            "string",
+                                            "number",
+                                            "integer",
+                                            "boolean",
+                                            "object",
+                                            "array",
+                                            "unknown"
+                                          ],
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "name",
+                                        "type",
+                                        "required"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "toolName": {
+                                    "type": "string"
+                                  },
+                                  "writeSide": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "connectionAlias",
+                                  "toolName",
+                                  "description",
+                                  "writeSide",
+                                  "inputFields"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "primitives": {
+                              "items": {
+                                "properties": {
+                                  "nodeType": {
+                                    "type": "string"
+                                  },
+                                  "notes": {
+                                    "type": "string"
+                                  },
+                                  "requiredConfig": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "nodeType",
+                                  "requiredConfig",
+                                  "notes"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "schemaVersion": {
+                              "type": "string"
+                            },
+                            "subworkflows": {
+                              "items": {
+                                "properties": {
+                                  "latestVersion": {
+                                    "type": "number"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string"
+                                  },
+                                  "workflowId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "workflowId",
+                                  "name",
+                                  "status",
+                                  "latestVersion"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "triggers": {
+                              "items": {
+                                "properties": {
+                                  "endpoint": {
+                                    "type": "string"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nodeType": {
+                                    "type": "string"
+                                  },
+                                  "requiredConfig": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "requiredConfig"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "version": {
+                              "type": "string"
+                            },
+                            "warnings": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "schemaVersion",
+                            "version",
+                            "builtinTools",
+                            "mcpTools",
+                            "triggers",
+                            "credentials",
+                            "subworkflows",
+                            "primitives",
+                            "warnings"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Exact tenant-safe capability catalog for workflow authoring"
+      }
+    },
+    "/dlq": {
+      "get": {
+        "operationId": "get_v1_dlq",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "items": {
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Dead-letter list with server-side filters"
+      }
+    },
+    "/dlq/clusters": {
+      "get": {
+        "operationId": "get_v1_dlq_clusters",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "items": {
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Failure clusters over open dead letters"
+      }
+    },
+    "/dlq/redrive": {
+      "post": {
+        "operationId": "post_v1_dlq_redrive",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "deadLetterId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "deadLetterId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "redriven": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "redriven"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Redrive one dead letter"
+      }
+    },
+    "/dlq/replay": {
+      "post": {
+        "operationId": "post_v1_dlq_replay",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "deadLetterId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "deadLetterId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "ok": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "ok"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Replay one dead letter (unversioned wire)"
+      }
+    },
+    "/dlq/validate-fix": {
+      "post": {
+        "operationId": "post_v1_dlq_validate-fix",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "deadLetterId": {
+                    "type": "string"
+                  },
+                  "recoveryPlaybookId": {
+                    "type": "string"
+                  },
+                  "suggestedWorkflow": {},
+                  "validationEffectMode": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "deadLetterId",
+                  "suggestedWorkflow"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "runId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "runId"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Start a write-suppressed validation replay for a proposed fix"
+      }
+    },
+    "/memory/consent-status": {
+      "get": {
+        "operationId": "get_v1_memory_consent-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "processEnabled": {
+                              "type": "boolean"
+                            },
+                            "purge": {
+                              "type": "object"
+                            },
+                            "tenantEnabled": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Tenant memory consent and purge posture"
+      }
+    },
+    "/operations/brief": {
+      "get": {
+        "operationId": "get_v1_operations_brief",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "actions": {
+                              "items": {
+                                "properties": {
+                                  "allowedActions": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "bodyKey": {
+                                    "type": "string"
+                                  },
+                                  "createdAt": {
+                                    "type": "string"
+                                  },
+                                  "ctaKey": {
+                                    "type": "string"
+                                  },
+                                  "evidence": {
+                                    "items": {
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "key": {
+                                          "type": "string"
+                                        },
+                                        "kind": {
+                                          "type": "string"
+                                        },
+                                        "value": {}
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "id",
+                                        "key",
+                                        "value"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "type": "string"
+                                  },
+                                  "params": {
+                                    "type": "object"
+                                  },
+                                  "priority": {
+                                    "type": "integer"
+                                  },
+                                  "severity": {
+                                    "type": "string"
+                                  },
+                                  "target": {
+                                    "properties": {
+                                      "destination": {
+                                        "type": "string"
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      },
+                                      "workflowId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "id",
+                                      "destination"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "titleKey": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "kind",
+                                  "priority",
+                                  "severity",
+                                  "titleKey",
+                                  "bodyKey",
+                                  "ctaKey",
+                                  "params",
+                                  "evidence",
+                                  "target",
+                                  "allowedActions",
+                                  "createdAt"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "generatedAt": {
+                              "type": "string"
+                            },
+                            "version": {
+                              "type": "string"
+                            },
+                            "warnings": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "generatedAt",
+                            "actions",
+                            "warnings"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Bounded deterministic Operator Brief shared by UI and MCP"
+      }
+    },
+    "/recovery/cases": {
+      "get": {
+        "operationId": "get_v1_recovery_cases",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "cases": {
+                              "items": {
+                                "properties": {
+                                  "action": {
+                                    "type": "string"
+                                  },
+                                  "createdAt": {
+                                    "type": "string"
+                                  },
+                                  "createdBy": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "detailsJson": {},
+                                  "detectorId": {
+                                    "type": "string"
+                                  },
+                                  "detectorKind": {
+                                    "type": "string"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  },
+                                  "orgId": {
+                                    "type": "string"
+                                  },
+                                  "resolvedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "revision": {
+                                    "type": "number"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "sourceNodeId": {
+                                    "type": "string"
+                                  },
+                                  "state": {
+                                    "type": "string"
+                                  },
+                                  "updatedAt": {
+                                    "type": "string"
+                                  },
+                                  "workflowId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "workflowVersionId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "orgId",
+                                  "runId",
+                                  "workflowVersionId",
+                                  "source",
+                                  "detectorId",
+                                  "sourceNodeId",
+                                  "detectorKind",
+                                  "action",
+                                  "message",
+                                  "state",
+                                  "revision",
+                                  "createdAt",
+                                  "updatedAt"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "cases"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "List bounded semantic recovery cases"
+      }
+    },
+    "/recovery/cases/{caseId}": {
+      "get": {
+        "operationId": "get_v1_recovery_cases_caseId",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "activeApproval": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "candidateArtifactId": {
+                                  "type": "string"
+                                },
+                                "caseRevision": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "validationArtifactId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "candidateArtifactId",
+                                "validationArtifactId",
+                                "caseRevision",
+                                "expiresAt"
+                              ],
+                              "type": [
+                                "object",
+                                "null"
+                              ]
+                            },
+                            "artifacts": {
+                              "items": {
+                                "properties": {
+                                  "actorId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "actorKind": {
+                                    "type": "string"
+                                  },
+                                  "caseId": {
+                                    "type": "string"
+                                  },
+                                  "createdAt": {
+                                    "type": "string"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "type": "string"
+                                  },
+                                  "payload": {},
+                                  "sha256": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "caseId",
+                                  "kind",
+                                  "payload",
+                                  "sha256",
+                                  "actorKind",
+                                  "createdAt"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "autonomy": {
+                              "type": "object"
+                            },
+                            "case": {
+                              "properties": {
+                                "action": {
+                                  "type": "string"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "detailsJson": {},
+                                "detectorId": {
+                                  "type": "string"
+                                },
+                                "detectorKind": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "resolvedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "revision": {
+                                  "type": "number"
+                                },
+                                "runId": {
+                                  "type": "string"
+                                },
+                                "source": {
+                                  "type": "string"
+                                },
+                                "sourceNodeId": {
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "type": "string"
+                                },
+                                "updatedAt": {
+                                  "type": "string"
+                                },
+                                "workflowId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowVersionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "runId",
+                                "workflowVersionId",
+                                "source",
+                                "detectorId",
+                                "sourceNodeId",
+                                "detectorKind",
+                                "action",
+                                "message",
+                                "state",
+                                "revision",
+                                "createdAt",
+                                "updatedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "transitions": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "case",
+                            "transitions",
+                            "artifacts",
+                            "autonomy",
+                            "activeApproval"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Inspect one governed semantic recovery case"
+      }
+    },
+    "/recovery/cases/{caseId}/apply": {
+      "post": {
+        "operationId": "post_v1_recovery_cases_caseId_apply",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "candidateArtifactId": {
+                    "type": "string"
+                  },
+                  "expectedRevision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "validationArtifactId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "expectedRevision",
+                  "candidateArtifactId",
+                  "validationArtifactId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "decision": {
+                              "type": "string"
+                            },
+                            "resolvedCaseIds": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "resumed": {
+                              "type": "boolean"
+                            },
+                            "runId": {
+                              "type": "string"
+                            },
+                            "sourceNodeId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "runId",
+                            "sourceNodeId",
+                            "decision",
+                            "resumed",
+                            "resolvedCaseIds"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Apply an approved immutable recovery candidate"
+      }
+    },
+    "/recovery/cases/{caseId}/approve": {
+      "post": {
+        "operationId": "post_v1_recovery_cases_caseId_approve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "candidateArtifactId": {
+                    "type": "string"
+                  },
+                  "expectedRevision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "validationArtifactId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "expectedRevision",
+                  "candidateArtifactId",
+                  "validationArtifactId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "approval": {
+                              "properties": {
+                                "candidateArtifactId": {
+                                  "type": "string"
+                                },
+                                "caseId": {
+                                  "type": "string"
+                                },
+                                "caseRevision": {
+                                  "type": "number"
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "validationArtifactId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "caseId",
+                                "caseRevision",
+                                "candidateArtifactId",
+                                "validationArtifactId",
+                                "expiresAt"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "approval"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Create a 30-minute one-use human approval"
+      }
+    },
+    "/recovery/cases/{caseId}/candidates": {
+      "post": {
+        "operationId": "post_v1_recovery_cases_caseId_candidates",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "acceptLossReason": {
+                    "maxLength": 1000,
+                    "type": "string"
+                  },
+                  "expectedRevision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "manualReplacement": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "output": {},
+                      "reason": {
+                        "maxLength": 1000,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "output",
+                      "reason"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "expectedRevision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "candidates": {
+                              "items": {
+                                "properties": {
+                                  "actorId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "actorKind": {
+                                    "type": "string"
+                                  },
+                                  "caseId": {
+                                    "type": "string"
+                                  },
+                                  "createdAt": {
+                                    "type": "string"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "type": "string"
+                                  },
+                                  "payload": {},
+                                  "sha256": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "caseId",
+                                  "kind",
+                                  "payload",
+                                  "sha256",
+                                  "actorKind",
+                                  "createdAt"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "case": {
+                              "properties": {
+                                "action": {
+                                  "type": "string"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "detailsJson": {},
+                                "detectorId": {
+                                  "type": "string"
+                                },
+                                "detectorKind": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "resolvedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "revision": {
+                                  "type": "number"
+                                },
+                                "runId": {
+                                  "type": "string"
+                                },
+                                "source": {
+                                  "type": "string"
+                                },
+                                "sourceNodeId": {
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "type": "string"
+                                },
+                                "updatedAt": {
+                                  "type": "string"
+                                },
+                                "workflowId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowVersionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "runId",
+                                "workflowVersionId",
+                                "source",
+                                "detectorId",
+                                "sourceNodeId",
+                                "detectorKind",
+                                "action",
+                                "message",
+                                "state",
+                                "revision",
+                                "createdAt",
+                                "updatedAt"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "case",
+                            "candidates"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Create immutable recovery candidates"
+      }
+    },
+    "/recovery/cases/{caseId}/diagnose": {
+      "post": {
+        "operationId": "post_v1_recovery_cases_caseId_diagnose",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedRevision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expectedRevision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "case": {
+                              "properties": {
+                                "action": {
+                                  "type": "string"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "detailsJson": {},
+                                "detectorId": {
+                                  "type": "string"
+                                },
+                                "detectorKind": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "resolvedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "revision": {
+                                  "type": "number"
+                                },
+                                "runId": {
+                                  "type": "string"
+                                },
+                                "source": {
+                                  "type": "string"
+                                },
+                                "sourceNodeId": {
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "type": "string"
+                                },
+                                "updatedAt": {
+                                  "type": "string"
+                                },
+                                "workflowId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowVersionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "runId",
+                                "workflowVersionId",
+                                "source",
+                                "detectorId",
+                                "sourceNodeId",
+                                "detectorKind",
+                                "action",
+                                "message",
+                                "state",
+                                "revision",
+                                "createdAt",
+                                "updatedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "diagnosis": {
+                              "properties": {
+                                "actorId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "actorKind": {
+                                  "type": "string"
+                                },
+                                "caseId": {
+                                  "type": "string"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string"
+                                },
+                                "payload": {},
+                                "sha256": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "caseId",
+                                "kind",
+                                "payload",
+                                "sha256",
+                                "actorKind",
+                                "createdAt"
+                              ],
+                              "type": "object"
+                            },
+                            "mode": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "case",
+                            "diagnosis",
+                            "mode"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Record a bounded diagnosis and advance the recovery case"
+      }
+    },
+    "/recovery/cases/{caseId}/validate": {
+      "post": {
+        "operationId": "post_v1_recovery_cases_caseId_validate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "candidateArtifactId": {
+                    "type": "string"
+                  },
+                  "expectedRevision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expectedRevision",
+                  "candidateArtifactId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "case": {
+                              "properties": {
+                                "action": {
+                                  "type": "string"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "detailsJson": {},
+                                "detectorId": {
+                                  "type": "string"
+                                },
+                                "detectorKind": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "resolvedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "revision": {
+                                  "type": "number"
+                                },
+                                "runId": {
+                                  "type": "string"
+                                },
+                                "source": {
+                                  "type": "string"
+                                },
+                                "sourceNodeId": {
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "type": "string"
+                                },
+                                "updatedAt": {
+                                  "type": "string"
+                                },
+                                "workflowId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowVersionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "runId",
+                                "workflowVersionId",
+                                "source",
+                                "detectorId",
+                                "sourceNodeId",
+                                "detectorKind",
+                                "action",
+                                "message",
+                                "state",
+                                "revision",
+                                "createdAt",
+                                "updatedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "passed": {
+                              "type": "boolean"
+                            },
+                            "validation": {
+                              "properties": {
+                                "actorId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "actorKind": {
+                                  "type": "string"
+                                },
+                                "caseId": {
+                                  "type": "string"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string"
+                                },
+                                "payload": {},
+                                "sha256": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "caseId",
+                                "kind",
+                                "payload",
+                                "sha256",
+                                "actorKind",
+                                "createdAt"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "case",
+                            "validation",
+                            "passed"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Validate one immutable recovery candidate"
+      }
+    },
+    "/recovery/ledger": {
+      "get": {
+        "operationId": "get_v1_recovery_ledger",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "downtimeEndedMs": {
+                              "type": "number"
+                            },
+                            "sinceIso": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "totalRecovered": {
+                              "type": "number"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Lifetime verified-recovery impact ledger"
+      }
+    },
+    "/recovery/metrics": {
+      "get": {
+        "operationId": "get_v1_recovery_metrics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "costByProvider": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "mttrMs": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "verifiedRecovery": {
+                              "type": "object"
+                            },
+                            "windowDays": {
+                              "type": "number"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Verified-recovery north star + cost rollup"
+      }
+    },
+    "/recovery/my-wins": {
+      "get": {
+        "operationId": "get_v1_recovery_my-wins",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "recovered": {
+                              "type": "number"
+                            },
+                            "windowDays": {
+                              "type": "number"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Current operator recovery wins"
+      }
+    },
+    "/resume": {
+      "post": {
+        "operationId": "post_v1_resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "nodeId": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "runId",
+                  "nodeId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "resumed": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "resumed"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Resume one waiting node"
+      }
+    },
+    "/run": {
+      "get": {
+        "operationId": "get_v1_run",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "events": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "eventsCursor": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "eventsHasMore": {
+                              "type": "boolean"
+                            },
+                            "nodes": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "run": {
+                              "type": "object"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "One run with nodes and paginated events"
+      }
+    },
+    "/run/cancel": {
+      "post": {
+        "operationId": "post_v1_run_cancel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "runId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "runId": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "runId",
+                            "status"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Cancel a non-terminal run"
+      }
+    },
+    "/run/usage": {
+      "get": {
+        "operationId": "get_v1_run_usage",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "llm": {
+                              "type": "object"
+                            },
+                            "loadedRows": {
+                              "type": "number"
+                            },
+                            "memory": {
+                              "type": "object"
+                            },
+                            "rowCap": {
+                              "type": "number"
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Bounded per-run AI and memory usage"
+      }
+    },
+    "/runs": {
+      "get": {
+        "operationId": "get_v1_runs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "items": {
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Keyset-paginated run list"
+      }
+    },
+    "/runs/redrive": {
+      "post": {
+        "operationId": "post_v1_runs_redrive",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "nodeId": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "runId",
+                  "nodeId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "runId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "ok",
+                            "runId"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Redrive by run and node (revive-in-place)"
+      }
+    },
+    "/runs/semantic-search": {
+      "get": {
+        "operationId": "get_v1_runs_semantic-search",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "entries": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "entries"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Search consented run-summary memory"
+      }
+    },
+    "/start": {
+      "post": {
+        "operationId": "post_v1_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "input": {},
+                  "workflow": {
+                    "properties": {
+                      "dslVersion": {
+                        "type": "string"
+                      },
+                      "edges": {
+                        "items": {
+                          "properties": {
+                            "condition": {
+                              "type": "string"
+                            },
+                            "from": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "onError": {
+                              "type": "boolean"
+                            },
+                            "to": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "to"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "inputs": {},
+                      "metadata": {
+                        "additionalProperties": {},
+                        "type": "object"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "nodes": {
+                        "items": {
+                          "properties": {
+                            "config": {
+                              "additionalProperties": {},
+                              "type": "object"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "outputs": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "recovery": {},
+                      "templatePolicy": {
+                        "type": "string"
+                      },
+                      "ui": {
+                        "additionalProperties": {},
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "nodes",
+                      "edges"
+                    ],
+                    "type": "object"
+                  },
+                  "workflowVersionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "workflow"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "runId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "runId"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Start an exact saved workflow version or an ad-hoc document"
+      }
+    },
+    "/status": {
+      "get": {
+        "operationId": "get_v1_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "events": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "eventsCursor": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "eventsHasMore": {
+                              "type": "boolean"
+                            },
+                            "nodes": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "run": {
+                              "type": "object"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Alias of /v1/run"
+      }
+    },
+    "/templates": {
+      "get": {
+        "operationId": "get_v1_templates",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "items": {
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Built-in workflow authoring templates"
+      }
+    },
+    "/tools": {
+      "get": {
+        "operationId": "get_v1_tools",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "items": {
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "The AI Studio tool catalog"
+      }
+    },
+    "/triggers/email/ingest": {
+      "post": {
+        "operationId": "post_v1_triggers_email_ingest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "aliasKey": {
+                    "type": "string"
+                  },
+                  "attachmentBodies": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "attachments": {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "dkimPass": {
+                    "type": "boolean"
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "receivedAt": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "aliasKey",
+                  "from"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "duplicate": {
+                              "type": "boolean"
+                            },
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "runId": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "triggerEventId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "ok",
+                            "triggerEventId"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Ingest a normalized inbound email event"
+      }
+    },
+    "/triggers/file/ingest": {
+      "post": {
+        "operationId": "post_v1_triggers_file_ingest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "bucket": {
+                    "type": "string"
+                  },
+                  "contentType": {
+                    "type": "string"
+                  },
+                  "etag": {
+                    "type": "string"
+                  },
+                  "eventName": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "receivedAt": {
+                    "type": "string"
+                  },
+                  "sizeBytes": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "bucket",
+                  "key"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "duplicate": {
+                              "type": "boolean"
+                            },
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "runId": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "triggerEventId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "ok",
+                            "triggerEventId"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Ingest a normalized object-store event"
+      }
+    },
+    "/triggers/mcp/ingest": {
+      "post": {
+        "operationId": "post_v1_triggers_mcp_ingest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "connectionAlias": {
+                    "type": "string"
+                  },
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "payload": {
+                    "type": "object"
+                  },
+                  "receivedAt": {
+                    "type": "string"
+                  },
+                  "resourceUri": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "connectionAlias",
+                  "resourceUri",
+                  "eventType"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "duplicate": {
+                              "type": "boolean"
+                            },
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "runId": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "triggerEventId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "ok",
+                            "triggerEventId"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Ingest a normalized MCP resource event"
+      }
+    },
+    "/validate": {
+      "post": {
+        "operationId": "post_v1_validate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "issues": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "valid": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "valid",
+                            "issues"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Validate a workflow document without executing it"
+      }
+    },
+    "/webhooks/{workflowId}": {
+      "post": {
+        "operationId": "post_v1_webhooks_workflowId",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "endpointKey": {
+                    "type": "string"
+                  },
+                  "eventId": {
+                    "type": "string"
+                  },
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "payload": {
+                    "type": "object"
+                  },
+                  "receivedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "endpointKey",
+                  "eventId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "duplicate": {
+                              "type": "boolean"
+                            },
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "runId": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "triggerEventId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "ok",
+                            "triggerEventId"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Ingest one webhook trigger event"
+      }
+    },
+    "/workflows": {
+      "get": {
+        "operationId": "get_v1_workflows",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "items": {
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Keyset-paginated workflow list"
+      }
+    },
+    "/workflows/health": {
+      "get": {
+        "operationId": "get_v1_workflows_health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "breakdown": {
+                              "additionalProperties": {
+                                "type": "object"
+                              },
+                              "type": "object"
+                            },
+                            "score": {
+                              "type": "integer"
+                            },
+                            "signals": {
+                              "type": "object"
+                            },
+                            "slo": {
+                              "type": [
+                                "object",
+                                "null"
+                              ]
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "score",
+                            "status",
+                            "breakdown",
+                            "signals"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Workflow assurance health score"
+      }
+    },
+    "/workflows/latest": {
+      "get": {
+        "operationId": "get_v1_workflows_latest",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Latest version of one workflow (nullable)"
+      }
+    },
+    "/workflows/readiness": {
+      "post": {
+        "operationId": "post_v1_workflows_readiness",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "workflow": {
+                    "properties": {
+                      "dslVersion": {
+                        "type": "string"
+                      },
+                      "edges": {
+                        "items": {
+                          "properties": {
+                            "condition": {
+                              "type": "string"
+                            },
+                            "from": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "onError": {
+                              "type": "boolean"
+                            },
+                            "to": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "to"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "inputs": {},
+                      "metadata": {
+                        "additionalProperties": {},
+                        "type": "object"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "nodes": {
+                        "items": {
+                          "properties": {
+                            "config": {
+                              "additionalProperties": {},
+                              "type": "object"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "outputs": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "recovery": {},
+                      "templatePolicy": {
+                        "type": "string"
+                      },
+                      "ui": {
+                        "additionalProperties": {},
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "nodes",
+                      "edges"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "workflow"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "issues": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "issues"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Deterministic production-readiness check"
+      }
+    },
+    "/workflows/rollback": {
+      "post": {
+        "operationId": "post_v1_workflows_rollback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "sourceVersionId": {
+                    "type": "string"
+                  },
+                  "workflowId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "workflowId",
+                  "sourceVersionId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "sourceVersion": {
+                              "type": "number"
+                            },
+                            "version": {
+                              "type": "number"
+                            },
+                            "versionId": {
+                              "type": "string"
+                            },
+                            "workflowId": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Append a prior snapshot as the new latest version"
+      }
+    },
+    "/workflows/save": {
+      "post": {
+        "operationId": "post_v1_workflows_save",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "dslVersion": {
+                    "type": "string"
+                  },
+                  "edges": {
+                    "items": {
+                      "properties": {
+                        "condition": {
+                          "type": "string"
+                        },
+                        "from": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "onError": {
+                          "type": "boolean"
+                        },
+                        "to": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "to"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "inputs": {},
+                  "metadata": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "nodes": {
+                    "items": {
+                      "properties": {
+                        "config": {
+                          "additionalProperties": {},
+                          "type": "object"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "config"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "outputs": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "recovery": {},
+                  "templatePolicy": {
+                    "type": "string"
+                  },
+                  "ui": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "upstreamHealthSources": {
+                    "items": {
+                      "maxLength": 80,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "nodes",
+                  "edges"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "version": {
+                              "type": "number"
+                            },
+                            "versionId": {
+                              "type": "string"
+                            },
+                            "workflowId": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Save a workflow as a new immutable version"
+      }
+    },
+    "/workflows/schedule-preview": {
+      "get": {
+        "operationId": "get_v1_workflows_schedule-preview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "nextFires": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "valid": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Validate a cron expression and preview its next fires"
+      }
+    },
+    "/workflows/versions": {
+      "get": {
+        "operationId": "get_v1_workflows_versions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "items": {
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "All versions of one workflow"
+      }
+    },
+    "/workflows/versions/{versionId}": {
+      "get": {
+        "operationId": "get_v1_workflows_versions_versionId",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "dagJson": {
+                              "properties": {
+                                "dslVersion": {
+                                  "type": "string"
+                                },
+                                "edges": {
+                                  "items": {
+                                    "properties": {
+                                      "condition": {
+                                        "type": "string"
+                                      },
+                                      "from": {
+                                        "type": "string"
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "onError": {
+                                        "type": "boolean"
+                                      },
+                                      "to": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "from",
+                                      "to"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "inputs": {},
+                                "metadata": {
+                                  "additionalProperties": {},
+                                  "type": "object"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "nodes": {
+                                  "items": {
+                                    "properties": {
+                                      "config": {
+                                        "additionalProperties": {},
+                                        "type": "object"
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "type",
+                                      "config"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "outputs": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "recovery": {},
+                                "templatePolicy": {
+                                  "type": "string"
+                                },
+                                "ui": {
+                                  "additionalProperties": {},
+                                  "type": "object"
+                                }
+                              },
+                              "required": [
+                                "nodes",
+                                "edges"
+                              ],
+                              "type": "object"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "version": {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "workflowId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "workflowId",
+                            "version",
+                            "dagJson"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "One exact immutable workflow version"
+      }
+    },
+    "/workflows/{id}/resume": {
+      "post": {
+        "operationId": "post_v1_workflows_id_resume",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "backfilled": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "remaining": {
+                              "type": "number"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "workflowId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "ok",
+                            "workflowId",
+                            "status",
+                            "backfilled",
+                            "failed",
+                            "remaining"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Resume a workflow paused by its circuit breaker"
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Version 1",
+      "url": "/v1"
+    }
+  ]
+}

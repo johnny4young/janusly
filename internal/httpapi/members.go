@@ -1,0 +1,409 @@
+// Member management, implements the contract's members routes with
+// their wire shapes verbatim: invite validation ladder (role defined for
+// the org — built-in OR custom —, email format, pending-invite 409,
+// existing-member 409), the self-modification guard on role changes and
+// removal (an admin cannot demote or remove THEMSELVES — the lock-out
+// rationale — with the blocked attempt audited carrying the operator's
+// raw intent), and the no-cascade member delete. Mutations pair their
+// audit rows transactionally through WithAuditTx — a strictly stronger
+// posture than the contract's post-hoc best-effort on these routes,
+// recorded in the plan registry.
+package httpapi
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/store"
+)
+
+var emailPattern = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+
+func init() {
+	audit.RegisterRuntimeAction("organization.owner.transferred")
+}
+
+var (
+	errOrganizationOwnerProtected = errors.New("organization owner membership is protected")
+	errOrganizationOwnerRequired  = errors.New("organization owner required")
+	errOrganizationOwnerSame      = errors.New("organization owner unchanged")
+	errOwnerTargetNotFound        = errors.New("owner target not found")
+	errPendingInvitationExists    = errors.New("pending invitation exists")
+	errInvitationMemberExists     = errors.New("invitation member exists")
+)
+
+func invitationLifecycleLockKey(orgID, email string) string {
+	return strconv.Itoa(len(orgID)) + ":" + orgID + ":" + strings.ToLower(strings.TrimSpace(email))
+}
+
+// roleDefinedForOrg accepts built-ins or org-defined custom roles.
+func (s *V1Server) roleDefinedForOrg(r *http.Request, orgID, roleName string) (bool, error) {
+	if auth.IsBuiltinRole(roleName) {
+		return true, nil
+	}
+	_, err := store.New(s.pool).GetOrgRole(r.Context(), store.GetOrgRoleParams{OrgID: orgID, Name: roleName})
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return false, err
+}
+
+// listMembers writes the contract's BARE array wire (sendJson(rows) —
+// no envelope key), which the dual-run comparator pinned.
+func (s *V1Server) listMembers(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	rows, err := store.New(s.pool).ListOrgMembers(r.Context(), rc.orgID)
+	if err != nil {
+		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+		return
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, map[string]any{
+			"id": row.ID, "orgId": row.OrgID, "userId": row.UserID,
+			"email": textOrNull(row.Email), "role": row.Role,
+			"invitedBy": textOrNull(row.InvitedBy), "createdAt": timeOrNull(row.CreatedAt),
+			"isOwner": row.IsOwner,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(items)
+}
+
+func (s *V1Server) listInvitationsCore(r *http.Request, rc v1Request) opResult {
+	rows, err := store.New(s.pool).ListOrgInvitations(r.Context(), rc.orgID)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, map[string]any{
+			"id": row.ID, "orgId": row.OrgID, "email": row.Email, "role": row.Role,
+			"invitedBy": textOrNull(row.InvitedBy), "status": row.Status,
+			"acceptedAt": timeOrNull(row.AcceptedAt), "createdAt": timeOrNull(row.CreatedAt),
+		})
+	}
+	return opOK(map[string]any{"invitations": items})
+}
+
+func (s *V1Server) inviteMemberCore(r *http.Request, rc v1Request) opResult {
+	var body struct {
+		Email string `json:"email"`
+		Role  string `json:"role"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "email_required", "email is required", nil)
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	roleName := strings.TrimSpace(body.Role)
+	if roleName == "" {
+		roleName = "viewer"
+	}
+	defined, err := s.roleDefinedForOrg(r, rc.orgID, roleName)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	if !defined {
+		return opError(http.StatusBadRequest, "members_role_not_defined",
+			`role "{{role}}" is not defined for this org`, map[string]any{"role": roleName})
+	}
+	if email == "" {
+		return opError(http.StatusBadRequest, "email_required", "email is required", nil)
+	}
+	if !emailPattern.MatchString(email) || len(email) > 254 {
+		return opError(http.StatusBadRequest, "email_invalid", "email format is invalid", nil)
+	}
+	ctx := r.Context()
+	inviteID := s.newID()
+	err = audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		q := store.New(tx)
+		if err := q.LockInvitationLifecycle(ctx, invitationLifecycleLockKey(rc.orgID, email)); err != nil {
+			return err
+		}
+		if _, err := q.FindOrgMemberRowByEmail(ctx, store.FindOrgMemberRowByEmailParams{
+			OrgID: rc.orgID, Email: pgtype.Text{String: email, Valid: true},
+		}); err == nil {
+			return errInvitationMemberExists
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		rows, err := q.CreateOrReactivateInvitation(ctx, store.CreateOrReactivateInvitationParams{
+			ID: inviteID, OrgID: rc.orgID, Email: email, Role: roleName,
+			InvitedBy: pgtype.Text{String: rc.userID, Valid: true},
+		})
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return errPendingInvitationExists
+		}
+		return txAudit("invitation.created", audit.Options{
+			TargetType: "invitation", TargetID: inviteID,
+			Metadata: map[string]any{"email": email, "role": roleName},
+		})
+	})
+	if errors.Is(err, errPendingInvitationExists) {
+		return opError(http.StatusConflict, "invitation_pending_exists",
+			"Invitation already pending for this email", map[string]any{"email": email})
+	}
+	if errors.Is(err, errInvitationMemberExists) {
+		return opError(http.StatusConflict, "member_exists",
+			"Member already exists for this org", map[string]any{"email": email})
+	}
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	return opOK(map[string]any{"id": inviteID, "status": "pending"})
+}
+
+func (s *V1Server) revokeInvitationCore(r *http.Request, rc v1Request, id string) opResult {
+	if id == "" {
+		return opError(http.StatusBadRequest, "members_invitation_id_required", "invitation id is required", nil)
+	}
+	var revoked int64
+	err := audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		q := store.New(tx)
+		target, err := q.GetOrgInvitationLockTarget(r.Context(), store.GetOrgInvitationLockTargetParams{
+			ID: id, OrgID: rc.orgID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errInvitationUnavailable
+		}
+		if err != nil {
+			return err
+		}
+		if err := q.LockInvitationLifecycle(r.Context(), invitationLifecycleLockKey(target.OrgID, target.Email)); err != nil {
+			return err
+		}
+		rows, err := q.RevokePendingInvitation(r.Context(), store.RevokePendingInvitationParams{
+			ID: id, OrgID: rc.orgID,
+		})
+		if err != nil {
+			return err
+		}
+		revoked = rows
+		if rows == 0 {
+			return errInvitationUnavailable
+		}
+		return txAudit("invitation.revoked", audit.Options{TargetType: "invitation", TargetID: id})
+	})
+	if errors.Is(err, errInvitationUnavailable) {
+		return opError(http.StatusNotFound, "members_invitation_not_found", "invitation not found or not pending", nil)
+	}
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	if revoked == 0 {
+		return opError(http.StatusNotFound, "members_invitation_not_found", "invitation not found or not pending", nil)
+	}
+	return opOK(map[string]any{"ok": true})
+}
+
+func (s *V1Server) setMemberRoleCore(r *http.Request, rc v1Request) opResult {
+	var body struct {
+		UserID string `json:"userId"`
+		Role   string `json:"role"`
+	}
+	if err := decodeBody(r, &body); err != nil || body.UserID == "" {
+		return opError(http.StatusBadRequest, "members_user_id_required", "userId is required", nil)
+	}
+	roleName := strings.TrimSpace(body.Role)
+	if body.UserID == rc.userID {
+		// The lock-out guard: audited with the raw operator intent.
+		audit.Write(r.Context(), s.pool, rc.authContext, "member.self_modification_blocked", audit.Options{
+			TargetType: "member", TargetID: body.UserID,
+			Metadata: map[string]any{"action": "role_set", "attemptedRole": body.Role},
+		})
+		return opError(http.StatusBadRequest, "self_membership_modification", "Cannot modify your own membership", nil)
+	}
+	defined, err := s.roleDefinedForOrg(r, rc.orgID, roleName)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	if !defined {
+		return opError(http.StatusBadRequest, "members_role_not_defined",
+			`role "{{role}}" is not defined for this org`, map[string]any{"role": roleName})
+	}
+	var updated int64
+	err = audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		q := store.New(tx)
+		ownerUserID, err := q.LockOrganizationOwner(r.Context(), rc.orgID)
+		if err != nil {
+			return err
+		}
+		if ownerUserID != "" && ownerUserID == body.UserID {
+			return errOrganizationOwnerProtected
+		}
+		rows, err := q.UpdateOrgMemberRole(r.Context(), store.UpdateOrgMemberRoleParams{
+			OrgID: rc.orgID, UserID: body.UserID, Role: roleName,
+		})
+		if err != nil {
+			return err
+		}
+		updated = rows
+		if rows == 0 {
+			return nil // 404 outside; a phantom change is never audited
+		}
+		return txAudit("member.role.updated", audit.Options{
+			TargetType: "member", TargetID: body.UserID,
+			Metadata: map[string]any{"role": roleName},
+		})
+	})
+	if errors.Is(err, errOrganizationOwnerProtected) {
+		return opError(http.StatusConflict, "organization_owner_protected", "The organization owner cannot be demoted", nil)
+	}
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	if updated == 0 {
+		return opError(http.StatusNotFound, "member_not_found", "member not found", nil)
+	}
+	return opOK(map[string]any{"ok": true})
+}
+
+func (s *V1Server) removeMemberCore(r *http.Request, rc v1Request) opResult {
+	userID := r.URL.Query().Get("userId")
+	if userID == "" {
+		return opError(http.StatusBadRequest, "members_user_id_required", "userId is required", nil)
+	}
+	if userID == rc.userID {
+		audit.Write(r.Context(), s.pool, rc.authContext, "member.self_modification_blocked", audit.Options{
+			TargetType: "member", TargetID: userID,
+			Metadata: map[string]any{"action": "remove"},
+		})
+		return opError(http.StatusBadRequest, "self_membership_modification", "Cannot modify your own membership", nil)
+	}
+	var removed int64
+	err := audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		q := store.New(tx)
+		ownerUserID, err := q.LockOrganizationOwner(r.Context(), rc.orgID)
+		if err != nil {
+			return err
+		}
+		if ownerUserID != "" && ownerUserID == userID {
+			return errOrganizationOwnerProtected
+		}
+		// No cascade: ONLY the membership row goes; workflows, runs, and
+		// audit rows stay (audit is append-only). The session dies on the
+		// target's next request via the resolver.
+		rows, err := q.DeleteOrgMember(r.Context(), store.DeleteOrgMemberParams{
+			OrgID: rc.orgID, UserID: userID,
+		})
+		if err != nil {
+			return err
+		}
+		removed = rows
+		if rows == 0 {
+			return nil
+		}
+		return txAudit("member.removed", audit.Options{TargetType: "member", TargetID: userID})
+	})
+	if errors.Is(err, errOrganizationOwnerProtected) {
+		return opError(http.StatusConflict, "organization_owner_protected", "The organization owner cannot be removed", nil)
+	}
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	if removed == 0 {
+		return opError(http.StatusNotFound, "member_not_found", "Member not found", nil)
+	}
+	return opOK(map[string]any{"ok": true})
+}
+
+func (s *V1Server) transferOrganizationOwnerCore(r *http.Request, rc v1Request) opResult {
+	var body struct {
+		UserID string `json:"userId"`
+	}
+	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.UserID) == "" {
+		return opError(http.StatusBadRequest, "members_user_id_required", "userId is required", nil)
+	}
+	body.UserID = strings.TrimSpace(body.UserID)
+	err := audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		q := store.New(tx)
+		currentOwner, err := q.LockOrganizationOwner(r.Context(), rc.orgID)
+		if err != nil {
+			return err
+		}
+		if currentOwner == "" || currentOwner != rc.userID {
+			return errOrganizationOwnerRequired
+		}
+		if body.UserID == currentOwner {
+			return errOrganizationOwnerSame
+		}
+		if _, err := q.GetOrgMembership(r.Context(), store.GetOrgMembershipParams{
+			OrgID: rc.orgID, UserID: body.UserID,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			return errOwnerTargetNotFound
+		} else if err != nil {
+			return err
+		}
+		if rows, err := q.UpdateOrgMemberRole(r.Context(), store.UpdateOrgMemberRoleParams{
+			OrgID: rc.orgID, UserID: body.UserID, Role: "admin",
+		}); err != nil || rows != 1 {
+			if err != nil {
+				return err
+			}
+			return errOwnerTargetNotFound
+		}
+		rows, err := q.TransferOrganizationOwner(r.Context(), store.TransferOrganizationOwnerParams{
+			OrgID: rc.orgID, CurrentOwnerUserID: currentOwner, NewOwnerUserID: body.UserID,
+		})
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return errOrganizationOwnerRequired
+		}
+		return txAudit("organization.owner.transferred", audit.Options{
+			TargetType: "organization", TargetID: rc.orgID,
+			Metadata: map[string]any{"previousOwnerUserId": currentOwner, "newOwnerUserId": body.UserID},
+		})
+	})
+	if errors.Is(err, errOrganizationOwnerRequired) {
+		return opError(http.StatusForbidden, "organization_owner_required", "Only the organization owner can transfer ownership", nil)
+	}
+	if errors.Is(err, errOrganizationOwnerSame) {
+		return opError(http.StatusBadRequest, "organization_owner_same", "This member already owns the organization", nil)
+	}
+	if errors.Is(err, errOwnerTargetNotFound) {
+		return opError(http.StatusNotFound, "member_not_found", "Member not found", nil)
+	}
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	return opOK(map[string]any{"ok": true, "ownerUserId": body.UserID})
+}
+
+func (s *V1Server) mountMemberRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /members", s.auth(s.listMembers))
+	mux.HandleFunc("GET /members/invitations", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.listInvitationsCore(r, rc))
+	}))
+	mux.HandleFunc("POST /members/invite", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.inviteMemberCore(r, rc))
+	}))
+	mux.HandleFunc("POST /members/invitations/{id}/revoke", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.revokeInvitationCore(r, rc, r.PathValue("id")))
+	}))
+	mux.HandleFunc("POST /members/role", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.setMemberRoleCore(r, rc))
+	}))
+	mux.HandleFunc("DELETE /members", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.removeMemberCore(r, rc))
+	}))
+	s.route(mux, "POST /organizations/owner", routeGate{auth.RoleAdmin, "members.role_set"},
+		func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+			writeUnversioned(w, s.transferOrganizationOwnerCore(r, rc))
+		})
+}

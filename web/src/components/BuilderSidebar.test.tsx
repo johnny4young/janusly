@@ -1,0 +1,139 @@
+import type { ComponentProps } from 'react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { BuilderSidebar } from './BuilderSidebar'
+
+type Deferred<T = void> = {
+  promise: Promise<T>
+  resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
+}
+
+function deferred<T = void>(): Deferred<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function renderSidebar(overrides: Partial<ComponentProps<typeof BuilderSidebar>> = {}) {
+  const props: ComponentProps<typeof BuilderSidebar> = {
+    activeTab: 'inspector',
+    aiHealth: null,
+    workflowName: 'Test workflow',
+    streamStatus: 'idle',
+    permissions: [
+      'workflows.read', 'workflows.write', 'runs.read', 'runs.start', 'recovery.read',
+      'ai.write', 'evals.read', 'packs.read', 'credentials.read', 'members.read',
+    ],
+    onWorkflowNameChange: vi.fn(),
+    onValidate: vi.fn(),
+    onSave: vi.fn(),
+    onStart: vi.fn(),
+    onOpenTab: vi.fn(),
+    onOpenHelp: vi.fn(),
+    ...overrides,
+  }
+  render(<BuilderSidebar {...props} />)
+  return props
+}
+
+describe('<BuilderSidebar />', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('hides unauthorized destinations and disables write actions', () => {
+    renderSidebar({ permissions: ['workflows.read', 'runs.read'] })
+
+    expect(screen.queryByRole('button', { name: /Credentials/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('AI operator')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled()
+  })
+
+  it('keeps the header action strip busy until an async action settles', async () => {
+    const save = deferred()
+    const onSave = vi.fn(() => save.promise)
+    renderSidebar({ onSave })
+
+    const saveButton = screen.getByRole('button', { name: 'Save' })
+    const validateButton = screen.getByRole('button', { name: 'Validate' })
+    const runButton = screen.getByRole('button', { name: 'Run' })
+
+    fireEvent.click(saveButton)
+    fireEvent.click(saveButton)
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(saveButton).toHaveAttribute('aria-busy', 'true'))
+    expect(validateButton).toBeDisabled()
+    expect(runButton).toBeDisabled()
+
+    await act(async () => { save.resolve() })
+
+    await waitFor(() => expect(saveButton).not.toBeDisabled())
+    expect(saveButton).toHaveAttribute('aria-busy', 'false')
+    expect(validateButton).not.toBeDisabled()
+    expect(runButton).not.toBeDisabled()
+  })
+
+  it('keeps step discovery out of global navigation', () => {
+    renderSidebar()
+
+    expect(screen.queryByRole('button', { name: 'Call an API' })).not.toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search sections…' })).toBeInTheDocument()
+  })
+
+  it('opens real keyboard help and does not render the dead whats-new affordance', () => {
+    const props = renderSidebar()
+    fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+    expect(props.onOpenHelp).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: "What's new" })).not.toBeInTheDocument()
+  })
+
+  it('keeps run evidence in one global destination', () => {
+    renderSidebar()
+
+    expect(screen.getByRole('button', { name: /^Activity$/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Runs$/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Multi-agent timeline$/ })).not.toBeInTheDocument()
+  })
+
+  it('exposes four global destinations and keeps authoring chrome contextual', () => {
+    renderSidebar({ activeTab: 'home' })
+
+    expect(screen.getByRole('button', { name: /^Home/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Workflows$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Activity$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Settings$/ })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Name' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Call an API' })).not.toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search sections…' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Advanced/ })).not.toBeInTheDocument()
+  })
+
+  it('ignores former group state without hiding the global destinations', () => {
+    window.localStorage.setItem('janusly:sidebar:state', JSON.stringify({
+      openGroups: ['pinned', 'build', 'run'],
+      openCategories: ['ai'],
+      collapsed: false,
+    }))
+
+    renderSidebar({ activeTab: 'home' })
+
+    expect(screen.getByText('Workspace')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Activity$/ })).toBeInTheDocument()
+  })
+
+  it('marks an internal section through its parent destination', () => {
+    const props = renderSidebar({ activeTab: 'recover' })
+
+    const activity = screen.getByRole('button', { name: /^Activity$/ })
+    expect(activity).toHaveAttribute('aria-current', 'page')
+    fireEvent.click(activity)
+    expect(props.onOpenTab).toHaveBeenCalledWith('runs')
+  })
+})

@@ -1,6 +1,6 @@
 # Demo: Incident triage
 
-**Template:** [`incident-triage`](../../apps/api/src/templates.ts)
+**Template:** `incident-triage` in `internal/httpapi/assets/templates.json`
 **Audience:** SRE, on-call, operations engineering managers
 **Time:** 3-5 minutes
 **Story:** "When PagerDuty wakes someone up at 2am, Janusly already filed the GitHub issue and posted the Slack ping. Here is what the operator sees, what the audit trail captures, and what happens when an integration rate-limits us."
@@ -9,8 +9,8 @@
 
 | Need | How |
 | --- | --- |
-| `github_token` credential | AI Studio → Credentials → New, kind `github_token`, name `bot-github`. The token's secret material lives in env (`GITHUB_TOKEN_BOT`); the credential row stores only the env-var name and the org-scoped identifier. |
-| `slack_webhook` credential | Same flow, kind `slack_webhook`, name `incidents-slack`. The webhook URL lives in env (`SLACK_WEBHOOK_INCIDENTS`). |
+| `github_token` credential | AI Studio → Credentials → New, kind `github_token`, name `bot-github`. Paste the token value; it is envelope-encrypted in PostgreSQL. An env-var reference (`GITHUB_TOKEN_BOT`) is the restricted alternative and requires `JANUSLY_CREDENTIAL_ENV_ALLOWLIST`. |
+| `slack_webhook` credential | Same flow, kind `slack_webhook`, name `incidents-slack`, with the webhook URL as the stored value (or an allowlisted `SLACK_WEBHOOK_INCIDENTS` env reference). |
 | Sample incident payload | `{ "alertName": "API p95 above 800ms", "service": "checkout-api", "severity": "high", "summary": "Checkout p95 latency exceeded 800ms for 10 consecutive minutes" }` |
 | Optional: Github repo `janusly/incidents` you can write to | The template targets that repo by default; edit the `github_issue` node's `owner`/`repo` in the Inspector to match yours. |
 
@@ -31,7 +31,7 @@
 
 ## Human-in-the-loop story
 
-The default `incident-triage` flow runs unattended — that is the point at 2am. For human-gated severity, the sibling [`customer-escalation-router`](../templates.md#customer-escalation-router--severity-routed-customer-escalation-operations) template upgrades the same pattern: AI classifies severity, condition-guarded edges fan to `low` (Slack ping), `medium` (Slack + GitHub), or `high` (HUMAN form + Slack + GitHub). Mention this as the "we have an opinion about when the human should be in the loop" beat.
+The default `incident-triage` flow runs unattended — that is the point at 2am. For human-gated severity, the sibling `customer-escalation-router` template (in the in-product template gallery) upgrades the same pattern: AI classifies severity, condition-guarded edges fan to `low` (Slack ping), `medium` (Slack + GitHub), or `high` (HUMAN form + Slack + GitHub). Mention this as the "we have an opinion about when the human should be in the loop" beat.
 
 ## Recovery story
 
@@ -44,7 +44,10 @@ The demo's recovery angle is the one nobody plans for: "what if Slack rate-limit
 
 ## Closing metric
 
-**Mean Time To Recovery for failed Slack pings, before vs after Janusly.** A typical operator-driven recovery (find the failed alert, manually file the GitHub issue, paste the link into Slack) is 4-8 minutes. Janusly's auto-recover loop is under 60 seconds end-to-end including the operator picking the suggestion.
+**Time to verified recovery for a failed Slack notification.** Record the
+actual production-only clock after the generation-bound replay succeeds.
+“4–8 minutes manually” and “under 60 seconds with Janusly” are demonstration
+assumptions until a design partner supplies a measured baseline and result.
 
 ## 3-5 minute talk track
 
@@ -61,4 +64,4 @@ The demo's recovery angle is the one nobody plans for: "what if Slack rate-limit
 > Now watch what happens when Slack rate-limits us. The flow doesn't crash — it captures the failure, the Recovery Queue offers a one-click fix, sandbox validation runs, and we're back to green. From "Slack is down" to "Slack is fixed" — under a minute, no operator paged.
 >
 > **(3:30–4:30, the close)**
-> Three integrations, one flow, the audit trail your security team wants, and a recovery story your on-call team will love. The number we track for you is Mean Time To Recovery — and this demo just took ours from minutes to seconds.
+> Three integrations, one flow, the audit trail your security team wants, and a recovery story your on-call team will love. Janusly records the time from detected failure to verified recovery so you can compare it with your own measured baseline.

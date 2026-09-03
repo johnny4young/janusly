@@ -2,7 +2,7 @@ name: janusly-observability-cloud
 
 services:
   alloy:
-    image: grafana/alloy:v1.16.1
+    image: grafana/alloy:v1.16.1@sha256:51aeb9d829239345070619dad3edd6873186f913c84f45b365b74574fcb38ec0
     command:
       - run
       - --server.http.listen-addr=0.0.0.0:12345
@@ -15,6 +15,7 @@ services:
       GRAFANA_CLOUD_INSTANCE_ID: ${GRAFANA_CLOUD_INSTANCE_ID:?Set GRAFANA_CLOUD_INSTANCE_ID}
       GRAFANA_CLOUD_API_TOKEN: ${GRAFANA_CLOUD_API_TOKEN:?Set GRAFANA_CLOUD_API_TOKEN}
       JANUSLY_ENVIRONMENT: ${JANUSLY_ENVIRONMENT:-production}
+      JANUSLY_METRICS_ADDRESS: ${JANUSLY_METRICS_ADDRESS:-host.docker.internal:9464}
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:

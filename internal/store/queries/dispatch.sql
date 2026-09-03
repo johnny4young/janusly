@@ -1,0 +1,233 @@
+-- Dispatch plane: claims, queue publication, wakeups, locks, reaper.
+
+-- Keep Node's existing publication outbox current while Go owns delivery.
+-- It is dormant under single-owner Go execution and becomes the rollback
+-- source for durable queue publication.
+-- name: QueueRunNode :execrows
+UPDATE run_nodes
+SET status = 'queued', attempts = 1, enqueued_at = clock_timestamp(),
+    queue_publication_repair_after = clock_timestamp(),
+    queue_publication_generation = queue_publication_generation + 1
+WHERE run_id = $1 AND node_id = $2 AND status = 'pending';
+
+-- name: LockClaimableRunNodes :many
+SELECT rn.id
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE rn.status = 'queued' AND r.status = 'running'
+  AND rn.enqueued_at <= now()
+  AND NOT EXISTS (
+    SELECT 1 FROM run_wakeups w
+    WHERE w.run_node_id = rn.id AND w.wake_at > now()
+  )
+ORDER BY rn.enqueued_at, rn.id
+LIMIT sqlc.arg(batch_size)
+FOR UPDATE OF rn SKIP LOCKED;
+
+-- A successful Go claim consumes this generation's rollback marker.
+-- name: MarkLockedNodesRunning :many
+UPDATE run_nodes
+SET status = 'running', started_at = now(),
+    queue_publication_repair_after = NULL
+WHERE id = ANY(sqlc.arg(ids)::text[])
+  AND status = 'queued'
+  AND enqueued_at <= now()
+  AND NOT EXISTS (
+    SELECT 1 FROM run_wakeups w
+    WHERE w.run_node_id = run_nodes.id AND w.wake_at > now()
+  )
+RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt,
+  GREATEST(EXTRACT(EPOCH FROM clock_timestamp() - enqueued_at), 0)::float8
+    AS queue_wait_seconds;
+
+-- name: AcquireRunCompletionLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(run_id)::text, 0));
+
+-- name: FindStalledRunningNodes :many
+SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+       rn.started_at
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE rn.status = 'running'
+  AND rn.started_at < now() - make_interval(secs => sqlc.arg(threshold_seconds)::float8)
+  AND r.status IN ('running', 'failed')
+ORDER BY rn.started_at
+LIMIT sqlc.arg(batch_size);
+
+-- A controlled drill must not sweep unrelated production work. The exact
+-- tenant/run scope crosses the same running-node CAS and terminal boundary as
+-- the ordinary reaper after this bounded selection.
+-- name: FindScopedStalledRunningNodes :many
+SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+       rn.started_at
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE rn.status = 'running'
+  AND rn.started_at < now() - make_interval(secs => sqlc.arg(threshold_seconds)::float8)
+  AND r.status IN ('running', 'failed')
+  AND r.org_id = sqlc.arg(org_id)
+  AND r.id = sqlc.arg(run_id)
+ORDER BY rn.started_at
+LIMIT sqlc.arg(batch_size);
+
+-- name: ClaimDeadLetterReplay :execrows
+UPDATE dead_letters
+SET replay_claimed_at = now(), status = 'replayed', replayed_at = now()
+WHERE id = $1 AND org_id = $2 AND replay_claimed_at IS NULL;
+
+-- name: UpsertWakeup :exec
+INSERT INTO run_wakeups (run_node_id, wake_at, reason)
+VALUES ($1, $2, $3)
+ON CONFLICT (run_node_id) DO UPDATE SET wake_at = EXCLUDED.wake_at, reason = EXCLUDED.reason;
+
+-- name: ListDueWakeups :many
+SELECT run_node_id, wake_at, reason
+FROM run_wakeups
+WHERE wake_at <= now()
+ORDER BY wake_at
+LIMIT $1;
+
+-- name: DeleteWakeup :exec
+DELETE FROM run_wakeups WHERE run_node_id = $1;
+
+-- name: SweepDueWakeups :execrows
+DELETE FROM run_wakeups w
+WHERE w.wake_at <= now()
+  AND NOT EXISTS (
+    SELECT 1 FROM run_nodes rn
+    WHERE rn.id = w.run_node_id AND rn.status = 'waiting'
+  );
+
+-- name: ListDueWaitingWakeups :many
+SELECT run_node_id, run_id, node_id, wake_at, reason
+FROM (
+  SELECT w.run_node_id, rn.run_id, rn.node_id, w.wake_at, w.reason,
+         ROW_NUMBER() OVER (PARTITION BY rn.run_id ORDER BY w.wake_at, w.run_node_id) AS run_rank
+  FROM run_wakeups w
+  JOIN run_nodes rn ON rn.id = w.run_node_id
+  JOIN runs r ON r.id = rn.run_id
+  WHERE w.wake_at <= now() AND rn.status = 'waiting'
+    AND r.status = 'running'
+    AND w.reason IN ('wait_until', 'approval_timeout')
+) ranked
+ORDER BY run_rank, run_node_id
+LIMIT sqlc.arg(batch_size);
+
+-- name: NotifyRunEvents :exec
+SELECT pg_notify('janusly_run_events', sqlc.arg(run_id)::text);
+
+-- name: ClaimTriggerEventStart :execrows
+-- Accepts 'received' (the ordinary ingest path) AND 'buffered' (the
+-- breaker-resume backfill): both are "owed a run" states, and the CAS
+-- keeps a concurrent backfill/relay from spawning a second run.
+UPDATE trigger_events
+SET status = 'started', run_id = $3, skipped_reason = NULL,
+    backfill_claim_token = NULL, backfill_claimed_at = NULL
+WHERE org_id = $1 AND id = $2 AND status IN ('received', 'buffered') AND run_id IS NULL;
+
+-- name: ClaimDueReplayCampaign :one
+UPDATE replay_campaigns
+SET next_dispatch_at = now() + make_interval(secs => pacing_ms / 1000.0),
+    updated_at = now()
+WHERE id = (
+  SELECT id FROM replay_campaigns
+  WHERE status = 'running' AND next_dispatch_at <= now()
+  ORDER BY next_dispatch_at
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED)
+RETURNING *;
+
+-- A processing row whose claim went stale (crash between claim and
+-- settle) is re-claimable after ten minutes; the settle CAS on
+-- claim_token makes the original claimant's late settle lose cleanly.
+-- Without this, one crash wedges the campaign in running forever.
+-- name: ClaimNextReplayCampaignItem :one
+UPDATE replay_campaign_items
+SET status = 'processing', claim_token = sqlc.arg(claim_token),
+    claimed_at = now(), attempt_count = attempt_count + 1
+WHERE replay_campaign_items.id = (
+  SELECT i.id FROM replay_campaign_items i
+  WHERE i.campaign_id = sqlc.arg(campaign_id)
+    AND (i.status = 'pending'
+         OR (i.status = 'processing'
+             AND i.claimed_at <= now() - interval '10 minutes'))
+  ORDER BY i.position
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED)
+RETURNING *;
+
+-- name: ClaimStartIdempotencyKey :execrows
+INSERT INTO run_start_idempotency (org_id, idempotency_key, run_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, idempotency_key) DO NOTHING;
+
+-- name: QueryQueueHealth :one
+-- enqueued_at is the durable eligibility clock. Retry requeues persist their
+-- wake_at there, so cleanup of a due run_wakeups row cannot make queue age
+-- regress to the beginning of backoff.
+WITH eligible AS (
+  SELECT rn.id, rn.enqueued_at AS eligible_at
+  FROM run_nodes rn
+  JOIN runs r ON r.id = rn.run_id
+  LEFT JOIN run_wakeups w ON w.run_node_id = rn.id
+  WHERE rn.status = 'queued' AND r.status = 'running'
+    AND rn.enqueued_at <= now()
+    AND (w.wake_at IS NULL OR w.wake_at <= now())
+)
+SELECT
+  (SELECT count(*) FROM eligible)::int AS waiting,
+  (SELECT count(*) FROM run_nodes WHERE status = 'running')::int AS active,
+  (SELECT min(eligible_at) FROM eligible) AS oldest_eligible_at;
+
+-- name: StampRedriveRecoveryClaim :exec
+UPDATE run_nodes
+SET recovery_dead_letter_id = $3, recovery_requested_by = $4, recovery_claim_token = $5,
+    recovery_playbook_id = $6, recovery_validation_run_id = $7
+WHERE run_id = $1 AND node_id = $2;
+
+-- name: GetRunNodeRecoveryClaim :one
+SELECT recovery_dead_letter_id, recovery_requested_by, recovery_claim_token,
+       recovery_playbook_id, recovery_validation_run_id
+FROM run_nodes WHERE run_id = $1 AND node_id = $2;
+
+-- name: ClaimBufferedTriggerEvents :many
+UPDATE trigger_events SET backfill_claim_token = sqlc.arg(claim_token), backfill_claimed_at = now()
+WHERE trigger_events.id IN (
+  SELECT te.id FROM trigger_events te
+  WHERE te.org_id = sqlc.arg(org_id) AND te.workflow_id = sqlc.arg(workflow_id) AND te.status = 'buffered'
+    AND te.backfill_claim_token IS NULL
+  ORDER BY te.created_at ASC
+  LIMIT sqlc.arg(page_limit)
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING trigger_events.id, trigger_events.node_id, trigger_events.payload_json, trigger_events.created_at,
+          trigger_events.workflow_version_id, trigger_events.workflow_rollout_id, trigger_events.workflow_rollout_variant;
+
+-- name: ClaimDueParentNotifications :many
+UPDATE runs SET parent_notification_after = sqlc.arg(lease_until)
+WHERE id IN (
+  SELECT due.id FROM runs AS due
+  WHERE due.parent_notification_after <= sqlc.arg(now)
+    AND due.status IN ('succeeded', 'failed', 'cancelled', 'timed_out')
+  ORDER BY due.parent_notification_after
+  LIMIT sqlc.arg(row_limit)
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING id, status;
+
+-- The claim overwrites next_fire_at with the lease, so the tick's LOGICAL
+-- due time is returned alongside the row: it is the tick's durable
+-- identity, and firing keys run-start idempotency on it. Without that,
+-- a lease that expires mid-batch or a crash between the run insert and
+-- the advance fires the same scheduled tick twice.
+-- name: ClaimDueScheduleEntries :many
+UPDATE schedule_entries SET next_fire_at = sqlc.arg(lease_until)
+FROM (
+  SELECT due.id, due.next_fire_at AS due_at FROM schedule_entries AS due
+  WHERE due.enabled = true AND due.next_fire_at <= sqlc.arg(now)
+  ORDER BY due.next_fire_at
+  LIMIT sqlc.arg(row_limit)
+  FOR UPDATE SKIP LOCKED
+) AS claimed
+WHERE schedule_entries.id = claimed.id
+RETURNING schedule_entries.*, claimed.due_at;

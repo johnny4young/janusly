@@ -1,0 +1,32 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "schema.sql"
+    queries: "internal/store/queries"
+    gen:
+      go:
+        package: "store"
+        out: "internal/store"
+        sql_package: "pgx/v5"
+        overrides:
+          # jsonb travels as raw bytes end to end: the store never re-encodes
+          # payloads, so key order and number formatting survive untouched.
+          - db_type: "jsonb"
+            go_type: "encoding/json.RawMessage"
+          - db_type: "jsonb"
+            nullable: true
+            go_type: "encoding/json.RawMessage"
+          - db_type: "pg_catalog.timestamptz"
+            go_type: "time.Time"
+          - db_type: "pg_catalog.timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true

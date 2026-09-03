@@ -1,0 +1,908 @@
+// Postgres DB query tools (reference the source contract):
+// credential-backed access to CUSTOMER-owned databases from workflow tool
+// nodes.
+//
+// Invariants:
+//   - The multi-tenant boundary is the org-scoped credential lookup
+//     (orgId, kind "postgres", name). Customer SQL is never rewritten to
+//     inject tenant predicates; the customer's DSN/role/schema/RLS/views
+//     own row-level isolation inside the external DB.
+//   - Workflow JSON stores only the credential NAME; the DSN resolves
+//     through the Secret Store and neither the contract nor the URL is
+//     ever echoed (safeDbError redacts postgres:// URLs + secret shapes).
+//   - SQL validation rejects semicolons, comments, DDL/session-control
+//     verbs, verb-class mismatches, and placeholder/param mismatches.
+//   - Pools are keyed org+credential: max five external pools per
+//     org/process, ONE connection each; a rotated DSN (fingerprint
+//     change) swaps the pool.
+//   - Envelopes never throw; write tools carry WriteSide (dry-run skip).
+package tools
+
+import (
+	"errors"
+	"os"
+
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/johnny4young/janusly/internal/signature"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+const (
+	dbMaxOrgPools            = 5
+	dbMaxProcessPoolsDefault = 25
+	dbMaxRowsDefault         = 100
+	dbMaxRowsLimit           = 1_000
+	dbMaxTransactionStmts    = 10
+	dbMaxIdentifierLength    = 63
+	dbSQLTextMax             = 20_000
+	dbTimeoutMsDefault       = 30_000
+	dbTimeoutMsMax           = 120_000
+	dbSchemaDescribeRowLimit = 2_000
+	dbDefaultRateLimitPerMin = 60
+	dbParamsMaxBytes         = 256 << 10
+	dbTransactionMaxBytes    = 512 << 10
+)
+
+var (
+	dbSafeIdentifier   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	dbCommentPattern   = regexp.MustCompile(`--|/\*`)
+	dbDangerousPattern = regexp.MustCompile(`(?i)\b(create|alter|drop|truncate|grant|revoke|copy|listen|notify|vacuum|analyze|call|do|execute|prepare|deallocate|reset|show|begin|commit|rollback|savepoint|release)\b`)
+	dbPlaceholder      = regexp.MustCompile(`\$(\d+)`)
+	dbPostgresURL      = regexp.MustCompile(`(?i)postgres(?:ql)?://\S+`)
+)
+
+/* ---------------------------- SQL validation --------------------------- */
+
+// FirstSQLVerb returns the lowercased first token.
+func FirstSQLVerb(sql string) string {
+	fields := strings.Fields(strings.TrimSpace(sql))
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToLower(fields[0])
+}
+
+func isWriteVerb(verb string) bool {
+	return verb == "insert" || verb == "update" || verb == "delete"
+}
+
+// ValidateDbSQL enforces the closed statement grammar for one statement.
+// kind: "read" | "write" | "any".
+func ValidateDbSQL(sql string, paramsLen int, kind string) string {
+	trimmed := strings.TrimSpace(sql)
+	if trimmed == "" {
+		return "sql is required"
+	}
+	if len(trimmed) > dbSQLTextMax {
+		return "sql is too large"
+	}
+	if strings.Contains(trimmed, ";") {
+		return "sql must contain exactly one statement and no semicolon"
+	}
+	if dbCommentPattern.MatchString(trimmed) {
+		return "sql comments are not allowed"
+	}
+	if dbDangerousPattern.MatchString(trimmed) {
+		return "sql verb is not allowed"
+	}
+	verb := FirstSQLVerb(trimmed)
+	switch kind {
+	case "read":
+		if verb != "select" {
+			return "db.query.read only accepts SELECT statements"
+		}
+	case "write":
+		if !isWriteVerb(verb) {
+			return "db.query.write only accepts INSERT, UPDATE, or DELETE statements"
+		}
+	default:
+		if verb != "select" && !isWriteVerb(verb) {
+			return "transactions accept only SELECT, INSERT, UPDATE, or DELETE statements"
+		}
+	}
+	return validateDbPlaceholders(trimmed, paramsLen)
+}
+
+func validateDbPlaceholders(sql string, paramsLen int) string {
+	seen := map[int]bool{}
+	max := 0
+	for _, match := range dbPlaceholder.FindAllStringSubmatch(sql, -1) {
+		n, err := strconv.Atoi(match[1])
+		if err != nil || n <= 0 {
+			return "sql placeholders must start at $1"
+		}
+		seen[n] = true
+		if n > max {
+			max = n
+		}
+	}
+	for i := 1; i <= max; i++ {
+		if !seen[i] {
+			return "sql placeholders must be contiguous from $1"
+		}
+	}
+	if paramsLen != max {
+		return fmt.Sprintf("params length (%d) must match highest placeholder ($%d)", paramsLen, max)
+	}
+	return ""
+}
+
+func dbPlaceholderArity(sql string) int {
+	maximum := 0
+	for _, match := range dbPlaceholder.FindAllStringSubmatch(sql, -1) {
+		value, err := strconv.Atoi(match[1])
+		if err == nil && value > maximum {
+			maximum = value
+		}
+	}
+	return maximum
+}
+
+func validateDbIdentifier(value, field string) error {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > dbMaxIdentifierLength ||
+		!dbSafeIdentifier.MatchString(value) {
+		return fmt.Errorf("%s must be a simple Postgres identifier of at most %d bytes", field, dbMaxIdentifierLength)
+	}
+	return nil
+}
+
+func validateDbStringArray(raw any, field string, maximum int) ([]any, error) {
+	items, ok := arrayItems(raw)
+	if !ok || len(items) > maximum {
+		return nil, fmt.Errorf("%s allows at most %d names", field, maximum)
+	}
+	seen := make(map[string]bool, len(items))
+	for _, rawItem := range items {
+		item, ok := rawItem.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s entries must be strings", field)
+		}
+		if err := validateDbIdentifier(item, "table"); err != nil {
+			return nil, err
+		}
+		canonical := strings.ToLower(item)
+		if seen[canonical] {
+			return nil, fmt.Errorf("%s entries must be unique case-insensitively", field)
+		}
+		seen[canonical] = true
+	}
+	return items, nil
+}
+
+func validateDbParams(raw any) ([]any, error) {
+	params, ok := arrayItems(raw)
+	if !ok || len(params) > 100 {
+		return nil, fmt.Errorf("params allows at most 100 JSON values")
+	}
+	serialized, err := json.Marshal(raw)
+	if err != nil || len(serialized) > dbParamsMaxBytes {
+		return nil, fmt.Errorf("params exceed the %d byte bound", dbParamsMaxBytes)
+	}
+	return params, nil
+}
+
+func validateDbBound(input map[string]any, key string, maximum int, options InputValidationOptions) error {
+	raw, present := input[key]
+	if !present || isDeferredWholeTemplate(raw, options) {
+		return nil
+	}
+	if _, ok := boundedWholeNumber(raw, 1, int64(maximum)); !ok {
+		return fmt.Errorf("%s must be a whole number from 1 to %d", key, maximum)
+	}
+	return nil
+}
+
+func validateDbStatementInput(
+	sqlRaw any,
+	paramsRaw any,
+	paramsPresent bool,
+	kind string,
+	options InputValidationOptions,
+) error {
+	paramsKnown := false
+	paramsLength := 0
+	if paramsPresent {
+		if !isDeferredWholeTemplate(paramsRaw, options) {
+			params, err := validateDbParams(paramsRaw)
+			if err != nil {
+				return err
+			}
+			paramsKnown = true
+			paramsLength = len(params)
+		}
+	} else if options.RequireAll {
+		paramsKnown = true
+	}
+	if isDeferredWholeTemplate(sqlRaw, options) {
+		return nil
+	}
+	sql, ok := sqlRaw.(string)
+	if !ok {
+		return fmt.Errorf("sql must be a string")
+	}
+	if !paramsKnown {
+		paramsLength = dbPlaceholderArity(sql)
+	}
+	if message := ValidateDbSQL(sql, paramsLength, kind); message != "" {
+		return errors.New(message)
+	}
+	return nil
+}
+
+func validateDbCommonInput(input map[string]any, options InputValidationOptions) error {
+	if err := validateTrimmedIdentifier(input, "credential", integrationCredentialMaxRunes, options); err != nil {
+		return err
+	}
+	if err := validateDbBound(input, "timeoutMs", dbTimeoutMsMax, options); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateDbSchemaInput(input map[string]any, options InputValidationOptions) error {
+	if err := validateDbCommonInput(input, options); err != nil {
+		return err
+	}
+	if raw, present := input["schema"]; present && !isDeferredWholeTemplate(raw, options) {
+		if err := validateDbIdentifier(raw.(string), "schema"); err != nil {
+			return err
+		}
+	}
+	if raw, present := input["tables"]; present && !isDeferredWholeTemplate(raw, options) {
+		_, err := validateDbStringArray(raw, "tables", 50)
+		return err
+	}
+	return nil
+}
+
+func validateDbQueryInput(kind string) func(map[string]any, InputValidationOptions) error {
+	return func(input map[string]any, options InputValidationOptions) error {
+		if err := validateDbCommonInput(input, options); err != nil {
+			return err
+		}
+		if err := validateDbBound(input, "maxRows", dbMaxRowsLimit, options); err != nil {
+			return err
+		}
+		sqlRaw, sqlPresent := input["sql"]
+		if !sqlPresent {
+			return nil
+		}
+		paramsRaw, paramsPresent := input["params"]
+		return validateDbStatementInput(sqlRaw, paramsRaw, paramsPresent, kind, options)
+	}
+}
+
+func validateDbTransactionInput(input map[string]any, options InputValidationOptions) error {
+	if err := validateDbCommonInput(input, options); err != nil {
+		return err
+	}
+	if err := validateDbBound(input, "maxRowsPerStatement", dbMaxRowsLimit, options); err != nil {
+		return err
+	}
+	raw, present := input["statements"]
+	if !present || isDeferredWholeTemplate(raw, options) {
+		return nil
+	}
+	statements, ok := arrayItems(raw)
+	if !ok || len(statements) == 0 || len(statements) > dbMaxTransactionStmts {
+		return fmt.Errorf("statements must list 1..%d entries", dbMaxTransactionStmts)
+	}
+	serialized, err := json.Marshal(raw)
+	if err != nil || len(serialized) > dbTransactionMaxBytes {
+		return fmt.Errorf("statements exceed the %d byte bound", dbTransactionMaxBytes)
+	}
+	for index, rawStatement := range statements {
+		statement, ok := rawStatement.(map[string]any)
+		if !ok {
+			return fmt.Errorf("statements[%d] must be an object", index)
+		}
+		unknown := make([]string, 0)
+		for field := range statement {
+			if field != "sql" && field != "params" {
+				unknown = append(unknown, field)
+			}
+		}
+		sort.Strings(unknown)
+		if len(unknown) > 0 {
+			return fmt.Errorf("statements[%d] contains unsupported field %s", index, unknown[0])
+		}
+		sqlRaw, sqlPresent := statement["sql"]
+		if !sqlPresent {
+			return fmt.Errorf("statements[%d].sql is required", index)
+		}
+		paramsRaw, paramsPresent := statement["params"]
+		if err := validateDbStatementInput(sqlRaw, paramsRaw, paramsPresent, "any", options); err != nil {
+			return fmt.Errorf("statements[%d]: %w", index, err)
+		}
+	}
+	return nil
+}
+
+/* ------------------------------ pool cache ----------------------------- */
+
+type dbPoolEntry struct {
+	pool        *pgxpool.Pool
+	orgID       string
+	fingerprint string
+	touchedAt   time.Time
+}
+
+var (
+	dbPoolsMu sync.Mutex
+	dbPools   = map[string]*dbPoolEntry{}
+)
+
+// errDbPoolExhausted is the stable never-throw sentinel: at the process
+// cap the tool answers {ok:false, error:"db_pool_exhausted"}.
+var errDbPoolExhausted = errors.New("db_pool_exhausted")
+
+// metricDbToolPools gauges the live external-pool count for dashboards.
+var metricDbToolPools = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "janusly_db_tool_pools",
+	Help: "Cached external db-tool connection pools in this process.",
+})
+
+// dbMaxProcessPools resolves the PROCESS-wide external-pool cap: env
+// JANUSLY_DB_TOOL_MAX_PROCESS_POOLS (1..500) or the default 25. One
+// noisy tenant can exhaust its own 5-pool budget, never the process.
+func dbMaxProcessPools() int {
+	if raw := os.Getenv("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 500 {
+			return n
+		}
+	}
+	return dbMaxProcessPoolsDefault
+}
+
+// ResetDbPoolsForTests closes and forgets every cached external pool.
+func ResetDbPoolsForTests() {
+	dbPoolsMu.Lock()
+	defer dbPoolsMu.Unlock()
+	for key, entry := range dbPools {
+		entry.pool.Close()
+		delete(dbPools, key)
+	}
+	metricDbToolPools.Set(0)
+}
+
+// getDbPool caches ONE-connection pools per (org, credential), swapping on
+// a DSN fingerprint change and evicting the org's LRU pool past the cap.
+func getDbPool(ctx context.Context, orgID, credentialName, dsn string) (*pgxpool.Pool, error) {
+	key := orgID + "\x00" + credentialName
+	digest := sha256.Sum256([]byte(dsn))
+	fingerprint := hex.EncodeToString(digest[:])
+
+	dbPoolsMu.Lock()
+	defer dbPoolsMu.Unlock()
+	if existing, ok := dbPools[key]; ok {
+		if existing.fingerprint == fingerprint {
+			existing.touchedAt = time.Now()
+			return existing.pool, nil
+		}
+		existing.pool.Close()
+		delete(dbPools, key)
+	}
+	// Evict the org's least-recently-used pool past the cap.
+	var orgKeys []string
+	for candidateKey, entry := range dbPools {
+		if entry.orgID == orgID {
+			orgKeys = append(orgKeys, candidateKey)
+		}
+	}
+	if len(orgKeys) >= dbMaxOrgPools {
+		sort.Slice(orgKeys, func(a, b int) bool {
+			return dbPools[orgKeys[a]].touchedAt.Before(dbPools[orgKeys[b]].touchedAt)
+		})
+		oldest := orgKeys[0]
+		dbPools[oldest].pool.Close()
+		delete(dbPools, oldest)
+	}
+	// Process-wide semaphore over the TOTAL: a net-new pool past
+	// the cap answers the stable exhausted sentinel instead of growing —
+	// deliberately NO cross-org eviction, so one tenant cannot thrash
+	// another tenant's warm pools.
+	if len(dbPools) >= dbMaxProcessPools() {
+		return nil, errDbPoolExhausted
+	}
+
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("invalid postgres credential value")
+	}
+	config.MaxConns = 1
+	config.ConnConfig.ConnectTimeout = 10 * time.Second
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("could not open external database pool")
+	}
+	dbPools[key] = &dbPoolEntry{pool: pool, orgID: orgID, fingerprint: fingerprint, touchedAt: time.Now()}
+	metricDbToolPools.Set(float64(len(dbPools)))
+	return pool, nil
+}
+
+/* ------------------------------ shaping -------------------------------- */
+
+func dbJSONSafe(value any) any {
+	switch typed := value.(type) {
+	case time.Time:
+		return typed.UTC().Format(time.RFC3339Nano)
+	case []byte:
+		return base64.StdEncoding.EncodeToString(typed)
+	case [16]byte: // uuid
+		return hex.EncodeToString(typed[:])
+	default:
+		return value
+	}
+}
+
+func collectDbRows(rows pgx.Rows, maxRows int) ([]any, bool, error) {
+	// Close on EVERY exit: a mid-iteration Values() failure used to return
+	// with the rows still open, handing a dirty connection back to the
+	// external pool (the caller's deferred rollback discards its error, so
+	// the fault surfaced later, on someone else's query).
+	defer rows.Close()
+	fieldDescriptions := rows.FieldDescriptions()
+	collected := make([]any, 0, maxRows)
+	truncated := false
+	for rows.Next() {
+		if len(collected) >= maxRows {
+			truncated = true
+			break
+		}
+		values, err := rows.Values()
+		if err != nil {
+			return nil, false, err
+		}
+		record := map[string]any{}
+		for index, field := range fieldDescriptions {
+			record[string(field.Name)] = dbJSONSafe(values[index])
+		}
+		collected = append(collected, record)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil { // safe after Close; the deferred Close is a no-op
+		return nil, false, err
+	}
+	return collected, truncated, nil
+}
+
+// safeDbError redacts connection URLs and secret shapes; never empty.
+// redactedValues carries the RESOLVED credential material (the DSN):
+// pgx quotes the whole connection string verbatim in parse failures, and
+// a credential whose secretRef points at a process environment variable
+// would otherwise echo that variable's value straight back to the
+// workflow author through the tool envelope. Value-based redaction is
+// the same posture safePersistPayload takes for persisted payloads —
+// shape-based scrubbing alone cannot catch an arbitrary secret.
+func safeDbError(err error, redactedValues ...string) string {
+	raw := "database query failed"
+	if err != nil && err.Error() != "" {
+		raw = err.Error()
+	}
+	for _, value := range redactedValues {
+		if strings.TrimSpace(value) != "" {
+			raw = strings.ReplaceAll(raw, value, "[redacted]")
+		}
+	}
+	scrubbed := strings.TrimSpace(signature.ScrubSecretShapes(dbPostgresURL.ReplaceAllString(raw, "[REDACTED_POSTGRES_URL]")))
+	if scrubbed == "" {
+		return "database query failed"
+	}
+	if len(scrubbed) > 300 {
+		return scrubbed[:300] + "…"
+	}
+	return scrubbed
+}
+
+/* --------------------------- catalog entries --------------------------- */
+
+func dbTools() []Definition {
+	unavailable := func(_ context.Context, _ map[string]any) (map[string]any, error) {
+		return map[string]any{"ok": false, "error": "integration tools require run context", "latencyMs": 0}, nil
+	}
+	return []Definition{
+		{
+			Name:        "db.schema.describe",
+			Description: "Describe tables and columns from a stored Postgres credential without running arbitrary SQL.",
+			Required:    []string{"credential"},
+			Optional:    []string{"schema", "tables"},
+			Fields: []Field{
+				{Name: "credential", Type: "string", Required: true},
+				{Name: "schema", Type: "string"},
+				{Name: "tables", Type: "array"},
+			},
+			InputExample: map[string]any{"credential": "customer-postgres", "schema": "public", "tables": []any{"customers"}},
+			Validate:     validateDbSchemaInput,
+			Execute:      unavailable,
+		},
+		{
+			Name:        "db.query.read",
+			Description: "Run a parameterized SELECT against a stored Postgres credential and return bounded rows.",
+			Required:    []string{"credential", "sql"},
+			Optional:    []string{"params", "maxRows", "timeoutMs"},
+			Fields: []Field{
+				{Name: "credential", Type: "string", Required: true},
+				{Name: "sql", Type: "string", Required: true},
+				{Name: "params", Type: "array"},
+				{Name: "maxRows", Type: "number"},
+				{Name: "timeoutMs", Type: "number"},
+			},
+			InputExample: map[string]any{
+				"credential": "customer-postgres",
+				"sql":        "select id, email from customers where status = $1", "params": []any{"active"},
+			},
+			Validate: validateDbQueryInput("read"),
+			Execute:  unavailable,
+		},
+		{
+			Name:        "db.query.write",
+			Description: "Run one parameterized INSERT, UPDATE, or DELETE against a stored Postgres credential.",
+			Required:    []string{"credential", "sql"},
+			Optional:    []string{"params", "maxRows", "timeoutMs"},
+			Fields: []Field{
+				{Name: "credential", Type: "string", Required: true},
+				{Name: "sql", Type: "string", Required: true},
+				{Name: "params", Type: "array"},
+				{Name: "maxRows", Type: "number"},
+				{Name: "timeoutMs", Type: "number"},
+			},
+			InputExample: map[string]any{
+				"credential": "customer-postgres",
+				"sql":        "update customers set status = $1 where id = $2", "params": []any{"active", "cus_123"},
+			},
+			Validate:  validateDbQueryInput("write"),
+			WriteSide: true,
+			Execute:   unavailable,
+		},
+		{
+			Name:        "db.query.transaction",
+			Description: "Run a bounded transaction of parameterized Postgres SELECT/DML statements through a stored credential.",
+			Required:    []string{"credential", "statements"},
+			Optional:    []string{"maxRowsPerStatement", "timeoutMs"},
+			Fields: []Field{
+				{Name: "credential", Type: "string", Required: true},
+				{Name: "statements", Type: "array", Required: true},
+				{Name: "maxRowsPerStatement", Type: "number"},
+				{Name: "timeoutMs", Type: "number"},
+			},
+			InputExample: map[string]any{
+				"credential": "customer-postgres",
+				"statements": []any{
+					map[string]any{"sql": "update customers set status = $1 where id = $2", "params": []any{"active", "cus_123"}},
+					map[string]any{"sql": "select id, status from customers where id = $1", "params": []any{"cus_123"}},
+				},
+			},
+			Validate:  validateDbTransactionInput,
+			WriteSide: true,
+			Execute:   unavailable,
+		},
+	}
+}
+
+/* ------------------------------ execution ------------------------------ */
+
+type dbStatement struct {
+	sql    string
+	params []any
+}
+
+func dbBoundedInt(input map[string]any, key string, fallback, max int) (int, string) {
+	raw, present := input[key]
+	if !present {
+		return fallback, ""
+	}
+	value, ok := boundedWholeNumber(raw, 1, int64(max))
+	if !ok {
+		return 0, key + " out of range"
+	}
+	return int(value), ""
+}
+
+// executeDbTool dispatches the four db.* tools through the chokepoint.
+func executeDbTool(ctx context.Context, name string, input map[string]any, deps *IntegrationDeps) map[string]any {
+	start := time.Now()
+	latency := func() int { return int(time.Since(start).Milliseconds()) }
+	credential, _ := input["credential"].(string)
+	if credential == "" {
+		return envelopeError(name+" requires credential", latency())
+	}
+	record := func(ok bool, errMessage string) {
+		if deps != nil && deps.Record != nil {
+			deps.Record(name, credential, ok, 0, errMessage, latency())
+		}
+	}
+	answerError := func(message string) map[string]any {
+		record(false, message)
+		return envelopeError(message, latency())
+	}
+	if deps == nil || deps.Gate == nil {
+		return envelopeError("integration tools require run context", latency())
+	}
+
+	maxRowsKey := "maxRows"
+	if name == "db.query.transaction" {
+		maxRowsKey = "maxRowsPerStatement"
+	}
+	maxRows, boundError := dbBoundedInt(input, maxRowsKey, dbMaxRowsDefault, dbMaxRowsLimit)
+	if boundError != "" {
+		return answerError(boundError)
+	}
+	timeoutMs, boundError := dbBoundedInt(input, "timeoutMs", dbTimeoutMsDefault, dbTimeoutMsMax)
+	if boundError != "" {
+		return answerError(boundError)
+	}
+
+	// Validate BEFORE the gate — bad SQL must not consume rate budget.
+	var statements []dbStatement
+	switch name {
+	case "db.schema.describe":
+		if schema, present := input["schema"].(string); present && !dbSafeIdentifier.MatchString(schema) {
+			return answerError("schema must be a simple Postgres identifier")
+		}
+		if rawTables, present := input["tables"]; present {
+			tables, ok := arrayItems(rawTables)
+			if !ok {
+				return answerError("tables must be an array")
+			}
+			if len(tables) > 50 {
+				return answerError("tables allows at most 50 names")
+			}
+			for _, rawTable := range tables {
+				table, ok := rawTable.(string)
+				if !ok || len(table) > dbMaxIdentifierLength || !dbSafeIdentifier.MatchString(table) {
+					return answerError("table names must be simple Postgres identifiers")
+				}
+			}
+		}
+	case "db.query.read", "db.query.write":
+		sql, _ := input["sql"].(string)
+		params := []any(nil)
+		if rawParams, present := input["params"]; present {
+			params, _ = arrayItems(rawParams)
+		}
+		if len(params) > 100 {
+			return answerError("params allows at most 100 values")
+		}
+		kind := "read"
+		if name == "db.query.write" {
+			kind = "write"
+		}
+		if message := ValidateDbSQL(sql, len(params), kind); message != "" {
+			return answerError(message)
+		}
+		statements = []dbStatement{{sql: strings.TrimSpace(sql), params: params}}
+	case "db.query.transaction":
+		rawStatements, ok := arrayItems(input["statements"])
+		if !ok || len(rawStatements) == 0 || len(rawStatements) > dbMaxTransactionStmts {
+			return answerError(fmt.Sprintf("statements must list 1..%d entries", dbMaxTransactionStmts))
+		}
+		for _, rawStatement := range rawStatements {
+			entry, ok := rawStatement.(map[string]any)
+			if !ok {
+				return answerError("statements entries must be objects")
+			}
+			sql, _ := entry["sql"].(string)
+			params := []any(nil)
+			if rawParams, present := entry["params"]; present {
+				params, _ = arrayItems(rawParams)
+			}
+			if len(params) > 100 {
+				return answerError("params allows at most 100 values")
+			}
+			if message := ValidateDbSQL(sql, len(params), "any"); message != "" {
+				return answerError(message)
+			}
+			statements = append(statements, dbStatement{sql: strings.TrimSpace(sql), params: params})
+		}
+	}
+
+	rateLimit := dbDefaultRateLimitPerMin
+	if deps.RateLimitPerMin != nil {
+		rateLimit = deps.RateLimitPerMin("db", dbDefaultRateLimitPerMin)
+	}
+	dsn, gateError := deps.Gate(ctx, name, "postgres", credential, rateLimit)
+	if gateError != "" {
+		return answerError(gateError)
+	}
+	orgID := ""
+	if deps.OrgID != nil {
+		orgID = deps.OrgID()
+	}
+	// From here on every error may quote the resolved DSN verbatim.
+	safeErr := func(err error) string { return safeDbError(err, dsn) }
+	pool, err := getDbPool(ctx, orgID, credential, dsn)
+	if err != nil {
+		return answerError(safeErr(err))
+	}
+
+	txOptions := pgx.TxOptions{}
+	if name == "db.schema.describe" || name == "db.query.read" {
+		txOptions.AccessMode = pgx.ReadOnly
+	}
+	tx, err := pool.BeginTx(ctx, txOptions)
+	if err != nil {
+		return answerError(safeErr(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, fmt.Sprintf("set local statement_timeout = %d", timeoutMs)); err != nil {
+		return answerError(safeErr(err))
+	}
+
+	switch name {
+	case "db.schema.describe":
+		schema, _ := input["schema"].(string)
+		rawTables := []any(nil)
+		if value, present := input["tables"]; present {
+			rawTables, _ = arrayItems(value)
+		}
+		sql, params := buildSchemaDescribeQuery(schema, rawTables)
+		rows, err := tx.Query(ctx, sql, params...)
+		if err != nil {
+			return answerError(safeErr(err))
+		}
+		collected, _, err := collectDbRows(rows, dbSchemaDescribeRowLimit+1)
+		if err != nil {
+			return answerError(safeErr(err))
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return answerError(safeErr(err))
+		}
+		truncated := len(collected) > dbSchemaDescribeRowLimit
+		if truncated {
+			collected = collected[:dbSchemaDescribeRowLimit]
+		}
+		record(true, "")
+		return map[string]any{"ok": true, "tables": shapeSchemaRows(collected), "truncated": truncated, "latencyMs": latency()}
+
+	case "db.query.read":
+		statement := statements[0]
+		wrapped := fmt.Sprintf("select * from (%s) as janusly_db_query limit %d", statement.sql, maxRows+1)
+		rows, err := tx.Query(ctx, wrapped, statement.params...)
+		if err != nil {
+			return answerError(safeErr(err))
+		}
+		collected, truncated, err := collectDbRows(rows, maxRows)
+		if err != nil {
+			return answerError(safeErr(err))
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return answerError(safeErr(err))
+		}
+		record(true, "")
+		return map[string]any{"ok": true, "rows": collected, "rowCount": len(collected), "truncated": truncated, "latencyMs": latency()}
+
+	case "db.query.write":
+		statement := statements[0]
+		rows, err := tx.Query(ctx, statement.sql, statement.params...)
+		if err != nil {
+			return answerError(safeErr(err))
+		}
+		collected, truncated, err := collectDbRows(rows, maxRows)
+		if err != nil {
+			return answerError(safeErr(err))
+		}
+		rowCount := len(collected)
+		commandTag := rows.CommandTag()
+		if commandTag.RowsAffected() > 0 && rowCount == 0 {
+			rowCount = int(commandTag.RowsAffected())
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return answerError(safeErr(err))
+		}
+		record(true, "")
+		return map[string]any{"ok": true, "rows": collected, "rowCount": rowCount, "truncated": truncated, "latencyMs": latency()}
+
+	default: // db.query.transaction
+		results := make([]any, 0, len(statements))
+		for _, statement := range statements {
+			sql := statement.sql
+			if FirstSQLVerb(sql) == "select" {
+				sql = fmt.Sprintf("select * from (%s) as janusly_db_query limit %d", sql, maxRows+1)
+			}
+			rows, err := tx.Query(ctx, sql, statement.params...)
+			if err != nil {
+				return answerError(safeErr(err))
+			}
+			collected, truncated, err := collectDbRows(rows, maxRows)
+			if err != nil {
+				return answerError(safeErr(err))
+			}
+			rowCount := len(collected)
+			if tag := rows.CommandTag(); tag.RowsAffected() > 0 && rowCount == 0 {
+				rowCount = int(tag.RowsAffected())
+			}
+			results = append(results, map[string]any{"rows": collected, "rowCount": rowCount, "truncated": truncated})
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return answerError(safeErr(err))
+		}
+		record(true, "")
+		return map[string]any{"ok": true, "results": results, "latencyMs": latency()}
+	}
+}
+
+func buildSchemaDescribeQuery(schema string, rawTables []any) (string, []any) {
+	params := []any{}
+	clauses := []string{"table_schema not in ('pg_catalog', 'information_schema')"}
+	if schema != "" {
+		params = append(params, schema)
+		clauses = append(clauses, fmt.Sprintf("table_schema = $%d", len(params)))
+	}
+	if len(rawTables) > 0 {
+		tables := make([]string, 0, len(rawTables))
+		for _, rawTable := range rawTables {
+			if table, ok := rawTable.(string); ok {
+				tables = append(tables, table)
+			}
+		}
+		params = append(params, tables)
+		clauses = append(clauses, fmt.Sprintf("table_name = any($%d::text[])", len(params)))
+	}
+	sql := fmt.Sprintf(`select table_schema, table_name, column_name, data_type, is_nullable, ordinal_position
+from information_schema.columns
+where %s
+order by table_schema, table_name, ordinal_position
+limit %d`, strings.Join(clauses, " and "), dbSchemaDescribeRowLimit+1)
+	return sql, params
+}
+
+func shapeSchemaRows(rows []any) []any {
+	type tableShape struct {
+		schema  string
+		name    string
+		columns []any
+	}
+	order := []string{}
+	byTable := map[string]*tableShape{}
+	for _, rawRow := range rows {
+		row, ok := rawRow.(map[string]any)
+		if !ok {
+			continue
+		}
+		schema := fmt.Sprint(row["table_schema"])
+		name := fmt.Sprint(row["table_name"])
+		key := schema + "\x00" + name
+		table, present := byTable[key]
+		if !present {
+			table = &tableShape{schema: schema, name: name}
+			byTable[key] = table
+			order = append(order, key)
+		}
+		ordinal := 0.0
+		if value, ok := row["ordinal_position"].(float64); ok {
+			ordinal = value
+		} else if value, ok := row["ordinal_position"].(int32); ok {
+			ordinal = float64(value)
+		}
+		table.columns = append(table.columns, map[string]any{
+			"name":            fmt.Sprint(row["column_name"]),
+			"type":            fmt.Sprint(row["data_type"]),
+			"nullable":        row["is_nullable"] == "YES",
+			"ordinalPosition": ordinal,
+		})
+	}
+	out := make([]any, 0, len(order))
+	for _, key := range order {
+		out = append(out, map[string]any{
+			"schema": byTable[key].schema, "name": byTable[key].name, "columns": byTable[key].columns,
+		})
+	}
+	return out
+}

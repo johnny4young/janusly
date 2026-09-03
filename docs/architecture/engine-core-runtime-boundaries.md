@@ -1,127 +1,16 @@
-# Engine core runtime boundaries
+# Runtime boundaries
 
-## Goal
+The executable in `cmd/api` composes configuration, provenance, migrations,
+PostgreSQL pools, HTTP handlers, workflow execution, maintenance loops, metrics,
+and graceful shutdown.
 
-Keep workflow orchestration portable and testable by separating pure runtime
-semantics from infrastructure adapters. BullMQ and Postgres are the production
-adapters, but `WorkflowRuntime` owns the lifecycle rules.
+- `internal/domain`: pure workflow validation and decision logic.
+- `internal/engine`: durable workflow and recovery lifecycle.
+- `internal/executors`: task effects and tool dispatch.
+- `internal/store`: SQLC persistence boundary.
+- `internal/httpapi`: transport, authz, envelopes, and streaming.
+- `internal/boot`: pools, logging, supervision, and lifecycle wiring.
 
-## Current shape
-
-```txt
-packages/engine/src/
-  core/
-    runtime.ts          # WorkflowRuntime orchestration
-    types.ts            # adapter/runtime contracts
-    events.ts           # event-type catalogue + builder
-    retry-policy.ts     # pure retry classifier/delay logic
-    timeout.ts          # per-node timeout primitive
-  adapters/
-    postgres-execution-store.ts
-    bullmq-queue-adapter.ts
-    dead-letter-queue.ts
-    replay-lab.ts
-    sandbox-run.ts
-    sample-failure.ts
-  worker.ts             # BullMQ process wiring
-  start-run.ts          # transactional run bootstrap
-  resume-run.ts         # waiting-node resume path
-```
-
-`worker.ts`, `resume-run.ts`, `subworkflow.ts`, replay-lab helpers, and
-sandbox-run helpers all construct or call `WorkflowRuntime` rather than
-duplicating graph scheduling rules.
-
-## Adapter contracts
-
-`ExecutionStore` is the persistence boundary. The production implementation is
-`PostgresExecutionStore`, which wraps the existing run/node/event persistence
-helpers.
-
-`QueueAdapter` is the queue boundary. The production implementation is
-`BullMQQueueAdapter`, which composes the DLQ adapter. Failed-beyond-retry jobs
-must keep flowing through this adapter so dead-letter insertion stays part of
-the queue contract.
-
-`NodeExecutorRegistry` is the node-execution boundary. The registry delegates
-to concrete node executors in `node-registry.ts`; runtime core does not import
-executor-specific config schemas.
-
-## Runtime lifecycle
-
-`WorkflowRuntime.executeQueuedNode(input)` owns one queued node:
-
-```txt
-queued -> running -> succeeded -> enqueueReadyNodes
-queued -> running -> waiting
-queued -> running -> failed -> retry or DLQ
-queued -> skipped when run is already cancelled/failed
-```
-
-Important guards:
-
-- Pre-execution run-status check prevents jobs from executing after a run is
-  already `cancelled` or `failed`.
-- Atomic `queued -> running` claim prevents a stale queued job from executing
-  after another worker or cancellation path advanced the row.
-- Post-success cancellation check prevents downstream enqueue after an operator
-  cancels while a node body is running.
-- Retry policy is pure and explicit: no policy means no retry.
-
-`WorkflowRuntime.enqueueReadyNodes(input)` owns graph readiness:
-
-```txt
-pending + dependencies terminal + edge condition satisfied -> queued
-pending + dependencies terminal + no satisfied edge -> skipped
-```
-
-`parallel_fork` / `join` fan-in behavior is handled here, so callers do not
-need custom scheduling branches for parallel subgraphs.
-
-## Status contract
-
-Run and node statuses are exported from `packages/shared/src/status.ts` and
-re-exported by `core/types.ts` so API, engine, and web read the same values.
-Changing a status is a cross-layer migration: database rows, engine runtime,
-API docs, and web comparisons must change together.
-
-Current run statuses:
-
-```txt
-created, running, waiting, succeeded, failed, cancelled, timed_out
-```
-
-Current node statuses:
-
-```txt
-pending, queued, running, waiting, succeeded, failed, skipped, cancelled
-```
-
-## Run start and resume boundaries
-
-`startRun` keeps the run row, all initial node rows, and the `run.started`
-event in one transaction. After that transaction commits, it queues start
-nodes. Do not split the transactional bootstrap back into per-node writes.
-
-`resumeRun` is the only path that completes waiting `approval`, `webhook`, and
-`human_form` nodes. `human_form` resumes require an engine-signed token and
-schema validation. New tokens bind the org/run/node/purpose tuple and sign both
-`issuedAt` and `expiresAt`; `runs.humanFormResumeTtlSeconds` controls only newly
-issued links in the 300..604800-second range, while legacy tokens without an
-explicit expiry keep the original seven-day boundary. `webhook` resumes capture
-the inbound payload as node output; `approval` preserves the historical
-empty-output behavior.
-
-## Remaining portability work
-
-The core runtime boundary exists today. Remaining improvements are narrower:
-
-- add a reusable in-memory adapter package for integration tests instead of
-  per-test mocks;
-- keep moving executor-specific validation into typed node config parsers;
-- preserve compatibility exports while callers finish moving to the runtime
-  boundary;
-- avoid adding new infrastructure calls inside `core/*`.
-
-Non-goals remain unchanged: do not replace BullMQ, Drizzle/Postgres, or the
-public API contract as part of runtime-boundary maintenance.
+The API and execution engine use separate PostgreSQL pools. Background loops are
+supervised and stopped before pool shutdown. A task effect may not bypass the
+executor safeguards or persist through HTTP route code directly.

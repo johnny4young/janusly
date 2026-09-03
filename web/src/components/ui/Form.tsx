@@ -1,0 +1,182 @@
+import {
+  forwardRef,
+  useId,
+  type AriaAttributes,
+  type DetailsHTMLAttributes,
+  type InputHTMLAttributes,
+  type LabelHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from 'react'
+
+function mergeControlClassName(className?: string) {
+  return ['ui-control', className].filter(Boolean).join(' ')
+}
+
+/** Standalone semantic controls for compact filters and inline editors. Use
+ * FormField around them whenever a visible label, hint, or error is present. */
+export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function TextInput({ className, ...props }, ref) {
+    return <input {...props} ref={ref} className={mergeControlClassName(className)} data-ui-control />
+  },
+)
+
+export const SelectControl = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
+  function SelectControl({ className, ...props }, ref) {
+    return <select {...props} ref={ref} className={mergeControlClassName(className)} data-ui-control />
+  },
+)
+
+export const TextAreaControl = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
+  function TextAreaControl({ className, ...props }, ref) {
+    return <textarea {...props} ref={ref} className={mergeControlClassName(className)} data-ui-control />
+  },
+)
+
+export const FieldLabel = forwardRef<HTMLLabelElement, LabelHTMLAttributes<HTMLLabelElement>>(
+  function FieldLabel({ children, className, ...props }, ref) {
+    return (
+      <label {...props} ref={ref} className={['ui-field__label', className].filter(Boolean).join(' ')}>
+        <span>{children}</span>
+      </label>
+    )
+  },
+)
+
+export type FormControlProps = {
+  id: string
+  className?: string
+  'data-ui-control': true
+  'aria-describedby'?: string
+  'aria-errormessage'?: string
+  'aria-invalid'?: AriaAttributes['aria-invalid']
+}
+
+export function FormField({
+  children,
+  className,
+  controlClassName,
+  error,
+  hint,
+  id,
+  label,
+  required = false,
+}: {
+  children: (controlProps: FormControlProps) => ReactNode
+  className?: string
+  controlClassName?: string
+  error?: ReactNode
+  hint?: ReactNode
+  id?: string
+  label: ReactNode
+  required?: boolean
+}) {
+  const generatedId = useId()
+  const controlId = id ?? `ui-field-${generatedId}`
+  const hintId = hint ? `${controlId}-hint` : undefined
+  const errorId = error ? `${controlId}-error` : undefined
+  const describedBy = [hintId, errorId].filter(Boolean).join(' ') || undefined
+
+  return (
+    <div className={['ui-field', className].filter(Boolean).join(' ')}>
+      <label className="ui-field__label" htmlFor={controlId}>
+        <span>{label}</span>
+        {required ? <span className="ui-field__required" aria-hidden="true" /> : null}
+      </label>
+      {children({
+        id: controlId,
+        className: mergeControlClassName(controlClassName),
+        'data-ui-control': true,
+        'aria-describedby': describedBy,
+        'aria-errormessage': errorId,
+        'aria-invalid': Boolean(error),
+      })}
+      {hint ? <div id={hintId} className="ui-field__hint">{hint}</div> : null}
+      {error ? <div id={errorId} className="ui-field__error" role="alert">{error}</div> : null}
+    </div>
+  )
+}
+
+export function FormSection({
+  children,
+  className,
+  description,
+  disabled,
+  title,
+}: {
+  children: ReactNode
+  className?: string
+  description?: ReactNode
+  disabled?: boolean
+  title: ReactNode
+}) {
+  return (
+    <fieldset className={['ui-form-section', className].filter(Boolean).join(' ')} disabled={disabled}>
+      <legend className="ui-form-section__legend">
+        <span className="ui-form-section__title">{title}</span>
+        {description ? <span className="ui-form-section__description">{description}</span> : null}
+      </legend>
+      <div className="ui-form-section__body">{children}</div>
+    </fieldset>
+  )
+}
+
+export function FormActions({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return <div className={['ui-form-actions', className].filter(Boolean).join(' ')}>{children}</div>
+}
+
+export function FieldStack({
+  children,
+  className,
+  disabled,
+  labelledBy,
+}: {
+  children: ReactNode
+  className?: string
+  disabled?: boolean
+  labelledBy?: string
+}) {
+  return (
+    <fieldset
+      className={['ui-field-stack', className].filter(Boolean).join(' ')}
+      disabled={disabled}
+      aria-labelledby={labelledBy}
+    >
+      {children}
+    </fieldset>
+  )
+}
+
+export function FormGrid({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return <div className={['ui-form-grid', className].filter(Boolean).join(' ')}>{children}</div>
+}
+
+export function FormDisclosure({
+  children,
+  className,
+  summary,
+  ...detailsProps
+}: Omit<DetailsHTMLAttributes<HTMLDetailsElement>, 'children'> & {
+  children: ReactNode
+  summary: ReactNode
+}) {
+  return (
+    <details {...detailsProps} className={['ui-form-disclosure', className].filter(Boolean).join(' ')}>
+      <summary className="ui-form-disclosure__summary">{summary}</summary>
+      <div className="ui-form-disclosure__body">{children}</div>
+    </details>
+  )
+}

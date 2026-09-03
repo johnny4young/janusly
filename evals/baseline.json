@@ -1,7 +1,0 @@
-{
-  "aiModeRate": 1,
-  "shapePassRate": 0.92,
-  "tolerance": 0.1,
-  "note": "Conservative seed floors for the AI generation golden suite. Refresh on a keyed local run via `pnpm evals:baseline`. aiModeRate = fraction of requiresMode:ai cases returning mode:ai; shapePassRate = fraction meeting node-shape expectations; tolerance = allowed drop below each floor before it counts as a regression.",
-  "updatedAt": "2026-07-25T22:17:19.479Z"
-}

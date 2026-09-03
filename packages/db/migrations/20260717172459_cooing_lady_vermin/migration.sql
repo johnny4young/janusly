@@ -1,1 +1,0 @@
-CREATE INDEX IF NOT EXISTS "trigger_events_org_workflow_status_idx" ON "trigger_events" ("org_id","workflow_id","status","created_at");

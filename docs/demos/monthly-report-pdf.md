@@ -1,6 +1,6 @@
 # Demo: Monthly metrics report with PDF + email
 
-**Template:** [`monthly-report-pdf`](../../apps/api/src/templates.ts)
+**Template:** `monthly-report-pdf` in `internal/httpapi/assets/templates.json`
 **Audience:** Enterprise ops, finance ops, business analytics buyers
 **Time:** 3-5 minutes
 **Story:** "Every month, the operations team manually pulls metrics, summarizes them, exports a PDF, and emails it to leadership. Janusly does the whole loop on cron, with the AI doing the narrative summary."
@@ -33,7 +33,7 @@
 - **Audit log** captures `workflow.saved`, `workflow.started`, `tool.executed` (twice — pdf + email).
 - **Usage events** captures `llm.completion`, `pdf.generated` (with provider + byte count for billing), and `email.sent` (with provider + delivery status).
 - **Budget dashboard** rolls up the AI cost AND the PDF byte cost AND the email count — operators see the monthly run's cost trail in one place.
-- **Schedule registry** — the cron is registered in BullMQ via `upsertJobScheduler`; the next firing time is visible in the Workflows panel.
+- **Schedule registry** — the schedule is registered in PostgreSQL by the Janusly runtime; the next firing time is visible in the Workflows panel.
 
 ## Human-in-the-loop story
 

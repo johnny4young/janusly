@@ -1,0 +1,43 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { expect, test } from '@playwright/test'
+
+test('Settings auth policy panel validates and saves org settings', async ({ page }) => {
+  const orgId = `auth-policy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+  }, { activeOrg: orgId })
+  await page.goto('/')
+  await openWorkspaceSection(page, 'Settings', 'Workspace')
+  await page.getByTestId('operations-rail-tab-access').click()
+
+  await expect(page.getByRole('heading', { name: 'Authentication policies', exact: true })).toBeVisible()
+
+  const domainInput = page.getByRole('textbox', { name: /Allowed email domains/i })
+  const mfaToggle = page.getByRole('checkbox', { name: /Require multi-factor authentication/i })
+  const ttlInput = page.getByRole('spinbutton', { name: /Session TTL/i })
+  const resumeTtlInput = page.getByRole('spinbutton', { name: /Human-form link TTL/i })
+
+  await expect(domainInput).toBeVisible()
+  await expect(ttlInput).toHaveValue('28800')
+  await expect(resumeTtlInput).toHaveValue('604800')
+
+  await ttlInput.fill('60')
+  await expect(page.getByRole('alert')).toContainText('between 300 and 86400')
+  await expect(page.getByRole('button', { name: /Save policies/i })).toBeDisabled()
+
+  await domainInput.fill('acme.com, partner.com')
+  await mfaToggle.check()
+  await ttlInput.fill('1800')
+  await resumeTtlInput.fill('299')
+  await expect(page.getByRole('alert')).toContainText('between 300 and 604800')
+  await expect(page.getByRole('button', { name: /Save policies/i })).toBeDisabled()
+
+  await resumeTtlInput.fill('900')
+  await page.getByRole('button', { name: /Save policies/i }).click()
+
+  await expect(page.getByRole('button', { name: 'Authentication policies saved' })).toBeVisible()
+  await expect(domainInput).toHaveValue('acme.com, partner.com')
+  await expect(mfaToggle).toBeChecked()
+  await expect(ttlInput).toHaveValue('1800')
+  await expect(resumeTtlInput).toHaveValue('900')
+})

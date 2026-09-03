@@ -1,0 +1,194 @@
+{
+  "id": "incident-triage",
+  "name": "Incident triage",
+  "description": "When an alert fires, classify its severity with AI, open a tracking issue on GitHub, and page the on-call channel on Slack.",
+  "category": "incident_triage",
+  "version": "1.2.0",
+  "requiredCredentials": [
+    {
+      "name": "ops_github",
+      "kind": "github_token",
+      "purpose": "Opens the incident tracking issue in your repo"
+    },
+    {
+      "name": "ops_slack",
+      "kind": "slack_webhook",
+      "purpose": "Pages your on-call channel"
+    }
+  ],
+  "requiredOrgConfigs": [],
+  "workflowJson": {
+    "dslVersion": "1.0",
+    "templatePolicy": "strict",
+    "id": "incident-triage",
+    "name": "Incident triage",
+    "inputs": {
+      "type": "object",
+      "required": [
+        "event"
+      ],
+      "properties": {
+        "event": {
+          "type": "object",
+          "required": [
+            "eventId",
+            "payload"
+          ],
+          "properties": {
+            "eventId": {
+              "type": "string",
+              "description": "Stable delivery id from the monitoring system"
+            },
+            "payload": {
+              "type": "object",
+              "required": [
+                "alertName",
+                "summary",
+                "service"
+              ],
+              "properties": {
+                "alertName": {
+                  "type": "string",
+                  "description": "Short alert name from your monitoring system"
+                },
+                "summary": {
+                  "type": "string",
+                  "description": "Alert body or description"
+                },
+                "service": {
+                  "type": "string",
+                  "description": "Affected service name"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "webhook_received",
+        "config": {
+          "endpointKey": "incident-triage"
+        }
+      },
+      {
+        "id": "classify",
+        "type": "ai",
+        "config": {
+          "prompt": "Classify this alert and return JSON with exactly two fields: severity must be sev1, sev2, or sev3; rationale must be one concise sentence. Alert: {{context.trigger.output.event.payload.alertName}} on {{context.trigger.output.event.payload.service}} — {{context.trigger.output.event.payload.summary}}",
+          "outputSchema": {
+            "type": "object",
+            "required": [
+              "severity",
+              "rationale"
+            ],
+            "properties": {
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "sev1",
+                  "sev2",
+                  "sev3"
+                ]
+              },
+              "rationale": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "open_issue",
+        "type": "tool",
+        "config": {
+          "tool": "github.create_issue",
+          "resultPolicy": "require_ok",
+          "input": {
+            "credential": "ops_github",
+            "owner": "your-org",
+            "repo": "incidents",
+            "title": "[incident] {{context.trigger.output.event.payload.alertName}} on {{context.trigger.output.event.payload.service}}",
+            "body": "Severity: {{context.classify.output.data.severity}}\n\n{{context.classify.output.data.rationale}}\n\n{{context.trigger.output.event.payload.summary}}",
+            "labels": [
+              "incident",
+              "auto-triaged"
+            ]
+          }
+        }
+      },
+      {
+        "id": "page_oncall",
+        "type": "tool",
+        "config": {
+          "tool": "slack.post",
+          "resultPolicy": "require_ok",
+          "input": {
+            "credential": "ops_slack",
+            "text": ":rotating_light: {{context.trigger.output.event.payload.alertName}} on {{context.trigger.output.event.payload.service}} — severity {{context.classify.output.data.severity}}. Issue: {{context.open_issue.output.result.url}}"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "trigger",
+        "to": "classify"
+      },
+      {
+        "from": "classify",
+        "to": "open_issue",
+        "condition": "context.classify.output.valid === true"
+      },
+      {
+        "from": "open_issue",
+        "to": "page_oncall",
+        "condition": "context.classify.output.valid === true"
+      }
+    ],
+    "outputs": {
+      "severity": "{{context.classify.output.data.severity}}",
+      "rationale": "{{context.classify.output.data.rationale}}",
+      "issueUrl": "{{context.open_issue.output.result.url}}",
+      "pageDelivered": "{{context.page_oncall.output.result.ok}}"
+    }
+  },
+  "samplePayloads": [
+    {
+      "id": "default",
+      "label": "Database connection pool exhausted",
+      "input": {
+        "event": {
+          "endpointKey": "incident-triage",
+          "eventId": "sample-alert-db-pool",
+          "eventType": "monitoring.alert_fired",
+          "payload": {
+            "alertName": "DBConnectionPoolExhausted",
+            "summary": "Primary Postgres pool at 100% for 5m; new connections rejected.",
+            "service": "checkout-api"
+          }
+        }
+      }
+    }
+  ],
+  "failureFixtures": [
+    {
+      "id": "github_secret_unbound",
+      "label": "GitHub credential unavailable",
+      "description": "The issue-creation node crosses the real worker and terminal-failure boundary. The retry policy classifies a controlled missing-secret probe as non-retryable before any GitHub request can start.",
+      "failureMode": "credential_unavailable",
+      "recoveryPath": "runtime_failure",
+      "failedNodeId": "open_issue"
+    },
+    {
+      "id": "worker_interrupted_during_page",
+      "label": "Worker interrupted during on-call page",
+      "description": "A controlled stale running claim crosses the configured age threshold and is terminated by the real stalled-node reaper.",
+      "failureMode": "worker_stalled",
+      "recoveryPath": "stalled_node_reaper",
+      "failedNodeId": "page_oncall"
+    }
+  ]
+}

@@ -2,7 +2,7 @@ name: janusly-observability
 
 services:
   alloy:
-    image: grafana/alloy:v1.16.1
+    image: grafana/alloy:v1.16.1@sha256:51aeb9d829239345070619dad3edd6873186f913c84f45b365b74574fcb38ec0
     command:
       - run
       - --server.http.listen-addr=0.0.0.0:12345
@@ -21,8 +21,23 @@ services:
       - tempo
     restart: unless-stopped
 
+  alertmanager:
+    image: prom/alertmanager:v0.33.1@sha256:9e082985f56f4c8c9f724e18f2288c6708f472e56a5286b8863d080434ea065d
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ${ALERTMANAGER_CONFIG:-./alertmanager/alertmanager.yml}:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - 127.0.0.1:9093:9093
+    restart: unless-stopped
+
   prometheus:
-    image: prom/prometheus:v3.11.0
+    image: prom/prometheus:v3.11.0@sha256:dda13e28bf95a5e5ca5b8ed56852006094c1c8e8871d9c9dbeed30aa6e55271f
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -34,10 +49,12 @@ services:
       - prometheus_data:/prometheus
     ports:
       - 127.0.0.1:9090:9090
+    depends_on:
+      - alertmanager
     restart: unless-stopped
 
   tempo:
-    image: grafana/tempo:2.10.5
+    image: grafana/tempo:2.10.5@sha256:ee21727732c7a7199cb71c3eee9153bbf23f9b0b87619f0555a0cf21a67f1a33
     command:
       - -config.file=/etc/tempo/tempo.yml
     volumes:
@@ -48,7 +65,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:13.1.0
+    image: grafana/grafana:13.1.0@sha256:121a7a9ece6dc10b969f1f96eed64b4f07dfac0d0b8abc070f7cb83bbde86f63
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-janusly-local}
@@ -72,6 +89,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  alertmanager_data:
   alloy_data:
   grafana_data:
   prometheus_data:

@@ -1,0 +1,114 @@
+// The `http.request` registered tool (reference the source contract
+// tools/http.ts): one guarded outbound HTTP call for tool nodes and the
+// agent planner. Invariant (AGENTS.md "HTTP/SSRF"): it MUST go through
+// FetchHTTPTarget — the pinned dialer prevents DNS rebinding; a direct
+// client would bypass SSRF protection for untrusted URLs. Write-side at
+// registration (validation/dry-run skip); the runtime dry-run classifier
+// still refines safe GET/HEAD reads.
+package executors
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"maps"
+
+	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/httpcontract"
+	"github.com/johnny4young/janusly/internal/tools"
+)
+
+func httpRequestDefinition() tools.Definition {
+	return tools.Definition{
+		Name:        "http.request",
+		Description: "Make an HTTP request to an external API.",
+		Required:    []string{"url"},
+		Optional:    []string{"method", "headers", "body", "timeoutMs", "maxResponseBytes", "maxRedirects"},
+		Fields: []tools.Field{
+			{Name: "url", Type: "string", Required: true},
+			{Name: "method", Type: "string"},
+			{Name: "headers", Type: "object"},
+			{Name: "body", Type: "unknown"},
+			{Name: "timeoutMs", Type: "number"},
+			{Name: "maxResponseBytes", Type: "number"},
+			{Name: "maxRedirects", Type: "number"},
+		},
+		InputExample: map[string]any{"url": "https://example.com", "method": "GET"},
+		Validate:     validateHTTPRequestInput,
+		WriteSide:    true,
+		Execute:      executeHTTPRequestTool,
+	}
+}
+
+func validateHTTPRequestInput(input map[string]any, options tools.InputValidationOptions) error {
+	config := maps.Clone(input)
+	if _, present := config["url"]; !present {
+		// Required-field presence is owned by the registry. A partial proposal
+		// may omit it, but any supplied method/header/bound still needs semantic
+		// validation instead of hiding behind that unresolved binding.
+		config["url"] = "https://example.invalid"
+	}
+	_, err := httpcontract.ResolveNodeConfig(config, options.AllowWholeTemplates)
+	if err != nil {
+		return err
+	}
+	if raw, present := input["body"]; present {
+		if text, ok := raw.(string); ok && options.AllowWholeTemplates {
+			if _, whole := grammar.WholeTemplateReference(text); whole {
+				return nil
+			}
+		}
+		encoded, marshalErr := json.Marshal(raw)
+		if marshalErr != nil {
+			return fmt.Errorf("http.body must be valid JSON")
+		}
+		if len(encoded) > httpcontract.MaxRequestBodyBytes {
+			return fmt.Errorf("http.body exceeds %d bytes", httpcontract.MaxRequestBodyBytes)
+		}
+	}
+	return nil
+}
+
+func executeHTTPRequestTool(ctx context.Context, input map[string]any) (map[string]any, error) {
+	rawURL, _ := input["url"].(string)
+	if rawURL == "" {
+		return nil, fmt.Errorf("Invalid tool input for http.request: url is required") //nolint:staticcheck // tool error shape
+	}
+	method, _ := input["method"].(string)
+	headers := map[string]string{}
+	if rawHeaders, ok := input["headers"].(map[string]any); ok {
+		for name, value := range rawHeaders {
+			if text, ok := value.(string); ok {
+				headers[name] = text
+			}
+		}
+	}
+	var body []byte
+	if raw, present := input["body"]; present && raw != nil {
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("Invalid tool input for http.request: body is not serializable") //nolint:staticcheck // tool error shape
+		}
+		body = encoded
+	}
+	intOf := func(field string, maximum int) int {
+		value, _ := httpcontract.WholeNumber(input[field], 0, maximum)
+		return value
+	}
+	_, maxRedirectsSet := input["maxRedirects"]
+	result, err := FetchHTTPTarget(ctx, rawURL, FetchOptions{
+		Method: method, Headers: headers, Body: body,
+		TimeoutMs:        intOf("timeoutMs", httpcontract.MaxTimeoutMS),
+		MaxResponseBytes: intOf("maxResponseBytes", httpcontract.MaxResponseBytes),
+		MaxRedirects:     intOf("maxRedirects", httpcontract.MaxRedirects),
+		MaxRedirectsSet:  maxRedirectsSet,
+	})
+	if err != nil {
+		return nil, err
+	}
+	output := map[string]any{
+		"statusCode": result.StatusCode, "ok": result.Ok, "body": result.Body,
+	}
+	maps.Copy(output, projectHTTPJSON([]byte(result.Body), result.ContentType))
+	return output, nil
+}

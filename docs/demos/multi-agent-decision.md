@@ -1,6 +1,6 @@
 # Demo: Multi-agent decision support
 
-**Template:** [`multi-agent-decision`](../../apps/api/src/templates.ts)
+**Template:** `multi-agent-decision` in `internal/httpapi/assets/templates.json`
 **Audience:** AI builders, agencies, technical AI buyers
 **Time:** 3-5 minutes
 **Story:** "Single-shot prompts produce single-shot opinions. Multi-agent debate produces opinions you can actually defend. Watch three agents — optimist, skeptic, arbiter — disagree productively about a real decision."

@@ -1,0 +1,15 @@
+{
+  "id": "guarded-fetch",
+  "name": "Branch on HTTP success",
+  "nodes": [
+    { "id": "fetch", "type": "http", "config": { "url": "https://api.github.com/repos/anthropics/anthropic-cookbook" } },
+    { "id": "is_ok", "type": "condition", "config": { "expression": "context.fetch.output.statusCode === 200" } },
+    { "id": "happy", "type": "noop", "config": {} },
+    { "id": "rescue", "type": "noop", "config": {} }
+  ],
+  "edges": [
+    { "from": "fetch", "to": "is_ok" },
+    { "from": "is_ok", "to": "happy", "condition": "context.is_ok.output.result === true" },
+    { "from": "is_ok", "to": "rescue", "condition": "context.is_ok.output.result === false" }
+  ]
+}

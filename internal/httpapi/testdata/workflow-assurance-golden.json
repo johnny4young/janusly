@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "1",
+  "cases": [
+    {
+      "id": "single_terminal_intent",
+      "prompt": "Build one local step",
+      "draft": {
+        "dslVersion": "1.0",
+        "id": "single_terminal",
+        "name": "Single terminal",
+        "nodes": [{ "id": "done", "type": "noop", "config": {} }],
+        "edges": []
+      },
+      "want": {
+        "outputs": { "result": "{{context.done.output}}" },
+        "addedOutputs": true,
+        "recoveryVersion": "",
+        "addedRecovery": false,
+        "qualificationFixtures": 0,
+        "effectKinds": {}
+      }
+    },
+    {
+      "id": "parallel_terminal_intent",
+      "prompt": "Run two branches",
+      "draft": {
+        "dslVersion": "1.0",
+        "id": "parallel_terminals",
+        "name": "Parallel terminals",
+        "nodes": [
+          { "id": "start", "type": "noop", "config": {} },
+          { "id": "left", "type": "noop", "config": {} },
+          { "id": "right", "type": "noop", "config": {} }
+        ],
+        "edges": [
+          { "from": "start", "to": "left" },
+          { "from": "start", "to": "right" }
+        ]
+      },
+      "want": {
+        "outputs": {
+          "result_1": "{{context.left.output}}",
+          "result_2": "{{context.right.output}}"
+        },
+        "addedOutputs": true,
+        "recoveryVersion": "",
+        "addedRecovery": false,
+        "qualificationFixtures": 0,
+        "effectKinds": {}
+      }
+    },
+    {
+      "id": "spanish_recovery_effects",
+      "prompt": "Crea un flujo resiliente, recuperable y con aprobación humana",
+      "draft": {
+        "dslVersion": "1.0",
+        "id": "spanish_recovery",
+        "name": "Recuperación",
+        "nodes": [
+          { "id": "approval", "type": "approval", "config": {} },
+          {
+            "id": "notify",
+            "type": "tool",
+            "config": { "tool": "slack.post", "resultPolicy": "require_ok", "input": {} }
+          }
+        ],
+        "edges": [{ "from": "approval", "to": "notify" }]
+      },
+      "want": {
+        "outputs": { "result": "{{context.notify.output}}" },
+        "addedOutputs": true,
+        "recoveryVersion": "1",
+        "addedRecovery": true,
+        "qualificationFixtures": 0,
+        "effectKinds": {
+          "approval": "human_action",
+          "notify": "notification"
+        }
+      }
+    },
+    {
+      "id": "authored_intent_preserved",
+      "prompt": "Keep the business result",
+      "draft": {
+        "dslVersion": "1.0",
+        "id": "authored_intent",
+        "name": "Authored intent",
+        "outputs": { "invoice_status": "{{context.done.output.status}}" },
+        "nodes": [{ "id": "done", "type": "noop", "config": {} }],
+        "edges": []
+      },
+      "want": {
+        "outputs": { "invoice_status": "{{context.done.output.status}}" },
+        "addedOutputs": false,
+        "recoveryVersion": "",
+        "addedRecovery": false,
+        "qualificationFixtures": 0,
+        "effectKinds": {}
+      }
+    },
+    {
+      "id": "qualified_flagship_preserved",
+      "prompt": "Keep this resilient workflow qualified",
+      "packId": "failed-payment-recovery",
+      "want": {
+        "outputs": {
+          "customer": "{{context.trigger.output.event.payload.customer}}",
+          "invoiceId": "{{context.trigger.output.event.payload.invoiceId}}",
+          "chargeRetryOk": "{{context.retry_charge.output.result.ok}}",
+          "teamNotified": "{{context.notify_team.output.result.ok}}"
+        },
+        "addedOutputs": false,
+        "recoveryVersion": "2",
+        "addedRecovery": false,
+        "qualificationFixtures": 2,
+        "effectKinds": {
+          "approval": "human_action",
+          "retry_charge": "financial_mutation",
+          "notify_team": "notification"
+        }
+      }
+    }
+  ]
+}
