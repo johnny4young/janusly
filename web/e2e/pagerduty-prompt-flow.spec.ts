@@ -28,6 +28,7 @@ const scenarios = [
     webhookCredentialLabel: 'Webhook signing credential',
     callbackLabel: 'PagerDuty callback URL',
     signatureCopy: /verifies the signature before persisting anything/i,
+    recompile: 'Use answers and compile again',
     incompletePrompt: 'I am on call 24x7 for one week. When PagerDuty alerts in certain ranges, move it to reviewing for 12 hours.',
     prompt: (apiCredential: string, webhookCredential: string) => (
       `Starting now for one week, when PagerDuty alerts user PLOCALUSER outside working hours 09:00 to 17:00 in America/Bogota, acknowledge it and snooze it for 12 hours. Use API credential ${apiCredential} and webhook credential ${webhookCredential} for operator@example.com.`
@@ -53,6 +54,7 @@ const scenarios = [
     webhookCredentialLabel: 'Credencial para firmar el webhook',
     callbackLabel: 'URL de retorno de PagerDuty',
     signatureCopy: /verifica la firma antes de persistir datos/i,
+    recompile: 'Usar respuestas y volver a compilar',
     incompletePrompt: 'Yo, como usuario, tengo disponibilidad laboral 24x7 por una semana y uso PagerDuty para resolver casos; quiero que las alertas que salten en ciertos rangos de horas pasen automáticamente a revisando por 12 horas.',
     prompt: (apiCredential: string, webhookCredential: string) => (
       `Desde ahora y durante una semana, cuando PagerDuty asigne un incidente al usuario PLOCALUSER fuera de 09:00–17:00 en America/Bogota, muévelo a revisando y aplázalo por 12 horas como operator@example.com. Usa credencial de API ${apiCredential} y credencial del webhook ${webhookCredential}.`
@@ -103,6 +105,9 @@ for (const scenario of scenarios) {
     await expect(incompleteBrief.getByText(scenario.clarificationTitle, { exact: true })).toBeVisible()
     await expect(incompleteBrief.locator('.ai-brief-questions li')).toHaveCount(3)
     await expect(page.getByRole('button', { name: scenario.buildProposal, exact: true })).toBeDisabled()
+    await incompleteBrief.locator('.ai-brief-answer').first().fill('09:00 to 17:00 America/Bogota')
+    await page.getByRole('button', { name: scenario.recompile, exact: true }).click()
+    await expect(page.getByTestId('intent-brief')).toBeVisible()
     if (evidenceDir) {
       await mkdir(evidenceDir, { recursive: true })
       await incompleteBrief.screenshot({
