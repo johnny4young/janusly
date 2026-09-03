@@ -40,7 +40,7 @@ describe('<ReasoningPanel /> (browser smoke)', () => {
               payload: {
                 agent: 'recovery-agent',
                 iteration: 1,
-                planner: 'openai',
+                planner: 'ai',
                 mode: 'ai',
                 scope: 'agent',
                 replacesEventId: 'e-planned',

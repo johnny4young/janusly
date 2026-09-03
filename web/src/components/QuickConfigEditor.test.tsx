@@ -26,6 +26,98 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('<QuickConfigEditor /> governed agent writes', () => {
+  it.each(['agent', 'multi_agent'] as const)('keeps %s writes off by default and preserves sibling config when enabled', (type) => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId={`${type}-step`}
+        type={type}
+        config={{ goal: 'Inspect the incident', marker: 'preserve-me' }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    const toggle = screen.getByRole('checkbox', { name: 'Agent writes' })
+    expect(toggle).not.toBeChecked()
+    expect(screen.getByText(/human approval on all paths/)).toBeVisible()
+    fireEvent.click(toggle)
+
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      goal: 'Inspect the incident',
+      marker: 'preserve-me',
+      allowWriteTools: true,
+    })
+  })
+
+  it('localizes the authority boundary instead of presenting a generic write toggle', () => {
+    initI18n('es')
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="agent-step"
+        type="agent"
+        config={{ allowWriteTools: true }}
+        tools={[]}
+        onUpdate={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('checkbox', { name: 'Escrituras del agente' })).toBeChecked()
+    expect(screen.getByText(/aprobación humana en cada ruta/)).toBeVisible()
+  })
+
+  it('shows each runtime default without persisting an implicit maxSteps value', () => {
+    const onUpdate = vi.fn()
+    const { rerender } = render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="agent-step"
+        type="agent"
+        config={{}}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByRole('spinbutton', { name: 'Max steps' })).toHaveAttribute('placeholder', '3')
+
+    rerender(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="team-step"
+        type="multi_agent"
+        config={{}}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+    expect(screen.getByRole('spinbutton', { name: 'Max steps' })).toHaveAttribute('placeholder', '2')
+    expect(onUpdate).not.toHaveBeenCalled()
+  })
+
+  it('clamps max steps to the runtime contract before updating the draft', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="agent-step"
+        type="agent"
+        config={{ maxSteps: 3 }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    const maxSteps = screen.getByRole('spinbutton', { name: 'Max steps' })
+    fireEvent.change(maxSteps, { target: { value: '51' } })
+    fireEvent.blur(maxSteps)
+    expect(onUpdate).toHaveBeenLastCalledWith({ maxSteps: 50 })
+  })
+})
+
 describe('<QuickConfigEditor /> resilience wiring', () => {
   it.each(['http', 'tool', 'agent', 'mcp_tool'] as const)('mounts resilience controls for %s nodes', (type) => {
     render(
@@ -101,7 +193,7 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
         onUpdate={vi.fn()}
       />,
     )
-    expect(screen.getByText(/Declared JSON responses up to 64 KiB/)).toHaveTextContent('output.jsonParseSkipped')
+    expect(screen.getByText(/JSON responses up to 64 KiB/)).toHaveTextContent('output.jsonParseSkipped')
     expect(screen.getByTestId('http-json-contract-helper')).toBeVisible()
 
     initI18n('es')
@@ -312,7 +404,7 @@ describe('<QuickConfigEditor /> bounded per-item processing', () => {
     expect(screen.getByLabelText('Tool')).toHaveValue('text.uppercase')
     expect(screen.getByLabelText('Concurrency')).toHaveValue(4)
     expect(screen.getByLabelText('Failed items allowed')).toHaveValue(2)
-    expect(screen.getByText(/Processes at most 1,000 items/)).toBeVisible()
+    expect(screen.getByText(/Processes up to 1,000 items/)).toBeVisible()
 
     fireEvent.change(screen.getByLabelText('Failure budget'), { target: { value: 'percentage' } })
     expect(onUpdate).toHaveBeenLastCalledWith({
@@ -749,7 +841,7 @@ describe('<QuickConfigEditor /> PagerDuty workflow trigger', () => {
       'http://localhost:7311/webhooks/pagerduty/pagerduty-off-hours/on_pagerduty',
     )
     expect(screen.getByLabelText('Maximum events per minute')).toHaveValue(120)
-    expect(screen.getByText(/Store the PagerDuty V3 webhook secret/)).toBeVisible()
+    expect(screen.getByText(/Store the PagerDuty V3 secret/)).toBeVisible()
 
     fireEvent.change(screen.getByLabelText('Webhook signing credential'), {
       target: { value: 'pagerduty-signing-prod' },

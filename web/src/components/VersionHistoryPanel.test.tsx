@@ -283,8 +283,8 @@ describe('<VersionHistoryPanel />', () => {
     const aiResponse = {
       mode: 'ai' as const,
       suggestions: [
-        { workflow: improvedFlow, rationale: 'Add retry to handle transient failures.', approachLabel: 'add_retry', confidence: 80 },
-        { workflow: simplifiedFlow, rationale: 'Or simplify by removing the unused parameter.', approachLabel: 'simplify', confidence: 50 },
+        { workflow: improvedFlow, rationale: 'Add retry to handle transient failures.', approachLabel: 'add_retry', confidence: 0.8 },
+        { workflow: simplifiedFlow, rationale: 'Or simplify by removing the unused parameter.', approachLabel: 'simplify', confidence: 0.5 },
       ],
       model: 'claude-haiku-4-5-20251001',
     }
@@ -402,7 +402,7 @@ describe('<VersionHistoryPanel />', () => {
       if (path === '/ai/suggest-improvement') {
         return {
           mode: 'ai',
-          suggestions: [{ workflow: improvedFlow, rationale: 'r', approachLabel: 'add_retry', confidence: 70 }],
+          suggestions: [{ workflow: improvedFlow, rationale: 'r', approachLabel: 'add_retry', confidence: 0.7 }],
         }
       }
       throw new Error(`Unexpected API call: ${path}`)
@@ -470,7 +470,7 @@ describe('<VersionHistoryPanel />', () => {
     await act(async () => {
       resolveAi?.({
         mode: 'ai',
-        suggestions: [{ workflow: improvedFlow, rationale: 'STALE', approachLabel: 'add_retry', confidence: 80 }],
+        suggestions: [{ workflow: improvedFlow, rationale: 'STALE', approachLabel: 'add_retry', confidence: 0.8 }],
       })
     })
 

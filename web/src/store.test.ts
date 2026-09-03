@@ -372,7 +372,7 @@ describe('useWorkflowStore', () => {
     expect(useWorkflowStore.getState().nodes[0].data.config).toEqual({ connectionAlias: '', toolName: '', input: {} })
   })
 
-  it('carries only valid runtime retry controls into the target kind', () => {
+  it('drops the whole retry policy instead of carrying a misleading invalid subset', () => {
     useWorkflowStore.getState().hydrateWorkflow({
       id: 'wf',
       nodes: [{
@@ -399,11 +399,7 @@ describe('useWorkflowStore', () => {
 
     useWorkflowStore.getState().updateSelectedNodeType('ai')
 
-    expect(useWorkflowStore.getState().nodes[0].data.config.retry).toEqual({
-      delayMs: 0,
-      jitter: true,
-      retryOn: ['5xx'],
-    })
+    expect(useWorkflowStore.getState().nodes[0].data.config).not.toHaveProperty('retry')
     expect(useWorkflowStore.getState().nodes[0].data.config).not.toHaveProperty('timeoutMs')
   })
 

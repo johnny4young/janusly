@@ -67,7 +67,7 @@ export const AGENT_REASONING_REASON_MAX_CHARS = 500;
 export type AgentReasoningEventPayload = {
   agent: string;
   iteration: number;
-  planner: "rules" | "openai";
+  planner: "rules" | "ai";
   mode: "rules" | "ai" | "fallback";
   scope: string;
   /** Exact legacy `*.step.planned` event replaced by this safe projection. */

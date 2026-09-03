@@ -129,7 +129,8 @@ describe('Recovery Playbook reuse', () => {
 
     const regression = await screen.findByTestId('recovery-playbook-regression', {}, { timeout: 4000 })
     expect(regression).toHaveTextContent('Playbook retired after regression')
-    expect(regression).toHaveTextContent('retired the playbook before it could be used again')
+    expect(regression).toHaveTextContent('Janusly retired this playbook')
+    expect(regression).toHaveTextContent('only after a successful recovery')
     expect(screen.getByText('timeout still exceeded')).toBeInTheDocument()
   })
 })

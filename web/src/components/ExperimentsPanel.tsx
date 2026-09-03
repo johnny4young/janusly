@@ -13,7 +13,7 @@
  *   other server-data panels refresh through the shared store contract.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { ChartNoAxesCombined, FlaskConical, Play, Plus, RefreshCw } from 'lucide-react'
 
 import { api } from '../api'
@@ -36,13 +36,12 @@ export function ExperimentsPanel(): React.ReactElement {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [maxProviderCalls, setMaxProviderCalls] = useState(DEFAULT_MAX_PROVIDER_CALLS)
   const [selected, setSelected] = useState<Experiment | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
   const [runForm, setRunForm] = useState<RunForm>(INITIAL_RUN_FORM)
   const [datasetName, setDatasetName] = useState('')
   const [datasetDescription, setDatasetDescription] = useState('')
+  const [datasetRetentionDays, setDatasetRetentionDays] = useState('')
   const [creatingDataset, setCreatingDataset] = useState(false)
   const [running, setRunning] = useState(false)
-  const detailRequestId = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -67,34 +66,14 @@ export function ExperimentsPanel(): React.ReactElement {
       setRunForm((current) => current.evalDatasetId || nextDatasets.length === 0
         ? current
         : { ...current, evalDatasetId: nextDatasets[0]!.id })
-      const errors = [experimentsResult, datasetsResult]
-        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-        .map((result) => tApiError(result.reason))
+      setLoadError([experimentsResult, datasetsResult]
+        .map((result) => result.status === 'rejected' ? tApiError(result.reason) : '')
         .filter(Boolean)
-      setLoadError(errors.length > 0 ? errors.join(' · ') : null)
+        .join(' · ') || null)
       setLoading(false)
     })
     return () => { cancelled = true }
   }, [platformVersion])
-
-  async function selectExperiment(experiment: Experiment): Promise<void> {
-    const requestId = detailRequestId.current + 1
-    detailRequestId.current = requestId
-    setSelected(experiment)
-    setDetailLoading(true)
-    try {
-      const response = asRecord(await api(`/experiments/${encodeURIComponent(experiment.id)}`))
-      const detail = response?.experiment as Experiment | undefined
-      if (detail && requestId === detailRequestId.current) {
-        setSelected(detail)
-        setExperiments((current) => updateExperiment(current, detail))
-      }
-    } catch (error) {
-      if (requestId === detailRequestId.current) addToast(tApiError(error), 'error')
-    } finally {
-      if (requestId === detailRequestId.current) setDetailLoading(false)
-    }
-  }
 
   async function createDataset(): Promise<void> {
     const name = datasetName.trim()
@@ -103,7 +82,11 @@ export function ExperimentsPanel(): React.ReactElement {
     try {
       const response = asRecord(await api('/eval/datasets', {
         method: 'POST',
-        body: JSON.stringify({ name, ...(datasetDescription.trim() ? { description: datasetDescription.trim() } : {}) }),
+        body: JSON.stringify({
+          name,
+          ...(datasetDescription.trim() ? { description: datasetDescription.trim() } : {}),
+          ...(datasetRetentionDays ? { retentionDays: Number(datasetRetentionDays) } : {}),
+        }),
       }))
       const dataset = response?.dataset as EvalDataset | undefined
       if (!dataset) throw new Error(t('experiments.toast.datasetError'))
@@ -111,6 +94,7 @@ export function ExperimentsPanel(): React.ReactElement {
       setRunForm((current) => ({ ...current, evalDatasetId: dataset.id }))
       setDatasetName('')
       setDatasetDescription('')
+      setDatasetRetentionDays('')
       addToast(t('experiments.toast.datasetCreated'), 'success')
       bumpPlatformVersion()
     } catch (error) {
@@ -121,7 +105,7 @@ export function ExperimentsPanel(): React.ReactElement {
   }
 
   async function runExperiment(): Promise<void> {
-    if (!runForm.name.trim() || !runForm.controlRef.trim() || !runForm.candidateRef.trim() || !runForm.evalDatasetId) return
+    if (!canRun) return
     setRunning(true)
     try {
       const response = asRecord(await api('/experiments/run', {
@@ -139,7 +123,6 @@ export function ExperimentsPanel(): React.ReactElement {
       const summary = response?.summary
       if (!experiment) throw new Error(t('experiments.toast.runError'))
       const completed = { ...experiment, summary: summary ?? experiment.summary }
-      detailRequestId.current += 1
       setExperiments((current) => updateExperiment(current, completed))
       setSelected(completed)
       addToast(t('experiments.toast.runCompleted'), 'success')
@@ -161,10 +144,7 @@ export function ExperimentsPanel(): React.ReactElement {
     }
   }
 
-  const selectedDataset = useMemo(
-    () => datasets.find((dataset) => dataset.id === runForm.evalDatasetId) ?? null,
-    [datasets, runForm.evalDatasetId],
-  )
+  const selectedDataset = datasets.find((dataset) => dataset.id === runForm.evalDatasetId) ?? null
   const providerCallEstimate = estimateProviderCalls(selectedDataset?.exampleCount ?? 0, runForm.scorerKind)
   const callPlanAllowed = providerCallEstimate > 0 && providerCallEstimate <= maxProviderCalls
   const canRun = Boolean(
@@ -243,11 +223,23 @@ export function ExperimentsPanel(): React.ReactElement {
           <TextInput id="experiment-dataset-name"  value={datasetName} onChange={(event) => setDatasetName(event.target.value)} />
           <FieldLabel  htmlFor="experiment-dataset-description">{t('experiments.dataset.descriptionLabel')}</FieldLabel>
           <TextInput id="experiment-dataset-description"  value={datasetDescription} onChange={(event) => setDatasetDescription(event.target.value)} />
+          <FieldLabel htmlFor="experiment-dataset-retention">{t('experiments.dataset.retentionLabel')}</FieldLabel>
+          <SelectControl
+            id="experiment-dataset-retention"
+            value={datasetRetentionDays}
+            onChange={(event) => setDatasetRetentionDays(event.target.value)}
+          >
+            <option value="">{t('experiments.dataset.retention.none')}</option>
+            {[30, 90, 365].map((days) => (
+              <option key={days} value={days}>{t('experiments.dataset.retention.days', { count: days })}</option>
+            ))}
+          </SelectControl>
           <Button variant="secondary" type="button"  onClick={() => void createDataset()} disabled={!datasetName.trim() || creatingDataset}>
             <Plus size={14} aria-hidden="true" />
             {creatingDataset ? t('experiments.action.creatingDataset') : t('experiments.action.createDataset')}
           </Button>
         </div>
+        <p className="helper-text">{t('experiments.dataset.retentionHelp')}</p>
       </section>
 
       <section className="we-card" aria-labelledby="experiments-history-title">
@@ -262,7 +254,7 @@ export function ExperimentsPanel(): React.ReactElement {
         </div>
         {loadError && (
           <div className="run-input-form-error" role="alert">
-            <span>{loadError || t('experiments.load.error')}</span>
+            <span>{loadError}</span>
             <Button variant="ghost" type="button"  onClick={() => bumpPlatformVersion()}>{t('common.retry')}</Button>
           </div>
         )}
@@ -270,25 +262,22 @@ export function ExperimentsPanel(): React.ReactElement {
           <EmptyView icon={<ChartNoAxesCombined size={22} />} title={t('experiments.history.empty.title')} body={t('experiments.history.empty.body')} />
         ) : (
           <ul className="we-experiments__list">
-            {experiments.map((experiment) => {
-              const date = formatDate(experiment.completedAt ?? experiment.createdAt)
-              return (
-                <li key={experiment.id}>
-                  <button type="button" className="we-experiments__row" data-selected={selected?.id === experiment.id ? 'true' : 'false'} onClick={() => void selectExperiment(experiment)}>
-                    <span>
-                      <strong>{experiment.name}</strong>
-                      <small>{date ?? t('common.unknown')}</small>
-                    </span>
-                    <span className="we-pill" data-tone="info">{t(`experiments.status.${experiment.status}`)}</span>
-                  </button>
-                </li>
-              )
-            })}
+            {experiments.map((experiment) => (
+              <li key={experiment.id}>
+                <button type="button" className="we-experiments__row" data-selected={selected?.id === experiment.id ? 'true' : 'false'} onClick={() => setSelected(experiment)}>
+                  <span>
+                    <strong>{experiment.name}</strong>
+                    <small>{formatDate(experiment.completedAt ?? experiment.createdAt) ?? t('common.unknown')}</small>
+                  </span>
+                  <span className="we-pill" data-tone="info">{t(`experiments.status.${experiment.status}`)}</span>
+                </button>
+              </li>
+            ))}
           </ul>
         )}
       </section>
 
-      {selected && <ExperimentSummaryDetail experiment={selected} loading={detailLoading} onCopyCandidate={() => void copyCandidateReference()} />}
+      {selected && <ExperimentSummaryDetail experiment={selected} onCopyCandidate={() => void copyCandidateReference()} />}
     </div>
   )
 }

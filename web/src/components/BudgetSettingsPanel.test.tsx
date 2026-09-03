@@ -86,7 +86,7 @@ describe('<BudgetSettingsPanel />', () => {
     // as the org-level selector — not the bare "warn" / "block" key names.
     const wfPolicy = await screen.findByTestId('budget-workflow-policy')
     expect(wfPolicy).toHaveTextContent('keep AI calls running')
-    expect(wfPolicy).toHaveTextContent('stop AI calls at the limit')
+    expect(wfPolicy).toHaveTextContent('Block new calls at the recorded threshold')
   })
 
   it('saves org budget fields through the existing org config route and bumps platformVersion', async () => {

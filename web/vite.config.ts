@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { minify as minifyWithTerser } from 'terser'
 import { compactI18nCatalogs } from './scripts/compact-i18n-plugin.mjs'
 import { resolveWebTestWorkerLimit } from './vitest-worker-policy.js'
 
@@ -34,6 +35,27 @@ export default defineConfig(({ mode }) => ({
     }),
     react(),
     tailwindcss(),
+    {
+      name: 'janusly-terser-compression-pass',
+      // This extra pass intentionally returns no source map. Keep it scoped to
+      // the production build, whose sourcemaps are disabled below, so staging
+      // retains Vite's complete maps for diagnostics.
+      apply: (_config, environment) => (
+        environment.command === 'build' && environment.mode === 'production'
+      ),
+      enforce: 'post',
+      async renderChunk(code) {
+        const result = await minifyWithTerser(code, {
+          ecma: 2022,
+          module: true,
+          toplevel: true,
+          compress: { ecma: 2022, passes: 3 },
+          mangle: true,
+          format: { comments: false, ecma: 2022 },
+        })
+        return result.code ? { code: result.code, map: null } : null
+      },
+    },
   ],
   resolve: {
     alias: { '@': resolve(import.meta.dirname, 'src') },

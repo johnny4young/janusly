@@ -26,13 +26,14 @@ describe('BUILTIN_SNIPPETS', () => {
     'slack-on-failure',
     'condition-then-branch',
     'parallel-fan-out',
-    'transform-and-cache',
+    'transform-and-enrich',
     'http-with-circuit-breaker',
     'dlq-friendly-error-flow',
+    'webhook-to-transform',
   ]
 
-  it('ships exactly the eight named built-ins', () => {
-    expect(BUILTIN_SNIPPETS).toHaveLength(8)
+  it('ships exactly the nine named built-ins', () => {
+    expect(BUILTIN_SNIPPETS).toHaveLength(9)
     const slugs = BUILTIN_SNIPPETS.map((s) => s.id.replace(BUILTIN_SNIPPET_ID_PREFIX, ''))
     expect(slugs).toEqual(expectedSlugs)
   })
@@ -66,6 +67,12 @@ describe('BUILTIN_SNIPPETS', () => {
         expect(localIds.has(edge.to), `${snippet.id} edge.to`).toBe(true)
       }
     }
+  })
+
+  it('ships the parallel fan-out with the executable branch object grammar', () => {
+    const snippet = getBuiltinSnippet('builtin:parallel-fan-out')
+    const fork = snippet?.nodes.find((node) => node.type === 'parallel_fork')
+    expect(fork?.config.branches).toEqual([{ label: 'a' }, { label: 'b' }])
   })
 
   it('getBuiltinSnippet resolves a known slug and rejects unknown ids', () => {

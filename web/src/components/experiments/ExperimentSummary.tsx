@@ -17,24 +17,25 @@ import { formatCurrency, formatDelta, formatPercent, formatScorePoints, parseSum
 import { Button } from '@/components/ui/Button'
 
 function getRecommendationReason(summary: ExperimentSummary, t: ReturnType<typeof useT>['t']): string {
-  if (summary.recommendation === 'promote_candidate') {
-    return t('experiments.recommendation.promote_candidate.reason', { value: formatScorePoints(summary.scoreDelta * 100) })
-  }
-  if (summary.recommendation === 'keep_control') {
-    return summary.scoreDelta < 0
-      ? t('experiments.recommendation.keep_control.controlWin', { value: formatScorePoints(Math.abs(summary.scoreDelta * 100)) })
-      : t('experiments.recommendation.keep_control.withinNoise')
-  }
-  return t('experiments.recommendation.inconclusive.reason')
+  // Derive a code for summaries persisted before the API exposed reason codes.
+  const reasonCode = summary.recommendationReasonCode ?? (
+    summary.recommendation === 'promote_candidate'
+      ? 'candidate_score_improved'
+      : summary.recommendation === 'keep_control'
+        ? summary.scoreDelta < 0 ? 'control_score_improved' : 'within_noise'
+        : null
+  )
+  return t(
+    `experiments.recommendation.${reasonCode ? `reason.${reasonCode}` : 'inconclusive.reason'}`,
+    { value: formatScorePoints(Math.abs(summary.scoreDelta * 100)) },
+  )
 }
 
 export function ExperimentSummaryDetail({
   experiment,
-  loading,
   onCopyCandidate,
 }: {
   experiment: Experiment
-  loading: boolean
   onCopyCandidate: () => void
 }): React.ReactElement {
   const { t } = useT()
@@ -49,7 +50,7 @@ export function ExperimentSummaryDetail({
         </div>
         <span className="we-pill" data-tone="info">{t(`experiments.status.${experiment.status}`)}</span>
       </div>
-      {loading ? <p className="helper-text">{t('common.loading')}</p> : summary ? (
+      {summary ? (
         <>
           <p className="helper-text">{t('experiments.detail.summary', { count: summary.exampleCount, scorer: summary.scorerKind })}</p>
           <div className="we-experiments__table-wrap">
@@ -62,6 +63,7 @@ export function ExperimentSummaryDetail({
                   <th scope="col">{t('experiments.table.latency')}</th>
                   <th scope="col">{t('experiments.table.errors')}</th>
                   <th scope="col">{t('experiments.table.judged')}</th>
+                  <th scope="col">{t('experiments.table.scoringFallbacks')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -75,6 +77,7 @@ export function ExperimentSummaryDetail({
                       <td>{t('experiments.metric.latency', { value: Math.round(sideSummary.meanLatencyMs) })}</td>
                       <td data-severity={sideSummary.errorCount > 0 ? 'danger' : 'healthy'}>{sideSummary.errorCount}</td>
                       <td>{sideSummary.judgedByLlmCount}</td>
+                      <td data-severity={sideSummary.scoringFallbackCount > 0 ? 'danger' : 'healthy'}>{sideSummary.scoringFallbackCount}</td>
                     </tr>
                   )
                 })}

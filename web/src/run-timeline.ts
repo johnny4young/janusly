@@ -68,7 +68,7 @@ export function parseAgentReasoning(event: RunEvent): AgentReasoningEventPayload
     typeof agent !== 'string'
     || !Number.isSafeInteger(iteration)
     || (iteration as number) < 0
-    || (planner !== 'rules' && planner !== 'openai')
+    || (planner !== 'rules' && planner !== 'ai')
     || (mode !== 'rules' && mode !== 'ai' && mode !== 'fallback')
     || typeof scope !== 'string'
     || typeof replacesEventId !== 'string'

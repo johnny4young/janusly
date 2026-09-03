@@ -11,11 +11,12 @@ vi.mock('../api', () => ({ api: vi.fn() }))
 const summary = {
   scorerKind: 'string_equality',
   exampleCount: 4,
-  control: { meanScore: 0.5, totalCostUsd: 0.01, costKnownCount: 4, meanLatencyMs: 120, errorCount: 1, judgedByLlmCount: 0 },
-  candidate: { meanScore: 0.8, totalCostUsd: 0.02, costKnownCount: 4, meanLatencyMs: 90, errorCount: 0, judgedByLlmCount: 0 },
+  control: { meanScore: 0.5, totalCostUsd: 0.01, costKnownCount: 4, meanLatencyMs: 120, errorCount: 1, judgedByLlmCount: 0, scoringFallbackCount: 0 },
+  candidate: { meanScore: 0.8, totalCostUsd: 0.02, costKnownCount: 4, meanLatencyMs: 90, errorCount: 0, judgedByLlmCount: 0, scoringFallbackCount: 0 },
   scoreDelta: 0.3,
   costDelta: 0.01,
   recommendation: 'promote_candidate',
+  recommendationReasonCode: 'candidate_score_improved',
   recommendationReason: 'Candidate scored 30.0 points higher on average.',
 } as const
 
@@ -54,6 +55,7 @@ describe('<ExperimentsPanel />', () => {
 
     await waitFor(() => expect(screen.getByTestId('experiment-detail')).toBeInTheDocument())
     expect(screen.getByRole('columnheader', { name: 'Score' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Scoring fallbacks' })).toBeInTheDocument()
     expect(screen.getByRole('rowheader', { name: 'Control' })).toBeInTheDocument()
     expect(screen.getByRole('rowheader', { name: 'Candidate' })).toBeInTheDocument()
     expect(screen.getByText('Candidate recommended')).toBeInTheDocument()
@@ -91,18 +93,12 @@ describe('<ExperimentsPanel />', () => {
     expect(await screen.findByText('Candidate recommended')).toBeInTheDocument()
   })
 
-  it('keeps the most recently selected experiment when an older detail request resolves late', async () => {
-    let resolveFirst!: (value: unknown) => void
-    let resolveSecond!: (value: unknown) => void
-    const firstDetail = new Promise<unknown>((resolve) => { resolveFirst = resolve })
-    const secondDetail = new Promise<unknown>((resolve) => { resolveSecond = resolve })
+  it('selects the complete list projection without a redundant detail request', async () => {
     const second = { ...experiment, id: 'exp-2', name: 'Second candidate' }
 
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/experiments') return { experiments: [experiment, second] }
       if (path === '/eval/datasets') return { datasets: [] }
-      if (path === '/experiments/exp-1') return firstDetail
-      if (path === '/experiments/exp-2') return secondDetail
       return {}
     })
 
@@ -110,10 +106,8 @@ describe('<ExperimentsPanel />', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Triage candidate/i }))
     fireEvent.click(await screen.findByRole('button', { name: /Second candidate/i }))
-    resolveSecond({ experiment: second })
-    expect(await screen.findByRole('heading', { name: 'Second candidate' })).toBeInTheDocument()
-    resolveFirst({ experiment })
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Second candidate' })).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Second candidate' })).toBeInTheDocument()
+    expect(vi.mocked(api)).not.toHaveBeenCalledWith(expect.stringMatching(/^\/experiments\//))
   })
 
   it('creates a dataset locally, selects it for the next comparison, and signals the shared refresh', async () => {
@@ -130,9 +124,12 @@ describe('<ExperimentsPanel />', () => {
 
     await screen.findByText('No experiments yet')
     fireEvent.change(screen.getByLabelText('Dataset name'), { target: { value: 'June recoveries' } })
+    fireEvent.change(screen.getByLabelText('Automatic expiry'), { target: { value: '90' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create dataset' }))
 
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/eval/datasets', expect.objectContaining({ method: 'POST' })))
+    const call = vi.mocked(api).mock.calls.find(([path, options]) => path === '/eval/datasets' && options?.method === 'POST')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: 'June recoveries', retentionDays: 90 })
     expect(screen.getByRole('option', { name: 'June recoveries · 8 examples' })).toBeInTheDocument()
   })
 
@@ -153,7 +150,10 @@ describe('<ExperimentsPanel />', () => {
   })
 
   it('renders a valid aggregate summary when its legacy display reason is absent', async () => {
-    const experimentWithoutReason = { ...experiment, summary: { ...summary, recommendationReason: undefined } }
+    const experimentWithoutReason = {
+      ...experiment,
+      summary: { ...summary, recommendationReason: undefined, recommendationReasonCode: undefined },
+    }
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/experiments') return { experiments: [experimentWithoutReason] }
       if (path === '/eval/datasets') return { datasets: [] }
@@ -166,6 +166,32 @@ describe('<ExperimentsPanel />', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Triage candidate/i }))
 
     expect(await screen.findByText('Candidate scored 30.0 points higher on average.')).toBeInTheDocument()
+  })
+
+  it('explains an inconclusive LLM-judge fallback instead of claiming the dataset is empty', async () => {
+    const fallbackExperiment = {
+      ...experiment,
+      summary: {
+        ...summary,
+        scorerKind: 'llm_judge',
+        recommendation: 'inconclusive',
+        recommendationReasonCode: 'scoring_fallback',
+        control: { ...summary.control, judgedByLlmCount: 4 },
+        candidate: { ...summary.candidate, judgedByLlmCount: 3, scoringFallbackCount: 1 },
+      },
+    }
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/experiments') return { experiments: [fallbackExperiment] }
+      if (path === '/eval/datasets') return { datasets: [] }
+      if (path === '/experiments/exp-1') return { experiment: fallbackExperiment }
+      return {}
+    })
+
+    render(<ExperimentsPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /Triage candidate/i }))
+
+    expect(await screen.findByText(/deterministic fallback scoring was used/i)).toBeInTheDocument()
+    expect(screen.queryByText(/has no examples/i)).not.toBeInTheDocument()
   })
 
   it('shows the provider-call plan and blocks an oversized LLM-judge run', async () => {

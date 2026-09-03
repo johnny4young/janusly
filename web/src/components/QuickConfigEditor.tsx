@@ -30,7 +30,6 @@ import {
   asJsonObject,
   fieldId,
   JsonConfigField,
-  NumberConfigField,
   OptionalNumberConfigField,
   readConfigNumber,
   readConfigString,
@@ -187,22 +186,21 @@ export function QuickConfigEditor({
   }
 
   if (type === 'agent' || type === 'multi_agent') {
-    const plannerId = fieldId(nodeId, `${type} planner`)
-    const teamModeId = fieldId(nodeId, 'team mode')
+    const isTeam = type === 'multi_agent'
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextareaConfigField scope={nodeId} label={type === 'multi_agent' ? (t('rightPanel.quickConfig.teamGoal')) : (t('rightPanel.quickConfig.agentGoal'))} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
-        <FormField id={plannerId} label={t('rightPanel.quickConfig.planner')}>
+        <TextareaConfigField scope={nodeId} label={isTeam ? t('rightPanel.quickConfig.teamGoal') : t('rightPanel.quickConfig.agentGoal')} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
+        <FormField id={fieldId(nodeId, 'planner')} label={t('rightPanel.quickConfig.planner')}>
           {controlProps => (
             <select {...controlProps} value={readConfigString(config, 'planner') || 'rules'} onChange={event => patch({ planner: event.target.value })}>
               <option value="rules">{t('rightPanel.quickConfig.plannerRules')}</option>
-              <option value="openai">{t('rightPanel.quickConfig.plannerOpenai')}</option>
+              <option value="ai">{t('rightPanel.quickConfig.plannerAi')}</option>
             </select>
           )}
         </FormField>
-        {type === 'multi_agent' && (
-          <FormField id={teamModeId} label={t('rightPanel.quickConfig.teamMode')}>
+        {isTeam && (
+          <FormField id={fieldId(nodeId, 'team mode')} label={t('rightPanel.quickConfig.teamMode')}>
             {controlProps => (
               <select {...controlProps} value={readConfigString(config, 'mode') || 'sequential'} onChange={event => patch({ mode: event.target.value })}>
                 <option value="sequential">{t('rightPanel.quickConfig.teamModeSequential')}</option>
@@ -211,16 +209,30 @@ export function QuickConfigEditor({
             )}
           </FormField>
         )}
-        {type === 'agent' && <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.inputValue')} value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
-        <NumberConfigField scope={nodeId} label={t('rightPanel.quickConfig.maxSteps')} value={readConfigNumber(config, 'maxSteps') ?? 3} onChange={value => patch({ maxSteps: value })} />
-        {type === 'multi_agent' && (
+        {!isTeam && <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.inputValue')} value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
+        <OptionalNumberConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.maxSteps')}
+          value={readConfigNumber(config, 'maxSteps')}
+          min={1}
+          max={50}
+          placeholder={isTeam ? '2' : '3'}
+          onChange={value => patch({ maxSteps: value })}
+        />
+        <SwitchField
+          checked={config.allowWriteTools === true}
+          label={t('rightPanel.quickConfig.agentWrites')}
+          hint={t('rightPanel.quickConfig.agentWritesHint')}
+          onChange={event => patch({ allowWriteTools: event.target.checked })}
+        />
+        {isTeam && (
           <SwitchField
             checked={config.reflection !== false}
             label={t('rightPanel.quickConfig.reflection')}
             onChange={event => patch({ reflection: event.target.checked })}
           />
         )}
-        {type === 'agent' && <ResilienceFieldset nodeId={nodeId} nodeType="agent" config={config} onPatch={patch} />}
+        {!isTeam && <ResilienceFieldset nodeId={nodeId} nodeType="agent" config={config} onPatch={patch} />}
       </section>
     )
   }

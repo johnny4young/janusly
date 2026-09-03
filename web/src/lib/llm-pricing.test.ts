@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MODEL_PRICES,
+  MODEL_PRICING_SNAPSHOT_DATE,
   estimatePromptCostUsd,
   formatEstimateLabel,
   lookupModelPrice,
@@ -9,8 +10,20 @@ import {
 
 describe("llm-pricing", () => {
   it("ships a frozen, non-empty MODEL_PRICES table", () => {
-    expect(Object.keys(MODEL_PRICES).length).toBeGreaterThan(4);
+    expect(MODEL_PRICING_SNAPSHOT_DATE).toBe("2026-09-03");
+    expect(Object.keys(MODEL_PRICES)).toHaveLength(14);
     expect(MODEL_PRICES["claude-haiku-4-5-20251001"]).toBeDefined();
+    expect(MODEL_PRICES["claude-sonnet-5"]).toEqual({
+      inputUsdPer1M: 3, outputUsdPer1M: 15,
+    });
+    expect(MODEL_PRICES["claude-fable-5-1"]).toEqual({
+      inputUsdPer1M: 10, outputUsdPer1M: 50,
+    });
+    expect(MODEL_PRICES["claude-opus-4-5-20251101"]).toEqual({
+      inputUsdPer1M: 5, outputUsdPer1M: 25,
+    });
+    expect(MODEL_PRICES["claude-opus-4"]).toBeUndefined();
+    expect(MODEL_PRICES["gpt-4o-mini"]).toBeUndefined();
     expect(() => {
       // Frozen — assigning a new key throws in strict mode.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,6 +33,9 @@ describe("llm-pricing", () => {
 
   it("lookupModelPrice returns null for unknown ids", () => {
     expect(lookupModelPrice("does-not-exist")).toBeNull();
+    expect(lookupModelPrice(" CLAUDE-SONNET-5 ")).toEqual({
+      inputUsdPer1M: 3, outputUsdPer1M: 15,
+    });
   });
 
   it("estimatePromptCostUsd computes input × inputRate + output × outputRate", () => {

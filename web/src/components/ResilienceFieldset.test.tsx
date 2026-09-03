@@ -62,6 +62,21 @@ describe('<ResilienceFieldset />', () => {
     expect(onPatch).toHaveBeenLastCalledWith({ timeoutMs: 120000 })
   })
 
+  it('caps HTTP resource controls at the shared process limits on blur', () => {
+    const onPatch = renderFieldset()
+
+    for (const [label, value, expected] of [
+      ['Timeout (ms)', '900000', { timeoutMs: 600000 }],
+      ['Maximum response bytes', '999999999', { maxResponseBytes: 67108864 }],
+      ['Maximum redirects', '99', { maxRedirects: 20 }],
+    ] as const) {
+      const field = screen.getByLabelText(label)
+      fireEvent.change(field, { target: { value } })
+      fireEvent.blur(field, { target: { value } })
+      expect(onPatch).toHaveBeenLastCalledWith(expected)
+    }
+  })
+
   it('keeps retry attempts at the production-readiness minimum on blur', () => {
     const onPatch = renderFieldset()
 
@@ -134,7 +149,7 @@ describe('selective retry (retryOn)', () => {
   it('checking a class patches retry.retryOn with the engine pattern string', () => {
     const onPatch = renderFieldset()
     fireEvent.click(screen.getByTestId('resilience-retry-on-5xx'))
-    expect(onPatch).toHaveBeenCalledWith({ retry: expect.objectContaining({ retryOn: ['5xx'] }) })
+    expect(onPatch).toHaveBeenCalledWith({ retry: { maxAttempts: 3, retryOn: ['5xx'] } })
   })
 
   it('reflects an existing retryOn as checked boxes', () => {
@@ -146,8 +161,8 @@ describe('selective retry (retryOn)', () => {
   })
 
   it('unchecking the last class omits retryOn rather than persisting an empty array', () => {
-    const onPatch = renderFieldset({ config: { url: 'x', retry: { retryOn: ['5xx'] } } })
+    const onPatch = renderFieldset({ config: { url: 'x', retry: { maxAttempts: 3, retryOn: ['5xx'] } } })
     fireEvent.click(screen.getByTestId('resilience-retry-on-5xx'))
-    expect(onPatch).toHaveBeenCalledWith({ retry: { retryOn: undefined } })
+    expect(onPatch).toHaveBeenCalledWith({ retry: { maxAttempts: 3, retryOn: undefined } })
   })
 })

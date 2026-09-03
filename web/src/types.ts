@@ -525,6 +525,7 @@ export type WorkflowImprovementSuggestion = {
   workflow: WorkflowDefinition
   rationale: string
   approachLabel: string
+  /** Model confidence normalized by the API to the closed 0..1 range. */
   confidence: number
 }
 export type WorkflowImprovementResult = {

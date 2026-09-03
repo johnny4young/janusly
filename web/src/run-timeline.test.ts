@@ -34,7 +34,7 @@ describe('run event timeline projection', () => {
       payload: {
         agent: `recovery\npostgres://operator:password@db.internal/acme ${'a'.repeat(180)}`,
         iteration: 0,
-        planner: 'openai',
+        planner: 'ai',
         mode: 'ai',
         scope: 'agent',
         replacesEventId: 'planned-1',
@@ -45,7 +45,7 @@ describe('run event timeline projection', () => {
     })
     expect(parsed).toMatchObject({
       iteration: 0,
-      planner: 'openai',
+      planner: 'ai',
       mode: 'ai',
       scope: 'agent',
       replacesEventId: 'planned-1',

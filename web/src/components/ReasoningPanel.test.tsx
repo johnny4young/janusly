@@ -75,7 +75,7 @@ describe('<ReasoningPanel />', () => {
         payload: {
           agent: 'invoice-agent',
           iteration: 0,
-          planner: 'openai',
+          planner: 'ai',
           mode: 'ai',
           scope: 'agent',
           replacesEventId: 'reason-legacy',

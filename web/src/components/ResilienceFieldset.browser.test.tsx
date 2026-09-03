@@ -52,6 +52,6 @@ describe('<ResilienceFieldset /> (browser smoke)', () => {
     expect(block.textContent).toContain('Errores de servidor (5xx)')
 
     fireEvent.click(screen.getByTestId('resilience-retry-on-5xx'))
-    expect(onPatch).toHaveBeenLastCalledWith({ retry: { retryOn: ['5xx'] } })
+    expect(onPatch).toHaveBeenLastCalledWith({ retry: { maxAttempts: 3, retryOn: ['5xx'] } })
   })
 })

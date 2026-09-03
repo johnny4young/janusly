@@ -6940,7 +6940,7 @@ button.we-recovery-heatmap__cell:focus-visible {
 
 .we-experiments__dataset-form {
   align-items: end;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(150px, 0.6fr) auto;
 }
 
 .we-experiments__dataset-form .ui-field__label {

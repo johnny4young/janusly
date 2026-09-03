@@ -17,6 +17,14 @@ import { getResolvedLocale } from '../../i18n'
 export type ExperimentKind = 'prompt' | 'model'
 export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed'
 export type Recommendation = 'promote_candidate' | 'keep_control' | 'inconclusive'
+export type RecommendationReasonCode =
+  | 'empty_dataset'
+  | 'all_arms_failed'
+  | 'scoring_fallback'
+  | 'candidate_error_regression'
+  | 'candidate_score_improved'
+  | 'control_score_improved'
+  | 'within_noise'
 
 export type Experiment = {
   id: string
@@ -37,6 +45,7 @@ export type EvalDataset = {
   name: string
   description: string
   exampleCount: number
+  retentionDays: number | null
 }
 
 export type SideSummary = {
@@ -46,6 +55,7 @@ export type SideSummary = {
   meanLatencyMs: number
   errorCount: number
   judgedByLlmCount: number
+  scoringFallbackCount: number
 }
 
 export type ExperimentSummary = {
@@ -56,6 +66,7 @@ export type ExperimentSummary = {
   scoreDelta: number
   costDelta: number
   recommendation: Recommendation
+  recommendationReasonCode: RecommendationReasonCode | null
 }
 
 export type RunForm = {
@@ -93,19 +104,38 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+function isNonNegativeNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return isNonNegativeNumber(value) && Number.isSafeInteger(value)
+}
+
+const recommendationReasonCodes: readonly string[] = [
+  'empty_dataset',
+  'all_arms_failed',
+  'scoring_fallback',
+  'candidate_error_regression',
+  'candidate_score_improved',
+  'control_score_improved',
+  'within_noise',
+]
+
 function parseSide(value: unknown): SideSummary | null {
   const record = asRecord(value)
   if (!record) return null
-  const fields = ['meanScore', 'totalCostUsd', 'costKnownCount', 'meanLatencyMs', 'errorCount', 'judgedByLlmCount'] as const
-  if (!fields.every((field) => isFiniteNumber(record[field]))) return null
-  return {
-    meanScore: record.meanScore as number,
-    totalCostUsd: record.totalCostUsd as number,
-    costKnownCount: record.costKnownCount as number,
-    meanLatencyMs: record.meanLatencyMs as number,
-    errorCount: record.errorCount as number,
-    judgedByLlmCount: record.judgedByLlmCount as number,
-  }
+  if (!isNonNegativeNumber(record.meanScore) || record.meanScore > 1 ||
+      !isNonNegativeNumber(record.totalCostUsd) || !isNonNegativeNumber(record.meanLatencyMs) ||
+      !isNonNegativeInteger(record.costKnownCount) || !isNonNegativeInteger(record.errorCount) ||
+      !isNonNegativeInteger(record.judgedByLlmCount)) return null
+  // Summaries persisted before scoring provenance was introduced remain
+  // renderable and explicitly mean zero recorded fallbacks.
+  const scoringFallbackCount = record.scoringFallbackCount === undefined
+    ? 0
+    : record.scoringFallbackCount
+  if (!isNonNegativeInteger(scoringFallbackCount)) return null
+  return { ...record, scoringFallbackCount } as SideSummary
 }
 
 export function parseSummary(value: unknown): ExperimentSummary | null {
@@ -114,29 +144,30 @@ export function parseSummary(value: unknown): ExperimentSummary | null {
   const control = parseSide(record.control)
   const candidate = parseSide(record.candidate)
   const recommendation = record.recommendation
-  if (!control || !candidate || !isFiniteNumber(record.exampleCount) || !isFiniteNumber(record.scoreDelta) || !isFiniteNumber(record.costDelta)) return null
-  if (recommendation !== 'promote_candidate' && recommendation !== 'keep_control' && recommendation !== 'inconclusive') return null
+  if (!control || !candidate || !isNonNegativeInteger(record.exampleCount) ||
+      !isFiniteNumber(record.scoreDelta) || record.scoreDelta < -1 || record.scoreDelta > 1 ||
+      !isFiniteNumber(record.costDelta)) return null
+  if (!['promote_candidate', 'keep_control', 'inconclusive'].includes(recommendation as string)) return null
+  const reasonCode = record.recommendationReasonCode
+  if (reasonCode !== undefined && (typeof reasonCode !== 'string' || !recommendationReasonCodes.includes(reasonCode))) return null
   return {
-    scorerKind: record.scorerKind,
-    exampleCount: record.exampleCount,
+    ...record,
     control,
     candidate,
-    scoreDelta: record.scoreDelta,
-    costDelta: record.costDelta,
-    recommendation,
-  }
+    recommendationReasonCode: reasonCode ?? null,
+  } as ExperimentSummary
 }
 
 export function formatCurrency(value: number): string {
-  return new Intl.NumberFormat(getResolvedLocale(), { style: 'currency', currency: 'USD', maximumFractionDigits: 4 }).format(value)
+  return value.toLocaleString(getResolvedLocale(), { style: 'currency', currency: 'USD', maximumFractionDigits: 4 })
 }
 
 export function formatPercent(value: number): string {
-  return `${new Intl.NumberFormat(getResolvedLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value)}%`
+  return `${formatScorePoints(value)}%`
 }
 
 export function formatScorePoints(value: number): string {
-  return new Intl.NumberFormat(getResolvedLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value)
+  return value.toLocaleString(getResolvedLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 }
 
 export function formatDate(value: string | null): string | null {

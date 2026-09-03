@@ -17,7 +17,7 @@ describe('Trans', () => {
 
     expect(screen.getByText('$7.50', { selector: 'strong' })).toBeVisible()
     expect(screen.getByText('$20.00', { selector: 'strong' })).toBeVisible()
-    expect(screen.getByText(/monthly limit/)).toBeVisible()
+    expect(screen.getByText(/raise the Workspace budget or switch the policy to warn-only/)).toBeVisible()
   })
 
   it('maps named placeholders and re-renders after a locale change', async () => {

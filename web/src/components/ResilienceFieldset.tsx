@@ -28,6 +28,10 @@ import { SwitchField } from './ui/SwitchField'
 
 type ResilienceNodeType = 'http' | 'tool' | 'agent' | 'mcp_tool'
 
+const HTTP_TIMEOUT_MAX_MS = 600_000
+const HTTP_RESPONSE_MAX_BYTES = 67_108_864
+const HTTP_REDIRECT_MAX = 20
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -42,14 +46,12 @@ function readBackoff(value: unknown): '' | 'fixed' | 'exponential' {
   return value === 'fixed' || value === 'exponential' ? value : ''
 }
 
-function configuredSettingCount(config: JsonObject, nodeType: ResilienceNodeType): number {
+function configuredSettingCount(config: JsonObject, isHttp: boolean): number {
   const retry = asRecord(config.retry)
-  return [
-    Object.values(retry).some((value) => value !== undefined),
-    typeof config.timeoutMs === 'number',
-    nodeType === 'http' && typeof config.maxResponseBytes === 'number',
-    nodeType === 'http' && typeof config.maxRedirects === 'number',
-  ].filter(Boolean).length
+  return +Object.values(retry).some((value) => value !== undefined)
+    + +(typeof config.timeoutMs === 'number')
+    + +(isHttp && typeof config.maxResponseBytes === 'number')
+    + +(isHttp && typeof config.maxRedirects === 'number')
 }
 
 export function ResilienceFieldset({
@@ -67,8 +69,12 @@ export function ResilienceFieldset({
   const fieldsetRef = useRef<HTMLFieldSetElement | null>(null)
   const retry = asRecord(config.retry)
   const isHttp = nodeType === 'http'
-  const timeoutMax = nodeType === 'mcp_tool' ? 120_000 : undefined
-  const configuredCount = configuredSettingCount(config, nodeType)
+  const timeoutMax = nodeType === 'mcp_tool'
+    ? 120_000
+    : isHttp
+      ? HTTP_TIMEOUT_MAX_MS
+      : undefined
+  const configuredCount = configuredSettingCount(config, isHttp)
   const [open, setOpen] = useState(false)
 
   const focusFieldset = useCallback(() => {
@@ -93,7 +99,17 @@ export function ResilienceFieldset({
     return () => window.removeEventListener(RESILIENCE_FOCUS_EVENT, onFocusRequest)
   }, [focusFieldset, nodeId])
 
-  const patchRetry = (next: Record<string, unknown>) => onPatch({ retry: { ...retry, ...next } })
+  const patchRetry = (next: Record<string, unknown>) => {
+    if (Object.hasOwn(next, 'maxAttempts') && next.maxAttempts === undefined) {
+      onPatch({ retry: undefined })
+      return
+    }
+    const merged = { ...retry, ...next }
+    if (!Number.isInteger(merged.maxAttempts)) {
+      merged.maxAttempts = 3
+    }
+    onPatch({ retry: merged })
+  }
   const selectedRetryClasses = readRetryOnClasses(retry.retryOn)
   const retryAttempts = readNumber(retry.maxAttempts)
   const retryDelay = readNumber(retry.delayMs)
@@ -133,6 +149,7 @@ export function ResilienceFieldset({
             label={t('rightPanel.resilience.retryAttempts')}
             value={retryAttempts}
             min={2}
+            max={10}
             placeholder="3"
             onChange={(value) => patchRetry({ maxAttempts: value })}
           />
@@ -141,6 +158,7 @@ export function ResilienceFieldset({
             label={t('rightPanel.resilience.initialDelayMs')}
             value={retryDelay}
             min={1}
+            max={600_000}
             placeholder="1000"
             onChange={(value) => patchRetry({ delayMs: value })}
           />
@@ -149,6 +167,7 @@ export function ResilienceFieldset({
             label={t('rightPanel.resilience.maxDelayMs')}
             value={retryMaxDelay}
             min={1}
+            max={3_600_000}
             placeholder="30000"
             onChange={(value) => patchRetry({ maxDelayMs: value })}
           />
@@ -205,6 +224,7 @@ export function ResilienceFieldset({
                 label={t('rightPanel.resilience.timeoutMs')}
                 value={readNumber(config.timeoutMs)}
                 min={1}
+                max={timeoutMax}
                 placeholder="30000"
                 onChange={(value) => onPatch({ timeoutMs: value })}
               />
@@ -213,6 +233,7 @@ export function ResilienceFieldset({
                 label={t('rightPanel.resilience.maxResponseBytes')}
                 value={readNumber(config.maxResponseBytes)}
                 min={1}
+                max={HTTP_RESPONSE_MAX_BYTES}
                 placeholder="1000000"
                 onChange={(value) => onPatch({ maxResponseBytes: value })}
               />
@@ -221,6 +242,7 @@ export function ResilienceFieldset({
                 label={t('rightPanel.resilience.maxRedirects')}
                 value={readNumber(config.maxRedirects)}
                 min={0}
+                max={HTTP_REDIRECT_MAX}
                 placeholder="5"
                 onChange={(value) => onPatch({ maxRedirects: value })}
               />

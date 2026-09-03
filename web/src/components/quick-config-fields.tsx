@@ -52,17 +52,6 @@ export function TextConfigField({ scope, label, value, onChange, describedBy }: 
   )
 }
 
-export function NumberConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: number; onChange: (value: number) => void }) {
-  const id = fieldId(scope, label)
-  return (
-    <FormField id={id} label={label}>
-      {controlProps => (
-        <input {...controlProps} type="number" min={1} value={value} onChange={event => onChange(Number(event.target.value) || 1)} />
-      )}
-    </FormField>
-  )
-}
-
 /** Number field that preserves an absent optional config value until the operator sets one. */
 export function OptionalNumberConfigField({
   scope,

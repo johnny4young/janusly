@@ -56,6 +56,7 @@ export const SNIPPET_CATEGORIES = [
   'error_handling',
   'notification',
   'transform',
+  'trigger',
   'custom',
 ] as const
 export const SnippetCategorySchema = /* @__PURE__ */ z.enum(SNIPPET_CATEGORIES)
@@ -301,7 +302,7 @@ export function insertSnippet(
 // ---------- built-in snippets (code, read-only) ----------
 
 /**
- * The eight built-in snippets that ship with every install. These live in
+ * The nine built-in snippets that ship with every install. These live in
  * CODE (never the DB), are `builtin: true`, and are surfaced read-only by
  * `GET /snippets`. Their `id`s are `builtin:<slug>`; their display copy is
  * resolved on the web via the EN/ES `snippets.builtin.<slug>.*` keys, so
@@ -348,7 +349,7 @@ export const BUILTIN_SNIPPETS: readonly SnippetDefinition[] = [
         config: {
           method: 'GET',
           url: 'https://api.example.com/resource',
-          retryPolicy: { maxAttempts: 4, backoff: 'exponential', initialDelayMs: 500 },
+          retry: { maxAttempts: 4, backoff: 'exponential', delayMs: 500 },
         },
       },
     ],
@@ -358,14 +359,21 @@ export const BUILTIN_SNIPPETS: readonly SnippetDefinition[] = [
   builtin(
     'approval-with-timeout',
     'Approval with timeout',
-    'A human approval gate followed by a timed wait before the action proceeds.',
+    'A human approval gate that fails closed when its one-hour decision deadline expires.',
     'approval',
     ['approval', 'human-in-the-loop'],
     [
-      { id: 'approve', type: 'approval', config: { message: 'Approve before continuing?' } },
-      { id: 'wait', type: 'wait_until', config: { durationSeconds: 3600 } },
+      {
+        id: 'approve',
+        type: 'approval',
+        config: {
+          message: 'Approve before continuing?',
+          decisionTimeoutMs: 3_600_000,
+          onTimeout: 'fail',
+        },
+      },
     ],
-    [{ from: 'approve', to: 'wait' }],
+    [],
     'approve',
   ),
   builtin(
@@ -380,7 +388,8 @@ export const BUILTIN_SNIPPETS: readonly SnippetDefinition[] = [
         type: 'tool',
         config: {
           tool: 'slack.post',
-          input: { credentialName: 'slack_webhook', text: 'A workflow step failed.' },
+          resultPolicy: 'require_ok',
+          input: { credential: 'slack_webhook', text: 'A workflow step failed.' },
         },
       },
     ],
@@ -411,7 +420,7 @@ export const BUILTIN_SNIPPETS: readonly SnippetDefinition[] = [
     'transform',
     ['parallel', 'fan-out'],
     [
-      { id: 'fork', type: 'parallel_fork', config: { branches: ['a', 'b'] } },
+      { id: 'fork', type: 'parallel_fork', config: { branches: [{ label: 'a' }, { label: 'b' }] } },
       { id: 'branch_a', type: 'noop', config: {} },
       { id: 'branch_b', type: 'noop', config: {} },
       { id: 'join', type: 'join', config: { sources: { a: 'branch_a', b: 'branch_b' } } },
@@ -425,9 +434,9 @@ export const BUILTIN_SNIPPETS: readonly SnippetDefinition[] = [
     'fork',
   ),
   builtin(
-    'transform-and-cache',
-    'Transform and cache',
-    'Reshape an upstream payload then persist the result for downstream reuse.',
+    'transform-and-enrich',
+    'Transform and enrich',
+    'Reshape an upstream payload, then add a deterministic metadata field.',
     'transform',
     ['transform', 'mapping'],
     [
@@ -437,12 +446,19 @@ export const BUILTIN_SNIPPETS: readonly SnippetDefinition[] = [
         config: { mapping: { id: '{{context.fetch.output.id}}', total: '{{context.fetch.output.amount}}' } },
       },
       {
-        id: 'cache',
+        id: 'enrich',
         type: 'tool',
-        config: { tool: 'kv.set', input: { key: 'last_result', value: '{{context.shape.output}}' } },
+        config: {
+          tool: 'json.set',
+          input: {
+            path: 'metadata.prepared',
+            value: true,
+            source: '{{context.shape.output}}',
+          },
+        },
       },
     ],
-    [{ from: 'shape', to: 'cache' }],
+    [{ from: 'shape', to: 'enrich' }],
     'shape',
   ),
   builtin(
@@ -459,7 +475,6 @@ export const BUILTIN_SNIPPETS: readonly SnippetDefinition[] = [
         config: {
           method: 'POST',
           url: 'https://api.example.com/action',
-          retryPolicy: { maxAttempts: 2, backoff: 'fixed', initialDelayMs: 250 },
         },
       },
       { id: 'short_circuit', type: 'noop', config: { note: 'upstream unhealthy — skipped' } },
@@ -473,7 +488,7 @@ export const BUILTIN_SNIPPETS: readonly SnippetDefinition[] = [
   builtin(
     'dlq-friendly-error-flow',
     'DLQ-friendly error flow',
-    'An action node with capped retries that lands in the dead-letter queue on exhaustion, plus a failure notifier.',
+    'A write action that fails closed into governed recovery without an unsafe blind retry.',
     'error_handling',
     ['dlq', 'error-handling', 'resilience'],
     [
@@ -483,24 +498,28 @@ export const BUILTIN_SNIPPETS: readonly SnippetDefinition[] = [
         config: {
           method: 'POST',
           url: 'https://api.example.com/submit',
-          retryPolicy: { maxAttempts: 3, backoff: 'exponential', initialDelayMs: 1000 },
-        },
-      },
-      { id: 'on_failure', type: 'condition', config: { expression: 'context.action.output.ok == false' } },
-      {
-        id: 'alert',
-        type: 'tool',
-        config: {
-          tool: 'slack.post',
-          input: { credentialName: 'slack_webhook', text: 'Submit failed after retries — check the DLQ.' },
         },
       },
     ],
-    [
-      { from: 'action', to: 'on_failure' },
-      { from: 'on_failure', to: 'alert', condition: 'context.action.output.ok == false' },
-    ],
+    [],
     'action',
+  ),
+  builtin(
+    'webhook-to-transform',
+    'Webhook to transform',
+    'Receive a named webhook event and reshape its payload for downstream steps.',
+    'trigger',
+    ['webhook', 'trigger'],
+    [
+      { id: 'inbox', type: 'webhook_received', config: { endpointKey: 'orders' } },
+      {
+        id: 'shape',
+        type: 'transform',
+        config: { mapping: { total: '{{context.inbox.output.event.payload.total}}' } },
+      },
+    ],
+    [{ from: 'inbox', to: 'shape' }],
+    'inbox',
   ),
 ]
 

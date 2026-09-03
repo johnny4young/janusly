@@ -1,24 +1,25 @@
 /**
- * Zero-dep LLM model price table + pure cost-estimation helper.
+ * Zero-dependency LLM cost-estimation helpers over the generated runtime
+ * price catalog.
  *
- * Lives in `src/lib` so the web bundle can compute "(~$0.05)"
- * preview labels next to AI Studio CTAs without round-tripping through
- * the API. The server-side cost recorder in `internal/ai/pricing.go`
- * re-exports the table from here to keep a single source of truth.
+ * `internal/ai/pricing.go` is the source of truth. `make generate` renders
+ * `llm-pricing.generated.ts`, so browser previews and server usage records
+ * cannot silently drift.
  *
- * Prices are USD per 1,000,000 tokens — the scale every vendor's pricing
- * page publishes at. Snapshot is current as of 2026-04; refresh via PR
- * when a vendor's pricing changes. Unknown models return `null` so
+ * Prices are USD per 1,000,000 tokens. Unknown models return `null` so
  * callers degrade to "(?)" rather than a misleading $0.
  *
- * Used by:
- * - `internal/ai/pricing.go` — server-side cost recording.
- * - `web/src/components/AiStudioPanel.tsx` — preview labels.
+ * Used by `web/src/components/AiStudioPanel.tsx` for preview labels.
  *
  * Invariants:
  * - Zero runtime deps (no node-only globals).
  * - No I/O. Synchronous pure functions.
  */
+
+import {
+  GENERATED_MODEL_PRICES,
+  GENERATED_MODEL_PRICING_SNAPSHOT_DATE,
+} from './llm-pricing.generated'
 
 export type ModelPrice = {
   /** USD per 1M input tokens. */
@@ -27,31 +28,20 @@ export type ModelPrice = {
   outputUsdPer1M: number;
 };
 
-/** Snapshot of vendor pricing pages (2026-04). Keep keys lowercase. */
-export const MODEL_PRICES: Readonly<Record<string, ModelPrice>> = Object.freeze({
-  // OpenAI
-  "gpt-4o-mini": { inputUsdPer1M: 0.15, outputUsdPer1M: 0.6 },
-  "gpt-4o": { inputUsdPer1M: 2.5, outputUsdPer1M: 10.0 },
-  "gpt-4.1": { inputUsdPer1M: 2.0, outputUsdPer1M: 8.0 },
-  "gpt-4.1-mini": { inputUsdPer1M: 0.4, outputUsdPer1M: 1.6 },
-  // Anthropic
-  "claude-haiku-4-5-20251001": { inputUsdPer1M: 1.0, outputUsdPer1M: 5.0 },
-  "claude-haiku-4-5": { inputUsdPer1M: 1.0, outputUsdPer1M: 5.0 },
-  "claude-sonnet-4-5": { inputUsdPer1M: 3.0, outputUsdPer1M: 15.0 },
-  "claude-opus-4": { inputUsdPer1M: 15.0, outputUsdPer1M: 75.0 },
-});
+export const MODEL_PRICING_SNAPSHOT_DATE = GENERATED_MODEL_PRICING_SNAPSHOT_DATE
+export const MODEL_PRICES: Readonly<Record<string, ModelPrice>> = GENERATED_MODEL_PRICES
 
 /** Look up the static price entry for a model id. Returns `null` when
  *  unknown — callers handle "no price → no estimate" gracefully. */
 export function lookupModelPrice(modelId: string): ModelPrice | null {
-  return MODEL_PRICES[modelId] ?? null;
+  return MODEL_PRICES[modelId.trim().toLowerCase()] ?? null;
 }
 
 /**
  * Estimate the USD cost of one LLM call given a model id + approximate
- * input/output token counts. Returns `null` for unknown models. v1 is a
- * pure linear formula; measured history may later provide median-based
- * adjustments using `usage_events`.
+ * uncached input/output token counts. Returns `null` for unknown models. The
+ * preview represents a cache miss without a cacheable system-prompt estimate;
+ * measured server usage separately prices cache writes and reads exactly.
  */
 export function estimatePromptCostUsd(
   modelId: string,
@@ -72,6 +62,5 @@ export function estimatePromptCostUsd(
 export function formatEstimateLabel(usd: number | null): string {
   if (usd === null) return "~?";
   if (usd < 0.005) return "<$0.01";
-  if (usd < 1) return `~$${usd.toFixed(2)}`;
   return `~$${usd.toFixed(2)}`;
 }

@@ -699,7 +699,7 @@ describe('<RecoveryCasePanel />', () => {
     ))
     expect(onOpenAiAuthoring).toHaveBeenCalledOnce()
     expect(onOpenAiAuthoring.mock.calls[0]?.[0]).toContain('workflow-1@version-1')
-    expect(onOpenAiAuthoring.mock.calls[0]?.[0]).toContain('do not apply, save, run, approve, or recover')
+    expect(onOpenAiAuthoring.mock.calls[0]?.[0]).toContain('never apply, save, run, approve, or recover')
     expect(contractApi).not.toHaveBeenCalled()
   })
 

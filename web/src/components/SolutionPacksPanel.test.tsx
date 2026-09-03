@@ -131,7 +131,7 @@ describe('<SolutionPacksPanel />', () => {
     expect(select).toHaveValue('github_secret_unbound')
     expect(screen.getByText('Credential unavailable')).toBeVisible()
     expect(screen.getByText('Real runtime path')).toBeVisible()
-    expect(screen.getByText(/real worker and terminal-failure boundary/)).toBeVisible()
+    expect(screen.getByText(/terminal and non-retryable before sending any request/)).toBeVisible()
 
     fireEvent.click(screen.getByRole('button', { name: 'Start recovery drill' }))
     expect(handlers.onInjectFailure).toHaveBeenCalledWith('incident-triage', 'github_secret_unbound')

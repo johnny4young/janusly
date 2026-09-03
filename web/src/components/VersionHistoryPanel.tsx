@@ -39,6 +39,11 @@ type ImprovementSuggestion = {
   confidence: number
 }
 
+function improvementConfidencePercent(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.round(Math.min(1, Math.max(0, value)) * 100)
+}
+
 /**
  * State machine for the "Suggest improvement" affordance. The button
  * lives in Compare mode below the diff and is only available to
@@ -403,7 +408,7 @@ export function VersionHistoryPanel() {
                     className={`we-suggest-chip${idx === improvement.activeIdx ? ' we-suggest-chip--active' : ''}`}
                     onClick={() => setImprovement({ ...improvement, activeIdx: idx })}
                   >
-                    {approachLabelText(suggestion.approachLabel)} · {suggestion.confidence}%
+                    {approachLabelText(suggestion.approachLabel)} · {improvementConfidencePercent(suggestion.confidence)}%
                   </button>
                 ))}
               </div>
