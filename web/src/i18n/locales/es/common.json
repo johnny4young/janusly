@@ -1875,7 +1875,6 @@
   "aiStudio.brief.outcome": "Resultado esperado",
   "aiStudio.brief.failurePolicy": "Política de fallos",
   "aiStudio.brief.questions": "Agrega los detalles faltantes a la intención y vuelve a compilarla",
-  "aiStudio.brief.answerLabel": "Respuesta {{number}}",
   "aiStudio.brief.answerPlaceholder": "Agrega un detalle específico y verificable",
   "aiStudio.brief.recompile": "Usar respuestas y volver a compilar",
   "aiStudio.brief.details": "Entradas, efectos, aprobaciones y ejemplos",

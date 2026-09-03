@@ -393,14 +393,13 @@ describe('<AiStudioPanel />', () => {
     fireEvent.click(screen.getByRole('button', { name: /Compile intent brief/i }))
     await screen.findByText('What exact time range may Janusly act within?')
 
-    const answer = screen.getByRole('textbox', { name: 'Answer 1' })
+    const answer = screen.getByRole('textbox', { name: 'What exact time range may Janusly act within?' })
     expect(screen.getByRole('button', { name: /Use answers and compile again/i })).toBeDisabled()
     fireEvent.change(answer, { target: { value: '09:00–17:00 America/Bogota' } })
     fireEvent.click(screen.getByRole('button', { name: /Use answers and compile again/i }))
 
     await waitFor(() => expect(onCompileWorkflowBrief).toHaveBeenCalledTimes(2))
-    expect(onCompileWorkflowBrief.mock.calls[1]?.[0]).toContain('Clarification 1: What exact time range may Janusly act within?')
-    expect(onCompileWorkflowBrief.mock.calls[1]?.[0]).toContain('Answer: 09:00–17:00 America/Bogota')
+    expect(onCompileWorkflowBrief.mock.calls[1]?.[0]).toContain('Clarification 1: 09:00–17:00 America/Bogota')
     expect(await screen.findByRole('button', { name: /Build proposal/i })).toBeEnabled()
   })
 

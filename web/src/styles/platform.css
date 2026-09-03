@@ -8346,32 +8346,11 @@ button.we-recovery-heatmap__cell:focus-visible {
   padding-left: 18px;
 }
 
-.ai-brief-question {
+.ai-brief-questions > li {
   display: grid;
   gap: 6px;
   min-width: 0;
-}
-
-.ai-brief-question__text {
   overflow-wrap: anywhere;
-}
-
-.ai-brief-question__answer {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.ai-brief-question__answer-label {
-  color: var(--we-muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.ai-brief-answer {
-  width: 100%;
 }
 
 .ai-binding-report .ui-form-disclosure ul,

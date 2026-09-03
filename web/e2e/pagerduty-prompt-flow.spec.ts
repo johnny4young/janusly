@@ -105,7 +105,7 @@ for (const scenario of scenarios) {
     await expect(incompleteBrief.getByText(scenario.clarificationTitle, { exact: true })).toBeVisible()
     await expect(incompleteBrief.locator('.ai-brief-questions li')).toHaveCount(3)
     await expect(page.getByRole('button', { name: scenario.buildProposal, exact: true })).toBeDisabled()
-    await incompleteBrief.locator('.ai-brief-answer').first().fill('09:00 to 17:00 America/Bogota')
+    await incompleteBrief.locator('.ai-brief-questions li input').first().fill('09:00 to 17:00 America/Bogota')
     await page.getByRole('button', { name: scenario.recompile, exact: true }).click()
     await expect(page.getByTestId('intent-brief')).toBeVisible()
     if (evidenceDir) {

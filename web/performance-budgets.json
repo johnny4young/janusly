@@ -31,6 +31,13 @@
         "CanvasWorkspace.css"
       ],
       "maxGzipKiB": 68
+    },
+    "workflowWorkspace": {
+      "label": "Workflow workspace",
+      "assets": [
+        "workflow-workspace.js"
+      ],
+      "maxGzipKiB": 43.1
     }
   },
   "routeBudgets": {
