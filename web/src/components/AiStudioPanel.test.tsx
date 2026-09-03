@@ -403,6 +403,82 @@ describe('<AiStudioPanel />', () => {
     expect(await screen.findByRole('button', { name: /Build proposal/i })).toBeEnabled()
   })
 
+  it('retains every submitted answer across multiple clarification rounds', async () => {
+    const onCompileWorkflowBrief = vi.fn()
+      .mockResolvedValueOnce({ ...compilation, complete: false, clarifyingQuestions: ['Which time window?'] })
+      .mockResolvedValueOnce({ ...compilation, complete: false, clarifyingQuestions: ['Which account?'] })
+      .mockResolvedValueOnce(compilation)
+    const onProposeWorkflow = vi.fn(async () => workflowProposal())
+    renderPanel({ onCompileWorkflowBrief, onProposeWorkflow })
+
+    await screen.findByTestId('capability-catalog-summary')
+    const intent = screen.getByRole('textbox', { name: 'Business intent' })
+    const original = (intent as HTMLTextAreaElement).value
+    fireEvent.click(screen.getByRole('button', { name: /Compile intent brief/i }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Which time window?' }), {
+      target: { value: '09:00–17:00 America/Bogota' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Use answers and compile again/i }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Which account?' }), {
+      target: { value: 'operator@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Use answers and compile again/i }))
+
+    await waitFor(() => expect(onCompileWorkflowBrief).toHaveBeenCalledTimes(3))
+    const submitted = onCompileWorkflowBrief.mock.calls[2]?.[0] as string
+    expect(submitted).toContain(original)
+    expect(submitted).toContain('09:00–17:00 America/Bogota')
+    expect(submitted).toContain('operator@example.com')
+    expect(intent).toHaveValue(submitted)
+    fireEvent.click(await screen.findByRole('button', { name: /Build proposal/i }))
+    await waitFor(() => expect(onProposeWorkflow).toHaveBeenCalledWith(compilation.brief, catalog.version, submitted))
+  })
+
+  it('refuses an oversized clarified intent without truncating constraints or losing answers', async () => {
+    const onCompileWorkflowBrief = vi.fn().mockResolvedValue({
+      ...compilation,
+      complete: false,
+      clarifyingQuestions: ['Which account?'],
+    })
+    renderPanel({ onCompileWorkflowBrief })
+
+    await screen.findByTestId('capability-catalog-summary')
+    const intent = screen.getByRole('textbox', { name: 'Business intent' })
+    const original = `${'a'.repeat(3940)} Never write without human approval.`
+    fireEvent.change(intent, { target: { value: original } })
+    fireEvent.click(screen.getByRole('button', { name: /Compile intent brief/i }))
+    const answer = await screen.findByRole('textbox', { name: 'Which account?' })
+    const answerText = `operator@example.com ${'b'.repeat(100)}`
+    fireEvent.change(answer, { target: { value: answerText } })
+    fireEvent.click(screen.getByRole('button', { name: /Use answers and compile again/i }))
+
+    expect(await screen.findByText(/The intent and answers exceed 4000 characters/)).toBeInTheDocument()
+    expect(onCompileWorkflowBrief).toHaveBeenCalledTimes(1)
+    expect(intent).toHaveValue(original)
+    expect(answer).toHaveValue(answerText)
+    expect(screen.getByTestId('intent-brief')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Build proposal/i })).toBeDisabled()
+  })
+
+  it('keeps submitted clarification text available after a compiler failure', async () => {
+    const onCompileWorkflowBrief = vi.fn()
+      .mockResolvedValueOnce({ ...compilation, complete: false, clarifyingQuestions: ['Which account?'] })
+      .mockRejectedValueOnce(new Error('compiler unavailable'))
+    renderPanel({ onCompileWorkflowBrief })
+
+    await screen.findByTestId('capability-catalog-summary')
+    fireEvent.click(screen.getByRole('button', { name: /Compile intent brief/i }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Which account?' }), {
+      target: { value: 'operator@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Use answers and compile again/i }))
+
+    expect(await screen.findByText('compiler unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Business intent' })).toHaveValue(onCompileWorkflowBrief.mock.calls[1]?.[0])
+    expect(onCompileWorkflowBrief.mock.calls[1]?.[0]).toContain('operator@example.com')
+    expect(screen.queryByTestId('intent-brief')).not.toBeInTheDocument()
+  })
+
   it('keeps proposal generation blocked while the intent needs clarification', async () => {
     const incompleteCompilation: WorkflowBriefCompilation = {
       ...compilation,

@@ -1870,6 +1870,7 @@
   "aiStudio.brief.compile": "Compile intent brief",
   "aiStudio.brief.compiling": "Compiling brief…",
   "aiStudio.brief.failed": "The intent brief could not be compiled.",
+  "aiStudio.brief.tooLong": "The intent and answers exceed {{max}} characters. Shorten the text; nothing was sent or removed.",
   "aiStudio.brief.objective": "Objective",
   "aiStudio.brief.trigger": "Trigger",
   "aiStudio.brief.outcome": "Expected outcome",

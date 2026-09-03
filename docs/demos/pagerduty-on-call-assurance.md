@@ -96,7 +96,10 @@ Then move through the four independent stages:
 1. **Intent Brief — Compile intent.** Review the objective, trigger, expected
    outcome, failure policy, and at most three clarification questions. Answer
    any missing detail inline and choose **Use answers and compile again**;
-   Janusly appends only those bounded answers to the original intent. An
+   Janusly appends those bounded answers to the visible intent and retains
+   earlier answers across further clarification rounds or request failures.
+   If the combined text exceeds 4,000 characters, shorten it explicitly:
+   Janusly neither sends it nor silently removes any original constraint. An
    incomplete brief cannot proceed.
 2. **Capability Binding.** Confirm both exact credential names resolve and
    that there are no binding blockers.

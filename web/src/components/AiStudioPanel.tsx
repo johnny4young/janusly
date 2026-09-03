@@ -67,12 +67,8 @@ function composeAuthoringPrompt(
     if (!answer) return []
     return [`Clarification ${index + 1}: ${answer}`]
   })
-  if (clarificationLines.length === 0) return base.slice(0, MAX_AUTHORING_PROMPT_CHARS)
-
-  const suffix = `\n\n${clarificationLines.join('\n')}`
-  const availableBaseChars = MAX_AUTHORING_PROMPT_CHARS - suffix.length
-  if (availableBaseChars <= 0) return suffix.slice(-MAX_AUTHORING_PROMPT_CHARS)
-  return `${base.slice(0, availableBaseChars)}${suffix}`
+  if (clarificationLines.length === 0) return base
+  return `${base}\n\n${clarificationLines.join('\n')}`
 }
 
 type AiStudioPanelProps = {
@@ -370,8 +366,15 @@ export function AiStudioPanel({
     const questions = briefCompilation?.clarifyingQuestions.slice(0, 3) ?? []
     const trimmed = composeAuthoringPrompt(prompt, questions, clarificationAnswers)
     if (!trimmed) return
+    if (trimmed.length > MAX_AUTHORING_PROMPT_CHARS) {
+      setAuthoringError(t('aiStudio.brief.tooLong', { max: MAX_AUTHORING_PROMPT_CHARS }))
+      return
+    }
     const requestID = ++authoringRequestRef.current
     const startedAt = performance.now()
+    // Keep every submitted clarification visible and cumulative, even if this
+    // request fails or the compiler needs another round of missing details.
+    setPrompt(trimmed)
     setAuthoringLoading('compile')
     setAuthoringError(null)
     setBriefCompilation(null)

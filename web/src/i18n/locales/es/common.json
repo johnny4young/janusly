@@ -1870,6 +1870,7 @@
   "aiStudio.brief.compile": "Compilar brief de intención",
   "aiStudio.brief.compiling": "Compilando brief…",
   "aiStudio.brief.failed": "No se pudo compilar el brief de intención.",
+  "aiStudio.brief.tooLong": "La intención y las respuestas superan {{max}} caracteres. Acorta el texto; no se envió ni eliminó nada.",
   "aiStudio.brief.objective": "Objetivo",
   "aiStudio.brief.trigger": "Trigger",
   "aiStudio.brief.outcome": "Resultado esperado",
