@@ -6,6 +6,9 @@ baseline_ref=${JANUSLY_VISUAL_BASELINE_REF:-a18a0478d547a956885b4187b1ead303ea02
 profile=${1:-all}
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 evidence_root=${JANUSLY_EVIDENCE_DIR:-$root/output/qualification/pre-main-visual/$stamp}
+if [[ "$evidence_root" != /* ]]; then
+  evidence_root="$root/$evidence_root"
+fi
 run_id=${JANUSLY_VISUAL_RUN_ID:-${UID:-0}-$$}
 current_project=${JANUSLY_VISUAL_AFTER_PROJECT:-janusly-visual-after-$run_id}
 baseline_project=${JANUSLY_VISUAL_BEFORE_PROJECT:-janusly-visual-before-$run_id}
@@ -110,11 +113,66 @@ validate() {
   if [[ "$profile" == selftest ]]; then return 0; fi
   [[ ${CONFIRM:-} == reset ]] || die 'isolated volume cleanup requires CONFIRM=reset'
   command -v "$docker_bin" >/dev/null 2>&1 || die 'docker is required'
+  command -v jq >/dev/null 2>&1 || die 'jq is required'
   git -C "$root" cat-file -e "${baseline_ref}^{commit}" 2>/dev/null ||
     die "baseline ref does not resolve: $baseline_ref"
   if [[ -n $(git -C "$root" status --porcelain --untracked-files=all) ]]; then
     die 'current source must be clean so after evidence has exact provenance'
   fi
+}
+
+validate_visual_evidence() {
+  local phase=$1
+  local phase_dir="$evidence_root/$phase"
+  local matrix="$phase_dir/${phase}-visual-matrix.json"
+  local expected_screenshots=84
+  local actual_screenshots
+
+  [[ -f "$matrix" && ! -L "$matrix" ]] ||
+    die "$phase visual matrix is missing from the canonical evidence directory"
+  jq -e --arg phase "$phase" '
+    .phase == $phase and
+    (.combinations | length) == 12 and
+    all(.combinations[];
+      (.surfaces | length) == 7 and
+      all(.surfaces[];
+        (.screenshot | type) == "string" and
+        (.screenshot | length) > 0
+      )
+    )
+  ' "$matrix" >/dev/null || die "$phase visual matrix is incomplete"
+
+  while IFS= read -r screenshot; do
+    [[ -f "$phase_dir/$screenshot" && ! -L "$phase_dir/$screenshot" ]] ||
+      die "$phase visual screenshot is missing: $screenshot"
+  done < <(jq -r '.combinations[].surfaces[].screenshot' "$matrix")
+
+  if [[ "$phase" == after ]]; then
+    local recovery_dir="$phase_dir/governed-recovery"
+    local recovery_manifest="$recovery_dir/semantic-outcome-evidence.json"
+    [[ -f "$recovery_manifest" && ! -L "$recovery_manifest" ]] ||
+      die 'governed recovery evidence manifest is missing from the canonical evidence directory'
+    jq -e '
+      .evidenceLevel == "deterministic_local_runtime" and
+      (.fixtures | type) == "object" and
+      (.fixtures | length) == 3
+    ' "$recovery_manifest" >/dev/null || die 'governed recovery evidence manifest is incomplete'
+    jq -e '
+      all(.combinations[];
+        all(.surfaces[];
+          .overflowPx == 0 and
+          (.blockingViolations | length) == 0
+        ) and
+        (.browserErrors | length) == 0 and
+        (.interactionFindings | length) == 0
+      )
+    ' "$matrix" >/dev/null || die 'after visual matrix contains blocking findings'
+    expected_screenshots=97
+  fi
+
+  actual_screenshots=$(find "$phase_dir" -type f -name '*.png' | wc -l | tr -d ' ')
+  [[ "$actual_screenshots" == "$expected_screenshots" ]] ||
+    die "$phase evidence contains $actual_screenshots screenshots; expected $expected_screenshots"
 }
 
 project_has_resources() {
@@ -221,6 +279,7 @@ capture_phase() {
   select_phase "$phase"
   start_active_stack
   run_visual_phase "$phase"
+  validate_visual_evidence "$phase"
   stop_active_stack
   active_source=
   active_project=
@@ -257,7 +316,8 @@ if [[ "$profile" == selftest ]]; then
     --arg afterProject "$current_project" \
     --argjson beforeAppPort "$baseline_app_port" \
     --argjson afterAppPort "$current_app_port" \
-    '{projects:{before:$beforeProject,after:$afterProject},ports:{beforeApplication:$beforeAppPort,afterApplication:$afterAppPort}}'
+    --arg evidenceRoot "$evidence_root" \
+    '{projects:{before:$beforeProject,after:$afterProject},ports:{beforeApplication:$beforeAppPort,afterApplication:$afterAppPort},evidenceRoot:$evidenceRoot}'
   exit 0
 fi
 mkdir -p "$evidence_root"

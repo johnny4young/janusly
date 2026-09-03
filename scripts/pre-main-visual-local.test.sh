@@ -6,14 +6,16 @@ script="$root/scripts/pre-main-visual-local.sh"
 
 bash -n "$script"
 result=$(JANUSLY_VISUAL_RUN_ID=selftest-1 \
+  JANUSLY_EVIDENCE_DIR=output/qualification/selftest-visual \
   JANUSLY_VISUAL_BEFORE_PORT=37331 JANUSLY_VISUAL_AFTER_PORT=37332 \
   bash "$script" selftest)
 jq -e '
   .projects.before == "janusly-visual-before-selftest-1" and
   .projects.after == "janusly-visual-after-selftest-1" and
   .ports.beforeApplication == 37331 and
-  .ports.afterApplication == 37332
-' <<<"$result" >/dev/null
+  .ports.afterApplication == 37332 and
+  .evidenceRoot == $evidenceRoot
+' --arg evidenceRoot "$root/output/qualification/selftest-visual" <<<"$result" >/dev/null
 
 if JANUSLY_VISUAL_BEFORE_PROJECT=janusly-visual-before \
   bash "$script" selftest >/dev/null 2>&1; then
@@ -44,5 +46,6 @@ fi
 
 grep -F 'project_has_resources "$active_project"' "$script" >/dev/null
 grep -F 'if ((active_attempted))' "$script" >/dev/null
+grep -F 'validate_visual_evidence "$phase"' "$script" >/dev/null
 
 echo 'pre-main visual harness self-test passed'
