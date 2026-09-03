@@ -94,7 +94,9 @@ Usar credencial de API "pd-api-local" y credencial del webhook
 Then move through the four independent stages:
 
 1. **Intent Brief — Compile intent.** Review the objective, trigger, expected
-   outcome, failure policy, and at most three clarification questions. An
+   outcome, failure policy, and at most three clarification questions. Answer
+   any missing detail inline and choose **Use answers and compile again**;
+   Janusly appends only those bounded answers to the original intent. An
    incomplete brief cannot proceed.
 2. **Capability Binding.** Confirm both exact credential names resolve and
    that there are no binding blockers.
