@@ -42,7 +42,7 @@ import { tAiReviewIssue, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { BrandMark } from './BrandMark'
 import { Button } from './ui/Button'
-import { FormActions, FormDisclosure, FormField } from './ui/Form'
+import { FormActions, FormDisclosure, FormField, TextInput } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
 
 const ASSUMED_TOKEN_BUDGETS: Record<'proposal' | 'explain' | 'review' | 'fix', { input: number; output: number }> = {
@@ -54,6 +54,30 @@ const ASSUMED_TOKEN_BUDGETS: Record<'proposal' | 'explain' | 'review' | 'fix', {
 const MAX_PROPOSAL_INPUT_DEFAULTS = 12
 const MAX_PROPOSAL_INPUT_DEFAULT_CHARS = 240
 const MAX_AUTHORING_PROMPT_CHARS = 4000
+const MAX_CLARIFICATION_ANSWER_CHARS = 500
+
+function composeAuthoringPrompt(
+  prompt: string,
+  questions: string[],
+  answers: Record<number, string>,
+): string {
+  const base = prompt.trim()
+  const clarificationLines = questions.slice(0, 3).flatMap((question, index) => {
+    const answer = answers[index]?.trim()
+    if (!answer) return []
+    return [`Clarification ${index + 1}: ${question}`, `Answer: ${answer}`]
+  })
+  const baseRunes = Array.from(base)
+  if (clarificationLines.length === 0) {
+    return baseRunes.slice(0, MAX_AUTHORING_PROMPT_CHARS).join('')
+  }
+
+  const suffix = `\n\n${clarificationLines.join('\n')}`
+  const suffixRunes = Array.from(suffix)
+  const availableBaseChars = MAX_AUTHORING_PROMPT_CHARS - suffixRunes.length
+  if (availableBaseChars <= 0) return suffixRunes.slice(-MAX_AUTHORING_PROMPT_CHARS).join('')
+  return `${baseRunes.slice(0, availableBaseChars).join('')}${suffix}`
+}
 
 type AiStudioPanelProps = {
   health: AiHealth | null
@@ -167,6 +191,8 @@ export function AiStudioPanel({
   const [catalog, setCatalog] = useState<AuthoringCapabilityCatalog | null>(null)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [briefCompilation, setBriefCompilation] = useState<WorkflowBriefCompilation | null>(null)
+  const [clarificationAnswers, setClarificationAnswers] = useState<Record<number, string>>({})
+  const [compiledSourcePrompt, setCompiledSourcePrompt] = useState('')
   const [proposal, setProposal] = useState<WorkflowProposalResponse | null>(null)
   const [authoringError, setAuthoringError] = useState<string | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(true)
@@ -209,6 +235,8 @@ export function AiStudioPanel({
     proposalSourceRef.current = null
     setPrompt(primaryStarterPrompt)
     setBriefCompilation(null)
+    setClarificationAnswers({})
+    setCompiledSourcePrompt('')
     setProposal(null)
     setResult(null)
     setBriefCompileMs(null)
@@ -229,6 +257,8 @@ export function AiStudioPanel({
     authoringRequestRef.current += 1
     setPrompt(nextStarter)
     setBriefCompilation(null)
+    setClarificationAnswers({})
+    setCompiledSourcePrompt('')
     setProposal(null)
     setBriefCompileMs(null)
     setProposalBuildMs(null)
@@ -268,6 +298,8 @@ export function AiStudioPanel({
     setCurrentLoading(null)
     setResult(null)
     setProposal(null)
+    setClarificationAnswers({})
+    setCompiledSourcePrompt('')
     proposalSourceRef.current = null
     setAuthoringError(null)
     if (!isExpectedApply) setApplied(false)
@@ -342,13 +374,16 @@ export function AiStudioPanel({
   ], [health, locale, t])
 
   const compileBrief = async () => {
-    const trimmed = prompt.trim()
+    const questions = briefCompilation?.clarifyingQuestions.slice(0, 3) ?? []
+    const trimmed = composeAuthoringPrompt(prompt, questions, clarificationAnswers)
     if (!trimmed) return
     const requestID = ++authoringRequestRef.current
     const startedAt = performance.now()
     setAuthoringLoading('compile')
     setAuthoringError(null)
     setBriefCompilation(null)
+    setClarificationAnswers({})
+    setCompiledSourcePrompt('')
     setBriefCompileMs(null)
     setProposal(null)
     setProposalBuildMs(null)
@@ -357,6 +392,7 @@ export function AiStudioPanel({
       const compiled = await onCompileWorkflowBrief(trimmed)
       if (authoringRequestRef.current !== requestID) return
       setBriefCompilation(compiled)
+      setCompiledSourcePrompt(trimmed)
       setBriefCompileMs(Math.max(0, Math.round(performance.now() - startedAt)))
     } catch (error) {
       if (authoringRequestRef.current !== requestID) return
@@ -378,7 +414,11 @@ export function AiStudioPanel({
     setProposalBuildMs(null)
     setApplied(false)
     try {
-      const nextProposal = await onProposeWorkflow(briefCompilation.brief, catalog.version, prompt.trim())
+      const nextProposal = await onProposeWorkflow(
+        briefCompilation.brief,
+        catalog.version,
+        compiledSourcePrompt || prompt.trim(),
+      )
       if (authoringRequestRef.current !== requestID) return
       const current = useWorkflowStore.getState()
       if (current.currentWorkflowId !== sourceWorkflow.workflowId || current.workflowRevision !== sourceWorkflow.revision) return
@@ -535,6 +575,8 @@ export function AiStudioPanel({
         authoringRequestRef.current += 1
         setPrompt(prefill.slice(0, MAX_AUTHORING_PROMPT_CHARS))
         setBriefCompilation(null)
+        setClarificationAnswers({})
+        setCompiledSourcePrompt('')
         setProposal(null)
         setBriefCompileMs(null)
         setProposalBuildMs(null)
@@ -655,6 +697,8 @@ export function AiStudioPanel({
                 authoringRequestRef.current += 1
                 setPrompt(event.target.value)
                 setBriefCompilation(null)
+                setClarificationAnswers({})
+                setCompiledSourcePrompt('')
                 setProposal(null)
                 setBriefCompileMs(null)
                 setProposalBuildMs(null)
@@ -677,6 +721,8 @@ export function AiStudioPanel({
                 authoringRequestRef.current += 1
                 setPrompt(starter)
                 setBriefCompilation(null)
+                setClarificationAnswers({})
+                setCompiledSourcePrompt('')
                 setProposal(null)
                 setBriefCompileMs(null)
                 setProposalBuildMs(null)
@@ -716,10 +762,48 @@ export function AiStudioPanel({
                 title={t('aiStudio.brief.questions')}
                 description={(
                   <ol className="ai-brief-questions">
-                    {briefCompilation.clarifyingQuestions.slice(0, 3).map((question) => (
-                      <li key={question}>{question}</li>
+                    {briefCompilation.clarifyingQuestions.slice(0, 3).map((question, index) => (
+                      <li key={question} className="ai-brief-question">
+                        <span className="ai-brief-question__text">{question}</span>
+                        <label className="ai-brief-question__answer" htmlFor={`ai-brief-answer-${index}`}>
+                          <span className="ai-brief-question__answer-label">
+                            {t('aiStudio.brief.answerLabel', { number: index + 1 })}
+                          </span>
+                          <TextInput
+                            id={`ai-brief-answer-${index}`}
+                            className="ai-brief-answer"
+                            value={clarificationAnswers[index] ?? ''}
+                            maxLength={MAX_CLARIFICATION_ANSWER_CHARS}
+                            disabled={authoringLoading !== null}
+                            placeholder={t('aiStudio.brief.answerPlaceholder')}
+                            onChange={(event) => {
+                              setClarificationAnswers((current) => ({
+                                ...current,
+                                [index]: event.target.value,
+                              }))
+                            }}
+                          />
+                        </label>
+                      </li>
                     ))}
                   </ol>
+                )}
+                actions={(
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    leadingIcon={<RefreshCw size={15} />}
+                    loading={authoringLoading === 'compile'}
+                    loadingLabel={t('aiStudio.brief.compiling')}
+                    disabled={
+                      !briefCompilation.clarifyingQuestions.some((_, index) => (
+                        Boolean(clarificationAnswers[index]?.trim())
+                      )) || authoringLoading !== null
+                    }
+                    onClick={() => { void compileBrief() }}
+                  >
+                    {t('aiStudio.brief.recompile')}
+                  </Button>
                 )}
               />
             )}
