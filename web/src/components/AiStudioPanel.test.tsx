@@ -708,18 +708,24 @@ describe('<AiStudioPanel />', () => {
     expect(screen.getByLabelText('Business intent')).toHaveValue(
       'Starting now for one week, acknowledge PagerDuty incidents assigned to PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
     )
-    expect(screen.getByText(/Configure ANTHROPIC_API_KEY for the API and worker/i)).toBeInTheDocument()
-    expect(screen.getByText('Root .env has ANTHROPIC_API_KEY')).toBeInTheDocument()
+    expect(screen.getByText(/Set ANTHROPIC_API_KEY for the Janusly process/i)).toBeInTheDocument()
+    expect(screen.getByText('Anthropic key configured')).toBeInTheDocument()
+    expect(screen.getByText('Janusly process responding')).toBeInTheDocument()
+    expect(screen.getByText(/Janusly runs the API and workers in one process/)).toBeInTheDocument()
+    expect(screen.queryByText(/Restart both processes/)).not.toBeInTheDocument()
     expect(screen.queryByText(/OPENAI_API_KEY/i)).not.toBeInTheDocument()
 
     await act(async () => { await changeAppLanguage('es') })
-    expect(screen.getByText(/Configura ANTHROPIC_API_KEY para la API y el worker/i)).toBeInTheDocument()
-    expect(screen.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeInTheDocument()
+    expect(screen.getByText(/Configura ANTHROPIC_API_KEY para el proceso Janusly/i)).toBeInTheDocument()
+    expect(screen.getByText('Clave de Anthropic configurada')).toBeInTheDocument()
+    expect(screen.getByText('El proceso Janusly responde')).toBeInTheDocument()
+    expect(screen.getByText(/Janusly ejecuta la API y los workers en un solo proceso/)).toBeInTheDocument()
+    expect(screen.queryByText(/Reinicia ambos procesos/)).not.toBeInTheDocument()
     expect(screen.getAllByText('Brief de intención')).not.toHaveLength(0)
     expect(screen.getByLabelText('Intención de negocio')).toHaveValue(
       'Desde ahora y durante una semana, reconoce incidentes de PagerDuty asignados a PUSER1 fuera de 09:00–17:00 America/Bogota y aplázalos 12 horas como operator@example.com.',
     )
-    expect(screen.queryByText('Root .env has ANTHROPIC_API_KEY')).not.toBeInTheDocument()
+    expect(screen.queryByText('Anthropic key configured')).not.toBeInTheDocument()
   })
 })
 

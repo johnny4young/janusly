@@ -78,8 +78,8 @@ test('production OCI works without Anthropic and explains local mode in both loc
 
   const hero = page.locator('.ai-studio-hero')
   await expect(hero).toContainText('Local mode is active')
-  await expect(hero).toContainText('Configure ANTHROPIC_API_KEY for the API and worker')
-  await expect(page.getByText('Root .env has ANTHROPIC_API_KEY')).toBeVisible()
+  await expect(hero).toContainText('Set ANTHROPIC_API_KEY for the Janusly process')
+  await expect(page.getByText('Anthropic key configured')).toBeVisible()
   await page.locator('.ai-studio-prompt').fill('Create a flow with human approval before writing')
   const englishProposal = await buildWorkflowProposal(page)
   await expect(
@@ -94,8 +94,8 @@ test('production OCI works without Anthropic and explains local mode in both loc
   // already-open AI Studio surface.
   await changeLocale(page, 'es')
   await expect(hero).toContainText('Modo local activo')
-  await expect(hero).toContainText('Configura ANTHROPIC_API_KEY para la API y el worker')
-  await expect(page.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeVisible()
+  await expect(hero).toContainText('Configura ANTHROPIC_API_KEY para el proceso Janusly')
+  await expect(page.getByText('Clave de Anthropic configurada')).toBeVisible()
   await page.locator('.ai-studio-prompt').fill('Crea un flujo con aprobación humana antes de escribir')
   const spanishProposal = await buildWorkflowProposal(page, 'es')
   await expect(

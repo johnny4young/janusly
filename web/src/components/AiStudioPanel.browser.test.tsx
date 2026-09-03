@@ -123,10 +123,10 @@ describe('<AiStudioPanel /> provider guidance (browser)', () => {
   it('renders visible Anthropic guidance in English local mode', async () => {
     render(<AiStudioPanel {...panelProps()} />)
 
-    const detail = await screen.findByText(/Configure ANTHROPIC_API_KEY for the API and worker/i)
+    const detail = await screen.findByText(/Set ANTHROPIC_API_KEY for the Janusly process/i)
     expect(detail.getBoundingClientRect().height).toBeGreaterThan(0)
     expect(getComputedStyle(detail).display).not.toBe('none')
-    expect(screen.getByText('Root .env has ANTHROPIC_API_KEY')).toBeInTheDocument()
+    expect(screen.getByText('Anthropic key configured')).toBeInTheDocument()
     expect(screen.queryByText(/OPENAI_API_KEY/i)).not.toBeInTheDocument()
   })
 
@@ -134,10 +134,10 @@ describe('<AiStudioPanel /> provider guidance (browser)', () => {
     initI18n('es')
     render(<AiStudioPanel {...panelProps()} />)
 
-    const detail = await screen.findByText(/Configura ANTHROPIC_API_KEY para la API y el worker/i)
+    const detail = await screen.findByText(/Configura ANTHROPIC_API_KEY para el proceso Janusly/i)
     expect(detail.getBoundingClientRect().height).toBeGreaterThan(0)
     expect(getComputedStyle(detail).display).not.toBe('none')
-    expect(screen.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeInTheDocument()
+    expect(screen.getByText('Clave de Anthropic configurada')).toBeInTheDocument()
     expect(screen.queryByText(/OPENAI_API_KEY/i)).not.toBeInTheDocument()
   })
 

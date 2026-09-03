@@ -24,9 +24,9 @@ test('AI Studio local mode points operators to the supported Anthropic key in bo
 
   const englishHero = page.locator('.ai-studio-hero')
   await expect(englishHero).toContainText(
-    'Configure ANTHROPIC_API_KEY for the API and worker, then restart both.',
+    'Set ANTHROPIC_API_KEY for the Janusly process, then restart it.',
   )
-  await expect(page.getByText('Root .env has ANTHROPIC_API_KEY')).toBeVisible()
+  await expect(page.getByText('Anthropic key configured')).toBeVisible()
   await expect(page.getByText(/OPENAI_API_KEY/)).toHaveCount(0)
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
@@ -35,9 +35,9 @@ test('AI Studio local mode points operators to the supported Anthropic key in bo
 
   const spanishHero = page.locator('.ai-studio-hero')
   await expect(spanishHero).toContainText(
-    'Configura ANTHROPIC_API_KEY para la API y el worker y reinicia ambos.',
+    'Configura ANTHROPIC_API_KEY para el proceso Janusly y reinícialo.',
   )
-  await expect(page.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeVisible()
+  await expect(page.getByText('Clave de Anthropic configurada')).toBeVisible()
   await expect(page.getByText(/OPENAI_API_KEY/)).toHaveCount(0)
   expect(browserErrors).toEqual([])
 })
