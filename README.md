@@ -54,6 +54,11 @@ make dev
 Open <http://127.0.0.1:5173>. The Go API remains available at
 <http://127.0.0.1:3001>.
 
+Local PostgreSQL is published only at `127.0.0.1:15473`, not the shared default
+port `5432`. To choose another host port, run
+`make dev JANUSLY_POSTGRES_HOST_PORT=15474`; Make keeps Compose and its database
+URL aligned. Containers still connect to `postgres:5432` on their private network.
+
 Start with the
 [PagerDuty on-call assurance walkthrough](docs/demos/pagerduty-on-call-assurance.md)
 to exercise Janusly's provider-free intent compiler, exact capability binding,
@@ -105,7 +110,7 @@ See [local deployment](docs/local-deployment.md),
 The core process settings are:
 
 ```dotenv
-JANUSLY_DATABASE_URL=postgres://janusly:janusly-local@127.0.0.1:5432/janusly?sslmode=disable
+JANUSLY_DATABASE_URL=postgres://janusly:janusly-local@127.0.0.1:15473/janusly?sslmode=disable
 JANUSLY_ENV=development
 JANUSLY_PORT=3001
 JANUSLY_INTERNAL_HOST=127.0.0.1

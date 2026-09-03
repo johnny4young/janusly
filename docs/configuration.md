@@ -8,7 +8,7 @@ in `org_configs`; secrets never do.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `JANUSLY_DATABASE_URL` | local `janusly` PostgreSQL URL | PostgreSQL 18 connection string. |
+| `JANUSLY_DATABASE_URL` | local `janusly` PostgreSQL URL on `127.0.0.1:15473` | PostgreSQL 18 connection string. Containers use the private `postgres:5432` endpoint. |
 | `JANUSLY_ENV` | development | Set to `production` to enable the production security and readiness posture. |
 | `JANUSLY_PORT` | `3001` | Public API and React listener. |
 | `JANUSLY_INTERNAL_HOST` | `127.0.0.1` | Internal metrics listener; only loopback (`127.0.0.1`, `::1`) or wildcard (`0.0.0.0`, `::`) is accepted. |

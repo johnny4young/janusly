@@ -15,9 +15,33 @@ make dev
 - React development URL: <http://127.0.0.1:5173>
 - Go public URL: <http://127.0.0.1:3001>
 - internal metrics: <http://127.0.0.1:9464/metrics>
+- PostgreSQL from the host: `127.0.0.1:15473` (loopback only)
 
 Vite proxies API traffic to the Go listener. The production build does not use
 that proxy because the same Go process serves both surfaces.
+
+### Database port isolation
+
+The nonstandard host port avoids sharing PostgreSQL's default `5432` with
+other local projects. The container still listens on `5432`; the Janusly
+container connects to `postgres:5432`, not the host's published port.
+
+To override the host port, export `JANUSLY_POSTGRES_HOST_PORT` in your shell or
+pass it to Make consistently:
+
+```bash
+make dev JANUSLY_POSTGRES_HOST_PORT=15474
+```
+
+Make exports that value to Compose and derives `DB_URL` from it for the API,
+migrations and integration tests. An explicit `DB_URL` still takes precedence.
+For direct binary execution with a custom port, set `JANUSLY_DATABASE_URL`.
+Make's exported host port takes precedence over Compose's `.env` value; do not
+change only the Compose `.env` port when using Make.
+
+Changing a port recreates the database container but retains its named volume.
+It does not require `db-reset` and must not remove existing data. If the chosen
+port is occupied, select another override instead of stopping another project.
 
 ## Container deployment
 

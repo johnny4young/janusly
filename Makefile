@@ -1,8 +1,10 @@
 SHELL := /bin/bash
 
 COMPOSE_PROJECT_NAME ?= janusly
+JANUSLY_POSTGRES_HOST_PORT ?= 15473
+export JANUSLY_POSTGRES_HOST_PORT
 COMPOSE := docker compose -p $(COMPOSE_PROJECT_NAME)
-DB_URL ?= postgres://janusly:janusly-local@127.0.0.1:5432/janusly?sslmode=disable
+DB_URL ?= postgres://janusly:janusly-local@127.0.0.1:$(JANUSLY_POSTGRES_HOST_PORT)/janusly?sslmode=disable
 PNPM ?= pnpm --ignore-workspace
 IMAGE ?= janusly:local
 ARTIFACT_DIR ?= artifacts
@@ -77,6 +79,7 @@ vuln:
 	go tool govulncheck ./...
 
 test:
+	bash scripts/local-db-port.test.sh
 	go test -race ./...
 	cd web && $(PNPM) test && $(PNPM) test:scripts && $(PNPM) test:browser
 

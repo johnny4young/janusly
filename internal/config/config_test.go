@@ -31,13 +31,14 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Production {
 		t.Fatal("development defaults must not enable the production boot posture")
 	}
-	if !strings.Contains(cfg.DatabaseURL, "5432/janusly") {
+	if cfg.DatabaseURL != "postgres://janusly:janusly-local@127.0.0.1:15473/janusly" {
 		t.Fatalf("unexpected database default: %s", cfg.DatabaseURL)
 	}
 }
 
 func TestLoadOverrides(t *testing.T) {
 	cfg, err := Load(env(map[string]string{
+		"JANUSLY_DATABASE_URL":                   "postgres://operator:secret@db.example:6432/custom",
 		"JANUSLY_PORT":                           "4700",
 		"JANUSLY_INTERNAL_HOST":                  "0.0.0.0",
 		"JANUSLY_WORKER_CONCURRENCY":             "2",
@@ -48,6 +49,9 @@ func TestLoadOverrides(t *testing.T) {
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DatabaseURL != "postgres://operator:secret@db.example:6432/custom" {
+		t.Fatal("explicit database URL must override the local default")
 	}
 	if cfg.Port != 4700 || cfg.InternalHost != "0.0.0.0" || cfg.WorkerConcurrency != 2 || cfg.PollInterval != 500*time.Millisecond {
 		t.Fatalf("overrides not applied: %+v", cfg)

@@ -59,7 +59,7 @@ func IsProduction(getenv func(string) string) bool {
 }
 
 // defaultDatabaseURL matches the compose project in this directory.
-const defaultDatabaseURL = "postgres://janusly:janusly-local@127.0.0.1:5432/janusly"
+const defaultDatabaseURL = "postgres://janusly:janusly-local@127.0.0.1:15473/janusly"
 
 // Load reads configuration through getenv (nil means os.Getenv, injectable
 // for tests) and aggregates every violation into one error so a broken

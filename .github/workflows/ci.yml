@@ -54,6 +54,8 @@ jobs:
         run: test -z "$(find cmd internal e2e -name '*.go' -type f -exec gofmt -l {} +)"
       - name: Build
         run: go build ./...
+      - name: Local database port contract
+        run: bash scripts/local-db-port.test.sh
       - name: Generated contract and SQL
         run: |
           go tool sqlc generate

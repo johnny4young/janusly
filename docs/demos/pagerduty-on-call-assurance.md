@@ -165,7 +165,7 @@ For a focused developer rerun against an already fresh PostgreSQL 18 database:
 
 ```bash
 ANTHROPIC_API_KEY='' \
-JANUSLY_DATABASE_URL='postgres://janusly:janusly-local@127.0.0.1:5432/janusly?sslmode=disable' \
+JANUSLY_DATABASE_URL='postgres://janusly:janusly-local@127.0.0.1:15473/janusly?sslmode=disable' \
 go test -tags=integration -count=1 ./internal/httpapi \
   -run '^TestCompiledPagerDutyFlagshipVerifiesProviderOutcome$'
 ```
