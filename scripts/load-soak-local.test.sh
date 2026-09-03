@@ -5,6 +5,8 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 script="$root/scripts/load-soak-local.sh"
 
 bash -n "$script"
+docker compose -f "$root/docker-compose.yml" config --format json |
+  jq -e '.services.postgres.init == true' >/dev/null
 selftest=$(JANUSLY_LOAD_SELFTEST=1 "$script")
 jq -e '.passed == true and .budgets.queueSnapshots == true' <<<"$selftest" >/dev/null
 jq -e '(.queueObservability.phases | length) == 6' <<<"$selftest" >/dev/null

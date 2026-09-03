@@ -3,6 +3,10 @@ name: ${COMPOSE_PROJECT_NAME:-janusly}
 services:
   postgres:
     image: pgvector/pgvector:pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
+    # Keep Docker exec/healthcheck processes parented to an init process rather
+    # than the PostgreSQL postmaster. A timed-out pg_isready can otherwise be
+    # reaped by postgres as an unknown child with exit code 2, forcing recovery.
+    init: true
     environment:
       POSTGRES_USER: janusly
       POSTGRES_PASSWORD: janusly-local
