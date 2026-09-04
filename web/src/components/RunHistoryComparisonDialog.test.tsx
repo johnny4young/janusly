@@ -3,7 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { RunHistoryComparisonDialog } from './RunHistoryComparisonDialog'
 
-vi.mock('../api', () => ({ api: vi.fn() }))
+vi.mock('../api', () => {
+  const module = ({ api: vi.fn() })
+  return {
+    ...module,
+    // Typed reads route through contractApi; delegate to the same mock so the
+    // path-keyed expectations below keep working.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
+      options === undefined ? module.api(path) : module.api(path, options),
+  }
+})
 
 const selectedRun = {
   id: 'failed-run',

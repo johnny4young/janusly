@@ -14,7 +14,7 @@ import type {
   RunNode,
   RunSummary,
 } from '../types'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
 import { getMemoryPurgeCountdown } from '../memory-consent-status'
 import {
@@ -369,7 +369,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       orgId: resolvedOrgId,
       value: { brief: null, status: 'loading' },
     })
-    void api('/operations/brief')
+    void contractApi('GET /operations/brief', '/operations/brief', undefined)
       .then((payload) => {
         if (cancelled) return
         const brief = decodeOperatorBrief(payload)

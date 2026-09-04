@@ -27,7 +27,7 @@ import {
   type ActivityFeedItem,
   type ActivityFilter,
 } from '../activity-feed'
-import { api } from '../api'
+import { contractApi } from '../api'
 import { formatStatusLabel, getNodeLabel } from '../constants'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 import { useVirtualList } from '../hooks/useVirtualList'
@@ -284,9 +284,9 @@ export function ActivityWorkspace({
       return
     }
     const controller = new AbortController()
-    api(`/dlq?id=${encodeURIComponent(selection.id)}`, { signal: controller.signal })
+    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(selection.id)}`, undefined, { signal: controller.signal })
       .then(value => {
-        if (!controller.signal.aborted) setOffListRecovery(value as DeadLetter)
+        if (!controller.signal.aborted) setOffListRecovery(value as unknown as DeadLetter)
       })
       .catch(() => {
         if (!controller.signal.aborted) setOffListRecovery(null)

@@ -231,7 +231,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     if (!authority) return false
     try {
       const [data, { isWorkflowDefinition }] = await Promise.all([
-        api(`/workflows/latest?workflowId=${encodeURIComponent(id)}`) as Promise<{
+        contractApi('GET /workflows/latest', `/workflows/latest?workflowId=${encodeURIComponent(id)}`, undefined) as unknown as Promise<{
           id?: unknown
           workflowId?: unknown
           dagJson?: unknown

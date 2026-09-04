@@ -22,7 +22,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, Play, RefreshCcw, X } from 'lucide-react'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { RunComparisonView, type RunComparisonPayload } from './RunComparisonView'
 import { useT } from '../i18n'
@@ -110,7 +110,7 @@ export function ReplayLabDialog({
 
     const tick = async () => {
       try {
-        const result = await api(`/run?runId=${encodeURIComponent(replayingRunId)}`) as RunStatusPayload
+        const result = await contractApi('GET /run', `/run?runId=${encodeURIComponent(replayingRunId)}`, undefined) as unknown as RunStatusPayload
         if (cancelled || !aliveRef.current) return
         const status = result.run?.status
         if (!status) return

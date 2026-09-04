@@ -8,7 +8,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-import { api, downloadFromApi } from '../api'
+import { downloadFromApi, contractApi } from '../api'
 import { copyText } from '../clipboard'
 import { formatStatusLabel, getNodeLabel } from '../constants'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
@@ -132,14 +132,14 @@ export function ActivityRecoveryDetail({
     const controller = new AbortController()
     const summaryStatus = deadLetter.status
     setDetail({ id: deadLetter.id, kind: 'loading', summaryStatus, value: null })
-    api(`/dlq?id=${encodeURIComponent(deadLetter.id)}`, { signal: controller.signal })
+    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(deadLetter.id)}`, undefined, { signal: controller.signal })
       .then(value => {
         if (!controller.signal.aborted) {
           setDetail({
             id: deadLetter.id,
             kind: 'ready',
             summaryStatus,
-            value: value as DeadLetter,
+            value: value as unknown as DeadLetter,
           })
         }
       })

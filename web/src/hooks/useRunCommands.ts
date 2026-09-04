@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { requestRecoveryAllClearIfQueueEmpty } from '../components/recovery-all-clear-coordinator'
 import { formatStatusLabel } from '../constants'
 import { isRunRequestCurrent } from '../run-transition'
@@ -181,7 +181,7 @@ export function useRunCommands(
     setActivityRecoveryId(null)
     setActiveTab(targetTab ?? 'runs')
     try {
-      const data = await api(`/run?runId=${encodeURIComponent(id)}`) as RunResponse
+      const data = await contractApi('GET /run', `/run?runId=${encodeURIComponent(id)}`, undefined) as unknown as RunResponse
       if (!runTransitionGuard.isCurrent(requestId)) return
       setRunId(id)
       if (data.run) {
@@ -233,9 +233,7 @@ export function useRunCommands(
       generation: useWorkflowStore.getState().runTransitionGeneration,
     }
     try {
-      const data = await api(
-        `/run?runId=${encodeURIComponent(runId)}&eventsCursor=${encodeURIComponent(eventsCursor)}`,
-      ) as RunResponse
+      const data = await contractApi('GET /run', `/run?runId=${encodeURIComponent(runId)}&eventsCursor=${encodeURIComponent(eventsCursor)}`, undefined) as unknown as RunResponse
       if (!isRunRequestCurrent(context, useWorkflowStore.getState())) return
       addEvents(data.events ?? [])
       setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))

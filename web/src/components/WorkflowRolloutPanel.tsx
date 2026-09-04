@@ -9,7 +9,7 @@
 import { GitBranch } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { useConfirm } from './ConfirmDialog'
@@ -151,7 +151,7 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
     let cancelled = false
     setLoading(true)
     Promise.all([
-      api(`/workflows/versions?workflowId=${encodeURIComponent(workflowId)}`),
+      contractApi('GET /workflows/versions', `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}`, undefined),
       api(`/workflows/${encodeURIComponent(workflowId)}/rollout`),
     ]).then(([versionsPayload, rolloutPayload]) => {
       if (cancelled) return

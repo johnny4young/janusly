@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
 import { Button } from '@/components/ui/Button'
@@ -74,7 +74,7 @@ export function WorkflowSloPanel({ workflowId: explicit, readOnly = false }: Wor
     if (!workflowId) return
     let cancelled = false
     setLoading(true)
-    api(`/workflows/health?workflowId=${encodeURIComponent(workflowId)}`)
+    contractApi('GET /workflows/health', `/workflows/health?workflowId=${encodeURIComponent(workflowId)}`, undefined)
       .then((payload) => {
         if (cancelled) return
         const incoming = (payload as { slo?: { slo: WorkflowSlo } | null } | null)?.slo?.slo

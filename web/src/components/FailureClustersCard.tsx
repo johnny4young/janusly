@@ -19,7 +19,7 @@
 
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { parseFailureClusters } from '../lib/recovery-metrics-model'
 import type {
   ClusterCategory,
@@ -113,7 +113,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
           total: number
           capped: boolean
         }>,
-        api(`/dlq?id=${encodeURIComponent(representative.id)}`) as Promise<DeadLetter>,
+        contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(representative.id)}`, undefined) as unknown as Promise<DeadLetter>,
       ])
       let selectedDlq = dlqResp
       if (!membersResp.deadLetterIds.includes(representative.id)) {
@@ -126,7 +126,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
           setRecovery({ kind: 'error', signature: cluster.signature, message: t('clusters.noOpenMembers') })
           return
         }
-        selectedDlq = await api(`/dlq?id=${encodeURIComponent(fallback)}`) as DeadLetter
+        selectedDlq = await contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(fallback)}`, undefined) as unknown as DeadLetter
       }
       setRecovery({
         kind: 'open',
@@ -149,7 +149,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
     let cancelled = false
     setLoading(true)
     setError(null)
-    api('/dlq/clusters')
+    contractApi('GET /dlq/clusters', '/dlq/clusters', undefined)
       .then((payload) => {
         if (cancelled) return
         const parsed = parseFailureClusters(payload)

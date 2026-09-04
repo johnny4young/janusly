@@ -4,9 +4,18 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { RecoveryDeltaCard } from './RecoveryDeltaCard'
 
-vi.mock('../api', () => ({
+vi.mock('../api', () => {
+  const module = ({
   api: vi.fn(),
-}))
+})
+  return {
+    ...module,
+    // Typed reads route through contractApi; delegate to the same mock so the
+    // path-keyed expectations below keep working.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
+      options === undefined ? module.api(path) : module.api(path, options),
+  }
+})
 
 // RollbackConfirmDialog imports the real one which calls the api wrapper;
 // stub it out so we just assert it mounted with the expected props.

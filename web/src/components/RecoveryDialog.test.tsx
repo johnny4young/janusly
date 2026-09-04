@@ -4,9 +4,18 @@ import { api } from '../api'
 import { RecoveryDialog } from './RecoveryDialog'
 import type { DeadLetter } from './DeadLettersPanel'
 
-vi.mock('../api', () => ({
+vi.mock('../api', () => {
+  const module = ({
   api: vi.fn(),
-}))
+})
+  return {
+    ...module,
+    // Typed reads route through contractApi; delegate to the same mock so the
+    // path-keyed expectations below keep working.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
+      options === undefined ? module.api(path) : module.api(path, options),
+  }
+})
 // The similar-runs card owns its own suite; here it must not consume the
 // dialog's mockResolvedValueOnce chains with its semantic-search fetch.
 vi.mock('./recovery-dialog/SimilarRunsCard', () => ({ SimilarRunsCard: () => null }))

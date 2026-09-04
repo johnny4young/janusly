@@ -50,7 +50,7 @@ const ActivityWorkspace = lazy(() => import('./ActivityWorkspace').then((m) => (
 const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
 const RecoveryCasePanel = lazy(() => import('./RecoveryCasePanel').then((m) => ({ default: m.RecoveryCasePanel })))
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { workspaceDestinationForTab } from '../workspace-locations'
 import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
@@ -180,7 +180,7 @@ function RightPanelRouter(props: RightPanelProps) {
   const { authoring, catalog, execution, navigation } = props
   const can = (permission: string) => props.permissions === undefined || props.permissions.includes(permission)
   const loadRunUsage = useCallback((runId: string, signal: AbortSignal) =>
-    api(`/run/usage?runId=${encodeURIComponent(runId)}`, { signal }), [])
+    contractApi('GET /run/usage', `/run/usage?runId=${encodeURIComponent(runId)}`, undefined, { signal }), [])
   const replayDecision = useCallback((eventId: string, nodeId: string, signal: AbortSignal) => {
     if (!execution.activeRunId) return Promise.resolve(null)
     return api(`/causal?runId=${encodeURIComponent(execution.activeRunId)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })

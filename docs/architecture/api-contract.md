@@ -29,6 +29,16 @@ static parity gate crosses the browser call, real Go route, central
 authorization registry, OpenAPI, and generated request, response, and status
 maps.
 
+The manifest describes response envelopes exactly as the handlers serve them:
+`GET /v1/dlq/clusters` is an object with `clusters`, `totalSamples`, and
+`windowDays`, and `GET /v1/recovery/metrics` lists every metric key the
+handler emits. Both are checked against live responses by an integration
+test, so the generated TypeScript types stay trustworthy. On the browser side
+`scripts/check-raw-v1-reads.mjs` (part of `pnpm lint`) rejects a raw `api()`
+call on any `V1_READ_PATHS` entry outside the transport and `lib/` layers;
+typed reads go through `contractApi`, and a component that needs a narrower
+runtime shape than the contract type narrows it explicitly.
+
 Dynamic contracted reads participate in the same `/v1` lane. The browser path
 catalog matches `{parameter}` segments rather than only literal paths, and the
 Go parity test mirrors that matcher. `GET /v1/workflows/versions/{versionId}`

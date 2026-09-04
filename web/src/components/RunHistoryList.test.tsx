@@ -5,10 +5,19 @@ import { useWorkflowStore } from '../store'
 import type { RunSummary } from '../types'
 import { RunHistoryList } from './RunHistoryList'
 
-vi.mock('../api', () => ({
+vi.mock('../api', () => {
+  const module = ({
   api: vi.fn(),
   downloadFromApi: vi.fn(),
-}))
+})
+  return {
+    ...module,
+    // Typed reads route through contractApi; delegate to the same mock so the
+    // path-keyed expectations below keep working.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
+      options === undefined ? module.api(path) : module.api(path, options),
+  }
+})
 
 vi.mock('../hooks/useVirtualList', () => ({
   useVirtualList: ({ items }: { items: unknown[] }) => ({

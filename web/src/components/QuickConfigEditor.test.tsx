@@ -5,10 +5,19 @@ import { api } from '../api'
 import { initI18n } from '../i18n'
 import type { ToolSchema } from '../types'
 
-vi.mock('../api', () => ({
+vi.mock('../api', () => {
+  const module = ({
   api: vi.fn(),
   publicApiUrl: (path: string) => `http://localhost:7311${path}`,
-}))
+})
+  return {
+    ...module,
+    // Typed reads route through contractApi; delegate to the same mock so the
+    // path-keyed expectations below keep working.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
+      options === undefined ? module.api(path) : module.api(path, options),
+  }
+})
 vi.mock('./McpToolConfigField', () => ({
   McpToolConfigField: () => <section data-testid="mcp-tool-config" />,
 }))

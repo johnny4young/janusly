@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
@@ -133,7 +133,7 @@ export function VersionHistoryPanel() {
         return
       }
       try {
-        const data = await api(`/workflows/versions?workflowId=${encodeURIComponent(currentWorkflowId)}`)
+        const data = await contractApi('GET /workflows/versions', `/workflows/versions?workflowId=${encodeURIComponent(currentWorkflowId)}`, undefined)
         if (cancelled) return
         const rows = Array.isArray(data) ? (data as VersionRow[]) : []
         setVersions(rows)

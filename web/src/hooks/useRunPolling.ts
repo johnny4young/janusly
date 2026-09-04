@@ -22,7 +22,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react'
-import { api } from '../api'
+import { contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { isRunRequestCurrent } from '../run-transition'
@@ -83,7 +83,7 @@ export function useRunPolling(
     )
     let status: RunResponse
     try {
-      status = await api(`/status?runId=${encodeURIComponent(id)}`) as RunResponse
+      status = await contractApi('GET /status', `/status?runId=${encodeURIComponent(id)}`, undefined) as unknown as RunResponse
     } catch (error) {
       if (!isCurrentRequest()) return { discarded: true }
       throw error

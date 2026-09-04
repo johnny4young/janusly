@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api'
+import { contractApi } from '../api'
 import { parseMemoryConsentStatus, type MemoryConsentStatus } from '../memory-consent-status'
 import { useWorkflowStore } from '../store'
 
@@ -22,7 +22,7 @@ export function useMemoryConsentStatus(): {
     let cancelled = false
     setLoading(true)
     setUnavailableForOrg(null)
-    api('/memory/consent-status')
+    contractApi('GET /memory/consent-status', '/memory/consent-status', undefined)
       .then((payload) => {
         if (cancelled) return
         const parsed = parseMemoryConsentStatus(payload)

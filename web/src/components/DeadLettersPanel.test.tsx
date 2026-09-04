@@ -12,15 +12,24 @@ import { requestRecoveryQueueFocus } from './recovery-queue-focus-bus'
 // returns a { items, nextCursor, hasMore } keyset envelope. The default stub
 // returns an empty page; `dlqMock` simulates the server for filter/sort cases.
 // Supplementary recovery cards are deferred until the operator expands them.
-vi.mock('../api', () => ({
-  api: vi.fn(async (path?: unknown) => {
+vi.mock('../api', () => {
+  const module = ({
+  api: vi.fn(async (path?: unknown, _init?: RequestInit) => {
     if (typeof path !== 'string') return { items: [], clusters: [], runs: [], proposals: [] }
     if (path.startsWith('/dlq/counts')) return { total: 0, open: 0, replayed: 0, resolved: 0 }
     if (path.startsWith('/dlq/queue')) return { items: [] as DeadLetter[], nextCursor: null, hasMore: false }
     return { items: [], clusters: [], runs: [], proposals: [] }
   }),
   downloadFromApi: vi.fn(),
-}))
+})
+  return {
+    ...module,
+    // Typed reads route through contractApi; delegate to the same mock so the
+    // path-keyed expectations below keep working.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
+      options === undefined ? module.api(path) : module.api(path, options),
+  }
+})
 
 vi.mock('../clipboard', () => ({
   copyText: vi.fn(async () => true),

@@ -4,7 +4,16 @@ import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { BudgetSettingsPanel } from './BudgetSettingsPanel'
 
-vi.mock('../api', () => ({ api: vi.fn() }))
+vi.mock('../api', () => {
+  const module = ({ api: vi.fn() })
+  return {
+    ...module,
+    // Typed reads route through contractApi; delegate to the same mock so the
+    // path-keyed expectations below keep working.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
+      options === undefined ? module.api(path) : module.api(path, options),
+  }
+})
 
 const initialState = useWorkflowStore.getState()
 

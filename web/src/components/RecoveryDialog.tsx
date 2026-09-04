@@ -42,7 +42,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, Play, RefreshCcw, Sparkles, X } from 'lucide-react'
 import { normalizeErrorSignature } from '@/lib/error-signature'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './dead-letter-types'
 import { Trans, useT } from '../i18n'
@@ -265,7 +265,7 @@ export function RecoveryDialog({
         return
       }
       try {
-        const result = await api(`/run?runId=${encodeURIComponent(step.runId)}`) as RunStatusPayload
+        const result = await contractApi('GET /run', `/run?runId=${encodeURIComponent(step.runId)}`, undefined) as unknown as RunStatusPayload
         if (cancelled) return
         const status = result.run?.status
         if (!status || !TERMINAL_STATUSES.has(status)) {
@@ -431,7 +431,7 @@ export function RecoveryDialog({
     let preSaveBeforeSnapshot: PreSaveBeforeSnapshot | null = null
     if (targetWorkflowId) {
       try {
-        const snapshot = await api(`/workflows/health?workflowId=${encodeURIComponent(targetWorkflowId)}`) as {
+        const snapshot = await contractApi('GET /workflows/health', `/workflows/health?workflowId=${encodeURIComponent(targetWorkflowId)}`, undefined) as unknown as {
           score?: number
           status?: string
           signals?: { p95LatencyMs?: number | null; totalRuns?: number; totalCostUsd?: number }

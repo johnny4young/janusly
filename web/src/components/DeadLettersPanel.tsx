@@ -8,7 +8,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
-import { api, downloadFromApi } from '../api'
+import { api, downloadFromApi, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
@@ -293,9 +293,9 @@ export function DeadLettersPanel({
     }
     let cancelled = false
     setRequestedNotFound(false)
-    api(`/dlq?id=${encodeURIComponent(requestedId)}`)
+    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(requestedId)}`, undefined)
       .then((row) => {
-        if (!cancelled) setOffListSelected(row as DeadLetter)
+        if (!cancelled) setOffListSelected(row as unknown as DeadLetter)
       })
       .catch(() => {
         if (!cancelled) {
@@ -322,9 +322,9 @@ export function DeadLettersPanel({
     let cancelled = false
     setSelectedDetail(null)
     setShowSuspectDiff(false)
-    api(`/dlq?id=${encodeURIComponent(selectedRowId)}`)
+    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(selectedRowId)}`, undefined)
       .then((row) => {
-        if (!cancelled) setSelectedDetail(row as DeadLetter)
+        if (!cancelled) setSelectedDetail(row as unknown as DeadLetter)
       })
       .catch(() => {
         // Summary row keeps rendering — the detail blocks just stay lighter.

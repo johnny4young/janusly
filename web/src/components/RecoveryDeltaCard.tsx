@@ -27,7 +27,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, ArrowDownRight, ArrowUpRight, Minus, RotateCcw } from 'lucide-react'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 import type { WorkflowDefinition } from '../types'
@@ -124,7 +124,7 @@ export function RecoveryDeltaCard({
   const onOpenRollback = useCallback(async (priorVersionNumber: number) => {
     setRollback({ kind: 'fetching' })
     try {
-      const versions = await api(`/workflows/versions?workflowId=${encodeURIComponent(workflowId)}`) as Array<RollbackVersion>
+      const versions = await contractApi('GET /workflows/versions', `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}`, undefined) as unknown as Array<RollbackVersion>
       const current = versions.find((v) => v.version === afterVersion)
       const target = versions.find((v) => v.version === priorVersionNumber)
       if (!current || !target) {

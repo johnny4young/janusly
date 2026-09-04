@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Coins, Info, Save, ShieldAlert } from "lucide-react";
-import { api } from "../api";
+import { api, contractApi } from "../api";
 import { useWorkflowStore } from "../store";
 import { tApiError, useT } from "../i18n";
 import { Button } from "./ui/Button";
@@ -127,7 +127,7 @@ export function BudgetSettingsPanel() {
   // Load workflows for the per-workflow dropdown.
   useEffect(() => {
     let cancelled = false;
-    api("/workflows")
+    contractApi('GET /workflows', "/workflows", undefined)
       .then((payload) => {
         if (cancelled) return;
         const list = (Array.isArray(payload) ? payload : []) as WorkflowSummaryRow[];
