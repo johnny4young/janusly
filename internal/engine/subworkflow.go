@@ -406,9 +406,13 @@ func (e *Engine) settleParentOnChildSuccess(
 	if node.Status == "succeeded" && nodeState.Subworkflow.ChildRunID == childRunID {
 		latest, err := q.GetRunParentLink(ctx, parentRunID)
 		if err == nil && latest.Status == "running" {
-			_ = e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
+			// A failed repair is NOT settled: reporting it as such lets the
+			// reconciler clear the durable marker and strands the parent.
+			if err := e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
 				return e.scheduleDownstream(ctx, txq, events, parentRunID, eventNow())
-			})
+			}); err != nil {
+				return false
+			}
 		}
 		return true
 	}
@@ -480,10 +484,14 @@ func (e *Engine) settleParentOnChildFailure(
 	if node.Status == "failed" && nodeError.ChildRunID == childRunID {
 		latest, err := q.GetRunParentLink(ctx, parentRunID)
 		if err == nil && latest.Status == "running" {
-			_ = e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
+			// Same rule as the success path: an unapplied flip must keep the
+			// marker so the next lease retries it.
+			if err := e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
 				return e.flipRunTerminal(ctx, txq, events, parentRunID, "failed",
 					map[string]any{"reason": "subworkflow_failed", "childRunId": childRunID}, eventNow(), nil)
-			})
+			}); err != nil {
+				return false
+			}
 		}
 		return true
 	}
