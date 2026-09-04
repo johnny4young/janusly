@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 )
@@ -28,5 +29,16 @@ func TestPoolConfigRetainsConservativeFallbackSize(t *testing.T) {
 	}
 	if cfg.MaxConns != 10 {
 		t.Fatalf("MaxConns = %d, want 10", cfg.MaxConns)
+	}
+}
+
+func TestLogLevelFromEnvDefaultsToInfo(t *testing.T) {
+	for name, want := range map[string]slog.Level{
+		"": slog.LevelInfo, "debug": slog.LevelDebug, " WARN ": slog.LevelWarn,
+		"warning": slog.LevelWarn, "error": slog.LevelError, "verbose": slog.LevelInfo,
+	} {
+		if got := logLevelFromEnv(name); got != want {
+			t.Fatalf("%q: got %v, want %v", name, got, want)
+		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -53,8 +54,24 @@ func (role PoolRole) StatementTimeout() time.Duration {
 
 // NewLogger returns the process-wide structured logger: JSON on stdout, so
 // any log collector (or a human with jq) consumes it without configuration.
+// JANUSLY_LOG_LEVEL (debug, info, warn, error; default info) sets the floor.
 func NewLogger() *slog.Logger {
-	return slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevelFromEnv(os.Getenv("JANUSLY_LOG_LEVEL"))}))
+}
+
+// logLevelFromEnv maps the configured name to a level; anything unknown or
+// empty keeps info, so a typo can never silence the process.
+func logLevelFromEnv(name string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 // Connect opens a bounded pgx pool and verifies connectivity with one ping,

@@ -240,7 +240,9 @@ func newV1HandlerWithWorkOS(
 		}
 		return server.feedbackMemory.shutdown(ctx)
 	}
-	return WithBrowserHeaders(mux), shutdown, nil
+	// Browser headers resolve the request id first; the telemetry wrapper
+	// inside them records metrics, one server span and the access log line.
+	return WithBrowserHeaders(withRequestTelemetry(mux, options.Logger)), shutdown, nil
 }
 
 // mountAPIRoutes registers every API pattern without the SPA catch-all.
@@ -496,6 +498,7 @@ func userIDOrEmpty(identity *auth.Identity) string {
 // context, then applies the closed role/permission registry.
 func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		markRoutePattern(r)
 		requestID := requestIDFrom(r)
 		resolved, err := s.resolver.Resolve(r.Context(), r)
 		if err != nil {
