@@ -216,6 +216,7 @@ func newV1HandlerWithWorkOS(
 			runHub(serverCtx)
 		}()
 	}
+	server.routeAuthz = newRouteAuthz()
 	mux := http.NewServeMux()
 	server.mountAPIRoutes(mux)
 
@@ -240,6 +241,11 @@ func newV1HandlerWithWorkOS(
 // Tests can therefore ask the real ServeMux whether a browser call resolves;
 // the production handler mounts the static catch-all only after this method.
 func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
+	// Every mount owns its table: the constructor seeds it, and a bare
+	// server built by a test gets the same base rather than a nil-map panic.
+	if s.routeAuthz == nil {
+		s.routeAuthz = newRouteAuthz()
+	}
 	mux.HandleFunc("GET /healthz", healthzHandler)
 	mux.HandleFunc("GET /readyz", readyzHandler(readinessTimeout, s.pool.Ping))
 	// Public generated contract. Exact mux patterns win before the embedded
@@ -505,7 +511,7 @@ func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 		// Central authorization: the matched mux pattern indexes the
 		// annotated registry; role first, then permission — the
 		// reference dispatcher's order. Wire-aware rejection bodies.
-		if gate, gatedRoute := routeAuthz[r.Pattern]; gatedRoute {
+		if gate, gatedRoute := s.routeAuthz[r.Pattern]; gatedRoute {
 			if rejection := s.checkGate(r, rc, gate); rejection != nil {
 				if strings.HasPrefix(r.URL.Path, "/v1/") {
 					writeVersioned(w, rc.id, *rejection)

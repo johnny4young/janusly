@@ -13,6 +13,7 @@ package httpapi
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 
 	"github.com/johnny4young/janusly/internal/auth"
@@ -55,14 +56,21 @@ var optionalIdentityRoutes = map[string]bool{
 // pattern with the same gate is idempotent (harnesses build many
 // handlers per process); a CONFLICTING gate is a programming error.
 func (s *V1Server) route(mux *http.ServeMux, pattern string, gate routeGate, handler handlerFunc) {
-	if existing, present := routeAuthz[pattern]; present && existing != gate {
+	if existing, present := s.routeAuthz[pattern]; present && existing != gate {
 		panic(fmt.Sprintf("route %s registered twice with conflicting gates", pattern))
 	}
-	routeAuthz[pattern] = gate
+	s.routeAuthz[pattern] = gate
 	mux.HandleFunc(pattern, s.auth(handler))
 }
 
-var routeAuthz = map[string]routeGate{
+// newRouteAuthz is each server's own copy of the base table. route() extends
+// the copy, so building a second server while a first one is serving never
+// races on a shared map.
+func newRouteAuthz() map[string]routeGate {
+	return maps.Clone(baseRouteAuthz)
+}
+
+var baseRouteAuthz = map[string]routeGate{
 	// Workflows — version writes are editor + workflows.write.
 	"POST /v1/workflows/save":                {auth.RoleEditor, "workflows.write"},
 	"POST /workflows/save":                   {auth.RoleEditor, "workflows.write"},

@@ -90,7 +90,7 @@ type centralAuthRegistration struct {
 }
 
 func centralAuthForPattern(pattern string) (centralAuthRegistration, bool) {
-	if gate, ok := routeAuthz[pattern]; ok {
+	if gate, ok := mountedRouteAuthz()[pattern]; ok {
 		return centralAuthRegistration{kind: "gated", gate: gate}, true
 	}
 	if authOnlyRoutes[pattern] {

@@ -63,7 +63,8 @@ var mountedPattern = regexp.MustCompile(`mux\.Handle(?:Func)?\(\s*"(GET|POST|PUT
 func mountedV1Routes(t *testing.T) map[string]bool {
 	t.Helper()
 	mux := http.NewServeMux()
-	(&V1Server{}).mountAPIRoutes(mux)
+	server := &V1Server{routeAuthz: newRouteAuthz()}
+	server.mountAPIRoutes(mux)
 
 	// http.ServeMux exposes no pattern listing, so the mounted set is the
 	// UNION of two authoritative sources:
@@ -77,7 +78,7 @@ func mountedV1Routes(t *testing.T) map[string]bool {
 	//   - literal patterns in source, for the handful mounted straight through
 	//     mux.HandleFunc without a gate (they live in authOnlyRoutes instead).
 	routes := map[string]bool{}
-	for pattern := range routeAuthz {
+	for pattern := range server.routeAuthz {
 		if strings.HasPrefix(pattern, "GET /v1/") || strings.HasPrefix(pattern, "POST /v1/") ||
 			strings.HasPrefix(pattern, "PUT /v1/") || strings.HasPrefix(pattern, "PATCH /v1/") ||
 			strings.HasPrefix(pattern, "DELETE /v1/") {

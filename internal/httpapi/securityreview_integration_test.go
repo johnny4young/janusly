@@ -50,7 +50,7 @@ func TestRouteRegistrySweepAsEditor(t *testing.T) {
 		return text
 	}
 	visited := 0
-	for pattern, gate := range routeAuthz {
+	for pattern, gate := range mountedRouteAuthz() {
 		method, path := concrete(pattern)
 		visited++
 		if strings.Contains(path, "/stream") {
@@ -73,8 +73,8 @@ func TestRouteRegistrySweepAsEditor(t *testing.T) {
 			}
 		}
 	}
-	if visited != len(routeAuthz) {
-		t.Fatalf("sweep must cover the whole registry: %d of %d", visited, len(routeAuthz))
+	if visited != len(mountedRouteAuthz()) {
+		t.Fatalf("sweep must cover the whole registry: %d of %d", visited, len(mountedRouteAuthz()))
 	}
 }
 

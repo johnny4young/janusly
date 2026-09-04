@@ -38,8 +38,12 @@ func TestRouteRegistrySweepAsViewer(t *testing.T) {
 		return parts[0], path
 	}
 
+	// The table is per server; mount a bare one to enumerate every gated
+	// pattern, route()-registered ones included.
+	registry := &V1Server{routeAuthz: newRouteAuthz()}
+	registry.mountAPIRoutes(http.NewServeMux())
 	visited := 0
-	for pattern, gate := range routeAuthz {
+	for pattern, gate := range registry.routeAuthz {
 		method, path := concrete(pattern)
 		if strings.Contains(path, "/stream") {
 			// SSE holds the connection open; the gate is shared code and
@@ -89,8 +93,8 @@ func TestRouteRegistrySweepAsViewer(t *testing.T) {
 			t.Fatalf("%s: viewer read must pass the gates, got %d %+v", pattern, res.status, res.body)
 		}
 	}
-	if visited != len(routeAuthz) {
-		t.Fatalf("sweep must cover the whole registry: %d of %d", visited, len(routeAuthz))
+	if visited != len(registry.routeAuthz) {
+		t.Fatalf("sweep must cover the whole registry: %d of %d", visited, len(registry.routeAuthz))
 	}
 }
 
