@@ -255,7 +255,7 @@ func TestClaimPlanUsesFIFOQueueIndex(t *testing.T) {
 		FROM run_nodes rn
 		WHERE rn.status = 'queued'
 		  AND rn.enqueued_at <= now()
-		  AND EXISTS (SELECT 1 FROM runs r WHERE r.id = rn.run_id AND r.status = 'running')
+		  AND EXISTS (SELECT 1 FROM runs r WHERE r.id = rn.run_id AND (r.status = 'running') IS TRUE)
 		  AND NOT EXISTS (
 		    SELECT 1 FROM run_wakeups w
 		    WHERE w.run_node_id = rn.id AND w.wake_at > now()

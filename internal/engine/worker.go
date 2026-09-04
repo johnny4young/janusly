@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -58,10 +59,11 @@ func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Dura
 	// many nodes became claimable and that many workers wake, round-robin;
 	// SKIP LOCKED hands each a different node.
 	wakes := make([]chan struct{}, concurrency)
+	idle := make([]atomic.Bool, concurrency)
 	for i := range wakes {
 		wakes[i] = make(chan struct{}, 1)
 	}
-	wake := newWakeFanout(wakes)
+	wake := newWakeFanout(wakes, idle)
 
 	var listeners sync.WaitGroup
 	listeners.Go(func() {
@@ -78,10 +80,10 @@ func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Dura
 	})
 
 	var workers sync.WaitGroup
-	for _, ch := range wakes {
+	for i, ch := range wakes {
 		workers.Go(func() {
 			superviseLoop(ctx, "worker", logger, func() {
-				e.workerLoop(ctx, ch, poll, execute, logger)
+				e.workerLoop(ctx, ch, &idle[i], poll, execute, logger)
 			})
 		})
 	}
@@ -122,8 +124,8 @@ func superviseLoop(ctx context.Context, name string, logger *slog.Logger, loop f
 // workerLoop claims and executes one node at a time. Claimed work executes
 // on a context detached from cancellation so shutdown finishes what this
 // worker already owns.
-func (e *Engine) workerLoop(ctx context.Context, wake <-chan struct{}, poll time.Duration, execute ExecuteFunc, logger *slog.Logger) {
-	idle := 0
+func (e *Engine) workerLoop(ctx context.Context, wake <-chan struct{}, idle *atomic.Bool, poll time.Duration, execute ExecuteFunc, logger *slog.Logger) {
+	misses := 0
 	for {
 		if ctx.Err() != nil {
 			return
@@ -137,18 +139,24 @@ func (e *Engine) workerLoop(ctx context.Context, wake <-chan struct{}, poll time
 			claims = nil
 		}
 		if len(claims) == 0 {
-			idle++
+			misses++
+			// Idle is what the wake fan-out targets first: a token handed to
+			// a worker busy inside an executor would sit until that node
+			// finished, while an idle sibling could have claimed at once.
+			idle.Store(true)
 			select {
 			case <-wake:
 				// A notification means work exists: poll tightly again.
-				idle = 0
-			case <-time.After(idlePollInterval(poll, idle)):
+				misses = 0
+			case <-time.After(idlePollInterval(poll, misses)):
 			case <-ctx.Done():
+				idle.Store(false)
 				return
 			}
+			idle.Store(false)
 			continue
 		}
-		idle = 0
+		misses = 0
 		e.executeClaim(context.WithoutCancel(ctx), claims[0], execute, logger)
 	}
 }
@@ -395,28 +403,43 @@ func wakeCountFromPayload(payload string) int {
 	return 1
 }
 
-// newWakeFanout signals up to n distinct worker channels per call,
-// rotating the starting worker so consecutive wakes spread across the pool.
-// A channel that already holds a token counts as woken.
-func newWakeFanout(wakes []chan struct{}) func(int) {
+// newWakeFanout signals up to n distinct worker channels per call: idle
+// workers first, rotating the starting point so consecutive wakes spread
+// across the pool, then busy ones (their token is consumed when the
+// executor returns). A channel that already holds a token counts as woken.
+func newWakeFanout(wakes []chan struct{}, idle []atomic.Bool) func(int) {
 	var mu sync.Mutex
 	next := 0
+	signal := func(index int) {
+		select {
+		case wakes[index] <- struct{}{}:
+		default:
+		}
+	}
 	return func(n int) {
-		if n < 1 {
-			n = 1
+		if len(wakes) == 0 {
+			return
 		}
-		if n > len(wakes) {
-			n = len(wakes)
-		}
+		n = max(1, min(n, len(wakes)))
 		mu.Lock()
 		start := next
-		next = (next + n) % max(len(wakes), 1)
+		next = (next + n) % len(wakes)
 		mu.Unlock()
-		for i := range n {
-			ch := wakes[(start+i)%len(wakes)]
-			select {
-			case ch <- struct{}{}:
-			default:
+		remaining := n
+		for pass := range 2 {
+			for i := range len(wakes) {
+				if remaining == 0 {
+					return
+				}
+				index := (start + i) % len(wakes)
+				if pass == 0 && !idle[index].Load() {
+					continue
+				}
+				if pass == 1 && idle[index].Load() {
+					continue
+				}
+				signal(index)
+				remaining--
 			}
 		}
 	}

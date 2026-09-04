@@ -248,11 +248,15 @@ test('ai studio against Go: $0 fallback generate, save, run, approve', async ({ 
   await page.getByRole('button', { name: /Approve/ }).first().click()
   await expect(page.getByTestId('waiting-steps')).toBeHidden({ timeout: 20_000 })
 
-  // Backend truth: exactly one run for the org and it succeeded.
-  const runs = await request.get(`${API_URL}/v1/runs`, { headers: headers(orgId) })
-  const runsBody = await runs.json() as { data?: Array<{ status?: string }> }
-  const statuses = (runsBody.data ?? []).map((run) => run.status)
-  expect(statuses).toContain('succeeded')
+  // Backend truth: exactly one run for the org and it succeeded. The UI
+  // hides the waiting step on the resume; the terminal flip lands a moment
+  // later, so read until it does.
+  const statuses = async () => {
+    const runs = await request.get(`${API_URL}/v1/runs`, { headers: headers(orgId) })
+    const runsBody = await runs.json() as { data?: Array<{ status?: string }> }
+    return (runsBody.data ?? []).map((run) => run.status)
+  }
+  await expect.poll(statuses, { timeout: 15_000 }).toContain('succeeded')
 
   expect(pageErrors, `page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
 })
