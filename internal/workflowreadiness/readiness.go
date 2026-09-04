@@ -24,7 +24,7 @@ const CredentialRefCap = 50
 // consumer. Unknown tool names remain external through the registry's
 // fail-safe classification.
 func Options() domain.ReadinessOptions {
-	registry := executors.NewToolRegistry()
+	registry := executors.SharedToolRegistry()
 	return domain.ReadinessOptions{
 		IsWriteSideTool: func(tool string, _ map[string]any) bool {
 			return registry.IsWriteSide(tool)

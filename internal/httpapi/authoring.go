@@ -468,7 +468,7 @@ func proposalWorkflowReadiness(workflow *domain.Workflow, parseIssues []domain.I
 			NodeID: issue.NodeID, EdgeID: issue.EdgeID,
 		})
 	}
-	registry := executors.NewToolRegistry()
+	registry := executors.SharedToolRegistry()
 	readiness := domain.CheckWorkflowReadiness(workflow, domain.ReadinessOptions{
 		IsWriteSideTool: func(name string, _ map[string]any) bool { return registry.IsWriteSide(name) },
 		IsExternalTool:  registry.IsExternal,

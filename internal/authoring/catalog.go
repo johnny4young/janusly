@@ -97,13 +97,13 @@ type Builder struct {
 }
 
 func NewBuilder(pool *pgxpool.Pool, mcp McpCatalogSource) *Builder {
-	return &Builder{Pool: pool, MCP: mcp, Registry: executors.NewToolRegistry(), Now: time.Now}
+	return &Builder{Pool: pool, MCP: mcp, Registry: executors.SharedToolRegistry(), Now: time.Now}
 }
 
 func (b *Builder) Build(ctx context.Context, orgID string) Catalog {
 	registry := b.Registry
 	if registry == nil {
-		registry = executors.NewToolRegistry()
+		registry = executors.SharedToolRegistry()
 	}
 	now := time.Now()
 	if b.Now != nil {

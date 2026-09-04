@@ -377,7 +377,7 @@ func autoHealingCandidateNode(row store.ListOpenDeadLettersForHealingRow) (*doma
 }
 
 func autoHealingNodeEligible(node domain.Node) bool {
-	registry := executors.NewToolRegistry()
+	registry := executors.SharedToolRegistry()
 	opts := domain.ReadinessOptions{
 		IsWriteSideTool: func(name string, _ map[string]any) bool { return registry.IsWriteSide(name) },
 		IsExternalTool:  registry.IsExternal,

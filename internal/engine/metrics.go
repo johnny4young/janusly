@@ -6,6 +6,7 @@ package engine
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"time"
 
@@ -84,9 +85,13 @@ func (c *QueueDepthCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.des
 
 // Collect implements prometheus.Collector with a 5-second cache.
 func (c *QueueDepthCollector) Collect(ch chan<- prometheus.Metric) {
+	// Refresh outside the lock: a slow query must not stall every concurrent
+	// scrape for its full timeout. Racing scrapes may both refresh; the
+	// cache is advisory, not a consistency boundary.
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if time.Since(c.at) > 5*time.Second {
+	stale := time.Since(c.at) > 5*time.Second
+	c.mu.Unlock()
+	if stale {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		rows, err := c.pool.Query(ctx,
@@ -117,11 +122,17 @@ func (c *QueueDepthCollector) Collect(ch chan<- prometheus.Metric) {
 			// otherwise publish partial queue depths as authoritative for
 			// the next 5s, which reads as a queue that suddenly drained.
 			if rows.Err() == nil {
+				c.mu.Lock()
 				c.cache, c.at = fresh, time.Now()
+				c.mu.Unlock()
 			}
 		}
 	}
-	for state, value := range c.cache {
+	c.mu.Lock()
+	snapshot := make(map[string]float64, len(c.cache))
+	maps.Copy(snapshot, c.cache)
+	c.mu.Unlock()
+	for state, value := range snapshot {
 		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, value, state)
 	}
 }
@@ -158,15 +169,23 @@ func (c *WorkflowQueueCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements prometheus.Collector with a 5-second cache.
 func (c *WorkflowQueueCollector) Collect(ch chan<- prometheus.Metric) {
+	// Same posture as QueueDepthCollector: the query runs outside the lock so
+	// a slow scrape never blocks the others.
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if time.Since(c.at) > 5*time.Second {
+	stale := time.Since(c.at) > 5*time.Second
+	c.mu.Unlock()
+	if stale {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if row, err := store.New(c.pool).QueryQueueHealth(ctx); err == nil {
+			c.mu.Lock()
 			c.waiting, c.active, c.at = float64(row.Waiting), float64(row.Active), time.Now()
+			c.mu.Unlock()
 		}
 	}
-	ch <- prometheus.MustNewConstMetric(c.waitingDesc, prometheus.GaugeValue, c.waiting)
-	ch <- prometheus.MustNewConstMetric(c.activeDesc, prometheus.GaugeValue, c.active)
+	c.mu.Lock()
+	waiting, active := c.waiting, c.active
+	c.mu.Unlock()
+	ch <- prometheus.MustNewConstMetric(c.waitingDesc, prometheus.GaugeValue, waiting)
+	ch <- prometheus.MustNewConstMetric(c.activeDesc, prometheus.GaugeValue, active)
 }

@@ -24,7 +24,7 @@ func ValidateDraft(workflow *domain.Workflow) domain.ValidationResult {
 }
 
 func validate(workflow *domain.Workflow, allowIncompleteToolInputs bool) domain.ValidationResult {
-	registry := executors.NewToolRegistry()
+	registry := executors.SharedToolRegistry()
 	return domain.ValidateWithOptions(
 		workflow,
 		grammar.DomainValidator,

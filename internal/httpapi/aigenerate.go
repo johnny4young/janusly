@@ -666,7 +666,7 @@ func (s *V1Server) selectBestOfN(prompt string, n int, meta *generationMeta,
 	}
 
 	bestScore, bestIndex, validCount := -1, -1, 0
-	registry := executors.NewToolRegistry()
+	registry := executors.SharedToolRegistry()
 	for index, entry := range parsed {
 		if issues := validateGeneratedWorkflowCandidate(entry.raw); len(issues) > 0 {
 			continue // not a structurally valid graph — skip for scoring
