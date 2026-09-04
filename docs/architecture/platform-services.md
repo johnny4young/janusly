@@ -64,7 +64,8 @@ instances share one durable view. A store error keeps the documented fail-open
 traffic posture while emitting degradation evidence.
 
 Three request buckets sit in front of the most abusable entry points and share
-that same store: `POST /v1/start` at 120 per minute per organization,
+that same store: `POST /v1/start` at 30,000 per minute per organization by
+default (`JANUSLY_START_RATE_LIMIT_PER_MIN`; a runaway-client cap, not a quota),
 `GET /auth/sso/start` at 60 per minute per client address, and the
 unauthenticated `GET /public/status/{token}` at 60 per minute per client
 address. An exhausted bucket answers `429 rate_limited` with a `Retry-After`

@@ -10,6 +10,7 @@ import (
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -44,10 +45,29 @@ func limitedResult(err error) opResult {
 	return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 }
 
-var startRunLimit = ratelimit.Options{Name: "api:start", Max: 120, Window: time.Minute}
+// The start bucket is a runaway-client cap, not a quota: a healthy tenant
+// under load starts a few hundred runs a second, so the default sits well
+// above that and JANUSLY_START_RATE_LIMIT_PER_MIN tunes it per deployment.
+const defaultStartRateLimitPerMinute = 30000
+
+func startRateLimitFromEnv() int {
+	if raw := os.Getenv("JANUSLY_START_RATE_LIMIT_PER_MIN"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultStartRateLimitPerMinute
+}
+
+func startRateLimit(perMinute int) ratelimit.Options {
+	if perMinute <= 0 {
+		perMinute = startRateLimitFromEnv()
+	}
+	return ratelimit.Options{Name: "api:start", Max: perMinute, Window: time.Minute}
+}
 
 func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
-	if err := s.limiter.Enforce(r.Context(), rc.orgID, startRunLimit); err != nil {
+	if err := s.limiter.Enforce(r.Context(), rc.orgID, s.startRunLimit); err != nil {
 		return limitedResult(err)
 	}
 	var body struct {

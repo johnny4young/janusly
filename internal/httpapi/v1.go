@@ -77,6 +77,7 @@ type V1Server struct {
 	newID          func() string
 	hub            *streamHub
 	routeAuthz     map[string]routeGate
+	startRunLimit  ratelimit.Options
 	statusPages    statusPageCache
 	resolver       *auth.Resolver
 	authPolicy     *authpolicy.Evaluator
@@ -101,6 +102,9 @@ type V1ServerOptions struct {
 	// close like every other loop. nil (tests, ad-hoc handlers) falls back
 	// to an owned goroutine that shutdown joins.
 	Supervise func(name string, fn func(ctx context.Context))
+	// StartRateLimitPerMinute bounds POST /v1/start per organization; 0
+	// resolves JANUSLY_START_RATE_LIMIT_PER_MIN or the default.
+	StartRateLimitPerMinute int
 }
 
 // DefaultV1ServerOptions returns the production-safe bounded defaults.
@@ -110,6 +114,7 @@ func DefaultV1ServerOptions() V1ServerOptions {
 		FeedbackMemoryQueueCapacity: defaultFeedbackMemoryQueueCapacity,
 		FeedbackMemoryTaskTimeout:   defaultFeedbackMemoryTaskTimeout,
 		Logger:                      slog.Default(),
+		StartRateLimitPerMinute:     startRateLimitFromEnv(),
 	}
 }
 
@@ -217,6 +222,7 @@ func newV1HandlerWithWorkOS(
 		}()
 	}
 	server.routeAuthz = newRouteAuthz()
+	server.startRunLimit = startRateLimit(options.StartRateLimitPerMinute)
 	mux := http.NewServeMux()
 	server.mountAPIRoutes(mux)
 

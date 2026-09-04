@@ -67,8 +67,11 @@ func TestSsoStartIsRateLimitedPerIP(t *testing.T) {
 // before the request body is even parsed, so a flood of malformed starts
 // costs one counter bump each.
 func TestStartRunIsRateLimitedPerOrg(t *testing.T) {
-	h := newAPIHarnessWithoutWorkers(t)
-	for i := 0; i < startRunLimit.Max; i++ {
+	const perMinute = 5
+	options := DefaultV1ServerOptions()
+	options.StartRateLimitPerMinute = perMinute
+	h := newAPIHarnessWithOptions(t, false, options)
+	for i := 0; i < perMinute; i++ {
 		res := h.call("POST", "/v1/start", map[string]any{}, "")
 		if res.status == http.StatusTooManyRequests {
 			t.Fatalf("request %d tripped the limit early", i+1)
@@ -76,7 +79,7 @@ func TestStartRunIsRateLimitedPerOrg(t *testing.T) {
 	}
 	res := h.call("POST", "/v1/start", map[string]any{}, "")
 	if res.status != http.StatusTooManyRequests {
-		t.Fatalf("request %d: want 429, got %d: %v", startRunLimit.Max+1, res.status, res.body)
+		t.Fatalf("request %d: want 429, got %d: %v", perMinute+1, res.status, res.body)
 	}
 	if got := res.headers.Get("Retry-After"); got == "" {
 		t.Fatal("a limited start must tell the client when to retry")
