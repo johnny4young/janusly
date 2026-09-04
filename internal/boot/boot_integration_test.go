@@ -76,7 +76,7 @@ func TestPoolsCarrySessionLimitsPerRole(t *testing.T) {
 	defer cancel()
 	for role, want := range map[PoolRole]map[string]string{
 		PoolRoleAPI:    {"statement_timeout": "15s", "lock_timeout": "5s", "idle_in_transaction_session_timeout": "30s"},
-		PoolRoleWorker: {"statement_timeout": "1min", "lock_timeout": "5s", "idle_in_transaction_session_timeout": "30s"},
+		PoolRoleWorker: {"statement_timeout": "1min", "lock_timeout": "30s", "idle_in_transaction_session_timeout": "30s"},
 	} {
 		pool, err := Connect(ctx, runtimeDatabaseURL(t), 2, role)
 		if err != nil {

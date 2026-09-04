@@ -92,10 +92,19 @@ owned workers before PostgreSQL pools close.
 Both pools carry PostgreSQL session limits on every connection: a statement
 timeout of 15 seconds on the API pool and 60 seconds on the execution pool
 (whose batched retention deletes and index-backed sweeps legitimately run
-longer than any request), a 5-second lock timeout, and a 30-second
-idle-in-transaction timeout. A runaway statement therefore cancels on the
-server instead of holding a connection and its locks until the client gives
-up. The migration connection is separate and deliberately unbounded.
+longer than any request), a lock timeout of 5 seconds on the API pool and 30
+seconds on the execution pool (completion transactions serialize per run on
+an advisory lock, so a fan-in queues its siblings behind one another by
+design), and a 30-second idle-in-transaction timeout. A runaway statement
+therefore cancels on the server instead of holding a connection and its locks
+until the client gives up. The migration connection is separate and
+deliberately unbounded. When an outcome transaction (complete, fail, retry,
+waiting) is cancelled by a lock wait, loses a deadlock or serialization
+decision, or loses its connection, the worker replays it up to six times over
+roughly eight seconds — the transaction is a compare-and-swap on the node
+status, so a replay can never apply twice — and counts each replay in
+`janusly_outcome_persist_retries_total{op}`. Only a permanent error leaves the
+node `running` for the stalled-node reaper.
 
 Each process heartbeat uses one boot-unique instance identity. PostgreSQL keeps
 the detailed instance/build/concurrency rows for platform telemetry, while the

@@ -232,8 +232,9 @@ func (e *Engine) claimBatch(ctx context.Context, batch int32) ([]ClaimedNode, er
 }
 
 // executeClaim loads the run snapshot, dispatches the executor and commits
-// the outcome. A persistence error here leaves the row in `running` for the
-// stalled-node reaper — logged loudly, never swallowed silently.
+// the outcome. A transient persistence error is replayed within a short
+// budget (persistOutcome); a permanent one leaves the row in `running` for
+// the stalled-node reaper — logged loudly, never swallowed silently.
 func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute ExecuteFunc, logger *slog.Logger) {
 	q := store.New(e.pool)
 	run, err := q.GetRunExecution(ctx, claim.RunID)
@@ -266,7 +267,9 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 	output, execErr := runExecutor(ctx, claim, *node, wf, runInput, execute)
 	metricNodeExecution.WithLabelValues(node.Type).Observe(time.Since(executionStart).Seconds())
 	if execErr != nil {
-		if err := e.RetryOrFail(ctx, claim, *node, execErr); err != nil {
+		if err := e.persistOutcome(ctx, logger, "retry", claim, func() error {
+			return e.RetryOrFail(ctx, claim, *node, execErr)
+		}); err != nil {
 			logger.Error("retry-or-fail failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
 		}
 		// A failure may have flipped the run terminal — deliver any armed
@@ -275,17 +278,19 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 		return
 	}
 	if waiting, ok := output.(executors.Waiting); ok {
-		if err := e.MarkNodeWaiting(ctx, claim, waiting); err != nil {
+		if err := e.persistOutcome(ctx, logger, "waiting", claim, func() error {
+			return e.MarkNodeWaiting(ctx, claim, waiting)
+		}); err != nil {
 			logger.Error("mark waiting failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
 		}
 		return
 	}
-	var completionErr error
-	if router, ok := output.(RouterExecution); ok {
-		completionErr = e.CompleteRouterNode(ctx, claim, router)
-	} else {
-		completionErr = e.CompleteNode(ctx, claim, output)
-	}
+	completionErr := e.persistOutcome(ctx, logger, "complete", claim, func() error {
+		if router, ok := output.(RouterExecution); ok {
+			return e.CompleteRouterNode(ctx, claim, router)
+		}
+		return e.CompleteNode(ctx, claim, output)
+	})
 	if completionErr != nil {
 		logger.Error("complete node failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", completionErr)
 	}
@@ -316,7 +321,9 @@ func runExecutor(ctx context.Context, claim ClaimedNode, node domain.Node, wf *d
 }
 
 func (e *Engine) failClaim(ctx context.Context, claim ClaimedNode, cause error, logger *slog.Logger) {
-	if err := e.FailNode(ctx, claim, cause); err != nil {
+	if err := e.persistOutcome(ctx, logger, "fail", claim, func() error {
+		return e.FailNode(ctx, claim, cause)
+	}); err != nil {
 		logger.Error("fail node failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
 	}
 }

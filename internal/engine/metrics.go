@@ -34,6 +34,10 @@ var (
 		Name: "janusly_runs_terminal_total",
 		Help: "Run-level terminal transitions by status.",
 	}, []string{"status"})
+	metricPersistRetries = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "janusly_outcome_persist_retries_total",
+		Help: "Outcome transactions replayed after a transient database error, by operation.",
+	}, []string{"op"})
 	metricReapedNodes = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "janusly_reaped_nodes_total",
 		Help: "Stalled running nodes failed into the DLQ by the reaper.",

@@ -77,3 +77,11 @@ poll fallback; waking every worker made each start open a claim
 transaction per worker. The claim itself is a semi-join over the FIFO
 partial index, so a grown `runs` table cannot steer the planner into
 walking running runs first.
+
+Outcome transactions (complete, fail, retry, waiting) are compare-and-swap
+guarded, so a worker replays one that a lock wait cancelled, a deadlock or
+serialization decision lost, or a dropped connection interrupted — up to six
+attempts over roughly eight seconds, each counted in
+`janusly_outcome_persist_retries_total{op}`. A permanent error still leaves
+the node `running` for the stalled-node reaper; a transient one no longer
+does.

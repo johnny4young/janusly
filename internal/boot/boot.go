@@ -42,9 +42,23 @@ const (
 const (
 	apiStatementTimeout    = 15 * time.Second
 	workerStatementTimeout = 60 * time.Second
-	poolLockTimeout        = 5 * time.Second
-	poolIdleInTxTimeout    = 30 * time.Second
+	apiLockTimeout         = 5 * time.Second
+	// Completion transactions serialize per run on an advisory lock and
+	// share hot rows (routing stats, rate windows): a fan-in queues its
+	// siblings behind one another by design, and a checkpoint stall on the
+	// volume adds seconds to every waiter at once. Cancelling those waits at
+	// five seconds turned one stall into orphaned running nodes.
+	workerLockTimeout   = 30 * time.Second
+	poolIdleInTxTimeout = 30 * time.Second
 )
+
+// LockTimeout is the lock-wait bound a role's connections carry.
+func (role PoolRole) LockTimeout() time.Duration {
+	if role == PoolRoleWorker {
+		return workerLockTimeout
+	}
+	return apiLockTimeout
+}
 
 // StatementTimeout is the per-statement bound a role's connections carry.
 func (role PoolRole) StatementTimeout() time.Duration {
@@ -106,7 +120,7 @@ func poolConfig(databaseURL string, maxConns int, role PoolRole) (*pgxpool.Confi
 		cfg.ConnConfig.RuntimeParams = map[string]string{}
 	}
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = milliseconds(role.StatementTimeout())
-	cfg.ConnConfig.RuntimeParams["lock_timeout"] = milliseconds(poolLockTimeout)
+	cfg.ConnConfig.RuntimeParams["lock_timeout"] = milliseconds(role.LockTimeout())
 	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = milliseconds(poolIdleInTxTimeout)
 	// One client span per statement, named after the sqlc query. Attached
 	// only when tracing is configured: even a no-op span costs a context
