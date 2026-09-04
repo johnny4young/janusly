@@ -94,6 +94,11 @@ type V1ServerOptions struct {
 	FeedbackMemoryQueueCapacity int
 	FeedbackMemoryTaskTimeout   time.Duration
 	Logger                      *slog.Logger
+	// Supervise runs a named background loop under the process's sweep
+	// group, so the stream hub restarts on panic and drains before pools
+	// close like every other loop. nil (tests, ad-hoc handlers) falls back
+	// to an owned goroutine that shutdown joins.
+	Supervise func(name string, fn func(ctx context.Context))
 }
 
 // DefaultV1ServerOptions returns the production-safe bounded defaults.
@@ -177,20 +182,38 @@ func newV1HandlerWithWorkOS(
 	})
 	server.queueCache = &queueHealthCache{read: server.readQueueSnapshot}
 	server.mcp = mcpclient.New(pool, server.limiter)
-	go func() {
-		// The hub reconnects on connection loss itself; this recover only
-		// guards against a panic taking the whole process down — clients
-		// degrade to the poll fallback until the next (re)start.
-		for serverCtx.Err() == nil {
-			func() {
-				defer func() { _ = recover() }()
-				server.hub.listen(serverCtx, pool)
-			}()
-			if serverCtx.Err() == nil {
-				time.Sleep(time.Second)
+	// The hub reconnects on connection loss itself; supervision is what turns
+	// a panic into a logged restart instead of a silent degradation to the
+	// poll fallback, and what makes shutdown wait for the hijacked LISTEN
+	// connection to be released before the pool closes.
+	runHub := func(ctx context.Context) {
+		for ctx.Err() == nil && serverCtx.Err() == nil {
+			server.hub.listen(ctx, pool)
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
+				return
+			case <-serverCtx.Done():
+				return
 			}
 		}
-	}()
+	}
+	hubDone := make(chan struct{})
+	hubLogger := options.Logger
+	if options.Supervise != nil {
+		close(hubDone)
+		options.Supervise("stream-hub", runHub)
+	} else {
+		go func() {
+			defer close(hubDone)
+			defer func() {
+				if cause := recover(); cause != nil && hubLogger != nil {
+					hubLogger.Error("stream hub panic recovered", "panic", cause)
+				}
+			}()
+			runHub(serverCtx)
+		}()
+	}
 	mux := http.NewServeMux()
 	server.mountAPIRoutes(mux)
 
@@ -200,6 +223,12 @@ func newV1HandlerWithWorkOS(
 	mux.Handle("GET /", webdist.Handler())
 	shutdown := func(ctx context.Context) error {
 		cancelServer()
+		// Join the unsupervised hub (supervised ones drain with the runner).
+		select {
+		case <-hubDone:
+		case <-ctx.Done():
+			return fmt.Errorf("stream hub did not stop before shutdown deadline: %w", ctx.Err())
+		}
 		return server.feedbackMemory.shutdown(ctx)
 	}
 	return WithBrowserHeaders(mux), shutdown, nil

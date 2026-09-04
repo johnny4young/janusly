@@ -292,6 +292,7 @@ func run() error {
 		FeedbackMemoryQueueCapacity: cfg.FeedbackMemoryQueueCapacity,
 		FeedbackMemoryTaskTimeout:   cfg.FeedbackMemoryTaskTimeout,
 		Logger:                      logger,
+		Supervise:                   runner.Go,
 	})
 	if err != nil {
 		return err
