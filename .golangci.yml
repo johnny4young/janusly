@@ -3,8 +3,10 @@ version: "2"
 linters:
   default: standard
   enable:
+    - bodyclose
     - depguard
     - modernize
+    - rowserrcheck
   exclusions:
     rules:
       # The grammar package ports the contract evaluator's error messages

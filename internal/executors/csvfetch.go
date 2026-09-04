@@ -189,7 +189,7 @@ func executeCsvFetch(ctx context.Context, input map[string]any) (map[string]any,
 		config["headers"] = headers
 	}
 	executor := &httpExecutor{opts: normalizeHTTPOptions(HTTPOptions{})}
-	res, cleanup, err := executor.openStream(ctx, Input{Config: config, Context: map[string]any{}})
+	res, cleanup, err := executor.openStream(ctx, Input{Config: config, Context: map[string]any{}}) //nolint:bodyclose // res.Body is closed by cleanup(), deferred below
 	if err != nil {
 		// Pre-stream rejection: uniform envelope, statusCode 0, scrubbed.
 		return map[string]any{
