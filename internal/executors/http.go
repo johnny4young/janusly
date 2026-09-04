@@ -315,31 +315,9 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (result any, execE
 
 	transport := e.newTransport(pins)
 	client := &http.Client{
-		Transport: transport,
-		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) > maxRedirects {
-				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // contract message is the wire contract
-			}
-			// Every hop revalidates and re-pins — a 302 to the metadata
-			// endpoint dies here, not at the socket.
-			if _, err := e.validate(req.Context(), req.URL.String(), pins); err != nil {
-				return err
-			}
-			// Fetch-spec credential stripping, ORIGIN-based like the
-			// contract's manual hops: Go's own redirect logic compares
-			// DOMAINS (same host or subdomain keeps Authorization/Cookie on
-			// any port, and never touches Proxy-Authorization) — so a
-			// redirect to the same host on another port, a scheme
-			// downgrade, or a subdomain hop would forward the credential.
-			// Same-origin hops keep their headers.
-			if !sameOrigin(via[len(via)-1].URL, req.URL) {
-				for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie"} {
-					req.Header.Del(name)
-				}
-			}
-			return nil
-		},
+		Transport:     transport,
+		Timeout:       time.Duration(timeoutMs) * time.Millisecond,
+		CheckRedirect: e.redirectPolicy(pins, maxRedirects, false),
 	}
 	defer transport.CloseIdleConnections()
 
@@ -519,6 +497,42 @@ func NewPinnedHTTPClient(ctx context.Context, rawURL string, opts HTTPOptions) (
 		return nil, err
 	}
 	return &http.Client{Transport: executor.newTransport(pins)}, nil
+}
+
+// redirectPolicy is the ONE CheckRedirect every outbound client shares — the
+// SSRF posture on redirects must not diverge between the http node, fetch,
+// and csv fetch, so it lives in one place:
+//
+//   - a hop budget;
+//   - every hop revalidates and re-pins — a 302 to the metadata endpoint
+//     dies here, not at the socket;
+//   - fetch-spec credential stripping, ORIGIN-based like the contract's
+//     manual hops. Go's own redirect logic compares DOMAINS (same host or
+//     subdomain keeps Authorization/Cookie on any port, and never touches
+//     Proxy-Authorization), so a same-host port change, a scheme downgrade,
+//     or a subdomain hop would otherwise forward the credential. Same-origin
+//     hops keep their headers.
+//
+// disableRedirects hands the first response back untouched, for
+// credential-bearing fixed-endpoint calls that must never follow a hop.
+func (e *httpExecutor) redirectPolicy(pins *pinnedDialer, maxRedirects int, disableRedirects bool) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if disableRedirects {
+			return http.ErrUseLastResponse
+		}
+		if len(via) > maxRedirects {
+			return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // contract message is the wire contract
+		}
+		if _, err := e.validate(req.Context(), req.URL.String(), pins); err != nil {
+			return err
+		}
+		if !sameOrigin(via[len(via)-1].URL, req.URL) {
+			for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie"} {
+				req.Header.Del(name)
+			}
+		}
+		return nil
+	}
 }
 
 // newTransport builds the per-request transport with the pinned dialer

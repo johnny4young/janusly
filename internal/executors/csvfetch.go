@@ -362,22 +362,9 @@ func (e *httpExecutor) openStream(ctx context.Context, in Input) (*http.Response
 	}
 	transport := e.newTransport(pins)
 	client := &http.Client{
-		Transport: transport,
-		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) > maxRedirects {
-				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // contract message is the wire contract
-			}
-			if _, err := e.validate(req.Context(), req.URL.String(), pins); err != nil {
-				return err
-			}
-			if !sameOrigin(via[len(via)-1].URL, req.URL) {
-				for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie"} {
-					req.Header.Del(name)
-				}
-			}
-			return nil
-		},
+		Transport:     transport,
+		Timeout:       time.Duration(timeoutMs) * time.Millisecond,
+		CheckRedirect: e.redirectPolicy(pins, maxRedirects, false),
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {

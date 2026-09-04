@@ -82,25 +82,9 @@ func FetchHTTPTarget(ctx context.Context, rawURL string, opts FetchOptions) (Fet
 	}
 	transport := executor.newTransport(pins)
 	client := &http.Client{
-		Transport: transport,
-		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if opts.DisableRedirects {
-				return http.ErrUseLastResponse
-			}
-			if len(via) > maxRedirects {
-				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // contract message is the wire contract
-			}
-			if _, err := executor.validate(req.Context(), req.URL.String(), pins); err != nil {
-				return err
-			}
-			if !sameOrigin(via[len(via)-1].URL, req.URL) {
-				for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie"} {
-					req.Header.Del(name)
-				}
-			}
-			return nil
-		},
+		Transport:     transport,
+		Timeout:       time.Duration(timeoutMs) * time.Millisecond,
+		CheckRedirect: executor.redirectPolicy(pins, maxRedirects, opts.DisableRedirects),
 	}
 	defer transport.CloseIdleConnections()
 
