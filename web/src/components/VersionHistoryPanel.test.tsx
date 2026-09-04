@@ -100,6 +100,30 @@ describe('<VersionHistoryPanel />', () => {
     expect(screen.getByText(/1 node.*changed/i)).toBeInTheDocument()
   })
 
+  it('loads older versions below the oldest row shown', async () => {
+    const page = (from: number, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        id: `v${from - index}`, version: from - index, dagJson: makeWorkflow(`https://example.test/${from - index}`),
+      }))
+    vi.mocked(api).mockImplementation(async (path) => {
+      const url = new URL(path, 'http://localhost')
+      if (!url.pathname.startsWith('/workflows/versions')) throw new Error(`Unexpected API call: ${path}`)
+      const before = url.searchParams.get('beforeVersion')
+      return before ? page(Number(before) - 1, 3) : page(60, 50)
+    })
+    setPermissions(['workflows.read', 'workflows.write', 'ai.write'])
+    render(<VersionHistoryPanel />)
+    // Text queries: role queries over 50 rows exceed the default wait.
+    await screen.findByText('v60')
+    expect(screen.queryByText('v10')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('version-history-load-more'))
+    await screen.findByText('v8')
+    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'))
+    // A short page means the history is exhausted.
+    expect(screen.queryByTestId('version-history-load-more')).toBeNull()
+  })
+
   it('does not request version history for an unsaved workflow draft', async () => {
     vi.mocked(api).mockResolvedValue([])
     useWorkflowStore.setState({

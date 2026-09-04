@@ -1842,12 +1842,18 @@ const listWorkflowVersions = `-- name: ListWorkflowVersions :many
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
 FROM workflow_versions
 WHERE workflow_id = $1 AND org_id = $2
+  AND ($3::int IS NULL OR version < $3::int)
+  AND ($4::int IS NULL OR version = $4::int)
 ORDER BY version DESC
+LIMIT $5
 `
 
 type ListWorkflowVersionsParams struct {
-	WorkflowID string
-	OrgID      string
+	WorkflowID    string
+	OrgID         string
+	BeforeVersion pgtype.Int4
+	ExactVersion  pgtype.Int4
+	PageLimit     int32
 }
 
 type ListWorkflowVersionsRow struct {
@@ -1860,8 +1866,17 @@ type ListWorkflowVersionsRow struct {
 	CreatedAt  *time.Time
 }
 
+// Keyset page over a workflow's history, newest first. dag_json stays in the
+// row: the version panel restores, compares and diffs from this list. An
+// exact version pins one row for callers that know which one they need.
 func (q *Queries) ListWorkflowVersions(ctx context.Context, arg ListWorkflowVersionsParams) ([]ListWorkflowVersionsRow, error) {
-	rows, err := q.db.Query(ctx, listWorkflowVersions, arg.WorkflowID, arg.OrgID)
+	rows, err := q.db.Query(ctx, listWorkflowVersions,
+		arg.WorkflowID,
+		arg.OrgID,
+		arg.BeforeVersion,
+		arg.ExactVersion,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

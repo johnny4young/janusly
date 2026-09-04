@@ -61,11 +61,17 @@ WHERE w.org_id = $1 AND w.deleted_at IS NULL
 ORDER BY w.created_at DESC, w.id DESC
 LIMIT sqlc.arg(page_limit);
 
+-- Keyset page over a workflow's history, newest first. dag_json stays in the
+-- row: the version panel restores, compares and diffs from this list. An
+-- exact version pins one row for callers that know which one they need.
 -- name: ListWorkflowVersions :many
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
 FROM workflow_versions
 WHERE workflow_id = $1 AND org_id = $2
-ORDER BY version DESC;
+  AND (sqlc.narg(before_version)::int IS NULL OR version < sqlc.narg(before_version)::int)
+  AND (sqlc.narg(exact_version)::int IS NULL OR version = sqlc.narg(exact_version)::int)
+ORDER BY version DESC
+LIMIT sqlc.arg(page_limit);
 
 -- name: SoftDeleteWorkflow :execrows
 UPDATE workflows SET deleted_at = now()

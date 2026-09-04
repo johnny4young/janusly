@@ -214,7 +214,8 @@ describe('<RecoveryDeltaCard />', () => {
       { id: 'v-after', version: 2, dagJson: { dslVersion: '1.0', nodes: [], edges: [] } },
       { id: 'v-before', version: 1, dagJson: { dslVersion: '1.0', nodes: [], edges: [] } },
     ]
-    vi.mocked(api).mockResolvedValueOnce(versionsResponse)
+    // The card pins each version with its own exact-version read.
+    vi.mocked(api).mockResolvedValueOnce(versionsResponse).mockResolvedValueOnce(versionsResponse)
 
     render(<RecoveryDeltaCard {...baseProps} />)
     await waitFor(() => screen.getByRole('button', { name: /Roll back to v1/i }))

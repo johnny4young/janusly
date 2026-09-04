@@ -124,9 +124,11 @@ export function RecoveryDeltaCard({
   const onOpenRollback = useCallback(async (priorVersionNumber: number) => {
     setRollback({ kind: 'fetching' })
     try {
-      const versions = await contractApi('GET /workflows/versions', `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}`, undefined) as unknown as Array<RollbackVersion>
-      const current = versions.find((v) => v.version === afterVersion)
-      const target = versions.find((v) => v.version === priorVersionNumber)
+      const exact = (version: number) =>
+        contractApi('GET /workflows/versions', `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}&version=${version}`, undefined) as unknown as Promise<Array<RollbackVersion>>
+      const [currentRows, targetRows] = await Promise.all([exact(afterVersion), exact(priorVersionNumber)])
+      const current = currentRows.find((v) => v.version === afterVersion)
+      const target = targetRows.find((v) => v.version === priorVersionNumber)
       if (!current || !target) {
         setRollback({ kind: 'error', message: t('recoveryDelta.errorBothVersions') })
         return

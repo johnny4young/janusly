@@ -1608,6 +1608,7 @@
   "dlq.suspectVersion.versionLabel": "v{{version}}",
   "dlq.detail.show": "Show {{title}}",
   "dlq.detail.hide": "Hide {{title}}",
+  "versionHistory.loadMore": "Load older versions",
   "versionHistory.heading": "Version History",
   "versionHistory.compare": "Compare",
   "versionHistory.cancelCompare": "Cancel",

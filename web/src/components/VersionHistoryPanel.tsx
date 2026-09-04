@@ -12,7 +12,7 @@
  * Used by `RightPanel.tsx` (Inspector tab → version history).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
 import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
@@ -66,6 +66,16 @@ type ImprovementState =
     }
   | { kind: 'fallback'; aiError: string }
 
+// The history is a keyset page, newest first; the next page starts below
+// the oldest version already shown.
+const VERSIONS_PAGE_SIZE = 50
+
+function versionsPagePath(workflowId: string, beforeVersion?: number): string {
+  const params = new URLSearchParams({ workflowId, limit: String(VERSIONS_PAGE_SIZE) })
+  if (beforeVersion !== undefined) params.set('beforeVersion', String(beforeVersion))
+  return `/workflows/versions?${params.toString()}`
+}
+
 const APPROACH_KEYS: Record<string, string> = {
   add_retry: 'versionHistory.approach.add_retry',
   raise_timeout: 'versionHistory.approach.raise_timeout',
@@ -92,6 +102,8 @@ export function VersionHistoryPanel() {
   const addToast = useWorkflowStore(state => state.addToast)
   const platformVersion = useWorkflowStore(state => state.platformVersion)
   const [versions, setVersions] = useState<VersionRow[]>([])
+  const [hasMoreVersions, setHasMoreVersions] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [compareMode, setCompareMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   // Snapshot the (current, target) ids at the moment the operator clicks
@@ -118,6 +130,7 @@ export function VersionHistoryPanel() {
   useEffect(() => {
     suggestCancelRef.current = true
     setVersions([])
+    setHasMoreVersions(false)
     setSelectedIds([])
     setCompareMode(false)
     setRollbackPair(null)
@@ -133,10 +146,11 @@ export function VersionHistoryPanel() {
         return
       }
       try {
-        const data = await contractApi('GET /workflows/versions', `/workflows/versions?workflowId=${encodeURIComponent(currentWorkflowId)}`, undefined)
+        const data = await contractApi('GET /workflows/versions', versionsPagePath(currentWorkflowId), undefined)
         if (cancelled) return
         const rows = Array.isArray(data) ? (data as VersionRow[]) : []
         setVersions(rows)
+        setHasMoreVersions(rows.length >= VERSIONS_PAGE_SIZE)
         setSelectedIds((prev) => prev.filter((id) => rows.some((version) => version.id === id)))
         if (rows.length < 2) setCompareMode(false)
       } catch (error) {
@@ -197,6 +211,22 @@ export function VersionHistoryPanel() {
       return next.length <= 2 ? next : next.slice(-2)
     })
   }
+
+  const onLoadMoreVersions = useCallback(async () => {
+    if (!currentWorkflowId || loadingMore || versions.length === 0) return
+    const oldest = versions[versions.length - 1].version
+    setLoadingMore(true)
+    try {
+      const data = await contractApi('GET /workflows/versions', versionsPagePath(currentWorkflowId, oldest), undefined)
+      const rows = Array.isArray(data) ? (data as VersionRow[]) : []
+      setVersions((prev) => [...prev, ...rows.filter((row) => !prev.some((known) => known.id === row.id))])
+      setHasMoreVersions(rows.length >= VERSIONS_PAGE_SIZE)
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : t('versionHistory.loadFailed'), 'error')
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [currentWorkflowId, loadingMore, versions, addToast, t])
 
   const onToggleCompare = () => {
     setCompareMode((prev) => {
@@ -345,6 +375,17 @@ export function VersionHistoryPanel() {
           </div>
         )
       })}
+      {hasMoreVersions && (
+        <button
+          type="button"
+          className="small-command"
+          onClick={onLoadMoreVersions}
+          disabled={loadingMore}
+          data-testid="version-history-load-more"
+        >
+          {t('versionHistory.loadMore')}
+        </button>
+      )}
 
       {compareMode && comparePair && (
         <WorkflowDiffView

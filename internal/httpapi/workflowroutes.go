@@ -297,6 +297,14 @@ func (s *V1Server) latestWorkflowVersionCore(r *http.Request, rc v1Request) opRe
 		row.DagJson, row.CreatedBy, row.CreatedAt))
 }
 
+// A workflow's history used to come back whole, every dag_json included.
+// The list is now a keyset page (newest first, `beforeVersion` cursor,
+// `limit` up to 200) and `version` pins one exact row.
+const (
+	workflowVersionsPageDefault = 50
+	workflowVersionsPageMax     = 200
+)
+
 func (s *V1Server) listWorkflowVersions(w http.ResponseWriter, r *http.Request, rc v1Request) {
 	writeVersioned(w, rc.id, s.listWorkflowVersionsCore(r, rc))
 }
@@ -306,9 +314,26 @@ func (s *V1Server) listWorkflowVersionsCore(r *http.Request, rc v1Request) opRes
 	if rejection != nil {
 		return *rejection
 	}
-	rows, err := store.New(s.pool).ListWorkflowVersions(r.Context(), store.ListWorkflowVersionsParams{
-		WorkflowID: workflowID, OrgID: rc.orgID,
-	})
+	params := store.ListWorkflowVersionsParams{
+		WorkflowID: workflowID, OrgID: rc.orgID, PageLimit: workflowVersionsPageDefault,
+	}
+	query := r.URL.Query()
+	if raw := query.Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= workflowVersionsPageMax {
+			params.PageLimit = int32(n)
+		}
+	}
+	if raw := query.Get("beforeVersion"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			params.BeforeVersion = pgtype.Int4{Int32: int32(n), Valid: true}
+		}
+	}
+	if raw := query.Get("version"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			params.ExactVersion = pgtype.Int4{Int32: int32(n), Valid: true}
+		}
+	}
+	rows, err := store.New(s.pool).ListWorkflowVersions(r.Context(), params)
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}

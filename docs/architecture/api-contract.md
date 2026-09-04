@@ -39,6 +39,12 @@ call on any `V1_READ_PATHS` entry outside the transport and `lib/` layers;
 typed reads go through `contractApi`, and a component that needs a narrower
 runtime shape than the contract type narrows it explicitly.
 
+`GET /v1/workflows/versions` is a keyset page of one workflow's history,
+newest first: `limit` (default 50, at most 200), `beforeVersion` as the
+cursor below the oldest row shown, and `version` to pin one exact row. Rows
+keep `dagJson`; the version panel restores, compares and diffs from the
+list, and the recovery delta card pins the two versions it compares.
+
 Dynamic contracted reads participate in the same `/v1` lane. The browser path
 catalog matches `{parameter}` segments rather than only literal paths, and the
 Go parity test mirrors that matcher. `GET /v1/workflows/versions/{versionId}`
