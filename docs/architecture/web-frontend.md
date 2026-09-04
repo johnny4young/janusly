@@ -63,3 +63,15 @@ Unicode-bounded term is debounced and sent. Short in-progress terms show neutral
 guidance rather than issuing a database request; overlong or control-containing
 terms show inline validation. This keeps browser behavior and direct API clients
 consistent without counting UTF-16 code units as characters.
+
+Runtime shape guards (`isRecord`, `asRecord`, `asRecordOrEmpty`) live in
+`src/lib/guards.ts` only; `scripts/check-duplicate-guards.mjs` (part of
+`pnpm lint`) rejects a second definition. The `/org/config` payload has one
+reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector stay in
+the eager workspace chunk on purpose: splitting them fans their shared helpers
+into small chunks whose wrapper overhead costs more total bytes than the split
+saves, and the artifact budget counts every chunk; the per-route win waits for
+the stylesheet split. `RightPanel` and `AppWorkspace` are memoized, and the shell's derived counts
+are memoized on their inputs, because the shell renders on every store tick.
+Dialogs get Escape from `useDialogFocusTrap`'s `onEscape` option rather than
+their own keydown effects.

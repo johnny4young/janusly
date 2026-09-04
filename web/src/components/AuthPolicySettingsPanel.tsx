@@ -23,6 +23,7 @@ import { Button } from "./ui/Button";
 import { FormActions, FormField, FormSection } from "./ui/Form";
 import { StatusSummary } from "./ui/StatusSummary";
 import { SwitchField } from "./ui/SwitchField";
+import { parseOrgConfigEntries } from "../lib/org-config-model";
 
 const KEYS = {
   allowedEmailDomains: "auth.allowedEmailDomains",
@@ -38,12 +39,6 @@ const RESUME_TTL_MIN = 300;
 const RESUME_TTL_MAX = 604800;
 const RESUME_TTL_DEFAULT = 604800;
 
-type OrgConfigEntry = {
-  key: string;
-  value: string | number | boolean;
-  source: string;
-  description?: string;
-};
 
 type FormState = {
   allowedEmailDomains: string;
@@ -77,9 +72,7 @@ export function AuthPolicySettingsPanel() {
     api("/org/config")
       .then((data) => {
         if (cancelled) return;
-        const entries: OrgConfigEntry[] = (data && typeof data === "object" && "config" in (data as object))
-          ? ((data as { config: OrgConfigEntry[] }).config ?? [])
-          : [];
+        const entries = parseOrgConfigEntries(data);
         const next: FormState = { ...EMPTY_FORM };
         for (const entry of entries) {
           if (entry.key === KEYS.allowedEmailDomains && typeof entry.value === "string") {

@@ -66,7 +66,6 @@ export function ReplayCampaignDialog({
   const { t } = useT()
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const nameRef = useRef<HTMLInputElement | null>(null)
-  useDialogFocusTrap(dialogRef)
   const stableIds = useMemo(() => [...new Set(deadLetterIds)], [deadLetterIds])
   const [name, setName] = useState(() => t('replayCampaign.dialog.defaultName', {
     date: new Intl.DateTimeFormat(getResolvedLocale(), {
@@ -81,6 +80,7 @@ export function ReplayCampaignDialog({
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  useDialogFocusTrap(dialogRef, { onEscape: submitting ? undefined : onClose })
 
   useEffect(() => {
     let cancelled = false
@@ -104,14 +104,6 @@ export function ReplayCampaignDialog({
   useEffect(() => {
     if (!loading) nameRef.current?.focus()
   }, [loading])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !submitting) onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, submitting])
 
   const submit = async () => {
     const trimmedName = name.trim()

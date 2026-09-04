@@ -18,6 +18,7 @@ import type {
 } from './WorkflowRecoveryQualification'
 import { Button } from '@/components/ui/Button'
 import { FormField } from '@/components/ui/Form'
+import { asRecord } from '../lib/guards'
 
 const WorkflowRecoveryQualification = lazy(() => import('./WorkflowRecoveryQualification').then(module => ({
   default: module.WorkflowRecoveryQualification,
@@ -60,12 +61,6 @@ const DEFAULT_DRAFT: Draft = {
   trafficPercent: 10,
   minimumSampleSize: 10,
   minimumSuccessRatePercent: 90,
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
 }
 
 function boundedInteger(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): number | null {

@@ -13,23 +13,15 @@ import { useWorkflowStore } from '../store'
 import { Button } from './ui/Button'
 import { FormActions, FormField } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
+import { isRecord } from '../lib/guards'
+import { orgConfigValue } from '../lib/org-config-model'
 
-type OrgConfigEntry = { key: string; value: string | number | boolean }
 type GuidanceLoadState = 'loading' | 'ready' | 'error'
 
 function readGuidance(payload: unknown): string | null {
-  const envelope = payload !== null && typeof payload === 'object' && !Array.isArray(payload)
-    ? payload as { config?: unknown }
-    : null
-  const entries = Array.isArray(payload) ? payload : Array.isArray(envelope?.config) ? envelope.config : null
-  if (!entries) return null
-  const entry = entries.find((candidate): candidate is OrgConfigEntry => (
-    candidate !== null
-    && typeof candidate === 'object'
-    && !Array.isArray(candidate)
-    && (candidate as { key?: unknown }).key === 'ai.operatorGuidance'
-  ))
-  return typeof entry?.value === 'string' ? entry.value : null
+  if (!Array.isArray(payload) && !(isRecord(payload) && Array.isArray(payload.config))) return null
+  const value = orgConfigValue(payload, 'ai.operatorGuidance')
+  return typeof value === 'string' ? value : null
 }
 
 export function AiGuidanceSettingsPanel() {

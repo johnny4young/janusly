@@ -25,18 +25,13 @@ import {
 import { readRetryOnClasses, RETRY_CLASSES, toggleRetryClass } from './resilience-retry-classes'
 import { FormDisclosure, FormField } from './ui/Form'
 import { SwitchField } from './ui/SwitchField'
+import { asRecordOrEmpty as asRecord } from '../lib/guards'
 
 type ResilienceNodeType = 'http' | 'tool' | 'agent' | 'mcp_tool'
 
 const HTTP_TIMEOUT_MAX_MS = 600_000
 const HTTP_RESPONSE_MAX_BYTES = 67_108_864
 const HTTP_REDIRECT_MAX = 20
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
-}
 
 function readNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null

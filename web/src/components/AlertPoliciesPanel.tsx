@@ -25,6 +25,7 @@ import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
 import { useConfirm } from './ConfirmDialog'
 import { Button } from '@/components/ui/Button'
+import type { Credential as CredentialRecord } from '../types'
 
 type Channel = {
   destination: AlertDestination
@@ -42,11 +43,7 @@ type AlertPolicy = {
   enabled: boolean
 }
 
-type Credential = {
-  id: string
-  name: string
-  kind: string
-}
+type Credential = Pick<CredentialRecord, 'id' | 'name' | 'kind'>
 
 type SlackInteractionConnection = {
   id: string

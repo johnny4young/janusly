@@ -4,6 +4,7 @@ import { api } from '../api'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { Button } from '@/components/ui/Button'
+import { asRecord } from '../lib/guards'
 
 export type RecoveryQualification = {
   id: string
@@ -43,12 +44,6 @@ export type RecoveryQualificationGate = {
   loading: boolean
   required: boolean
   status: RecoveryQualification['status'] | null
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
 }
 
 function boundedInteger(value: unknown, min = 0): number | null {

@@ -17,6 +17,8 @@ import { useConfirm } from './ConfirmDialog'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { Button } from '@/components/ui/Button'
+import { isRecord } from '../lib/guards'
+import type { Credential as CredentialRecord } from '../types'
 
 type SlackUserMapping = { slackUserId: string; userId: string }
 type SlackConnection = {
@@ -30,7 +32,7 @@ type SlackConnection = {
   createdAt: string
   updatedAt: string
 }
-type Credential = { id: string; name: string; kind: string }
+type Credential = Pick<CredentialRecord, 'id' | 'name' | 'kind'>
 type Member = { userId: string; email?: string | null; role?: string | null }
 type FormMapping = SlackUserMapping & { key: string }
 type ConnectionForm = {
@@ -48,10 +50,6 @@ const emptyForm = (): ConnectionForm => ({
   userMappings: [{ slackUserId: '', userId: '', key: crypto.randomUUID() }],
   enabled: true,
 })
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
 
 function parseConnections(value: unknown): SlackConnection[] {
   if (!isRecord(value)) return []

@@ -14,6 +14,7 @@ import {
   computeWorkflowDiff,
   type DiffableWorkflow,
 } from "./workflow-diff";
+import { asRecordOrEmpty as asRecord } from "./guards";
 
 export const TECHNICAL_AUTONOMY_FACTOR_IDS = [
   "policy",
@@ -187,12 +188,6 @@ function isExactApprovalInsertion(input: {
   );
   expectedEdges.push({ from: approval.id, to: input.failingNodeId });
   return equalEdgeSets(expectedEdges, input.candidate.edges ?? []);
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value != null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
 }
 
 function equalEdgeSets(

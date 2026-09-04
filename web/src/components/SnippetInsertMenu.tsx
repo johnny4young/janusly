@@ -75,7 +75,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
   // trigger on close. The component focuses the search input itself on open, so
   // initialFocus stays off — the hook only adds the trap + restore the other
   // app modals already have (this was the lone aria-modal dialog without it).
-  useDialogFocusTrap(dialogRef, { active: open })
+  useDialogFocusTrap(dialogRef, { active: open, onEscape: onClose })
 
   useEffect(() => {
     aliveRef.current = true
@@ -104,18 +104,6 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
     })()
     return () => window.cancelAnimationFrame(id)
   }, [open, selectedNodeId])
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [open, onClose])
 
   /** Resolve the display name (built-ins use i18n; custom use their stored name). */
   const nameFor = useCallback(

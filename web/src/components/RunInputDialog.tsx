@@ -21,7 +21,7 @@
  * the one-click run path.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useMemo, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, Play, Trash2, Workflow, X } from 'lucide-react'
 import type { WorkflowInputSchemaShape } from '../types'
@@ -116,7 +116,7 @@ export function RunInputDialog({
   const [presetBusy, setPresetBusy] = useState(false)
   const firstFieldRef = useRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useDialogFocusTrap(dialogRef, { initialFocus: firstFieldRef })
+  useDialogFocusTrap(dialogRef, { initialFocus: firstFieldRef, onEscape: submitting ? undefined : onCancel })
 
   // Server errors are remapped per render (no caching) so re-fetching a
   // fresh `serverErrors` prop replaces the inline error text without a
@@ -131,14 +131,6 @@ export function RunInputDialog({
   // resolves: the parent's error-handling path (e.g. RightPanel surfacing
   // human_form field errors) needs the dialog mounted to receive the
   // response.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !submitting) onCancel()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onCancel, submitting])
-
   const handleSubmit = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault()

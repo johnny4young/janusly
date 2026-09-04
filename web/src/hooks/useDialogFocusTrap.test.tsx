@@ -1,6 +1,6 @@
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import { StrictMode, useRef } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { useDialogFocusTrap } from './useDialogFocusTrap'
 
 function Dialog() {
@@ -170,5 +170,40 @@ describe('useDialogFocusTrap', () => {
       </>,
     )
     await waitFor(() => expect(document.activeElement).toBe(getByTestId('trigger')))
+  })
+})
+
+function EscapeDialog({ active, onEscape }: { active: boolean; onEscape?: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useDialogFocusTrap(ref, { active, onEscape })
+  return active ? <div ref={ref} role="dialog"><button>only</button></div> : null
+}
+
+// Escape used to be a separate effect in every dialog, each with its own
+// guard; the trap owns it now.
+describe('useDialogFocusTrap Escape', () => {
+  it('calls onEscape while active and never while inactive or unset', () => {
+    const onEscape = vi.fn()
+    const { rerender } = render(<EscapeDialog active onEscape={onEscape} />)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onEscape).toHaveBeenCalledTimes(1)
+
+    rerender(<EscapeDialog active={false} onEscape={onEscape} />)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onEscape).toHaveBeenCalledTimes(1)
+
+    rerender(<EscapeDialog active />)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onEscape).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the latest callback without resubscribing', () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const { rerender } = render(<EscapeDialog active onEscape={first} />)
+    rerender(<EscapeDialog active onEscape={second} />)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(first).not.toHaveBeenCalled()
+    expect(second).toHaveBeenCalledTimes(1)
   })
 })

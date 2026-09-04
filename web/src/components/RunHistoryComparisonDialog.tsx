@@ -48,7 +48,7 @@ export function RunHistoryComparisonDialog({
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
   const [state, setState] = useState<ComparisonState>({ kind: 'loading' })
-  useDialogFocusTrap(dialogRef, { initialFocus: true })
+  useDialogFocusTrap(dialogRef, { initialFocus: true, onEscape: onClose })
 
   useEffect(() => {
     const controller = new AbortController()
@@ -85,14 +85,6 @@ export function RunHistoryComparisonDialog({
     void load()
     return () => controller.abort()
   }, [selectedRun.createdAt, selectedRun.id, selectedRun.workflowId, retryNonce])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
 
   return (
     <div className="run-input-backdrop" onClick={onClose}>

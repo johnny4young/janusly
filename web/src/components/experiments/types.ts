@@ -13,6 +13,7 @@
  */
 
 import { getResolvedLocale } from '../../i18n'
+import { asRecord } from '../../lib/guards'
 
 export type ExperimentKind = 'prompt' | 'model'
 export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -94,11 +95,7 @@ export function estimateProviderCalls(exampleCount: number, scorerKind: RunForm[
   return Math.floor(exampleCount) * (scorerKind === 'llm_judge' ? 4 : 2)
 }
 
-export function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
+export { asRecord }
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)

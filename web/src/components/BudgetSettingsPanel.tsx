@@ -24,6 +24,7 @@ import { tApiError, useT } from "../i18n";
 import { Button } from "./ui/Button";
 import { FormActions, FormField, FormSection } from "./ui/Form";
 import { StatusSummary } from "./ui/StatusSummary";
+import { parseOrgConfigEntries } from "../lib/org-config-model";
 
 type OrgBudgetForm = {
   monthlyUsd: string;
@@ -58,12 +59,6 @@ function isWarnInvalid(value: string): boolean {
   return !Number.isInteger(n) || n < 0 || n > 100;
 }
 
-type OrgConfigEntry = {
-  key: string;
-  value: string | number | boolean;
-  source: string;
-  description?: string;
-};
 
 type WorkflowBudgetRow = {
   id: string;
@@ -102,13 +97,7 @@ export function BudgetSettingsPanel() {
     api("/org/config")
       .then((payload) => {
         if (cancelled) return;
-        const maybeEnvelope = payload as { config?: unknown };
-        const entries = (Array.isArray(payload)
-          ? payload
-          : Array.isArray(maybeEnvelope.config)
-            ? maybeEnvelope.config
-            : []) as OrgConfigEntry[];
-        const byKey = new Map(entries.map((entry) => [entry.key, entry.value]));
+        const byKey = new Map(parseOrgConfigEntries(payload).map((entry) => [entry.key, entry.value]));
         setForm({
           monthlyUsd: String(byKey.get(ORG_CONFIG_KEYS.monthlyUsd) ?? 0),
           warnPercent: String(byKey.get(ORG_CONFIG_KEYS.warnPercent) ?? 80),

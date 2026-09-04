@@ -24,6 +24,8 @@ import { useConfirm } from './ConfirmDialog'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { Button } from '@/components/ui/Button'
+import { isRecord } from '../lib/guards'
+import type { Credential as CredentialRecord } from '../types'
 
 type ExternalRuntimeConnection = {
   id: string
@@ -66,7 +68,7 @@ type ExternalRuntimeShadow = {
   cases: ExternalRecoveryCase[]
 }
 
-type Credential = { id: string; name: string; kind: string }
+type Credential = Pick<CredentialRecord, 'id' | 'name' | 'kind'>
 
 type ConnectionForm = {
   name: string
@@ -81,10 +83,6 @@ const emptyForm = (): ConnectionForm => ({
   signingCredentialName: '',
   enabled: true,
 })
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
 
 function isStringOrNull(value: unknown): value is string | null {
   return value === null || typeof value === 'string'

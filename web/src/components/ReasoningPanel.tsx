@@ -35,6 +35,7 @@ import type { RunEvent } from '../types'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { EmptyView } from './panel-primitives'
 import { Button } from '@/components/ui/Button'
+import { isRecord } from '../lib/guards'
 
 const RUN_EVENT_ROW_HEIGHT = 172
 
@@ -93,10 +94,6 @@ const RUN_USAGE_REFRESH_EVENTS = new Set([
   'run.failed',
   'run.succeeded',
 ])
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0

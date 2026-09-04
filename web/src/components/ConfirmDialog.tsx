@@ -56,6 +56,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null)
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null)
   useDialogFocusTrap(dialogRef, {
+    onEscape: () => close(false),
     active: options !== null,
     // A danger confirm must not let a stray Enter fire the destructive
     // action: focus lands on Cancel so acknowledgment is deliberate.
@@ -92,18 +93,6 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
 
   // Escape remains dialog-specific; the shared hook owns initial focus, the
   // Tab trap, Strict Mode replay safety, and trigger restoration.
-  useEffect(() => {
-    if (!options) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        close(false)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [options, close])
-
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}

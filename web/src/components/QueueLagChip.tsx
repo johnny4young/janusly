@@ -9,6 +9,7 @@
  */
 
 import { getResolvedLocale, useT } from '../i18n'
+import { isRecord } from '../lib/guards'
 
 export type QueueHealth = {
   waiting: number
@@ -23,10 +24,6 @@ export type QueueHealthOverview = {
 }
 
 export type QueueUnavailableReason = 'store' | 'transport'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0

@@ -1,6 +1,7 @@
 import { t as runtimeT } from '../i18n/runtime'
 import type { WorkflowInputSchemaShape } from '../types'
 import { inputDisplayLabel } from './input-display-label'
+import { isRecord } from '../lib/guards'
 
 export { inputDisplayLabel } from './input-display-label'
 
@@ -53,10 +54,6 @@ function initialLeafValue(schema: WorkflowInputSchemaShape, supplied?: unknown):
     return nested
   }
   return ''
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 export function getRunInputValue(state: RunInputFormState, path: string): unknown {

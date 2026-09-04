@@ -9,16 +9,11 @@ import type {
   RecoveryMetric,
   RecoveryMetrics,
 } from './components/recovery-center/recovery-center-model'
+import { isRecord } from './lib/guards'
 
 export type RecoveryHomeQueueSection = {
   counts: { open: number }
   oldestOpen: { createdAt?: string } | null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value)
-    && typeof value === 'object'
-    && !Array.isArray(value)
 }
 
 function isNumber(value: unknown): value is number {

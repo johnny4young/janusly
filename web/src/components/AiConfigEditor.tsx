@@ -12,6 +12,7 @@ import {
   TextareaConfigField,
 } from './quick-config-fields'
 import { FormDisclosure, FormField } from './ui/Form'
+import { asRecordOrEmpty as asRecord } from '../lib/guards'
 
 type AiResponseMode = 'text' | 'json' | 'structured'
 type PromptSource = 'inline' | 'saved'
@@ -27,12 +28,6 @@ const DEFAULT_OUTPUT_SCHEMA = {
     result: { type: 'string' },
   },
   required: ['result'],
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
 }
 
 function readPromptRef(config: JsonObject): { name: string; version?: number } | null {

@@ -19,6 +19,7 @@ import type {
   RecoveryCaseTransition,
   SemanticCaseResolution,
 } from '../types'
+import { isRecord } from './guards'
 
 export type RecoveryCaseDetail = {
   case: RecoveryCase
@@ -63,10 +64,6 @@ const RECOVERY_AUTONOMY_SOURCES = new Set<RecoveryAutonomyProfile['source']>([
   'strictest_failure',
   'unavailable',
 ])
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function utf8ByteLength(value: string): number {
   return textEncoder.encode(value).byteLength

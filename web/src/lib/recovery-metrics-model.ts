@@ -7,6 +7,7 @@
  * renderers can rely on, or `null` for "not a payload we understand".
  */
 
+import { isRecord } from './guards'
 export type MetricSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
 
 export type RecoveryMetric = {
@@ -54,10 +55,6 @@ const CLUSTER_CATEGORIES = new Set<ClusterCategory>([
 ])
 const CLUSTER_OWNERS = new Set<ClusterOwner>(['ops', 'workflow_author', 'platform'])
 const SEVERITIES = new Set<MetricSeverity>(['healthy', 'warn', 'unhealthy', 'neutral'])
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function readString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback

@@ -40,10 +40,27 @@ export function useDialogFocusTrap(
   options?: {
     active?: boolean
     initialFocus?: boolean | RefObject<HTMLElement | null>
+    /** Called on Escape while the trap is active; undefined leaves Escape alone (e.g. mid-submit). */
+    onEscape?: () => void
   },
 ): void {
   const active = options?.active ?? true
   const initialFocus = options?.initialFocus ?? false
+  // Read through a ref so a new callback identity never re-subscribes.
+  const onEscapeRef = useRef(options?.onEscape)
+  onEscapeRef.current = options?.onEscape
+  useEffect(() => {
+    if (!active) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !onEscapeRef.current) return
+      event.preventDefault()
+      onEscapeRef.current()
+    }
+    // On window, where the dialogs listened before: a keydown reaches it
+    // whether dispatched on the document or on the window itself.
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [active])
 
   // Capture the trigger at the render where `active` flips on — before the
   // dialog's own initial-focus moves focus inward — so it can be restored when

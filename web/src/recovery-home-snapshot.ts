@@ -1,5 +1,6 @@
 /** Defensive wire reader for the coalesced Recovery Center snapshot. */
 
+import { isRecord } from './lib/guards'
 export type RecoveryHomeScope = 'full' | 'impact'
 
 export type RecoveryHomeSection =
@@ -10,12 +11,6 @@ export type RecoveryHomeSnapshot = {
   scope: RecoveryHomeScope
   generatedAt: string
   sections: Record<string, RecoveryHomeSection>
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value)
-    && typeof value === 'object'
-    && !Array.isArray(value)
 }
 
 export function parseRecoveryHomeSnapshot(

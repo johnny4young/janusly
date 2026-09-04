@@ -12,6 +12,7 @@ import { formatAiModeLabel } from '../constants'
 import type { AiMode } from '../types'
 import { useT } from '../i18n'
 import { Button } from '@/components/ui/Button'
+import { isRecord } from '../lib/guards'
 
 type Message = {
   role: 'user' | 'assistant'
@@ -28,10 +29,6 @@ type ExplainRunResponse = {
   model?: string
   error?: string
   aiError?: string
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function readString(value: unknown): string | undefined {
