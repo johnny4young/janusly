@@ -56,6 +56,7 @@ func (e *Engine) ReplayRunAsValidation(
 		ValidationEvidenceLevel: pgtype.Text{String: "static", Valid: true},
 		ParentRunID:             pgtype.Text{String: sourceRunID, Valid: true},
 		ParentLinkKind:          pgtype.Text{String: "replay", Valid: true},
+		WorkflowID:              runWorkflowID(wf, runID),
 	}); err != nil {
 		return "", fmt.Errorf("insert lab run: %w", err)
 	}
@@ -175,6 +176,7 @@ func (e *Engine) ReplayRunAsValidationFork(
 		ParentRunID:             pgtype.Text{String: sourceRunID, Valid: true},
 		ParentNodeID:            pgtype.Text{String: forkNodeID, Valid: true},
 		ParentLinkKind:          pgtype.Text{String: "replay", Valid: true},
+		WorkflowID:              runWorkflowID(wf, runID),
 	}); err != nil {
 		return ReplayLabForkResult{}, fmt.Errorf("insert fork run: %w", err)
 	}

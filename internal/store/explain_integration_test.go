@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,6 +28,7 @@ var watchedTables = map[string]bool{
 	"scim_user_state": true, "scim_user_groups": true, "scim_group_role_mappings": true,
 	"eval_examples": true, "usage_events": true, "audit_logs": true,
 	"trigger_events": true, "schedule_entries": true,
+	"rate_limit_windows": true, "sso_state_nonces": true, "auto_healing_runs": true,
 }
 
 type explainCase struct {
@@ -63,9 +65,33 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 		{"listActiveScimUserState", listActiveScimUserState, []any{"org-x", "dir-x", int32(5001)}},
 		{"listScheduleFireHistory", listScheduleFireHistory, []any{"wf-x", "org-x", now}},
 		{"listFailedRunNodeSamples", listFailedRunNodeSamples, []any{"org-x", now}},
+		// The per-node AI budget gate (on an empty table the planner may still
+		// pick the shorter (org_id, metric) prefix over the expression index,
+		// so only the seq-scan gate applies), the DLQ counters, the healing anti-join,
+		// audit lookups by target, the run list filtered by workflow, the
+		// validating-run poll, the hourly expiry deletes, and the retention
+		// org scan: each has an index shaped for it.
+		{"sumWorkflowSpendThisMonth", sumWorkflowSpendThisMonth, []any{"org-x", "wf-x"}},
+		{"countDeadLettersByStatus", countDeadLettersByStatus, []any{"org-x"}},
+		{"listOpenDeadLettersForHealing", listOpenDeadLettersForHealing, []any{"org-x", now}},
+		{"listAuditRowsForTargets", listAuditRowsForTargets, []any{"org-x", []string{"target-x"}}},
+		{"listRunSummariesByWorkflow", listRunSummaries, []any{"org-x", now, "id-x", "wf-x", nil, int32(50)}},
+		{"listValidatingAutoHealingRuns", listValidatingAutoHealingRuns, []any{}},
+		{"cleanupExpiredRateWindows", cleanupExpiredRateWindows, []any{}},
+		{"cleanupExpiredSsoNonces", cleanupExpiredSsoNonces, []any{}},
+		{"listOrgsWithRetainableData", listOrgsWithRetainableData, []any{}},
+		{"deleteExpiredDeadLettersBatch", deleteExpiredDeadLettersBatch, []any{"org-x", now, int32(100)}},
 	}
 	requiredIndexes := map[string]string{
-		"listFailedRunNodeSamples": "run_nodes_failed_finished_idx",
+		"listFailedRunNodeSamples":      "run_nodes_failed_finished_idx",
+		"countDeadLettersByStatus":      "dead_letters_org_status_production_idx",
+		"listOpenDeadLettersForHealing": "auto_healing_runs_org_dlq_idx",
+		"listAuditRowsForTargets":       "audit_logs_org_target_created_id_idx",
+		"listRunSummariesByWorkflow":    "runs_org_workflow_created_id_idx",
+		"listValidatingAutoHealingRuns": "auto_healing_runs_validating_idx",
+		"cleanupExpiredRateWindows":     "rate_limit_windows_expires_idx",
+		"cleanupExpiredSsoNonces":       "sso_state_nonces_expires_idx",
+		"listScheduleFireHistory":       "runs_org_workflow_created_id_idx",
 	}
 
 	for index, c := range cases {
@@ -108,13 +134,22 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 					literals += "'" + value + "'"
 				case int32:
 					literals += fmt.Sprintf("%d", value)
+				case []string:
+					quoted := make([]string, 0, len(value))
+					for _, item := range value {
+						quoted = append(quoted, "'"+item+"'")
+					}
+					literals += "ARRAY[" + strings.Join(quoted, ",") + "]::text[]"
 				default:
 					t.Fatalf("unsupported literal type %T", arg)
 				}
 			}
 			var planJSON []byte
-			row := tx.QueryRow(ctx,
-				fmt.Sprintf("EXPLAIN (FORMAT JSON) EXECUTE %s(%s)", stmt, literals))
+			execute := fmt.Sprintf("EXECUTE %s(%s)", stmt, literals)
+			if len(c.args) == 0 {
+				execute = "EXECUTE " + stmt
+			}
+			row := tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+execute)
 			if err := row.Scan(&planJSON); err != nil {
 				t.Fatalf("explain: %v", err)
 			}

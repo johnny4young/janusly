@@ -27,10 +27,8 @@ UPDATE schedule_entries SET enabled = false, updated_at = now() WHERE id = $1;
 -- name: ListScheduleFireHistory :many
 SELECT r.created_at, r.status
 FROM runs r
-JOIN workflow_versions wv ON wv.id = r.workflow_version_id
-WHERE wv.workflow_id = $1 AND wv.org_id = $2
-  AND r.org_id = $2
-  AND r.input_json -> 'input' ->> 'triggeredBy' = 'schedule'
-  AND r.created_at >= $3
+WHERE r.org_id = sqlc.arg(org_id)::text AND r.workflow_id = sqlc.arg(workflow_id)::text
+  AND r.trigger_kind = 'schedule'
+  AND r.created_at >= sqlc.arg(created_at)
 ORDER BY r.created_at DESC
 LIMIT 5000;

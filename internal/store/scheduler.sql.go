@@ -72,18 +72,16 @@ func (q *Queries) DisableScheduleEntry(ctx context.Context, id string) error {
 const listScheduleFireHistory = `-- name: ListScheduleFireHistory :many
 SELECT r.created_at, r.status
 FROM runs r
-JOIN workflow_versions wv ON wv.id = r.workflow_version_id
-WHERE wv.workflow_id = $1 AND wv.org_id = $2
-  AND r.org_id = $2
-  AND r.input_json -> 'input' ->> 'triggeredBy' = 'schedule'
+WHERE r.org_id = $1::text AND r.workflow_id = $2::text
+  AND r.trigger_kind = 'schedule'
   AND r.created_at >= $3
 ORDER BY r.created_at DESC
 LIMIT 5000
 `
 
 type ListScheduleFireHistoryParams struct {
-	WorkflowID string
 	OrgID      string
+	WorkflowID string
 	CreatedAt  *time.Time
 }
 
@@ -93,7 +91,7 @@ type ListScheduleFireHistoryRow struct {
 }
 
 func (q *Queries) ListScheduleFireHistory(ctx context.Context, arg ListScheduleFireHistoryParams) ([]ListScheduleFireHistoryRow, error) {
-	rows, err := q.db.Query(ctx, listScheduleFireHistory, arg.WorkflowID, arg.OrgID, arg.CreatedAt)
+	rows, err := q.db.Query(ctx, listScheduleFireHistory, arg.OrgID, arg.WorkflowID, arg.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

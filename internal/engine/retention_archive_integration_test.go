@@ -92,8 +92,14 @@ func TestRunEventArchivalExportsBeforeDeleting(t *testing.T) {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".jsonl") {
 			return err
 		}
-		if !strings.Contains(filepath.ToSlash(path), "archive/run-events/") {
+		key := filepath.ToSlash(path)
+		if !strings.Contains(key, "archive/run-events/") {
 			t.Fatalf("unexpected archive key: %s", path)
+		}
+		// The sweep archives every org with aged events; only this org's
+		// objects are this test's evidence on a shared database.
+		if !strings.Contains(key, "/orgs/"+org+"/") {
+			return nil
 		}
 		raw, readErr := os.ReadFile(path)
 		if readErr != nil {

@@ -719,6 +719,8 @@ type Run struct {
 	ValidationEvidenceLevel              pgtype.Text
 	OutcomeStatus                        pgtype.Text
 	SemanticViolationCount               int32
+	WorkflowID                           pgtype.Text
+	TriggerKind                          pgtype.Text
 }
 
 type RunEvent struct {

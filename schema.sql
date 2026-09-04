@@ -1134,7 +1134,9 @@ CREATE TABLE public.runs (
     workflow_rollout_variant text,
     validation_evidence_level text,
     outcome_status text,
-    semantic_violation_count integer DEFAULT 0 NOT NULL
+    semantic_violation_count integer DEFAULT 0 NOT NULL,
+    workflow_id text,
+    trigger_kind text
 );
 
 
@@ -2307,13 +2309,6 @@ CREATE INDEX alert_policies_org_trigger_enabled_idx ON public.alert_policies USI
 
 
 --
--- Name: audit_logs_metadata_gin_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX audit_logs_metadata_gin_idx ON public.audit_logs USING gin (metadata jsonb_path_ops);
-
-
---
 -- Name: audit_logs_org_action_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2325,6 +2320,13 @@ CREATE INDEX audit_logs_org_action_created_id_idx ON public.audit_logs USING btr
 --
 
 CREATE INDEX audit_logs_org_created_id_idx ON public.audit_logs USING btree (org_id, created_at DESC, id DESC);
+
+
+--
+-- Name: audit_logs_org_target_created_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_org_target_created_id_idx ON public.audit_logs USING btree (org_id, target_id, created_at DESC, id DESC);
 
 
 --
@@ -2374,6 +2376,13 @@ CREATE INDEX auto_healing_runs_org_validated_idx ON public.auto_healing_runs USI
 --
 
 CREATE INDEX auto_healing_runs_publication_repair_idx ON public.auto_healing_runs USING btree (publication_repair_after, id) WHERE ((publication_repair_after IS NOT NULL) AND (status = ANY (ARRAY['publishing'::text, 'publish_failed'::text])));
+
+
+--
+-- Name: auto_healing_runs_validating_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX auto_healing_runs_validating_idx ON public.auto_healing_runs USING btree (validation_run_id) WHERE (status = 'validating'::text);
 
 
 --
@@ -2437,6 +2446,13 @@ CREATE INDEX dead_letters_org_run_node_created_idx ON public.dead_letters USING 
 --
 
 CREATE INDEX dead_letters_org_status_created_idx ON public.dead_letters USING btree (org_id, status, created_at DESC, id DESC);
+
+
+--
+-- Name: dead_letters_org_status_production_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX dead_letters_org_status_production_idx ON public.dead_letters USING btree (org_id, status) WHERE (replay_mode IS NULL);
 
 
 --
@@ -2696,6 +2712,13 @@ CREATE INDEX prompts_org_created_id_idx ON public.prompts USING btree (org_id, c
 --
 
 CREATE UNIQUE INDEX prompts_org_name_idx ON public.prompts USING btree (org_id, name);
+
+
+--
+-- Name: rate_limit_windows_expires_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX rate_limit_windows_expires_idx ON public.rate_limit_windows USING btree (expires_at);
 
 
 --
@@ -3056,6 +3079,13 @@ CREATE INDEX runs_org_status_created_id_idx ON public.runs USING btree (org_id, 
 
 
 --
+-- Name: runs_org_workflow_created_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX runs_org_workflow_created_id_idx ON public.runs USING btree (org_id, workflow_id, created_at DESC, id DESC) WHERE (workflow_id IS NOT NULL);
+
+
+--
 -- Name: runs_parent_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3238,6 +3268,13 @@ CREATE UNIQUE INDEX sso_connections_org_provider_idx ON public.sso_connections U
 
 
 --
+-- Name: sso_state_nonces_expires_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sso_state_nonces_expires_idx ON public.sso_state_nonces USING btree (expires_at);
+
+
+--
 -- Name: sso_state_nonces_org_nonce_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3294,6 +3331,13 @@ CREATE UNIQUE INDEX upstream_health_sources_org_name_idx ON public.upstream_heal
 
 
 --
+-- Name: usage_events_org_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX usage_events_org_created_idx ON public.usage_events USING btree (org_id, created_at);
+
+
+--
 -- Name: usage_events_org_metric_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3301,10 +3345,10 @@ CREATE INDEX usage_events_org_metric_created_idx ON public.usage_events USING bt
 
 
 --
--- Name: usage_events_org_metric_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: usage_events_org_metric_workflow_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX usage_events_org_metric_idx ON public.usage_events USING btree (org_id, metric);
+CREATE INDEX usage_events_org_metric_workflow_created_idx ON public.usage_events USING btree (org_id, metric, ((metadata ->> 'workflowId'::text)), created_at DESC);
 
 
 --

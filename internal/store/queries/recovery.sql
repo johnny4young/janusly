@@ -614,6 +614,15 @@ WHERE dl.org_id = $1 AND dl.created_at >= $2 AND dl.status = 'open'
 ORDER BY dl.created_at DESC
 LIMIT 500;
 
+-- Only settled dead letters age out; the open queue never disappears by age.
+-- name: DeleteExpiredDeadLettersBatch :execrows
+DELETE FROM dead_letters WHERE id IN (
+  SELECT id FROM dead_letters
+  WHERE org_id = sqlc.arg(target_org)::text
+    AND status IN ('replayed', 'resolved')
+    AND created_at < sqlc.arg(cutoff)::timestamptz
+  LIMIT sqlc.arg(batch_size));
+
 -- name: MarkDeadLetterResolved :execrows
 UPDATE dead_letters SET status = 'resolved' WHERE org_id = $1 AND id = $2;
 

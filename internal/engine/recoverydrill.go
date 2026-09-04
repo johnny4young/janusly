@@ -149,9 +149,10 @@ func (e *Engine) insertRuntimeFailureDrill(ctx context.Context, input RecoveryDr
 	q := store.New(e.wrapTx(tx))
 	if err := q.InsertRecoveryDrillRun(ctx, store.InsertRecoveryDrillRunParams{
 		ID: runID, OrgID: input.OrgID, WorkflowVersionID: runID, Status: "running",
-		InputJson: drillInputJSON(workflow, input.Input, input.Source),
-		CreatedBy: pgtype.Text{String: input.CreatedBy, Valid: input.CreatedBy != ""},
-		CreatedAt: &now,
+		InputJson:  drillInputJSON(workflow, input.Input, input.Source),
+		WorkflowID: runWorkflowID(workflow, runID),
+		CreatedBy:  pgtype.Text{String: input.CreatedBy, Valid: input.CreatedBy != ""},
+		CreatedAt:  &now,
 	}); err != nil {
 		return "", fmt.Errorf("insert runtime recovery drill: %w", err)
 	}
@@ -345,9 +346,10 @@ func (e *Engine) RunStalledNodeDrill(ctx context.Context, input RecoveryDrillInp
 	q := store.New(e.wrapTx(tx))
 	if err := q.InsertRecoveryDrillRun(ctx, store.InsertRecoveryDrillRunParams{
 		ID: runID, OrgID: input.OrgID, WorkflowVersionID: runID, Status: "running",
-		InputJson: drillInputJSON(input.Workflow, map[string]any{}, drill),
-		CreatedBy: pgtype.Text{String: input.CreatedBy, Valid: input.CreatedBy != ""},
-		CreatedAt: &stalledAt,
+		InputJson:  drillInputJSON(input.Workflow, map[string]any{}, drill),
+		WorkflowID: runWorkflowID(input.Workflow, runID),
+		CreatedBy:  pgtype.Text{String: input.CreatedBy, Valid: input.CreatedBy != ""},
+		CreatedAt:  &stalledAt,
 	}); err != nil {
 		return StalledNodeDrillResult{}, fmt.Errorf("insert stalled-node recovery drill: %w", err)
 	}

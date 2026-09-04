@@ -220,6 +220,8 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		WorkflowRolloutID:       pgtype.Text{String: in.WorkflowRolloutID, Valid: in.WorkflowRolloutID != ""},
 		WorkflowRolloutVariant:  pgtype.Text{String: in.WorkflowRolloutVariant, Valid: in.WorkflowRolloutVariant != ""},
 		TraceID:                 pgtype.Text{String: traceID, Valid: true},
+		WorkflowID:              runWorkflowID(in.Workflow, versionID),
+		TriggerKind:             runTriggerKind(in.Input),
 	}); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
 	}
@@ -345,4 +347,22 @@ func insertRunNodeRows(ctx context.Context, q *store.Queries, rows []store.Inser
 		return fmt.Errorf("insert run nodes: %d of %d rows landed", inserted, len(rows))
 	}
 	return nil
+}
+
+// runWorkflowID is the identity the run list filters and groups by: the
+// saved workflow's id, or the run's own version identity for an ad-hoc
+// document (mirrors the former input_json fallback).
+func runWorkflowID(wf *domain.Workflow, versionID string) pgtype.Text {
+	if wf != nil && wf.ID != "" {
+		return pgtype.Text{String: wf.ID, Valid: true}
+	}
+	return pgtype.Text{String: versionID, Valid: versionID != ""}
+}
+
+// runTriggerKind lifts the start input's triggeredBy marker (scheduler,
+// webhook, …) into a column so history queries stop reading input_json.
+func runTriggerKind(input any) pgtype.Text {
+	fields, _ := input.(map[string]any)
+	kind, _ := fields["triggeredBy"].(string)
+	return pgtype.Text{String: kind, Valid: kind != ""}
 }

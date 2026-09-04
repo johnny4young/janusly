@@ -1074,9 +1074,9 @@ func (q *Queries) InsertExternalRuntimeEventReceipt(ctx context.Context, arg Ins
 const insertRecoveryDrillRun = `-- name: InsertRecoveryDrillRun :exec
 INSERT INTO runs (
   id, org_id, workflow_version_id, status, input_json, created_by,
-  replay_mode, validation_evidence_level, created_at
+  replay_mode, validation_evidence_level, created_at, workflow_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, 'validation', 'static', $7)
+VALUES ($1, $2, $3, $4, $5, $6, 'validation', 'static', $7, $8)
 `
 
 type InsertRecoveryDrillRunParams struct {
@@ -1087,6 +1087,7 @@ type InsertRecoveryDrillRunParams struct {
 	InputJson         json.RawMessage
 	CreatedBy         pgtype.Text
 	CreatedAt         *time.Time
+	WorkflowID        pgtype.Text
 }
 
 // Recovery drills reproduce a server-authored historical claim and therefore
@@ -1101,6 +1102,7 @@ func (q *Queries) InsertRecoveryDrillRun(ctx context.Context, arg InsertRecovery
 		arg.InputJson,
 		arg.CreatedBy,
 		arg.CreatedAt,
+		arg.WorkflowID,
 	)
 	return err
 }
@@ -1108,8 +1110,9 @@ func (q *Queries) InsertRecoveryDrillRun(ctx context.Context, arg InsertRecovery
 const insertRun = `-- name: InsertRun :exec
 
 INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level,
-  parent_run_id, parent_node_id, parent_link_kind, workflow_rollout_id, workflow_rollout_variant, trace_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+  parent_run_id, parent_node_id, parent_link_kind, workflow_rollout_id, workflow_rollout_variant, trace_id,
+  workflow_id, trigger_kind)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 `
 
 type InsertRunParams struct {
@@ -1127,6 +1130,8 @@ type InsertRunParams struct {
 	WorkflowRolloutID       pgtype.Text
 	WorkflowRolloutVariant  pgtype.Text
 	TraceID                 pgtype.Text
+	WorkflowID              pgtype.Text
+	TriggerKind             pgtype.Text
 }
 
 // Runs, nodes, events, subworkflows: lifecycle reads and writes.
@@ -1146,6 +1151,8 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
 		arg.WorkflowRolloutID,
 		arg.WorkflowRolloutVariant,
 		arg.TraceID,
+		arg.WorkflowID,
+		arg.TriggerKind,
 	)
 	return err
 }
@@ -1855,25 +1862,17 @@ SELECT r.id, r.org_id, r.workflow_version_id, r.status,
        r.validation_evidence_level, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
        r.created_at, r.trace_id,
-       coalesce(wv.workflow_id,
-                nullif(r.input_json->'workflow'->>'id', ''),
-                r.workflow_version_id) AS workflow_id,
+       coalesce(r.workflow_id, r.workflow_version_id) AS workflow_id,
        coalesce(w.name, r.input_json->'workflow'->>'name', '') AS workflow_name,
        EXISTS (
          SELECT 1 FROM run_nodes rn
          WHERE rn.run_id = r.id AND rn.status = 'waiting'
        ) AS has_waiting_nodes
 FROM runs r
-LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
-LEFT JOIN workflows w ON w.id = wv.workflow_id
+LEFT JOIN workflows w ON w.id = r.workflow_id
 WHERE r.org_id = $1
   AND (r.created_at, r.id) < ($2::timestamptz, $3::text)
-  AND ($4::text IS NULL
-       OR wv.workflow_id = $4
-       OR (wv.id IS NULL AND coalesce(
-             nullif(r.input_json->'workflow'->>'id', ''),
-             r.workflow_version_id
-           ) = $4))
+  AND ($4::text IS NULL OR r.workflow_id = $4)
   AND ($5::text IS NULL OR r.status = $5)
 ORDER BY r.created_at DESC, r.id DESC
 LIMIT $6

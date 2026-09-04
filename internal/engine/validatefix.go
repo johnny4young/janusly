@@ -112,6 +112,7 @@ func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
 		ValidationEvidenceLevel: pgtype.Text{String: "static", Valid: true},
 		ParentRunID:             pgtype.Text{String: item.RunID, Valid: true},
 		ParentLinkKind:          pgtype.Text{String: "replay", Valid: true},
+		WorkflowID:              runWorkflowID(suggested, runID),
 	}); err != nil {
 		return "", fmt.Errorf("insert validation run: %w", err)
 	}

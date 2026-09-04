@@ -264,6 +264,30 @@ func (q *Queries) CountOperatorRecoveries(ctx context.Context, arg CountOperator
 	return column_1, err
 }
 
+const deleteExpiredDeadLettersBatch = `-- name: DeleteExpiredDeadLettersBatch :execrows
+DELETE FROM dead_letters WHERE id IN (
+  SELECT id FROM dead_letters
+  WHERE org_id = $1::text
+    AND status IN ('replayed', 'resolved')
+    AND created_at < $2::timestamptz
+  LIMIT $3)
+`
+
+type DeleteExpiredDeadLettersBatchParams struct {
+	TargetOrg string
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+// Only settled dead letters age out; the open queue never disappears by age.
+func (q *Queries) DeleteExpiredDeadLettersBatch(ctx context.Context, arg DeleteExpiredDeadLettersBatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredDeadLettersBatch, arg.TargetOrg, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const finalizeRunSemanticRecoveryOutcome = `-- name: FinalizeRunSemanticRecoveryOutcome :execrows
 UPDATE runs
 SET outcome_status = CASE

@@ -2,8 +2,9 @@
 
 -- name: InsertRun :exec
 INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level,
-  parent_run_id, parent_node_id, parent_link_kind, workflow_rollout_id, workflow_rollout_variant, trace_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
+  parent_run_id, parent_node_id, parent_link_kind, workflow_rollout_id, workflow_rollout_variant, trace_id,
+  workflow_id, trigger_kind)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);
 
 -- Recovery drills reproduce a server-authored historical claim and therefore
 -- need an explicit creation clock. Ordinary run starts must keep using
@@ -11,9 +12,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
 -- name: InsertRecoveryDrillRun :exec
 INSERT INTO runs (
   id, org_id, workflow_version_id, status, input_json, created_by,
-  replay_mode, validation_evidence_level, created_at
+  replay_mode, validation_evidence_level, created_at, workflow_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, 'validation', 'static', $7);
+VALUES ($1, $2, $3, $4, $5, $6, 'validation', 'static', $7, $8);
 
 -- name: GetRun :one
 SELECT id, org_id, workflow_version_id, status, input_json, output_json,
@@ -298,25 +299,17 @@ SELECT r.id, r.org_id, r.workflow_version_id, r.status,
        r.validation_evidence_level, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
        r.created_at, r.trace_id,
-       coalesce(wv.workflow_id,
-                nullif(r.input_json->'workflow'->>'id', ''),
-                r.workflow_version_id) AS workflow_id,
+       coalesce(r.workflow_id, r.workflow_version_id) AS workflow_id,
        coalesce(w.name, r.input_json->'workflow'->>'name', '') AS workflow_name,
        EXISTS (
          SELECT 1 FROM run_nodes rn
          WHERE rn.run_id = r.id AND rn.status = 'waiting'
        ) AS has_waiting_nodes
 FROM runs r
-LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
-LEFT JOIN workflows w ON w.id = wv.workflow_id
+LEFT JOIN workflows w ON w.id = r.workflow_id
 WHERE r.org_id = $1
   AND (r.created_at, r.id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
-  AND (sqlc.narg(filter_workflow_id)::text IS NULL
-       OR wv.workflow_id = sqlc.narg(filter_workflow_id)
-       OR (wv.id IS NULL AND coalesce(
-             nullif(r.input_json->'workflow'->>'id', ''),
-             r.workflow_version_id
-           ) = sqlc.narg(filter_workflow_id)))
+  AND (sqlc.narg(filter_workflow_id)::text IS NULL OR r.workflow_id = sqlc.narg(filter_workflow_id))
   AND (sqlc.narg(filter_status)::text IS NULL OR r.status = sqlc.narg(filter_status))
 ORDER BY r.created_at DESC, r.id DESC
 LIMIT sqlc.arg(page_limit);

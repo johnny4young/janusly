@@ -95,6 +95,7 @@ func (e *Engine) StartSandboxRun(ctx context.Context, in SandboxRunInput) (strin
 		CreatedBy:               pgtype.Text{String: in.CreatedBy, Valid: in.CreatedBy != ""},
 		ReplayMode:              pgtype.Text{String: "validation", Valid: true},
 		ValidationEvidenceLevel: pgtype.Text{String: "static", Valid: true},
+		WorkflowID:              runWorkflowID(in.Workflow, runID),
 	}); err != nil {
 		return "", fmt.Errorf("insert sandbox run: %w", err)
 	}

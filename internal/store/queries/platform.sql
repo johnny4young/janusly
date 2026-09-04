@@ -105,14 +105,42 @@ DELETE FROM audit_logs WHERE id IN (
 -- Orgs holding data old enough to POSSIBLY be expired — bounded by each
 -- table's catalog FLOOR (run_events >= 7 days, audit/usage >= 30), so an
 -- org with only fresh data never enters the sweep loop at all.
+-- One existence probe per org instead of a scan over every aged row: each
+-- recursive step walks to the next distinct org through the table's
+-- (org_id, created_at) index. Run events carry no org, so their probe walks
+-- the org's runs oldest-first and stops at the first aged event.
 -- name: ListOrgsWithRetainableData :many
-SELECT DISTINCT org_id FROM (
-  SELECT r.org_id FROM runs r
-  JOIN run_events re ON re.run_id = r.id
-  WHERE re.created_at < now() - interval '7 days'
-  UNION SELECT org_id FROM audit_logs WHERE created_at < now() - interval '30 days'
-  UNION SELECT org_id FROM usage_events WHERE created_at < now() - interval '30 days'
-) all_orgs;
+WITH RECURSIVE run_orgs AS (
+  SELECT min(org_id) AS org_id FROM runs
+  UNION ALL
+  SELECT (SELECT min(r.org_id) FROM runs r WHERE r.org_id > run_orgs.org_id)
+  FROM run_orgs WHERE run_orgs.org_id IS NOT NULL
+), audit_orgs AS (
+  SELECT min(org_id) AS org_id FROM audit_logs
+  UNION ALL
+  SELECT (SELECT min(a.org_id) FROM audit_logs a WHERE a.org_id > audit_orgs.org_id)
+  FROM audit_orgs WHERE audit_orgs.org_id IS NOT NULL
+), usage_orgs AS (
+  SELECT min(org_id) AS org_id FROM usage_events
+  UNION ALL
+  SELECT (SELECT min(u.org_id) FROM usage_events u WHERE u.org_id > usage_orgs.org_id)
+  FROM usage_orgs WHERE usage_orgs.org_id IS NOT NULL
+)
+SELECT org_id::text AS org_id FROM run_orgs
+WHERE org_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM runs r
+    JOIN run_events re ON re.run_id = r.id
+    WHERE r.org_id = run_orgs.org_id AND re.created_at < now() - interval '7 days'
+    ORDER BY r.created_at LIMIT 1)
+UNION
+SELECT org_id::text FROM audit_orgs
+WHERE org_id IS NOT NULL
+  AND EXISTS (SELECT 1 FROM audit_logs a WHERE a.org_id = audit_orgs.org_id AND a.created_at < now() - interval '30 days')
+UNION
+SELECT org_id::text FROM usage_orgs
+WHERE org_id IS NOT NULL
+  AND EXISTS (SELECT 1 FROM usage_events u WHERE u.org_id = usage_orgs.org_id AND u.created_at < now() - interval '30 days');
 
 -- One read for every org's retention windows — the sweep resolves the
 -- layer chain in memory instead of one config query per org/table.
