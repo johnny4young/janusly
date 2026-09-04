@@ -65,9 +65,7 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 		{"listActiveScimUserState", listActiveScimUserState, []any{"org-x", "dir-x", int32(5001)}},
 		{"listScheduleFireHistory", listScheduleFireHistory, []any{"wf-x", "org-x", now}},
 		{"listFailedRunNodeSamples", listFailedRunNodeSamples, []any{"org-x", now}},
-		// The per-node AI budget gate (on an empty table the planner may still
-		// pick the shorter (org_id, metric) prefix over the expression index,
-		// so only the seq-scan gate applies), the DLQ counters, the healing anti-join,
+		// The per-node AI budget gate, the DLQ counters, the healing anti-join,
 		// audit lookups by target, the run list filtered by workflow, the
 		// validating-run poll, the hourly expiry deletes, and the retention
 		// org scan: each has an index shaped for it.
@@ -82,16 +80,16 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 		{"listOrgsWithRetainableData", listOrgsWithRetainableData, []any{}},
 		{"deleteExpiredDeadLettersBatch", deleteExpiredDeadLettersBatch, []any{"org-x", now, int32(100)}},
 	}
+	// Only queries whose predicate no other index can serve pin their index:
+	// on the empty controlled keys the planner is indifferent between two
+	// index-served plans, so a pin against a competing prefix index (org,
+	// created_at) flips between runs. The seq-scan gate still covers those.
 	requiredIndexes := map[string]string{
 		"listFailedRunNodeSamples":      "run_nodes_failed_finished_idx",
-		"countDeadLettersByStatus":      "dead_letters_org_status_production_idx",
 		"listOpenDeadLettersForHealing": "auto_healing_runs_org_dlq_idx",
-		"listAuditRowsForTargets":       "audit_logs_org_target_created_id_idx",
-		"listRunSummariesByWorkflow":    "runs_org_workflow_created_id_idx",
 		"listValidatingAutoHealingRuns": "auto_healing_runs_validating_idx",
 		"cleanupExpiredRateWindows":     "rate_limit_windows_expires_idx",
 		"cleanupExpiredSsoNonces":       "sso_state_nonces_expires_idx",
-		"listScheduleFireHistory":       "runs_org_workflow_created_id_idx",
 	}
 
 	for index, c := range cases {
