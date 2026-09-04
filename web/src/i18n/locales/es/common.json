@@ -2680,6 +2680,7 @@
   "rightPanel.quickConfig.cronPreviewTitle": "Próximas 3 ejecuciones",
   "rightPanel.quickConfig.cronPreviewInvalid": "Usa una expresión cron válida de 5 campos.",
   "rightPanel.quickConfig.cronPreviewError": "No se pudieron calcular las próximas ejecuciones en este momento.",
+  "rightPanel.quickConfig.cronPreviewUtc": "Los campos del cron se evalúan en UTC; las horas de arriba se muestran en tu zona local.",
   "rightPanel.quickConfig.cronPreviewEmpty": "Escribe una expresión cron para ver sus próximas ejecuciones.",
   "rightPanel.quickConfig.cronPreviewPaused": "Este horario está pausado; no se encolarán ejecuciones.",
   "rightPanel.quickConfig.emailAliasKey": "Alias de entrada",

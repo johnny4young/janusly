@@ -87,6 +87,7 @@ export function ScheduleCronPreview({ expression, enabled, id, onStateChange }: 
         <ol>
           {(effectiveState.nextFires ?? []).map((value) => <li key={value}>{formatter.format(new Date(value))}</li>)}
         </ol>
+        <span className="helper-text">{t('rightPanel.quickConfig.cronPreviewUtc')}</span>
       </>
     )
   } else content = null

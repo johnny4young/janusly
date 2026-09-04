@@ -4,6 +4,14 @@ Schedules are durable PostgreSQL rows evaluated by supervised loops in the
 Janusly process. Workflow deletion disables scheduling; restoration rebuilds
 active schedule state from the latest workflow version.
 
+Cron expressions are evaluated in UTC only: a schedule entry stores no time
+zone, its five fields are read against the UTC clock, and the persisted
+`next_fire_at` is a UTC instant. The schedule editor's preview renders those
+instants in the browser's own zone so an operator sees local wall-clock times
+while authoring in UTC. A per-schedule time zone is a known gap tracked for a
+later baseline edition; until then a workflow that must fire at a local hour
+declares the UTC equivalent.
+
 Approval and form deadlines use generation-bound durable checkpoints. A stale
 deadline cannot overwrite manual resume, cancellation, or a newer deadline.
 

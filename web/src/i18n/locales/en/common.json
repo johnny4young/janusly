@@ -2680,6 +2680,7 @@
   "rightPanel.quickConfig.cronPreviewTitle": "Next 3 runs",
   "rightPanel.quickConfig.cronPreviewInvalid": "Use a valid 5-field cron expression.",
   "rightPanel.quickConfig.cronPreviewError": "The next runs couldn't be calculated right now.",
+  "rightPanel.quickConfig.cronPreviewUtc": "Cron fields are read in UTC; the times above are shown in your local zone.",
   "rightPanel.quickConfig.cronPreviewEmpty": "Enter a cron expression to preview its next runs.",
   "rightPanel.quickConfig.cronPreviewPaused": "This schedule is paused; no runs will be queued.",
   "rightPanel.quickConfig.emailAliasKey": "Inbound alias",
