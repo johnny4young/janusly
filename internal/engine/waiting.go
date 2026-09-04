@@ -359,7 +359,8 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 			eventPayload = safePersist(map[string]any{"output": output}, defaultPersistMaxBytes())
 		}
 		events.add(e.newID(), runID, nodeID, "node.resumed", eventPayload, finishedAt)
-		return e.scheduleDownstream(ctx, q, events, runID, finishedAt)
+		_, err = e.scheduleDownstream(ctx, q, events, ClaimedNode{RunID: runID, NodeID: nodeID}, finishedAt)
+		return err
 	})
 }
 

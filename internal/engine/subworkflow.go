@@ -380,7 +380,8 @@ func (e *Engine) settleParentOnChildSuccess(
 		// A failed parent SETTLES the wait without reopening: no downstream
 		// scheduling — a replay may later reopen the parent explicitly.
 		if parent.Status == "running" {
-			return e.scheduleDownstream(ctx, q, events, parentRunID, finishedAt)
+			_, err := e.scheduleDownstream(ctx, q, events, ClaimedNode{RunID: parentRunID}, finishedAt)
+			return err
 		}
 		return nil
 	})
@@ -409,7 +410,8 @@ func (e *Engine) settleParentOnChildSuccess(
 			// A failed repair is NOT settled: reporting it as such lets the
 			// reconciler clear the durable marker and strands the parent.
 			if err := e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
-				return e.scheduleDownstream(ctx, txq, events, parentRunID, e.eventNow())
+				_, err := e.scheduleDownstream(ctx, txq, events, ClaimedNode{RunID: parentRunID}, e.eventNow())
+				return err
 			}); err != nil {
 				return false
 			}

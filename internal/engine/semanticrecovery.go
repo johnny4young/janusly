@@ -682,7 +682,7 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 		// queues every now-ready successor in this same transaction. QueueRunNode
 		// stamps the publication-repair generation, while LISTEN/NOTIFY remains
 		// only a latency optimization delivered by PostgreSQL after commit.
-		if err := e.scheduleDownstream(ctx, q, events, snapshot.RunID, resolvedAt); err != nil {
+		if _, err := e.scheduleDownstream(ctx, q, events, ClaimedNode{RunID: snapshot.RunID}, resolvedAt); err != nil {
 			return ResolveSemanticOutcomeResult{}, fmt.Errorf("resume semantic recovery downstream: %w", err)
 		}
 	}
@@ -939,7 +939,7 @@ func (e *Engine) finalizeSemanticRecoveryMonitoring(
 	if runID == "" || terminalEventID == "" {
 		return fmt.Errorf("semantic verification requires run and terminal event ids")
 	}
-	run, err := q.GetRunExecution(ctx, runID)
+	run, err := q.GetRunHeader(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("read semantic verification run: %w", err)
 	}

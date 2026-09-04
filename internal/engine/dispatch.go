@@ -212,10 +212,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	// The subworkflow node needs the engine (atomic child start + parent
 	// checkpoint), so it dispatches here instead of the executors map.
 	if node.Type == "subworkflow" {
-		replayMode := ""
-		if run, err := q.GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
-			replayMode = run.ReplayMode.String
-		}
+		replayMode := claim.replayMode(ctx, q)
 		return d.engine.executeSubworkflowNode(ctx, claim, renderedConfig,
 			map[string]any{"input": runContext["input"]}, replayMode, rendered.RedactedValues)
 	}
@@ -260,10 +257,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		bounds := LoadOrgHTTPBounds(ctx, q, claim.OrgID, d.renderOpts.LookupEnv)
 		httpBounds = &bounds
 	}
-	dryRun := false
-	if run, err := q.GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
-		dryRun = run.ReplayMode.String == "validation"
-	}
+	dryRun := claim.replayMode(ctx, q) == "validation"
 	var aiDeps *executors.AIDeps
 	if node.Type == "ai" || node.Type == "agent" || node.Type == "multi_agent" {
 		aiDeps = d.buildAIDeps(ctx, claim)
@@ -454,10 +448,7 @@ func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *execut
 	pool := d.engine.pool
 	client, settings := aiconfig.Resolve(ctx, pool, claim.OrgID)
 	workflowID, _ := store.New(pool).GetRunWorkflowID(ctx, claim.RunID)
-	dryRun := false
-	if run, err := store.New(pool).GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
-		dryRun = run.ReplayMode.String == "validation"
-	}
+	dryRun := claim.replayMode(ctx, store.New(pool)) == "validation"
 	return &executors.AIDeps{
 		Client: client, OrgID: claim.OrgID, WorkflowID: workflowID, DryRun: dryRun,
 		PromptMaxChars: settings.PromptMaxChars,
@@ -493,10 +484,7 @@ func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *execut
 func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode, workflowID string, redactedValues []string) *executors.MemoryDeps {
 	pool := d.engine.pool
 	redactedValues = append([]string(nil), redactedValues...)
-	dryRun := false
-	if run, err := store.New(pool).GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
-		dryRun = run.ReplayMode.String == "validation"
-	}
+	dryRun := claim.replayMode(ctx, store.New(pool)) == "validation"
 	return &executors.MemoryDeps{
 		DryRun: dryRun,
 		Commit: func(content string, metadata map[string]any) map[string]any {

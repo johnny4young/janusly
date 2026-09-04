@@ -229,7 +229,7 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 	}
 	// The snapshot this executor runs is the one the completion path needs;
 	// carrying it avoids refetching and reparsing input_json downstream.
-	claim = claim.withSnapshot(wf, run.ReplayMode.String)
+	claim = claim.withSnapshot(wf, runInput, run.ReplayMode.String, run.WorkflowVersionID)
 	var node *domain.Node
 	for i := range wf.Nodes {
 		if wf.Nodes[i].ID == claim.NodeID {

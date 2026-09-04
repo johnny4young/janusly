@@ -231,9 +231,16 @@ func WorkflowsEqual(a, b *domain.Workflow) bool {
 // The run marker and playbook mutation share the caller's transaction, so a
 // later outcome read can be idempotent without racing terminal completion.
 func (e *Engine) recordPlaybookValidationOutcome(ctx context.Context, q *store.Queries, runID, status string) error {
-	run, err := q.GetRunExecution(ctx, runID)
-	if err != nil || !run.ReplayMode.Valid || run.ReplayMode.String != "validation" {
+	// Every terminal flip lands here; only a validation replay carries a
+	// playbook claim, so production runs answer from the narrow header and
+	// never transfer input_json for this check.
+	header, err := q.GetRunHeader(ctx, runID)
+	if err != nil || !header.ReplayMode.Valid || header.ReplayMode.String != "validation" {
 		return nil
+	}
+	run, err := q.GetRunExecution(ctx, runID)
+	if err != nil {
+		return nil //nolint:nilerr // the flip already committed; a vanished run is not an outcome
 	}
 	var envelope struct {
 		RecoveryPlaybookID string `json:"recoveryPlaybookId"`

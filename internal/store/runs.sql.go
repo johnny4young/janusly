@@ -824,6 +824,32 @@ func (q *Queries) GetRunExecution(ctx context.Context, id string) (GetRunExecuti
 	return i, err
 }
 
+const getRunHeader = `-- name: GetRunHeader :one
+SELECT status, org_id, workflow_version_id, replay_mode FROM runs WHERE id = $1
+`
+
+type GetRunHeaderRow struct {
+	Status            string
+	OrgID             string
+	WorkflowVersionID string
+	ReplayMode        pgtype.Text
+}
+
+// Completion paths re-check the run's status and identity inside their own
+// transaction; the workflow snapshot itself rides the claim, so this read
+// must not transfer input_json.
+func (q *Queries) GetRunHeader(ctx context.Context, id string) (GetRunHeaderRow, error) {
+	row := q.db.QueryRow(ctx, getRunHeader, id)
+	var i GetRunHeaderRow
+	err := row.Scan(
+		&i.Status,
+		&i.OrgID,
+		&i.WorkflowVersionID,
+		&i.ReplayMode,
+	)
+	return i, err
+}
+
 const getRunNode = `-- name: GetRunNode :one
 SELECT id, run_id, node_id, status, state_json, attempts, started_at,
        finished_at, error_json

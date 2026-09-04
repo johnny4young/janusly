@@ -29,20 +29,24 @@ var (
 	skippedBranchPayload = json.RawMessage(`{"reason":"Branch not taken"}`)
 )
 
-func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, events *runEventBuffer, runID string, completedAt time.Time) error {
-	run, err := q.GetRunExecution(ctx, runID)
+func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, events *runEventBuffer, claim ClaimedNode, completedAt time.Time) (terminal bool, err error) {
+	runID := claim.RunID
+	// The status is re-read on this transaction's snapshot (cancellation
+	// may have landed while the node ran), but the workflow rides the
+	// claim: a completion no longer transfers or re-parses input_json.
+	header, err := q.GetRunHeader(ctx, runID)
 	if err != nil {
-		return fmt.Errorf("read run: %w", err)
+		return false, fmt.Errorf("read run: %w", err)
 	}
-	if run.Status != "running" {
+	if header.Status != "running" {
 		// Cancellation (or a concurrent failure) landed while this node ran:
 		// its own terminal state stays, but no downstream work is scheduled
 		// for a run the operator already stopped.
-		return nil
+		return false, nil
 	}
-	wf, runInput, err := workflowFromRunInput(run.InputJson)
+	wf, runInput, err := e.runWorkflow(ctx, q, claim)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Cheap path: statuses alone unless some edge condition can reach into
@@ -59,7 +63,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 	if needFull {
 		rows, err := q.ListRunNodesByRun(ctx, runID)
 		if err != nil {
-			return fmt.Errorf("read node rows: %w", err)
+			return false, fmt.Errorf("read node rows: %w", err)
 		}
 		runContext = runContextFromRows(rows)
 		for nodeID, entry := range runContext {
@@ -68,7 +72,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 	} else {
 		statuses, err = e.nodeStatuses(ctx, q, runID)
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 
@@ -94,7 +98,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 					StateJson: stateJSON, FinishedAt: &skippedAt,
 				})
 				if err != nil {
-					return fmt.Errorf("skip node %s: %w", node.ID, err)
+					return false, fmt.Errorf("skip node %s: %w", node.ID, err)
 				}
 				if rows > 0 {
 					events.add(e.newID(), runID, node.ID, "node.skipped", payload, skippedAt)
@@ -113,7 +117,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 			}
 			rows, err := q.QueueRunNode(ctx, store.QueueRunNodeParams{RunID: runID, NodeID: node.ID})
 			if err != nil {
-				return fmt.Errorf("queue node %s: %w", node.ID, err)
+				return false, fmt.Errorf("queue node %s: %w", node.ID, err)
 			}
 			if rows == 0 {
 				continue
@@ -128,9 +132,9 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 
 	if queued > 0 {
 		if err := q.NotifyWake(ctx, runID); err != nil {
-			return fmt.Errorf("notify wake: %w", err)
+			return false, fmt.Errorf("notify wake: %w", err)
 		}
-		return nil
+		return false, nil
 	}
 
 	anyUnhandledFailed, anyOpen := false, false
@@ -153,9 +157,9 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 	if anyUnhandledFailed {
 		if err := e.flipRunTerminal(ctx, q, events, runID, "failed",
 			map[string]any{"failedNodes": failedNodes}, completedAt, nil); err != nil {
-			return err
+			return false, err
 		}
-		return e.appendStatusChecked(ctx, events, runID, completedAt)
+		return true, e.appendStatusChecked(ctx, events, runID, completedAt)
 	}
 	if total > 0 && !anyOpen {
 		var outputJSON json.RawMessage
@@ -168,11 +172,11 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 		}
 		if err := e.flipRunTerminal(ctx, q, events, runID, "succeeded",
 			payload, completedAt, outputJSON); err != nil {
-			return err
+			return false, err
 		}
-		return e.appendStatusChecked(ctx, events, runID, completedAt)
+		return true, e.appendStatusChecked(ctx, events, runID, completedAt)
 	}
-	return e.appendStatusChecked(ctx, events, runID, completedAt)
+	return false, e.appendStatusChecked(ctx, events, runID, completedAt)
 }
 
 // appendStatusChecked is the contract's fan-in settle marker: every

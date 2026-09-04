@@ -35,7 +35,7 @@ type runSummaryMemoryJob struct {
 // just flipped terminal. INSERT ON CONFLICT replaces the former racy
 // SELECT-then-detached-goroutine path and makes every completion hook safe.
 func (e *Engine) maybeCommitRunSummaryMemory(ctx context.Context, runID string) {
-	run, err := store.New(e.pool).GetRunExecution(ctx, runID)
+	run, err := store.New(e.pool).GetRunHeader(ctx, runID)
 	if err != nil || (run.ReplayMode.Valid && run.ReplayMode.String != "") {
 		return
 	}

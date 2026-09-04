@@ -139,6 +139,12 @@ SELECT status, org_id, workflow_version_id, input_json, replay_mode FROM runs WH
 -- name: GetRunReplayMode :one
 SELECT status, org_id, replay_mode FROM runs WHERE id = $1;
 
+-- Completion paths re-check the run's status and identity inside their own
+-- transaction; the workflow snapshot itself rides the claim, so this read
+-- must not transfer input_json.
+-- name: GetRunHeader :one
+SELECT status, org_id, workflow_version_id, replay_mode FROM runs WHERE id = $1;
+
 -- The Node outbox deadline is the same instant as Go's retry wakeup. Node's
 -- reconciler therefore cannot publish the rollback delivery before backoff.
 -- name: RequeueRunNodeForRetry :execrows

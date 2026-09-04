@@ -153,8 +153,11 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 		// it expected. No dead letter (there is nothing for an operator to
 		// recover — the workflow recovers itself), no terminal flip; the
 		// error branch schedules inside this same transaction.
-		if wf, _, wfErr := workflowFromRunInput(run.InputJson); wfErr == nil && run.Status == "running" &&
-			nodeFailureHandled(wf, claim.NodeID) {
+		wf := claim.snapshot.workflowOr(nil)
+		if wf == nil {
+			wf, _, _ = workflowFromRunInput(run.InputJson)
+		}
+		if wf != nil && run.Status == "running" && nodeFailureHandled(wf, claim.NodeID) {
 			handled = true
 			handledPayload := map[string]any{"error": serr, "attempt": claim.Attempt, "handled": true}
 			handledJSON, err := json.Marshal(handledPayload)
@@ -162,7 +165,8 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 				return fmt.Errorf("marshal handled payload: %w", err)
 			}
 			events.add(e.newID(), claim.RunID, claim.NodeID, "node.failed", handledJSON, failedAt)
-			return e.scheduleDownstream(ctx, q, events, claim.RunID, failedAt)
+			_, err = e.scheduleDownstream(ctx, q, events, claim, failedAt)
+			return err
 		}
 
 		if err := e.insertDeadLetter(ctx, q, claim, run, serr, failedAt); err != nil {

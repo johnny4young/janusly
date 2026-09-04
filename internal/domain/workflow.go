@@ -6,10 +6,12 @@
 package domain
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -190,14 +192,19 @@ func Parse(raw []byte) (*Workflow, []Issue) {
 	if doc.Nodes == nil {
 		contract("nodes", "Invalid input: expected array, received undefined")
 	} else {
+		// The raw pass only tells an explicit null from an absent field. A
+		// document without the token cannot carry one, so the stored
+		// snapshot re-parsed on every claim decodes its nodes once.
 		var rawNodes []map[string]json.RawMessage
-		_ = json.Unmarshal(document["nodes"], &rawNodes)
+		if bytes.Contains(document["nodes"], []byte("null")) {
+			_ = json.Unmarshal(document["nodes"], &rawNodes)
+		}
 		// Non-nil even when empty: the workflow snapshot persisted at run
 		// start must round-trip as "nodes": [] — a nil slice would marshal
 		// as null and fail this same contract on re-parse.
 		wf.Nodes = []Node{}
 		for i, n := range *doc.Nodes {
-			path := fmt.Sprintf("nodes.%d", i)
+			path := "nodes." + strconv.Itoa(i)
 			if i < len(rawNodes) && rawNodes[i] != nil {
 				for _, field := range []string{"label", "config"} {
 					if value, present := rawNodes[i][field]; present && isJSONNull(value) {
@@ -236,9 +243,11 @@ func Parse(raw []byte) (*Workflow, []Issue) {
 		contract("edges", "Invalid input: expected array, received undefined")
 	} else {
 		var rawEdges []map[string]json.RawMessage
-		_ = json.Unmarshal(document["edges"], &rawEdges)
+		if bytes.Contains(document["edges"], []byte("null")) {
+			_ = json.Unmarshal(document["edges"], &rawEdges)
+		}
 		for i, e := range *doc.Edges {
-			path := fmt.Sprintf("edges.%d", i)
+			path := "edges." + strconv.Itoa(i)
 			if i < len(rawEdges) && rawEdges[i] != nil {
 				for _, field := range []string{"id", "condition", "onError"} {
 					if value, present := rawEdges[i][field]; present && isJSONNull(value) {

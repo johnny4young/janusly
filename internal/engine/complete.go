@@ -42,14 +42,31 @@ type ClaimedNode struct {
 }
 
 type claimSnapshot struct {
-	workflow   *domain.Workflow
-	replayMode string
+	workflow          *domain.Workflow
+	runInput          map[string]any
+	replayMode        string
+	workflowVersionID string
 }
 
 // withSnapshot returns a copy of the claim carrying the parsed run.
-func (c ClaimedNode) withSnapshot(workflow *domain.Workflow, replayMode string) ClaimedNode {
-	c.snapshot = &claimSnapshot{workflow: workflow, replayMode: replayMode}
+func (c ClaimedNode) withSnapshot(workflow *domain.Workflow, runInput map[string]any, replayMode, workflowVersionID string) ClaimedNode {
+	c.snapshot = &claimSnapshot{
+		workflow: workflow, runInput: runInput,
+		replayMode: replayMode, workflowVersionID: workflowVersionID,
+	}
 	return c
+}
+
+// replayMode is the run's replay mode from the claim snapshot, or one
+// narrow read for a hand-built claim; "" is a production run.
+func (c ClaimedNode) replayMode(ctx context.Context, q *store.Queries) string {
+	if c.snapshot != nil {
+		return c.snapshot.replayMode
+	}
+	if run, err := q.GetRunReplayMode(ctx, c.RunID); err == nil && run.ReplayMode.Valid {
+		return run.ReplayMode.String
+	}
+	return ""
 }
 
 type completionOptions struct {
@@ -150,6 +167,7 @@ func (e *Engine) completeNode(ctx context.Context, claim ClaimedNode, output any
 	eventJSON := safePersist(eventPayload, defaultPersistMaxBytes())
 
 	finishedAt := e.eventNow()
+	terminal := false
 	if err := e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		completed, err := q.CompleteRunNode(ctx, store.CompleteRunNodeParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
@@ -200,17 +218,20 @@ func (e *Engine) completeNode(ctx context.Context, claim ClaimedNode, output any
 			// already have landed above, matching the compatibility runtime.
 			return nil
 		}
-		return e.scheduleDownstream(ctx, q, events, claim.RunID, finishedAt)
+		flipped, err := e.scheduleDownstream(ctx, q, events, claim, finishedAt)
+		terminal = flipped
+		return err
 	}); err != nil {
 		return err
 	}
-	// Rollout outcome receipt (post-commit, idempotent; the repair pass
-	// covers crash windows). Only meaningful when this completion rolled
-	// the run terminal — the recorder re-validates everything itself.
-	e.maybeRecordRolloutOutcome(ctx, claim.RunID)
-	// Same shape for the memory summary: fired from every completion,
-	// no-op until the run itself reads terminal.
-	e.maybeCommitRunSummaryMemory(ctx, claim.RunID)
+	// Post-commit receipts (idempotent; the repair pass covers crash
+	// windows) only matter when this completion rolled the run terminal.
+	// Both recorders re-validate the run themselves, so a non-terminal
+	// completion no longer pays their round trips.
+	if terminal {
+		e.maybeRecordRolloutOutcome(ctx, claim.RunID)
+		e.maybeCommitRunSummaryMemory(ctx, claim.RunID)
+	}
 	return nil
 }
 
@@ -223,7 +244,7 @@ func (e *Engine) recordRoutingOutcome(
 ) error {
 	orgID := claim.OrgID
 	if orgID == "" {
-		run, err := q.GetRunExecution(ctx, claim.RunID)
+		run, err := q.GetRunHeader(ctx, claim.RunID)
 		if err != nil {
 			return fmt.Errorf("resolve routing outcome tenant: %w", err)
 		}
@@ -308,11 +329,11 @@ func (e *Engine) persistSemanticViolations(
 	ctx context.Context, q *store.Queries, events *runEventBuffer, claim ClaimedNode,
 	violations []recovery.SemanticOutcomeViolation, finishedAt time.Time,
 ) (bool, error) {
-	run, err := q.GetRunExecution(ctx, claim.RunID)
+	wf, _, err := e.runWorkflow(ctx, q, claim)
 	if err != nil {
 		return false, fmt.Errorf("read run for semantic persistence: %w", err)
 	}
-	wf, _, err := workflowFromRunInput(run.InputJson)
+	orgID, workflowVersionID, err := e.runIdentity(ctx, q, claim)
 	if err != nil {
 		return false, err
 	}
@@ -322,7 +343,7 @@ func (e *Engine) persistSemanticViolations(
 	exactWorkflowID := pgtype.Text{}
 	if wf.ID != "" {
 		_, versionErr := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
-			ID: run.WorkflowVersionID, OrgID: run.OrgID, WorkflowID: wf.ID,
+			ID: workflowVersionID, OrgID: orgID, WorkflowID: wf.ID,
 		})
 		switch {
 		case versionErr == nil:
@@ -333,7 +354,7 @@ func (e *Engine) persistSemanticViolations(
 		}
 	}
 	for _, violation := range violations {
-		caseID := StableSemanticID("sem", run.OrgID, claim.RunID, violation.DetectorID)
+		caseID := StableSemanticID("sem", orgID, claim.RunID, violation.DetectorID)
 		state := "detected"
 		if violation.Action == "quarantine" {
 			state = "contained"
@@ -344,9 +365,9 @@ func (e *Engine) persistSemanticViolations(
 		}
 		detailsJSON, _ := json.Marshal(details)
 		if err := q.InsertRecoveryCase(ctx, store.InsertRecoveryCaseParams{
-			ID: caseID, OrgID: run.OrgID, RunID: claim.RunID,
+			ID: caseID, OrgID: orgID, RunID: claim.RunID,
 			WorkflowID:        exactWorkflowID,
-			WorkflowVersionID: run.WorkflowVersionID,
+			WorkflowVersionID: workflowVersionID,
 			Source:            semanticRecoveryCaseSource, DetectorID: violation.DetectorID,
 			SourceNodeID: violation.SourceNodeID, DetectorKind: violation.Kind,
 			Action: violation.Action, Message: violation.Message,
@@ -362,7 +383,7 @@ func (e *Engine) persistSemanticViolations(
 			})
 			if _, err := q.InsertRecoveryCaseTransition(ctx, store.InsertRecoveryCaseTransitionParams{
 				ID:    StableSemanticID("sct", caseID, "contained"),
-				OrgID: run.OrgID, CaseID: caseID,
+				OrgID: orgID, CaseID: caseID,
 				FromState: "detected", ToState: "contained",
 				ActorKind: "system", ActorID: pgtype.Text{},
 				EvidenceJson: evidenceJSON, Reason: pgtype.Text{},
@@ -381,7 +402,7 @@ func (e *Engine) persistSemanticViolations(
 	}
 
 	counts, err := q.CountRunSemanticCases(ctx, store.CountRunSemanticCasesParams{
-		OrgID: run.OrgID, RunID: claim.RunID,
+		OrgID: orgID, RunID: claim.RunID,
 	})
 	if err != nil {
 		return false, fmt.Errorf("count semantic cases: %w", err)
@@ -504,4 +525,36 @@ func (c *claimSnapshot) workflowOr(fallback *domain.Workflow) *domain.Workflow {
 		return fallback
 	}
 	return c.workflow
+}
+
+// runWorkflow returns the run's parsed workflow and start input: from the
+// claim snapshot when the worker preloaded it, otherwise from one
+// input_json read. Hand-built claims (drills, tests) take the second path.
+func (e *Engine) runWorkflow(ctx context.Context, q *store.Queries, claim ClaimedNode) (*domain.Workflow, map[string]any, error) {
+	if wf := claim.snapshot.workflowOr(nil); wf != nil {
+		return wf, claim.snapshot.runInput, nil
+	}
+	run, err := q.GetRunExecution(ctx, claim.RunID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read run: %w", err)
+	}
+	return workflowFromRunInput(run.InputJson)
+}
+
+// runIdentity resolves the tenant and pinned version without transferring
+// input_json: the claim carries both after executeClaim; otherwise one
+// narrow header read.
+func (e *Engine) runIdentity(ctx context.Context, q *store.Queries, claim ClaimedNode) (orgID, workflowVersionID string, err error) {
+	orgID = claim.OrgID
+	if claim.snapshot != nil {
+		workflowVersionID = claim.snapshot.workflowVersionID
+	}
+	if orgID != "" && workflowVersionID != "" {
+		return orgID, workflowVersionID, nil
+	}
+	header, err := q.GetRunHeader(ctx, claim.RunID)
+	if err != nil {
+		return "", "", fmt.Errorf("read run header: %w", err)
+	}
+	return header.OrgID, header.WorkflowVersionID, nil
 }
