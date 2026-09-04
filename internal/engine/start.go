@@ -255,18 +255,27 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		}
 	}
 
+	// One COPY for every node row: a start used to cost one round trip per
+	// node. Queued roots carry the publication stamp InsertRunNode computes
+	// in SQL (repair-after = now, generation 1).
+	publishedAt := time.Now().UTC()
+	nodeRows := make([]store.InsertRunNodesParams, 0, len(in.Workflow.Nodes))
 	for _, node := range in.Workflow.Nodes {
-		status, attempts := "pending", int32(0)
-		if roots[node.ID] {
-			status, attempts = "queued", 1
-		}
-		if err := q.InsertRunNode(ctx, store.InsertRunNodeParams{
+		row := store.InsertRunNodesParams{
 			ID: e.newID(), RunID: runID, NodeID: node.ID,
-			Status: status, Attempts: pgtype.Int4{Int32: attempts, Valid: true},
+			Status: "pending", Attempts: pgtype.Int4{Int32: 0, Valid: true},
 			StateJson: json.RawMessage(`{}`),
-		}); err != nil {
-			return "", fmt.Errorf("insert node %s: %w", node.ID, err)
 		}
+		if roots[node.ID] {
+			row.Status, row.Attempts = "queued", pgtype.Int4{Int32: 1, Valid: true}
+			row.QueuePublicationRepairAfter, row.QueuePublicationGeneration = &publishedAt, 1
+		}
+		nodeRows = append(nodeRows, row)
+	}
+	if inserted, err := q.InsertRunNodes(ctx, nodeRows); err != nil {
+		return "", fmt.Errorf("insert run nodes: %w", err)
+	} else if inserted != int64(len(nodeRows)) {
+		return "", fmt.Errorf("insert run nodes: %d of %d rows landed", inserted, len(nodeRows))
 	}
 
 	startedFields := map[string]string{"workflowVersionId": versionID}
@@ -276,16 +285,15 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	}
 	startedPayload, _ := json.Marshal(startedFields)
 	startedAt := e.eventNow()
-	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID, Type: "run.started", Payload: startedPayload,
-		CreatedAt: &startedAt,
-	}); err != nil {
-		return "", fmt.Errorf("insert run.started: %w", err)
-	}
 	// The contract's initial publication appends node.queued per root
 	// (event-granularity consistency). Millisecond offsets keep the
 	// (created_at, id) keyset from ever ordering a queued event before
-	// run.started or shuffling roots between reads.
+	// run.started or shuffling roots between reads. All of it lands in one
+	// COPY, like the completion path's event buffer.
+	eventRows := []store.InsertRunEventsParams{{
+		ID: e.newID(), RunID: runID, Type: "run.started", Payload: startedPayload,
+		CreatedAt: &startedAt,
+	}}
 	rootIndex := 0
 	for _, node := range in.Workflow.Nodes {
 		if !roots[node.ID] {
@@ -293,14 +301,17 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		}
 		rootIndex++
 		queuedAt := startedAt.Add(time.Duration(rootIndex) * time.Millisecond)
-		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+		eventRows = append(eventRows, store.InsertRunEventsParams{
 			ID: e.newID(), RunID: runID,
 			NodeID: pgtype.Text{String: node.ID, Valid: true},
 			Type:   "node.queued", Payload: json.RawMessage(`{}`),
 			CreatedAt: &queuedAt,
-		}); err != nil {
-			return "", fmt.Errorf("insert node.queued: %w", err)
-		}
+		})
+	}
+	if inserted, err := q.InsertRunEvents(ctx, eventRows); err != nil {
+		return "", fmt.Errorf("insert start events: %w", err)
+	} else if inserted != int64(len(eventRows)) {
+		return "", fmt.Errorf("insert start events: %d of %d rows landed", inserted, len(eventRows))
 	}
 
 	if in.ParentCheckpoint != nil {

@@ -1454,9 +1454,8 @@ func (q *Queries) ListHealingCandidateOrgs(ctx context.Context, createdAt *time.
 }
 
 const listOpenDeadLetterClusterMembers = `-- name: ListOpenDeadLetterClusterMembers :many
-SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at, r.input_json
+SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at, dl.node_json
 FROM dead_letters dl
-JOIN runs r ON r.id = dl.run_id
 WHERE dl.org_id = $1 AND dl.created_at >= $2 AND dl.status = 'open'
   AND dl.replay_mode IS NULL
 ORDER BY dl.created_at DESC
@@ -1474,9 +1473,11 @@ type ListOpenDeadLetterClusterMembersRow struct {
 	NodeID    string
 	ErrorJson json.RawMessage
 	CreatedAt *time.Time
-	InputJson json.RawMessage
+	NodeJson  json.RawMessage
 }
 
+// Membership is decided from the dead letter's own node snapshot; the run's
+// workflow document is never transferred for it.
 func (q *Queries) ListOpenDeadLetterClusterMembers(ctx context.Context, arg ListOpenDeadLetterClusterMembersParams) ([]ListOpenDeadLetterClusterMembersRow, error) {
 	rows, err := q.db.Query(ctx, listOpenDeadLetterClusterMembers, arg.OrgID, arg.CreatedAt)
 	if err != nil {
@@ -1492,7 +1493,7 @@ func (q *Queries) ListOpenDeadLetterClusterMembers(ctx context.Context, arg List
 			&i.NodeID,
 			&i.ErrorJson,
 			&i.CreatedAt,
-			&i.InputJson,
+			&i.NodeJson,
 		); err != nil {
 			return nil, err
 		}
@@ -1509,7 +1510,7 @@ SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.error_json, dl.workflow_json,
        dl.node_json, dl.created_at
 FROM dead_letters dl
 WHERE dl.org_id = $1 AND dl.status = 'open' AND dl.created_at >= $2
-  AND NOT EXISTS (SELECT 1 FROM auto_healing_runs ahr WHERE ahr.dead_letter_id = dl.id)
+  AND NOT EXISTS (SELECT 1 FROM auto_healing_runs ahr WHERE ahr.org_id = $1 AND ahr.dead_letter_id = dl.id)
 ORDER BY dl.created_at DESC
 LIMIT 200
 `

@@ -63,7 +63,7 @@ func (s *V1Server) clusterMembersCore(r *http.Request, rc v1Request) opResult {
 			Source: "dead_letter", ID: row.ID, RunID: row.RunID, NodeID: row.NodeID,
 			ErrorJSON: row.ErrorJson,
 		}
-		enrichSampleFromRunInput(&sample, row.InputJson)
+		enrichSampleFromNodeJSON(&sample, row.NodeJson)
 		result := signature.NormalizeJSON(sample.ErrorJSON, signature.Context{
 			NodeType: sample.NodeType, NodeID: sample.NodeID, ToolName: sample.ToolName,
 		})

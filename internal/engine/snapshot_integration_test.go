@@ -41,6 +41,19 @@ func (c *queryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pg
 
 func (c *queryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
+// COPY statements bypass the query tracer; they are counted by table.
+func (c *queryCounter) TraceCopyFromStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceCopyFromStartData) context.Context {
+	c.mu.Lock()
+	if c.counts == nil {
+		c.counts = map[string]int{}
+	}
+	c.counts["copy:"+strings.Trim(data.TableName.Sanitize(), `"`)]++
+	c.mu.Unlock()
+	return ctx
+}
+
+func (c *queryCounter) TraceCopyFromEnd(context.Context, *pgx.Conn, pgx.TraceCopyFromEndData) {}
+
 func (c *queryCounter) reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -86,9 +99,18 @@ func TestNodeCycleTransfersTheRunSnapshotOnce(t *testing.T) {
 	org := "org-snapshot-" + hex.EncodeToString(raw)
 	eng := New(pool)
 
+	counter.reset()
 	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, chainDoc)})
 	if err != nil {
 		t.Fatalf("start: %v", err)
+	}
+	// Start writes the node rows and the initial events in one COPY each
+	// instead of one statement per node and per root.
+	if copies, single := counter.get("copy:run_nodes"), counter.get("InsertRunNode"); copies != 1 || single != 0 {
+		t.Fatalf("start must COPY its node rows once: copies=%d InsertRunNode=%d", copies, single)
+	}
+	if copies, single := counter.get("copy:run_events"), counter.get("InsertRunEventAt"); copies != 1 || single != 0 {
+		t.Fatalf("start must COPY its initial events once: copies=%d InsertRunEventAt=%d", copies, single)
 	}
 	counter.reset()
 

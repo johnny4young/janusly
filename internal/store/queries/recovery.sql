@@ -604,10 +604,11 @@ SELECT * FROM recovery_item_handoffs
 WHERE org_id = $1 AND recovery_item_id = $2
 ORDER BY first_dispatched_at DESC LIMIT 50;
 
+-- Membership is decided from the dead letter's own node snapshot; the run's
+-- workflow document is never transferred for it.
 -- name: ListOpenDeadLetterClusterMembers :many
-SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at, r.input_json
+SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at, dl.node_json
 FROM dead_letters dl
-JOIN runs r ON r.id = dl.run_id
 WHERE dl.org_id = $1 AND dl.created_at >= $2 AND dl.status = 'open'
   AND dl.replay_mode IS NULL
 ORDER BY dl.created_at DESC
@@ -753,7 +754,7 @@ SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.error_json, dl.workflow_json,
        dl.node_json, dl.created_at
 FROM dead_letters dl
 WHERE dl.org_id = $1 AND dl.status = 'open' AND dl.created_at >= $2
-  AND NOT EXISTS (SELECT 1 FROM auto_healing_runs ahr WHERE ahr.dead_letter_id = dl.id)
+  AND NOT EXISTS (SELECT 1 FROM auto_healing_runs ahr WHERE ahr.org_id = $1 AND ahr.dead_letter_id = dl.id)
 ORDER BY dl.created_at DESC
 LIMIT 200;
 

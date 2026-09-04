@@ -48,3 +48,44 @@ func (r iteratorForInsertRunEvents) Err() error {
 func (q *Queries) InsertRunEvents(ctx context.Context, arg []InsertRunEventsParams) (int64, error) {
 	return q.db.CopyFrom(ctx, []string{"run_events"}, []string{"id", "run_id", "node_id", "type", "payload", "created_at"}, &iteratorForInsertRunEvents{rows: arg})
 }
+
+// iteratorForInsertRunNodes implements pgx.CopyFromSource.
+type iteratorForInsertRunNodes struct {
+	rows                 []InsertRunNodesParams
+	skippedFirstNextCall bool
+}
+
+func (r *iteratorForInsertRunNodes) Next() bool {
+	if len(r.rows) == 0 {
+		return false
+	}
+	if !r.skippedFirstNextCall {
+		r.skippedFirstNextCall = true
+		return true
+	}
+	r.rows = r.rows[1:]
+	return len(r.rows) > 0
+}
+
+func (r iteratorForInsertRunNodes) Values() ([]interface{}, error) {
+	return []interface{}{
+		r.rows[0].ID,
+		r.rows[0].RunID,
+		r.rows[0].NodeID,
+		r.rows[0].Status,
+		r.rows[0].Attempts,
+		r.rows[0].StateJson,
+		r.rows[0].QueuePublicationRepairAfter,
+		r.rows[0].QueuePublicationGeneration,
+	}, nil
+}
+
+func (r iteratorForInsertRunNodes) Err() error {
+	return nil
+}
+
+// Run start writes every node row in one COPY; the queued roots carry the
+// publication stamp InsertRunNode computes in SQL.
+func (q *Queries) InsertRunNodes(ctx context.Context, arg []InsertRunNodesParams) (int64, error) {
+	return q.db.CopyFrom(ctx, []string{"run_nodes"}, []string{"id", "run_id", "node_id", "status", "attempts", "state_json", "queue_publication_repair_after", "queue_publication_generation"}, &iteratorForInsertRunNodes{rows: arg})
+}

@@ -52,6 +52,15 @@ VALUES (
   CASE WHEN $4 = 'queued' THEN 1 ELSE 0 END
 );
 
+-- Run start writes every node row in one COPY; the queued roots carry the
+-- publication stamp InsertRunNode computes in SQL.
+-- name: InsertRunNodes :copyfrom
+INSERT INTO run_nodes (
+  id, run_id, node_id, status, attempts, state_json,
+  queue_publication_repair_after, queue_publication_generation
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
 -- Server-owned sandbox adapters seed only the checkpoints required to enter
 -- one exact runtime boundary. This is deliberately not a general mutation API.
 -- name: InsertSeededRunNode :exec
@@ -303,7 +312,7 @@ SELECT r.id, r.org_id, r.workflow_version_id, r.status,
        coalesce(wv.workflow_id,
                 nullif(r.input_json->'workflow'->>'id', ''),
                 r.workflow_version_id) AS workflow_id,
-       coalesce((r.input_json->'workflow'->>'name')::text, '') AS workflow_name,
+       coalesce(w.name, r.input_json->'workflow'->>'name', '') AS workflow_name,
        EXISTS (
          SELECT 1 FROM run_nodes rn
          WHERE rn.run_id = r.id AND rn.status = 'waiting'

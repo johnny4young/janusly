@@ -106,6 +106,23 @@ func (s *V1Server) failureClustersValue(ctx context.Context, orgID string, windo
 
 // enrichSampleFromRunInput reads workflow identity + failing-node type/tool
 // out of the run's persisted input_json.workflow snapshot.
+// enrichSampleFromNodeJSON fills the node type and tool from the dead
+// letter's own node snapshot: enough for signature matching, without the
+// run's whole workflow document.
+func enrichSampleFromNodeJSON(sample *signature.FailureSample, nodeJSON []byte) {
+	var node struct {
+		Type   string         `json:"type"`
+		Config map[string]any `json:"config"`
+	}
+	if json.Unmarshal(nodeJSON, &node) != nil {
+		return
+	}
+	sample.NodeType = node.Type
+	if tool, ok := node.Config["tool"].(string); ok {
+		sample.ToolName = tool
+	}
+}
+
 func enrichSampleFromRunInput(sample *signature.FailureSample, inputJSON []byte) {
 	var input struct {
 		Workflow struct {

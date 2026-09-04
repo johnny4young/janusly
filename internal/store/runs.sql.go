@@ -1244,6 +1244,17 @@ func (q *Queries) InsertRunNode(ctx context.Context, arg InsertRunNodeParams) er
 	return err
 }
 
+type InsertRunNodesParams struct {
+	ID                          string
+	RunID                       string
+	NodeID                      string
+	Status                      string
+	Attempts                    pgtype.Int4
+	StateJson                   json.RawMessage
+	QueuePublicationRepairAfter *time.Time
+	QueuePublicationGeneration  int32
+}
+
 const insertSeededRunNode = `-- name: InsertSeededRunNode :exec
 INSERT INTO run_nodes (
   id, run_id, node_id, status, attempts, state_json,
@@ -1882,7 +1893,7 @@ SELECT r.id, r.org_id, r.workflow_version_id, r.status,
        coalesce(wv.workflow_id,
                 nullif(r.input_json->'workflow'->>'id', ''),
                 r.workflow_version_id) AS workflow_id,
-       coalesce((r.input_json->'workflow'->>'name')::text, '') AS workflow_name,
+       coalesce(w.name, r.input_json->'workflow'->>'name', '') AS workflow_name,
        EXISTS (
          SELECT 1 FROM run_nodes rn
          WHERE rn.run_id = r.id AND rn.status = 'waiting'
@@ -1928,7 +1939,7 @@ type ListRunSummariesRow struct {
 	CreatedAt               *time.Time
 	TraceID                 pgtype.Text
 	WorkflowID              string
-	WorkflowName            interface{}
+	WorkflowName            string
 	HasWaitingNodes         bool
 }
 

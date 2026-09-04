@@ -63,21 +63,26 @@ func TestCompletionEventsLandInOneCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	startInserts := rowInserts.Load() // the start tx keeps per-row inserts (out of scope)
+	// The start transaction lands its own timeline (run.started +
+	// node.queued(a)) in one COPY as well.
+	if rowInserts.Load() != 0 || copies.Load() != 1 || copiedRows.Load() != 2 {
+		t.Fatalf("start must COPY its 2 initial events once: inserts=%d copies=%d rows=%d",
+			rowInserts.Load(), copies.Load(), copiedRows.Load())
+	}
+	startCopies, startRows := copies.Load(), copiedRows.Load()
 	runDispatcherToTerminal(t, eng, pool, runID, "succeeded")
 
-	completionInserts := rowInserts.Load() - startInserts
-	if completionInserts != 0 {
-		t.Fatalf("completion path must not per-row insert events, saw %d", completionInserts)
+	if rowInserts.Load() != 0 {
+		t.Fatalf("completion path must not per-row insert events, saw %d", rowInserts.Load())
 	}
 	// Two completion transactions (node a, node b): each lands exactly one COPY.
-	if copies.Load() != 2 {
-		t.Fatalf("expected 2 event copies (one per completion tx), got %d", copies.Load())
+	if completionCopies := copies.Load() - startCopies; completionCopies != 2 {
+		t.Fatalf("expected 2 event copies (one per completion tx), got %d", completionCopies)
 	}
 	// a: node.succeeded + node.queued(b) = 2; b: node.succeeded + run.succeeded
 	// + run.status_checked = 3 — five events, two round trips (was five).
-	if copiedRows.Load() != 5 {
-		t.Fatalf("expected 5 batched events across both completions, got %d", copiedRows.Load())
+	if completionRows := copiedRows.Load() - startRows; completionRows != 5 {
+		t.Fatalf("expected 5 batched events across both completions, got %d", completionRows)
 	}
 
 	// The timeline itself is byte-compatible: exact vocabulary and order.
