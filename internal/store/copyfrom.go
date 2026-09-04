@@ -9,6 +9,42 @@ import (
 	"context"
 )
 
+// iteratorForInsertReplayCampaignItems implements pgx.CopyFromSource.
+type iteratorForInsertReplayCampaignItems struct {
+	rows                 []InsertReplayCampaignItemsParams
+	skippedFirstNextCall bool
+}
+
+func (r *iteratorForInsertReplayCampaignItems) Next() bool {
+	if len(r.rows) == 0 {
+		return false
+	}
+	if !r.skippedFirstNextCall {
+		r.skippedFirstNextCall = true
+		return true
+	}
+	r.rows = r.rows[1:]
+	return len(r.rows) > 0
+}
+
+func (r iteratorForInsertReplayCampaignItems) Values() ([]interface{}, error) {
+	return []interface{}{
+		r.rows[0].ID,
+		r.rows[0].OrgID,
+		r.rows[0].CampaignID,
+		r.rows[0].DeadLetterID,
+		r.rows[0].Position,
+	}, nil
+}
+
+func (r iteratorForInsertReplayCampaignItems) Err() error {
+	return nil
+}
+
+func (q *Queries) InsertReplayCampaignItems(ctx context.Context, arg []InsertReplayCampaignItemsParams) (int64, error) {
+	return q.db.CopyFrom(ctx, []string{"replay_campaign_items"}, []string{"id", "org_id", "campaign_id", "dead_letter_id", "position"}, &iteratorForInsertReplayCampaignItems{rows: arg})
+}
+
 // iteratorForInsertRunEvents implements pgx.CopyFromSource.
 type iteratorForInsertRunEvents struct {
 	rows                 []InsertRunEventsParams
@@ -84,6 +120,8 @@ func (r iteratorForInsertRunNodes) Err() error {
 	return nil
 }
 
+// Initial executable roots expose one Node-compatible rollback generation;
+// pending descendants do not become publishable until readiness queues them.
 // Run start writes every node row in one COPY; the queued roots carry the
 // publication stamp InsertRunNode computes in SQL.
 func (q *Queries) InsertRunNodes(ctx context.Context, arg []InsertRunNodesParams) (int64, error) {

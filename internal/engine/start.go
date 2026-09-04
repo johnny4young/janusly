@@ -256,9 +256,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	}
 
 	// One COPY for every node row: a start used to cost one round trip per
-	// node. Queued roots carry the publication stamp InsertRunNode computes
-	// in SQL (repair-after = now, generation 1).
-	publishedAt := time.Now().UTC()
+	// node.
 	nodeRows := make([]store.InsertRunNodesParams, 0, len(in.Workflow.Nodes))
 	for _, node := range in.Workflow.Nodes {
 		row := store.InsertRunNodesParams{
@@ -268,14 +266,11 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		}
 		if roots[node.ID] {
 			row.Status, row.Attempts = "queued", pgtype.Int4{Int32: 1, Valid: true}
-			row.QueuePublicationRepairAfter, row.QueuePublicationGeneration = &publishedAt, 1
 		}
 		nodeRows = append(nodeRows, row)
 	}
-	if inserted, err := q.InsertRunNodes(ctx, nodeRows); err != nil {
-		return "", fmt.Errorf("insert run nodes: %w", err)
-	} else if inserted != int64(len(nodeRows)) {
-		return "", fmt.Errorf("insert run nodes: %d of %d rows landed", inserted, len(nodeRows))
+	if err := insertRunNodeRows(ctx, q, nodeRows); err != nil {
+		return "", err
 	}
 
 	startedFields := map[string]string{"workflowVersionId": versionID}
@@ -330,4 +325,24 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		return "", fmt.Errorf("commit: %w", err)
 	}
 	return runID, nil
+}
+
+// insertRunNodeRows lands a seeded run's node rows in one COPY. Queued rows
+// carry the publication stamp InsertRunNode computes in SQL (repair-after =
+// now, generation 1) so the claim path sees them exactly as before.
+func insertRunNodeRows(ctx context.Context, q *store.Queries, rows []store.InsertRunNodesParams) error {
+	publishedAt := time.Now().UTC()
+	for i := range rows {
+		if rows[i].Status == "queued" {
+			rows[i].QueuePublicationRepairAfter, rows[i].QueuePublicationGeneration = &publishedAt, 1
+		}
+	}
+	inserted, err := q.InsertRunNodes(ctx, rows)
+	if err != nil {
+		return fmt.Errorf("insert run nodes: %w", err)
+	}
+	if inserted != int64(len(rows)) {
+		return fmt.Errorf("insert run nodes: %d of %d rows landed", inserted, len(rows))
+	}
+	return nil
 }

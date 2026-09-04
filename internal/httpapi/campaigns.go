@@ -192,13 +192,15 @@ func (s *V1Server) campaignCreateCore(r *http.Request, rc v1Request) opResult {
 	}); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
+	items := make([]store.InsertReplayCampaignItemsParams, 0, len(preview.Eligible))
 	for position, entry := range preview.Eligible {
-		if err := q.InsertReplayCampaignItem(ctx, store.InsertReplayCampaignItemParams{
+		items = append(items, store.InsertReplayCampaignItemsParams{
 			ID: uuid.NewString(), OrgID: rc.orgID, CampaignID: campaignID,
 			DeadLetterID: entry.DeadLetterID, Position: int32(position),
-		}); err != nil {
-			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
-		}
+		})
+	}
+	if inserted, err := q.InsertReplayCampaignItems(ctx, items); err != nil || inserted != int64(len(items)) {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)

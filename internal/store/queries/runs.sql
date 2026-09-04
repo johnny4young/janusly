@@ -41,17 +41,6 @@ WHERE id = $1 AND org_id = $2 AND status = $3;
 
 -- Initial executable roots expose one Node-compatible rollback generation;
 -- pending descendants do not become publishable until readiness queues them.
--- name: InsertRunNode :exec
-INSERT INTO run_nodes (
-  id, run_id, node_id, status, attempts, state_json,
-  queue_publication_repair_after, queue_publication_generation
-)
-VALUES (
-  $1, $2, $3, $4, $5, $6,
-  CASE WHEN $4 = 'queued' THEN clock_timestamp() ELSE NULL END,
-  CASE WHEN $4 = 'queued' THEN 1 ELSE 0 END
-);
-
 -- Run start writes every node row in one COPY; the queued roots carry the
 -- publication stamp InsertRunNode computes in SQL.
 -- name: InsertRunNodes :copyfrom

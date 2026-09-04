@@ -1209,41 +1209,6 @@ type InsertRunEventsParams struct {
 	CreatedAt *time.Time
 }
 
-const insertRunNode = `-- name: InsertRunNode :exec
-INSERT INTO run_nodes (
-  id, run_id, node_id, status, attempts, state_json,
-  queue_publication_repair_after, queue_publication_generation
-)
-VALUES (
-  $1, $2, $3, $4, $5, $6,
-  CASE WHEN $4 = 'queued' THEN clock_timestamp() ELSE NULL END,
-  CASE WHEN $4 = 'queued' THEN 1 ELSE 0 END
-)
-`
-
-type InsertRunNodeParams struct {
-	ID        string
-	RunID     string
-	NodeID    string
-	Status    string
-	Attempts  pgtype.Int4
-	StateJson json.RawMessage
-}
-
-// Initial executable roots expose one Node-compatible rollback generation;
-// pending descendants do not become publishable until readiness queues them.
-func (q *Queries) InsertRunNode(ctx context.Context, arg InsertRunNodeParams) error {
-	_, err := q.db.Exec(ctx, insertRunNode,
-		arg.ID,
-		arg.RunID,
-		arg.NodeID,
-		arg.Status,
-		arg.Attempts,
-		arg.StateJson,
-	)
-	return err
-}
-
 type InsertRunNodesParams struct {
 	ID                          string
 	RunID                       string

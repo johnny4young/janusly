@@ -379,28 +379,12 @@ func (q *Queries) InsertReplayCampaign(ctx context.Context, arg InsertReplayCamp
 	return err
 }
 
-const insertReplayCampaignItem = `-- name: InsertReplayCampaignItem :exec
-INSERT INTO replay_campaign_items (id, org_id, campaign_id, dead_letter_id, position)
-VALUES ($1, $2, $3, $4, $5)
-`
-
-type InsertReplayCampaignItemParams struct {
+type InsertReplayCampaignItemsParams struct {
 	ID           string
 	OrgID        string
 	CampaignID   string
 	DeadLetterID string
 	Position     int32
-}
-
-func (q *Queries) InsertReplayCampaignItem(ctx context.Context, arg InsertReplayCampaignItemParams) error {
-	_, err := q.db.Exec(ctx, insertReplayCampaignItem,
-		arg.ID,
-		arg.OrgID,
-		arg.CampaignID,
-		arg.DeadLetterID,
-		arg.Position,
-	)
-	return err
 }
 
 const listReplayCampaignDeadLetters = `-- name: ListReplayCampaignDeadLetters :many

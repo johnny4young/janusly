@@ -59,18 +59,20 @@ func (e *Engine) ReplayRunAsValidation(
 	}); err != nil {
 		return "", fmt.Errorf("insert lab run: %w", err)
 	}
+	labRows := make([]store.InsertRunNodesParams, 0, len(wf.Nodes))
 	for _, node := range wf.Nodes {
 		status, attempts := "pending", int32(0)
 		if roots[node.ID] {
 			status, attempts = "queued", 1
 		}
-		if err := txq.InsertRunNode(ctx, store.InsertRunNodeParams{
+		labRows = append(labRows, store.InsertRunNodesParams{
 			ID: e.newID(), RunID: runID, NodeID: node.ID,
 			Status: status, Attempts: pgtype.Int4{Int32: attempts, Valid: true},
 			StateJson: []byte(`{}`),
-		}); err != nil {
-			return "", fmt.Errorf("seed lab node %s: %w", node.ID, err)
-		}
+		})
+	}
+	if err := insertRunNodeRows(ctx, txq, labRows); err != nil {
+		return "", fmt.Errorf("seed lab nodes: %w", err)
 	}
 	startedAt := e.eventNow()
 	payload, _ := json.Marshal(map[string]any{
@@ -176,8 +178,9 @@ func (e *Engine) ReplayRunAsValidationFork(
 	}); err != nil {
 		return ReplayLabForkResult{}, fmt.Errorf("insert fork run: %w", err)
 	}
+	forkRows := make([]store.InsertRunNodesParams, 0, len(wf.Nodes))
 	for _, node := range wf.Nodes {
-		params := store.InsertRunNodeParams{
+		params := store.InsertRunNodesParams{
 			ID: e.newID(), RunID: runID, NodeID: node.ID,
 			Status: "skipped", Attempts: pgtype.Int4{Int32: 0, Valid: true},
 			StateJson: []byte(`{"skipped":{"reason":"outside_replay_fork","forkNodeId":"` + forkNodeID + `"}}`),
@@ -202,9 +205,10 @@ func (e *Engine) ReplayRunAsValidationFork(
 		case downstream[node.ID]:
 			params.Status, params.StateJson = "pending", []byte(`{}`)
 		}
-		if err := txq.InsertRunNode(ctx, params); err != nil {
-			return ReplayLabForkResult{}, fmt.Errorf("seed fork node %s: %w", node.ID, err)
-		}
+		forkRows = append(forkRows, params)
+	}
+	if err := insertRunNodeRows(ctx, txq, forkRows); err != nil {
+		return ReplayLabForkResult{}, fmt.Errorf("seed fork nodes: %w", err)
 	}
 	startedAt := e.eventNow()
 	payload, _ := json.Marshal(map[string]any{

@@ -218,15 +218,27 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 		if s.hub.listening.Load() {
 			pollFallback = streamPollFallbackListenOK
 		}
-		select {
-		case <-wake:
-		case <-time.After(pollFallback):
-		case <-heartbeat.C:
-			if !write(": keep-alive\n\n") {
+		// A heartbeat only proves the connection is alive; it does not mean
+		// new events exist, so it must not cost the two catch-up queries a
+		// wake or a poll fallback does.
+		fallback := time.NewTimer(pollFallback)
+	wait:
+		for {
+			select {
+			case <-wake:
+				break wait
+			case <-fallback.C:
+				break wait
+			case <-heartbeat.C:
+				if !write(": keep-alive\n\n") {
+					fallback.Stop()
+					return
+				}
+			case <-r.Context().Done():
+				fallback.Stop()
 				return
 			}
-		case <-r.Context().Done():
-			return
 		}
+		fallback.Stop()
 	}
 }

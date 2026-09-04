@@ -10,7 +10,7 @@ INSERT INTO replay_campaigns (id, org_id, name, cluster_signature, filter_json,
                               pacing_ms, total_count, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
--- name: InsertReplayCampaignItem :exec
+-- name: InsertReplayCampaignItems :copyfrom
 INSERT INTO replay_campaign_items (id, org_id, campaign_id, dead_letter_id, position)
 VALUES ($1, $2, $3, $4, $5);
 

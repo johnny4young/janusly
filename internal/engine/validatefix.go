@@ -116,6 +116,7 @@ func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
 		return "", fmt.Errorf("insert validation run: %w", err)
 	}
 	copyableStatuses := map[string]bool{"succeeded": true, "skipped": true}
+	validationRows := make([]store.InsertRunNodesParams, 0, len(suggested.Nodes))
 	for _, node := range suggested.Nodes {
 		original, hasOriginal := originalByID[node.ID]
 		startsQueued := node.ID == item.NodeID
@@ -138,13 +139,14 @@ func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
 		case continues:
 			status, attempts, stateJSON = "pending", 0, []byte(`{}`)
 		}
-		if err := txq.InsertRunNode(ctx, store.InsertRunNodeParams{
+		validationRows = append(validationRows, store.InsertRunNodesParams{
 			ID: e.newID(), RunID: runID, NodeID: node.ID,
 			Status: status, Attempts: pgtype.Int4{Int32: attempts, Valid: true},
 			StateJson: stateJSON,
-		}); err != nil {
-			return "", fmt.Errorf("seed validation node %s: %w", node.ID, err)
-		}
+		})
+	}
+	if err := insertRunNodeRows(ctx, txq, validationRows); err != nil {
+		return "", fmt.Errorf("seed validation nodes: %w", err)
 	}
 	startedAt := e.eventNow()
 	payload, _ := json.Marshal(map[string]any{
