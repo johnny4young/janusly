@@ -17,6 +17,7 @@ import {
   TEXT_SEARCH_MAX_CHARACTERS,
   TEXT_SEARCH_MIN_INDEXABLE_CHARACTERS,
 } from '../lib/text-search'
+import { orgConfigValue } from '../lib/org-config-model'
 
 const FAILED_RUN_STATUSES = new Set(['failed', 'cancelled', 'timed_out'])
 const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
@@ -45,6 +46,11 @@ function useWorkflowsDashboardController({
   const platformVersion = useWorkflowStore(state => state.platformVersion)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const [workflows, setWorkflows] = useState<SavedWorkflow[]>([])
+  // Callbacks read the latest list through a ref, so an optimistic edit
+  // (which replaces `workflows`) does not recreate every handler and the
+  // controller model along with it. (Guarded ref write during render: idempotent.)
+  const workflowsRef = useRef(workflows)
+  workflowsRef.current = workflows
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [creationOpen, setCreationOpen] = useState(false)
@@ -198,13 +204,7 @@ function useWorkflowsDashboardController({
     void (async () => {
       try {
         const payload = await api('/org/config')
-        const envelope = payload as { config?: unknown }
-        const entries = (Array.isArray(payload)
-          ? payload
-          : Array.isArray(envelope.config)
-            ? envelope.config
-            : []) as Array<{ key: string; value: unknown }>
-        const raw = entries.find(entry => entry.key === 'retention.deletedWorkflowsDays')?.value
+        const raw = orgConfigValue(payload, 'retention.deletedWorkflowsDays')
         if (cancelled) return
         const parsed = typeof raw === 'number' && Number.isFinite(raw) ? raw : DEFAULT_RETENTION_DAYS
         setRetentionDays(parsed)
@@ -280,7 +280,7 @@ function useWorkflowsDashboardController({
   const moveToFolder = useCallback(
     async (workflowId: string, folderKey: string) => {
       const folder = folderKey === UNGROUPED ? null : folderKey
-      const current = workflows.find((w) => w.id === workflowId)
+      const current = workflowsRef.current.find((w) => w.id === workflowId)
       if (!current) return
       const previousFolder = current.folder ?? null
       if (previousFolder === folder) return // already in this folder — no-op
@@ -304,11 +304,11 @@ function useWorkflowsDashboardController({
         addToast(tApiError(err) || (t('workflowsDashboard.moveFailed')), 'error')
       }
     },
-    [workflows, addToast, bumpPlatformVersion, t],
+    [addToast, bumpPlatformVersion, t],
   )
   const setRowTag = useCallback(
     async (workflowId: string, tag: string, op: 'add' | 'remove') => {
-      const current = workflows.find((w) => w.id === workflowId)
+      const current = workflowsRef.current.find((w) => w.id === workflowId)
       if (!current) return
       const prior = current.tags ?? []
       if (op === 'add' && prior.includes(tag)) return
@@ -334,7 +334,7 @@ function useWorkflowsDashboardController({
         addToast(tApiError(err) || (t('workflowsDashboard.rowTagFailed')), 'error')
       }
     },
-    [workflows, addToast, bumpPlatformVersion, t],
+    [addToast, bumpPlatformVersion, t],
   )
   const commitNewFolder = useCallback(() => {
     const id = newFolderDropFor
@@ -353,7 +353,7 @@ function useWorkflowsDashboardController({
       setRenamingFolder(null)
       const trimmed = to.trim()
       if (!trimmed || trimmed === from) return
-      const affectedIds = new Set(workflows.filter((w) => w.folder === from).map((w) => w.id))
+      const affectedIds = new Set(workflowsRef.current.filter((w) => w.folder === from).map((w) => w.id))
       if (affectedIds.size === 0) return
       setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder: trimmed } : w)))
       try {
@@ -368,12 +368,12 @@ function useWorkflowsDashboardController({
         addToast(tApiError(err) || (t('workflowsDashboard.renameFailed')), 'error')
       }
     },
-    [workflows, addToast, bumpPlatformVersion, t],
+    [addToast, bumpPlatformVersion, t],
   )
   const deleteFolder = useCallback(
     async (folder: string) => {
       setConfirmDeleteFolder(null)
-      const affectedIds = new Set(workflows.filter((w) => w.folder === folder).map((w) => w.id))
+      const affectedIds = new Set(workflowsRef.current.filter((w) => w.folder === folder).map((w) => w.id))
       if (affectedIds.size === 0) return
       setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder: null } : w)))
       try {
@@ -388,15 +388,15 @@ function useWorkflowsDashboardController({
         addToast(tApiError(err) || (t('workflowsDashboard.folderDeleteFailed')), 'error')
       }
     },
-    [workflows, addToast, bumpPlatformVersion, t],
+    [addToast, bumpPlatformVersion, t],
   )
   const renameTag = useCallback(
     async (from: string, to: string) => {
       setRenamingTag(false)
       const trimmed = to.trim()
       if (!trimmed || trimmed === from) return
-      const idSet = new Set(workflows.filter((w) => (w.tags ?? []).includes(from)).map((w) => w.id))
-      const priorTags = new Map(workflows.filter((w) => idSet.has(w.id)).map((w) => [w.id, w.tags ?? []]))
+      const idSet = new Set(workflowsRef.current.filter((w) => (w.tags ?? []).includes(from)).map((w) => w.id))
+      const priorTags = new Map(workflowsRef.current.filter((w) => idSet.has(w.id)).map((w) => [w.id, w.tags ?? []]))
       setWorkflows((prev) =>
         prev.map((w) => {
           if (!idSet.has(w.id)) return w
@@ -426,13 +426,13 @@ function useWorkflowsDashboardController({
         addToast(tApiError(err) || (t('workflowsDashboard.renameTagFailed')), 'error')
       }
     },
-    [workflows, addToast, bumpPlatformVersion, t],
+    [addToast, bumpPlatformVersion, t],
   )
   const deleteTag = useCallback(
     async (tag: string) => {
       setConfirmDeleteTag(false)
-      const idSet = new Set(workflows.filter((w) => (w.tags ?? []).includes(tag)).map((w) => w.id))
-      const priorTags = new Map(workflows.filter((w) => idSet.has(w.id)).map((w) => [w.id, w.tags ?? []]))
+      const idSet = new Set(workflowsRef.current.filter((w) => (w.tags ?? []).includes(tag)).map((w) => w.id))
+      const priorTags = new Map(workflowsRef.current.filter((w) => idSet.has(w.id)).map((w) => [w.id, w.tags ?? []]))
       setWorkflows((prev) =>
         prev.map((w) => (idSet.has(w.id) ? { ...w, tags: (w.tags ?? []).filter((tg) => tg !== tag) } : w)),
       )
@@ -449,12 +449,12 @@ function useWorkflowsDashboardController({
         addToast(tApiError(err) || (t('workflowsDashboard.deleteTagFailed')), 'error')
       }
     },
-    [workflows, addToast, bumpPlatformVersion, t],
+    [addToast, bumpPlatformVersion, t],
   )
   const resumeWorkflow = useCallback(
     async (workflowId: string) => {
       if (recoveryBusyRef.current.has(workflowId)) return
-      const prior = workflows.find((w) => w.id === workflowId)
+      const prior = workflowsRef.current.find((w) => w.id === workflowId)
       if (!prior) return
       recoveryBusyRef.current.add(workflowId)
       setRecoveryBusyIds((current) => new Set(current).add(workflowId))
@@ -501,7 +501,7 @@ function useWorkflowsDashboardController({
         })
       }
     },
-    [workflows, addToast, bumpPlatformVersion, t],
+    [addToast, bumpPlatformVersion, t],
   )
   const toggleSelected = useCallback((workflowId: string) => {
     setSelectedIds((prev) => {
@@ -611,7 +611,7 @@ function useWorkflowsDashboardController({
   const deleteWorkflow = useCallback(
     async (workflowId: string) => {
       setConfirmDeleteId(null)
-      const current = workflows.find((w) => w.id === workflowId)
+      const current = workflowsRef.current.find((w) => w.id === workflowId)
       if (!current) return
       setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
       setSelectedIds((prev) => {
@@ -629,11 +629,11 @@ function useWorkflowsDashboardController({
         addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed')), 'error')
       }
     },
-    [workflows, addToast, bumpPlatformVersion, t],
+    [addToast, bumpPlatformVersion, t],
   )
   const restoreWorkflow = useCallback(
     async (workflowId: string) => {
-      const current = workflows.find((w) => w.id === workflowId)
+      const current = workflowsRef.current.find((w) => w.id === workflowId)
       if (!current) return
       setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
       setSelectedIds((prev) => {
@@ -651,7 +651,7 @@ function useWorkflowsDashboardController({
         addToast(tApiError(err) || (t('workflowsDashboard.restoreFailed')), 'error')
       }
     },
-    [workflows, addToast, bumpPlatformVersion, t],
+    [addToast, bumpPlatformVersion, t],
   )
   const bulkRestore = useCallback(
     async () => {

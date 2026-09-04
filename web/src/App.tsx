@@ -477,6 +477,25 @@ export default function App() {
     if (latest) void maybeRestoreDraft(latest.workflowId)
   }, [tenantReady, maybeRestoreDraft])
 
+  // Shell derivations are memoized on their inputs: the shell renders on
+  // every store tick, and these walks over runs, nodes and dead letters used
+  // to run on each of them.
+  const openDlqCount = useMemo(() => deadLetters.filter(dlq => dlq.status === 'open').length, [deadLetters])
+  // Waiting is a run-level posture. Semantic quarantine deliberately leaves
+  // its source node succeeded, so node-only counting would report all-clear
+  // while downstream effects remain contained.
+  const blockerCount = useMemo(
+    () => countActiveRecoveryBlockers(projectedRuns, runNodes, runId, semanticBlockerRunIds),
+    [projectedRuns, runNodes, runId, semanticBlockerRunIds],
+  )
+  const activeRunCount = useMemo(() => projectedRuns.filter(run => isOpenRunStatus(run.status)).length, [projectedRuns])
+  const observedRun = useMemo(
+    () => runId ? (runDetail?.id === runId ? runDetail : projectedRuns.find(run => run.id === runId)) : undefined,
+    [runId, runDetail, projectedRuns],
+  )
+  const paletteWorkflows = useMemo(() => savedWorkflows.map(workflow => ({ id: workflow.id, name: workflow.name })), [savedWorkflows])
+  const paletteRecipes = useMemo(() => templates.map(template => ({ id: template.id, name: template.name })), [templates])
+
   if (!authReady || (userId !== null && !identityReady)) return (
     <div className="boot-screen" role="status" aria-live="polite">
       <div className="boot-screen__inner">
@@ -492,22 +511,8 @@ export default function App() {
 
   const env: 'sandbox' | 'production' = (import.meta as { env?: { PROD?: boolean } }).env?.PROD ? 'production' : 'sandbox'
   const currentOrganizationLabel = currentOrganization?.name ?? orgId ?? 'default'
-  const openDlqCount = deadLetters.filter(dlq => dlq.status === 'open').length
-  // Waiting is a run-level posture. Semantic quarantine deliberately leaves
-  // its source node succeeded, so node-only counting would report all-clear
-  // while downstream effects remain contained.
-  const blockerCount = countActiveRecoveryBlockers(
-    projectedRuns,
-    runNodes,
-    runId,
-    semanticBlockerRunIds,
-  )
   const recoverState: 'blocked' | 'attention' | 'clear' =
     blockerCount > 0 ? 'blocked' : openDlqCount > 0 ? 'attention' : 'clear'
-  const activeRunCount = projectedRuns.filter(run => isOpenRunStatus(run.status)).length
-  const observedRun = runId
-    ? (runDetail?.id === runId ? runDetail : projectedRuns.find(run => run.id === runId))
-    : undefined
 
   return (
     <AppWorkspace
@@ -661,8 +666,8 @@ export default function App() {
         docsUrl: DOCS_URL,
         onInsertSnippet: () => setSnippetMenuOpen(true),
         permissions: tenantPermissions,
-        workflows: savedWorkflows.map(workflow => ({ id: workflow.id, name: workflow.name })),
-        recipes: templates.map(template => ({ id: template.id, name: template.name })),
+        workflows: paletteWorkflows,
+        recipes: paletteRecipes,
         onOpenWorkflow: (id) => { void openWorkflow(id) },
         onOpenRecipe: (id) => {
           const template = templates.find(candidate => candidate.id === id)

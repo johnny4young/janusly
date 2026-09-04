@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy, memo, Suspense, type ReactNode } from 'react'
 import type {
   Connection,
   EdgeMouseHandler,
@@ -439,6 +439,8 @@ export function streamStatusLabelKey(status: StreamStatus): string {
   }
 }
 
-export function AppWorkspace(props: AppWorkspaceProps) {
+// Memoized for the same reason as RightPanel: App re-renders on every store
+// tick, and the workspace only needs the ticks that change its props.
+export const AppWorkspace = memo(function AppWorkspace(props: AppWorkspaceProps) {
   return <WorkspaceContent {...props} />
-}
+})

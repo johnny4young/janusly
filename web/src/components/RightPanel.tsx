@@ -20,7 +20,7 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react'
 import { Activity, Boxes, Database, FlaskConical, Layers3, Plug, Users, Workflow } from 'lucide-react'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
@@ -33,12 +33,16 @@ import { WorkspaceSectionNav } from './WorkspaceSectionNav'
 // Tab-specific panels are code-split out of the eager App chunk: each is only
 // rendered when the operator navigates to its own tab (never on Home or the
 // default authoring tab), so it loads on demand behind the shared <Suspense> in
-// RightPanel. AI Studio + the core Inspector (node/edge config) stay eager above
-// — they're the operator's immediate authoring surface. The inspector's auxiliary
-// sub-panels (version history / SLO / schedule history / metadata) are also lazy,
-// rendered behind an inner <Suspense> so the node config stays instant while they
-// load on first inspector visit. OperationsPage additionally pulls ~11 admin
-// sub-panels + alert/budget/scim/permission forms.
+// RightPanel. AI Studio + the core Inspector (node/edge config) stay eager:
+// they are the operator's immediate authoring surface, and splitting them
+// fans their shared helpers into small chunks whose wrapper overhead costs
+// more total bytes than the split saves under the artifact budget (the
+// per-route win waits for the stylesheet split). The inspector's auxiliary
+// sub-panels (version history / SLO / schedule history / metadata) are lazy,
+// rendered behind an inner <Suspense> so the node config stays instant while
+// they load on first inspector visit. OperationsPage additionally pulls ~11
+// admin sub-panels + alert/budget/scim/permission forms.
+
 const MultiAgentTimeline = lazy(() => import('../MultiAgentTimeline').then((m) => ({ default: m.MultiAgentTimeline })))
 const WorkflowsDashboard = lazy(() => import('./WorkflowsDashboard').then((m) => ({ default: m.WorkflowsDashboard })))
 const MembersPanel = lazy(() => import('./MembersPanel').then((m) => ({ default: m.MembersPanel })))
@@ -146,7 +150,9 @@ export type RightPanelProps = {
  *  API returns, and one of them dereferencing an unexpected envelope used to
  *  unmount the entire workspace. Keyed on the active tab so navigating away and
  *  back clears a tripped panel without a page reload. */
-export function RightPanel(props: RightPanelProps) {
+// Memoized: the shell re-renders on every store tick, and the panel's props
+// are stable references between ticks that do not concern it.
+export const RightPanel = memo(function RightPanel(props: RightPanelProps) {
   const { t } = useT()
   return (
     <div
@@ -169,7 +175,7 @@ export function RightPanel(props: RightPanelProps) {
       </ErrorBoundary>
     </div>
   )
-}
+})
 
 /** Tab→panel router — picks the inner panel component for the active tab. The
  *  'home' tab is intentionally handled by `App.tsx` at the layout level (panel
