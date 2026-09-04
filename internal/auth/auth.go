@@ -28,6 +28,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"github.com/johnny4young/janusly/internal/config"
 	"net/http"
 	"os"
 	"strings"
@@ -142,7 +143,7 @@ func ConfigFromEnv() Config {
 		SupabaseURL:     os.Getenv("SUPABASE_URL"),
 		SupabaseKey:     os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
 		ServiceToken:    os.Getenv("JANUSLY_API_SERVICE_TOKEN"),
-		Production:      os.Getenv("JANUSLY_ENV") == "production",
+		Production:      config.IsProduction(nil),
 		AllowDevHeaders: os.Getenv("ALLOW_DEV_AUTH_HEADERS") == "true",
 	}
 }

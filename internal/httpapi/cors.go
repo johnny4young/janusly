@@ -8,6 +8,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/johnny4young/janusly/internal/config"
 	"net"
 	"net/http"
 	"net/url"
@@ -43,7 +44,7 @@ func isAllowedRequestOrigin(origin string) bool {
 	if origin == "" {
 		return false
 	}
-	production := os.Getenv("JANUSLY_ENV") == "production"
+	production := config.IsProduction(nil)
 	for _, candidate := range allowedOrigins() {
 		if candidate == origin || (candidate == "*" && !production) {
 			return true
