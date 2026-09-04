@@ -424,6 +424,45 @@ function graphToWorkflow(
   }
 }
 
+// Structural equality for the two poll-refreshed collections. Cheap fields
+// first; the JSON payloads are compared serialized only when everything else
+// matched, which is the common "nothing changed" tick.
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a == null || b == null) return false
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
+function sameRunNode(a: RunNode, b: RunNode): boolean {
+  return a === b || (
+    a.nodeId === b.nodeId
+    && a.status === b.status
+    && (a.attempts ?? null) === (b.attempts ?? null)
+    && (a.startedAt ?? null) === (b.startedAt ?? null)
+    && (a.finishedAt ?? null) === (b.finishedAt ?? null)
+    && sameJson(a.stateJson ?? null, b.stateJson ?? null)
+    && sameJson(a.errorJson ?? null, b.errorJson ?? null)
+  )
+}
+
+function sameRunNodes(previous: RunNode[], next: RunNode[]): boolean {
+  return previous.length === next.length && previous.every((node, index) => sameRunNode(node, next[index]))
+}
+
+function sameRunEvent(a: RunEvent, b: RunEvent): boolean {
+  return a === b || (
+    a.id === b.id
+    && a.type === b.type
+    && (a.nodeId ?? null) === (b.nodeId ?? null)
+    && (a.createdAt ?? null) === (b.createdAt ?? null)
+    && sameJson(a.payload ?? null, b.payload ?? null)
+  )
+}
+
 export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   session: null,
   user: null,
@@ -799,6 +838,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       }
       return existing
     })
+    // Identical content keeps the previous array: the poll loop calls this
+    // every 1.5s, and a fresh reference here re-renders the whole shell.
+    if (sameRunNodes(state.runNodes, runNodes)) return {}
     return { runNodes }
   }),
   mergeRunNode: (incoming) => set((state) => {
@@ -819,7 +861,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   addEvents: (incoming) => set((state) => {
     const keyOf = (event: RunEvent) => event.id ?? `${event.type}:${event.nodeId}:${event.createdAt}`
     const merged = new Map(state.events.map((event) => [keyOf(event), event]))
-    for (const event of incoming) merged.set(keyOf(event), event)
+    // Same rule as setRunNodes: a poll that brings nothing new must not
+    // produce a new array, or every subscriber re-renders on the tick.
+    let changed = false
+    for (const event of incoming) {
+      const key = keyOf(event)
+      const existing = merged.get(key)
+      if (existing && sameRunEvent(existing, event)) continue
+      changed = true
+      merged.set(key, event)
+    }
+    if (!changed) return {}
     const events = [...merged.values()].sort((a, b) => {
       const at = (a.createdAt ?? '').localeCompare(b.createdAt ?? '')
       if (at !== 0) return at

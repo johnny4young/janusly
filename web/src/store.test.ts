@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { __resetBumpCoalesceForTests, registerFlowOps, registerNodePlacementResolver, useWorkflowStore } from './store'
-import type { WorkflowDefinition } from './types'
+import type { RunEvent, RunNode, WorkflowDefinition } from './types'
 
 const initialState = useWorkflowStore.getState()
 
@@ -1057,5 +1057,50 @@ describe('useWorkflowStore semantic workflow signals', () => {
     // Clearing for a new run is still a hard reset.
     store.setRunNodes([])
     expect(useWorkflowStore.getState().runNodes).toEqual([])
+  })
+})
+
+describe('poll-refreshed collections keep their identity when nothing changed', () => {
+  const nodes = (): RunNode[] => [
+    { nodeId: 'fetch', status: 'running', attempts: 1, startedAt: '2026-01-01T00:00:00Z', finishedAt: null, stateJson: { step: 1 } },
+    { nodeId: 'notify', status: 'queued', attempts: 0, startedAt: null, finishedAt: null },
+  ]
+  const events = (): RunEvent[] => [
+    { id: 'ev-1', type: 'node.started', nodeId: 'fetch', createdAt: '2026-01-01T00:00:00Z', payload: { attempt: 1 } },
+    { id: 'ev-2', type: 'node.queued', nodeId: 'notify', createdAt: '2026-01-01T00:00:01Z' },
+  ]
+
+  it('setRunNodes returns the same array for content-identical input', () => {
+    useWorkflowStore.getState().setRunNodes(nodes())
+    const first = useWorkflowStore.getState().runNodes
+    useWorkflowStore.getState().setRunNodes(nodes())
+    expect(useWorkflowStore.getState().runNodes).toBe(first)
+  })
+
+  it('setRunNodes still replaces the array when a node changes', () => {
+    useWorkflowStore.getState().setRunNodes(nodes())
+    const first = useWorkflowStore.getState().runNodes
+    const next = nodes()
+    next[0] = { ...next[0], status: 'succeeded', finishedAt: '2026-01-01T00:00:05Z' }
+    useWorkflowStore.getState().setRunNodes(next)
+    expect(useWorkflowStore.getState().runNodes).not.toBe(first)
+    expect(useWorkflowStore.getState().runNodes[0].status).toBe('succeeded')
+  })
+
+  it('addEvents returns the same array when every incoming event is already known', () => {
+    useWorkflowStore.getState().addEvents(events())
+    const first = useWorkflowStore.getState().events
+    useWorkflowStore.getState().addEvents(events())
+    expect(useWorkflowStore.getState().events).toBe(first)
+  })
+
+  it('addEvents still appends genuinely new events', () => {
+    useWorkflowStore.getState().addEvents(events())
+    const first = useWorkflowStore.getState().events
+    useWorkflowStore.getState().addEvents([
+      { id: 'ev-3', type: 'node.finished', nodeId: 'fetch', createdAt: '2026-01-01T00:00:09Z' },
+    ])
+    expect(useWorkflowStore.getState().events).not.toBe(first)
+    expect(useWorkflowStore.getState().events).toHaveLength(3)
   })
 })
