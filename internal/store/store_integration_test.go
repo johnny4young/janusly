@@ -187,7 +187,7 @@ func TestRunNodeTransitionsAreCompareAndSet(t *testing.T) {
 	casNow := time.Now().UTC()
 	casRun := uid(org, "run-cas")
 	seedRun(t, ctx, q, org, casRun)
-	if err := q.InsertRunNode(ctx, InsertRunNodeParams{ID: uid(org, "rn"), RunID: casRun, NodeID: "step", Status: "pending"}); err != nil {
+	if _, err := q.InsertRunNodes(ctx, []InsertRunNodesParams{{ID: uid(org, "rn"), RunID: casRun, NodeID: "step", Status: "pending"}}); err != nil {
 		t.Fatalf("insert node: %v", err)
 	}
 
@@ -253,9 +253,9 @@ func TestWakeupsLifecycle(t *testing.T) {
 	anchorRun := uid(org, "run-wake")
 	seedRun(t, ctx, q, org, anchorRun)
 	for _, rowID := range []string{due, later} {
-		if err := q.InsertRunNode(ctx, InsertRunNodeParams{
+		if _, err := q.InsertRunNodes(ctx, []InsertRunNodesParams{{
 			ID: rowID, RunID: anchorRun, NodeID: "wait-" + rowID[:8], Status: "waiting",
-		}); err != nil {
+		}}); err != nil {
 			t.Fatalf("insert waiting anchor: %v", err)
 		}
 	}
