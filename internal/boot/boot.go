@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/johnny4young/janusly/internal/observability"
 )
 
 const (
@@ -106,6 +108,9 @@ func poolConfig(databaseURL string, maxConns int, role PoolRole) (*pgxpool.Confi
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = milliseconds(role.StatementTimeout())
 	cfg.ConnConfig.RuntimeParams["lock_timeout"] = milliseconds(poolLockTimeout)
 	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = milliseconds(poolIdleInTxTimeout)
+	// One client span per statement, named after the sqlc query; a no-op
+	// until a trace provider is configured.
+	cfg.ConnConfig.Tracer = observability.NewPgxTracer()
 	if maxConns < 1 {
 		maxConns = 10
 	}
