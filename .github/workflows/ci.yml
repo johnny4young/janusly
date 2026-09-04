@@ -56,11 +56,18 @@ jobs:
         run: go build ./...
       - name: Local database port contract
         run: bash scripts/local-db-port.test.sh
-      - name: Generated contract and SQL
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.18.0
+      - name: Generated files leave no drift
+        # Every `make generate` output, not just the Go ones: the pricing
+        # table and the OpenAPI-derived TypeScript types are tracked files too.
         run: |
           go tool sqlc generate
           go run ./cmd/contract
-          git diff --exit-code -- schema.sql internal/store contract
+          go run ./cmd/pricing
+          (cd web && node scripts/generate-api-types.mjs)
+          git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts
       - uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
         with:
           version: v2.7.2

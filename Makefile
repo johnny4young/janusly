@@ -144,8 +144,8 @@ verify:
 # migrated a fresh PostgreSQL 18 database. Callers that opt into this target
 # own the lifecycle and schema state of DB_URL.
 verify-current-db: generate
-	@git diff --exit-code -- schema.sql internal/store contract || { \
-		echo "Generated SQLC or OpenAPI files drifted; run make generate and commit the result."; \
+	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts || { \
+		echo "Generated SQLC, OpenAPI, pricing or API-type files drifted; run make generate and commit the result."; \
 		exit 1; \
 	}
 	$(MAKE) lint
