@@ -2,8 +2,10 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore: ['docs/**', '**/*.md']
   push:
     branches: [develop, main]
+    paths-ignore: ['docs/**', '**/*.md']
 
 permissions:
   contents: read
@@ -13,8 +15,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # One diff decides which lanes a change needs: a web-only change skips the
+  # Go and PostgreSQL lanes, a Go-only change skips the frontend lane, and
+  # the single-runtime E2E runs for either. Shared inputs (workflows,
+  # Makefile, scripts, deploy, the OpenAPI contract) run everything.
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.classify.outputs.web }}
+      go: ${{ steps.classify.outputs.go }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - id: classify
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
+            changed="everything"
+          else
+            changed=$(git diff --name-only "$base" "${{ github.sha }}")
+          fi
+          web=false; go=false
+          if [ "$changed" = "everything" ]; then web=true; go=true; fi
+          if printf '%s\n' "$changed" | grep -Eq '^(web/|contract/|internal/contract/)'; then web=true; fi
+          if printf '%s\n' "$changed" | grep -Eq '^(cmd/|internal/|e2e/|go\.(mod|sum)$|schema\.sql$|sqlc\.yaml$|contract/)'; then go=true; fi
+          if printf '%s\n' "$changed" | grep -Eq '^(\.github/|Makefile$|scripts/|deploy/|docker-compose\.yml$|Dockerfile$)'; then web=true; go=true; fi
+          echo "web=$web" >> "$GITHUB_OUTPUT"
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
   frontend:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -36,13 +74,23 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm test:scripts
-      - run: pnpm exec playwright install --with-deps chromium
+      - id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
       - run: pnpm test:browser
       - run: pnpm build
       - run: pnpm bundle-check
 
   backend:
     name: Backend
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -79,6 +127,8 @@ jobs:
 
   integration:
     name: PostgreSQL 18 integration
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -108,6 +158,8 @@ jobs:
 
   e2e:
     name: Single-runtime E2E
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -121,13 +173,27 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm --dir web install --frozen-lockfile
-      - run: pnpm --dir web exec playwright install --with-deps chromium
+      - id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --dir web exec playwright install --with-deps chromium
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --dir web exec playwright install-deps chromium
       - run: bash scripts/test-e2e.sh
 
   artifact:
     name: Artifact
     runs-on: ubuntu-latest
-    needs: [frontend, backend, integration, e2e]
+    needs: [changes, frontend, backend, integration, e2e]
+    # The image build is the expensive lane: only pushes to the integration
+    # branches pay for it, and only when every lane that ran passed (skipped
+    # lanes are not failures).
+    if: >-
+      !cancelled() && github.event_name == 'push'
+      && !contains(needs.*.result, 'failure')
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
