@@ -88,6 +88,14 @@ HTTP intake, then drains accepted tasks. If the five-minute drain deadline is
 reached, it cancels active work and explicitly discards queued work, joining all
 owned workers before PostgreSQL pools close.
 
+Both pools carry PostgreSQL session limits on every connection: a statement
+timeout of 15 seconds on the API pool and 60 seconds on the execution pool
+(whose batched retention deletes and index-backed sweeps legitimately run
+longer than any request), a 5-second lock timeout, and a 30-second
+idle-in-transaction timeout. A runaway statement therefore cancels on the
+server instead of holding a connection and its locks until the client gives
+up. The migration connection is separate and deliberately unbounded.
+
 Each process heartbeat uses one boot-unique instance identity. PostgreSQL keeps
 the detailed instance/build/concurrency rows for platform telemetry, while the
 tenant-admin `/system/workers` route returns only `healthy`, `degraded`, or

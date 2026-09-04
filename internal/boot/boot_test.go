@@ -6,7 +6,7 @@ import (
 )
 
 func TestPoolConfigBoundsBurstConnectionLifetime(t *testing.T) {
-	cfg, err := poolConfig("postgres://janusly:secret@127.0.0.1:5432/janusly", 24)
+	cfg, err := poolConfig("postgres://janusly:secret@127.0.0.1:5432/janusly", 24, PoolRoleAPI)
 	if err != nil {
 		t.Fatalf("pool config: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestPoolConfigBoundsBurstConnectionLifetime(t *testing.T) {
 }
 
 func TestPoolConfigRetainsConservativeFallbackSize(t *testing.T) {
-	cfg, err := poolConfig("postgres://janusly:secret@127.0.0.1:5432/janusly", 0)
+	cfg, err := poolConfig("postgres://janusly:secret@127.0.0.1:5432/janusly", 0, PoolRoleWorker)
 	if err != nil {
 		t.Fatalf("pool config: %v", err)
 	}

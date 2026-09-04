@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,6 +19,37 @@ const (
 	poolMaxConnIdleTime   = 5 * time.Minute
 	poolHealthCheckPeriod = 30 * time.Second
 )
+
+// PoolRole selects the PostgreSQL session limits a pool's connections carry.
+type PoolRole int
+
+const (
+	// PoolRoleAPI serves request handlers: every statement is short.
+	PoolRoleAPI PoolRole = iota
+	// PoolRoleWorker serves claims, completions and maintenance sweeps,
+	// whose batched deletes and index-backed scans may legitimately run
+	// longer than any request.
+	PoolRoleWorker
+)
+
+// Session limits ride every pooled connection so a runaway statement, a
+// lock wait or a forgotten transaction cancels on the server instead of
+// holding a connection (and its locks) until the client gives up. The
+// migration connection is separate and deliberately unbounded.
+const (
+	apiStatementTimeout    = 15 * time.Second
+	workerStatementTimeout = 60 * time.Second
+	poolLockTimeout        = 5 * time.Second
+	poolIdleInTxTimeout    = 30 * time.Second
+)
+
+// StatementTimeout is the per-statement bound a role's connections carry.
+func (role PoolRole) StatementTimeout() time.Duration {
+	if role == PoolRoleWorker {
+		return workerStatementTimeout
+	}
+	return apiStatementTimeout
+}
 
 // NewLogger returns the process-wide structured logger: JSON on stdout, so
 // any log collector (or a human with jq) consumes it without configuration.
@@ -30,8 +62,8 @@ func NewLogger() *slog.Logger {
 // the caller's role: API pools serve request handlers, worker pools serve
 // claim/completion transactions — separating them keeps pollers from
 // starving executors (the load tests' 50-VU cliff).
-func Connect(ctx context.Context, databaseURL string, maxConns int) (*pgxpool.Pool, error) {
-	cfg, err := poolConfig(databaseURL, maxConns)
+func Connect(ctx context.Context, databaseURL string, maxConns int, role PoolRole) (*pgxpool.Pool, error) {
+	cfg, err := poolConfig(databaseURL, maxConns, role)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
@@ -46,11 +78,17 @@ func Connect(ctx context.Context, databaseURL string, maxConns int) (*pgxpool.Po
 	return pool, nil
 }
 
-func poolConfig(databaseURL string, maxConns int) (*pgxpool.Config, error) {
+func poolConfig(databaseURL string, maxConns int, role PoolRole) (*pgxpool.Config, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err
 	}
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	cfg.ConnConfig.RuntimeParams["statement_timeout"] = milliseconds(role.StatementTimeout())
+	cfg.ConnConfig.RuntimeParams["lock_timeout"] = milliseconds(poolLockTimeout)
+	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = milliseconds(poolIdleInTxTimeout)
 	if maxConns < 1 {
 		maxConns = 10
 	}
@@ -82,4 +120,8 @@ func ProbeMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		return ErrNotMigrated
 	}
 	return nil
+}
+
+func milliseconds(d time.Duration) string {
+	return strconv.FormatInt(d.Milliseconds(), 10)
 }

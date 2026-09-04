@@ -46,7 +46,7 @@ func run() error {
 	if err := migrate.AssertMigrated(ctx, cfg.DatabaseURL); err != nil {
 		return err
 	}
-	pool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.APIPoolSize+cfg.WorkerPoolSize)
+	pool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.APIPoolSize+cfg.WorkerPoolSize, boot.PoolRoleWorker)
 	if err != nil {
 		return err
 	}

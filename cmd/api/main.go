@@ -193,12 +193,12 @@ func run() error {
 
 	// Two pools, one truth from the load tests: API pollers and worker
 	// transactions must not compete for the same connection budget.
-	pool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.APIPoolSize)
+	pool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.APIPoolSize, boot.PoolRoleAPI)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	workerPool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.WorkerPoolSize)
+	workerPool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.WorkerPoolSize, boot.PoolRoleWorker)
 	if err != nil {
 		return err
 	}
