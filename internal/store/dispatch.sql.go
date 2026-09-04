@@ -607,9 +607,9 @@ func (q *Queries) ListDueWakeups(ctx context.Context, limit int32) ([]RunWakeup,
 const lockClaimableRunNodes = `-- name: LockClaimableRunNodes :many
 SELECT rn.id
 FROM run_nodes rn
-JOIN runs r ON r.id = rn.run_id
-WHERE rn.status = 'queued' AND r.status = 'running'
+WHERE rn.status = 'queued'
   AND rn.enqueued_at <= now()
+  AND EXISTS (SELECT 1 FROM runs r WHERE r.id = rn.run_id AND r.status = 'running')
   AND NOT EXISTS (
     SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = rn.id AND w.wake_at > now()
@@ -619,6 +619,11 @@ LIMIT $1
 FOR UPDATE OF rn SKIP LOCKED
 `
 
+// The runs check is a semi-join, not an inner join: with an inner join the
+// planner may start from runs (status = 'running' through a skip scan of
+// the org-status index) once the runs table has grown, and then every
+// claim walks running runs instead of the FIFO partial index. An EXISTS
+// probe by primary key keeps run_nodes_queued_claim_idx as the driver.
 func (q *Queries) LockClaimableRunNodes(ctx context.Context, batchSize int32) ([]string, error) {
 	rows, err := q.db.Query(ctx, lockClaimableRunNodes, batchSize)
 	if err != nil {

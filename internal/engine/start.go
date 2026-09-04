@@ -317,7 +317,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		}
 	}
 
-	if err := q.NotifyWake(ctx, runID); err != nil {
+	if err := q.NotifyWake(ctx, store.NotifyWakeParams{RunID: runID, Ready: int32(max(len(roots), 1))}); err != nil {
 		return "", fmt.Errorf("notify wake: %w", err)
 	}
 	if err := q.NotifyRunEvents(ctx, runID); err != nil {

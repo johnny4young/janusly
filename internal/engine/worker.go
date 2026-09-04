@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,23 +51,17 @@ const (
 // work and returns. Concurrency and poll interval come validated from
 // config.
 func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Duration, execute ExecuteFunc, logger *slog.Logger) error {
-	// One wake channel per worker, signalled together: a single NOTIFY
-	// used to hand one token to one worker, so a fan-out of N nodes woke
-	// one worker and the rest slept through the idle poll backoff. Every
-	// idle worker now claims at once; SKIP LOCKED hands each a different
-	// node, and the ones that find nothing go back to sleep.
+	// One wake channel per worker. A single NOTIFY used to hand one token to
+	// one worker, so a fan-out of N nodes woke one worker and the rest slept
+	// through the idle poll backoff; waking every worker instead made each
+	// start open eight claim transactions. The notification now says how
+	// many nodes became claimable and that many workers wake, round-robin;
+	// SKIP LOCKED hands each a different node.
 	wakes := make([]chan struct{}, concurrency)
 	for i := range wakes {
 		wakes[i] = make(chan struct{}, 1)
 	}
-	wake := func() {
-		for _, ch := range wakes {
-			select {
-			case ch <- struct{}{}:
-			default:
-			}
-		}
-	}
+	wake := newWakeFanout(wakes)
 
 	var listeners sync.WaitGroup
 	listeners.Go(func() {
@@ -320,7 +316,7 @@ func (e *Engine) failClaim(ctx context.Context, claim ClaimedNode, cause error, 
 // sweepWakeups applies due waiting policies, garbage-collects consumed rows,
 // and nudges idle workers when any work advanced. Claim correctness never
 // depends on it — the claim's anti-join compares wake_at to now() directly.
-func (e *Engine) sweepWakeups(ctx context.Context, wake func(), poll time.Duration, logger *slog.Logger) {
+func (e *Engine) sweepWakeups(ctx context.Context, wake func(int), poll time.Duration, logger *slog.Logger) {
 	q := store.New(e.pool)
 	for {
 		select {
@@ -337,7 +333,7 @@ func (e *Engine) sweepWakeups(ctx context.Context, wake func(), poll time.Durati
 			continue
 		}
 		if swept > 0 || processed > 0 {
-			wake()
+			wake(int(swept) + processed)
 		}
 	}
 }
@@ -347,7 +343,7 @@ func (e *Engine) sweepWakeups(ctx context.Context, wake func(), poll time.Durati
 // signal. Connection loss
 // re-subscribes with backoff; while down, the polling fallback carries the
 // queue.
-func (e *Engine) listenForWakeups(ctx context.Context, wake func(), logger *slog.Logger) {
+func (e *Engine) listenForWakeups(ctx context.Context, wake func(int), logger *slog.Logger) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -363,7 +359,7 @@ func (e *Engine) listenForWakeups(ctx context.Context, wake func(), logger *slog
 	}
 }
 
-func (e *Engine) listenOnce(ctx context.Context, wake func()) error {
+func (e *Engine) listenOnce(ctx context.Context, wake func(int)) error {
 	pooled, err := e.pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire listen connection: %w", err)
@@ -377,12 +373,51 @@ func (e *Engine) listenOnce(ctx context.Context, wake func()) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	for {
-		if _, err := conn.WaitForNotification(ctx); err != nil {
+		notification, err := conn.WaitForNotification(ctx)
+		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
 			return fmt.Errorf("wait for notification: %w", err)
 		}
-		wake()
+		wake(wakeCountFromPayload(notification.Payload))
+	}
+}
+
+// wakeCountFromPayload reads the ready count a NotifyWake payload carries
+// ("<runId>:<n>"); anything else counts as one.
+func wakeCountFromPayload(payload string) int {
+	if _, raw, ok := strings.Cut(payload, ":"); ok {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
+}
+
+// newWakeFanout signals up to n distinct worker channels per call,
+// rotating the starting worker so consecutive wakes spread across the pool.
+// A channel that already holds a token counts as woken.
+func newWakeFanout(wakes []chan struct{}) func(int) {
+	var mu sync.Mutex
+	next := 0
+	return func(n int) {
+		if n < 1 {
+			n = 1
+		}
+		if n > len(wakes) {
+			n = len(wakes)
+		}
+		mu.Lock()
+		start := next
+		next = (next + n) % max(len(wakes), 1)
+		mu.Unlock()
+		for i := range n {
+			ch := wakes[(start+i)%len(wakes)]
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
 	}
 }

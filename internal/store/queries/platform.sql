@@ -1,7 +1,12 @@
 -- Org config, audit, snippets, onboarding, alerts, reports, misc.
 
+-- The payload carries how many nodes just became claimable, so the
+-- listener wakes that many workers instead of one (fan-out) or all of
+-- them (every start waking eight claim transactions). Identical payloads
+-- inside one transaction are deduplicated by PostgreSQL, which is why the
+-- count rides the payload rather than repeated notifications.
 -- name: NotifyWake :exec
-SELECT pg_notify('janusly_wake', sqlc.arg(run_id)::text);
+SELECT pg_notify('janusly_wake', sqlc.arg(run_id)::text || ':' || sqlc.arg(ready)::int::text);
 
 -- name: ListOrgHTTPConfig :many
 SELECT key, value_json FROM org_configs

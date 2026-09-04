@@ -151,7 +151,7 @@ func (e *Engine) StartSandboxRun(ctx context.Context, in SandboxRunInput) (strin
 		if err := e.appendStatusChecked(ctx, events, runID, causeAt); err != nil {
 			return "", err
 		}
-	} else if err := q.NotifyWake(ctx, runID); err != nil {
+	} else if err := q.NotifyWake(ctx, store.NotifyWakeParams{RunID: runID, Ready: int32(max(len(ready), 1))}); err != nil {
 		return "", fmt.Errorf("notify sandbox work: %w", err)
 	}
 	if err := events.flush(ctx, q); err != nil {

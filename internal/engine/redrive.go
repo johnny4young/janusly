@@ -170,7 +170,7 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	}); err != nil {
 		return fmt.Errorf("insert node.redriven: %w", err)
 	}
-	if err := q.NotifyWake(ctx, deadLetter.RunID); err != nil {
+	if err := q.NotifyWake(ctx, store.NotifyWakeParams{RunID: deadLetter.RunID, Ready: 1}); err != nil {
 		return fmt.Errorf("notify wake: %w", err)
 	}
 	if err := q.NotifyRunEvents(ctx, deadLetter.RunID); err != nil {
@@ -236,7 +236,7 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID string
 	}); err != nil {
 		return fmt.Errorf("insert node.redriven: %w", err)
 	}
-	if err := q.NotifyWake(ctx, runID); err != nil {
+	if err := q.NotifyWake(ctx, store.NotifyWakeParams{RunID: runID, Ready: 1}); err != nil {
 		return fmt.Errorf("notify wake: %w", err)
 	}
 	if err := q.NotifyRunEvents(ctx, runID); err != nil {

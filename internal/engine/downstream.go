@@ -131,7 +131,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 	}
 
 	if queued > 0 {
-		if err := q.NotifyWake(ctx, runID); err != nil {
+		if err := q.NotifyWake(ctx, store.NotifyWakeParams{RunID: runID, Ready: int32(queued)}); err != nil {
 			return false, fmt.Errorf("notify wake: %w", err)
 		}
 		return false, nil

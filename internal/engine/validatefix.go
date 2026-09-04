@@ -160,7 +160,7 @@ func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
 	}); err != nil {
 		return "", fmt.Errorf("insert run.started.validation: %w", err)
 	}
-	if err := txq.NotifyWake(ctx, runID); err != nil {
+	if err := txq.NotifyWake(ctx, store.NotifyWakeParams{RunID: runID, Ready: 1}); err != nil {
 		return "", fmt.Errorf("notify wake: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -1082,12 +1082,22 @@ func (q *Queries) ListWorkerInstances(ctx context.Context) ([]WorkerInstance, er
 
 const notifyWake = `-- name: NotifyWake :exec
 
-SELECT pg_notify('janusly_wake', $1::text)
+SELECT pg_notify('janusly_wake', $1::text || ':' || $2::int::text)
 `
 
+type NotifyWakeParams struct {
+	RunID string
+	Ready int32
+}
+
 // Org config, audit, snippets, onboarding, alerts, reports, misc.
-func (q *Queries) NotifyWake(ctx context.Context, runID string) error {
-	_, err := q.db.Exec(ctx, notifyWake, runID)
+// The payload carries how many nodes just became claimable, so the
+// listener wakes that many workers instead of one (fan-out) or all of
+// them (every start waking eight claim transactions). Identical payloads
+// inside one transaction are deduplicated by PostgreSQL, which is why the
+// count rides the payload rather than repeated notifications.
+func (q *Queries) NotifyWake(ctx context.Context, arg NotifyWakeParams) error {
+	_, err := q.db.Exec(ctx, notifyWake, arg.RunID, arg.Ready)
 	return err
 }
 

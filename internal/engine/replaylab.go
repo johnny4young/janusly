@@ -85,7 +85,7 @@ func (e *Engine) ReplayRunAsValidation(
 	}); err != nil {
 		return "", fmt.Errorf("insert run.started.replay-lab: %w", err)
 	}
-	if err := txq.NotifyWake(ctx, runID); err != nil {
+	if err := txq.NotifyWake(ctx, store.NotifyWakeParams{RunID: runID, Ready: int32(max(len(roots), 1))}); err != nil {
 		return "", fmt.Errorf("notify wake: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -223,7 +223,7 @@ func (e *Engine) ReplayRunAsValidationFork(
 	}); err != nil {
 		return ReplayLabForkResult{}, fmt.Errorf("insert run.started.replay-lab-fork: %w", err)
 	}
-	if err := txq.NotifyWake(ctx, runID); err != nil {
+	if err := txq.NotifyWake(ctx, store.NotifyWakeParams{RunID: runID, Ready: 1}); err != nil {
 		return ReplayLabForkResult{}, fmt.Errorf("notify wake: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

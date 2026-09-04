@@ -218,7 +218,7 @@ func (e *Engine) insertRuntimeFailureDrill(ctx context.Context, input RecoveryDr
 			return "", fmt.Errorf("insert runtime recovery drill ancestor event: %w", err)
 		}
 	}
-	if err := q.NotifyWake(ctx, runID); err != nil {
+	if err := q.NotifyWake(ctx, store.NotifyWakeParams{RunID: runID, Ready: 1}); err != nil {
 		return "", fmt.Errorf("notify runtime recovery drill: %w", err)
 	}
 	if err := q.NotifyRunEvents(ctx, runID); err != nil {

@@ -69,3 +69,11 @@ in the same transaction: a failed run can never claim again, and queued rows
 would otherwise sit at the head of the FIFO claim index forever, rejected by
 the running-run join on every claim. A redrive re-queues them through the
 ordinary readiness pass; cancellation marks its own nodes cancelled.
+
+Wake-ups carry a count: `janusly_wake` notifications and the wake sweeper
+say how many nodes just became claimable, and that many workers wake,
+rotating through the pool. Waking one worker left a fan-out waiting on the
+poll fallback; waking every worker made each start open a claim
+transaction per worker. The claim itself is a semi-join over the FIFO
+partial index, so a grown `runs` table cannot steer the planner into
+walking running runs first.

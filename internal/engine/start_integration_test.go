@@ -116,8 +116,8 @@ func TestStartRunCommitsSkeletonAtomically(t *testing.T) {
 	notifyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	notification, err := listener.Conn().WaitForNotification(notifyCtx)
-	if err != nil || notification.Payload != runID {
-		t.Fatalf("expected committed NOTIFY with the run id, got %+v err=%v", notification, err)
+	if err != nil || notification.Payload != runID+":1" {
+		t.Fatalf("expected committed NOTIFY with the run id and one ready root, got %+v err=%v", notification, err)
 	}
 }
 
