@@ -8,8 +8,10 @@ SELECT key, value_json FROM org_configs
 WHERE org_id = $1 AND category = 'http';
 
 -- Deferred hard cascade for tombstoned workflows: one data-modifying CTE
--- purges the expired workflows plus their versions and metadata atomically
--- — either the whole family goes or none of it does.
+-- purges the expired workflows plus their versions, metadata, status pages,
+-- budgets, input presets, recovery qualifications, schedule entries and
+-- improvement suggestions atomically — either the whole family goes or none
+-- of it does. The schema has no foreign keys, so this list is the cascade.
 -- name: PurgeExpiredSoftDeletedWorkflows :one
 WITH expired_workflows AS (
   SELECT id, org_id FROM workflows
@@ -22,6 +24,36 @@ deleted_versions AS (
 ),
 deleted_metadata AS (
   DELETE FROM workflow_metadata
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_status_pages AS (
+  DELETE FROM workflow_status_pages
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_budgets AS (
+  DELETE FROM workflow_budgets
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_presets AS (
+  DELETE FROM workflow_input_presets
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_qualifications AS (
+  DELETE FROM workflow_recovery_qualifications
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_schedules AS (
+  DELETE FROM schedule_entries
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_improvements AS (
+  DELETE FROM workflow_improvements
   WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
   RETURNING 1
 ),
@@ -85,6 +117,36 @@ deleted_versions AS (
 ),
 deleted_metadata AS (
   DELETE FROM workflow_metadata
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_status_pages AS (
+  DELETE FROM workflow_status_pages
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_budgets AS (
+  DELETE FROM workflow_budgets
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_presets AS (
+  DELETE FROM workflow_input_presets
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_qualifications AS (
+  DELETE FROM workflow_recovery_qualifications
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_schedules AS (
+  DELETE FROM schedule_entries
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_improvements AS (
+  DELETE FROM workflow_improvements
   WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
   RETURNING 1
 ),

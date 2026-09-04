@@ -74,6 +74,24 @@ func TestOrgConfigGovernsStartAndRetention(t *testing.T) {
 	}
 	seedTombstone(h.org, "wf-doomed-"+h.org)
 	seedTombstone(otherOrg, "wf-doomed-"+otherOrg)
+	// The schema has no foreign keys: the purge itself is the cascade over
+	// the workflow's dependants.
+	seedDependants := func(org, workflowID string) {
+		for _, statement := range []string{
+			`INSERT INTO workflow_status_pages (org_id, workflow_id, token_digest) VALUES ($1, $2, $2 || '-digest')`,
+			`INSERT INTO workflow_budgets (id, org_id, workflow_id, monthly_usd) VALUES ($2 || '-budget', $1, $2, 10)`,
+			`INSERT INTO workflow_input_presets (id, org_id, workflow_id, name, input_json) VALUES ($2 || '-preset', $1, $2, 'preset', '{}')`,
+			`INSERT INTO schedule_entries (id, org_id, workflow_id, workflow_version_id, node_id, cron_expression, next_fire_at)
+			   VALUES ($2 || '-schedule', $1, $2, $2 || '-v1', 'tick', '0 9 * * *', now() + interval '1 day')`,
+			`INSERT INTO workflow_improvements (id, org_id, workflow_id) VALUES ($2 || '-improvement', $1, $2)`,
+		} {
+			if _, err := pool.Exec(ctx, statement, org, workflowID); err != nil {
+				t.Fatalf("seed dependant: %v", err)
+			}
+		}
+	}
+	seedDependants(h.org, "wf-doomed-"+h.org)
+	seedDependants(otherOrg, "wf-doomed-"+otherOrg)
 	if res := h.call("POST", "/org/config", map[string]any{
 		"key": "retention.deletedWorkflowsDays", "value": float64(1),
 	}, ""); res.status != 200 {
@@ -99,5 +117,21 @@ func TestOrgConfigGovernsStartAndRetention(t *testing.T) {
 	}
 	if got := countRows(otherOrg); got != 1 {
 		t.Fatalf("default-window org must keep its tombstone, got %d", got)
+	}
+	countDependants := func(org string) int {
+		var n int
+		_ = pool.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM workflow_status_pages WHERE org_id = $1) +
+			(SELECT count(*) FROM workflow_budgets WHERE org_id = $1) +
+			(SELECT count(*) FROM workflow_input_presets WHERE org_id = $1) +
+			(SELECT count(*) FROM schedule_entries WHERE org_id = $1) +
+			(SELECT count(*) FROM workflow_improvements WHERE org_id = $1)`, org).Scan(&n)
+		return n
+	}
+	if got := countDependants(h.org); got != 0 {
+		t.Fatalf("the purge must take the workflow's dependants with it, %d rows left", got)
+	}
+	if got := countDependants(otherOrg); got != 5 {
+		t.Fatalf("the other org's dependants must survive, got %d of 5", got)
 	}
 }
