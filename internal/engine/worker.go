@@ -49,7 +49,23 @@ const (
 // work and returns. Concurrency and poll interval come validated from
 // config.
 func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Duration, execute ExecuteFunc, logger *slog.Logger) error {
-	wake := make(chan struct{}, 1)
+	// One wake channel per worker, signalled together: a single NOTIFY
+	// used to hand one token to one worker, so a fan-out of N nodes woke
+	// one worker and the rest slept through the idle poll backoff. Every
+	// idle worker now claims at once; SKIP LOCKED hands each a different
+	// node, and the ones that find nothing go back to sleep.
+	wakes := make([]chan struct{}, concurrency)
+	for i := range wakes {
+		wakes[i] = make(chan struct{}, 1)
+	}
+	wake := func() {
+		for _, ch := range wakes {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
+	}
 
 	var listeners sync.WaitGroup
 	listeners.Go(func() {
@@ -66,10 +82,10 @@ func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Dura
 	})
 
 	var workers sync.WaitGroup
-	for range concurrency {
+	for _, ch := range wakes {
 		workers.Go(func() {
 			superviseLoop(ctx, "worker", logger, func() {
-				e.workerLoop(ctx, wake, poll, execute, logger)
+				e.workerLoop(ctx, ch, poll, execute, logger)
 			})
 		})
 	}
@@ -304,7 +320,7 @@ func (e *Engine) failClaim(ctx context.Context, claim ClaimedNode, cause error, 
 // sweepWakeups applies due waiting policies, garbage-collects consumed rows,
 // and nudges idle workers when any work advanced. Claim correctness never
 // depends on it — the claim's anti-join compares wake_at to now() directly.
-func (e *Engine) sweepWakeups(ctx context.Context, wake chan<- struct{}, poll time.Duration, logger *slog.Logger) {
+func (e *Engine) sweepWakeups(ctx context.Context, wake func(), poll time.Duration, logger *slog.Logger) {
 	q := store.New(e.pool)
 	for {
 		select {
@@ -321,19 +337,17 @@ func (e *Engine) sweepWakeups(ctx context.Context, wake chan<- struct{}, poll ti
 			continue
 		}
 		if swept > 0 || processed > 0 {
-			select {
-			case wake <- struct{}{}:
-			default:
-			}
+			wake()
 		}
 	}
 }
 
 // listenForWakeups owns one dedicated connection subscribed to the wake
-// channel and forwards notifications as a coalesced signal. Connection loss
+// channel and forwards each notification to every worker as a coalesced
+// signal. Connection loss
 // re-subscribes with backoff; while down, the polling fallback carries the
 // queue.
-func (e *Engine) listenForWakeups(ctx context.Context, wake chan<- struct{}, logger *slog.Logger) {
+func (e *Engine) listenForWakeups(ctx context.Context, wake func(), logger *slog.Logger) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -349,7 +363,7 @@ func (e *Engine) listenForWakeups(ctx context.Context, wake chan<- struct{}, log
 	}
 }
 
-func (e *Engine) listenOnce(ctx context.Context, wake chan<- struct{}) error {
+func (e *Engine) listenOnce(ctx context.Context, wake func()) error {
 	pooled, err := e.pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire listen connection: %w", err)
@@ -369,9 +383,6 @@ func (e *Engine) listenOnce(ctx context.Context, wake chan<- struct{}) error {
 			}
 			return fmt.Errorf("wait for notification: %w", err)
 		}
-		select {
-		case wake <- struct{}{}:
-		default:
-		}
+		wake()
 	}
 }
