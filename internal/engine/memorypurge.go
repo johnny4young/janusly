@@ -37,17 +37,26 @@ func MemoryPurgeDelay() time.Duration {
 
 // SweepMemoryConsentPurges purges every org whose revocation aged past
 // the window. Returns orgs purged.
-func (e *Engine) SweepMemoryConsentPurges(ctx context.Context) int {
+func (e *Engine) SweepMemoryConsentPurges(ctx context.Context) (int, error) {
 	q := store.New(e.pool)
 	cutoff := time.Now().Add(-MemoryPurgeDelay())
 	rows, err := q.ListMemoryConsentRevokedOrgs(ctx, &cutoff)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	purged := 0
+	// One org's failure must not stop the others; the first error is still
+	// the pass's verdict so the failure counter moves.
+	var firstErr error
 	for _, row := range rows {
 		deleted, err := q.PurgeMemoryEntriesForOrg(ctx, row.OrgID)
-		if err != nil || deleted == 0 {
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if deleted == 0 {
 			continue
 		}
 		purged++
@@ -60,7 +69,7 @@ func (e *Engine) SweepMemoryConsentPurges(ctx context.Context) int {
 				},
 			})
 	}
-	return purged
+	return purged, firstErr
 }
 
 // RunMemoryConsentPurgeSweep loops the sweep until the context ends.
@@ -74,8 +83,8 @@ func (e *Engine) RunMemoryConsentPurgeSweep(ctx context.Context, every time.Dura
 		case <-ticker.C:
 		}
 		started := time.Now()
-		purged := e.SweepMemoryConsentPurges(ctx)
-		observability.ObserveSweepPass(observability.SweepMemoryConsentPurge, started, nil)
+		purged, err := e.SweepMemoryConsentPurges(ctx)
+		observability.ObserveSweepPass(observability.SweepMemoryConsentPurge, started, err)
 		if purged > 0 {
 			logger.Info("memory consent purge sweep", "orgsPurged", purged)
 		}

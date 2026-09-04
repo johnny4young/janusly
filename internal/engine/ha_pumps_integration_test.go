@@ -40,7 +40,7 @@ func TestHAConcurrentReapersNeverDoubleReap(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			totals[i] = eng.ReapStalledNodes(ctx, time.Hour, 50, quietLogger())
+			totals[i], _ = eng.ReapStalledNodes(ctx, time.Hour, 50, quietLogger())
 		}()
 	}
 	wg.Wait()

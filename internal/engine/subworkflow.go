@@ -500,14 +500,14 @@ const (
 
 // ReconcileSubworkflowTerminals leases due markers and retries the parent
 // handoff with per-child fault isolation.
-func (e *Engine) ReconcileSubworkflowTerminals(ctx context.Context) (scanned, repaired int) {
+func (e *Engine) ReconcileSubworkflowTerminals(ctx context.Context) (scanned, repaired int, err error) {
 	now := time.Now().UTC()
 	lease := now.Add(subworkflowReconcilerLease)
 	due, err := store.New(e.pool).ClaimDueParentNotifications(ctx, store.ClaimDueParentNotificationsParams{
 		Now: &now, LeaseUntil: &lease, RowLimit: subworkflowReconcilerLimit,
 	})
 	if err != nil {
-		return 0, 0
+		return 0, 0, err
 	}
 	for _, row := range due {
 		settled, _ := e.notifyParentOnTerminal(ctx, row.ID, row.Status)
@@ -519,7 +519,7 @@ func (e *Engine) ReconcileSubworkflowTerminals(ctx context.Context) (scanned, re
 			e.DeliverParentNotifications(ctx, row.ID)
 		}
 	}
-	return len(due), repaired
+	return len(due), repaired, nil
 }
 
 // RunSubworkflowTerminalReconciler loops the repair sweep until the
@@ -534,8 +534,8 @@ func (e *Engine) RunSubworkflowTerminalReconciler(ctx context.Context, every tim
 		case <-ticker.C:
 		}
 		started := time.Now()
-		scanned, repaired := e.ReconcileSubworkflowTerminals(ctx)
-		observability.ObserveSweepPass(observability.SweepSubworkflowReconciler, started, nil)
+		scanned, repaired, err := e.ReconcileSubworkflowTerminals(ctx)
+		observability.ObserveSweepPass(observability.SweepSubworkflowReconciler, started, err)
 		if scanned > 0 {
 			logger.Info("subworkflow terminal reconciler sweep",
 				"scanned", scanned, "repaired", repaired)

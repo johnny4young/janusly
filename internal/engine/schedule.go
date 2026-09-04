@@ -84,14 +84,16 @@ func (e *Engine) SyncWorkflowSchedules(
 }
 
 // SweepDueSchedules leases due entries and fires (or drops) each tick.
-func (e *Engine) SweepDueSchedules(ctx context.Context) (fired, dropped int) {
+func (e *Engine) SweepDueSchedules(ctx context.Context) (fired, dropped int, err error) {
 	now := time.Now().UTC()
 	lease := now.Add(time.Minute)
 	due, err := store.New(e.pool).ClaimDueScheduleEntries(ctx, store.ClaimDueScheduleEntriesParams{
 		Now: &now, LeaseUntil: &lease, RowLimit: scheduleSweepLimit,
 	})
 	if err != nil {
-		return 0, 0
+		// The claim is the sweep's one infrastructure dependency; report it
+		// so a scheduler that cannot reach PostgreSQL stops looking healthy.
+		return 0, 0, err
 	}
 	for _, entry := range due {
 		if e.fireScheduleEntry(ctx, entry, now) {
@@ -100,7 +102,7 @@ func (e *Engine) SweepDueSchedules(ctx context.Context) (fired, dropped int) {
 			dropped++
 		}
 	}
-	return fired, dropped
+	return fired, dropped, nil
 }
 
 // fireScheduleEntry handles one due tick; returns true when a run started.
@@ -223,8 +225,8 @@ func (e *Engine) RunScheduleSweep(ctx context.Context, every time.Duration, logg
 		case <-ticker.C:
 		}
 		started := time.Now()
-		fired, dropped := e.SweepDueSchedules(ctx)
-		observability.ObserveSweepPass(observability.SweepSchedule, started, nil)
+		fired, dropped, err := e.SweepDueSchedules(ctx)
+		observability.ObserveSweepPass(observability.SweepSchedule, started, err)
 		if fired > 0 || dropped > 0 {
 			logger.Info("schedule sweep", "fired", fired, "dropped", dropped)
 		}

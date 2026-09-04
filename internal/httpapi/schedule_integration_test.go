@@ -58,7 +58,7 @@ func TestScheduleNodeDueClockLoop(t *testing.T) {
 		t.Fatalf("force due: %v", err)
 	}
 	eng := engine.New(pool)
-	fired, dropped := eng.SweepDueSchedules(ctx)
+	fired, dropped, _ := eng.SweepDueSchedules(ctx)
 	if fired < 1 {
 		t.Fatalf("sweep: fired=%d dropped=%d", fired, dropped)
 	}
@@ -99,7 +99,7 @@ func TestScheduleNodeDueClockLoop(t *testing.T) {
 		`UPDATE schedule_entries SET next_fire_at = now() - interval '1 minute' WHERE id = $1`, entryID); err != nil {
 		t.Fatalf("force due again: %v", err)
 	}
-	fired, dropped = eng.SweepDueSchedules(ctx)
+	fired, dropped, _ = eng.SweepDueSchedules(ctx)
 	if dropped < 1 {
 		t.Fatalf("paused sweep: fired=%d dropped=%d", fired, dropped)
 	}
@@ -188,12 +188,12 @@ func TestScheduleTickFiresOncePerDueTime(t *testing.T) {
 	eng := engine.New(pool)
 
 	forceDue()
-	if fired, _ := eng.SweepDueSchedules(ctx); fired != 1 {
+	if fired, _, _ := eng.SweepDueSchedules(ctx); fired != 1 {
 		t.Fatalf("first sweep must fire the tick: %d", fired)
 	}
 	// Replay the SAME due time, as a lost lease or a second replica would.
 	forceDue()
-	if fired, _ := eng.SweepDueSchedules(ctx); fired != 0 {
+	if fired, _, _ := eng.SweepDueSchedules(ctx); fired != 0 {
 		t.Fatalf("the same due time must not fire twice: %d", fired)
 	}
 
@@ -212,7 +212,7 @@ func TestScheduleTickFiresOncePerDueTime(t *testing.T) {
 		entryID, dueAt.Add(time.Second)); err != nil {
 		t.Fatalf("advance due: %v", err)
 	}
-	if fired, _ := eng.SweepDueSchedules(ctx); fired != 1 {
+	if fired, _, _ := eng.SweepDueSchedules(ctx); fired != 1 {
 		t.Fatalf("a new due time must fire: %d", fired)
 	}
 }

@@ -148,7 +148,7 @@ func TestMemoryConsentPurgeSweep(t *testing.T) {
 	seed(agedOrg, 8*24*time.Hour)
 	seed(freshOrg, time.Hour)
 
-	if purged := eng.SweepMemoryConsentPurges(ctx); purged != 1 {
+	if purged, _ := eng.SweepMemoryConsentPurges(ctx); purged != 1 {
 		t.Fatalf("sweep must purge exactly the aged org: %d", purged)
 	}
 	var agedRows, freshRows, audits int
@@ -160,7 +160,7 @@ func TestMemoryConsentPurgeSweep(t *testing.T) {
 		t.Fatalf("purge outcome: aged=%d fresh=%d audits=%d", agedRows, freshRows, audits)
 	}
 	// Idempotent: the next sweep has nothing left to purge.
-	if purged := eng.SweepMemoryConsentPurges(ctx); purged != 0 {
+	if purged, _ := eng.SweepMemoryConsentPurges(ctx); purged != 0 {
 		t.Fatalf("second sweep must purge nothing: %d", purged)
 	}
 	_ = h

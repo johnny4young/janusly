@@ -41,7 +41,7 @@ type stalledReapResult struct {
 // Returns how many were reaped; it never fails the sweep as a whole — a
 // per-node error logs and moves on (the next sweep retries, the scan is
 // idempotent).
-func (e *Engine) ReapStalledNodes(ctx context.Context, threshold time.Duration, batch int, logger *slog.Logger) int {
+func (e *Engine) ReapStalledNodes(ctx context.Context, threshold time.Duration, batch int, logger *slog.Logger) (int, error) {
 	if batch <= 0 {
 		batch = 50
 	}
@@ -52,7 +52,7 @@ func (e *Engine) ReapStalledNodes(ctx context.Context, threshold time.Duration, 
 		if ctx.Err() == nil {
 			logger.Error("stalled-node scan failed", "error", err)
 		}
-		return 0
+		return 0, err
 	}
 	reaped := 0
 	fields := map[string]any{"reason": "worker_stalled"}
@@ -65,7 +65,7 @@ func (e *Engine) ReapStalledNodes(ctx context.Context, threshold time.Duration, 
 			reaped++
 		}
 	}
-	return reaped
+	return reaped, nil
 }
 
 // reapScopedStalledNodes crosses the same terminal boundary as the production
@@ -148,7 +148,7 @@ func (e *Engine) StartReaper(ctx context.Context, interval, threshold time.Durat
 			return
 		}
 		started := time.Now()
-		e.ReapStalledNodes(ctx, threshold, 50, logger)
-		observability.ObserveSweepPass(observability.SweepStalledNodeReaper, started, nil)
+		_, err := e.ReapStalledNodes(ctx, threshold, 50, logger)
+		observability.ObserveSweepPass(observability.SweepStalledNodeReaper, started, err)
 	}
 }

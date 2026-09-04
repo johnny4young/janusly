@@ -82,7 +82,7 @@ func TestReaperReclaimsStalledRunningNode(t *testing.T) {
 	}
 	// The shared dev DB may hold other stalled debris — assert OUR node
 	// is among the reaped, not the exact count.
-	if reaped := eng.ReapStalledNodes(ctx, 10*time.Minute, 50, slog.Default()); reaped < 1 {
+	if reaped, _ := eng.ReapStalledNodes(ctx, 10*time.Minute, 50, slog.Default()); reaped < 1 {
 		t.Fatalf("reaper must reclaim the stalled node: %d", reaped)
 	}
 	var nodeStatus, runStatus string

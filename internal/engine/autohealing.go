@@ -63,6 +63,9 @@ type AutoHealingScanResult struct {
 	Proposed    int
 	Promoted    int
 	Rejected    int
+	// Err is the pass's infrastructure failure (the candidate scan could not
+	// run). Per-org outcomes are counted, never raised.
+	Err error
 }
 
 // SweepAutoHealing runs one scan + watcher pass across every opted-in org.
@@ -75,6 +78,7 @@ func (e *Engine) SweepAutoHealing(ctx context.Context) AutoHealingScanResult {
 	since := time.Now().AddDate(0, 0, -autoHealingWindowDays)
 	orgs, err := q.ListHealingCandidateOrgs(ctx, &since)
 	if err != nil {
+		result.Err = err
 		return result
 	}
 	for _, orgID := range orgs {
@@ -639,7 +643,7 @@ func (e *Engine) RunAutoHealingSweep(ctx context.Context, every time.Duration, l
 		}
 		started := time.Now()
 		result := e.SweepAutoHealing(ctx)
-		observability.ObserveSweepPass(observability.SweepAutoHealing, started, nil)
+		observability.ObserveSweepPass(observability.SweepAutoHealing, started, result.Err)
 		if result.Proposed > 0 || result.Promoted > 0 || result.Rejected > 0 {
 			logger.Info("auto-healing sweep", "orgs", result.OrgsScanned,
 				"proposed", result.Proposed, "promoted", result.Promoted, "rejected", result.Rejected)

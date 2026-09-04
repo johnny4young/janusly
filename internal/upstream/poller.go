@@ -176,7 +176,7 @@ const upstreamSweepLimit = 200
 
 // Sweep polls every enabled + due source; one bad source never stalls the
 // rest.
-func Sweep(ctx context.Context, pool *pgxpool.Pool, fetch Fetcher, logger *slog.Logger) {
+func Sweep(ctx context.Context, pool *pgxpool.Pool, fetch Fetcher, logger *slog.Logger) error {
 	// Claiming stamps the clock, so a concurrent replica's sweep no longer
 	// sees these sources as due: one probe per interval, not one per
 	// replica, against third-party status pages that rate-limit.
@@ -185,11 +185,12 @@ func Sweep(ctx context.Context, pool *pgxpool.Pool, fetch Fetcher, logger *slog.
 		if ctx.Err() == nil {
 			logger.Error("upstream-health: failed to claim sources", "error", err)
 		}
-		return
+		return err
 	}
 	for _, source := range sources {
 		PollOneSource(ctx, pool, source, fetch)
 	}
+	return nil
 }
 
 // RunSweep loops the sweep on an interval until the context ends (wired
@@ -204,7 +205,7 @@ func RunSweep(ctx context.Context, pool *pgxpool.Pool, every time.Duration, logg
 		case <-ticker.C:
 		}
 		started := time.Now()
-		Sweep(ctx, pool, DefaultFetcher, logger)
-		observability.ObserveSweepPass(observability.SweepUpstreamHealth, started, nil)
+		err := Sweep(ctx, pool, DefaultFetcher, logger)
+		observability.ObserveSweepPass(observability.SweepUpstreamHealth, started, err)
 	}
 }

@@ -25,7 +25,7 @@ func TestReaperFailsStalledNodeIntoDLQ(t *testing.T) {
 		t.Fatalf("age node: %v", err)
 	}
 
-	reaped := eng.ReapStalledNodes(ctx, time.Hour, 50, quietLogger())
+	reaped, _ := eng.ReapStalledNodes(ctx, time.Hour, 50, quietLogger())
 	if reaped < 1 {
 		t.Fatalf("expected at least this node reaped, got %d", reaped)
 	}
@@ -48,7 +48,7 @@ func TestReaperFailsStalledNodeIntoDLQ(t *testing.T) {
 	}
 
 	// Idempotent: a second sweep finds nothing of this run.
-	_ = eng.ReapStalledNodes(ctx, time.Hour, 50, quietLogger())
+	_, _ = eng.ReapStalledNodes(ctx, time.Hour, 50, quietLogger())
 	var stillOne int
 	_ = pool.QueryRow(ctx, "select count(*) from dead_letters where run_id=$1", runID).Scan(&stillOne)
 	if stillOne != 1 {
@@ -67,7 +67,7 @@ func TestReaperLeavesHealthyExecutionAlone(t *testing.T) {
 		where run_id=$1 and node_id='first'`, runID); err != nil {
 		t.Fatalf("promote: %v", err)
 	}
-	_ = eng.ReapStalledNodes(ctx, time.Hour, 50, quietLogger())
+	_, _ = eng.ReapStalledNodes(ctx, time.Hour, 50, quietLogger())
 	var status string
 	_ = pool.QueryRow(ctx, "select status from run_nodes where run_id=$1 and node_id='first'", runID).Scan(&status)
 	if status != "running" {

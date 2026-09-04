@@ -221,7 +221,7 @@ func TestSubworkflowTerminalReconcilerRepairsCrashWindow(t *testing.T) {
 		t.Fatalf("arm marker: %v", err)
 	}
 
-	scanned, repaired := eng.ReconcileSubworkflowTerminals(ctx)
+	scanned, repaired, _ := eng.ReconcileSubworkflowTerminals(ctx)
 	if scanned < 1 || repaired < 1 {
 		t.Fatalf("reconciler must repair: scanned=%d repaired=%d", scanned, repaired)
 	}
