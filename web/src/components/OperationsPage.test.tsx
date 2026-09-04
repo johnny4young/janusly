@@ -599,3 +599,31 @@ describe('<OperationsPage />', () => {
     expect(screen.queryByTestId('stub-McpConnectionsPanel')).toBeNull()
   })
 })
+
+describe('<OperationsPage /> survives payloads the contract did not promise', () => {
+  beforeEach(() => {
+    vi.mocked(api).mockReset()
+    useWorkflowStore.setState({ ...initialState, platformVersion: 0, budgetBlocked: null }, true)
+  })
+
+  // Every one of these used to throw inside the Operations panel:
+  // `metrics?.costThisWindow.severity` stops at `metrics`, not at the missing
+  // `costThisWindow`, and `.some((m) => m.severity)` walked undefined metrics.
+  for (const [label, payload] of [
+    ['empty object', {}],
+    ['metric objects missing', { windowDays: 30, terminalRuns: 10 }],
+    ['metric fields null', { successRate: null, mttr: null, p95Latency: null, replayRate: null, costThisWindow: null }],
+    ['array instead of object', []],
+    ['string body', 'garbage'],
+  ] as const) {
+    it(`renders the overview with ${label}`, async () => {
+      stubApiByPath({
+        '/recovery/metrics': payload,
+        '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+      })
+      render(<OperationsPage />)
+      await screen.findByTestId('settings-index-reliability')
+      expect(screen.getByTestId('operations-rail-tab-overview')).toHaveAttribute('aria-current', 'page')
+    })
+  }
+})

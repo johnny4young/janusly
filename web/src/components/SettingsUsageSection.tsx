@@ -3,24 +3,9 @@ import { ChartNoAxesCombined } from 'lucide-react'
 import { getResolvedLocale, useT } from '../i18n'
 import { EmptyView } from './panel-primitives'
 
-export type CostProviderRow = {
-  provider: string
-  model: string
-  usd: number
-  tokens: number
-  inputTokens: number
-  cachedInputTokens: number
-  cacheCreationInputTokens: number
-  calls: number
-  aggregated?: boolean
-}
+import type { CacheEfficiency, CostProviderRow } from '../lib/recovery-metrics-model'
 
-export type CacheEfficiency = {
-  inputTokens: number
-  readTokens: number
-  creationTokens: number
-  readSharePercent: number | null
-}
+export type { CacheEfficiency, CostProviderRow }
 
 export function SettingsUsageSection({
   providers,

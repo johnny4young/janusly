@@ -39,11 +39,8 @@ import {
 import { AiRuntimeStatusCard } from './AiRuntimeStatusCard'
 import { SettingsInfrastructureSection, type WorkerFleet } from './SettingsInfrastructureSection'
 import { SettingsOverview } from './SettingsOverview'
-import {
-  SettingsUsageSection,
-  type CacheEfficiency,
-  type CostProviderRow,
-} from './SettingsUsageSection'
+import { SettingsUsageSection } from './SettingsUsageSection'
+import { parseRecoveryMetrics, type RecoveryMetrics } from '../lib/recovery-metrics-model'
 import {
   OPERATIONS_SECTION_REQUEST_EVENT as SECTION_REQUEST_EVENT,
   isOpsSection as isSection,
@@ -87,29 +84,6 @@ type HealthPayload = {
   rateLimiter?: RateLimiterHealth
 }
 
-type MetricSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
-
-type RecoveryMetric = {
-  value: number | null
-  display: string
-  severity: MetricSeverity
-  rationale: string
-  rationaleCode?: string
-  rationaleMeta?: Record<string, string | number | boolean>
-}
-
-type RecoveryMetrics = {
-  successRate: RecoveryMetric
-  verifiedRecovery?: RecoveryMetric
-  mttr: RecoveryMetric
-  p95Latency: RecoveryMetric
-  approvalsPending: RecoveryMetric
-  replayRate: RecoveryMetric
-  slaAttainment?: RecoveryMetric
-  costThisWindow: RecoveryMetric & { providers: CostProviderRow[]; cache: CacheEfficiency }
-  windowDays: number
-  terminalRuns: number
-}
 
 // The section bus (sub-section enum + deep-link helper) lives in its own
 // module so OperationsPage stays code-splittable — see operations-section-bus.
@@ -222,7 +196,10 @@ export function OperationsPage({
     api('/recovery/metrics')
       .then((payload) => {
         if (cancelled) return
-        setMetrics(payload as RecoveryMetrics)
+        // A payload we cannot read is the same as no metrics: the page
+        // already renders the unavailable state for `null`, and never again
+        // dereferences `costThisWindow` on a shape the contract did not send.
+        setMetrics(parseRecoveryMetrics(payload))
       })
       .catch((err) => {
         if (cancelled) return

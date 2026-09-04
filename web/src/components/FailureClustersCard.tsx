@@ -20,6 +20,13 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
 import { api } from '../api'
+import { parseFailureClusters } from '../lib/recovery-metrics-model'
+import type {
+  ClusterCategory,
+  ClusterOwner,
+  FailureCluster,
+  FailureClusters as ClustersResponse,
+} from '../lib/recovery-metrics-model'
 import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
@@ -28,46 +35,6 @@ import type { DeadLetter } from './dead-letter-types'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { Button } from '@/components/ui/Button'
-
-type ClusterCategory =
-  | 'secret_missing'
-  | 'http_error'
-  | 'network_timeout'
-  | 'ai_provider'
-  | 'parse_error'
-  | 'tool_input'
-  | 'unknown'
-
-type ClusterOwner = 'ops' | 'workflow_author' | 'platform'
-
-type ClusterWorkflow = {
-  workflowId: string
-  workflowName: string
-  count: number
-}
-
-type ClusterSampleRef = {
-  source: 'dead_letter' | 'failed_run_node'
-  id: string
-  runId: string
-}
-
-type FailureCluster = {
-  signature: string
-  category: ClusterCategory
-  frequency: number
-  affectedWorkflows: ClusterWorkflow[]
-  firstSeen: string
-  lastSeen: string
-  suggestedOwner: ClusterOwner
-  samples: ClusterSampleRef[]
-}
-
-type ClustersResponse = {
-  clusters: FailureCluster[]
-  totalSamples: number
-  windowDays: number
-}
 
 type ClusterData = ClustersResponse & {
   fetchedAtMs: number
@@ -185,7 +152,15 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
     api('/dlq/clusters')
       .then((payload) => {
         if (cancelled) return
-        setData({ ...(payload as ClustersResponse), fetchedAtMs: Date.now() })
+        const parsed = parseFailureClusters(payload)
+        if (!parsed) {
+          // Not a cluster response: the card's error state, never a throw
+          // on `clusters.length` that blanks the whole Recovery Center.
+          setError(t('clusters.unavailable', { detail: '' }))
+          setLoading(false)
+          return
+        }
+        setData({ ...parsed, fetchedAtMs: Date.now() })
         setLoading(false)
       })
       .catch((err) => {
