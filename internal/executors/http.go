@@ -313,13 +313,12 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (result any, execE
 		return nil, err
 	}
 
-	transport := e.newTransport(pins)
+	ctx = withPins(ctx, pins)
 	client := &http.Client{
-		Transport:     transport,
+		Transport:     e.transport(),
 		Timeout:       time.Duration(timeoutMs) * time.Millisecond,
 		CheckRedirect: e.redirectPolicy(pins, maxRedirects, false),
 	}
-	defer transport.CloseIdleConnections()
 
 	var bodyReader io.Reader
 	if body, present := in.Config["body"]; present {
@@ -535,12 +534,75 @@ func (e *httpExecutor) redirectPolicy(pins *pinnedDialer, maxRedirects int, disa
 	}
 }
 
-// newTransport builds the per-request transport with the pinned dialer
-// (skipped when private targets are allowed — dev/test loopback).
+type pinsContextKey struct{}
+
+// withPins attaches the pins a request validated so the shared transport's
+// dialer honors them on the first hop and on every redirect (Go carries
+// the request context across redirects).
+func withPins(ctx context.Context, pins *pinnedDialer) context.Context {
+	return context.WithValue(ctx, pinsContextKey{}, pins)
+}
+
+func pinsFromContext(ctx context.Context) *pinnedDialer {
+	pins, _ := ctx.Value(pinsContextKey{}).(*pinnedDialer)
+	return pins
+}
+
+const (
+	outboundMaxIdleConns        = 64
+	outboundMaxIdleConnsPerHost = 8
+	outboundIdleConnTimeout     = 90 * time.Second
+)
+
+// The outbound transports are process-wide so consecutive calls to the same
+// host reuse a connection instead of paying a TCP+TLS handshake per node.
+// The pinned one dials only through the pins carried by the request
+// context; the open one (AllowPrivate — dev/test loopback) uses the plain
+// dialer. Neither enables HTTP/2: a custom TLS config keeps Go on HTTP/1.1
+// unless forced, which preserves today's streaming behavior.
+var (
+	sharedPinnedTransport = sync.OnceValue(func() *http.Transport { return outboundTransport(pinnedContextDial) })
+	sharedOpenTransport   = sync.OnceValue(func() *http.Transport { return outboundTransport(nil) })
+)
+
+func outboundTransport(dial func(context.Context, string, string) (net.Conn, error)) *http.Transport {
+	transport := &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		MaxIdleConns:        outboundMaxIdleConns,
+		MaxIdleConnsPerHost: outboundMaxIdleConnsPerHost,
+		IdleConnTimeout:     outboundIdleConnTimeout,
+	}
+	if dial != nil {
+		transport.DialContext = dial
+	}
+	return transport
+}
+
+// pinnedContextDial fails closed: a request that reaches the shared pinned
+// transport without validated pins never dials.
+func pinnedContextDial(ctx context.Context, network, addr string) (net.Conn, error) {
+	pins := pinsFromContext(ctx)
+	if pins == nil {
+		return nil, fmt.Errorf("outbound dial to %s without a validated pin", addr)
+	}
+	return pins.dial(ctx, network, addr)
+}
+
+// transport returns the shared transport for this executor's posture.
+func (e *httpExecutor) transport() *http.Transport {
+	if e.opts.AllowPrivate() {
+		return sharedOpenTransport()
+	}
+	return sharedPinnedTransport()
+}
+
+// newTransport builds a dedicated transport bound to one set of pins, for
+// clients handed to SDKs whose requests cannot carry the pins in their
+// context (NewPinnedHTTPClient).
 func (e *httpExecutor) newTransport(pins *pinnedDialer) *http.Transport {
 	transport := &http.Transport{
-		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
-		DisableKeepAlives: true,
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		IdleConnTimeout: outboundIdleConnTimeout,
 	}
 	if !e.opts.AllowPrivate() {
 		transport.DialContext = pins.dial

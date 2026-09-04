@@ -340,7 +340,7 @@ func streamCsvSummary(body io.Reader, sampleCap, maxBytes int, filter map[string
 }
 
 // openStream performs the validated, pinned request and hands back the live
-// response for streaming consumption. The cleanup closes body + transport.
+// response for streaming consumption. The cleanup closes the body; the shared transport keeps its pool.
 func (e *httpExecutor) openStream(ctx context.Context, in Input) (*http.Response, func(), error) {
 	resolved, err := httpcontract.ResolveNodeConfig(in.Config, false)
 	if err != nil {
@@ -360,9 +360,9 @@ func (e *httpExecutor) openStream(ctx context.Context, in Input) (*http.Response
 	if err != nil {
 		return nil, nil, err
 	}
-	transport := e.newTransport(pins)
+	ctx = withPins(ctx, pins)
 	client := &http.Client{
-		Transport:     transport,
+		Transport:     e.transport(),
 		Timeout:       time.Duration(timeoutMs) * time.Millisecond,
 		CheckRedirect: e.redirectPolicy(pins, maxRedirects, false),
 	}
@@ -375,7 +375,6 @@ func (e *httpExecutor) openStream(ctx context.Context, in Input) (*http.Response
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		transport.CloseIdleConnections()
 		if strings.Contains(err.Error(), "Client.Timeout") {
 			return nil, nil, fmt.Errorf("HTTP request timed out after %dms", int(timeoutMs))
 		}
@@ -387,12 +386,10 @@ func (e *httpExecutor) openStream(ctx context.Context, in Input) (*http.Response
 	}
 	if res.ContentLength > int64(maxBytes) {
 		_ = res.Body.Close()
-		transport.CloseIdleConnections()
 		return nil, nil, fmt.Errorf("HTTP response exceeds maxResponseBytes (Content-Length %d > cap %d)", res.ContentLength, maxBytes) //nolint:staticcheck // contract message is the wire contract
 	}
 	cleanup := func() {
 		_ = res.Body.Close()
-		transport.CloseIdleConnections()
 	}
 	return res, cleanup, nil
 }

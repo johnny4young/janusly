@@ -80,13 +80,12 @@ func FetchHTTPTarget(ctx context.Context, rawURL string, opts FetchOptions) (Fet
 	if err != nil {
 		return FetchResult{}, err
 	}
-	transport := executor.newTransport(pins)
+	ctx = withPins(ctx, pins)
 	client := &http.Client{
-		Transport:     transport,
+		Transport:     executor.transport(),
 		Timeout:       time.Duration(timeoutMs) * time.Millisecond,
 		CheckRedirect: executor.redirectPolicy(pins, maxRedirects, opts.DisableRedirects),
 	}
-	defer transport.CloseIdleConnections()
 
 	var bodyReader io.Reader
 	if opts.Body != nil {
