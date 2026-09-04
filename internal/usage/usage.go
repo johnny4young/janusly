@@ -12,6 +12,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"log/slog"
 	"math"
 	"sync"
@@ -84,7 +86,44 @@ func Fire(ctx context.Context, record Record) {
 	}()
 	if err := fn(ctx, record); err != nil {
 		slog.Warn("usage recorder failed (call unaffected)", "error", err)
+		return
 	}
+	observeUsage(record)
+}
+
+// The process-level AI series: cost and tokens by provider and model, both
+// bounded by the pricing catalog. Recorded only for calls the recorder kept.
+var (
+	metricAICost = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "janusly_ai_cost_usd_total",
+		Help: "Priced AI spend in USD by provider and model.",
+	}, []string{"provider", "model"})
+	metricAITokens = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "janusly_ai_tokens_total",
+		Help: "AI tokens by provider, model and kind (input, output, cached_input, cache_creation).",
+	}, []string{"provider", "model", "kind"})
+)
+
+func observeUsage(record Record) {
+	provider, model := labelOr(record.Provider), labelOr(record.Model)
+	if record.CostUsd != nil && *record.CostUsd >= 0 {
+		metricAICost.WithLabelValues(provider, model).Add(*record.CostUsd)
+	}
+	for kind, value := range map[string]*int{
+		"input": record.InputTokens, "output": record.OutputTokens,
+		"cached_input": record.CachedInputTokens, "cache_creation": record.CacheCreationInputTokens,
+	} {
+		if value != nil && *value > 0 {
+			metricAITokens.WithLabelValues(provider, model, kind).Add(float64(*value))
+		}
+	}
+}
+
+func labelOr(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	return value
 }
 
 // NewDBRecorder builds the production writer over the shared pool — the

@@ -133,3 +133,19 @@ groups:
         annotations:
           summary: Janusly work is not being claimed promptly
           description: Eligible-to-claimed p95 queue wait exceeded five minutes; workers may be saturated or unavailable.
+      - alert: JanuslyHTTPServerErrors
+        expr: sum(increase(janusly_http_requests_total{job="janusly",status=~"5.."}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: The public API answered with 5xx in the last five minutes
+          description: Check janusly_http_requests_total by pattern and the access log lines carrying the request ids.
+      - alert: JanuslyDBPoolStarved
+        expr: sum by (pool) (increase(janusly_db_pool_acquires_total{job="janusly",outcome="empty"}[5m])) > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Callers keep finding the {{ $labels.pool }} PostgreSQL pool empty
+          description: Raise the pool size or find the statement holding connections; janusly_db_pool_connections shows the state split.

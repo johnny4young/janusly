@@ -19,12 +19,40 @@ Important series include:
   `janusly_sweep_last_success_timestamp_seconds`, and
   `janusly_sweep_failures_total`, labeled from a closed catalog of the nine
   supervised maintenance loops
+- `janusly_http_requests_total{pattern,status}` and
+  `janusly_http_request_seconds{pattern}`: the RED series of the public
+  listener, labeled by the registered route pattern (requests outside the
+  gated route table share `other`; long-lived streams are counted but not
+  timed)
+- `janusly_db_pool_connections{pool,state}`,
+  `janusly_db_pool_acquires_total{pool,outcome}` and
+  `janusly_db_pool_acquire_wait_seconds_total{pool}` from `pgxpool.Stat` for
+  the `api` and `worker` pools
+- `janusly_dead_letters{status}`: the production recovery queue by status
+- `janusly_ai_cost_usd_total{provider,model}` and
+  `janusly_ai_tokens_total{provider,model,kind}` from every recorded AI call
+  (counter vectors: the families appear with the first recorded call, which
+  is why the shipped dashboard does not reference them)
 - `target_info` with service and instance identity
 
-The public `/health` response exposes only bounded safe status. Detailed
-operational state and Prometheus output stay on protected surfaces.
+Every request also writes one structured access-log line (`http request`)
+carrying method, path, pattern, status, bytes, duration and the request id
+that `X-Request-Id` returned to the caller; `/health` and `/readyz` probes
+are left out. `JANUSLY_LOG_LEVEL` sets the log floor.
+
+The public `/health` response exposes only bounded safe status: `ok` is a
+constant liveness marker, and the rate-limiter and queue fields are the
+bounded public projections. Readiness (a live database) is `/readyz`.
+Detailed operational state and Prometheus output stay on protected surfaces.
 
 ## Traces
+
+Every public request runs under one server span named by its route pattern
+(`other` outside the gated table) carrying method, path, status and the
+request id, and every pooled statement runs under one client span named
+after its sqlc query (`db.GetRunHeader`); node executions keep their
+`node.execute` span. Without a configured exporter the global tracer is a
+no-op and the spans cost nothing.
 
 `OTEL_EXPORTER` accepts:
 

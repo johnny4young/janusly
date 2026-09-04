@@ -189,3 +189,62 @@ func (c *WorkflowQueueCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.waitingDesc, prometheus.GaugeValue, waiting)
 	ch <- prometheus.MustNewConstMetric(c.activeDesc, prometheus.GaugeValue, active)
 }
+
+// DeadLetterCollector exposes janusly_dead_letters{status}: the production
+// recovery queue by status, across tenants, from the partial (org, status)
+// index. Cached like the queue depth so scrapes coalesce.
+type DeadLetterCollector struct {
+	pool  *pgxpool.Pool
+	desc  *prometheus.Desc
+	mu    sync.Mutex
+	at    time.Time
+	cache map[string]float64
+}
+
+// NewDeadLetterCollector builds (but does not register) the collector.
+func NewDeadLetterCollector(pool *pgxpool.Pool) *DeadLetterCollector {
+	return &DeadLetterCollector{
+		pool: pool,
+		desc: prometheus.NewDesc("janusly_dead_letters",
+			"Production dead letters by status, across tenants.", []string{"status"}, nil),
+	}
+}
+
+// Describe implements prometheus.Collector.
+func (c *DeadLetterCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+// Collect implements prometheus.Collector with a 5-second cache.
+func (c *DeadLetterCollector) Collect(ch chan<- prometheus.Metric) {
+	c.mu.Lock()
+	stale := time.Since(c.at) > 5*time.Second
+	c.mu.Unlock()
+	if stale {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		rows, err := c.pool.Query(ctx,
+			`SELECT status, count(*)::bigint FROM dead_letters WHERE replay_mode IS NULL GROUP BY status`)
+		if err == nil {
+			fresh := map[string]float64{"open": 0, "replayed": 0, "resolved": 0}
+			for rows.Next() {
+				var status string
+				var count int64
+				if rows.Scan(&status, &count) == nil {
+					fresh[status] = float64(count)
+				}
+			}
+			rows.Close()
+			if rows.Err() == nil {
+				c.mu.Lock()
+				c.cache, c.at = fresh, time.Now()
+				c.mu.Unlock()
+			}
+		}
+	}
+	c.mu.Lock()
+	snapshot := make(map[string]float64, len(c.cache))
+	maps.Copy(snapshot, c.cache)
+	c.mu.Unlock()
+	for status, value := range snapshot {
+		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, value, status)
+	}
+}

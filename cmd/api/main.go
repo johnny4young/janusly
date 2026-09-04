@@ -219,6 +219,9 @@ func run() error {
 	// supports N independent consumers.
 	eng := engine.New(workerPool)
 	prometheus.MustRegister(engine.NewQueueDepthCollector(pool))
+	prometheus.MustRegister(engine.NewDeadLetterCollector(pool))
+	prometheus.MustRegister(boot.NewPoolStatsCollector("api", pool))
+	prometheus.MustRegister(boot.NewPoolStatsCollector("worker", workerPool))
 	// Stable workflow queue series plus the OTel Resource rendered the
 	// Prometheus way: a target_info
 	// gauge carrying service name/namespace/instance.
