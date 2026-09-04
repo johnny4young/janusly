@@ -26,7 +26,7 @@ import {
   ServerCog,
   ShieldCheck,
 } from 'lucide-react'
-import { api, contractApi } from '../api'
+import { api, contractApi, isForbiddenApiError } from '../api'
 import { canOpenSettingsSection } from '../settings-sections'
 import { useWorkflowStore } from '../store'
 import type { ActiveTab, AiHealth } from '../types'
@@ -40,7 +40,6 @@ import { AiRuntimeStatusCard } from './AiRuntimeStatusCard'
 import { SettingsInfrastructureSection, type WorkerFleet } from './SettingsInfrastructureSection'
 import { SettingsOverview } from './SettingsOverview'
 import { SettingsUsageSection } from './SettingsUsageSection'
-import { isForbiddenApiError } from '../lib/api-error'
 import { parseRecoveryMetrics, type RecoveryMetrics } from '../lib/recovery-metrics-model'
 import {
   OPERATIONS_SECTION_REQUEST_EVENT as SECTION_REQUEST_EVENT,

@@ -986,13 +986,10 @@ describe('useWorkflowStore semantic workflow signals', () => {
     expect(useWorkflowStore.getState().currentWorkflowVersion).toBeNull()
   })
 
-  it('markWorkflowSaved clears the flag; markWorkflowDirty forces it on', () => {
+  it('markWorkflowSaved clears the flag', () => {
     useWorkflowStore.getState().addNode('http')
     useWorkflowStore.getState().markWorkflowSaved()
     expect(useWorkflowStore.getState().workflowDirty).toBe(false)
-
-    useWorkflowStore.getState().markWorkflowDirty()
-    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
   })
 
   it('marks completed position changes dirty, ignores in-progress drag events, and marks removals semantic', () => {

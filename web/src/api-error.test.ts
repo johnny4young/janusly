@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError } from '../api'
-import { apiErrorStatus, isForbiddenApiError } from './api-error'
+import { ApiError, apiErrorStatus, isForbiddenApiError } from './api'
 
 describe('isForbiddenApiError', () => {
   it('recognises the API error the transport actually throws', () => {

@@ -21,8 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckCircle2, CircleAlert, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useT } from '../i18n'
-import { api } from '../api'
-import { isForbiddenApiError } from '../lib/api-error'
+import { api, isForbiddenApiError } from '../api'
 import { useWorkflowStore } from '../store'
 import type { ValidationEvidenceLevel } from '../types'
 import {

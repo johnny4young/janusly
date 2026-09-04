@@ -6,11 +6,14 @@ import { changeAppLanguage } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { OperationsPage, requestOperationsSection } from './OperationsPage'
 
-vi.mock('../api', () => {
+vi.mock('../api', async (importOriginal) => {
+  // The real module keeps ApiError and its status helpers; only the transport is doubled.
+  const actual = await importOriginal<typeof import('../api')>()
   const module = ({
   api: vi.fn(),
 })
   return {
+    ...actual,
     ...module,
     // Typed reads route through contractApi; delegate to the same mock so the
     // path-keyed expectations below keep working.

@@ -71,9 +71,8 @@ type ImprovementState =
 const VERSIONS_PAGE_SIZE = 50
 
 function versionsPagePath(workflowId: string, beforeVersion?: number): string {
-  const params = new URLSearchParams({ workflowId, limit: String(VERSIONS_PAGE_SIZE) })
-  if (beforeVersion !== undefined) params.set('beforeVersion', String(beforeVersion))
-  return `/workflows/versions?${params.toString()}`
+  const cursor = beforeVersion === undefined ? '' : `&beforeVersion=${beforeVersion}`
+  return `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}&limit=${VERSIONS_PAGE_SIZE}${cursor}`
 }
 
 const APPROACH_KEYS: Record<string, string> = {

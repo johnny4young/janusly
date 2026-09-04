@@ -268,8 +268,6 @@ type WorkflowStore = {
   newWorkflow: () => void
   /** Mark the current workflow as persisted server-side (after a successful save). */
   markWorkflowSaved: (version?: WorkflowVersionIdentity) => void
-  /** Force the dirty flag on — used after restoring a local draft (the restored content isn't server-side). */
-  markWorkflowDirty: () => void
   setWorkflowName: (name: string) => void
   setNodes: (nodes: WorkflowGraphNode[]) => void
   setEdges: (edges: WorkflowGraphEdge[]) => void
@@ -632,7 +630,6 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     workflowDirty: false,
     currentWorkflowVersion: version ?? state.currentWorkflowVersion,
   })),
-  markWorkflowDirty: () => set({ workflowDirty: true }),
 
   getWorkflowJson: () => {
     const state = get()

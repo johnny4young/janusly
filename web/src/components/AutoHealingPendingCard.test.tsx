@@ -5,7 +5,7 @@ import { api } from '../api'
 import { initI18n } from '../i18n'
 import { AutoHealingPendingCard } from './AutoHealingPendingCard'
 
-vi.mock('../api', () => ({ api: vi.fn() }))
+vi.mock('../api', async (importOriginal) => ({ ...(await importOriginal<typeof import('../api')>()), api: vi.fn() }))
 
 const bumpPlatformVersion = vi.fn()
 

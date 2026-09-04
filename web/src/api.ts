@@ -131,6 +131,21 @@ export class ApiError extends Error {
   }
 }
 
+/** The HTTP status carried by an ApiError, whatever wrapped it. */
+export function apiErrorStatus(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null || !('statusCode' in error)) return undefined
+  const status = (error as { statusCode?: unknown }).statusCode
+  return typeof status === 'number' ? status : undefined
+}
+
+/**
+ * True for the API's permission-denied response. Components used to read
+ * `.status` (a field the error never had) and their 403 branches were dead.
+ */
+export function isForbiddenApiError(error: unknown): boolean {
+  return apiErrorStatus(error) === 403
+}
+
 /**
  * Make an authenticated request to the API; resolves the parsed body or
  * throws on non-2xx.
