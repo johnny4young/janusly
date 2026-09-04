@@ -22,10 +22,10 @@ import (
 // generation mode, the retired alternate-provider model, and the unused per-surface model map;
 // governed agent-write consent adds one real executable control; the fictitious
 // embedding-provider selector was then retired because only Ollama's protocol
-// is implemented.
+// is implemented. Dead-letter retention adds one real executable control.
 func TestOrgConfigCatalogSurface(t *testing.T) {
-	if len(orgconfig.Definitions) != 67 {
-		t.Fatalf("catalog must pin at 67 definitions, got %d", len(orgconfig.Definitions))
+	if len(orgconfig.Definitions) != 68 {
+		t.Fatalf("catalog must pin at 68 definitions, got %d", len(orgconfig.Definitions))
 	}
 	for _, key := range []string{"ai.anthropic.model", "http.timeoutMs", "runs.requireSavedWorkflow",
 		"mcp.writeConsent", "retention.deletedWorkflowsDays", "onboarding.enabled"} {

@@ -143,6 +143,10 @@ tenant or workflow writes.
   ceiling for `cmd/mcp`; omission is read-only and write consent never expands
   this set
 - `JANUSLY_PUBLIC_APP_URL` for shareable report links
+- `JANUSLY_RETENTION_DEAD_LETTERS_DAYS` (org key `retention.deadLettersDays`,
+  default 180, range 30..730) ages out settled dead letters (`replayed`,
+  `resolved`) in the daily retention sweep; open dead letters never expire by
+  age.
 - `JANUSLY_RETENTION_ARCHIVE_RUN_EVENTS` exports expiring run events as
   JSONL to the object store before the retention sweep deletes them; rows
   are only deleted once their export is stored, so an unavailable store

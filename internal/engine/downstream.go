@@ -230,6 +230,14 @@ func (e *Engine) flipRunTerminal(ctx context.Context, q *store.Queries, events *
 		return nil
 	}
 	metricRunsTerminal.WithLabelValues(status).Inc()
+	if status == "failed" {
+		// Nothing of this run is claimable any more; queued siblings leave
+		// the claim index (see DemoteQueuedRunNodes). Cancellation handles
+		// its own nodes.
+		if _, err := q.DemoteQueuedRunNodes(ctx, runID); err != nil {
+			return fmt.Errorf("demote queued nodes: %w", err)
+		}
+	}
 	// A validation run carrying a playbook claim reports its outcome here:
 	// success refreshes evidence, failure auto-retires (in the same tx as
 	// the terminal flip, so evidence and outcome can't drift).

@@ -363,6 +363,23 @@ func (q *Queries) DeleteWakeup(ctx context.Context, runNodeID string) error {
 	return err
 }
 
+const demoteQueuedRunNodes = `-- name: DemoteQueuedRunNodes :execrows
+UPDATE run_nodes SET status = 'pending', attempts = 0
+WHERE run_id = $1 AND status = 'queued'
+`
+
+// A failed run can never claim again, yet its queued siblings used to sit
+// in the claim index forever, at its head (oldest enqueued first), rejected
+// by the runs join on every claim. They go back to pending; a redrive
+// re-queues them through the ordinary readiness pass.
+func (q *Queries) DemoteQueuedRunNodes(ctx context.Context, runID string) (int64, error) {
+	result, err := q.db.Exec(ctx, demoteQueuedRunNodes, runID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const findScopedStalledRunningNodes = `-- name: FindScopedStalledRunningNodes :many
 SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
        rn.started_at

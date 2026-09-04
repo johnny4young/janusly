@@ -59,6 +59,14 @@ var dataRetentionTables = []dataRetentionTable{
 				TargetOrg: org, Cutoff: cutoff, BatchSize: batch,
 			})
 		}},
+	// Settled dead letters only; the open queue is operator-owned and never
+	// ages out.
+	{"dead_letters", "retention.deadLettersDays",
+		func(ctx context.Context, q *store.Queries, org string, cutoff time.Time, batch int32) (int64, error) {
+			return q.DeleteExpiredDeadLettersBatch(ctx, store.DeleteExpiredDeadLettersBatchParams{
+				TargetOrg: org, Cutoff: cutoff, BatchSize: batch,
+			})
+		}},
 }
 
 // ProcessDataRetentionSweep purges expired rows across every org and

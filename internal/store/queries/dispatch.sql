@@ -10,6 +10,14 @@ SET status = 'queued', attempts = 1, enqueued_at = clock_timestamp(),
     queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = $1 AND node_id = $2 AND status = 'pending';
 
+-- A failed run can never claim again, yet its queued siblings used to sit
+-- in the claim index forever, at its head (oldest enqueued first), rejected
+-- by the runs join on every claim. They go back to pending; a redrive
+-- re-queues them through the ordinary readiness pass.
+-- name: DemoteQueuedRunNodes :execrows
+UPDATE run_nodes SET status = 'pending', attempts = 0
+WHERE run_id = $1 AND status = 'queued';
+
 -- name: LockClaimableRunNodes :many
 SELECT rn.id
 FROM run_nodes rn

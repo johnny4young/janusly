@@ -63,3 +63,9 @@ to 1–3,600,000 ms, and the scheduler applies the one-hour ceiling even when th
 author omits `maxDelayMs`. Backoff is fixed or exponential; jitter is boolean;
 retry/ignore matcher lists are bounded. Invalid legacy policy data fails closed
 to no retry rather than being partially interpreted.
+
+When a run flips to `failed`, its still-queued siblings go back to `pending`
+in the same transaction: a failed run can never claim again, and queued rows
+would otherwise sit at the head of the FIFO claim index forever, rejected by
+the running-run join on every claim. A redrive re-queues them through the
+ordinary readiness pass; cancellation marks its own nodes cancelled.
