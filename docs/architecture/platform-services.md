@@ -63,6 +63,17 @@ Rate limits and workflow queue state are PostgreSQL-backed so multiple Janusly
 instances share one durable view. A store error keeps the documented fail-open
 traffic posture while emitting degradation evidence.
 
+Three request buckets sit in front of the most abusable entry points and share
+that same store: `POST /v1/start` at 120 per minute per organization,
+`GET /auth/sso/start` at 60 per minute per client address, and the
+unauthenticated `GET /public/status/{token}` at 60 per minute per client
+address. An exhausted bucket answers `429 rate_limited` with a `Retry-After`
+header. The client address is the socket peer unless `JANUSLY_TRUSTED_PROXY`
+is set. Public status pages are additionally served from a 60-second
+in-memory snapshot per token, so a scan costs at most one query set per
+minute per page. In production the browser header set also carries
+`Strict-Transport-Security`.
+
 Recovery feedback is the durable primary operation. Its optional memory side
 effect is owned by `V1Server`, not by request goroutines: a fixed worker pool
 (four by default) reads a bounded process queue (256 by default), and every task

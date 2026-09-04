@@ -9,6 +9,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -28,6 +29,9 @@ type opResult struct {
 	// unversionedExtras merge top-level fields into the unversioned error body
 	// while /v1 keeps the same values inside params.
 	unversionedExtras map[string]any
+	// retryAfterSec, when set, is emitted as the Retry-After header so a
+	// rate-limited client can back off without parsing the body.
+	retryAfterSec int
 }
 
 func opOK(data any) opResult { return opResult{status: http.StatusOK, data: data} }
@@ -58,6 +62,9 @@ func publicErrorStatus(code string, status int) int {
 
 func writeUnversioned(w http.ResponseWriter, result opResult) {
 	result.status = publicErrorStatus(result.code, result.status)
+	if result.retryAfterSec > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(result.retryAfterSec))
+	}
 	result.message, result.params = publicErrorFields(result.code, result.message, result.params)
 	if result.code == "internal_error" {
 		result.data = nil
@@ -80,6 +87,9 @@ func writeUnversioned(w http.ResponseWriter, result opResult) {
 
 func writeVersioned(w http.ResponseWriter, requestID string, result opResult) {
 	result.status = publicErrorStatus(result.code, result.status)
+	if result.retryAfterSec > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(result.retryAfterSec))
+	}
 	result.message, result.params = publicErrorFields(result.code, result.message, result.params)
 	if result.code == "internal_error" {
 		result.data = nil

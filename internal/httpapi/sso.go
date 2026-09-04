@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/johnny4young/janusly/internal/ratelimit"
 	"net/http"
 	"os"
 	"strings"
@@ -190,7 +191,16 @@ func redirectNoStore(w http.ResponseWriter, target string) {
 	_, _ = fmt.Fprintf(w, `<html><body><a href="%s">Continue</a></body></html>`, strings.ReplaceAll(target, `"`, "&quot;"))
 }
 
+// Each SSO start writes a state nonce; an unauthenticated caller must not be
+// able to grow that table without bound. Enforced before any parsing so a
+// malformed flood costs nothing either.
+var ssoStartLimit = ratelimit.Options{Name: "auth:sso-start", Max: 60, Window: time.Minute}
+
 func (s *V1Server) startSso(w http.ResponseWriter, r *http.Request) {
+	if err := s.limiter.Enforce(r.Context(), "ip:"+clientAddress(r), ssoStartLimit); err != nil {
+		writeUnversioned(w, limitedResult(err))
+		return
+	}
 	orgID := r.URL.Query().Get("orgId")
 	if orgID == "" {
 		writeUnversioned(w, opError(http.StatusBadRequest, "sso_org_id_required", "orgId is required", nil))

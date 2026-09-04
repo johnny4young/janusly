@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/johnny4young/janusly/internal/ratelimit"
 	"io"
 	"net/http"
 	"strconv"
@@ -28,7 +29,27 @@ func (s *V1Server) startRun(w http.ResponseWriter, r *http.Request, rc v1Request
 	writeVersioned(w, rc.id, s.startCore(r, rc))
 }
 
+// Run starts are the queue's only producer and had no bucket: every other
+// costly surface was limited, this one was not.
+
+// limitedResult maps a limiter failure to its response: 429 with Retry-After
+// for an exhausted bucket, 500 when the limiter's storage failed.
+func limitedResult(err error) opResult {
+	var limited *ratelimit.LimitError
+	if errors.As(err, &limited) {
+		result := opError(http.StatusTooManyRequests, "rate_limited", limited.Error(), nil)
+		result.retryAfterSec = limited.RetryAfterSec
+		return result
+	}
+	return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+}
+
+var startRunLimit = ratelimit.Options{Name: "api:start", Max: 120, Window: time.Minute}
+
 func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
+	if err := s.limiter.Enforce(r.Context(), rc.orgID, startRunLimit); err != nil {
+		return limitedResult(err)
+	}
 	var body struct {
 		Workflow          json.RawMessage `json:"workflow"`
 		WorkflowVersionID string          `json:"workflowVersionId"`

@@ -13,6 +13,7 @@ in `org_configs`; secrets never do.
 | `JANUSLY_PORT` | `3001` | Public API and React listener. |
 | `JANUSLY_INTERNAL_HOST` | `127.0.0.1` | Internal metrics listener; only loopback (`127.0.0.1`, `::1`) or wildcard (`0.0.0.0`, `::`) is accepted. |
 | `JANUSLY_INTERNAL_PORT` | `9464` | Internal metrics and diagnostics port. |
+| `JANUSLY_TRUSTED_PROXY` | `false` | When `true`, per-IP rate limits key on the first `X-Forwarded-For` hop instead of the socket peer. Set it only behind a proxy that overwrites that header; otherwise a client can pick its own bucket. |
 | `JANUSLY_BROWSER_CONNECT_ORIGINS` | empty | Comma-separated explicit loopback HTTP origins added to browser CSP for local identity labs; non-loopback and non-HTTP values are ignored. |
 | `JANUSLY_WORKER_CONCURRENCY` | `8` | Concurrent workflow task limit, range 1–64. |
 | `JANUSLY_API_POOL_SIZE` | `10` | Public-request PostgreSQL pool size. |
