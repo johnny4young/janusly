@@ -10,6 +10,8 @@ import { createRoot } from 'react-dom/client'
 import { bootstrapI18n, FALLBACK_LOCALE, getStoredLanguage, resolveAppLanguage } from './i18n'
 import { bootTheme } from './theme'
 import { ConfirmProvider } from './components/ConfirmDialog'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { PanelErrorFallback } from './components/PanelErrorFallback'
 import './index.css'
 
 // Resolve the user's preferred locale BEFORE React mounts so the very first
@@ -56,9 +58,14 @@ async function mountApp(): Promise<void> {
   // (zoom / pan) still survives `inspector → operations → inspector`.
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <ConfirmProvider>
-        <App />
-      </ConfirmProvider>
+      {/* Panels and the canvas have their own boundaries; this one covers the
+          shell chrome around them (sidebar, badges, banners, status bar), which
+          otherwise unmounts the whole document to a blank page on a throw. */}
+      <ErrorBoundary logTag="shell" fallback={({ reset }) => <PanelErrorFallback onRetry={reset} />}>
+        <ConfirmProvider>
+          <App />
+        </ConfirmProvider>
+      </ErrorBoundary>
     </React.StrictMode>
   )
 }

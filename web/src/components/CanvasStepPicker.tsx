@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { writeNodePaletteDrag } from '../canvas-node-drag'
 import { getNodeHelper, getNodeLabel, nodeTypes } from '../constants'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useT } from '../i18n'
 
 const STEP_GROUPS: readonly { id: string; labelKey: string; types: readonly string[] }[] = [
@@ -23,6 +24,10 @@ export function CanvasStepPicker({
   const rootRef = useRef<HTMLDivElement | null>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLElement | null>(null)
+  // Tab must not escape to the canvas behind the picker; focus returns to
+  // the trigger when it closes.
+  useDialogFocusTrap(menuRef, { active: open, initialFocus: searchRef })
   const [dragging, setDragging] = useState(false)
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -80,9 +85,11 @@ export function CanvasStepPicker({
       </button>
       {open && (
         <section
+          ref={menuRef}
           id="canvas-step-picker-menu"
           className="canvas-step-picker__menu"
           role="dialog"
+          aria-modal="true"
           aria-label={t('canvas.stepPicker.title')}
           data-dragging={dragging ? 'true' : 'false'}
         >

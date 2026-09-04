@@ -19,6 +19,7 @@ const modalSources = Object.entries(sourceFiles)
 describe('modal accessibility contract', () => {
   it('keeps the audited modal inventory explicit', () => {
     expect(modalSources.map(([path]) => path)).toEqual([
+      './components/CanvasStepPicker.tsx',
       './components/CommandPalette.tsx',
       './components/ConfirmDialog.tsx',
       './components/ConnectionsPanel.tsx',

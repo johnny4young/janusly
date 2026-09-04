@@ -26,7 +26,7 @@ import {
   ServerCog,
   ShieldCheck,
 } from 'lucide-react'
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { canOpenSettingsSection } from '../settings-sections'
 import { useWorkflowStore } from '../store'
 import type { ActiveTab, AiHealth } from '../types'
@@ -40,6 +40,7 @@ import { AiRuntimeStatusCard } from './AiRuntimeStatusCard'
 import { SettingsInfrastructureSection, type WorkerFleet } from './SettingsInfrastructureSection'
 import { SettingsOverview } from './SettingsOverview'
 import { SettingsUsageSection } from './SettingsUsageSection'
+import { isForbiddenApiError } from '../lib/api-error'
 import { parseRecoveryMetrics, type RecoveryMetrics } from '../lib/recovery-metrics-model'
 import {
   OPERATIONS_SECTION_REQUEST_EVENT as SECTION_REQUEST_EVENT,
@@ -116,21 +117,6 @@ type QueueSignalState = {
   maintenanceUnavailableReason: QueueUnavailableReason
 }
 
-function hasNullMaintenanceSnapshot(value: unknown): boolean {
-  return typeof value === 'object'
-    && value !== null
-    && !Array.isArray(value)
-    && 'maintenance' in value
-    && (value as { maintenance?: unknown }).maintenance === null
-}
-
-function isForbiddenApiError(error: unknown): boolean {
-  return typeof error === 'object'
-    && error !== null
-    && 'statusCode' in error
-    && (error as { statusCode?: unknown }).statusCode === 403
-}
-
 function hasPermission(permissions: readonly string[] | undefined, permission: string): boolean {
   return permissions === undefined || permissions.includes(permission)
 }
@@ -193,7 +179,7 @@ export function OperationsPage({
       setMetrics(null)
       return () => { cancelled = true }
     }
-    api('/recovery/metrics')
+    contractApi('GET /recovery/metrics', '/recovery/metrics', undefined)
       .then((payload) => {
         if (cancelled) return
         // A payload we cannot read is the same as no metrics: the page
@@ -247,8 +233,11 @@ export function OperationsPage({
           setQueueSignal({
             workflow: health.workflow,
             maintenance: health.maintenance,
-            workflowUnavailableReason: payload === null ? 'store' : 'transport',
-            maintenanceUnavailableReason: hasNullMaintenanceSnapshot(payload) ? 'store' : 'transport',
+            // The request resolved: a missing projection here is the queue
+            // store's absence (or a shape we could not read), never transport.
+            // Transport is what the catch branch below reports.
+            workflowUnavailableReason: 'store',
+            maintenanceUnavailableReason: 'store',
           })
           setQueueCheckedAt(Date.now())
         })

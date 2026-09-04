@@ -18,10 +18,11 @@
  * hide instead of rendering an error).
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckCircle2, CircleAlert, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useT } from '../i18n'
 import { api } from '../api'
+import { isForbiddenApiError } from '../lib/api-error'
 import { useWorkflowStore } from '../store'
 import type { ValidationEvidenceLevel } from '../types'
 import {
@@ -157,16 +158,25 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
     return t('autoHealing.autonomy.factor.value', { actual, required })
   }
 
+  // Guards every state write behind the mounted lifetime, like the other
+  // fetching cards; a late response after the panel closes must not land.
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
+
   const load = useCallback(async () => {
     try {
       const resp = (await api('/auto-healing/pending')) as PendingResponse
+      if (!aliveRef.current) return
       setRows(resp.rows ?? [])
       setError(null)
     } catch (err) {
+      if (!aliveRef.current) return
       // 403 (permission denied) — hide the card silently so non-readers
       // don't see an error banner for a feature they can't use.
-      const status = (err as { status?: number }).status
-      if (status === 403) {
+      if (isForbiddenApiError(err)) {
         setHidden(true)
         return
       }

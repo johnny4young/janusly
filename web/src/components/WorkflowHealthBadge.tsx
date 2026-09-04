@@ -26,7 +26,7 @@
 
 import { useEffect, useState } from 'react'
 import { Activity } from 'lucide-react'
-import { api } from '../api'
+import { contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { tHealthRationale, useT } from '../i18n'
 
@@ -117,10 +117,19 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
     let cancelled = false
     setLoading(true)
     setError(null)
-    api(`/workflows/health?workflowId=${encodeURIComponent(workflowId)}`)
+    contractApi('GET /workflows/health', `/workflows/health?workflowId=${encodeURIComponent(workflowId)}`, undefined)
       .then((payload) => {
         if (cancelled) return
-        setResult(payload as HealthScore)
+        // The contract type is shallow; the renderer needs a numeric score
+        // and a breakdown object, so anything else is the error state rather
+        // than a blank shell when the badge is expanded.
+        const health = payload as unknown as Partial<HealthScore> | null
+        if (!health || typeof health.score !== 'number' || typeof health.breakdown !== 'object' || health.breakdown === null) {
+          setError(t('badges.health.unavailable'))
+          setLoading(false)
+          return
+        }
+        setResult(health as HealthScore)
         setLoading(false)
       })
       .catch((err) => {
@@ -180,7 +189,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
       )}
       {expanded && (
         <ul className="we-readiness-badge__issues">
-          {(Object.keys(result.breakdown) as HealthCategory[]).map((category) => {
+          {(Object.keys(result.breakdown ?? {}) as HealthCategory[]).map((category) => {
             const entry = result.breakdown[category]
             // Same severity bands as the rollup but per category — green
             // (pass) for ≥80, amber (warn) for ≥60, red (fail) below.

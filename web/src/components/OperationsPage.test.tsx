@@ -6,9 +6,18 @@ import { changeAppLanguage } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { OperationsPage, requestOperationsSection } from './OperationsPage'
 
-vi.mock('../api', () => ({
+vi.mock('../api', () => {
+  const module = ({
   api: vi.fn(),
-}))
+})
+  return {
+    ...module,
+    // Typed reads route through contractApi; delegate to the same mock so the
+    // path-keyed expectations below keep working.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
+      options === undefined ? module.api(path) : module.api(path, options),
+  }
+})
 
 // Each card under the sub-tabs self-fetches on mount. We stub the cards
 // to (a) keep this test focused on the page shell, and (b) prove which
