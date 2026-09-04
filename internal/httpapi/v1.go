@@ -76,6 +76,8 @@ type V1Server struct {
 	pool           *pgxpool.Pool
 	newID          func() string
 	hub            *streamHub
+	routeAuthz     map[string]routeGate
+	statusPages    statusPageCache
 	resolver       *auth.Resolver
 	authPolicy     *authpolicy.Evaluator
 	limiter        *ratelimit.Limiter

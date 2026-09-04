@@ -11,14 +11,18 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/johnny4young/janusly/internal/ratelimit"
 	"html"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -77,6 +81,7 @@ func (s *V1Server) mountStatusPageRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
+		s.statusPages.forget(workflowID)
 		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.status_page.rotated", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,
 		})
@@ -96,6 +101,7 @@ func (s *V1Server) mountStatusPageRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
+		s.statusPages.forget(workflowID)
 		if revoked > 0 {
 			audit.Write(r.Context(), s.pool, rc.authContext, "workflow.status_page.revoked", audit.Options{
 				TargetType: "workflow", TargetID: workflowID,
@@ -125,6 +131,92 @@ func statusPageTokenDigest(token string) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// The public page is unauthenticated and costs three queries, one of them an
+// aggregate over runs. A leaked or widely shared token must not become a
+// load generator against the API pool: reads are metered per client address
+// and the rendered inputs are cached for the same 60s the browser is told.
+var publicStatusPageLimit = ratelimit.Options{Name: "public:status-page", Max: 60, Window: time.Minute}
+
+const statusPageCacheTTL = 60 * time.Second
+
+type statusPageSnapshot struct {
+	page           store.FindWorkflowStatusPageByTokenDigestRow
+	days           []store.ListStatusPageDailyStatsRow
+	lastSuccess    time.Time
+	lastSuccessErr error
+	at             time.Time
+}
+
+type statusPageCache struct {
+	mu      sync.Mutex
+	entries map[string]statusPageSnapshot
+}
+
+func (c *statusPageCache) get(digest string) (statusPageSnapshot, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[digest]
+	if !ok || time.Since(entry.at) > statusPageCacheTTL {
+		return statusPageSnapshot{}, false
+	}
+	return entry, true
+}
+
+// forget drops every snapshot for a workflow so a rotated or revoked token
+// dies immediately instead of at the end of its cache window.
+func (c *statusPageCache) forget(workflowID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, existing := range c.entries {
+		if existing.page.WorkflowID == workflowID {
+			delete(c.entries, key)
+		}
+	}
+}
+
+func (c *statusPageCache) put(digest string, entry statusPageSnapshot) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries = map[string]statusPageSnapshot{}
+	}
+	// Bound the map: tokens are 32 random bytes, so entries only accumulate
+	// through real traffic; expired ones are dropped on the way in.
+	for key, existing := range c.entries {
+		if time.Since(existing.at) > statusPageCacheTTL {
+			delete(c.entries, key)
+		}
+	}
+	c.entries[digest] = entry
+}
+
+func (s *V1Server) loadStatusPage(ctx context.Context, digest string) (statusPageSnapshot, error) {
+	if entry, ok := s.statusPages.get(digest); ok {
+		return entry, nil
+	}
+	q := store.New(s.pool)
+	page, err := q.FindWorkflowStatusPageByTokenDigest(ctx, digest)
+	if err != nil {
+		return statusPageSnapshot{}, err
+	}
+	days, err := q.ListStatusPageDailyStats(ctx, store.ListStatusPageDailyStatsParams{
+		OrgID: page.OrgID, WorkflowID: page.WorkflowID,
+	})
+	if err != nil {
+		return statusPageSnapshot{}, errStatusPageUnavailable
+	}
+	// max() over zero successes is NULL; the scan error is the "never
+	// succeeded" case and keeps the dash label.
+	lastSuccess, lastSuccessErr := q.GetStatusPageLastSuccess(ctx, store.GetStatusPageLastSuccessParams{
+		OrgID: page.OrgID, WorkflowID: page.WorkflowID,
+	})
+	entry := statusPageSnapshot{page: page, days: days, lastSuccess: lastSuccess, lastSuccessErr: lastSuccessErr, at: time.Now()}
+	s.statusPages.put(digest, entry)
+	return entry, nil
+}
+
+var errStatusPageUnavailable = errors.New("status page stats unavailable")
+
 func (s *V1Server) servePublicStatusPage(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	// Cheap shape gate before touching the database.
@@ -132,23 +224,26 @@ func (s *V1Server) servePublicStatusPage(w http.ResponseWriter, r *http.Request)
 		http.NotFound(w, r)
 		return
 	}
-	page, err := store.New(s.pool).FindWorkflowStatusPageByTokenDigest(r.Context(), statusPageTokenDigest(token))
+	if err := s.limiter.Enforce(r.Context(), "ip:"+clientAddress(r), publicStatusPageLimit); err != nil {
+		var limited *ratelimit.LimitError
+		if errors.As(err, &limited) {
+			w.Header().Set("Retry-After", strconv.Itoa(limited.RetryAfterSec))
+			http.Error(w, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	snapshot, err := s.loadStatusPage(r.Context(), statusPageTokenDigest(token))
+	if errors.Is(err, errStatusPageUnavailable) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	days, err := store.New(s.pool).ListStatusPageDailyStats(r.Context(), store.ListStatusPageDailyStatsParams{
-		OrgID: page.OrgID, WorkflowID: page.WorkflowID,
-	})
-	if err != nil {
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	// max() over zero successes is NULL; the scan error is the "never
-	// succeeded" case and keeps the dash label.
-	lastSuccess, lastSuccessErr := store.New(s.pool).GetStatusPageLastSuccess(r.Context(), store.GetStatusPageLastSuccessParams{
-		OrgID: page.OrgID, WorkflowID: page.WorkflowID,
-	})
+	page, days, lastSuccess, lastSuccessErr := snapshot.page, snapshot.days, snapshot.lastSuccess, snapshot.lastSuccessErr
 
 	succeeded, failed := 0, 0
 	for _, day := range days {
