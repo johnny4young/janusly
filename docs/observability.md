@@ -14,8 +14,6 @@ Important series include:
 - `janusly_rate_limit_degraded_buckets`
 - `workflow_queue_waiting_jobs`
 - `workflow_queue_active_jobs`
-- `maintenance_queue_waiting_jobs`
-- `maintenance_queue_active_jobs`
 - workflow task duration, retry, and failure metrics
 - `janusly_sweep_pass_seconds`,
   `janusly_sweep_last_success_timestamp_seconds`, and
@@ -86,7 +84,7 @@ without contacting Grafana Cloud.
 ## Alerting
 
 `deploy/observability/prometheus/rules.yml` alerts on missing runtime metrics,
-eligible queue-wait latency, terminal/task failures, maintenance delay,
+eligible queue-wait latency, terminal/task failures,
 degraded rate limiting, repeated sweep failures, and sweep liveness grouped by
 cadence. The never-ran rule waits for the slowest hourly loop plus margin and
 counts each scrape instance independently, so startup and multiple replicas do

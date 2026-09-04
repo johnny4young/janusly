@@ -18,16 +18,6 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] }, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
-      "id": 2,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
-      "targets": [{ "expr": "max(maintenance_queue_waiting_jobs)", "legendFormat": "waiting", "refId": "A" }],
-      "title": "Maintenance jobs waiting",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }, "unit": "short" }, "overrides": [] },
       "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
       "id": 3,
@@ -53,10 +43,9 @@
       "id": 5,
       "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "expr": "max(workflow_queue_active_jobs)", "legendFormat": "workflow active", "refId": "A" },
-        { "expr": "max(maintenance_queue_active_jobs)", "legendFormat": "maintenance active", "refId": "B" }
+        { "expr": "max(workflow_queue_active_jobs)", "legendFormat": "workflow active", "refId": "A" }
       ],
-      "title": "Active work by queue",
+      "title": "Active workflow work",
       "type": "timeseries"
     },
     {

@@ -36,15 +36,6 @@ groups:
           summary: Workflow work remains queued
           description: At least one workflow task has remained waiting for five minutes.
 
-      - alert: JanuslyMaintenanceQueueWaiting
-        expr: max(maintenance_queue_waiting_jobs{job="janusly"}) > 0
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: Maintenance work remains queued
-          description: At least one maintenance task has remained waiting for ten minutes.
-
       - alert: JanuslyRateLimiterDegraded
         expr: max(janusly_rate_limit_degraded_buckets{job="janusly"}) > 0
         for: 1m

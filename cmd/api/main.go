@@ -222,17 +222,6 @@ func run() error {
 		Name: "janusly_rate_limit_degraded_buckets",
 		Help: "Rate-limiter buckets currently failing open in this process.",
 	}, ratelimit.DegradedBucketCount))
-	// Maintenance runs as supervised in-process loops in the binary. Stable
-	// metrics stay present with an always-drained value so dashboards can
-	// distinguish a clear lane from missing telemetry.
-	for _, metric := range []struct{ name, help string }{
-		{"maintenance_queue_waiting_jobs", "Maintenance jobs awaiting an in-process worker."},
-		{"maintenance_queue_active_jobs", "Maintenance jobs active in an in-process worker."},
-	} {
-		prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: metric.name, Help: metric.help,
-		}, func() float64 { return 0 }))
-	}
 	instanceID := resourceInstanceID()
 	resourceInfo := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "target_info",
