@@ -187,7 +187,8 @@ async function openRunFromHistory(page: Page, contract: LocaleContract, runId: s
       element.scrollTo({ top: rowOffset * 156 })
       return element.scrollTop + element.clientHeight >= element.scrollHeight
     }, offset + 4)
-    await page.waitForTimeout(50)
+    // One frame for the virtual list to render the rows that scrolled in.
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))))
     if (reachedEnd) break
   }
   throw new Error(`Run ${runId} was not present in history`)

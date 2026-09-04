@@ -447,7 +447,9 @@ test('every workspace tab mounts against Go without page errors', async ({ page,
       // swallow a shape drift silently).
       await expect(page.getByTestId('solution-pack-incident-triage')).toBeVisible()
     }
-    await page.waitForTimeout(400)
+    // Every tab load settles its own requests; that is the moment a page
+    // error from a lazy chunk or a wire shape would have surfaced.
+    await page.waitForLoadState('networkidle')
     expect(pageErrors, `tab ${tab} page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
   }
 })

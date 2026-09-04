@@ -212,7 +212,8 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
   expect(validationOverflow).toBeLessThanOrEqual(2)
   await page.setViewportSize({ width: 390, height: 1_200 })
   await expect(page.locator('#workspace-sidebar')).toBeHidden()
-  await page.waitForTimeout(300)
+  // The mobile layout animates the sidebar away; capture once nothing moves.
+  await page.waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== 'running'))
   await captureEvidence(validation, 'recovery-validation-es-accepted-loss-mobile')
 
   expect(browserErrors).toEqual([])

@@ -154,6 +154,8 @@ export default defineConfig(({ mode }) => ({
     // deadlines measure component behavior rather than host scheduler delay.
     fileParallelism: true,
     maxWorkers: resolveWebTestWorkerLimit(availableParallelism()),
-    css: true,
+    // jsdom cannot lay out; parsing the whole stylesheet per test file only
+    // cost time. The Chromium suite keeps CSS (vitest.browser.config.ts).
+    css: false,
   },
 }))
