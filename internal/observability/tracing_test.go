@@ -64,3 +64,17 @@ func TestWithSpanRecordsAttributesAndErrors(t *testing.T) {
 		t.Fatalf("attribute must ride the span: %+v", spans[0].Attributes())
 	}
 }
+
+func TestInitTracingUnsetExportsNothing(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER", "")
+	shutdown, err := InitTracing(context.Background())
+	if err != nil {
+		t.Fatalf("unset exporter must not fail: %v", err)
+	}
+	if _, isSDK := otel.GetTracerProvider().(*sdktrace.TracerProvider); isSDK {
+		t.Fatal("an unset OTEL_EXPORTER must leave the no-op provider in place")
+	}
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

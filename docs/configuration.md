@@ -167,7 +167,9 @@ credential references are restricted by the reserved namespace and optional
 
 | Variable | Meaning |
 | --- | --- |
-| `OTEL_EXPORTER` | `console`, `otlp`, or `none`. |
+| `OTEL_EXPORTER` | Unset or `none` exports nothing (default); `console` prints every span to stdout (local use only); `otlp` exports over OTLP/HTTP. |
+| `JANUSLY_DB_TRACING` | `on` or `off`; by default the per-statement PostgreSQL spans follow `OTEL_EXPORTER`. |
+| `JANUSLY_ACCESS_LOG` | `all`, `errors` (default: 4xx/5xx and requests over one second), or `off`. |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP/HTTP trace destination. |
 | `OTEL_SERVICE_INSTANCE_ID` | Stable process instance label. |
 | `ALERTMANAGER_CONFIG` | Optional path mounted by the local observability Compose stack instead of its non-secret webhook receiver. Use an absolute path for a configuration kept outside the repository. |

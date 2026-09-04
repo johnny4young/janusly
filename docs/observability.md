@@ -35,10 +35,11 @@ Important series include:
   is why the shipped dashboard does not reference them)
 - `target_info` with service and instance identity
 
-Every request also writes one structured access-log line (`http request`)
-carrying method, path, pattern, status, bytes, duration and the request id
-that `X-Request-Id` returned to the caller; `/health` and `/readyz` probes
-are left out. `JANUSLY_LOG_LEVEL` sets the log floor.
+Failed and slow requests (every request with `JANUSLY_ACCESS_LOG=all`)
+write one structured access-log line (`http request`) carrying method,
+path, pattern, status, bytes, duration and the request id that
+`X-Request-Id` returned to the caller; `/health` and `/readyz` probes are
+left out. `JANUSLY_LOG_LEVEL` sets the log floor.
 
 The public `/health` response exposes only bounded safe status: `ok` is a
 constant liveness marker, and the rate-limiter and queue fields are the
@@ -56,9 +57,19 @@ no-op and the spans cost nothing.
 
 `OTEL_EXPORTER` accepts:
 
-- `console` for local structured trace output;
-- `otlp` for OTLP/HTTP export;
-- `none` to disable trace export.
+- unset or `none`: no export (the default — the spans are opened but the
+  global tracer is a no-op);
+- `console` for local structured trace output on stdout — ask for it by
+  name and only locally: it writes one JSON document per span, one per
+  request and per SQL statement, which under a container log driver becomes
+  a serialized write on the hot path;
+- `otlp` for OTLP/HTTP export.
+
+`JANUSLY_DB_TRACING` (`on` | `off`) overrides whether the per-statement
+PostgreSQL spans are attached; by default they follow `OTEL_EXPORTER`.
+`JANUSLY_ACCESS_LOG` (`all` | `errors` | `off`, default `errors`) decides
+which requests reach the access log: by default failures (4xx, 5xx) and slow
+requests (over one second), each with its request id.
 
 Use `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` for an explicit trace endpoint and
 `OTEL_SERVICE_INSTANCE_ID` for stable instance labeling.

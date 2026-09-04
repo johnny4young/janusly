@@ -55,13 +55,18 @@ func serviceResource() *resource.Resource {
 // no-op global registered and returns a nil-safe shutdown.
 func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	kind := os.Getenv("OTEL_EXPORTER")
-	if kind == "none" {
+	// Unset means no export: the global tracer stays a no-op and the spans
+	// the request and statement paths open cost nothing. The console
+	// exporter must be asked for by name — it serializes every span to
+	// stdout, which under a container log driver is a write on the hot
+	// path for each request and each SQL statement.
+	if kind == "" || kind == "none" {
 		return func(context.Context) error { return nil }, nil
 	}
 	var exporter sdktrace.SpanExporter
 	var err error
 	switch kind {
-	case "", "console":
+	case "console":
 		exporter, err = stdouttrace.New()
 	case "otlp":
 		exporter, err = otlptracehttp.New(ctx)

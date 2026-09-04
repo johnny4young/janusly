@@ -108,9 +108,12 @@ func poolConfig(databaseURL string, maxConns int, role PoolRole) (*pgxpool.Confi
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = milliseconds(role.StatementTimeout())
 	cfg.ConnConfig.RuntimeParams["lock_timeout"] = milliseconds(poolLockTimeout)
 	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = milliseconds(poolIdleInTxTimeout)
-	// One client span per statement, named after the sqlc query; a no-op
-	// until a trace provider is configured.
-	cfg.ConnConfig.Tracer = observability.NewPgxTracer()
+	// One client span per statement, named after the sqlc query. Attached
+	// only when tracing is configured: even a no-op span costs a context
+	// value and an allocation per statement on the hottest path.
+	if dbTracingEnabled() {
+		cfg.ConnConfig.Tracer = observability.NewPgxTracer()
+	}
 	if maxConns < 1 {
 		maxConns = 10
 	}
@@ -146,4 +149,17 @@ func ProbeMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 
 func milliseconds(d time.Duration) string {
 	return strconv.FormatInt(d.Milliseconds(), 10)
+}
+
+// dbTracingEnabled follows OTEL_EXPORTER (any exporter but "none"), with
+// JANUSLY_DB_TRACING=on|off as the explicit override.
+func dbTracingEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("JANUSLY_DB_TRACING"))) {
+	case "on", "true":
+		return true
+	case "off", "false":
+		return false
+	}
+	exporter := strings.ToLower(strings.TrimSpace(os.Getenv("OTEL_EXPORTER")))
+	return exporter != "" && exporter != "none"
 }

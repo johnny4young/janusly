@@ -8,12 +8,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The telemetry wrapper writes one structured line per request carrying the
 // request id the browser-headers middleware resolved and the matched route
 // pattern; probes never reach the log.
 func TestRequestTelemetryLogsPatternAndRequestID(t *testing.T) {
+	t.Setenv("JANUSLY_ACCESS_LOG", "all")
 	var buffer bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buffer, nil))
 	mux := http.NewServeMux()
@@ -56,5 +58,25 @@ func TestRequestTelemetryLogsPatternAndRequestID(t *testing.T) {
 	_ = json.Unmarshal(bytes.TrimSpace(buffer.Bytes()), &line)
 	if line["pattern"] != otherRoutePattern {
 		t.Fatalf("unmatched routes must not label by path: %v", line["pattern"])
+	}
+}
+
+func TestAccessLogDefaultKeepsErrorsAndSlowRequestsOnly(t *testing.T) {
+	policy := accessLogMode()
+	if policy != accessLogErrors {
+		t.Fatalf("unset env must default to errors, got %q", policy)
+	}
+	if policy.logs(http.StatusOK, 20*time.Millisecond) {
+		t.Fatal("a fast 200 must not be logged by default")
+	}
+	if !policy.logs(http.StatusInternalServerError, 0) || !policy.logs(http.StatusForbidden, 0) {
+		t.Fatal("errors must always be logged")
+	}
+	if !policy.logs(http.StatusOK, 2*time.Second) {
+		t.Fatal("a slow 200 must be logged")
+	}
+	t.Setenv("JANUSLY_ACCESS_LOG", "off")
+	if accessLogMode().logs(http.StatusInternalServerError, 0) {
+		t.Fatal("off must log nothing")
 	}
 }

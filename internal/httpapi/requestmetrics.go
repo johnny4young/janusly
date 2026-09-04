@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -105,6 +106,7 @@ func withRequestTelemetry(next http.Handler, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	mode := accessLogMode()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		telemetry := &requestTelemetry{}
@@ -134,7 +136,7 @@ func withRequestTelemetry(next http.Handler, logger *slog.Logger) http.Handler {
 			span.SetStatus(codes.Error, http.StatusText(status))
 		}
 		span.End()
-		if isProbePath(r.URL.Path) {
+		if isProbePath(r.URL.Path) || !mode.logs(status, elapsed) {
 			return
 		}
 		logger.Info("http request",
@@ -146,4 +148,41 @@ func withRequestTelemetry(next http.Handler, logger *slog.Logger) http.Handler {
 
 func isProbePath(path string) bool {
 	return path == "/health" || path == "/readyz"
+}
+
+// accessLogPolicy decides which requests reach the access log. A line per
+// request is a stdout write on the hot path — under a container log driver
+// that write is serialized and measurably slow — so the default keeps the
+// lines that carry a diagnosis: errors and slow requests.
+type accessLogPolicy string
+
+const (
+	accessLogAll    accessLogPolicy = "all"
+	accessLogErrors accessLogPolicy = "errors"
+	accessLogOff    accessLogPolicy = "off"
+	slowRequest                     = time.Second
+)
+
+// accessLogMode reads JANUSLY_ACCESS_LOG (all | errors | off); unknown
+// values keep the default, errors.
+func accessLogMode() accessLogPolicy {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("JANUSLY_ACCESS_LOG"))) {
+	case "all":
+		return accessLogAll
+	case "off", "none":
+		return accessLogOff
+	default:
+		return accessLogErrors
+	}
+}
+
+func (p accessLogPolicy) logs(status int, elapsed time.Duration) bool {
+	switch p {
+	case accessLogAll:
+		return true
+	case accessLogOff:
+		return false
+	default:
+		return status >= http.StatusBadRequest || elapsed >= slowRequest
+	}
 }
