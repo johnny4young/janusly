@@ -7,6 +7,11 @@ services:
     # than the PostgreSQL postmaster. A timed-out pg_isready can otherwise be
     # reaped by postgres as an unknown child with exit code 2, forcing recovery.
     init: true
+    # The PostgreSQL 18 defaults (max_wal_size 1GB, checkpoint_timeout 5min)
+    # checkpoint every ~25 seconds under the diamond load profile, and each
+    # fsync burst on the Docker volume stalled commits for seconds — long
+    # enough to cancel lock waits inside completion transactions.
+    command: ["postgres", "-c", "max_wal_size=4GB", "-c", "checkpoint_timeout=15min"]
     environment:
       POSTGRES_USER: janusly
       POSTGRES_PASSWORD: janusly-local
