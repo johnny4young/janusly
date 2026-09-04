@@ -13,7 +13,15 @@ import (
 	"github.com/johnny4young/janusly/internal/httpjson"
 )
 
-var supabaseHTTPClient = &http.Client{Timeout: 10 * time.Second}
+// Redirects are refused outright: Go strips Authorization on a cross-host hop
+// but not the custom apikey header, so a redirect from a misconfigured or
+// hostile SUPABASE_URL would leak the service-role key.
+var supabaseHTTPClient = &http.Client{
+	Timeout: 10 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 const supabaseUserResponseMaxBytes = 64 << 10
 

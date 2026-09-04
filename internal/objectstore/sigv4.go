@@ -156,7 +156,14 @@ func (cfg s3Config) objectURL(key string) (base *url.URL, path string, err error
 	return parsed, "/" + key, nil
 }
 
-var s3HTTPClient = &http.Client{Timeout: 30 * time.Second}
+// A signed request is for one exact URL; following a redirect would replay
+// the SigV4 Authorization against a host the signature never named.
+var s3HTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 // s3Put uploads via SigV4-signed PUT and returns the object URL. The
 // context is honored: without it a stalled endpoint pinned the calling
