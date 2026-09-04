@@ -13,12 +13,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/executors"
+	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -46,6 +49,10 @@ type claimSnapshot struct {
 	runInput          map[string]any
 	replayMode        string
 	workflowVersionID string
+	// tenantRows are the org's config rows, read at most once per claim on
+	// first need. A claim is executed by one goroutine, so no lock.
+	tenantRows       map[string]json.RawMessage
+	tenantRowsLoaded bool
 }
 
 // withSnapshot returns a copy of the claim carrying the parsed run.
@@ -55,6 +62,42 @@ func (c ClaimedNode) withSnapshot(workflow *domain.Workflow, runInput map[string
 		replayMode: replayMode, workflowVersionID: workflowVersionID,
 	}
 	return c
+}
+
+// claimTenantRows returns the tenant's config rows for the claim: read once
+// and held on the snapshot, or read fresh for a hand-built claim.
+func (e *Engine) claimTenantRows(ctx context.Context, claim ClaimedNode) map[string]json.RawMessage {
+	if s := claim.snapshot; s != nil {
+		if !s.tenantRowsLoaded {
+			s.tenantRows = orgconfig.LoadTenantRows(ctx, e.pool, claim.OrgID)
+			s.tenantRowsLoaded = true
+		}
+		return s.tenantRows
+	}
+	return orgconfig.LoadTenantRows(ctx, e.pool, claim.OrgID)
+}
+
+// claimConfigValue resolves one catalog key through the tenant → env →
+// default chain from the rows the claim holds.
+func (e *Engine) claimConfigValue(ctx context.Context, claim ClaimedNode, key string) any {
+	value, _ := orgconfig.ResolveValue(key, e.claimTenantRows(ctx, claim), os.LookupEnv)
+	return value
+}
+
+func (e *Engine) claimConfigBool(ctx context.Context, claim ClaimedNode, key string) bool {
+	value, _ := e.claimConfigValue(ctx, claim, key).(bool)
+	return value
+}
+
+func (e *Engine) claimConfigNumber(ctx context.Context, claim ClaimedNode, key string) float64 {
+	value, _ := e.claimConfigValue(ctx, claim, key).(float64)
+	return value
+}
+
+// claimHTTPBounds resolves the outbound HTTP bounds for the claim's tenant
+// from the same held rows.
+func (e *Engine) claimHTTPBounds(ctx context.Context, claim ClaimedNode, lookupEnv func(string) (string, bool)) executors.HTTPBounds {
+	return httpBoundsFromTenantRows(e.claimTenantRows(ctx, claim), lookupEnv)
 }
 
 // replayMode is the run's replay mode from the claim snapshot, or one

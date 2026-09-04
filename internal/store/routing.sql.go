@@ -14,9 +14,14 @@ const listRoutingStats = `-- name: ListRoutingStats :many
 
 SELECT node_id, pulls, mean_reward
 FROM routing_stats
-WHERE org_id = $1
+WHERE org_id = $1 AND node_id = ANY($2::text[])
 ORDER BY node_id
 `
+
+type ListRoutingStatsParams struct {
+	OrgID   string
+	NodeIds []string
+}
 
 type ListRoutingStatsRow struct {
 	NodeID     string
@@ -25,8 +30,10 @@ type ListRoutingStatsRow struct {
 }
 
 // Tenant-scoped reinforcement counters for deterministic router decisions.
-func (q *Queries) ListRoutingStats(ctx context.Context, orgID string) ([]ListRoutingStatsRow, error) {
-	rows, err := q.db.Query(ctx, listRoutingStats, orgID)
+// A router decision needs the counters of its own candidates only; the
+// tenant's whole table is not loaded per dispatch.
+func (q *Queries) ListRoutingStats(ctx context.Context, arg ListRoutingStatsParams) ([]ListRoutingStatsRow, error) {
+	rows, err := q.db.Query(ctx, listRoutingStats, arg.OrgID, arg.NodeIds)
 	if err != nil {
 		return nil, err
 	}

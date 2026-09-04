@@ -1,9 +1,11 @@
 -- Tenant-scoped reinforcement counters for deterministic router decisions.
 
+-- A router decision needs the counters of its own candidates only; the
+-- tenant's whole table is not loaded per dispatch.
 -- name: ListRoutingStats :many
 SELECT node_id, pulls, mean_reward
 FROM routing_stats
-WHERE org_id = $1
+WHERE org_id = $1 AND node_id = ANY(sqlc.arg(node_ids)::text[])
 ORDER BY node_id;
 
 -- Atomic across replicas: each terminal/retry CAS that wins records exactly

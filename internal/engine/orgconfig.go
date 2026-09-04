@@ -7,14 +7,12 @@
 package engine
 
 import (
-	"context"
 	"encoding/json"
 	"math"
 	"strconv"
 
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/httpcontract"
-	"github.com/johnny4young/janusly/internal/store"
 )
 
 type httpBoundSpec struct {
@@ -33,7 +31,7 @@ var httpBoundSpecs = []httpBoundSpec{
 }
 
 // resolveHTTPBounds applies the precedence chain over already-loaded tenant
-// values. Pure — the DB read lives in LoadOrgHTTPBounds.
+// values. Pure — the rows come from the claim snapshot.
 func resolveHTTPBounds(tenant map[string]float64, lookupEnv func(string) (string, bool)) executors.HTTPBounds {
 	resolved := make([]float64, len(httpBoundSpecs))
 	for i, spec := range httpBoundSpecs {
@@ -61,18 +59,18 @@ func validHTTPBound(value float64, spec httpBoundSpec) bool {
 		value >= spec.min && value <= spec.max
 }
 
-// LoadOrgHTTPBounds reads the tenant's http-category rows and resolves the
-// effective bounds. A failed read degrades to env/defaults — an unreadable
-// config row must never fail a node that would otherwise run.
-func LoadOrgHTTPBounds(ctx context.Context, q *store.Queries, orgID string, lookupEnv func(string) (string, bool)) executors.HTTPBounds {
+// httpBoundsFromTenantRows resolves the tenant's http bounds from rows the
+// claim already holds; only the catalog's http keys are consulted.
+func httpBoundsFromTenantRows(rows map[string]json.RawMessage, lookupEnv func(string) (string, bool)) executors.HTTPBounds {
 	tenant := map[string]float64{}
-	rows, err := q.ListOrgHTTPConfig(ctx, orgID)
-	if err == nil {
-		for _, row := range rows {
-			var value float64
-			if json.Unmarshal(row.ValueJson, &value) == nil {
-				tenant[row.Key] = value
-			}
+	for _, spec := range httpBoundSpecs {
+		raw, ok := rows[spec.key]
+		if !ok {
+			continue
+		}
+		var value float64
+		if json.Unmarshal(raw, &value) == nil {
+			tenant[spec.key] = value
 		}
 	}
 	return resolveHTTPBounds(tenant, lookupEnv)

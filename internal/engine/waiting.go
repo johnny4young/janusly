@@ -17,7 +17,6 @@ import (
 
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/executors"
-	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/resumetoken"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -44,7 +43,7 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 		// The engine signs here — org TTL policy + the dedicated secret
 		// stay out of the executor. The signed expiry travels with the
 		// link; policy changes only affect tokens issued afterwards.
-		ttl := int(orgconfig.LoadNumber(ctx, e.pool, claim.OrgID, "runs.humanFormResumeTtlSeconds"))
+		ttl := int(e.claimConfigNumber(ctx, claim, "runs.humanFormResumeTtlSeconds"))
 		if ttl < resumetoken.MinTTLSeconds || ttl > resumetoken.DefaultTTLSeconds {
 			ttl = resumetoken.DefaultTTLSeconds
 		}

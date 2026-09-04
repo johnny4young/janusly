@@ -45,15 +45,14 @@ import (
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/observability"
-	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
 const subworkflowDepthWalkerMax = 100
 
 // maxSubworkflowDepth resolves the tenant ceiling (org config → env → 5).
-func (e *Engine) maxSubworkflowDepth(ctx context.Context, orgID string) int {
-	if configured := orgconfig.LoadNumber(ctx, e.pool, orgID, "subworkflow.maxDepth"); configured >= 1 {
+func (e *Engine) maxSubworkflowDepth(ctx context.Context, claim ClaimedNode) int {
+	if configured := e.claimConfigNumber(ctx, claim, "subworkflow.maxDepth"); configured >= 1 {
 		return int(configured)
 	}
 	if raw := os.Getenv("JANUSLY_MAX_SUBWORKFLOW_DEPTH"); raw != "" {
@@ -124,7 +123,7 @@ func (e *Engine) executeSubworkflowNode(
 	if err != nil {
 		return nil, err
 	}
-	if max := e.maxSubworkflowDepth(ctx, claim.OrgID); depth >= max {
+	if max := e.maxSubworkflowDepth(ctx, claim); depth >= max {
 		return nil, fmt.Errorf("Subworkflow depth limit reached (%d >= %d)", depth, max) //nolint:staticcheck // contract message is the wire contract
 	}
 

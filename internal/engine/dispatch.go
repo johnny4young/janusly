@@ -26,7 +26,6 @@ import (
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/memory"
-	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/prompts"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/secretstore"
@@ -221,7 +220,11 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		if len(candidates) == 0 {
 			return nil, fmt.Errorf("%s node requires at least one valid routing candidate", node.Type)
 		}
-		rows, err := q.ListRoutingStats(ctx, claim.OrgID)
+		candidateIDs := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			candidateIDs = append(candidateIDs, candidate.NodeID)
+		}
+		rows, err := q.ListRoutingStats(ctx, store.ListRoutingStatsParams{OrgID: claim.OrgID, NodeIds: candidateIDs})
 		if err != nil {
 			return nil, fmt.Errorf("load routing stats: %w", err)
 		}
@@ -254,7 +257,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	}
 	var httpBounds *executors.HTTPBounds
 	if node.Type == "http" || node.Type == "tool" || node.Type == "loop" || node.Type == "agent" || node.Type == "multi_agent" {
-		bounds := LoadOrgHTTPBounds(ctx, q, claim.OrgID, d.renderOpts.LookupEnv)
+		bounds := d.engine.claimHTTPBounds(ctx, claim, d.renderOpts.LookupEnv)
 		httpBounds = &bounds
 	}
 	dryRun := claim.replayMode(ctx, q) == "validation"
@@ -294,7 +297,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		}
 		agentWritesAuthorized = !dryRun && authoredAgentWritesOptIn(config) &&
 			os.Getenv(agentWritesEnabledEnv) == "true" &&
-			orgconfig.LoadBool(ctx, d.engine.pool, claim.OrgID, "ai.agentWriteConsent") &&
+			d.engine.claimConfigBool(ctx, claim, "ai.agentWriteConsent") &&
 			domain.HasApprovalAncestorIn(wf, node.ID)
 	}
 	output, execErr := execute(ctx, executors.Input{

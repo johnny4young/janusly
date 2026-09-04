@@ -86,18 +86,27 @@ func LoadValues(ctx context.Context, db Querier, orgID string, keys ...string) m
 // tenant-row snapshot. Store failures retain the ordinary fail-soft contract:
 // every requested known key resolves from environment/default policy.
 func LoadValuesWithSources(ctx context.Context, db Querier, orgID string, keys ...string) map[string]ValueWithSource {
-	tenantRows := map[string]json.RawMessage{}
-	if rows, err := store.New(db).ListOrgConfigRows(ctx, orgID); err == nil {
-		for _, row := range rows {
-			tenantRows[row.Key] = row.ValueJson
-		}
-	}
+	tenantRows := LoadTenantRows(ctx, db, orgID)
 	values := make(map[string]ValueWithSource, len(keys))
 	for _, key := range keys {
 		value, source := ResolveValue(key, tenantRows, os.LookupEnv)
 		values[key] = ValueWithSource{Value: value, Source: source}
 	}
 	return values
+}
+
+// LoadTenantRows reads every tenant-authored row once. Callers that resolve
+// several keys over a bounded scope (one claimed node, one sweep of an org)
+// hold the map and resolve from it with ResolveValue instead of paying a
+// pool round trip per key. A read failure degrades to "no tenant rows".
+func LoadTenantRows(ctx context.Context, db Querier, orgID string) map[string]json.RawMessage {
+	tenantRows := map[string]json.RawMessage{}
+	if rows, err := store.New(db).ListOrgConfigRows(ctx, orgID); err == nil {
+		for _, row := range rows {
+			tenantRows[row.Key] = row.ValueJson
+		}
+	}
+	return tenantRows
 }
 
 // LoadBool is LoadValue for boolean keys.
