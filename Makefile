@@ -60,6 +60,14 @@ generate:
 contract:
 	go run ./cmd/contract
 
+# schema.sql is generated from a freshly migrated database, never edited by
+# hand. The Compose project must already hold one: scripts/verify-isolated.sh
+# creates it for `make verify`, and `scripts/verify-isolated.sh schema` runs
+# only this step for a developer who changed the baseline.
+schema:
+	@test -n "$(COMPOSE_PROJECT_NAME)" || { echo "make schema needs COMPOSE_PROJECT_NAME of a migrated Compose project; run scripts/verify-isolated.sh schema"; exit 1; }
+	bash scripts/schema-dump.sh $(COMPOSE_PROJECT_NAME)
+
 frontend-install:
 	cd web && $(PNPM) install --frozen-lockfile
 
@@ -143,9 +151,11 @@ verify:
 # Internal seam used by scripts/verify-isolated.sh after it has created and
 # migrated a fresh PostgreSQL 18 database. Callers that opt into this target
 # own the lifecycle and schema state of DB_URL.
-verify-current-db: generate
+verify-current-db:
+	$(MAKE) schema COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME)
+	$(MAKE) generate
 	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts || { \
-		echo "Generated SQLC, OpenAPI, pricing or API-type files drifted; run make generate and commit the result."; \
+		echo "schema.sql or generated SQLC, OpenAPI, pricing or API-type files drifted; run scripts/verify-isolated.sh schema and make generate, then commit the result."; \
 		exit 1; \
 	}
 	$(MAKE) lint

@@ -46,6 +46,36 @@ CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access methods';
 
 
+--
+-- Name: protect_organization_owner_membership(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.protect_organization_owner_membership() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM public.organizations organization
+        WHERE organization.id = OLD.org_id
+          AND organization.owner_user_id = OLD.user_id
+    ) THEN
+        IF TG_OP = 'DELETE' THEN
+            RAISE EXCEPTION 'organization owner membership is protected'
+                USING ERRCODE = '23514';
+        ELSIF NEW.user_id IS DISTINCT FROM OLD.user_id
+              OR NEW.role IS DISTINCT FROM OLD.role THEN
+            RAISE EXCEPTION 'organization owner membership is protected'
+                USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -641,43 +671,6 @@ CREATE TABLE public.organizations (
 );
 
 
--- The organization owner is a durable authority, not a mutable role label.
--- Every membership write path (human, invitation, SSO, or SCIM) crosses this
--- trigger, so no subsystem can demote, re-key, or remove the owner's grant.
-CREATE FUNCTION public.protect_organization_owner_membership() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM public.organizations organization
-        WHERE organization.id = OLD.org_id
-          AND organization.owner_user_id = OLD.user_id
-    ) THEN
-        IF TG_OP = 'DELETE' THEN
-            RAISE EXCEPTION 'organization owner membership is protected'
-                USING ERRCODE = '23514';
-        ELSIF NEW.user_id IS DISTINCT FROM OLD.user_id
-              OR NEW.role IS DISTINCT FROM OLD.role THEN
-            RAISE EXCEPTION 'organization owner membership is protected'
-                USING ERRCODE = '23514';
-        END IF;
-    END IF;
-    IF TG_OP = 'DELETE' THEN
-        RETURN OLD;
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER protect_organization_owner_membership_delete
-BEFORE DELETE ON public.org_members
-FOR EACH ROW EXECUTE FUNCTION public.protect_organization_owner_membership();
-
-CREATE TRIGGER protect_organization_owner_membership_update
-BEFORE UPDATE OF user_id, role ON public.org_members
-FOR EACH ROW EXECUTE FUNCTION public.protect_organization_owner_membership();
-
-
 --
 -- Name: prompt_versions; Type: TABLE; Schema: public; Owner: -
 --
@@ -741,9 +734,9 @@ CREATE TABLE public.recovery_approval_grants (
     consumed_by text,
     revoked_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT recovery_approval_grants_revision_check CHECK ((case_revision > 0)),
     CONSTRAINT recovery_approval_grants_expiry_check CHECK ((expires_at = (created_at + '00:30:00'::interval))),
     CONSTRAINT recovery_approval_grants_lifecycle_check CHECK ((((consumed_at IS NULL) AND (consumed_by IS NULL) AND (revoked_at IS NULL)) OR ((consumed_at IS NOT NULL) AND (consumed_by IS NOT NULL) AND (revoked_at IS NULL)) OR ((consumed_at IS NULL) AND (consumed_by IS NULL) AND (revoked_at IS NOT NULL)))),
+    CONSTRAINT recovery_approval_grants_revision_check CHECK ((case_revision > 0)),
     CONSTRAINT recovery_approval_grants_time_check CHECK ((((consumed_at IS NULL) OR ((consumed_at >= created_at) AND (consumed_at < expires_at))) AND ((revoked_at IS NULL) OR (revoked_at >= created_at))))
 );
 
@@ -762,8 +755,8 @@ CREATE TABLE public.recovery_case_artifacts (
     actor_kind text NOT NULL,
     actor_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT recovery_case_artifacts_kind_check CHECK ((kind = ANY (ARRAY['diagnosis'::text, 'candidate'::text, 'validation'::text, 'publication'::text, 'verification'::text]))),
     CONSTRAINT recovery_case_artifacts_actor_check CHECK ((actor_kind = ANY (ARRAY['system'::text, 'user'::text, 'agent'::text]))),
+    CONSTRAINT recovery_case_artifacts_kind_check CHECK ((kind = ANY (ARRAY['diagnosis'::text, 'candidate'::text, 'validation'::text, 'publication'::text, 'verification'::text]))),
     CONSTRAINT recovery_case_artifacts_sha_check CHECK ((payload_sha256 ~ '^[0-9a-f]{64}$'::text))
 );
 
@@ -1088,17 +1081,6 @@ CREATE TABLE public.run_start_idempotency (
 
 
 --
--- Name: run_wakeups; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.run_wakeups (
-    run_node_id text NOT NULL,
-    wake_at timestamp with time zone NOT NULL,
-    reason text NOT NULL
-);
-
-
---
 -- Name: run_summary_memory_jobs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1113,6 +1095,17 @@ CREATE TABLE public.run_summary_memory_jobs (
     last_error text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: run_wakeups; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.run_wakeups (
+    run_node_id text NOT NULL,
+    wake_at timestamp with time zone NOT NULL,
+    reason text NOT NULL
 );
 
 
@@ -1434,6 +1427,19 @@ CREATE TABLE public.verified_domains (
 
 
 --
+-- Name: worker_instances; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.worker_instances (
+    instance_id text NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    worker_concurrency integer NOT NULL,
+    build_commit text
+);
+
+
+--
 -- Name: workflow_budgets; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1467,31 +1473,6 @@ CREATE TABLE public.workflow_improvements (
     confidence real DEFAULT 0 NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: worker_instances; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.worker_instances (
-    instance_id text NOT NULL,
-    started_at timestamp with time zone DEFAULT now() NOT NULL,
-    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
-    worker_concurrency integer NOT NULL,
-    build_commit text
-);
-
-
---
--- Name: workflow_status_pages; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.workflow_status_pages (
-    org_id text NOT NULL,
-    workflow_id text NOT NULL,
-    token_digest text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1593,6 +1574,18 @@ CREATE TABLE public.workflow_rollouts (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     ended_at timestamp with time zone,
     last_outcome_at timestamp with time zone
+);
+
+
+--
+-- Name: workflow_status_pages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.workflow_status_pages (
+    org_id text NOT NULL,
+    workflow_id text NOT NULL,
+    token_digest text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1894,14 +1887,6 @@ ALTER TABLE ONLY public.rate_limit_windows
 
 
 --
--- Name: recovery_case_transitions recovery_case_transitions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.recovery_case_transitions
-    ADD CONSTRAINT recovery_case_transitions_pkey PRIMARY KEY (id);
-
-
---
 -- Name: recovery_approval_grants recovery_approval_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1915,6 +1900,14 @@ ALTER TABLE ONLY public.recovery_approval_grants
 
 ALTER TABLE ONLY public.recovery_case_artifacts
     ADD CONSTRAINT recovery_case_artifacts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: recovery_case_transitions recovery_case_transitions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recovery_case_transitions
+    ADD CONSTRAINT recovery_case_transitions_pkey PRIMARY KEY (id);
 
 
 --
@@ -2038,19 +2031,19 @@ ALTER TABLE ONLY public.run_start_idempotency
 
 
 --
--- Name: run_wakeups run_wakeups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.run_wakeups
-    ADD CONSTRAINT run_wakeups_pkey PRIMARY KEY (run_node_id);
-
-
---
 -- Name: run_summary_memory_jobs run_summary_memory_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.run_summary_memory_jobs
     ADD CONSTRAINT run_summary_memory_jobs_pkey PRIMARY KEY (org_id, run_id);
+
+
+--
+-- Name: run_wakeups run_wakeups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_wakeups
+    ADD CONSTRAINT run_wakeups_pkey PRIMARY KEY (run_node_id);
 
 
 --
@@ -2198,6 +2191,14 @@ ALTER TABLE ONLY public.verified_domains
 
 
 --
+-- Name: worker_instances worker_instances_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.worker_instances
+    ADD CONSTRAINT worker_instances_pkey PRIMARY KEY (instance_id);
+
+
+--
 -- Name: workflow_budgets workflow_budgets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2211,22 +2212,6 @@ ALTER TABLE ONLY public.workflow_budgets
 
 ALTER TABLE ONLY public.workflow_improvements
     ADD CONSTRAINT workflow_improvements_pkey PRIMARY KEY (id);
-
-
---
--- Name: worker_instances worker_instances_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.worker_instances
-    ADD CONSTRAINT worker_instances_pkey PRIMARY KEY (instance_id);
-
-
---
--- Name: workflow_status_pages workflow_status_pages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.workflow_status_pages
-    ADD CONSTRAINT workflow_status_pages_pkey PRIMARY KEY (org_id, workflow_id);
 
 
 --
@@ -2267,6 +2252,14 @@ ALTER TABLE ONLY public.workflow_rollout_outcomes
 
 ALTER TABLE ONLY public.workflow_rollouts
     ADD CONSTRAINT workflow_rollouts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: workflow_status_pages workflow_status_pages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workflow_status_pages
+    ADD CONSTRAINT workflow_status_pages_pkey PRIMARY KEY (org_id, workflow_id);
 
 
 --
@@ -2706,13 +2699,6 @@ CREATE UNIQUE INDEX prompts_org_name_idx ON public.prompts USING btree (org_id, 
 
 
 --
--- Name: recovery_case_transitions_case_created_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX recovery_case_transitions_case_created_idx ON public.recovery_case_transitions USING btree (case_id, occurred_at);
-
-
---
 -- Name: recovery_approval_grants_active_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2738,6 +2724,13 @@ CREATE INDEX recovery_case_artifacts_case_created_idx ON public.recovery_case_ar
 --
 
 CREATE UNIQUE INDEX recovery_case_artifacts_content_idx ON public.recovery_case_artifacts USING btree (org_id, case_id, kind, payload_sha256);
+
+
+--
+-- Name: recovery_case_transitions_case_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX recovery_case_transitions_case_created_idx ON public.recovery_case_transitions USING btree (case_id, occurred_at);
 
 
 --
@@ -2989,9 +2982,6 @@ CREATE INDEX run_nodes_failed_finished_idx ON public.run_nodes USING btree (fini
 -- Name: run_nodes_pending_status_idx; Type: INDEX; Schema: public; Owner: -
 --
 
--- Queued, running, and waiting already have specialized partial indexes. This
--- closes the remaining pending-state observability path without introducing a
--- generic index that could displace the worker's FIFO claim plan.
 CREATE INDEX run_nodes_pending_status_idx ON public.run_nodes USING btree (status) WHERE (status = 'pending'::text);
 
 
@@ -3006,9 +2996,6 @@ CREATE INDEX run_nodes_queue_publication_repair_idx ON public.run_nodes USING bt
 -- Name: run_nodes_queued_claim_idx; Type: INDEX; Schema: public; Owner: -
 --
 
--- The partial index contains only claimable-state history and follows the
--- worker's FIFO order, so terminal run history cannot make queue polling
--- degrade into a full run_nodes scan.
 CREATE INDEX run_nodes_queued_claim_idx ON public.run_nodes USING btree (enqueued_at, id) WHERE (status = 'queued'::text);
 
 
@@ -3034,17 +3021,17 @@ CREATE INDEX run_nodes_waiting_target_idx ON public.run_nodes USING btree (waiti
 
 
 --
--- Name: run_wakeups_due_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX run_wakeups_due_idx ON public.run_wakeups USING btree (wake_at);
-
-
---
 -- Name: run_summary_memory_jobs_due_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX run_summary_memory_jobs_due_idx ON public.run_summary_memory_jobs USING btree (next_attempt_at, lease_expires_at) WHERE (completed_at IS NULL);
+
+
+--
+-- Name: run_wakeups_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX run_wakeups_due_idx ON public.run_wakeups USING btree (wake_at);
 
 
 --
@@ -3055,17 +3042,17 @@ CREATE INDEX runs_org_created_id_idx ON public.runs USING btree (org_id, created
 
 
 --
--- Name: runs_org_status_created_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX runs_org_status_created_id_idx ON public.runs USING btree (org_id, status, created_at DESC, id DESC);
-
-
---
 -- Name: runs_org_replay_mode_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX runs_org_replay_mode_idx ON public.runs USING btree (org_id, replay_mode);
+
+
+--
+-- Name: runs_org_status_created_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX runs_org_status_created_id_idx ON public.runs USING btree (org_id, status, created_at DESC, id DESC);
 
 
 --
@@ -3349,13 +3336,6 @@ CREATE INDEX workflow_improvements_org_workflow_idx ON public.workflow_improveme
 
 
 --
--- Name: workflow_status_pages_token_digest_key; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX workflow_status_pages_token_digest_key ON public.workflow_status_pages USING btree (token_digest);
-
-
---
 -- Name: workflow_input_presets_org_wf_name_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3412,6 +3392,13 @@ CREATE INDEX workflow_rollouts_org_workflow_created_idx ON public.workflow_rollo
 
 
 --
+-- Name: workflow_status_pages_token_digest_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX workflow_status_pages_token_digest_key ON public.workflow_status_pages USING btree (token_digest);
+
+
+--
 -- Name: workflow_versions_org_workflow_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3447,5 +3434,21 @@ CREATE INDEX workflows_org_deleted_idx ON public.workflows USING btree (org_id, 
 
 
 --
+-- Name: org_members protect_organization_owner_membership_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER protect_organization_owner_membership_delete BEFORE DELETE ON public.org_members FOR EACH ROW EXECUTE FUNCTION public.protect_organization_owner_membership();
+
+
+--
+-- Name: org_members protect_organization_owner_membership_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER protect_organization_owner_membership_update BEFORE UPDATE OF user_id, role ON public.org_members FOR EACH ROW EXECUTE FUNCTION public.protect_organization_owner_membership();
+
+
+--
 -- PostgreSQL database dump complete
 --
+
+

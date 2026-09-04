@@ -8,7 +8,11 @@ The runtime does not upgrade databases created by another schema generation.
 Startup checks schema completeness before opening public listeners. Running
 `janusly migrate` twice is safe.
 
-`schema.sql` is generated from an empty migrated database and drives SQLC.
+`schema.sql` is generated from an empty migrated database and drives SQLC:
+`scripts/verify-isolated.sh schema` (or `make schema` against a migrated Compose
+project) writes it, `make verify` regenerates it and fails on drift, and it is
+never edited by hand — a schema change is an edit to the baseline migration
+followed by that regeneration.
 Queries live in `internal/store/queries`, generated types and methods live in
 `internal/store`, and higher layers use organization-scoped store methods.
 
