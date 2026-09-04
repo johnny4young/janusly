@@ -149,7 +149,7 @@ func (e *Engine) completeNode(ctx context.Context, claim ClaimedNode, output any
 	}
 	eventJSON := safePersist(eventPayload, defaultPersistMaxBytes())
 
-	finishedAt := eventNow()
+	finishedAt := e.eventNow()
 	if err := e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		completed, err := q.CompleteRunNode(ctx, store.CompleteRunNodeParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
@@ -480,8 +480,12 @@ func workflowFromRunInput(inputJSON []byte) (*domain.Workflow, map[string]any, e
 // millisecond ISO strings on both backends. A µs-precision row under an
 // ms-precision cursor can be skipped at a page boundary; truncating at
 // write time makes every cursor comparison exact in both directions.
-func eventNow() time.Time {
-	return time.Now().UTC().Truncate(time.Millisecond)
+func (e *Engine) eventNow() time.Time {
+	now := time.Now
+	if e != nil && e.now != nil {
+		now = e.now
+	}
+	return now().UTC().Truncate(time.Millisecond)
 }
 
 // recordRecoveryImpact credits one generation-bound terminal success INSIDE

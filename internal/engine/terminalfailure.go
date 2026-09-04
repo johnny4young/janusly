@@ -38,7 +38,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 	if err != nil {
 		return fmt.Errorf("marshal retry payload: %w", err)
 	}
-	retriedAt := eventNow()
+	retriedAt := e.eventNow()
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		requeued, err := q.RequeueRunNodeForRetry(ctx, store.RequeueRunNodeForRetryParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
@@ -119,7 +119,7 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 		return false, false, fmt.Errorf("marshal event payload: %w", err)
 	}
 
-	failedAt := eventNow()
+	failedAt := e.eventNow()
 	committed, err = e.inCompletionTxCommitted(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		run, err := q.GetRunExecution(ctx, claim.RunID)
 		if err != nil {

@@ -45,8 +45,12 @@ func (e *Engine) maybeCommitRunSummaryMemory(ctx context.Context, runID string) 
 	if !memory.Enabled(ctx, e.pool, run.OrgID) {
 		return
 	}
-	_, _ = e.pool.Exec(ctx, `INSERT INTO run_summary_memory_jobs (org_id, run_id)
-		VALUES ($1, $2) ON CONFLICT (org_id, run_id) DO NOTHING`, run.OrgID, runID)
+	if _, err := e.pool.Exec(ctx, `INSERT INTO run_summary_memory_jobs (org_id, run_id)
+		VALUES ($1, $2) ON CONFLICT (org_id, run_id) DO NOTHING`, run.OrgID, runID); err != nil && ctx.Err() == nil {
+		// The run's completion must not fail on this, but a lost summary
+		// job should not vanish silently either.
+		slog.Warn("run summary memory job not queued", "runId", runID, "error", err)
+	}
 }
 
 func (e *Engine) claimRunSummaryMemoryJob(ctx context.Context) (*runSummaryMemoryJob, error) {

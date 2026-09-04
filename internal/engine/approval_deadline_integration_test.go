@@ -106,7 +106,7 @@ func TestApprovalDeadlineManualResumeAndHASweepRace(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
 	runID := startWaitingApproval(t, ctx, pool, eng, org)
 
-	past := eventNow().Add(-time.Second)
+	past := eng.eventNow().Add(-time.Second)
 	deadlineAt := domain.FormatWaitingInstant(past)
 	if _, err := pool.Exec(ctx, `
 		UPDATE run_nodes
@@ -155,7 +155,7 @@ func TestApprovalDeadlineManualResumeAndHASweepRace(t *testing.T) {
 func TestStaleApprovalDeadlineRearmsCurrentGeneration(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
 	runID := startWaitingApproval(t, ctx, pool, eng, org)
-	oldDeadline := eventNow().Add(-time.Second)
+	oldDeadline := eng.eventNow().Add(-time.Second)
 	currentDeadline := time.Date(2099, 2, 3, 4, 5, 6, 0, time.UTC)
 	currentText := domain.FormatWaitingInstant(currentDeadline)
 	if _, err := pool.Exec(ctx, `
@@ -188,7 +188,7 @@ func TestStaleApprovalDeadlineRearmsCurrentGeneration(t *testing.T) {
 func TestNodeApprovalCheckpointContinuesInGo(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
 	runID := org + "-node-checkpoint"
-	deadline := eventNow().Add(-time.Second)
+	deadline := eng.eventNow().Add(-time.Second)
 	deadlineAt := domain.FormatWaitingInstant(deadline)
 	if _, err := pool.Exec(ctx, `INSERT INTO runs (id, org_id, workflow_version_id, status)
 		VALUES ($1, $2, 'node-version', 'running')`, runID, org); err != nil {

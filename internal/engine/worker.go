@@ -192,7 +192,7 @@ func (e *Engine) claimBatch(ctx context.Context, batch int32) ([]ClaimedNode, er
 	// event still lands if this insert hits a blip.
 	for _, row := range rows {
 		attemptPayload, _ := json.Marshal(map[string]any{"attempt": row.Attempt})
-		runningAt := eventNow()
+		runningAt := e.eventNow()
 		if err := store.New(e.pool).InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 			ID: e.newID(), RunID: row.RunID,
 			NodeID: pgtype.Text{String: row.NodeID, Valid: true},

@@ -241,7 +241,7 @@ var ErrParentCheckpointConflict = errors.New("subworkflow parent checkpoint conf
 func (e *Engine) commitParentCheckpoint(
 	ctx context.Context, q *store.Queries, checkpoint *ParentCheckpoint, childRunID string,
 ) error {
-	checkpointAt := eventNow()
+	checkpointAt := e.eventNow()
 	metadata := map[string]any{
 		"kind": "subworkflow", "reason": "Waiting for subworkflow",
 		"childRunId": childRunID, "childWorkflowId": checkpoint.ChildWorkflowID,
@@ -357,7 +357,7 @@ func (e *Engine) settleParentOnChildSuccess(
 	if len(child.OutputJson) > 0 {
 		_ = json.Unmarshal(child.OutputJson, &childOutput)
 	}
-	finishedAt := eventNow()
+	finishedAt := e.eventNow()
 	state := safePersist(map[string]any{
 		"output":      childOutput,
 		"subworkflow": map[string]any{"childRunId": childRunID},
@@ -409,7 +409,7 @@ func (e *Engine) settleParentOnChildSuccess(
 			// A failed repair is NOT settled: reporting it as such lets the
 			// reconciler clear the durable marker and strands the parent.
 			if err := e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
-				return e.scheduleDownstream(ctx, txq, events, parentRunID, eventNow())
+				return e.scheduleDownstream(ctx, txq, events, parentRunID, e.eventNow())
 			}); err != nil {
 				return false
 			}
@@ -439,7 +439,7 @@ func (e *Engine) settleParentOnChildFailure(
 			serr["firstChildFailure"] = map[string]any{"nodeId": first.NodeID, "error": firstError}
 		}
 	}
-	failedAt := eventNow()
+	failedAt := e.eventNow()
 	settled := false
 	err := e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
 		failed, err := txq.MarkWaitingSubworkflowFailed(ctx, store.MarkWaitingSubworkflowFailedParams{
@@ -488,7 +488,7 @@ func (e *Engine) settleParentOnChildFailure(
 			// marker so the next lease retries it.
 			if err := e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
 				return e.flipRunTerminal(ctx, txq, events, parentRunID, "failed",
-					map[string]any{"reason": "subworkflow_failed", "childRunId": childRunID}, eventNow(), nil)
+					map[string]any{"reason": "subworkflow_failed", "childRunId": childRunID}, e.eventNow(), nil)
 			}); err != nil {
 				return false
 			}

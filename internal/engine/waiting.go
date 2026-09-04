@@ -34,7 +34,7 @@ var ErrResumeNodeNotFound = errors.New("Node not found") //nolint:staticcheck //
 // {waiting: {reason, ...metadata, waitingSince}} state, the node.waiting
 // event, and any reason-specific timer/approval wake-up.
 func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting executors.Waiting) error {
-	checkpointAt := eventNow()
+	checkpointAt := e.eventNow()
 	metadata := map[string]any{}
 	if waiting.Reason != "" {
 		metadata["reason"] = waiting.Reason
@@ -176,7 +176,7 @@ func (e *Engine) processApprovalTimeout(
 			escalateTo := strings.TrimSpace(waitingString(waiting["escalateTo"]))
 			if escalateTo != "" {
 				previousAssignee := strings.TrimSpace(waitingString(waiting["assignee"]))
-				escalatedAt := eventNow()
+				escalatedAt := e.eventNow()
 				nextWaiting := make(map[string]any, len(waiting)+4)
 				maps.Copy(nextWaiting, waiting)
 				nextWaiting["assignee"] = escalateTo
@@ -229,7 +229,7 @@ func (e *Engine) processApprovalTimeout(
 		errorPayload := map[string]any{
 			"code": code, "reason": reason, "deadlineAt": deadlineAt, "onTimeout": policy,
 		}
-		failedAt := eventNow()
+		failedAt := e.eventNow()
 		failed, err := q.FailWaitingApprovalDeadline(ctx, store.FailWaitingApprovalDeadlineParams{
 			RunID: runID, NodeID: nodeID, ExpectedDeadlineAt: deadlineAt,
 			ErrorJson: safePersist(errorPayload, deadLetterErrorMaxBytes), FinishedAt: &failedAt,
@@ -295,7 +295,7 @@ var (
 // still-`waiting` node completes (the CAS guard), so a replayed token
 // cannot double-write output or double-enqueue downstream work.
 func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, input map[string]any, token string) error {
-	finishedAt := eventNow()
+	finishedAt := e.eventNow()
 	return e.inCompletionTx(ctx, runID, func(q *store.Queries, events *runEventBuffer) error {
 		run, err := q.GetRunExecution(ctx, runID)
 		if err != nil {

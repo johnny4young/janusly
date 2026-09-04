@@ -144,7 +144,7 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	}
 	_ = json.Unmarshal(deadLetter.WorkflowJson, &wfDoc)
 	workflowID = wfDoc.ID
-	slaTarget := eventNow().Add(24 * time.Hour)
+	slaTarget := e.eventNow().Add(24 * time.Hour)
 	if _, err := q.InsertRecoveryItem(ctx, store.InsertRecoveryItemParams{
 		ID: e.newID(), OrgID: orgID, DeadLetterID: deadLetterID,
 		WorkflowID:     pgtype.Text{String: workflowID, Valid: workflowID != ""},
@@ -156,7 +156,7 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 		return fmt.Errorf("insert recovery item: %w", err)
 	}
 
-	redrivenAt := eventNow()
+	redrivenAt := e.eventNow()
 	payload, err := json.Marshal(map[string]any{
 		"deadLetterId": deadLetterID, "attempt": attempt,
 	})
@@ -224,7 +224,7 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID string
 	if _, err := q.ReviveFailedRun(ctx, runID); err != nil {
 		return fmt.Errorf("revive run: %w", err)
 	}
-	redrivenAt := eventNow()
+	redrivenAt := e.eventNow()
 	payload, err := json.Marshal(map[string]any{"attempt": attempt})
 	if err != nil {
 		return fmt.Errorf("marshal redrive payload: %w", err)

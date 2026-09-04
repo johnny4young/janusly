@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"strings"
@@ -312,16 +313,20 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		AgentAllowedHTTPRequestsByIndex: agentAllowedHTTPRequestsByIndex,
 		DryRun:                          dryRun,
 		Emit: func(eventType string, payload map[string]any) string {
-			eventAt := eventNow()
+			eventAt := d.engine.eventNow()
 			raw := grammar.SafePersistPayload(payload, grammar.PersistOptions{
 				RedactedValues: rendered.RedactedValues,
 			})
 			eventID := d.engine.newID()
-			_ = q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+			if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 				ID: eventID, RunID: claim.RunID,
 				NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
 				Type:   eventType, Payload: raw, CreatedAt: &eventAt,
-			})
+			}); err != nil && ctx.Err() == nil {
+				// Mirrors claimBatch: an executor timeline that silently
+				// stops recording is worse than a warning per lost event.
+				slog.Warn("executor event not recorded", "runId", claim.RunID, "nodeId", claim.NodeID, "type", eventType, "error", err)
+			}
 			return eventID
 		},
 		ReportUnresolved: func(paths []string) error {
@@ -391,7 +396,7 @@ func (d *Dispatcher) recordUnresolvedPaths(ctx context.Context, q *store.Queries
 	if err != nil {
 		return fmt.Errorf("marshal unresolved-path payload: %w", err)
 	}
-	eventAt := eventNow()
+	eventAt := d.engine.eventNow()
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 		ID: d.engine.newID(), RunID: claim.RunID,
 		NodeID: pgtype.Text{String: claim.NodeID, Valid: true},

@@ -84,7 +84,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 				continue
 			}
 			if doomed || !edgeAllowsRun(wf, node.ID, runContext) {
-				skippedAt := eventNow()
+				skippedAt := e.eventNow()
 				stateJSON, payload, reason := skippedEdgeState, skippedEdgePayload, "Condition not met"
 				if doomed {
 					stateJSON, payload, reason = skippedBranchState, skippedBranchPayload, "Branch not taken"
@@ -121,7 +121,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 			queued++
 			changed = true
 			statuses[node.ID] = "queued"
-			queuedAt := eventNow()
+			queuedAt := e.eventNow()
 			events.add(e.newID(), runID, node.ID, "node.queued", json.RawMessage(`{}`), queuedAt)
 		}
 	}

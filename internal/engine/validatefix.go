@@ -146,7 +146,7 @@ func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
 			return "", fmt.Errorf("seed validation node %s: %w", node.ID, err)
 		}
 	}
-	startedAt := eventNow()
+	startedAt := e.eventNow()
 	payload, _ := json.Marshal(map[string]any{
 		"originalRunId": item.RunID, "failingNodeId": item.NodeID,
 		"validationEffectMode": "skip",

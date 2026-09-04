@@ -99,7 +99,7 @@ func (e *Engine) StartSandboxRun(ctx context.Context, in SandboxRunInput) (strin
 		return "", fmt.Errorf("insert sandbox run: %w", err)
 	}
 
-	startedAt := eventNow()
+	startedAt := e.eventNow()
 	events := &runEventBuffer{}
 	startedPayload := safePersist(map[string]any{
 		"workflowVersionId": runID,

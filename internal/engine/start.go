@@ -275,7 +275,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		startedFields["workflowRolloutVariant"] = in.WorkflowRolloutVariant
 	}
 	startedPayload, _ := json.Marshal(startedFields)
-	startedAt := eventNow()
+	startedAt := e.eventNow()
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 		ID: e.newID(), RunID: runID, Type: "run.started", Payload: startedPayload,
 		CreatedAt: &startedAt,

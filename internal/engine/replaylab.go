@@ -72,7 +72,7 @@ func (e *Engine) ReplayRunAsValidation(
 			return "", fmt.Errorf("seed lab node %s: %w", node.ID, err)
 		}
 	}
-	startedAt := eventNow()
+	startedAt := e.eventNow()
 	payload, _ := json.Marshal(map[string]any{
 		"workflowVersionId": runID, "sourceRunId": sourceRunID, "hasPatch": hasPatch,
 	})
@@ -206,7 +206,7 @@ func (e *Engine) ReplayRunAsValidationFork(
 			return ReplayLabForkResult{}, fmt.Errorf("seed fork node %s: %w", node.ID, err)
 		}
 	}
-	startedAt := eventNow()
+	startedAt := e.eventNow()
 	payload, _ := json.Marshal(map[string]any{
 		"workflowVersionId": runID, "sourceRunId": sourceRunID, "forkNodeId": forkNodeID,
 		"predecessorCount": len(predecessors), "hasOverride": inputOverride != nil,
