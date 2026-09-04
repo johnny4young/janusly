@@ -23,6 +23,14 @@ services:
 
   janusly:
     image: ${IMAGE:-janusly:local}
+    # The image is distroless (no shell, no curl); the executable probes its
+    # own /readyz so Compose and orchestrators see real readiness.
+    healthcheck:
+      test: ["CMD", "/janusly", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
     build:
       context: .
       args:

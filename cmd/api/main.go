@@ -135,6 +135,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// `janusly readyz` probes the serving process on the configured port so
+	// the distroless image (no shell, no curl) can run its own healthcheck.
+	if len(os.Args) > 1 && os.Args[1] == "readyz" {
+		return probeReadiness(cfg.Port)
+	}
 	if err := requireBuildProvenance(cfg.Production, identity); err != nil {
 		return err
 	}
@@ -347,4 +352,24 @@ func resourceInstanceID() string {
 		base = "janusly"
 	}
 	return base + "-" + uuid.NewString()
+}
+
+const readinessProbeTimeout = 3 * time.Second
+
+func probeReadiness(port int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), readinessProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/readyz", port), nil)
+	if err != nil {
+		return err
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("readyz: %w", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("readyz: %s", res.Status)
+	}
+	return nil
 }

@@ -1,12 +1,12 @@
-// F1 terminal-sweep read closures: the last routes the real web
-// touches that the runtime did not yet serve on the exact wire the client
-// uses. The web's api() sends V1_READ_PATHS GETs to /v1 with the envelope
-// (templates, schedule-preview, workflows/health, run/usage,
-// memory/consent-status) and everything else raw legacy (mcp connections
-// list, recovery calibration-status). Each mount here either aliases an
-// existing core onto its missing wire or ports the contract handler
-// verbatim; the feature-absent surfaces stay documented divergences in
-// F1-GAPS.md instead of stub routes.
+// Compatibility read closures: the last routes the real web touches that the
+// runtime did not originally serve on the exact wire the client uses. The
+// web's api() sends V1_READ_PATHS GETs to /v1 with the envelope (templates,
+// schedule-preview, workflows/health, run/usage, memory/consent-status) and
+// everything else raw legacy (mcp connections list, recovery
+// calibration-status). Each mount here either aliases an existing core onto
+// its missing wire or ports the contract handler verbatim. Feature-absent
+// surfaces stay documented divergences in docs/architecture/api-contract.md
+// rather than stub routes.
 package httpapi
 
 import (
