@@ -1197,10 +1197,26 @@
                     {
                       "properties": {
                         "data": {
-                          "items": {
-                            "type": "object"
+                          "properties": {
+                            "clusters": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "totalSamples": {
+                              "type": "number"
+                            },
+                            "windowDays": {
+                              "type": "number"
+                            }
                           },
-                          "type": "array"
+                          "required": [
+                            "clusters",
+                            "totalSamples",
+                            "windowDays"
+                          ],
+                          "type": "object"
                         }
                       },
                       "type": "object"
@@ -2854,11 +2870,106 @@
                       "properties": {
                         "data": {
                           "properties": {
+                            "approvalsPending": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "clustersResolved": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
                             "costByProvider": {
                               "items": {
                                 "type": "object"
                               },
                               "type": "array"
+                            },
+                            "costThisWindow": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "downtimeEndedMs": {
+                              "type": "number"
+                            },
+                            "mttr": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
                             },
                             "mttrMs": {
                               "type": [
@@ -2866,13 +2977,196 @@
                                 "null"
                               ]
                             },
+                            "mttrTrend": {
+                              "items": {
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "p95Latency": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "recurrence": {
+                              "type": "object"
+                            },
+                            "recurrenceRate": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "replayRate": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "slaAttainment": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "successRate": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "terminalRuns": {
+                              "type": "number"
+                            },
+                            "timeToFirstAction": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "valueEstimate": {
+                              "type": "object"
+                            },
                             "verifiedRecovery": {
+                              "properties": {
+                                "display": {
+                                  "type": "string"
+                                },
+                                "rationale": {
+                                  "type": "string"
+                                },
+                                "rationaleCode": {
+                                  "type": "string"
+                                },
+                                "severity": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
                               "type": "object"
                             },
                             "windowDays": {
                               "type": "number"
                             }
                           },
+                          "required": [
+                            "successRate",
+                            "mttr",
+                            "p95Latency",
+                            "approvalsPending",
+                            "replayRate",
+                            "costThisWindow",
+                            "windowDays",
+                            "terminalRuns"
+                          ],
                           "type": "object"
                         }
                       },
@@ -2895,7 +3189,7 @@
             "description": "Error — the v1 error envelope"
           }
         },
-        "summary": "Verified-recovery north star + cost rollup"
+        "summary": "Recovery metrics: verified-recovery north star, reliability rollup, cost, value estimate"
       }
     },
     "/recovery/my-wins": {

@@ -29,7 +29,7 @@ export interface ApiRequests {
   "GET /recovery/cases/{caseId}": undefined
   /** Lifetime verified-recovery impact ledger */
   "GET /recovery/ledger": undefined
-  /** Verified-recovery north star + cost rollup */
+  /** Recovery metrics: verified-recovery north star, reliability rollup, cost, value estimate */
   "GET /recovery/metrics": undefined
   /** Current operator recovery wins */
   "GET /recovery/my-wins": undefined
@@ -350,7 +350,11 @@ export interface ApiResponses {
   /** Dead-letter list with server-side filters */
   "GET /dlq": Record<string, unknown>[]
   /** Failure clusters over open dead letters */
-  "GET /dlq/clusters": Record<string, unknown>[]
+  "GET /dlq/clusters": {
+    "clusters": Record<string, unknown>[]
+    "totalSamples": number
+    "windowDays": number
+  }
   /** Tenant memory consent and purge posture */
   "GET /memory/consent-status": {
     "enabled"?: boolean
@@ -459,12 +463,93 @@ export interface ApiResponses {
     "sinceIso"?: string | null
     "totalRecovered"?: number
   }
-  /** Verified-recovery north star + cost rollup */
+  /** Recovery metrics: verified-recovery north star, reliability rollup, cost, value estimate */
   "GET /recovery/metrics": {
+    "approvalsPending": {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
+    "clustersResolved"?: {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
     "costByProvider"?: Record<string, unknown>[]
+    "costThisWindow": {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
+    "downtimeEndedMs"?: number
+    "mttr": {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
     "mttrMs"?: number | null
-    "verifiedRecovery"?: Record<string, unknown>
-    "windowDays"?: number
+    "mttrTrend"?: Record<string, unknown>[]
+    "p95Latency": {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
+    "recurrence"?: Record<string, unknown>
+    "recurrenceRate"?: {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
+    "replayRate": {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
+    "slaAttainment"?: {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
+    "successRate": {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
+    "terminalRuns": number
+    "timeToFirstAction"?: {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
+    "valueEstimate"?: Record<string, unknown>
+    "verifiedRecovery"?: {
+      "display"?: string
+      "rationale"?: string
+      "rationaleCode"?: string
+      "severity"?: string
+      "value"?: number | null
+    }
+    "windowDays": number
   }
   /** Current operator recovery wins */
   "GET /recovery/my-wins": {
@@ -902,7 +987,7 @@ export interface ApiSuccessStatuses {
   "GET /recovery/cases/{caseId}": 200
   /** Lifetime verified-recovery impact ledger */
   "GET /recovery/ledger": 200
-  /** Verified-recovery north star + cost rollup */
+  /** Recovery metrics: verified-recovery north star, reliability rollup, cost, value estimate */
   "GET /recovery/metrics": 200
   /** Current operator recovery wins */
   "GET /recovery/my-wins": 200

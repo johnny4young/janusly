@@ -66,3 +66,59 @@ func TestGovernedMutationManifestsRejectUnknownProperties(t *testing.T) {
 		}
 	}
 }
+
+func findRoute(t *testing.T, method, path string) Route {
+	t.Helper()
+	for _, route := range Routes {
+		if route.Method == method && route.Path == path {
+			return route
+		}
+	}
+	t.Fatalf("manifest has no %s %s", method, path)
+	return Route{}
+}
+
+func requiredOf(schema map[string]any) map[string]bool {
+	out := map[string]bool{}
+	list, _ := schema["required"].([]string)
+	for _, key := range list {
+		out[key] = true
+	}
+	return out
+}
+
+// The generated TypeScript types are only as good as these shapes. Both
+// endpoints used to be described as something the handlers never emitted
+// (a bare array, four fields of eight), which made the typed client unusable
+// for them. The manifest now says what Go serves.
+func TestDlqClustersAndRecoveryMetricsManifestsMatchTheRuntimeShape(t *testing.T) {
+	clusters := findRoute(t, "GET", "/v1/dlq/clusters").Response
+	if clusters["type"] != "object" {
+		t.Fatalf("/v1/dlq/clusters must be an object envelope, got %v", clusters["type"])
+	}
+	required := requiredOf(clusters)
+	for _, key := range []string{"clusters", "totalSamples", "windowDays"} {
+		if !required[key] {
+			t.Fatalf("/v1/dlq/clusters must require %q", key)
+		}
+	}
+	properties, _ := clusters["properties"].(map[string]any)
+	if items, _ := properties["clusters"].(map[string]any); items["type"] != "array" {
+		t.Fatalf("clusters must be an array, got %v", items)
+	}
+
+	metrics := findRoute(t, "GET", "/v1/recovery/metrics").Response
+	properties, _ = metrics["properties"].(map[string]any)
+	for _, key := range []string{
+		"successRate", "verifiedRecovery", "mttr", "p95Latency", "approvalsPending",
+		"replayRate", "costThisWindow", "clustersResolved", "slaAttainment",
+		"timeToFirstAction", "recurrenceRate", "valueEstimate",
+	} {
+		if _, ok := properties[key]; !ok {
+			t.Fatalf("/v1/recovery/metrics must describe %q", key)
+		}
+	}
+	if _, stale := properties["data"]; stale {
+		t.Fatal("/v1/recovery/metrics no longer carries a data envelope")
+	}
+}

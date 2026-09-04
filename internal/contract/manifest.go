@@ -40,6 +40,22 @@ func boolT() map[string]any { return map[string]any{"type": "boolean"} }
 func jsonValue() map[string]any {
 	return map[string]any{}
 }
+
+// metricObj is the recoveryMetric envelope: a display value, a severity, and
+// the rationale behind it. Extra per-metric fields ride alongside.
+func metricObj() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"value":         map[string]any{"type": []any{"number", "null"}},
+			"display":       str(),
+			"severity":      str(),
+			"rationale":     str(),
+			"rationaleCode": str(),
+		},
+	}
+}
+
 func arr(items any) map[string]any {
 	return map[string]any{"type": "array", "items": items}
 }
@@ -370,7 +386,11 @@ var Routes = []Route{
 	{Method: "GET", Path: "/v1/dlq", Summary: "Dead-letter list with server-side filters",
 		Response: arr(map[string]any{"type": "object"})},
 	{Method: "GET", Path: "/v1/dlq/clusters", Summary: "Failure clusters over open dead letters",
-		Response: arr(map[string]any{"type": "object"})},
+		Response: obj(map[string]any{
+			"clusters":     arr(map[string]any{"type": "object"}),
+			"totalSamples": num(),
+			"windowDays":   num(),
+		}, "clusters", "totalSamples", "windowDays")},
 	{Method: "POST", Path: "/v1/dlq/redrive", Summary: "Redrive one dead letter",
 		Request:  obj(map[string]any{"deadLetterId": str()}, "deadLetterId"),
 		Response: obj(map[string]any{"redriven": boolT()}, "redriven")},
@@ -435,13 +455,31 @@ var Routes = []Route{
 			"runId": str(), "sourceNodeId": str(), "decision": str(),
 			"resumed": boolT(), "resolvedCaseIds": arr(str()),
 		}, "runId", "sourceNodeId", "decision", "resumed", "resolvedCaseIds")},
-	{Method: "GET", Path: "/v1/recovery/metrics", Summary: "Verified-recovery north star + cost rollup",
+	{Method: "GET", Path: "/v1/recovery/metrics", Summary: "Recovery metrics: verified-recovery north star, reliability rollup, cost, value estimate",
+		// One entry per key the handler emits (internal/httpapi/metrics.go);
+		// the metric objects share the recoveryMetric envelope. The legacy
+		// mttrMs / recurrence / costByProvider fields stay additive.
 		Response: obj(map[string]any{
-			"verifiedRecovery": map[string]any{"type": "object"},
-			"mttrMs":           map[string]any{"type": []any{"number", "null"}},
-			"windowDays":       num(),
-			"costByProvider":   arr(map[string]any{"type": "object"}),
-		})},
+			"successRate":       metricObj(),
+			"verifiedRecovery":  metricObj(),
+			"mttr":              metricObj(),
+			"p95Latency":        metricObj(),
+			"approvalsPending":  metricObj(),
+			"replayRate":        metricObj(),
+			"costThisWindow":    metricObj(),
+			"clustersResolved":  metricObj(),
+			"slaAttainment":     metricObj(),
+			"timeToFirstAction": metricObj(),
+			"recurrenceRate":    metricObj(),
+			"valueEstimate":     map[string]any{"type": "object"},
+			"terminalRuns":      num(),
+			"mttrTrend":         arr(map[string]any{"type": "object"}),
+			"downtimeEndedMs":   num(),
+			"mttrMs":            map[string]any{"type": []any{"number", "null"}},
+			"recurrence":        map[string]any{"type": "object"},
+			"windowDays":        num(),
+			"costByProvider":    arr(map[string]any{"type": "object"}),
+		}, "successRate", "mttr", "p95Latency", "approvalsPending", "replayRate", "costThisWindow", "windowDays", "terminalRuns")},
 	{Method: "GET", Path: "/v1/recovery/ledger", Summary: "Lifetime verified-recovery impact ledger",
 		Response: obj(map[string]any{"totalRecovered": num(), "downtimeEndedMs": num(), "sinceIso": map[string]any{"type": []any{"string", "null"}}})},
 	{Method: "GET", Path: "/v1/recovery/my-wins", Summary: "Current operator recovery wins",
