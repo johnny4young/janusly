@@ -37,6 +37,12 @@ import (
 
 const scheduleSweepLimit = 200
 
+// scheduleSweepWallBudget bounds one sweep below the one-minute lease the
+// claim takes: an entry still unfired when the budget runs out is left
+// leased and fires on a later sweep once the lease lapses, instead of a
+// second replica re-claiming it mid-flight.
+const scheduleSweepWallBudget = 45 * time.Second
+
 // SyncWorkflowSchedules replaces the workflow's schedule entries from one
 // version snapshot. Call with the queries handle of the SAME transaction
 // that persisted the version, so the entry set can never drift from the
@@ -95,8 +101,18 @@ func (e *Engine) SweepDueSchedules(ctx context.Context) (fired, dropped int, err
 		// so a scheduler that cannot reach PostgreSQL stops looking healthy.
 		return 0, 0, err
 	}
-	for _, entry := range due {
-		if e.fireScheduleEntry(ctx, entry, now) {
+	// Entries of the same version share one parsed document for the sweep;
+	// a workflow with many schedule nodes no longer re-reads and re-parses
+	// its snapshot per tick.
+	started := time.Now()
+	versions := map[string]*domain.Workflow{}
+	for index, entry := range due {
+		if time.Since(started) > scheduleSweepWallBudget {
+			slog.Warn("schedule sweep hit its wall budget; leased entries fire after the lease",
+				"deferred", len(due)-index, "budget", scheduleSweepWallBudget)
+			break
+		}
+		if e.fireScheduleEntry(ctx, entry, now, versions) {
 			fired++
 		} else {
 			dropped++
@@ -106,7 +122,9 @@ func (e *Engine) SweepDueSchedules(ctx context.Context) (fired, dropped int, err
 }
 
 // fireScheduleEntry handles one due tick; returns true when a run started.
-func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueScheduleEntriesRow, now time.Time) bool {
+// versions caches parsed documents across the sweep, keyed by tenant,
+// workflow and version so the scoped read is never bypassed.
+func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueScheduleEntriesRow, now time.Time, versions map[string]*domain.Workflow) bool {
 	q := store.New(e.pool)
 	schedule, err := cron.Parse(entry.CronExpression)
 	if err != nil {
@@ -158,17 +176,24 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		return false
 	}
 
-	version, err := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
-		ID: entry.WorkflowVersionID, OrgID: entry.OrgID, WorkflowID: entry.WorkflowID,
-	})
-	if err != nil {
-		_ = q.DeleteScheduleEntry(ctx, entry.ID)
-		return false
-	}
-	wf, _ := domain.Parse(version.DagJson)
+	versionKey := entry.OrgID + "|" + entry.WorkflowID + "|" + entry.WorkflowVersionID
+	wf := versions[versionKey]
 	if wf == nil {
-		advance("")
-		return false
+		version, err := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
+			ID: entry.WorkflowVersionID, OrgID: entry.OrgID, WorkflowID: entry.WorkflowID,
+		})
+		if err != nil {
+			_ = q.DeleteScheduleEntry(ctx, entry.ID)
+			return false
+		}
+		wf, _ = domain.Parse(version.DagJson)
+		if wf == nil {
+			advance("")
+			return false
+		}
+		if versions != nil {
+			versions[versionKey] = wf
+		}
 	}
 	nodePresent := false
 	for _, node := range wf.Nodes {
