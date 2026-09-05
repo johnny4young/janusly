@@ -526,6 +526,90 @@ func (s *V1Server) reviewWorkflowCore(r *http.Request, rc v1Request) opResult {
 	})
 }
 
+// reviewIssueMerger de-duplicates findings by code + node id; the first
+// writer of a key wins, which is how deterministic findings stay authoritative.
+type reviewIssueMerger struct {
+	seen   map[string]bool
+	merged []map[string]any
+}
+
+func (m *reviewIssueMerger) add(issue map[string]any) bool {
+	key, _ := issue["code"].(string)
+	if nodeID, ok := issue["nodeId"].(string); ok {
+		key += "|" + nodeID
+	}
+	if m.seen[key] {
+		return false
+	}
+	m.seen[key] = true
+	m.merged = append(m.merged, issue)
+	return true
+}
+
+// modelReviewIssues extracts the raw issue list from the model's envelope;
+// anything that is not `{"issues": [...]}` within the byte cap yields none.
+func modelReviewIssues(text string) []any {
+	parsed, ok := ai.ParseJSONValueBounded(text, aiReviewOutputMaxBytes)
+	if !ok {
+		return nil
+	}
+	envelope, ok := parsed.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, _ := envelope["issues"].([]any)
+	return raw
+}
+
+// sanitizeModelReviewIssue clamps one model finding to the closed contract:
+// a non-empty code, a known severity and a real (or absent) node id.
+func sanitizeModelReviewIssue(rawItem any, nodeIDs map[string]bool) (map[string]any, bool) {
+	item, ok := rawItem.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	code := oneLine(stringField(item, "code"), 120)
+	if code == "" {
+		return nil, false
+	}
+	severity, _ := item["severity"].(string)
+	if !reviewSeverities[severity] {
+		return nil, false
+	}
+	nodeID := ""
+	if rawNodeID, present := item["nodeId"]; present {
+		var validType bool
+		nodeID, validType = rawNodeID.(string)
+		if !validType || (nodeID != "" && !nodeIDs[nodeID]) {
+			return nil, false // malformed or invented node ids never reach the wire
+		}
+	}
+	issue := map[string]any{
+		"code": code, "severity": severity,
+		"message":    oneLine(stringField(item, "message"), 800),
+		"rationale":  oneLine(stringField(item, "rationale"), 1200),
+		"suggestion": oneLine(stringField(item, "suggestion"), 800),
+	}
+	if nodeID != "" {
+		issue["nodeId"] = nodeID
+	}
+	return issue, true
+}
+
+// reviewStatus is the worst severity among the merged findings.
+func reviewStatus(issues []map[string]any) string {
+	status := "pass"
+	for _, issue := range issues {
+		if issue["severity"] == "fail" {
+			return "fail"
+		}
+		if issue["severity"] == "warn" {
+			status = "warn"
+		}
+	}
+	return status
+}
+
 // sanitizeAiReview clamps the model's findings to the closed contract
 // (severity enum, real node ids) and MERGES the deterministic readiness
 // findings so an LLM can never hide a rule the gate would enforce.
@@ -534,83 +618,29 @@ func (s *V1Server) sanitizeAiReview(text string, wf *domain.Workflow, fallback m
 	for _, node := range wf.Nodes {
 		nodeIDs[node.ID] = true
 	}
-	seen := map[string]bool{}
-	merged := []map[string]any{}
-	appendIssue := func(issue map[string]any) bool {
-		key, _ := issue["code"].(string)
-		if nodeID, ok := issue["nodeId"].(string); ok {
-			key += "|" + nodeID
-		}
-		if seen[key] {
-			return false
-		}
-		seen[key] = true
-		merged = append(merged, issue)
-		return true
-	}
+	merger := &reviewIssueMerger{seen: map[string]bool{}, merged: []map[string]any{}}
 	// Deterministic findings are authoritative and must win de-duplication. If
 	// the model happens (or attempts) to emit the same code + node id, its copy
 	// may not weaken the severity or rewrite the production gate's evidence.
 	if fallbackIssues, ok := fallback["issues"].([]map[string]any); ok {
 		for _, issue := range fallbackIssues {
-			appendIssue(issue)
+			merger.add(issue)
 		}
 	}
 	modelIssueCount := 0
-	if parsed, ok := ai.ParseJSONValueBounded(text, aiReviewOutputMaxBytes); ok {
-		if envelope, ok := parsed.(map[string]any); ok {
-			if raw, ok := envelope["issues"].([]any); ok {
-				for _, rawItem := range raw {
-					if modelIssueCount >= maxAIReviewModelIssues {
-						break
-					}
-					item, ok := rawItem.(map[string]any)
-					if !ok {
-						continue
-					}
-					code := oneLine(stringField(item, "code"), 120)
-					if code == "" {
-						continue
-					}
-					severity, _ := item["severity"].(string)
-					if !reviewSeverities[severity] {
-						continue
-					}
-					nodeID := ""
-					if rawNodeID, present := item["nodeId"]; present {
-						var validType bool
-						nodeID, validType = rawNodeID.(string)
-						if !validType || (nodeID != "" && !nodeIDs[nodeID]) {
-							continue // malformed or invented node ids never reach the wire
-						}
-					}
-					issue := map[string]any{
-						"code": code, "severity": severity,
-						"message":    oneLine(stringField(item, "message"), 800),
-						"rationale":  oneLine(stringField(item, "rationale"), 1200),
-						"suggestion": oneLine(stringField(item, "suggestion"), 800),
-					}
-					if nodeID != "" {
-						issue["nodeId"] = nodeID
-					}
-					if appendIssue(issue) {
-						modelIssueCount++
-					}
-				}
-			}
-		}
-	}
-	status := "pass"
-	for _, issue := range merged {
-		if issue["severity"] == "fail" {
-			status = "fail"
+	for _, rawItem := range modelReviewIssues(text) {
+		if modelIssueCount >= maxAIReviewModelIssues {
 			break
 		}
-		if issue["severity"] == "warn" {
-			status = "warn"
+		issue, ok := sanitizeModelReviewIssue(rawItem, nodeIDs)
+		if !ok {
+			continue
+		}
+		if merger.add(issue) {
+			modelIssueCount++
 		}
 	}
-	return map[string]any{"status": status, "issues": merged}
+	return map[string]any{"status": reviewStatus(merger.merged), "issues": merger.merged}
 }
 
 /* ------------------------- /ai/suggest-improvement ------------------------ */
