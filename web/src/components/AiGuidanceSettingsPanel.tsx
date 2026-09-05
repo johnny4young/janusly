@@ -15,6 +15,7 @@ import { FormActions, FormField } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
 import { isRecord } from '../lib/guards'
 import { orgConfigValue } from '../lib/org-config-model'
+import { PLATFORM_TAG, useInvalidationNonce } from '@/lib/query-cache'
 
 type GuidanceLoadState = 'loading' | 'ready' | 'error'
 
@@ -24,11 +25,13 @@ function readGuidance(payload: unknown): string | null {
   return typeof value === 'string' ? value : null
 }
 
+const GUIDANCE_TAGS = [PLATFORM_TAG, 'org-config'] as const
+
 export function AiGuidanceSettingsPanel() {
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
-  const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const platformVersion = useInvalidationNonce(GUIDANCE_TAGS)
   const [guidance, setGuidance] = useState('')
   const [loadState, setLoadState] = useState<GuidanceLoadState>('loading')
   const [reloadNonce, setReloadNonce] = useState(0)

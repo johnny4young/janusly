@@ -24,6 +24,7 @@ import { FormActions, FormField, FormSection } from "./ui/Form";
 import { StatusSummary } from "./ui/StatusSummary";
 import { SwitchField } from "./ui/SwitchField";
 import { parseOrgConfigEntries } from "../lib/org-config-model";
+import { PLATFORM_TAG, useInvalidationNonce } from '@/lib/query-cache';
 
 const KEYS = {
   allowedEmailDomains: "auth.allowedEmailDomains",
@@ -54,11 +55,13 @@ const EMPTY_FORM: FormState = {
   humanFormResumeTtlSeconds: String(RESUME_TTL_DEFAULT),
 };
 
+const AUTH_POLICY_TAGS = [PLATFORM_TAG, 'org-config'] as const;
+
 export function AuthPolicySettingsPanel() {
   const { t } = useT();
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion);
   const addToast = useWorkflowStore((state) => state.addToast);
-  const platformVersion = useWorkflowStore((state) => state.platformVersion);
+  const platformVersion = useInvalidationNonce(AUTH_POLICY_TAGS);
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);

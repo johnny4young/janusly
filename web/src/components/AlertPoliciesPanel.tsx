@@ -26,6 +26,7 @@ import { tApiError, useT } from '../i18n'
 import { useConfirm } from './ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import type { Credential as CredentialRecord } from '../types'
+import { PLATFORM_TAG, useInvalidationNonce } from '@/lib/query-cache'
 
 type Channel = {
   destination: AlertDestination
@@ -173,10 +174,12 @@ function buildParameters(form: typeof EMPTY_FORM): Record<string, unknown> {
   }
 }
 
+const ALERT_POLICY_TAGS = [PLATFORM_TAG, 'alert-policies', 'credentials', 'slack-interactions'] as const
+
 export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } = {}): React.ReactElement {
   const { t } = useT()
   const confirmDialog = useConfirm()
-  const platformVersion = useWorkflowStore((s) => s.platformVersion)
+  const platformVersion = useInvalidationNonce(ALERT_POLICY_TAGS)
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
   const addToast = useWorkflowStore((s) => s.addToast)
   const orgId = useWorkflowStore((s) => s.orgId)

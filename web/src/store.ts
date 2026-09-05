@@ -38,6 +38,7 @@ import { isTerminalNodeStatus } from '@/lib/status'
 import { workflowToGraph } from './canvas-projections'
 import { PERSISTED_WORKSPACE_TABS } from './workspace-locations'
 import { readRoute, writeRoute, type WorkspaceRoute } from '@/lib/route'
+import { PLATFORM_TAG, invalidateTags } from '@/lib/query-cache'
 
 /**
  * Build the config for an explicit step-kind change.
@@ -917,6 +918,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     pendingBumpTimer = setTimeout(() => {
       pendingBumpTimer = null
       set((state) => ({ platformVersion: state.platformVersion + 1 }))
+      invalidateTags([PLATFORM_TAG])
     }, BUMP_COALESCE_MS)
   },
   setBudgetBlocked: (envelope) => set({ budgetBlocked: envelope }),

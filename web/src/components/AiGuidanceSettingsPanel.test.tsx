@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { AiGuidanceSettingsPanel } from './AiGuidanceSettingsPanel'
+import { PLATFORM_TAG, invalidateTags } from '@/lib/query-cache'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
@@ -66,7 +67,7 @@ describe('<AiGuidanceSettingsPanel />', () => {
     render(<AiGuidanceSettingsPanel />)
     const field = await screen.findByTestId('ai-guidance-org-input')
     fireEvent.change(field, { target: { value: 'Unsaved operator draft.' } })
-    useWorkflowStore.setState({ platformVersion: 1 })
+    act(() => invalidateTags([PLATFORM_TAG]))
     await waitFor(() => expect(api).toHaveBeenCalledTimes(2))
     expect(field).toHaveValue('Unsaved operator draft.')
   })
