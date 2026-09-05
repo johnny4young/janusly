@@ -70,8 +70,12 @@ Runtime shape guards (`isRecord`, `asRecord`, `asRecordOrEmpty`) live in
 reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector stay in
 the eager workspace chunk on purpose: splitting them fans their shared helpers
 into small chunks whose wrapper overhead costs more total bytes than the split
-saves, and the artifact budget counts every chunk; the per-route win waits for
-the stylesheet split. `RightPanel` and `AppWorkspace` are memoized, and the shell's derived counts
+saves, and the artifact budget counts every chunk. The stylesheet split has
+started where the rules are self-contained: the recovery case panel and the
+recovery item drawer import their own CSS next to the component, so Vite emits
+`RecoveryCasePanel.css` and `RunsPanel.css` with those lazy chunks and the
+eager `index.css` shrinks; every other panel still lives in `platform.css`
+until its rules are equally isolated. `RightPanel` and `AppWorkspace` are memoized, and the shell's derived counts
 are memoized on their inputs, because the shell renders on every store tick.
 Dialogs get Escape from `useDialogFocusTrap`'s `onEscape` option rather than
 their own keydown effects.

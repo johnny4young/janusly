@@ -14,6 +14,7 @@ import { Button } from './ui/Button'
 import { RecoveryCaseAutonomy } from './recovery-case/RecoveryCaseAutonomy'
 import { RecoveryCaseDecision } from './recovery-case/RecoveryCaseDecision'
 import { useRecoveryCaseController, type RecoveryCasePanelProps } from './recovery-case/useRecoveryCaseController'
+import './recovery-case/recovery-case.css'
 
 function recoveryCaseTone(
   state: RecoveryCase['state'],

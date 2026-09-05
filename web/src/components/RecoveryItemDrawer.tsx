@@ -26,6 +26,7 @@ import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { WorkflowAboutCard } from './WorkflowAboutCard'
 import { RecoveryHandoffSection } from './recovery-item/RecoveryHandoffSection'
 import { RecoveryOccurrences } from './recovery-item/RecoveryOccurrences'
+import './recovery-item/recovery-item-drawer.css'
 import { ReportDeliveryDialog } from './ReportDeliveryDialog'
 import { Button } from '@/components/ui/Button'
 

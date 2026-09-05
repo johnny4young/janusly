@@ -13,5 +13,7 @@
  *
  * Used by: web/src/main.tsx.
  * Invariant: keep imports in this order; canvas-only React Flow styles are
- * demand-loaded by CanvasWorkspace instead of joining the Home cold path.
+ * demand-loaded by CanvasWorkspace instead of joining the Home cold path, and
+ * the recovery case panel and recovery item drawer ship their stylesheets
+ * with their lazy chunks the same way.
  */
