@@ -194,12 +194,15 @@ func ValidateWithOptions(wf *Workflow, validExpression ExpressionValidator, repl
 		outgoing[edge.To] = true
 	}
 	nodeIDs := map[string]bool{}
+	ctx := nodeContext{
+		wf: wf, options: options, validExpression: validExpression,
+		allNodeIDs: allNodeIDs, outgoing: outgoingNodeIDs, push: push,
+	}
 	for _, node := range wf.Nodes {
 		if nodeIDs[node.ID] {
 			push(Issue{Code: CodeDuplicateNodeID, Message: "Duplicate node id: " + node.ID, NodeID: node.ID})
 		}
 		nodeIDs[node.ID] = true
-
 		if node.ID == "input" {
 			push(Issue{Code: CodeNodeIDReserved, Message: `Node id "input" is reserved for the run input (context.input)`, NodeID: node.ID})
 		}
@@ -213,213 +216,8 @@ func ValidateWithOptions(wf *Workflow, validExpression ExpressionValidator, repl
 				push(Issue{Code: CodeRetryInvalidConfig, Message: err.Error(), NodeID: node.ID})
 			}
 		}
-		if node.Type == "http" {
-			if _, err := httpcontract.ResolveNodeConfig(node.Config, true); err != nil {
-				code := CodeHTTPInvalidConfig
-				if configError, ok := err.(*httpcontract.NodeConfigError); ok && configError.Kind == httpcontract.NodeConfigMissingURL {
-					code = CodeHTTPMissingURL
-				}
-				push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
-			}
-		}
-		if node.Type == "tool" {
-			toolName, _ := node.Config["tool"].(string)
-			toolName = strings.TrimSpace(toolName)
-			if toolName == "" {
-				push(Issue{Code: CodeToolMissingName, Message: "Tool node requires config.tool", NodeID: node.ID})
-			} else if options.ToolValidator != nil {
-				input := map[string]any{}
-				if raw, present := node.Config["input"]; present {
-					var valid bool
-					input, valid = raw.(map[string]any)
-					if !valid || input == nil {
-						push(Issue{Code: CodeToolInvalidInput, Message: "Tool node config.input must be an object", NodeID: node.ID})
-						input = nil
-					}
-				}
-				if input != nil {
-					if err := options.ToolValidator(toolName, input, !options.AllowIncompleteToolInputs); err != nil {
-						push(Issue{Code: CodeToolInvalidInput, Message: err.Error(), NodeID: node.ID})
-					}
-				}
-			}
-		}
-		if node.Type == "subworkflow" {
-			workflowID, _ := node.Config["workflowId"].(string)
-			workflowID = strings.TrimSpace(workflowID)
-			if workflowID == "" {
-				push(Issue{Code: CodeSubworkflowMissingWorkflow, Message: "Subworkflow node requires config.workflowId", NodeID: node.ID})
-			} else if wf.ID != "" && workflowID == wf.ID {
-				push(Issue{Code: CodeSubworkflowSelfReference, Message: "A workflow cannot call itself directly", NodeID: node.ID})
-			}
-			if version, present := node.Config["version"]; present && !validWorkflowVersion(version) {
-				push(Issue{
-					Code:    CodeSubworkflowInvalidVersion,
-					Message: "Subworkflow config.version must be an integer between 1 and 2147483647",
-					NodeID:  node.ID,
-				})
-			}
-		}
-		if node.Type == "router" || node.Type == "router_llm" {
-			entries, isArray := arrayValues(node.Config["candidates"])
-			if isArray {
-				outgoing := outgoingNodeIDs[node.ID]
-				for _, candidate := range entries {
-					entry, ok := candidate.(map[string]any)
-					if !ok || entry == nil {
-						continue
-					}
-					candidateID := trimmedString(entry["nodeId"])
-					if candidateID == "" {
-						candidateID = trimmedString(entry["id"])
-					}
-					if candidateID == "" {
-						continue
-					}
-					if !allNodeIDs[candidateID] {
-						push(Issue{Code: CodeRouterCandidateUnknown, Message: "Router candidate does not exist: " + candidateID, NodeID: node.ID})
-					} else if !outgoing[candidateID] {
-						push(Issue{
-							Code:    CodeRouterCandidateNotSuccessor,
-							Message: fmt.Sprintf("Router candidate %q must be a direct successor (add an edge %s → %s) or the decision cannot route", candidateID, node.ID, candidateID),
-							NodeID:  node.ID,
-						})
-					}
-				}
-			}
-
-			if !isArray || len(entries) == 0 {
-				push(Issue{Code: CodeRouterMissingCandidates, Message: fmt.Sprintf("%s node requires a non-empty config.candidates array", node.Type), NodeID: node.ID})
-			} else {
-				for index, candidate := range entries {
-					entry, ok := candidate.(map[string]any)
-					if !ok || entry == nil {
-						push(Issue{Code: CodeRouterInvalidCandidate, Message: fmt.Sprintf("%s candidate at index %d must be an object", node.Type, index), NodeID: node.ID})
-						continue
-					}
-					candidateID := trimmedString(entry["nodeId"])
-					if candidateID == "" {
-						candidateID = trimmedString(entry["id"])
-					}
-					if candidateID == "" {
-						push(Issue{Code: CodeRouterCandidateMissingID, Message: fmt.Sprintf("%s candidate at index %d must have a non-empty nodeId (legacy \"id\" also accepted)", node.Type, index), NodeID: node.ID})
-						continue
-					}
-					if !allNodeIDs[candidateID] {
-						push(Issue{Code: CodeRouterCandidateUnknownID, Message: fmt.Sprintf("%s candidate at index %d references an unknown node: %s", node.Type, index, candidateID), NodeID: node.ID})
-					}
-				}
-			}
-		}
-		if node.Type == "condition" {
-			if isJSFalsy(node.Config["expression"]) {
-				push(Issue{Code: CodeConditionMissingExpr, Message: "Condition node requires config.expression", NodeID: node.ID})
-			} else if ok, msg := validExpression(jsString(node.Config["expression"])); !ok {
-				if msg == "" {
-					msg = "Invalid condition expression"
-				}
-				push(Issue{Code: CodeConditionInvalidExpr, Message: msg, NodeID: node.ID})
-			}
-		}
-		if node.Type == "transform" && !isNonEmptyObject(node.Config["mapping"]) {
-			push(Issue{Code: CodeTransformMissingMapping, Message: "Transform node requires a non-empty config.mapping object", NodeID: node.ID})
-		}
-		if node.Type == "schedule" {
-			if _, err := ResolveScheduleConfig(node.Config); err != nil {
-				push(Issue{Code: CodeScheduleInvalidCron, Message: err.Error(), NodeID: node.ID})
-			}
-		}
-		if node.Type == "human_form" {
-			schema, valid := ParseInputSchemaValue(node.Config["schema"])
-			if !valid {
-				push(Issue{Code: CodeHumanFormInvalidSchema, Message: "Human form node requires a valid config.schema", NodeID: node.ID})
-			} else if schema.Type == "object" && len(schema.Properties) == 0 {
-				push(Issue{Code: CodeHumanFormEmptySchema, Message: "Human form node requires at least one field in config.schema.properties", NodeID: node.ID})
-			} else if initialValues, present := node.Config["initialValues"]; present {
-				if errs := ValidateInputValue(schema, initialValues, "$"); len(errs) > 0 {
-					push(Issue{Code: CodeHumanFormInvalidInitial,
-						Message: "Human form config.initialValues does not satisfy config.schema: " + strings.Join(errs, "; "), NodeID: node.ID})
-				}
-			}
-		}
-		if node.Type == "ai" {
-			prompt, _ := node.Config["prompt"].(string)
-			_, promptRefPresent, promptRefErr := ResolvePromptReference(node.Config, "promptRef")
-			if promptRefErr != nil {
-				push(Issue{Code: CodeAIInvalidPromptRef, Message: promptRefErr.Error(), NodeID: node.ID})
-			}
-			if _, err := ResolvePromptVariables(node.Config); err != nil {
-				push(Issue{Code: CodeAIInvalidPromptVariables, Message: err.Error(), NodeID: node.ID})
-			}
-			if strings.TrimSpace(prompt) == "" && !promptRefPresent {
-				push(Issue{Code: CodeAIMissingPrompt,
-					Message: "AI node requires config.prompt or config.promptRef", NodeID: node.ID})
-			}
-			if schema, present := node.Config["outputSchema"]; present {
-				if _, valid := ParseInputSchemaValue(schema); !valid {
-					push(Issue{Code: CodeAIInvalidOutputSchema,
-						Message: "AI node config.outputSchema must use the supported JSON Schema subset", NodeID: node.ID})
-				}
-			}
-		}
-		if node.Type == "agent" {
-			goal, _ := node.Config["goal"].(string)
-			if strings.TrimSpace(goal) == "" {
-				push(Issue{Code: CodeAgentMissingGoal, Message: "Agent node requires config.goal", NodeID: node.ID})
-			}
-			if _, err := ResolveAgentRuntimeConfig(node.Config, AgentDefaultMaxSteps, false); err != nil {
-				push(Issue{Code: agentConfigIssueCode(err, false), Message: err.Error(), NodeID: node.ID})
-			} else {
-				validateAgentTool(node.Config, node.ID, CodeAgentInvalidTool, options, push)
-			}
-		}
-		if node.Type == "multi_agent" {
-			resolved, err := ResolveMultiAgentRuntimeConfig(node.Config)
-			if err != nil {
-				push(Issue{Code: agentConfigIssueCode(err, true), Message: err.Error(), NodeID: node.ID})
-			} else {
-				for _, raw := range resolved.Agents {
-					agent, _ := raw.(map[string]any)
-					validateAgentTool(agent, node.ID, CodeMultiAgentInvalidConfig, options, push)
-				}
-			}
-		}
-		if node.Type == "loop" {
-			validateLoopConfig(node, options, push)
-		}
-		if node.Type == "parallel_fork" {
-			if _, err := ResolveParallelForkBranches(node.Config); err != nil {
-				push(Issue{Code: CodeParallelForkInvalidBranches, Message: err.Error(), NodeID: node.ID})
-			}
-		}
-		if node.Type == "join" {
-			if _, err := ResolveJoinSources(node.Config); err != nil {
-				push(Issue{Code: CodeJoinInvalidSources, Message: err.Error(), NodeID: node.ID})
-			}
-		}
-		switch node.Type {
-		case "webhook_received", "email_received", "file_dropped", "mcp_server_event", "pagerduty_incident":
-			if err := ValidateTriggerConfig(node.Type, node.Config); err != nil {
-				push(Issue{Code: CodeTriggerInvalidConfig, Message: err.Error(), NodeID: node.ID})
-			}
-		}
-		if node.Type == "approval" {
-			if _, err := ResolveApprovalWaitingConfig(node.Config, time.Now()); err != nil {
-				code := "approval_invalid_deadline"
-				if configErr, ok := err.(*WaitingConfigError); ok {
-					code = configErr.Code
-				}
-				push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
-			}
-		}
-		if node.Type == "wait_until" {
-			if err := ValidateWaitUntilConfig(node.Config); err != nil {
-				code := "wait_until_invalid_duration"
-				if configErr, ok := err.(*WaitingConfigError); ok {
-					code = configErr.Code
-				}
-				push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
-			}
+		if validate := nodeValidators[node.Type]; validate != nil {
+			validate(node, ctx)
 		}
 	}
 
@@ -485,6 +283,297 @@ func ValidateWithOptions(wf *Workflow, validExpression ExpressionValidator, repl
 	}
 
 	return ValidationResult{Valid: len(issues) == 0, Issues: issues}
+}
+
+// nodeContext carries what a per-type validator needs beyond its node: the
+// workflow, the caller's options, the expression validator, the id set and
+// the adjacency built once per validation, and the issue sink.
+type nodeContext struct {
+	wf              *Workflow
+	options         ValidationOptions
+	validExpression ExpressionValidator
+	allNodeIDs      map[string]bool
+	outgoing        map[string]map[string]bool
+	push            func(Issue)
+}
+
+// nodeValidators dispatches the type-specific checks. A node has exactly
+// one type, so the issue order equals the previous single-pass order:
+// generic checks first, then the type's own.
+var nodeValidators = map[string]func(node Node, ctx nodeContext){
+	"http":               validateHttpNode,
+	"tool":               validateToolNode,
+	"subworkflow":        validateSubworkflowNode,
+	"router":             validateRouterNode,
+	"router_llm":         validateRouterNode,
+	"condition":          validateConditionNode,
+	"transform":          validateTransformNode,
+	"schedule":           validateScheduleNode,
+	"human_form":         validateHumanFormNode,
+	"ai":                 validateAiNode,
+	"agent":              validateAgentNode,
+	"multi_agent":        validateMultiAgentNode,
+	"loop":               validateLoopNode,
+	"parallel_fork":      validateParallelForkNode,
+	"join":               validateJoinNode,
+	"webhook_received":   validateTriggerNode,
+	"email_received":     validateTriggerNode,
+	"file_dropped":       validateTriggerNode,
+	"mcp_server_event":   validateTriggerNode,
+	"pagerduty_incident": validateTriggerNode,
+	"approval":           validateApprovalNode,
+	"wait_until":         validateWaitUntilNode,
+}
+
+func validateHttpNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	if _, err := httpcontract.ResolveNodeConfig(node.Config, true); err != nil {
+		code := CodeHTTPInvalidConfig
+		if configError, ok := err.(*httpcontract.NodeConfigError); ok && configError.Kind == httpcontract.NodeConfigMissingURL {
+			code = CodeHTTPMissingURL
+		}
+		push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
+	}
+}
+
+func validateToolNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	options := ctx.options
+	toolName, _ := node.Config["tool"].(string)
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		push(Issue{Code: CodeToolMissingName, Message: "Tool node requires config.tool", NodeID: node.ID})
+	} else if options.ToolValidator != nil {
+		input := map[string]any{}
+		if raw, present := node.Config["input"]; present {
+			var valid bool
+			input, valid = raw.(map[string]any)
+			if !valid || input == nil {
+				push(Issue{Code: CodeToolInvalidInput, Message: "Tool node config.input must be an object", NodeID: node.ID})
+				input = nil
+			}
+		}
+		if input != nil {
+			if err := options.ToolValidator(toolName, input, !options.AllowIncompleteToolInputs); err != nil {
+				push(Issue{Code: CodeToolInvalidInput, Message: err.Error(), NodeID: node.ID})
+			}
+		}
+	}
+}
+
+func validateSubworkflowNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	wf := ctx.wf
+	workflowID, _ := node.Config["workflowId"].(string)
+	workflowID = strings.TrimSpace(workflowID)
+	if workflowID == "" {
+		push(Issue{Code: CodeSubworkflowMissingWorkflow, Message: "Subworkflow node requires config.workflowId", NodeID: node.ID})
+	} else if wf.ID != "" && workflowID == wf.ID {
+		push(Issue{Code: CodeSubworkflowSelfReference, Message: "A workflow cannot call itself directly", NodeID: node.ID})
+	}
+	if version, present := node.Config["version"]; present && !validWorkflowVersion(version) {
+		push(Issue{
+			Code:    CodeSubworkflowInvalidVersion,
+			Message: "Subworkflow config.version must be an integer between 1 and 2147483647",
+			NodeID:  node.ID,
+		})
+	}
+}
+
+func validateRouterNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	allNodeIDs := ctx.allNodeIDs
+	outgoingNodeIDs := ctx.outgoing
+	entries, isArray := arrayValues(node.Config["candidates"])
+	if isArray {
+		outgoing := outgoingNodeIDs[node.ID]
+		for _, candidate := range entries {
+			entry, ok := candidate.(map[string]any)
+			if !ok || entry == nil {
+				continue
+			}
+			candidateID := trimmedString(entry["nodeId"])
+			if candidateID == "" {
+				candidateID = trimmedString(entry["id"])
+			}
+			if candidateID == "" {
+				continue
+			}
+			if !allNodeIDs[candidateID] {
+				push(Issue{Code: CodeRouterCandidateUnknown, Message: "Router candidate does not exist: " + candidateID, NodeID: node.ID})
+			} else if !outgoing[candidateID] {
+				push(Issue{
+					Code:    CodeRouterCandidateNotSuccessor,
+					Message: fmt.Sprintf("Router candidate %q must be a direct successor (add an edge %s → %s) or the decision cannot route", candidateID, node.ID, candidateID),
+					NodeID:  node.ID,
+				})
+			}
+		}
+	}
+
+	if !isArray || len(entries) == 0 {
+		push(Issue{Code: CodeRouterMissingCandidates, Message: fmt.Sprintf("%s node requires a non-empty config.candidates array", node.Type), NodeID: node.ID})
+	} else {
+		for index, candidate := range entries {
+			entry, ok := candidate.(map[string]any)
+			if !ok || entry == nil {
+				push(Issue{Code: CodeRouterInvalidCandidate, Message: fmt.Sprintf("%s candidate at index %d must be an object", node.Type, index), NodeID: node.ID})
+				continue
+			}
+			candidateID := trimmedString(entry["nodeId"])
+			if candidateID == "" {
+				candidateID = trimmedString(entry["id"])
+			}
+			if candidateID == "" {
+				push(Issue{Code: CodeRouterCandidateMissingID, Message: fmt.Sprintf("%s candidate at index %d must have a non-empty nodeId (legacy \"id\" also accepted)", node.Type, index), NodeID: node.ID})
+				continue
+			}
+			if !allNodeIDs[candidateID] {
+				push(Issue{Code: CodeRouterCandidateUnknownID, Message: fmt.Sprintf("%s candidate at index %d references an unknown node: %s", node.Type, index, candidateID), NodeID: node.ID})
+			}
+		}
+	}
+}
+
+func validateConditionNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	validExpression := ctx.validExpression
+	if isJSFalsy(node.Config["expression"]) {
+		push(Issue{Code: CodeConditionMissingExpr, Message: "Condition node requires config.expression", NodeID: node.ID})
+	} else if ok, msg := validExpression(jsString(node.Config["expression"])); !ok {
+		if msg == "" {
+			msg = "Invalid condition expression"
+		}
+		push(Issue{Code: CodeConditionInvalidExpr, Message: msg, NodeID: node.ID})
+	}
+}
+
+func validateTransformNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	if !isNonEmptyObject(node.Config["mapping"]) {
+		push(Issue{Code: CodeTransformMissingMapping, Message: "Transform node requires a non-empty config.mapping object", NodeID: node.ID})
+	}
+}
+
+func validateScheduleNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	if _, err := ResolveScheduleConfig(node.Config); err != nil {
+		push(Issue{Code: CodeScheduleInvalidCron, Message: err.Error(), NodeID: node.ID})
+	}
+}
+
+func validateHumanFormNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	schema, valid := ParseInputSchemaValue(node.Config["schema"])
+	if !valid {
+		push(Issue{Code: CodeHumanFormInvalidSchema, Message: "Human form node requires a valid config.schema", NodeID: node.ID})
+	} else if schema.Type == "object" && len(schema.Properties) == 0 {
+		push(Issue{Code: CodeHumanFormEmptySchema, Message: "Human form node requires at least one field in config.schema.properties", NodeID: node.ID})
+	} else if initialValues, present := node.Config["initialValues"]; present {
+		if errs := ValidateInputValue(schema, initialValues, "$"); len(errs) > 0 {
+			push(Issue{Code: CodeHumanFormInvalidInitial,
+				Message: "Human form config.initialValues does not satisfy config.schema: " + strings.Join(errs, "; "), NodeID: node.ID})
+		}
+	}
+}
+
+func validateAiNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	prompt, _ := node.Config["prompt"].(string)
+	_, promptRefPresent, promptRefErr := ResolvePromptReference(node.Config, "promptRef")
+	if promptRefErr != nil {
+		push(Issue{Code: CodeAIInvalidPromptRef, Message: promptRefErr.Error(), NodeID: node.ID})
+	}
+	if _, err := ResolvePromptVariables(node.Config); err != nil {
+		push(Issue{Code: CodeAIInvalidPromptVariables, Message: err.Error(), NodeID: node.ID})
+	}
+	if strings.TrimSpace(prompt) == "" && !promptRefPresent {
+		push(Issue{Code: CodeAIMissingPrompt,
+			Message: "AI node requires config.prompt or config.promptRef", NodeID: node.ID})
+	}
+	if schema, present := node.Config["outputSchema"]; present {
+		if _, valid := ParseInputSchemaValue(schema); !valid {
+			push(Issue{Code: CodeAIInvalidOutputSchema,
+				Message: "AI node config.outputSchema must use the supported JSON Schema subset", NodeID: node.ID})
+		}
+	}
+}
+
+func validateAgentNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	options := ctx.options
+	goal, _ := node.Config["goal"].(string)
+	if strings.TrimSpace(goal) == "" {
+		push(Issue{Code: CodeAgentMissingGoal, Message: "Agent node requires config.goal", NodeID: node.ID})
+	}
+	if _, err := ResolveAgentRuntimeConfig(node.Config, AgentDefaultMaxSteps, false); err != nil {
+		push(Issue{Code: agentConfigIssueCode(err, false), Message: err.Error(), NodeID: node.ID})
+	} else {
+		validateAgentTool(node.Config, node.ID, CodeAgentInvalidTool, options, push)
+	}
+}
+
+func validateMultiAgentNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	options := ctx.options
+	resolved, err := ResolveMultiAgentRuntimeConfig(node.Config)
+	if err != nil {
+		push(Issue{Code: agentConfigIssueCode(err, true), Message: err.Error(), NodeID: node.ID})
+	} else {
+		for _, raw := range resolved.Agents {
+			agent, _ := raw.(map[string]any)
+			validateAgentTool(agent, node.ID, CodeMultiAgentInvalidConfig, options, push)
+		}
+	}
+}
+
+func validateLoopNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	options := ctx.options
+	validateLoopConfig(node, options, push)
+}
+
+func validateParallelForkNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	if _, err := ResolveParallelForkBranches(node.Config); err != nil {
+		push(Issue{Code: CodeParallelForkInvalidBranches, Message: err.Error(), NodeID: node.ID})
+	}
+}
+
+func validateJoinNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	if _, err := ResolveJoinSources(node.Config); err != nil {
+		push(Issue{Code: CodeJoinInvalidSources, Message: err.Error(), NodeID: node.ID})
+	}
+}
+
+func validateTriggerNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	if err := ValidateTriggerConfig(node.Type, node.Config); err != nil {
+		push(Issue{Code: CodeTriggerInvalidConfig, Message: err.Error(), NodeID: node.ID})
+	}
+}
+
+func validateApprovalNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	if _, err := ResolveApprovalWaitingConfig(node.Config, time.Now()); err != nil {
+		code := "approval_invalid_deadline"
+		if configErr, ok := err.(*WaitingConfigError); ok {
+			code = configErr.Code
+		}
+		push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
+	}
+}
+
+func validateWaitUntilNode(node Node, ctx nodeContext) {
+	push := ctx.push
+	if err := ValidateWaitUntilConfig(node.Config); err != nil {
+		code := "wait_until_invalid_duration"
+		if configErr, ok := err.(*WaitingConfigError); ok {
+			code = configErr.Code
+		}
+		push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
+	}
 }
 
 func agentConfigIssueCode(err error, multi bool) string {
