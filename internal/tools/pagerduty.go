@@ -1023,9 +1023,11 @@ func parseWorkingWindows(raw any) []WorkingWindow {
 	return windows
 }
 
-// executePagerDutyAPICall runs the three API-backed tools through the
-// chokepoint deps. `name` selects method/path/body; every failure mode
-// answers the envelope.
+// executePagerDutyAPICall runs the three credentialed incident operations
+// through the shared provider seam: the request differs per operation, and
+// so does the receipt that proves it — a read must return the same incident,
+// an acknowledge must come back acknowledged, and a snooze must carry the
+// exact pending unacknowledge deadline the duration implies.
 func executePagerDutyAPICall(ctx context.Context, name string, input map[string]any, deps *IntegrationDeps) map[string]any {
 	start := time.Now()
 	latency := func() int { return int(time.Since(start).Milliseconds()) }
@@ -1052,113 +1054,67 @@ func executePagerDutyAPICall(ctx context.Context, name string, input map[string]
 		}
 		snoozeDuration = int(duration)
 	}
-	record := func(ok bool, statusCode int, errMessage string) {
-		if deps.Record != nil {
-			deps.Record(name, credential, ok, statusCode, errMessage, latency())
-		}
-	}
-
-	rateLimit := pagerDutyDefaultRateLimitMin
-	if deps.RateLimitPerMin != nil {
-		rateLimit = deps.RateLimitPerMin("pagerduty", pagerDutyDefaultRateLimitMin)
-	}
-	if rawOverride, present := input["rateLimitPerMin"]; present {
-		override, ok := boundedWholeNumber(rawOverride, 1, 10_000)
-		if !ok {
-			return envelopeError(name+" requires an integer rateLimitPerMin in 1..10000", latency())
-		}
-		// Workflow configuration may reduce provider pressure for one flow, but
-		// it can never raise the tenant ceiling resolved from org configuration.
-		rateLimit = min(rateLimit, int(override))
-	}
-	token, gateError := deps.Gate(ctx, name, "pagerduty_api_token", credential, rateLimit)
-	if gateError != "" {
-		record(false, 0, gateError)
-		return envelopeError(gateError, latency())
-	}
-
-	method, path := "GET", "/incidents/"+url.PathEscape(incidentID)
-	var body []byte
-	switch name {
-	case "pagerduty.incident.acknowledge":
-		method, path = "PUT", "/incidents"
-		body, _ = json.Marshal(map[string]any{"incidents": []map[string]any{{
-			"id": incidentID, "type": "incident_reference", "status": "acknowledged",
-		}}})
-	case "pagerduty.incident.snooze":
-		method, path = "POST", path+"/snooze"
-		body, _ = json.Marshal(map[string]any{"duration": snoozeDuration})
-	}
-
-	statusCode, responseBody, fetchError := deps.Fetch(ctx,
-		method, pagerDutyAPIBase(region)+path, pagerDutyHeaders(token, requesterEmail), body,
-		pagerDutyResponseMaxBytes)
-	ok := fetchError == "" && statusCode >= 200 && statusCode < 300
-
-	if name == "pagerduty.incident.get" {
-		var incident *pagerDutyIncident
-		if ok {
-			incident = parsePagerDutyIncidentBody(responseBody)
-		}
-		ok = ok && incident != nil && incident.ID == incidentID
-		if !ok {
-			message := "pagerduty incident read failed"
-			if statusCode > 0 {
-				message = fmt.Sprintf("pagerduty incident read failed (%d)", statusCode)
-			}
-			record(false, statusCode, message)
-			result := envelopeError(message, latency())
-			if statusCode > 0 {
-				result["statusCode"] = statusCode
-			}
-			return result
-		}
-		record(true, statusCode, "")
-		return map[string]any{"ok": true, "incident": incident.toMap(), "statusCode": statusCode, "latencyMs": latency()}
-	}
-	if ok && name == "pagerduty.incident.acknowledge" {
-		incident := parsePagerDutyIncidentListBody(responseBody, incidentID)
-		ok = incident != nil && incident.Status == "acknowledged"
-		if ok {
-			record(true, statusCode, "")
-			return map[string]any{
-				"ok": true, "incident": incident.toMap(),
-				"statusCode": statusCode, "latencyMs": latency(),
-			}
-		}
-	}
-	if ok && name == "pagerduty.incident.snooze" {
-		incident := parsePagerDutyIncidentBody(responseBody)
-		snoozeUntil, hasSnooze := pagerDutyUnacknowledgeAt(incident)
-		ok = incident != nil && incident.ID == incidentID && incident.Status == "acknowledged" && hasSnooze &&
-			pagerDutySnoozeReceiptMatches(snoozeUntil, start, time.Now(), snoozeDuration)
-		if ok {
-			record(true, statusCode, "")
-			return map[string]any{
-				"ok": true, "incident": incident.toMap(), "snoozeUntil": snoozeUntil,
-				"statusCode": statusCode, "latencyMs": latency(),
-			}
-		}
-	}
-
 	verb := "acknowledge"
-	if name == "pagerduty.incident.snooze" {
+	switch name {
+	case "pagerduty.incident.get":
+		verb = "incident read"
+	case "pagerduty.incident.snooze":
 		verb = "snooze"
 	}
-	if !ok {
-		message := "pagerduty " + verb + " failed"
+	failure := func(statusCode int, _ string) string {
 		if statusCode > 0 {
-			message = fmt.Sprintf("pagerduty %s failed (%d)", verb, statusCode)
+			return fmt.Sprintf("pagerduty %s failed (%d)", verb, statusCode)
 		}
-		record(false, statusCode, message)
-		result := envelopeError(message, latency())
-		if statusCode > 0 {
-			result["statusCode"] = statusCode
-		}
-		return result
+		return "pagerduty " + verb + " failed"
 	}
-	record(true, statusCode, "")
-	return map[string]any{"ok": true, "statusCode": statusCode, "latencyMs": latency()}
+	rateLimitOverride, hasRateLimitOverride := input["rateLimitPerMin"]
+	call := providerCall{
+		tool: name, credentialKind: "pagerduty_api_token", credential: credential,
+		rateLimitFamily: "pagerduty", rateLimitDefault: pagerDutyDefaultRateLimitMin,
+		rateLimitOverride: rateLimitOverride, hasRateLimitOverride: hasRateLimitOverride,
+		responseMaxBytes: pagerDutyResponseMaxBytes,
+		request: func(token string) (string, string, map[string]string, []byte, string) {
+			method, path := "GET", "/incidents/"+url.PathEscape(incidentID)
+			var body []byte
+			switch name {
+			case "pagerduty.incident.acknowledge":
+				method, path = "PUT", "/incidents"
+				body, _ = json.Marshal(map[string]any{"incidents": []map[string]any{{
+					"id": incidentID, "type": "incident_reference", "status": "acknowledged",
+				}}})
+			case "pagerduty.incident.snooze":
+				method, path = "POST", path+"/snooze"
+				body, _ = json.Marshal(map[string]any{"duration": snoozeDuration})
+			}
+			return method, pagerDutyAPIBase(region) + path, pagerDutyHeaders(token, requesterEmail), body, ""
+		},
+		receipt: func(statusCode int, responseBody string, startedAt time.Time) (map[string]any, string) {
+			switch name {
+			case "pagerduty.incident.get":
+				incident := parsePagerDutyIncidentBody(responseBody)
+				if incident == nil || incident.ID != incidentID {
+					return nil, failure(statusCode, "")
+				}
+				return map[string]any{"incident": incident.toMap()}, ""
+			case "pagerduty.incident.acknowledge":
+				incident := parsePagerDutyIncidentListBody(responseBody, incidentID)
+				if incident == nil || incident.Status != "acknowledged" {
+					return nil, failure(statusCode, "")
+				}
+				return map[string]any{"incident": incident.toMap()}, ""
+			default:
+				incident := parsePagerDutyIncidentBody(responseBody)
+				snoozeUntil, hasSnooze := pagerDutyUnacknowledgeAt(incident)
+				if incident == nil || incident.ID != incidentID || incident.Status != "acknowledged" || !hasSnooze ||
+					!pagerDutySnoozeReceiptMatches(snoozeUntil, startedAt, time.Now(), snoozeDuration) {
+					return nil, failure(statusCode, "")
+				}
+				return map[string]any{"incident": incident.toMap(), "snoozeUntil": snoozeUntil}, ""
+			}
+		},
+		failure: failure,
+	}
+	return call.execute(ctx, deps)
 }
 
 func validPagerDutyRequesterEmail(value string) bool {

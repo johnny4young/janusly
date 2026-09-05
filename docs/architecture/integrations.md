@@ -109,6 +109,15 @@ re-read the durable row and continue or return the settled duplicate result.
 PagerDuty API calls do not follow redirects, so bearer
 tokens and PUT/POST bodies are never replayed away from the explicitly
 configured regional provider endpoint.
+Credentialed provider operations share one call seam in `internal/tools`: the
+provider supplies the request it needs and the receipt check that proves the
+provider did what was asked (PagerDuty's read must return the same incident,
+its acknowledge must come back acknowledged, its snooze must carry the exact
+pending unacknowledge deadline), while the seam owns rate-limit resolution — a
+per-node override may lower the tenant ceiling, never raise it — the
+credential gate, usage recording and the failure envelope. Every provider
+therefore reports the same `ok`, `statusCode` and `latencyMs` shape, and a new
+provider adds request and receipt code, not gating or recording code.
 An unsuccessful `require_ok` envelope from any write-capable tool is persisted
 with `writeSide=true`, even when the provider response is ambiguous. Declared
 whole-node retry policies cannot replay that effect automatically; it enters
