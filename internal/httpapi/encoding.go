@@ -17,53 +17,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/httpkit"
 )
 
-func writeV1(w http.ResponseWriter, requestID string, status int, payload map[string]any) {
-	payload["apiVersion"] = "v1"
-	payload["requestId"] = requestID
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", requestID)
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
 func writeV1Data(w http.ResponseWriter, requestID string, data any) {
-	writeV1(w, requestID, http.StatusOK, map[string]any{"data": data})
+	httpkit.WriteV1Data(w, requestID, data)
 }
 
 func writeV1Error(w http.ResponseWriter, requestID string, status int, code, message string, params map[string]any) {
-	status = publicErrorStatus(code, status)
-	message, params = publicErrorFields(code, message, params)
-	errBody := map[string]any{"code": code, "message": message}
-	if params != nil {
-		errBody["params"] = params
-	}
-	writeV1(w, requestID, status, map[string]any{"error": errBody})
+	httpkit.WriteV1Error(w, requestID, status, code, message, params)
 }
 
 func decodeBody(r *http.Request, into any) error {
-	return decodeBodyBounded(r, into, 2<<20)
+	return httpkit.DecodeBody(r, into)
 }
 
 func decodeBodyBounded(r *http.Request, into any, maxBytes int64) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return err
-	}
-	// A strict body is exactly one JSON value. Decoder.Decode alone accepts a
-	// valid prefix followed by a second document, which lets clients sign,
-	// audit, or reason about different bytes than the handler actually uses.
-	// Whitespace after the first value still resolves to io.EOF.
-	var trailing json.RawMessage
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("request body must contain exactly one JSON value")
-		}
-		return err
-	}
-	return nil
+	return httpkit.DecodeBodyBounded(r, into, maxBytes)
 }
 
 // decodeJSONRecord mirrors the contract's readJson + asRecord pair: it
@@ -96,22 +66,8 @@ func decodeJSONRecord(r *http.Request, maxBytes int64) (map[string]any, *opResul
 	return record, nil
 }
 
-// readRawBody preserves the exact signed bytes while enforcing the same hard
-// cap as the public API contract. LimitReader alone is insufficient:
-// it silently turns an oversized signed payload into a valid truncated prefix.
 func readRawBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, bool) {
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))
-	if err == nil {
-		return raw, true
-	}
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		writeUnversioned(w, opError(http.StatusRequestEntityTooLarge, "server_request_failed",
-			fmt.Sprintf("Request body too large. Limit is %d bytes", maxBytes), nil))
-		return nil, false
-	}
-	writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-	return nil, false
+	return httpkit.ReadRawBody(w, r, maxBytes)
 }
 
 var unmarshalFieldPattern = regexp.MustCompile(`rawWorkflow\.(\w+)`)
@@ -167,19 +123,9 @@ func rawOrNull(raw json.RawMessage) any {
 	return raw
 }
 
-func timeOrNull(t *time.Time) any {
-	if t == nil {
-		return nil
-	}
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
-}
+func timeOrNull(t *time.Time) any { return httpkit.TimeOrNull(t) }
 
-func textOrNull(t pgtype.Text) any {
-	if !t.Valid {
-		return nil
-	}
-	return t.String
-}
+func textOrNull(t pgtype.Text) any { return httpkit.TextOrNull(t) }
 
 func textOrNullString(t any) any {
 	switch v := t.(type) {

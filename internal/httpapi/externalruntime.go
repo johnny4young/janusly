@@ -29,11 +29,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/secretstore"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
@@ -582,10 +582,7 @@ func mapRows[T any](rows []T, view func(T) map[string]any) []map[string]any {
 	return out
 }
 
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
+func isUniqueViolation(err error) bool { return httpkit.IsUniqueViolation(err) }
 
 type externalConnectionBody struct {
 	Name                  string `json:"name"`

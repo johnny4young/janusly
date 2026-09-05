@@ -7,15 +7,14 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"maps"
 	"net/http"
-	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -34,73 +33,18 @@ type opResult struct {
 	retryAfterSec int
 }
 
-func opOK(data any) opResult { return opResult{status: http.StatusOK, data: data} }
+func opOK(data any) opResult { return fromKit(httpkit.OK(data)) }
 
 func opError(status int, code, message string, params map[string]any) opResult {
-	status = publicErrorStatus(code, status)
-	message, params = publicErrorFields(code, message, params)
-	return opResult{status: status, code: code, message: message, params: params}
-}
-
-// publicErrorFields is the final defense against reflecting database,
-// provider, or evidence details through a generic 500. Callers should still
-// pass the stable literal, but both encoders normalize it so a future direct
-// opResult or writeV1Error cannot bypass the invariant.
-func publicErrorFields(code, message string, params map[string]any) (string, map[string]any) {
-	if code == "internal_error" {
-		return "Internal error", nil
-	}
-	return message, params
-}
-
-func publicErrorStatus(code string, status int) int {
-	if code == "internal_error" {
-		return http.StatusInternalServerError
-	}
-	return status
+	return fromKit(httpkit.Error(status, code, message, params))
 }
 
 func writeUnversioned(w http.ResponseWriter, result opResult) {
-	result.status = publicErrorStatus(result.code, result.status)
-	if result.retryAfterSec > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(result.retryAfterSec))
-	}
-	result.message, result.params = publicErrorFields(result.code, result.message, result.params)
-	if result.code == "internal_error" {
-		result.data = nil
-		result.unversionedExtras = nil
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(result.status)
-	if result.data != nil || (result.status >= 200 && result.status < 300 && result.code == "") {
-		_ = json.NewEncoder(w).Encode(result.data)
-		return
-	}
-	body := map[string]any{"error": result.message, "code": result.code}
-	if result.unversionedExtras != nil {
-		maps.Copy(body, result.unversionedExtras)
-	} else if result.params != nil {
-		body["params"] = result.params
-	}
-	_ = json.NewEncoder(w).Encode(body)
+	httpkit.WriteUnversioned(w, toKit(result))
 }
 
 func writeVersioned(w http.ResponseWriter, requestID string, result opResult) {
-	result.status = publicErrorStatus(result.code, result.status)
-	if result.retryAfterSec > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(result.retryAfterSec))
-	}
-	result.message, result.params = publicErrorFields(result.code, result.message, result.params)
-	if result.code == "internal_error" {
-		result.data = nil
-		result.unversionedExtras = nil
-	}
-	if result.data != nil || (result.status >= 200 && result.status < 300 && result.code == "") {
-		// Non-200 successes keep their status (202 = accepted, run deferred).
-		writeV1(w, requestID, result.status, map[string]any{"data": result.data})
-		return
-	}
-	writeV1Error(w, requestID, result.status, result.code, result.message, result.params)
+	httpkit.WriteVersioned(w, requestID, toKit(result))
 }
 
 // unversionedRoutes mounts the raw-wire aliases over the shared cores.

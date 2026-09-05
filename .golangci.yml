@@ -48,6 +48,13 @@ linters:
             - pkg: github.com/johnny4young/janusly/internal/httpapi
               desc: mount the HTTP leaf from cmd; never import it into internal services
 
+        httpapi-feature-packages-are-leaves:
+          files:
+            - "**/internal/httpapi/*/**"
+          deny:
+            - pkg: github.com/johnny4young/janusly/internal/httpapi
+              desc: feature packages depend on internal/httpkit, never on the API root or on each other
+
         generated-store-imports-nothing-internal:
           files:
             - "**/internal/store/**"

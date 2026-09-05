@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -275,11 +276,4 @@ func newVersionView(id, orgID, workflowID string, version int32, dagJSON json.Ra
 	}
 }
 
-// normalizedRaw keeps the wire identical to rawOrNull: empty/absent jsonb
-// marshals as explicit null.
-func normalizedRaw(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return json.RawMessage("null")
-	}
-	return raw
-}
+func normalizedRaw(raw json.RawMessage) json.RawMessage { return httpkit.NormalizedRaw(raw) }
