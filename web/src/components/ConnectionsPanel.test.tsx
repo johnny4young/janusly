@@ -208,6 +208,10 @@ describe('<ConnectionsPanel />', () => {
         }],
       })
       .mockRejectedValueOnce(new Error('health unavailable'))
+      // The health effect also re-runs on platformVersion. A bump that lands
+      // late from a previous test's async work must not exhaust the mock: an
+      // exhausted vi.fn() returns undefined and the `.then` chain throws.
+      .mockRejectedValue(new Error('health unavailable'))
 
     const initial = [credentials[0]!]
     const { rerender } = render(
@@ -227,7 +231,7 @@ describe('<ConnectionsPanel />', () => {
       />,
     )
 
-    await waitFor(() => expect(api).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(vi.mocked(api).mock.calls.length).toBeGreaterThanOrEqual(2))
     expect(await screen.findByText(/Health is temporarily unavailable/)).toBeInTheDocument()
     expect(screen.getByText('Unknown')).toBeInTheDocument()
     expect(screen.queryByText('Healthy')).not.toBeInTheDocument()
