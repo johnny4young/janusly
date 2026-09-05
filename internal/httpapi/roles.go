@@ -377,19 +377,19 @@ func (s *V1Server) deleteRoleCore(r *http.Request, rc v1Request, rawName string)
 }
 
 func (s *V1Server) mountRoleRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /org/permissions/catalog", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /org/permissions/catalog", routeGate{auth.RoleViewer, "members.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.permissionsCatalogCore(r, rc))
-	}))
-	mux.HandleFunc("GET /org/roles", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /org/roles", routeGate{auth.RoleViewer, "members.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.listRolesCore(r, rc))
-	}))
-	mux.HandleFunc("POST /org/roles", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /org/roles", routeGate{auth.RoleAdmin, "org.permissions.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.createRoleCore(r, rc))
-	}))
-	mux.HandleFunc("POST /org/roles/{name}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /org/roles/{name}", routeGate{auth.RoleAdmin, "org.permissions.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.updateRoleCore(r, rc, r.PathValue("name")))
-	}))
-	mux.HandleFunc("DELETE /org/roles/{name}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "DELETE /org/roles/{name}", routeGate{auth.RoleAdmin, "org.permissions.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.deleteRoleCore(r, rc, r.PathValue("name")))
-	}))
+	})
 }

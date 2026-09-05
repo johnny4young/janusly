@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/secretstore"
@@ -271,30 +272,30 @@ func int4OrNull(value pgtype.Int4) any {
 }
 
 func (s *V1Server) mountMcpRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /mcp/connections", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /mcp/connections", routeGate{auth.RoleAdmin, "mcp.connections.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.createMcpConnectionCore(r, rc))
-	}))
-	mux.HandleFunc("POST /mcp/connections/{alias}/tools/{toolName}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /mcp/connections/{alias}/tools/{toolName}", routeGate{auth.RoleAdmin, "mcp.connections.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.setMcpToolFlagsCore(r, rc, r.PathValue("alias"), r.PathValue("toolName")))
-	}))
+	})
 	// The admin panel and the mcp_tool step picker both read this to list a
 	// connection's cached descriptors. It was never registered, so both
 	// resolved the SPA shell and rendered a fabricated "no tools" state that
 	// blamed the admin for a route that did not exist.
-	mux.HandleFunc("GET /mcp/connections/{alias}/tools", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /mcp/connections/{alias}/tools", routeGate{auth.RoleViewer, "mcp.connections.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.listMcpToolsCore(r, rc, r.PathValue("alias")))
-	}))
+	})
 	// Connection-level enable/disable and delete. Without these the panel's
 	// kill switch was inert and a created connection could never be removed.
-	mux.HandleFunc("POST /mcp/connections/{alias}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /mcp/connections/{alias}", routeGate{auth.RoleAdmin, "mcp.connections.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.setMcpConnectionEnabledCore(r, rc, r.PathValue("alias")))
-	}))
-	mux.HandleFunc("DELETE /mcp/connections/{alias}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "DELETE /mcp/connections/{alias}", routeGate{auth.RoleAdmin, "mcp.connections.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.deleteMcpConnectionCore(r, rc, r.PathValue("alias")))
-	}))
-	mux.HandleFunc("POST /mcp/connections/{alias}/rediscover", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /mcp/connections/{alias}/rediscover", routeGate{auth.RoleAdmin, "mcp.connections.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.rediscoverMcpConnectionCore(r, rc, r.PathValue("alias")))
-	}))
+	})
 }
 
 // mcpToolDescriptorView projects a stored descriptor into the camelCase shape

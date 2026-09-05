@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/upstream"
 )
@@ -88,7 +89,7 @@ func (s *V1Server) parseUpstreamSourceBody(r *http.Request) (store.UpdateUpstrea
 }
 
 func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /upstream/sources", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /upstream/sources", routeGate{auth.RoleViewer, "upstream.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		rows, err := store.New(s.pool).ListUpstreamHealthSources(r.Context(), rc.orgID)
 		if err != nil {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
@@ -99,9 +100,9 @@ func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
 			views = append(views, upstreamSourceView(row))
 		}
 		writeUnversioned(w, opOK(map[string]any{"sources": views}))
-	}))
+	})
 
-	mux.HandleFunc("POST /upstream/sources", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /upstream/sources", routeGate{auth.RoleAdmin, "upstream.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		params, bad := s.parseUpstreamSourceBody(r)
 		if bad != nil {
 			writeUnversioned(w, *bad)
@@ -127,9 +128,9 @@ func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
 			Metadata: map[string]any{"name": row.Name, "kind": row.Kind},
 		})
 		writeUnversioned(w, opResult{status: http.StatusCreated, data: map[string]any{"source": upstreamSourceView(row)}})
-	}))
+	})
 
-	mux.HandleFunc("POST /upstream/sources/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /upstream/sources/{id}", routeGate{auth.RoleAdmin, "upstream.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		params, bad := s.parseUpstreamSourceBody(r)
 		if bad != nil {
 			writeUnversioned(w, *bad)
@@ -150,9 +151,9 @@ func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
 			Metadata: map[string]any{"name": row.Name, "kind": row.Kind},
 		})
 		writeUnversioned(w, opOK(map[string]any{"source": upstreamSourceView(row)}))
-	}))
+	})
 
-	mux.HandleFunc("DELETE /upstream/sources/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "DELETE /upstream/sources/{id}", routeGate{auth.RoleAdmin, "upstream.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		row, err := store.New(s.pool).DeleteUpstreamHealthSource(r.Context(), store.DeleteUpstreamHealthSourceParams{
 			OrgID: rc.orgID, ID: r.PathValue("id"),
 		})
@@ -165,10 +166,10 @@ func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
 			Metadata: map[string]any{"name": row.Name},
 		})
 		writeUnversioned(w, opOK(map[string]any{"ok": true}))
-	}))
+	})
 
 	// "Check now": an immediate one-off poll of a single source.
-	mux.HandleFunc("POST /upstream/sources/{id}/check", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /upstream/sources/{id}/check", routeGate{auth.RoleAdmin, "upstream.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		source, err := store.New(s.pool).GetUpstreamHealthSource(r.Context(), store.GetUpstreamHealthSourceParams{
 			OrgID: rc.orgID, ID: r.PathValue("id"),
 		})
@@ -196,5 +197,5 @@ func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
 			response["reason"] = outcome.Parse.Reason
 		}
 		writeUnversioned(w, opOK(response))
-	}))
+	})
 }

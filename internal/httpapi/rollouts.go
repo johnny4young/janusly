@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/recovery"
@@ -142,21 +143,21 @@ func (s *V1Server) decideRolloutCore(r *http.Request, rc v1Request, workflowID, 
 }
 
 func (s *V1Server) mountRolloutRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /workflows/{workflowId}/rollout", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /workflows/{workflowId}/rollout", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.getRolloutCore(r, rc, r.PathValue("workflowId")))
-	}))
-	mux.HandleFunc("POST /workflows/{workflowId}/rollout", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /workflows/{workflowId}/rollout", routeGate{auth.RoleAdmin, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.createRolloutCore(r, rc, r.PathValue("workflowId")))
-	}))
-	mux.HandleFunc("POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}", routeGate{auth.RoleAdmin, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.decideRolloutCore(r, rc, r.PathValue("workflowId"), r.PathValue("rolloutId"), r.PathValue("decision")))
-	}))
-	mux.HandleFunc("GET /workflows/{workflowId}/rollout/qualification", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /workflows/{workflowId}/rollout/qualification", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.getQualificationCore(r, rc, r.PathValue("workflowId")))
-	}))
-	mux.HandleFunc("POST /workflows/{workflowId}/rollout/qualification", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /workflows/{workflowId}/rollout/qualification", routeGate{auth.RoleAdmin, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recordQualificationCore(r, rc, r.PathValue("workflowId")))
-	}))
+	})
 }
 
 func qualificationView(row store.WorkflowRecoveryQualification) map[string]any {

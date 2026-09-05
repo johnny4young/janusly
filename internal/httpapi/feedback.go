@@ -20,6 +20,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/aiconfig"
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/memory"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/signature"
@@ -296,10 +297,10 @@ func (s *V1Server) listCalibrationsCore(r *http.Request, rc v1Request) opResult 
 }
 
 func (s *V1Server) mountFeedbackRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /recovery/feedback", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /recovery/feedback", routeGate{auth.RoleEditor, "recovery.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recordFeedbackCore(r, rc))
-	}))
-	mux.HandleFunc("GET /recovery/calibrations", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /recovery/calibrations", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.listCalibrationsCore(r, rc))
-	}))
+	})
 }

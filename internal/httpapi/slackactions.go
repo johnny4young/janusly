@@ -374,7 +374,7 @@ func (s *V1Server) slackCallbackHandler(w http.ResponseWriter, r *http.Request) 
 func (s *V1Server) mountSlackInteractionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /webhooks/slack/interactions/{id}", s.slackCallbackHandler)
 	mux.HandleFunc("POST /webhooks/pagerduty/{workflowId}/{nodeId}", s.pagerDutyCallbackHandler)
-	mux.HandleFunc("GET /integrations/slack/interactions", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /integrations/slack/interactions", routeGate{auth.RoleAdmin, "credentials.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		rows, err := store.New(s.pool).ListSlackInteractionConnections(r.Context(), rc.orgID)
 		if err != nil {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
@@ -385,8 +385,8 @@ func (s *V1Server) mountSlackInteractionRoutes(mux *http.ServeMux) {
 			connections = append(connections, slackConnectionView(row))
 		}
 		writeUnversioned(w, opOK(map[string]any{"connections": connections}))
-	}))
-	mux.HandleFunc("POST /integrations/slack/interactions", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /integrations/slack/interactions", routeGate{auth.RoleAdmin, "credentials.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		name, teamID, credentialName, mappingsJSON, enabled, bad := s.parseSlackConnectionBody(r, rc)
 		if bad != nil {
 			writeUnversioned(w, *bad)
@@ -406,8 +406,8 @@ func (s *V1Server) mountSlackInteractionRoutes(mux *http.ServeMux) {
 		})
 		row, _ := store.New(s.pool).GetSlackInteractionConnection(r.Context(), store.GetSlackInteractionConnectionParams{OrgID: rc.orgID, ID: id})
 		writeUnversioned(w, opOK(map[string]any{"connection": slackConnectionView(row)}))
-	}))
-	mux.HandleFunc("POST /integrations/slack/interactions/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /integrations/slack/interactions/{id}", routeGate{auth.RoleAdmin, "credentials.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		id := r.PathValue("id")
 		name, teamID, credentialName, mappingsJSON, enabled, bad := s.parseSlackConnectionBody(r, rc)
 		if bad != nil {
@@ -431,8 +431,8 @@ func (s *V1Server) mountSlackInteractionRoutes(mux *http.ServeMux) {
 		})
 		row, _ := store.New(s.pool).GetSlackInteractionConnection(r.Context(), store.GetSlackInteractionConnectionParams{OrgID: rc.orgID, ID: id})
 		writeUnversioned(w, opOK(map[string]any{"connection": slackConnectionView(row)}))
-	}))
-	mux.HandleFunc("DELETE /integrations/slack/interactions/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "DELETE /integrations/slack/interactions/{id}", routeGate{auth.RoleAdmin, "credentials.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		id := r.PathValue("id")
 		deleted, err := store.New(s.pool).DeleteSlackInteractionConnection(r.Context(), store.DeleteSlackInteractionConnectionParams{
 			OrgID: rc.orgID, ID: id,
@@ -445,5 +445,5 @@ func (s *V1Server) mountSlackInteractionRoutes(mux *http.ServeMux) {
 			TargetType: "slack-interaction", TargetID: id,
 		})
 		writeUnversioned(w, opOK(map[string]any{"ok": true}))
-	}))
+	})
 }

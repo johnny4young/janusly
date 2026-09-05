@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/health"
 	"github.com/johnny4young/janusly/internal/signature"
@@ -242,11 +243,11 @@ func buildRecoveryDelta(before, after health.Score, beforeSignals, afterSignals 
 }
 
 func (s *V1Server) mountWorkflowHealthRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /workflows/health", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /workflows/health", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.workflowHealthCore(r, rc))
-	}))
+	})
 
-	mux.HandleFunc("GET /workflows/health/delta", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /workflows/health/delta", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		query := r.URL.Query()
 		workflowID := query.Get("workflowId")
 		afterVersion, validAfterVersion := parseIntegerNumber(query.Get("afterVersion"))
@@ -365,5 +366,5 @@ func (s *V1Server) mountWorkflowHealthRoutes(mux *http.ServeMux) {
 			RecentRunsAgainstAfter: recent, SameFailureSinceApply: sameFailure,
 			PriorVersion: priorVersion,
 		}))
-	}))
+	})
 }

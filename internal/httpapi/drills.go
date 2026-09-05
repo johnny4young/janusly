@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/recovery"
 )
 
@@ -446,12 +447,12 @@ func (s *V1Server) drillDossierCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) mountDrillRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /recovery/drills/outcome", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /recovery/drills/outcome", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.drillOutcomeCore(r, rc))
-	}))
-	mux.HandleFunc("GET /recovery/drills/dossier", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /recovery/drills/dossier", routeGate{auth.RoleViewer, "reports.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.drillDossierCore(r, rc))
-	}))
+	})
 	s.route(mux, "GET /recovery/validation", routeGate{role: "viewer", permission: "reports.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recoveryValidationCore(r, rc))
 	})

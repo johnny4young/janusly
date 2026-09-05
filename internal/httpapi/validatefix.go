@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/johnny4young/janusly/internal/aiconfig"
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/ratelimit"
@@ -133,10 +134,10 @@ func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) mountValidateFixRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/dlq/validate-fix", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /v1/dlq/validate-fix", routeGate{auth.RoleEditor, "recovery.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.validateFixCore(r, rc))
-	}))
-	mux.HandleFunc("POST /dlq/validate-fix", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /dlq/validate-fix", routeGate{auth.RoleEditor, "recovery.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.validateFixCore(r, rc))
-	}))
+	})
 }

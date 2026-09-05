@@ -8,13 +8,14 @@ package httpapi
 
 import (
 	"context"
-	"github.com/johnny4young/janusly/internal/config"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/johnny4young/janusly/internal/config"
 
 	"github.com/google/uuid"
 )

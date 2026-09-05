@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/prompts"
 	"github.com/johnny4young/janusly/internal/store"
@@ -198,7 +199,7 @@ func (s *V1Server) pinPromptVersionCore(r *http.Request, rc v1Request, name stri
 }
 
 func (s *V1Server) mountPromptRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /prompts", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /prompts", routeGate{auth.RoleViewer, "prompts.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		rows, err := store.New(s.pool).ListPrompts(r.Context(), store.ListPromptsParams{OrgID: rc.orgID, Limit: 100})
 		if err != nil {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
@@ -209,19 +210,19 @@ func (s *V1Server) mountPromptRoutes(mux *http.ServeMux) {
 			views = append(views, promptView(row))
 		}
 		writeUnversioned(w, opOK(map[string]any{"prompts": views}))
-	}))
-	mux.HandleFunc("POST /prompts", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /prompts", routeGate{auth.RoleViewer, "prompts.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.createPromptCore(r, rc))
-	}))
-	mux.HandleFunc("POST /prompts/{name}/versions", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /prompts/{name}/versions", routeGate{auth.RoleViewer, "prompts.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.createPromptVersionCore(r, rc, r.PathValue("name")))
-	}))
-	mux.HandleFunc("POST /prompts/{name}/versions/{version}/pin", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /prompts/{name}/versions/{version}/pin", routeGate{auth.RoleViewer, "prompts.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		version, err := parsePositiveInt(r.PathValue("version"), 1_000_000)
 		if err != nil {
 			writeUnversioned(w, opError(http.StatusBadRequest, "prompts_invalid_url", "invalid url", nil))
 			return
 		}
 		writeUnversioned(w, s.pinPromptVersionCore(r, rc, r.PathValue("name"), version))
-	}))
+	})
 }

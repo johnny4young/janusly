@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/store"
@@ -50,7 +51,7 @@ func writeVersioned(w http.ResponseWriter, requestID string, result opResult) {
 // unversionedRoutes mounts the raw-wire aliases over the shared cores.
 func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 	// Workflow lifecycle: soft delete, trash, restore on the unversioned routes.
-	mux.HandleFunc("DELETE /workflows/{workflowId}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "DELETE /workflows/{workflowId}", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		workflowID := r.PathValue("workflowId")
 		// Tombstone + rollout cancellation commit TOGETHER: no active
 		// deployment may outlive its deleted workflow (the create path takes
@@ -96,8 +97,8 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 			Metadata: map[string]any{"soft": true},
 		})
 		writeUnversioned(w, opOK(map[string]any{"workflowId": workflowID, "ok": true}))
-	}))
-	mux.HandleFunc("POST /workflows/{workflowId}/restore", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /workflows/{workflowId}/restore", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		workflowID := r.PathValue("workflowId")
 		tx, err := s.pool.Begin(r.Context())
 		if err != nil {
@@ -150,8 +151,8 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 			TargetType: "workflow", TargetID: workflowID,
 		})
 		writeUnversioned(w, opOK(map[string]any{"workflowId": workflowID, "ok": true}))
-	}))
-	mux.HandleFunc("GET /workflows/trash", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /workflows/trash", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		query := r.URL.Query()
 		limit := 100
 		if raw := query.Get("limit"); raw != "" {
@@ -189,7 +190,7 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(items)
-	}))
+	})
 	alias := func(pattern string, core func(*http.Request, v1Request) opResult) {
 		mux.HandleFunc(pattern, s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 			writeUnversioned(w, core(r, rc))
@@ -209,7 +210,7 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 	alias("GET /workflows/versions", s.listWorkflowVersionsCore)
 
 	// Unversioned DLQ reads keep the raw response shape used by the web.
-	mux.HandleFunc("GET /dlq/counts", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /dlq/counts", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		counts, err := store.New(s.pool).CountDeadLettersByStatus(r.Context(), rc.orgID)
 		if err != nil {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
@@ -225,8 +226,8 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 		}
 		totals["total"] = total
 		writeUnversioned(w, opOK(totals))
-	}))
-	mux.HandleFunc("GET /dlq", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /dlq", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		id := r.URL.Query().Get("id")
 		if id == "" {
 			// Bare /dlq stays an ARRAY (home preview) — the queue page with
@@ -262,5 +263,5 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(view)
-	}))
+	})
 }

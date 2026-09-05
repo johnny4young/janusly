@@ -135,7 +135,7 @@ func (s *V1Server) mountSystemHealthRoutes(mux *http.ServeMux) {
 	// additive maintenance snapshot. Go runs maintenance loops in-process,
 	// so their truthful queue-compatible projection is an always-drained lane
 	// rather than unavailable telemetry.
-	mux.HandleFunc("GET /system/queue", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /system/queue", routeGate{auth.RoleAdmin, "org.config.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		snapshot := s.queueCache.get(r.Context())
 		if snapshot == nil {
 			writeUnversioned(w, opOK(map[string]any{"queue": nil}))
@@ -149,7 +149,7 @@ func (s *V1Server) mountSystemHealthRoutes(mux *http.ServeMux) {
 				Waiting: 0, Active: 0, WarnSeconds: resolveMaintenanceQueueLagWarnSeconds(),
 			},
 		}))
-	}))
+	})
 	// Tenant operators receive only a coarse fleet-health state. Instance IDs,
 	// build commits, start times, concurrency, and replica counts are global
 	// platform topology and must not cross the tenant-admin boundary.
@@ -183,10 +183,10 @@ func (s *V1Server) mountSystemHealthRoutes(mux *http.ServeMux) {
 			}))
 		})
 
-	mux.HandleFunc("GET /system/rate-limiter", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /system/rate-limiter", routeGate{auth.RoleAdmin, "org.config.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(s.limiterTracker.Admin())
-	}))
+	})
 }
 
 func intPtrOrNull(v *int) any {

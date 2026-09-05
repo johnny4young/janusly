@@ -284,63 +284,63 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /org/config", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.listOrgConfigCore(r, rc))
 	}))
-	mux.HandleFunc("POST /v1/workflows/save", s.auth(s.saveWorkflow))
-	mux.HandleFunc("POST /v1/workflows/rollback", s.auth(s.rollbackWorkflow))
-	mux.HandleFunc("POST /v1/workflows/readiness", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /v1/workflows/save", routeGate{auth.RoleEditor, "workflows.write"}, s.saveWorkflow)
+	s.route(mux, "POST /v1/workflows/rollback", routeGate{auth.RoleEditor, "workflows.write"}, s.rollbackWorkflow)
+	s.route(mux, "POST /v1/workflows/readiness", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.readinessCore(r, rc))
-	}))
-	mux.HandleFunc("POST /workflows/readiness", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /workflows/readiness", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.readinessCore(r, rc))
-	}))
-	mux.HandleFunc("POST /v1/validate", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /v1/validate", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.validateCore(r, rc))
-	}))
-	mux.HandleFunc("POST /validate", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /validate", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.validateCore(r, rc))
-	}))
-	mux.HandleFunc("POST /workflows/{id}/resume", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /workflows/{id}/resume", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.resumeWorkflowCore(r, rc, r.PathValue("id")))
-	}))
-	mux.HandleFunc("POST /v1/workflows/{id}/resume", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /v1/workflows/{id}/resume", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.resumeWorkflowCore(r, rc, r.PathValue("id")))
-	}))
-	mux.HandleFunc("GET /v1/workflows", s.auth(s.listWorkflows))
-	mux.HandleFunc("GET /v1/workflows/latest", s.auth(s.latestWorkflowVersion))
-	mux.HandleFunc("GET /v1/workflows/versions", s.auth(s.listWorkflowVersions))
-	mux.HandleFunc("GET /v1/workflows/versions/{versionId}", s.auth(s.workflowVersionSnapshot))
-	mux.HandleFunc("POST /v1/start", s.auth(s.startRun))
-	mux.HandleFunc("POST /triggers/webhook/ingest", s.auth(s.ingestWebhookBySelector))
-	mux.HandleFunc("POST /v1/webhooks/{workflowId}", s.auth(s.ingestWebhook))
-	mux.HandleFunc("POST /v1/triggers/email/ingest", s.auth(s.ingestEmail))
-	mux.HandleFunc("POST /v1/triggers/file/ingest", s.auth(s.ingestFileDropped))
-	mux.HandleFunc("POST /v1/triggers/mcp/ingest", s.auth(s.ingestMcpEvent))
-	mux.HandleFunc("GET /v1/run", s.auth(s.getRun))
-	mux.HandleFunc("GET /v1/status", s.auth(s.getRun))
-	mux.HandleFunc("GET /v1/runs", s.auth(s.listRuns))
-	mux.HandleFunc("POST /v1/resume", s.auth(s.resumeRun))
-	mux.HandleFunc("POST /v1/run/cancel", s.auth(s.cancelRun))
-	mux.HandleFunc("GET /v1/dlq", s.auth(s.listDeadLetters))
-	mux.HandleFunc("POST /runs/redrive", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /v1/workflows", routeGate{auth.RoleViewer, "workflows.read"}, s.listWorkflows)
+	s.route(mux, "GET /v1/workflows/latest", routeGate{auth.RoleViewer, "workflows.read"}, s.latestWorkflowVersion)
+	s.route(mux, "GET /v1/workflows/versions", routeGate{auth.RoleViewer, "workflows.read"}, s.listWorkflowVersions)
+	s.route(mux, "GET /v1/workflows/versions/{versionId}", routeGate{auth.RoleViewer, "workflows.read"}, s.workflowVersionSnapshot)
+	s.route(mux, "POST /v1/start", routeGate{auth.RoleEditor, "runs.start"}, s.startRun)
+	s.route(mux, "POST /triggers/webhook/ingest", routeGate{auth.RoleEditor, "triggers.ingest"}, s.ingestWebhookBySelector)
+	s.route(mux, "POST /v1/webhooks/{workflowId}", routeGate{auth.RoleEditor, "triggers.ingest"}, s.ingestWebhook)
+	s.route(mux, "POST /v1/triggers/email/ingest", routeGate{auth.RoleEditor, "triggers.ingest"}, s.ingestEmail)
+	s.route(mux, "POST /v1/triggers/file/ingest", routeGate{auth.RoleEditor, "triggers.ingest"}, s.ingestFileDropped)
+	s.route(mux, "POST /v1/triggers/mcp/ingest", routeGate{auth.RoleEditor, "triggers.ingest"}, s.ingestMcpEvent)
+	s.route(mux, "GET /v1/run", routeGate{auth.RoleViewer, "runs.read"}, s.getRun)
+	s.route(mux, "GET /v1/status", routeGate{auth.RoleViewer, "runs.read"}, s.getRun)
+	s.route(mux, "GET /v1/runs", routeGate{auth.RoleViewer, "runs.read"}, s.listRuns)
+	s.route(mux, "POST /v1/resume", routeGate{auth.RoleEditor, "runs.start"}, s.resumeRun)
+	s.route(mux, "POST /v1/run/cancel", routeGate{auth.RoleEditor, "runs.cancel"}, s.cancelRun)
+	s.route(mux, "GET /v1/dlq", routeGate{auth.RoleViewer, "dlq.read"}, s.listDeadLetters)
+	s.route(mux, "POST /runs/redrive", routeGate{auth.RoleEditor, "runs.start"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.runsRedriveCore(r, rc))
-	}))
-	mux.HandleFunc("POST /v1/runs/redrive", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /v1/runs/redrive", routeGate{auth.RoleEditor, "runs.start"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.runsRedriveCore(r, rc))
-	}))
-	mux.HandleFunc("GET /v1/recovery/metrics", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /v1/recovery/metrics", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.recoveryMetricsCore(r, rc))
-	}))
-	mux.HandleFunc("GET /recovery/metrics", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /recovery/metrics", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recoveryMetricsCore(r, rc))
-	}))
-	mux.HandleFunc("GET /v1/dlq/clusters", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /v1/dlq/clusters", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.clustersCore(r, rc))
-	}))
-	mux.HandleFunc("GET /dlq/clusters", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /dlq/clusters", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.clustersCore(r, rc))
-	}))
-	mux.HandleFunc("POST /v1/dlq/redrive", s.auth(s.redrive))
-	mux.HandleFunc("POST /v1/dlq/replay", s.auth(s.replayAlias))
-	mux.HandleFunc("GET /runs/{runId}/stream", s.auth(s.streamRun))
+	})
+	s.route(mux, "POST /v1/dlq/redrive", routeGate{auth.RoleEditor, "dlq.replay"}, s.redrive)
+	s.route(mux, "POST /v1/dlq/replay", routeGate{auth.RoleEditor, "dlq.replay"}, s.replayAlias)
+	s.route(mux, "GET /runs/{runId}/stream", routeGate{auth.RoleViewer, "runs.read"}, s.streamRun)
 	mux.HandleFunc("GET /auth/context", s.identity(s.authContext))
 	// The AI Studio's tool catalog; the web calls it through /v1.
 	mux.HandleFunc("GET /v1/tools", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {

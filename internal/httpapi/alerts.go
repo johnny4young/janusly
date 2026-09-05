@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -255,19 +256,19 @@ func (s *V1Server) recentAlertDispatchesCore(r *http.Request, rc v1Request) opRe
 }
 
 func (s *V1Server) mountAlertRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /alerts/policies", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /alerts/policies", routeGate{auth.RoleViewer, "alerts.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.listAlertPoliciesCore(r, rc))
-	}))
-	mux.HandleFunc("POST /alerts/policies", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /alerts/policies", routeGate{auth.RoleAdmin, "alerts.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.createAlertPolicyCore(r, rc))
-	}))
-	mux.HandleFunc("GET /alerts/recent", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /alerts/recent", routeGate{auth.RoleViewer, "alerts.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recentAlertDispatchesCore(r, rc))
-	}))
-	mux.HandleFunc("POST /alerts/policies/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /alerts/policies/{id}", routeGate{auth.RoleAdmin, "alerts.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.updateAlertPolicyCore(r, rc, r.PathValue("id")))
-	}))
-	mux.HandleFunc("DELETE /alerts/policies/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "DELETE /alerts/policies/{id}", routeGate{auth.RoleAdmin, "alerts.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.deleteAlertPolicyCore(r, rc, r.PathValue("id")))
-	}))
+	})
 }

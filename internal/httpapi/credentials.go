@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/secretstore"
 	"github.com/johnny4young/janusly/internal/store"
@@ -571,20 +572,20 @@ func (s *V1Server) credentialExpiryCore(r *http.Request, rc v1Request, name stri
 }
 
 func (s *V1Server) mountCredentialRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /credentials", s.auth(s.listCredentialsHandler))
-	mux.HandleFunc("GET /credentials/health", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /credentials", routeGate{auth.RoleViewer, "credentials.read"}, s.listCredentialsHandler)
+	s.route(mux, "GET /credentials/health", routeGate{auth.RoleViewer, "credentials.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.credentialHealthCore(r, rc))
-	}))
-	mux.HandleFunc("POST /credentials", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /credentials", routeGate{auth.RoleAdmin, "credentials.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.createCredentialCore(r, rc))
-	}))
-	mux.HandleFunc("POST /credentials/{name}/bulk-update", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /credentials/{name}/bulk-update", routeGate{auth.RoleAdmin, "credentials.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.bulkUpdateCredentialCore(r, rc, r.PathValue("name")))
-	}))
-	mux.HandleFunc("DELETE /credentials/{name}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "DELETE /credentials/{name}", routeGate{auth.RoleAdmin, "credentials.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.deleteCredentialCore(r, rc, r.PathValue("name")))
-	}))
-	mux.HandleFunc("POST /credentials/{name}/expiry", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /credentials/{name}/expiry", routeGate{auth.RoleAdmin, "credentials.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.credentialExpiryCore(r, rc, r.PathValue("name")))
-	}))
+	})
 }

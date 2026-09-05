@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -160,7 +161,7 @@ func orgConfigEntryView(def orgconfig.Definition, orgID string, value any, sourc
 }
 
 func (s *V1Server) mountOrgConfigRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /org/config", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /org/config", routeGate{auth.RoleAdmin, "org.config.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.updateOrgConfigCore(r, rc))
-	}))
+	})
 }

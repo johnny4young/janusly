@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -79,5 +80,5 @@ func (s *V1Server) auditTrail(w http.ResponseWriter, r *http.Request, rc v1Reque
 }
 
 func (s *V1Server) mountAuditRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /audit", s.auth(s.auditTrail))
+	s.route(mux, "GET /audit", routeGate{auth.RoleAdmin, "org.config.write"}, s.auditTrail)
 }

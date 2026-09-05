@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -328,26 +329,26 @@ func (s *V1Server) campaignListCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) mountCampaignRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /recovery/campaigns/preview", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /recovery/campaigns/preview", routeGate{auth.RoleEditor, "dlq.replay"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.campaignPreviewCore(r, rc))
-	}))
-	mux.HandleFunc("POST /recovery/campaigns", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /recovery/campaigns", routeGate{auth.RoleEditor, "dlq.replay"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.campaignCreateCore(r, rc))
-	}))
-	mux.HandleFunc("POST /recovery/campaigns/{id}/cancel", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /recovery/campaigns/{id}/cancel", routeGate{auth.RoleEditor, "dlq.replay"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.campaignCancelCore(r, rc, r.PathValue("id")))
-	}))
-	mux.HandleFunc("GET /recovery/campaigns/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /recovery/campaigns/{id}", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		detail, result := s.campaignDetail(r, rc, r.PathValue("id"))
 		if detail == nil {
 			writeUnversioned(w, result)
 			return
 		}
 		writeUnversioned(w, opOK(detail))
-	}))
-	mux.HandleFunc("GET /recovery/campaigns", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /recovery/campaigns", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.campaignListCore(r, rc))
-	}))
+	})
 }
 
 // isoMillis formats a NOT NULL timestamptz in the wire's millisecond ISO shape.

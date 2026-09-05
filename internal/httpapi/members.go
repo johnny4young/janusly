@@ -386,22 +386,22 @@ func (s *V1Server) transferOrganizationOwnerCore(r *http.Request, rc v1Request) 
 }
 
 func (s *V1Server) mountMemberRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /members", s.auth(s.listMembers))
-	mux.HandleFunc("GET /members/invitations", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /members", routeGate{auth.RoleViewer, "members.read"}, s.listMembers)
+	s.route(mux, "GET /members/invitations", routeGate{auth.RoleAdmin, "members.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.listInvitationsCore(r, rc))
-	}))
-	mux.HandleFunc("POST /members/invite", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /members/invite", routeGate{auth.RoleAdmin, "members.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.inviteMemberCore(r, rc))
-	}))
-	mux.HandleFunc("POST /members/invitations/{id}/revoke", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /members/invitations/{id}/revoke", routeGate{auth.RoleAdmin, "members.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.revokeInvitationCore(r, rc, r.PathValue("id")))
-	}))
-	mux.HandleFunc("POST /members/role", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /members/role", routeGate{auth.RoleAdmin, "members.role_set"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.setMemberRoleCore(r, rc))
-	}))
-	mux.HandleFunc("DELETE /members", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "DELETE /members", routeGate{auth.RoleAdmin, "members.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.removeMemberCore(r, rc))
-	}))
+	})
 	s.route(mux, "POST /organizations/owner", routeGate{auth.RoleAdmin, "members.role_set"},
 		func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 			writeUnversioned(w, s.transferOrganizationOwnerCore(r, rc))

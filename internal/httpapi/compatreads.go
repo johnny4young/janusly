@@ -127,29 +127,29 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 		}
 		return map[string]any{"valid": true, "nextFires": nextFires}
 	}
-	mux.HandleFunc("GET /v1/workflows/schedule-preview", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /v1/workflows/schedule-preview", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeV1Data(w, rc.id, schedulePreview(r))
-	}))
-	mux.HandleFunc("GET /workflows/schedule-preview", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /workflows/schedule-preview", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(schedulePreview(r))
-	}))
+	})
 
 	// v1 aliases over existing legacy cores (the wire the web reads).
-	mux.HandleFunc("GET /v1/workflows/health", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /v1/workflows/health", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.workflowHealthCore(r, rc))
-	}))
-	mux.HandleFunc("GET /v1/run/usage", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /v1/run/usage", routeGate{auth.RoleViewer, "runs.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.runUsageCore(r, rc))
-	}))
+	})
 
 	// Memory governance status for the Recovery Center warning card.
-	mux.HandleFunc("GET /v1/memory/consent-status", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /v1/memory/consent-status", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.memoryConsentStatusCore(r, rc))
-	}))
-	mux.HandleFunc("GET /memory/consent-status", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /memory/consent-status", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.memoryConsentStatusCore(r, rc))
-	}))
+	})
 
 	// Calibration posture for the Recovery Center tiles (legacy raw).
 	// Mounted through route so the gate and handler registration stay
@@ -172,7 +172,7 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 	// MCP connections list for the panel + tool config field (legacy raw;
 	// per-connection descriptor counts so the panel avoids N+1 fetches —
 	// the contract does the same join in the handler).
-	mux.HandleFunc("GET /mcp/connections", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /mcp/connections", routeGate{auth.RoleViewer, "mcp.connections.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		q := store.New(s.pool)
 		rows, err := q.ListMcpConnections(r.Context(), rc.orgID)
 		if err != nil {
@@ -209,5 +209,5 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 			})
 		}
 		writeUnversioned(w, opOK(map[string]any{"connections": connections}))
-	}))
+	})
 }

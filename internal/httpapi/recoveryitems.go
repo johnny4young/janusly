@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -242,23 +243,23 @@ func (s *V1Server) recoveryItemHandoffCore(r *http.Request, rc v1Request, id str
 }
 
 func (s *V1Server) mountRecoveryItemRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /recovery/items", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /recovery/items", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.listRecoveryItemsCore(r, rc))
-	}))
-	mux.HandleFunc("GET /recovery/items/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /recovery/items/{id}", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recoveryItemDetailCore(r, rc, r.PathValue("id")))
-	}))
-	mux.HandleFunc("GET /recovery/items/{id}/children", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "GET /recovery/items/{id}/children", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recoveryItemChildrenCore(r, rc, r.PathValue("id")))
-	}))
-	mux.HandleFunc("POST /recovery/items/{id}/{action}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /recovery/items/{id}/{action}", routeGate{auth.RoleEditor, "recovery.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		action := r.PathValue("action")
 		if action == "handoff" {
 			writeUnversioned(w, s.recoveryItemHandoffCore(r, rc, r.PathValue("id")))
 			return
 		}
 		writeUnversioned(w, s.recoveryItemActionCore(r, rc, r.PathValue("id"), action))
-	}))
+	})
 }
 
 func (s *V1Server) recoveryItemChildrenCore(r *http.Request, rc v1Request, id string) opResult {

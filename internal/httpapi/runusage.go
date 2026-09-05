@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -138,7 +139,7 @@ func safeCount(value any) int {
 }
 
 func (s *V1Server) mountRunUsageRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /run/usage", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /run/usage", routeGate{auth.RoleViewer, "runs.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.runUsageCore(r, rc))
-	}))
+	})
 }

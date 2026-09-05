@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 )
 
@@ -411,7 +412,7 @@ func (s *V1Server) dlqListItems(r *http.Request, rc v1Request) ([]map[string]any
 }
 
 func (s *V1Server) mountRecoveryQueueRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /dlq/queue", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /dlq/queue", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recoveryQueueCore(r, rc))
-	}))
+	})
 }

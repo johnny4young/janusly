@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/recovery"
@@ -559,12 +560,12 @@ func renderEvidenceMarkdown(report map[string]any) string {
 }
 
 func (s *V1Server) mountReportRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /reports/run-explain", s.auth(s.runExplainHandler))
-	mux.HandleFunc("GET /v1/reports/run-explain", s.auth(s.runExplainHandler))
+	s.route(mux, "GET /reports/run-explain", routeGate{auth.RoleViewer, "reports.read"}, s.runExplainHandler)
+	s.route(mux, "GET /v1/reports/run-explain", routeGate{auth.RoleViewer, "reports.read"}, s.runExplainHandler)
 	s.route(mux, "GET /reports/recovery-validation", routeGate{role: "viewer", permission: "reports.read"}, s.recoveryValidationReportHandler)
-	mux.HandleFunc("POST /reports/run-explain/deliver", s.auth(s.runExplainDeliveryHandler))
-	mux.HandleFunc("POST /recovery/items/{id}/evidence", s.auth(s.recoveryEvidenceHandler))
-	mux.HandleFunc("GET /reports/value-dashboard", s.auth(s.valueDashboardReportHandler))
+	s.route(mux, "POST /reports/run-explain/deliver", routeGate{auth.RoleEditor, "reports.deliver"}, s.runExplainDeliveryHandler)
+	s.route(mux, "POST /recovery/items/{id}/evidence", routeGate{auth.RoleEditor, "recovery.read"}, s.recoveryEvidenceHandler)
+	s.route(mux, "GET /reports/value-dashboard", routeGate{auth.RoleViewer, "reports.read"}, s.valueDashboardReportHandler)
 }
 
 func (s *V1Server) valueDashboardReportHandler(w http.ResponseWriter, r *http.Request, rc v1Request) {

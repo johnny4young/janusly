@@ -30,6 +30,7 @@ import (
 	"github.com/johnny4young/janusly/internal/aiconfig"
 	"github.com/johnny4young/janusly/internal/aiguidance"
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/executors"
@@ -604,9 +605,9 @@ func validateGeneratedWorkflowCandidate(raw []byte) []domain.Issue {
 }
 
 func (s *V1Server) mountAiGenerateRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /ai/generate-workflow", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /ai/generate-workflow", routeGate{auth.RoleViewer, "ai.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.generateWorkflowCore(r, rc))
-	}))
+	})
 }
 
 // clampCandidateCount bounds ai.generationCandidates to the [1,5] range.

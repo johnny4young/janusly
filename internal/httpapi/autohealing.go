@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/cron"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
@@ -43,7 +44,7 @@ func autoHealingRunView(row store.AutoHealingRun, autonomy domain.TechnicalRecov
 }
 
 func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /auto-healing/pending", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /auto-healing/pending", routeGate{auth.RoleViewer, "autohealing.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		limit := int32(100)
 		if raw := r.URL.Query().Get("limit"); raw != "" {
 			if parsed, err := parsePositiveInt(raw, 200); err == nil {
@@ -68,9 +69,9 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 			views = append(views, autoHealingRunView(row, assessments[index]))
 		}
 		writeUnversioned(w, opOK(map[string]any{"rows": views}))
-	}))
+	})
 
-	mux.HandleFunc("GET /auto-healing/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /auto-healing/{id}", routeGate{auth.RoleViewer, "autohealing.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		q := store.New(s.pool)
 		row, err := q.GetAutoHealingRun(r.Context(), store.GetAutoHealingRunParams{
 			OrgID: rc.orgID, ID: r.PathValue("id"),
@@ -85,9 +86,9 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 			return
 		}
 		writeUnversioned(w, opOK(map[string]any{"row": autoHealingRunView(row, assessments[0])}))
-	}))
+	})
 
-	mux.HandleFunc("POST /auto-healing/{id}/decide", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /auto-healing/{id}/decide", routeGate{auth.RoleEditor, "autohealing.decide"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		var body struct {
 			Accepted                  *bool  `json:"accepted"`
 			AcknowledgeValidationRisk bool   `json:"acknowledgeValidationRisk"`
@@ -174,19 +175,19 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 		writeUnversioned(w, opOK(map[string]any{
 			"ok": applyError == "", "accepted": true, "applyError": applyError,
 		}))
-	}))
+	})
 
-	mux.HandleFunc("POST /auto-healing/scan", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /auto-healing/scan", routeGate{auth.RoleAdmin, "autohealing.decide"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		proposed := s.engine.ScanOrgForHealing(r.Context(), rc.orgID)
 		audit.Write(r.Context(), s.pool, rc.authContext, "auto_healing.scan.triggered", audit.Options{
 			Metadata: map[string]any{"proposed": proposed},
 		})
 		writeUnversioned(w, opOK(map[string]any{"ok": true, "proposed": proposed}))
-	}))
+	})
 
 	// Cron-observability heatmap: observed scheduled fires (UTC grid) +
 	// the next-fire preview per registered entry.
-	mux.HandleFunc("GET /workflows/{workflowId}/schedule-history", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /workflows/{workflowId}/schedule-history", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		workflowID := r.PathValue("workflowId")
 		q := store.New(s.pool)
 		since := time.Now().AddDate(0, 0, -cron.MaxHistoryDays)
@@ -225,7 +226,7 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 			"cells": cron.BuildHeatmap(fires), "totalFires": len(fires),
 			"schedules": previews,
 		}))
-	}))
+	})
 }
 
 // patchedDeadLetterSnapshot loads the dead letter's workflow snapshot and

@@ -8,10 +8,12 @@ package httpapi
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -160,7 +162,7 @@ func (s *V1Server) recoveryHomeCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) mountRecoveryHomeRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /recovery/home", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /recovery/home", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recoveryHomeCore(r, rc))
-	}))
+	})
 }

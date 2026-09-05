@@ -56,6 +56,9 @@ var optionalIdentityRoutes = map[string]bool{
 // pattern with the same gate is idempotent (harnesses build many
 // handlers per process); a CONFLICTING gate is a programming error.
 func (s *V1Server) route(mux *http.ServeMux, pattern string, gate routeGate, handler handlerFunc) {
+	if s.routeAuthz == nil {
+		s.routeAuthz = newRouteAuthz()
+	}
 	if existing, present := s.routeAuthz[pattern]; present && existing != gate {
 		panic(fmt.Sprintf("route %s registered twice with conflicting gates", pattern))
 	}

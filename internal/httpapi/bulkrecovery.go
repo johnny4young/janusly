@@ -21,6 +21,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/aiconfig"
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/ratelimit"
@@ -392,19 +393,19 @@ func (s *V1Server) clusterApplyCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) mountBulkRecoveryRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /dlq/cluster-members", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /dlq/cluster-members", routeGate{auth.RoleViewer, "dlq.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.clusterMembersCore(r, rc))
-	}))
-	mux.HandleFunc("POST /dlq/resolve", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /dlq/resolve", routeGate{auth.RoleEditor, "recovery.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.resolveDeadLetterCore(r, rc))
-	}))
-	mux.HandleFunc("POST /dlq/bulk-resolve", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /dlq/bulk-resolve", routeGate{auth.RoleEditor, "recovery.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.bulkResolveCore(r, rc))
-	}))
-	mux.HandleFunc("POST /dlq/bulk-replay", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /dlq/bulk-replay", routeGate{auth.RoleEditor, "dlq.replay"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.bulkReplayCore(r, rc))
-	}))
-	mux.HandleFunc("POST /dlq/cluster-apply", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /dlq/cluster-apply", routeGate{auth.RoleEditor, "dlq.replay"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.clusterApplyCore(r, rc))
-	}))
+	})
 }

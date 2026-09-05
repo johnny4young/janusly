@@ -28,6 +28,7 @@ import (
 	"github.com/johnny4young/janusly/internal/aievidence"
 	"github.com/johnny4young/janusly/internal/aiguidance"
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/signature"
@@ -456,7 +457,7 @@ func nodeTypeOf(nodeJSON []byte) string {
 }
 
 func (s *V1Server) mountAiPatchRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /ai/patch-workflow", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "POST /ai/patch-workflow", routeGate{auth.RoleEditor, "ai.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.patchWorkflowCore(r, rc))
-	}))
+	})
 }
