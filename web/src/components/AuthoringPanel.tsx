@@ -149,11 +149,11 @@ export function AuthoringPanel({
         />
       )}
 
-      {scope === 'step' && hasSelection && (
+      {(scope === 'workflow' || (scope === 'step' && hasSelection)) && (
         <InspectorPanel
           readOnly={!canWrite}
-          selectedNode={model.selectedNode}
-          selectedEdge={model.selectedEdge}
+          selectedNode={scope === 'step' ? model.selectedNode : null}
+          selectedEdge={scope === 'step' ? model.selectedEdge : null}
           runNodes={model.runNodes}
           validationIssues={model.validationIssues}
           tools={model.tools}
@@ -172,31 +172,7 @@ export function AuthoringPanel({
         />
       )}
 
-      {scope === 'workflow' && (
-        <>
-          <InspectorPanel
-            readOnly={!canWrite}
-            selectedNode={null}
-            selectedEdge={null}
-            runNodes={model.runNodes}
-            validationIssues={model.validationIssues}
-            tools={model.tools}
-            workflows={model.workflows}
-            workflowNodes={model.workflowNodes}
-            workflowEdges={model.workflowEdges}
-            currentWorkflowId={model.currentWorkflowId}
-            currentWorkflowName={model.currentWorkflowName}
-            currentWorkflowInputs={model.currentWorkflowInputs}
-            currentWorkflowOutputs={model.currentWorkflowOutputs}
-            onUpdateNodeConfig={model.onUpdateNodeConfig}
-            onUpdateNodeType={model.onUpdateNodeType}
-            onUpdateEdgeCondition={model.onUpdateEdgeCondition}
-            onUpdateEdgeOnError={model.onUpdateEdgeOnError}
-            onInsertSnippet={model.onInsertSnippet}
-          />
-          <WorkflowOperationsPanel readOnly={!canWrite} />
-        </>
-      )}
+      {scope === 'workflow' && <WorkflowOperationsPanel readOnly={!canWrite} />}
     </PanelChrome>
   )
 }
