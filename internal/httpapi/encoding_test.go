@@ -53,12 +53,14 @@ func TestDecodeBodyErrorsAreNeverDiscarded(t *testing.T) {
 	}
 }
 
-// Provider callbacks and normalized event-ingest routes are externally
-// reachable. Their 500 envelopes may use stable literal diagnostics, but must
-// never compose a database/provider error into the response body.
-func TestExternalTriggerInternalErrorsAreRedacted(t *testing.T) {
+// requireLiteralInternalErrors walks the given httpapi source files and
+// fails when an opError(..., "internal_error", message, ...) call builds its
+// message dynamically: public 500 envelopes may use stable literal
+// diagnostics but must never compose a database/provider error into the body.
+func requireLiteralInternalErrors(t *testing.T, label string, paths ...string) {
+	t.Helper()
 	set := token.NewFileSet()
-	for _, path := range []string{"pagerduty.go", "webhooks.go", "triggeringest.go"} {
+	for _, path := range paths {
 		file, err := parser.ParseFile(set, path, nil, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
@@ -81,46 +83,24 @@ func TestExternalTriggerInternalErrorsAreRedacted(t *testing.T) {
 				return true
 			}
 			if _, literal := call.Args[2].(*ast.BasicLit); !literal {
-				t.Errorf("%s builds an external internal_error message dynamically", set.Position(call.Args[2].Pos()))
+				t.Errorf("%s builds %s internal_error message dynamically", set.Position(call.Args[2].Pos()), label)
 			}
 			return true
 		})
 	}
 }
 
+// Provider callbacks and normalized event-ingest routes are externally
+// reachable.
+func TestExternalTriggerInternalErrorsAreRedacted(t *testing.T) {
+	requireLiteralInternalErrors(t, "an external", "pagerduty.go", "webhooks.go", "triggeringest.go")
+}
+
 // Governed recovery carries long-lived operator/provider evidence and touches
 // PostgreSQL on every read and mutation. Its public 500 envelopes must not
 // reflect wrapped SQL, evidence, or provider details back to the browser.
 func TestGovernedRecoveryInternalErrorsAreRedacted(t *testing.T) {
-	set := token.NewFileSet()
-	for _, path := range []string{"recoveryreads.go", "semanticrecovery.go"} {
-		file, err := parser.ParseFile(set, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok || len(call.Args) < 3 {
-				return true
-			}
-			callee, ok := call.Fun.(*ast.Ident)
-			if !ok || callee.Name != "opError" {
-				return true
-			}
-			code, ok := call.Args[1].(*ast.BasicLit)
-			if !ok {
-				return true
-			}
-			decoded, err := strconv.Unquote(code.Value)
-			if err != nil || decoded != "internal_error" {
-				return true
-			}
-			if _, literal := call.Args[2].(*ast.BasicLit); !literal {
-				t.Errorf("%s builds a recovery internal_error message dynamically", set.Position(call.Args[2].Pos()))
-			}
-			return true
-		})
-	}
+	requireLiteralInternalErrors(t, "a recovery", "recoveryreads.go", "semanticrecovery.go")
 }
 
 // Every generic 500 in the HTTP package uses one stable literal and no params.
