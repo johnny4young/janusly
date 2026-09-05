@@ -182,3 +182,8 @@ i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
   word-split unquoted variables.
 - `golangci-lint` caches by path: after deleting a scratch worktree, run
   `golangci-lint cache clean` or it reports issues at the removed path.
+- CI runners have 4 CPUs, so a test pool built with `pgxpool.New` gets 4
+  connections. Reproduce a CI-only integration failure by appending
+  `&pool_max_conns=4` to `JANUSLY_DATABASE_URL`. Never block on a lock while
+  holding a pooled connection (`acquireResourceLock` shows the try-and-release
+  shape); with more waiters than connections the holder starves.
