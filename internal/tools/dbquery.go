@@ -616,6 +616,176 @@ func dbBoundedInt(input map[string]any, key string, fallback, max int) (int, str
 }
 
 // executeDbTool dispatches the four db.* tools through the chokepoint.
+// dbToolPlan is everything a database tool validated before touching the
+// gate: the statements to run, the row and time bounds, and whether the
+// transaction is read-only.
+type dbToolPlan struct {
+	statements []dbStatement
+	maxRows    int
+	timeoutMs  int
+	readOnly   bool
+}
+
+// planDbTool validates the input BEFORE the gate — bad SQL must not consume
+// rate budget. It returns the operator-facing message on rejection.
+func planDbTool(name string, input map[string]any) (dbToolPlan, string) {
+	plan := dbToolPlan{readOnly: name == "db.schema.describe" || name == "db.query.read"}
+	maxRowsKey := "maxRows"
+	if name == "db.query.transaction" {
+		maxRowsKey = "maxRowsPerStatement"
+	}
+	var boundError string
+	if plan.maxRows, boundError = dbBoundedInt(input, maxRowsKey, dbMaxRowsDefault, dbMaxRowsLimit); boundError != "" {
+		return plan, boundError
+	}
+	if plan.timeoutMs, boundError = dbBoundedInt(input, "timeoutMs", dbTimeoutMsDefault, dbTimeoutMsMax); boundError != "" {
+		return plan, boundError
+	}
+	switch name {
+	case "db.schema.describe":
+		if schema, present := input["schema"].(string); present && !dbSafeIdentifier.MatchString(schema) {
+			return plan, "schema must be a simple Postgres identifier"
+		}
+		if rawTables, present := input["tables"]; present {
+			tables, ok := arrayItems(rawTables)
+			if !ok {
+				return plan, "tables must be an array"
+			}
+			if len(tables) > 50 {
+				return plan, "tables allows at most 50 names"
+			}
+			for _, rawTable := range tables {
+				table, ok := rawTable.(string)
+				if !ok || len(table) > dbMaxIdentifierLength || !dbSafeIdentifier.MatchString(table) {
+					return plan, "table names must be simple Postgres identifiers"
+				}
+			}
+		}
+	case "db.query.read", "db.query.write":
+		sql, _ := input["sql"].(string)
+		params := []any(nil)
+		if rawParams, present := input["params"]; present {
+			params, _ = arrayItems(rawParams)
+		}
+		if len(params) > 100 {
+			return plan, "params allows at most 100 values"
+		}
+		kind := "read"
+		if name == "db.query.write" {
+			kind = "write"
+		}
+		if message := ValidateDbSQL(sql, len(params), kind); message != "" {
+			return plan, message
+		}
+		plan.statements = []dbStatement{{sql: strings.TrimSpace(sql), params: params}}
+	case "db.query.transaction":
+		rawStatements, ok := arrayItems(input["statements"])
+		if !ok || len(rawStatements) == 0 || len(rawStatements) > dbMaxTransactionStmts {
+			return plan, fmt.Sprintf("statements must list 1..%d entries", dbMaxTransactionStmts)
+		}
+		for _, rawStatement := range rawStatements {
+			entry, ok := rawStatement.(map[string]any)
+			if !ok {
+				return plan, "statements entries must be objects"
+			}
+			sql, _ := entry["sql"].(string)
+			params := []any(nil)
+			if rawParams, present := entry["params"]; present {
+				params, _ = arrayItems(rawParams)
+			}
+			if len(params) > 100 {
+				return plan, "params allows at most 100 values"
+			}
+			if message := ValidateDbSQL(sql, len(params), "any"); message != "" {
+				return plan, message
+			}
+			plan.statements = append(plan.statements, dbStatement{sql: strings.TrimSpace(sql), params: params})
+		}
+	}
+	return plan, ""
+}
+
+// runDbTool executes the planned statements inside tx and shapes the
+// tool's result; the caller commits, records usage and adds the envelope.
+func runDbTool(ctx context.Context, tx pgx.Tx, name string, input map[string]any, plan dbToolPlan) (map[string]any, error) {
+	statements := plan.statements
+	switch name {
+	case "db.schema.describe":
+		schema, _ := input["schema"].(string)
+		rawTables := []any(nil)
+		if value, present := input["tables"]; present {
+			rawTables, _ = arrayItems(value)
+		}
+		sql, params := buildSchemaDescribeQuery(schema, rawTables)
+		rows, err := tx.Query(ctx, sql, params...)
+		if err != nil {
+			return nil, err
+		}
+		collected, _, err := collectDbRows(rows, dbSchemaDescribeRowLimit+1)
+		if err != nil {
+			return nil, err
+		}
+		truncated := len(collected) > dbSchemaDescribeRowLimit
+		if truncated {
+			collected = collected[:dbSchemaDescribeRowLimit]
+		}
+		return map[string]any{"tables": shapeSchemaRows(collected), "truncated": truncated}, nil
+
+	case "db.query.read":
+		statement := statements[0]
+		wrapped := fmt.Sprintf("select * from (%s) as janusly_db_query limit %d", statement.sql, plan.maxRows+1)
+		rows, err := tx.Query(ctx, wrapped, statement.params...)
+		if err != nil {
+			return nil, err
+		}
+		collected, truncated, err := collectDbRows(rows, plan.maxRows)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"rows": collected, "rowCount": len(collected), "truncated": truncated}, nil
+
+	case "db.query.write":
+		statement := statements[0]
+		rows, err := tx.Query(ctx, statement.sql, statement.params...)
+		if err != nil {
+			return nil, err
+		}
+		collected, truncated, err := collectDbRows(rows, plan.maxRows)
+		if err != nil {
+			return nil, err
+		}
+		rowCount := len(collected)
+		commandTag := rows.CommandTag()
+		if commandTag.RowsAffected() > 0 && rowCount == 0 {
+			rowCount = int(commandTag.RowsAffected())
+		}
+		return map[string]any{"rows": collected, "rowCount": rowCount, "truncated": truncated}, nil
+
+	default: // db.query.transaction
+		results := make([]any, 0, len(statements))
+		for _, statement := range statements {
+			sql := statement.sql
+			if FirstSQLVerb(sql) == "select" {
+				sql = fmt.Sprintf("select * from (%s) as janusly_db_query limit %d", sql, plan.maxRows+1)
+			}
+			rows, err := tx.Query(ctx, sql, statement.params...)
+			if err != nil {
+				return nil, err
+			}
+			collected, truncated, err := collectDbRows(rows, plan.maxRows)
+			if err != nil {
+				return nil, err
+			}
+			rowCount := len(collected)
+			if tag := rows.CommandTag(); tag.RowsAffected() > 0 && rowCount == 0 {
+				rowCount = int(tag.RowsAffected())
+			}
+			results = append(results, map[string]any{"rows": collected, "rowCount": rowCount, "truncated": truncated})
+		}
+		return map[string]any{"results": results}, nil
+	}
+}
+
 func executeDbTool(ctx context.Context, name string, input map[string]any, deps *IntegrationDeps) map[string]any {
 	start := time.Now()
 	latency := func() int { return int(time.Since(start).Milliseconds()) }
@@ -635,82 +805,9 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 	if deps == nil || deps.Gate == nil {
 		return envelopeError("integration tools require run context", latency())
 	}
-
-	maxRowsKey := "maxRows"
-	if name == "db.query.transaction" {
-		maxRowsKey = "maxRowsPerStatement"
-	}
-	maxRows, boundError := dbBoundedInt(input, maxRowsKey, dbMaxRowsDefault, dbMaxRowsLimit)
-	if boundError != "" {
-		return answerError(boundError)
-	}
-	timeoutMs, boundError := dbBoundedInt(input, "timeoutMs", dbTimeoutMsDefault, dbTimeoutMsMax)
-	if boundError != "" {
-		return answerError(boundError)
-	}
-
-	// Validate BEFORE the gate — bad SQL must not consume rate budget.
-	var statements []dbStatement
-	switch name {
-	case "db.schema.describe":
-		if schema, present := input["schema"].(string); present && !dbSafeIdentifier.MatchString(schema) {
-			return answerError("schema must be a simple Postgres identifier")
-		}
-		if rawTables, present := input["tables"]; present {
-			tables, ok := arrayItems(rawTables)
-			if !ok {
-				return answerError("tables must be an array")
-			}
-			if len(tables) > 50 {
-				return answerError("tables allows at most 50 names")
-			}
-			for _, rawTable := range tables {
-				table, ok := rawTable.(string)
-				if !ok || len(table) > dbMaxIdentifierLength || !dbSafeIdentifier.MatchString(table) {
-					return answerError("table names must be simple Postgres identifiers")
-				}
-			}
-		}
-	case "db.query.read", "db.query.write":
-		sql, _ := input["sql"].(string)
-		params := []any(nil)
-		if rawParams, present := input["params"]; present {
-			params, _ = arrayItems(rawParams)
-		}
-		if len(params) > 100 {
-			return answerError("params allows at most 100 values")
-		}
-		kind := "read"
-		if name == "db.query.write" {
-			kind = "write"
-		}
-		if message := ValidateDbSQL(sql, len(params), kind); message != "" {
-			return answerError(message)
-		}
-		statements = []dbStatement{{sql: strings.TrimSpace(sql), params: params}}
-	case "db.query.transaction":
-		rawStatements, ok := arrayItems(input["statements"])
-		if !ok || len(rawStatements) == 0 || len(rawStatements) > dbMaxTransactionStmts {
-			return answerError(fmt.Sprintf("statements must list 1..%d entries", dbMaxTransactionStmts))
-		}
-		for _, rawStatement := range rawStatements {
-			entry, ok := rawStatement.(map[string]any)
-			if !ok {
-				return answerError("statements entries must be objects")
-			}
-			sql, _ := entry["sql"].(string)
-			params := []any(nil)
-			if rawParams, present := entry["params"]; present {
-				params, _ = arrayItems(rawParams)
-			}
-			if len(params) > 100 {
-				return answerError("params allows at most 100 values")
-			}
-			if message := ValidateDbSQL(sql, len(params), "any"); message != "" {
-				return answerError(message)
-			}
-			statements = append(statements, dbStatement{sql: strings.TrimSpace(sql), params: params})
-		}
+	plan, rejected := planDbTool(name, input)
+	if rejected != "" {
+		return answerError(rejected)
 	}
 
 	rateLimit := dbDefaultRateLimitPerMin
@@ -733,7 +830,7 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 	}
 
 	txOptions := pgx.TxOptions{}
-	if name == "db.schema.describe" || name == "db.query.read" {
+	if plan.readOnly {
 		txOptions.AccessMode = pgx.ReadOnly
 	}
 	tx, err := pool.BeginTx(ctx, txOptions)
@@ -741,101 +838,20 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 		return answerError(safeErr(err))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, fmt.Sprintf("set local statement_timeout = %d", timeoutMs)); err != nil {
+	if _, err := tx.Exec(ctx, fmt.Sprintf("set local statement_timeout = %d", plan.timeoutMs)); err != nil {
 		return answerError(safeErr(err))
 	}
-
-	switch name {
-	case "db.schema.describe":
-		schema, _ := input["schema"].(string)
-		rawTables := []any(nil)
-		if value, present := input["tables"]; present {
-			rawTables, _ = arrayItems(value)
-		}
-		sql, params := buildSchemaDescribeQuery(schema, rawTables)
-		rows, err := tx.Query(ctx, sql, params...)
-		if err != nil {
-			return answerError(safeErr(err))
-		}
-		collected, _, err := collectDbRows(rows, dbSchemaDescribeRowLimit+1)
-		if err != nil {
-			return answerError(safeErr(err))
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return answerError(safeErr(err))
-		}
-		truncated := len(collected) > dbSchemaDescribeRowLimit
-		if truncated {
-			collected = collected[:dbSchemaDescribeRowLimit]
-		}
-		record(true, "")
-		return map[string]any{"ok": true, "tables": shapeSchemaRows(collected), "truncated": truncated, "latencyMs": latency()}
-
-	case "db.query.read":
-		statement := statements[0]
-		wrapped := fmt.Sprintf("select * from (%s) as janusly_db_query limit %d", statement.sql, maxRows+1)
-		rows, err := tx.Query(ctx, wrapped, statement.params...)
-		if err != nil {
-			return answerError(safeErr(err))
-		}
-		collected, truncated, err := collectDbRows(rows, maxRows)
-		if err != nil {
-			return answerError(safeErr(err))
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return answerError(safeErr(err))
-		}
-		record(true, "")
-		return map[string]any{"ok": true, "rows": collected, "rowCount": len(collected), "truncated": truncated, "latencyMs": latency()}
-
-	case "db.query.write":
-		statement := statements[0]
-		rows, err := tx.Query(ctx, statement.sql, statement.params...)
-		if err != nil {
-			return answerError(safeErr(err))
-		}
-		collected, truncated, err := collectDbRows(rows, maxRows)
-		if err != nil {
-			return answerError(safeErr(err))
-		}
-		rowCount := len(collected)
-		commandTag := rows.CommandTag()
-		if commandTag.RowsAffected() > 0 && rowCount == 0 {
-			rowCount = int(commandTag.RowsAffected())
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return answerError(safeErr(err))
-		}
-		record(true, "")
-		return map[string]any{"ok": true, "rows": collected, "rowCount": rowCount, "truncated": truncated, "latencyMs": latency()}
-
-	default: // db.query.transaction
-		results := make([]any, 0, len(statements))
-		for _, statement := range statements {
-			sql := statement.sql
-			if FirstSQLVerb(sql) == "select" {
-				sql = fmt.Sprintf("select * from (%s) as janusly_db_query limit %d", sql, maxRows+1)
-			}
-			rows, err := tx.Query(ctx, sql, statement.params...)
-			if err != nil {
-				return answerError(safeErr(err))
-			}
-			collected, truncated, err := collectDbRows(rows, maxRows)
-			if err != nil {
-				return answerError(safeErr(err))
-			}
-			rowCount := len(collected)
-			if tag := rows.CommandTag(); tag.RowsAffected() > 0 && rowCount == 0 {
-				rowCount = int(tag.RowsAffected())
-			}
-			results = append(results, map[string]any{"rows": collected, "rowCount": rowCount, "truncated": truncated})
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return answerError(safeErr(err))
-		}
-		record(true, "")
-		return map[string]any{"ok": true, "results": results, "latencyMs": latency()}
+	result, err := runDbTool(ctx, tx, name, input, plan)
+	if err != nil {
+		return answerError(safeErr(err))
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return answerError(safeErr(err))
+	}
+	record(true, "")
+	result["ok"] = true
+	result["latencyMs"] = latency()
+	return result
 }
 
 func buildSchemaDescribeQuery(schema string, rawTables []any) (string, []any) {
