@@ -32,224 +32,257 @@ type BindingReport struct {
 // identifier in a proposed graph is an exact member of the current tenant
 // catalog. Missing or malformed references are returned explicitly and the
 // proposal remains unappliable; this function never rewrites an identifier.
-func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
-	report := BindingReport{
-		CatalogVersion: catalog.Version,
-		Resolved:       []Binding{}, Missing: []Binding{}, Complete: true,
+// workflowBinder resolves one workflow's capability identities against a
+// tenant catalog: builtin tools, MCP tools, subworkflows and credentials.
+// Missing bindings carry the closest alternatives so an operator can finish
+// an unappliable draft without losing valid graph structure.
+type workflowBinder struct {
+	catalog     Catalog
+	workflow    *domain.Workflow
+	report      BindingReport
+	builtin     map[string]tools.CatalogEntry
+	mcp         map[string]mcpclient.ExposedMcpTool
+	workflows   map[string]SubworkflowCapability
+	credentials map[string]CredentialCapability
+}
+
+func newWorkflowBinder(catalog Catalog, workflow *domain.Workflow) *workflowBinder {
+	b := &workflowBinder{
+		catalog: catalog, workflow: workflow,
+		report: BindingReport{
+			CatalogVersion: catalog.Version,
+			Resolved:       []Binding{}, Missing: []Binding{}, Complete: true,
+		},
+		builtin:     map[string]tools.CatalogEntry{},
+		mcp:         map[string]mcpclient.ExposedMcpTool{},
+		workflows:   map[string]SubworkflowCapability{},
+		credentials: map[string]CredentialCapability{},
 	}
-	if workflow == nil {
-		report.Missing = append(report.Missing, Binding{
-			Kind: "workflow", Field: "workflow", Alternatives: []string{}, Reason: "workflow_contract_invalid",
-		})
-		report.Complete = false
-		return report
-	}
-	builtin := map[string]tools.CatalogEntry{}
 	for _, entry := range catalog.BuiltinTools {
-		builtin[entry.Name] = entry
+		b.builtin[entry.Name] = entry
 	}
-	mcp := map[string]mcpclient.ExposedMcpTool{}
 	for _, entry := range catalog.McpTools {
 		if entry.ConnectionAlias == "_truncated" || entry.ToolName == "_truncated" {
 			continue
 		}
-		mcp[entry.ConnectionAlias+"\x00"+entry.ToolName] = entry
+		b.mcp[entry.ConnectionAlias+"\x00"+entry.ToolName] = entry
 	}
-	workflows := map[string]SubworkflowCapability{}
 	for _, entry := range catalog.Subworkflows {
-		workflows[entry.WorkflowID] = entry
+		b.workflows[entry.WorkflowID] = entry
 	}
-	credentials := map[string]CredentialCapability{}
 	for _, entry := range catalog.Credentials {
-		credentials[entry.Name] = entry
+		b.credentials[entry.Name] = entry
 	}
+	return b
+}
 
-	addResolved := func(binding Binding) {
-		report.Resolved = append(report.Resolved, bindingForWire(binding))
+func (b *workflowBinder) addResolved(binding Binding) {
+	b.report.Resolved = append(b.report.Resolved, bindingForWire(binding))
+}
+
+func (b *workflowBinder) addMissing(binding Binding) {
+	b.report.Missing = append(b.report.Missing, bindingForWire(binding))
+	b.report.Complete = false
+}
+
+func (b *workflowBinder) bindBuiltin(nodeID, fieldPrefix, name string, input map[string]any) (tools.CatalogEntry, bool) {
+	toolField := fieldPrefix + ".tool"
+	inputPrefix := fieldPrefix + ".input."
+	entry, exists := b.builtin[name]
+	if name == "" {
+		b.addMissing(Binding{Kind: "builtin_tool", NodeID: nodeID, Field: toolField, Alternatives: sortedBuiltinNames(b.catalog), Reason: "tool_binding_required"})
+		return tools.CatalogEntry{}, false
 	}
-	addMissing := func(binding Binding) {
-		report.Missing = append(report.Missing, bindingForWire(binding))
-		report.Complete = false
+	if !exists {
+		b.addMissing(Binding{Kind: "builtin_tool", NodeID: nodeID, Field: toolField, Requested: name, Alternatives: sortedBuiltinNames(b.catalog), Reason: "exact_tool_not_found"})
+		return tools.CatalogEntry{}, false
 	}
-	bindBuiltin := func(nodeID, fieldPrefix, name string, input map[string]any) (tools.CatalogEntry, bool) {
-		toolField := fieldPrefix + ".tool"
-		inputPrefix := fieldPrefix + ".input."
-		entry, exists := builtin[name]
-		if name == "" {
-			addMissing(Binding{Kind: "builtin_tool", NodeID: nodeID, Field: toolField, Alternatives: sortedBuiltinNames(catalog), Reason: "tool_binding_required"})
-			return tools.CatalogEntry{}, false
-		}
-		if !exists {
-			addMissing(Binding{Kind: "builtin_tool", NodeID: nodeID, Field: toolField, Requested: name, Alternatives: sortedBuiltinNames(catalog), Reason: "exact_tool_not_found"})
-			return tools.CatalogEntry{}, false
-		}
-		addResolved(Binding{Kind: "builtin_tool", NodeID: nodeID, Field: toolField, Requested: name, ResolvedID: name, Alternatives: []string{}})
-		for _, field := range entry.Required {
-			if field == "credential" {
-				continue
-			}
-			if !configuredInputField(input, field) {
-				addMissing(Binding{Kind: "configuration", NodeID: nodeID, Field: inputPrefix + field, Reason: "tool_input_required"})
-			}
-		}
-		if slices.Contains(entry.Required, "credential") {
-			credential := trimmedString(input["credential"])
-			credentialEntry, credentialExists := credentials[credential]
-			expectedKind := credentialKindForTool(name)
-			reason := ""
-			switch {
-			case credential == "":
-				reason = "credential_binding_required"
-			case !credentialExists:
-				reason = "exact_credential_not_found"
-			case expectedKind != "" && credentialEntry.Kind != expectedKind:
-				reason = "credential_kind_mismatch"
-			case !credentialEntry.Configured:
-				reason = "credential_not_configured"
-			case credentialEntry.Expired:
-				reason = "credential_expired"
-			}
-			credentialField := inputPrefix + "credential"
-			if reason == "" {
-				addResolved(Binding{Kind: "credential", NodeID: nodeID, Field: credentialField, Requested: credential, ResolvedID: credentialEntry.ID, Alternatives: []string{}})
-			} else {
-				addMissing(Binding{Kind: "credential", NodeID: nodeID, Field: credentialField, Requested: credential, Alternatives: availableCredentialNames(catalog, expectedKind), Reason: reason})
-			}
-		}
-		return entry, true
-	}
-	bindAgentTool := func(nodeID, fieldPrefix string, config map[string]any) bool {
-		name, input, err := domain.AgentConfiguredTool(config)
-		if err != nil {
-			addMissing(Binding{Kind: "configuration", NodeID: nodeID, Field: fieldPrefix + ".tool", Reason: "agent_tool_configuration_invalid"})
-			return false
-		}
-		if name == "" {
-			return false
-		}
-		entry, resolved := bindBuiltin(nodeID, fieldPrefix, name, input)
-		return resolved && agentToolWriteSide(entry, name, input)
-	}
-	for _, node := range workflow.Nodes {
-		if !domain.ExecutableNodeTypes[node.Type] {
-			addMissing(Binding{Kind: "node_type", NodeID: node.ID, Field: "type", Requested: node.Type, Reason: "node_type_not_executable"})
+	b.addResolved(Binding{Kind: "builtin_tool", NodeID: nodeID, Field: toolField, Requested: name, ResolvedID: name, Alternatives: []string{}})
+	for _, field := range entry.Required {
+		if field == "credential" {
 			continue
 		}
-		switch node.Type {
-		case "tool":
-			name := trimmedString(node.Config["tool"])
-			input, _ := node.Config["input"].(map[string]any)
-			bindBuiltin(node.ID, "config", name, input)
-		case "mcp_tool":
-			alias := trimmedString(node.Config["connectionAlias"])
-			name := trimmedString(node.Config["toolName"])
-			entry, exists := mcp[alias+"\x00"+name]
-			if alias == "" || name == "" {
-				addMissing(Binding{Kind: "mcp_tool", NodeID: node.ID, Field: "config.connectionAlias+toolName", Requested: mcpIdentifier(alias, name), Alternatives: sortedMcpNames(catalog), Reason: "mcp_binding_required"})
-			} else if !exists {
-				addMissing(Binding{Kind: "mcp_tool", NodeID: node.ID, Field: "config.connectionAlias+toolName", Requested: alias + "/" + name, Alternatives: sortedMcpNames(catalog), Reason: "exact_mcp_tool_not_found"})
-			} else {
-				addResolved(Binding{Kind: "mcp_tool", NodeID: node.ID, Field: "config.connectionAlias+toolName", Requested: alias + "/" + name, ResolvedID: alias + "/" + name, Alternatives: []string{}})
-				input, _ := node.Config["input"].(map[string]any)
-				for _, field := range entry.InputFields {
-					if field.Required && !configuredInputField(input, field.Name) {
-						addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.input." + field.Name, Reason: "mcp_input_required"})
-					}
-				}
-			}
-		case "subworkflow":
-			workflowID := trimmedString(node.Config["workflowId"])
-			entry, exists := workflows[workflowID]
-			if workflowID == "" {
-				addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Alternatives: availableSubworkflowIDs(catalog, workflow.ID), Reason: "subworkflow_binding_required"})
-			} else if !exists || entry.Status != "active" || workflowID == workflow.ID {
-				addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Requested: workflowID, Alternatives: availableSubworkflowIDs(catalog, workflow.ID), Reason: "exact_subworkflow_not_eligible"})
-			} else {
-				if rawVersion, specified := node.Config["version"]; specified {
-					version, valid := integerValue(rawVersion)
-					if !valid {
-						addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.version", Requested: fmt.Sprint(rawVersion), Alternatives: []string{fmt.Sprint(entry.LatestVersion)}, Reason: "subworkflow_version_invalid"})
-						continue
-					}
-					if version < 1 || version > int64(entry.LatestVersion) {
-						addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.version", Requested: fmt.Sprint(version), Alternatives: []string{fmt.Sprint(entry.LatestVersion)}, Reason: "subworkflow_version_not_found"})
-						continue
-					}
-				}
-				addResolved(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Requested: workflowID, ResolvedID: workflowID, Alternatives: []string{}})
-			}
-		case "wait_until":
-			if !completeWaitUntil(node.Config) {
-				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.duration|until", Alternatives: []string{"duration", "until"}, Reason: "wait_until_configuration_incomplete"})
-			}
-		case "schedule":
-			if _, err := domain.ResolveScheduleConfig(node.Config); err != nil {
-				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.cronExpression", Requested: trimmedString(node.Config["cronExpression"]), Reason: "schedule_configuration_invalid"})
-			}
-		case "loop":
-			if trimmedString(node.Config["mode"]) == "for_each" {
-				input, _ := node.Config["input"].(map[string]any)
-				bindBuiltin(node.ID, "config", trimmedString(node.Config["tool"]), input)
-			}
-		case "agent":
-			needsWriteOptIn := bindAgentTool(node.ID, "config", node.Config)
-			allowWrites, _ := node.Config["allowWriteTools"].(bool)
-			if needsWriteOptIn && !allowWrites {
-				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.allowWriteTools", Reason: "agent_write_opt_in_required"})
-			}
-		case "multi_agent":
-			resolved, err := domain.ResolveMultiAgentRuntimeConfig(node.Config)
-			if err != nil {
-				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.agents", Reason: "multi_agent_configuration_incomplete"})
-				break
-			}
-			needsWriteOptIn := false
-			for index, raw := range resolved.Agents {
-				agent, _ := raw.(map[string]any)
-				fieldPrefix := fmt.Sprintf("config.agents[%d]", index)
-				needsWriteOptIn = bindAgentTool(node.ID, fieldPrefix, agent) || needsWriteOptIn
-			}
-			allowWrites, _ := node.Config["allowWriteTools"].(bool)
-			if needsWriteOptIn && !allowWrites {
-				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.allowWriteTools", Reason: "agent_write_opt_in_required"})
-			}
-		case "router_llm":
-			if !completeRouter(node, workflow) {
-				addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.candidates", Reason: "router_configuration_incomplete"})
-			}
-		case "webhook_received":
-			requireConfig(&report, node, "endpointKey")
-		case "email_received":
-			requireConfig(&report, node, "aliasKey")
-		case "file_dropped":
-			requireConfig(&report, node, "bucket")
-		case "mcp_server_event":
-			requireConfig(&report, node, "connectionAlias")
-			requireConfig(&report, node, "resourceUri")
-		case "pagerduty_incident":
-			credential := trimmedString(node.Config["webhookCredential"])
-			entry, exists := credentials[credential]
-			reason := ""
-			switch {
-			case credential == "":
-				reason = "credential_binding_required"
-			case !exists:
-				reason = "exact_credential_not_found"
-			case entry.Kind != "pagerduty_webhook_secret":
-				reason = "credential_kind_mismatch"
-			case !entry.Configured:
-				reason = "credential_not_configured"
-			case entry.Expired:
-				reason = "credential_expired"
-			}
-			if reason == "" {
-				addResolved(Binding{Kind: "credential", NodeID: node.ID, Field: "config.webhookCredential", Requested: credential, ResolvedID: entry.ID, Alternatives: []string{}})
-			} else {
-				addMissing(Binding{Kind: "credential", NodeID: node.ID, Field: "config.webhookCredential", Requested: credential, Alternatives: availableCredentialNames(catalog, "pagerduty_webhook_secret"), Reason: reason})
-			}
+		if !configuredInputField(input, field) {
+			b.addMissing(Binding{Kind: "configuration", NodeID: nodeID, Field: inputPrefix + field, Reason: "tool_input_required"})
 		}
 	}
-	return report
+	if slices.Contains(entry.Required, "credential") {
+		credential := trimmedString(input["credential"])
+		credentialEntry, credentialExists := b.credentials[credential]
+		expectedKind := credentialKindForTool(name)
+		reason := ""
+		switch {
+		case credential == "":
+			reason = "credential_binding_required"
+		case !credentialExists:
+			reason = "exact_credential_not_found"
+		case expectedKind != "" && credentialEntry.Kind != expectedKind:
+			reason = "credential_kind_mismatch"
+		case !credentialEntry.Configured:
+			reason = "credential_not_configured"
+		case credentialEntry.Expired:
+			reason = "credential_expired"
+		}
+		credentialField := inputPrefix + "credential"
+		if reason == "" {
+			b.addResolved(Binding{Kind: "credential", NodeID: nodeID, Field: credentialField, Requested: credential, ResolvedID: credentialEntry.ID, Alternatives: []string{}})
+		} else {
+			b.addMissing(Binding{Kind: "credential", NodeID: nodeID, Field: credentialField, Requested: credential, Alternatives: availableCredentialNames(b.catalog, expectedKind), Reason: reason})
+		}
+	}
+	return entry, true
+}
+
+func (b *workflowBinder) bindAgentTool(nodeID, fieldPrefix string, config map[string]any) bool {
+	name, input, err := domain.AgentConfiguredTool(config)
+	if err != nil {
+		b.addMissing(Binding{Kind: "configuration", NodeID: nodeID, Field: fieldPrefix + ".tool", Reason: "agent_tool_configuration_invalid"})
+		return false
+	}
+	if name == "" {
+		return false
+	}
+	entry, resolved := b.bindBuiltin(nodeID, fieldPrefix, name, input)
+	return resolved && agentToolWriteSide(entry, name, input)
+}
+
+// bindNode resolves one node's identities and required configuration.
+func (b *workflowBinder) bindNode(node domain.Node) {
+	if !domain.ExecutableNodeTypes[node.Type] {
+		b.addMissing(Binding{Kind: "node_type", NodeID: node.ID, Field: "type", Requested: node.Type, Reason: "node_type_not_executable"})
+		return
+	}
+	switch node.Type {
+	case "tool":
+		name := trimmedString(node.Config["tool"])
+		input, _ := node.Config["input"].(map[string]any)
+		b.bindBuiltin(node.ID, "config", name, input)
+	case "mcp_tool":
+		alias := trimmedString(node.Config["connectionAlias"])
+		name := trimmedString(node.Config["toolName"])
+		entry, exists := b.mcp[alias+"\x00"+name]
+		if alias == "" || name == "" {
+			b.addMissing(Binding{Kind: "mcp_tool", NodeID: node.ID, Field: "config.connectionAlias+toolName", Requested: mcpIdentifier(alias, name), Alternatives: sortedMcpNames(b.catalog), Reason: "mcp_binding_required"})
+		} else if !exists {
+			b.addMissing(Binding{Kind: "mcp_tool", NodeID: node.ID, Field: "config.connectionAlias+toolName", Requested: alias + "/" + name, Alternatives: sortedMcpNames(b.catalog), Reason: "exact_mcp_tool_not_found"})
+		} else {
+			b.addResolved(Binding{Kind: "mcp_tool", NodeID: node.ID, Field: "config.connectionAlias+toolName", Requested: alias + "/" + name, ResolvedID: alias + "/" + name, Alternatives: []string{}})
+			input, _ := node.Config["input"].(map[string]any)
+			for _, field := range entry.InputFields {
+				if field.Required && !configuredInputField(input, field.Name) {
+					b.addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.input." + field.Name, Reason: "mcp_input_required"})
+				}
+			}
+		}
+	case "subworkflow":
+		workflowID := trimmedString(node.Config["workflowId"])
+		entry, exists := b.workflows[workflowID]
+		if workflowID == "" {
+			b.addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Alternatives: availableSubworkflowIDs(b.catalog, b.workflow.ID), Reason: "subworkflow_binding_required"})
+		} else if !exists || entry.Status != "active" || workflowID == b.workflow.ID {
+			b.addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Requested: workflowID, Alternatives: availableSubworkflowIDs(b.catalog, b.workflow.ID), Reason: "exact_subworkflow_not_eligible"})
+		} else {
+			if rawVersion, specified := node.Config["version"]; specified {
+				version, valid := integerValue(rawVersion)
+				if !valid {
+					b.addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.version", Requested: fmt.Sprint(rawVersion), Alternatives: []string{fmt.Sprint(entry.LatestVersion)}, Reason: "subworkflow_version_invalid"})
+					return
+				}
+				if version < 1 || version > int64(entry.LatestVersion) {
+					b.addMissing(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.version", Requested: fmt.Sprint(version), Alternatives: []string{fmt.Sprint(entry.LatestVersion)}, Reason: "subworkflow_version_not_found"})
+					return
+				}
+			}
+			b.addResolved(Binding{Kind: "subworkflow", NodeID: node.ID, Field: "config.workflowId", Requested: workflowID, ResolvedID: workflowID, Alternatives: []string{}})
+		}
+	case "wait_until":
+		if !completeWaitUntil(node.Config) {
+			b.addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.duration|until", Alternatives: []string{"duration", "until"}, Reason: "wait_until_configuration_incomplete"})
+		}
+	case "schedule":
+		if _, err := domain.ResolveScheduleConfig(node.Config); err != nil {
+			b.addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.cronExpression", Requested: trimmedString(node.Config["cronExpression"]), Reason: "schedule_configuration_invalid"})
+		}
+	case "loop":
+		if trimmedString(node.Config["mode"]) == "for_each" {
+			input, _ := node.Config["input"].(map[string]any)
+			b.bindBuiltin(node.ID, "config", trimmedString(node.Config["tool"]), input)
+		}
+	case "agent":
+		needsWriteOptIn := b.bindAgentTool(node.ID, "config", node.Config)
+		allowWrites, _ := node.Config["allowWriteTools"].(bool)
+		if needsWriteOptIn && !allowWrites {
+			b.addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.allowWriteTools", Reason: "agent_write_opt_in_required"})
+		}
+	case "multi_agent":
+		resolved, err := domain.ResolveMultiAgentRuntimeConfig(node.Config)
+		if err != nil {
+			b.addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.agents", Reason: "multi_agent_configuration_incomplete"})
+			return
+		}
+		needsWriteOptIn := false
+		for index, raw := range resolved.Agents {
+			agent, _ := raw.(map[string]any)
+			fieldPrefix := fmt.Sprintf("config.agents[%d]", index)
+			needsWriteOptIn = b.bindAgentTool(node.ID, fieldPrefix, agent) || needsWriteOptIn
+		}
+		allowWrites, _ := node.Config["allowWriteTools"].(bool)
+		if needsWriteOptIn && !allowWrites {
+			b.addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.allowWriteTools", Reason: "agent_write_opt_in_required"})
+		}
+	case "router_llm":
+		if !completeRouter(node, b.workflow) {
+			b.addMissing(Binding{Kind: "configuration", NodeID: node.ID, Field: "config.candidates", Reason: "router_configuration_incomplete"})
+		}
+	case "webhook_received":
+		requireConfig(&b.report, node, "endpointKey")
+	case "email_received":
+		requireConfig(&b.report, node, "aliasKey")
+	case "file_dropped":
+		requireConfig(&b.report, node, "bucket")
+	case "mcp_server_event":
+		requireConfig(&b.report, node, "connectionAlias")
+		requireConfig(&b.report, node, "resourceUri")
+	case "pagerduty_incident":
+		credential := trimmedString(node.Config["webhookCredential"])
+		entry, exists := b.credentials[credential]
+		reason := ""
+		switch {
+		case credential == "":
+			reason = "credential_binding_required"
+		case !exists:
+			reason = "exact_credential_not_found"
+		case entry.Kind != "pagerduty_webhook_secret":
+			reason = "credential_kind_mismatch"
+		case !entry.Configured:
+			reason = "credential_not_configured"
+		case entry.Expired:
+			reason = "credential_expired"
+		}
+		if reason == "" {
+			b.addResolved(Binding{Kind: "credential", NodeID: node.ID, Field: "config.webhookCredential", Requested: credential, ResolvedID: entry.ID, Alternatives: []string{}})
+		} else {
+			b.addMissing(Binding{Kind: "credential", NodeID: node.ID, Field: "config.webhookCredential", Requested: credential, Alternatives: availableCredentialNames(b.catalog, "pagerduty_webhook_secret"), Reason: reason})
+		}
+	}
+}
+
+// BindWorkflow resolves every node's capability identities against the
+// catalog and reports what is bound, what is missing and why.
+func BindWorkflow(catalog Catalog, workflow *domain.Workflow) BindingReport {
+	if workflow == nil {
+		return BindingReport{
+			CatalogVersion: catalog.Version, Resolved: []Binding{},
+			Missing: []Binding{bindingForWire(Binding{
+				Kind: "workflow", Field: "workflow", Alternatives: []string{}, Reason: "workflow_contract_invalid",
+			})},
+		}
+	}
+	b := newWorkflowBinder(catalog, workflow)
+	for _, node := range workflow.Nodes {
+		b.bindNode(node)
+	}
+	return b.report
 }
 
 // HasUnboundCapabilityIdentity distinguishes provider-authored executable
