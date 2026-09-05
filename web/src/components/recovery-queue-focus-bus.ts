@@ -1,17 +1,17 @@
 /**
- * Consume-once handoff for navigation that must land on the Recovery Queue.
- *
- * The queue is lazy-mounted under Runs, so callers persist a small focus
- * request in sessionStorage before switching tabs. A CustomEvent covers the
- * already-mounted case. An optional dead-letter id targets a specific row;
- * otherwise the queue heading is the focus destination.
+ * Navigation that must land on the Recovery Queue, spelled as the route
+ * `#/runs/dlq[/<deadLetterId>]`. The queue is lazy-mounted under Runs, so a
+ * request written before it mounts is read from the route on mount and
+ * cleared once (consume-once); a live event covers the already-mounted case.
+ * An optional dead-letter id targets a specific row; otherwise the queue
+ * heading is the focus destination.
  *
  * `consumeDeadLetterDeepLink` is the entry point from OUTSIDE the app: an
  * alert notification links to `?deadLetterId=<id>`, and that lands here as
  * the same focus request an in-app CTA produces.
  */
+import { readRoute, writeRoute } from '../lib/route'
 
-const STORAGE_KEY = 'janusly:recovery:queue-focus'
 export const RECOVERY_QUEUE_FOCUS_EVENT = 'janusly:recovery:queue-focus'
 
 export type RecoveryQueueFocusRequest = { deadLetterId?: string }
@@ -26,16 +26,18 @@ function normalizeRequest(value: unknown): RecoveryQueueFocusRequest | null {
   return { deadLetterId: trimmed }
 }
 
+function pendingRequest(): RecoveryQueueFocusRequest | null {
+  const route = readRoute()
+  if (!route || route.tab !== 'runs') return null
+  if (route.deadLetterId) return { deadLetterId: route.deadLetterId }
+  return route.queueFocus ? {} : null
+}
+
 /** Read and clear the pending queue focus request. */
 export function consumeRecoveryQueueFocus(): RecoveryQueueFocusRequest | null {
-  try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY)
-    if (raw) window.sessionStorage.removeItem(STORAGE_KEY)
-    if (!raw) return null
-    return normalizeRequest(JSON.parse(raw))
-  } catch {
-    return null
-  }
+  const request = pendingRequest()
+  if (request) writeRoute({ tab: 'runs' }, 'replace')
+  return request
 }
 
 /** Read and validate the live request carried by the queue focus event. */
@@ -48,11 +50,7 @@ export function parseRecoveryQueueFocusEvent(event: Event): RecoveryQueueFocusRe
 export function requestRecoveryQueueFocus(deadLetterId?: string): void {
   const request = normalizeRequest(deadLetterId === undefined ? {} : { deadLetterId })
   if (!request) return
-  try {
-    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(request))
-  } catch {
-    // Storage unavailable — the live event still covers an already-mounted queue.
-  }
+  writeRoute(request.deadLetterId ? { tab: 'runs', deadLetterId: request.deadLetterId } : { tab: 'runs', queueFocus: true })
   window.dispatchEvent(new CustomEvent(RECOVERY_QUEUE_FOCUS_EVENT, { detail: request }))
 }
 
@@ -60,24 +58,28 @@ export function requestRecoveryQueueFocus(deadLetterId?: string): void {
 const DEEP_LINK_PARAM = 'deadLetterId'
 
 /**
- * Read (and clear) a `?deadLetterId=` deep link from the URL bar.
+ * Read (and clear) a `?deadLetterId=` deep link from the URL bar, or the
+ * failure named by a `#/runs/dlq/<id>` route someone shared.
  *
  * An alert is the start of the MTTR clock, so its link has to land the
  * operator on the exact failure rather than a queue to hunt through. The id
  * goes through the same `normalizeRequest` validation as an in-app request —
  * it arrives from outside the app and is untrusted.
  *
- * Consume-once, mirroring `consumeSsoSessionFragment`: the param is stripped
- * from the URL and the history entry so a reload or a back-navigation doesn't
- * re-trigger the jump and yank the operator away from what they moved on to.
+ * The query form is consume-once, mirroring `consumeSsoSessionFragment`: the
+ * param is stripped from the URL and the history entry so a reload or a
+ * back-navigation doesn't re-trigger the jump and yank the operator away from
+ * what they moved on to. The route form is the shareable spelling and stays.
  */
 export function consumeDeadLetterDeepLink(): RecoveryQueueFocusRequest | null {
   if (typeof window === 'undefined' || !window.location) return null
   try {
     const params = new URLSearchParams(window.location.search || '')
     const raw = params.get(DEEP_LINK_PARAM)
-    if (!raw) return null
-
+    if (raw === null) {
+      const route = readRoute()
+      return route?.tab === 'runs' && route.deadLetterId ? { deadLetterId: route.deadLetterId } : null
+    }
     params.delete(DEEP_LINK_PARAM)
     const query = params.toString()
     const cleanUrl = window.location.pathname + (query ? `?${query}` : '') + (window.location.hash || '')

@@ -29,6 +29,7 @@ import { api } from './api'
 import type { RunInputPreset } from './components/RunInputDialog'
 import { useWorkflowStore } from './store'
 import { useAppStore } from './hooks/useAppStore'
+import { useRouteSync } from './hooks/useRouteSync'
 import { useAppCommands } from './hooks/useAppCommands'
 import { useIdentityBootstrap } from './hooks/useIdentityBootstrap'
 import { useRunEventStream } from './hooks/useRunEventStream'
@@ -51,6 +52,7 @@ const EMPTY_PERMISSIONS: readonly string[] = Object.freeze([])
 
 export default function App() {
   const appStore = useAppStore()
+  useRouteSync()
   const {
     nodes,
     edges,

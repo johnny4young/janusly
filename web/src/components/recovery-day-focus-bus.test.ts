@@ -8,14 +8,16 @@ import {
 } from './recovery-day-focus-bus'
 
 afterEach(() => {
-  window.sessionStorage.clear()
+  window.history.replaceState(null, '', '/')
   vi.restoreAllMocks()
 })
 
 describe('recovery day focus bus', () => {
-  it('stashes a valid day and consumes it once', () => {
+  it('writes a valid day to the route and consumes it once', () => {
     requestRecoveryDayFocus('2026-07-06')
+    expect(window.location.hash).toBe('#/runs/day/2026-07-06')
     expect(consumeRecoveryFocusDay()).toBe('2026-07-06')
+    expect(window.location.hash).toBe('#/runs')
     // consume-once: a second read is empty.
     expect(consumeRecoveryFocusDay()).toBeNull()
   })

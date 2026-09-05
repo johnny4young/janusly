@@ -37,6 +37,7 @@ import { t } from './i18n/runtime'
 import { isTerminalNodeStatus } from '@/lib/status'
 import { workflowToGraph } from './canvas-projections'
 import { PERSISTED_WORKSPACE_TABS } from './workspace-locations'
+import { readRoute, writeRoute, type WorkspaceRoute } from '@/lib/route'
 
 /**
  * Build the config for an explicit step-kind change.
@@ -295,6 +296,8 @@ type WorkflowStore = {
   setEventsPagination: (cursor: string | null, hasMore: boolean) => void
   setActiveTab: (tab: ActiveTab) => void
   openRecoveryCase: (caseId: string) => void
+  /** Adopt a route the browser navigated to, without writing it back. */
+  applyRoute: (route: WorkspaceRoute) => void
   setStreamStatus: (status: StreamStatus) => void
   setStreamTransport: (transport: StreamTransport) => void
   resetRun: () => void
@@ -501,8 +504,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   // frequent job is triaging failed runs / pending approvals / cluster
   // recovery). When the operator has navigated elsewhere, the last tab is
   // restored from localStorage so a refresh doesn't drop them back to Home.
-  activeTab: readStoredActiveTab(),
-  activeRecoveryCaseId: null,
+  activeTab: readRoute()?.tab ?? readStoredActiveTab(),
+  activeRecoveryCaseId: readRoute()?.recoveryCaseId ?? null,
   streamStatus: 'idle',
   streamTransport: 'idle',
   toasts: [],
@@ -880,9 +883,19 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setActiveTab: (tab) => {
     persistActiveTab(tab)
     set({ activeTab: tab })
+    // A richer route for the same tab (a focused failure, a day filter, an
+    // Operations section) was written by the caller first; keep it.
+    if (readRoute()?.tab !== tab) writeRoute({ tab })
   },
   openRecoveryCase: (caseId) => {
     set({ activeRecoveryCaseId: caseId, activeTab: 'recoveryCase' })
+    writeRoute({ tab: 'recoveryCase', recoveryCaseId: caseId })
+  },
+  applyRoute: (route) => {
+    if ((PERSISTED_WORKSPACE_TABS as readonly string[]).includes(route.tab)) persistActiveTab(route.tab)
+    set(route.tab === 'recoveryCase' && route.recoveryCaseId
+      ? { activeTab: route.tab, activeRecoveryCaseId: route.recoveryCaseId }
+      : { activeTab: route.tab })
   },
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   setStreamTransport: (streamTransport) => set({ streamTransport }),

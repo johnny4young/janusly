@@ -75,3 +75,21 @@ the stylesheet split. `RightPanel` and `AppWorkspace` are memoized, and the shel
 are memoized on their inputs, because the shell renders on every store tick.
 Dialogs get Escape from `useDialogFocusTrap`'s `onEscape` option rather than
 their own keydown effects.
+
+## Routing
+
+The workspace URL is a hash route owned by `src/lib/route.ts`: `#/<tab>` for
+a tab, `#/recoveryCase/<id>` for one case, `#/runs/dlq[/<deadLetterId>]` for
+the recovery queue (heading or one failure), `#/runs/day/<YYYY-MM-DD>` for a
+day filter and `#/operations/<section>` for an Operations sub-section. Hash
+routing keeps the served bundle one static document, so no server rewrite and
+no API path can shadow it. The store writes the route when a tab or case
+opens (`setActiveTab`, `openRecoveryCase`) and never clobbers a richer route
+for the same tab; `useRouteSync` writes the restored tab on a cold load with
+no hash and adopts browser navigation (back, forward, a typed hash) through
+`applyRoute` without writing it back. The navigation buses — recovery-queue
+focus, day focus and the Operations section — spell their requests as routes
+and read them back on mount (consume-once), keeping a live `CustomEvent` only
+for consumers already mounted; the DOM-focus buses (authoring problems,
+resilience) stay events because they are not navigation. `?deadLetterId=`
+from alert notifications remains a supported alias of the dlq route.

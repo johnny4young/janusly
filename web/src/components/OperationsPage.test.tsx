@@ -109,6 +109,7 @@ async function openInfrastructureSettings(): Promise<void> {
 
 describe('<OperationsPage />', () => {
   beforeEach(() => {
+    window.history.replaceState(null, '', '/')
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({ ...initialState, platformVersion: 0, budgetBlocked: null }, true)
     try {

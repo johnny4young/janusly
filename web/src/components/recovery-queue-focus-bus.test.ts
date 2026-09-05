@@ -9,14 +9,16 @@ import {
 } from './recovery-queue-focus-bus'
 
 afterEach(() => {
-  window.sessionStorage.clear()
+  window.history.replaceState(null, '', '/')
   vi.restoreAllMocks()
 })
 
 describe('recovery queue focus bus', () => {
-  it('stashes a queue-level request and consumes it once', () => {
+  it('writes a queue-level request to the route and consumes it once', () => {
     requestRecoveryQueueFocus()
+    expect(window.location.hash).toBe('#/runs/dlq')
     expect(consumeRecoveryQueueFocus()).toEqual({})
+    expect(window.location.hash).toBe('#/runs')
     expect(consumeRecoveryQueueFocus()).toBeNull()
   })
 
@@ -26,6 +28,7 @@ describe('recovery queue focus bus', () => {
     requestRecoveryQueueFocus(' dlq-123 ')
 
     expect(handler).toHaveBeenCalledOnce()
+    expect(window.location.hash).toBe('#/runs/dlq/dlq-123')
     expect(consumeRecoveryQueueFocus()).toEqual({ deadLetterId: 'dlq-123' })
     window.removeEventListener(RECOVERY_QUEUE_FOCUS_EVENT, handler)
   })
@@ -36,12 +39,14 @@ describe('recovery queue focus bus', () => {
     expect(consumeRecoveryQueueFocus()).toBeNull()
   })
 
-  it('drops corrupt stored requests', () => {
-    window.sessionStorage.setItem('janusly:recovery:queue-focus', '{bad json')
+  it('ignores routes that are not a queue request', () => {
+    window.history.replaceState(null, '', '/#/runs/day/2026-07-06')
+    expect(consumeRecoveryQueueFocus()).toBeNull()
+    window.history.replaceState(null, '', '/#/recoveryCase/dlq-1')
     expect(consumeRecoveryQueueFocus()).toBeNull()
   })
 
-  it('validates live event detail independently of session storage', () => {
+  it('validates live event detail independently of the route', () => {
     expect(parseRecoveryQueueFocusEvent(new CustomEvent(RECOVERY_QUEUE_FOCUS_EVENT, {
       detail: { deadLetterId: ' target ' },
     }))).toEqual({ deadLetterId: 'target' })
@@ -98,5 +103,12 @@ describe('consumeDeadLetterDeepLink — the alert -> failure jump', () => {
     setUrl(`/?deadLetterId=${encodeURIComponent('dl 42&x=1')}`)
 
     expect(consumeDeadLetterDeepLink()).toEqual({ deadLetterId: 'dl 42&x=1' })
+  })
+
+  it('reads a shared #/runs/dlq/<id> route and leaves it in place', () => {
+    setUrl('/#/runs/dlq/dl-77')
+
+    expect(consumeDeadLetterDeepLink()).toEqual({ deadLetterId: 'dl-77' })
+    expect(window.location.hash).toBe('#/runs/dlq/dl-77')
   })
 })

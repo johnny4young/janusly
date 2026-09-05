@@ -103,6 +103,27 @@ test('the real web boots against Go and renders live data', async ({ page, reque
   expect(pageErrors, `page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
 })
 
+test('the URL names the workspace: hash routes, deep links and the back button', async ({ page, request }) => {
+  test.setTimeout(90_000)
+  const orgId = `go-route-${Date.now()}`
+  await seed(request, orgId)
+  await preparePage(page, orgId)
+
+  // A cold load restores the tab and writes it so the first link is shareable.
+  await expect(page.getByTestId('activity-workspace')).toBeVisible()
+  await expect(page).toHaveURL(/#\/runs$/)
+
+  // A shared Operations link lands on the named section.
+  await page.goto('/#/operations/access')
+  await expect(page.getByTestId('operations-rail-tab-access')).toHaveAttribute('aria-current', 'page')
+  await expect(page).toHaveURL(/#\/operations\/access$/)
+
+  // Back means back: the previous tab, not a dead button.
+  await page.goBack()
+  await expect(page).toHaveURL(/#\/runs$/)
+  await expect(page.getByTestId('activity-workspace')).toBeVisible()
+})
+
 test('operator loop against Go: redrive and approve through the real UI', async ({ page, request }) => {
   test.setTimeout(120_000)
   const orgId = `go-loop-${Date.now()}`
