@@ -95,7 +95,10 @@ jq -e --arg commit "$commit" --arg tree "$tree" \
   "$work_dir/runtime-provenance.json" >/dev/null || die 'runtime provenance does not match the image'
 
 docker save --output "$work_dir/janusly-image.tar" "$image"
-docker run --rm --volume "$work_dir:/work" "$syft_image" \
+# Run Syft as the invoking user: it chmods the SPDX file it writes into the
+# bind mount, which a Linux daemon refuses when the container user does not
+# own the mount (Docker Desktop hides the mismatch, GitHub runners do not).
+docker run --rm --user "$(id -u):$(id -g)" --volume "$work_dir:/work" "$syft_image" \
   scan docker-archive:/work/janusly-image.tar \
   --output spdx-json=/work/janusly.spdx.json \
   --source-name Janusly \
