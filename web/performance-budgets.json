@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 583,
+  "artifactGzipKiB": 587,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 539
+    "maxGzipKiB": 543
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -37,7 +37,7 @@
       "assets": [
         "workflow-workspace.js"
       ],
-      "maxGzipKiB": 43.1
+      "maxGzipKiB": 44.5
     }
   },
   "routeBudgets": {
@@ -134,7 +134,7 @@
     "ValidationEvidencePill.js": 0.3,
     "VersionHistoryPanel.js": 2.54,
     "VitalSignsStrip.js": 2.11,
-    "workflow-workspace.js": 38.92,
+    "workflow-workspace.js": 43.4,
     "WorkflowDiffView.js": 1.55,
     "WorkflowIoEditor.js": 2.54,
     "WorkflowMetadataPanel.js": 2.7,

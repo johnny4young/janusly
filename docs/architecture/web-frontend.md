@@ -93,3 +93,25 @@ and read them back on mount (consume-once), keeping a live `CustomEvent` only
 for consumers already mounted; the DOM-focus buses (authoring problems,
 resilience) stay events because they are not navigation. `?deadLetterId=`
 from alert notifications remains a supported alias of the dlq route.
+
+## Data invalidation
+
+Panel reads subscribe to the resources they depend on through
+`src/lib/query-cache.ts` (`useInvalidationNonce(tags)`), and mutations name
+what they changed with `invalidateTags`; only panels whose tags intersect
+refetch. The store's `bumpPlatformVersion()` broadcast still exists and also
+invalidates the `platform` bridge tag, so a migrated panel subscribes to
+`[PLATFORM_TAG, ...its tags]` and keeps refreshing on every mutation until the
+mutations it cares about name their tags, at which point it drops the bridge.
+The AI guidance, alert policies and auth policy settings panels are the first
+adopters; the remaining `platformVersion` subscribers migrate the same way.
+
+## Bundle budgets
+
+`performance-budgets.json` is a ratchet, not a target: the total artifact,
+the worst single-locale artifact and the eager `workflow-workspace` chunk are
+capped, and every other chunk may grow at most 10 % over its recorded
+baseline. The caps were raised once (2026-09) by the measured cost of the
+controller/view splits and the hash router — about 1.5 KiB of gzip for the
+object keys a model boundary needs — after confirming the bundle held no
+duplicated modules and no removable code; they are not raised for features.
