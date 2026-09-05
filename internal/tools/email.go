@@ -168,52 +168,150 @@ func emailEnvelope(ok bool, provider, messageID, errMessage string) map[string]a
 	return envelope
 }
 
-// executeEmailSend runs the email.send tool through the chokepoint deps.
-// NEVER throws — every failure mode answers {ok:false, provider, error}.
-func executeEmailSend(ctx context.Context, input map[string]any, deps *IntegrationDeps) map[string]any {
-	start := time.Now()
-	to, _ := input["to"].(string)
-	subject, _ := input["subject"].(string)
-	text, _ := input["text"].(string)
-	html, _ := input["html"].(string)
-	if to == "" || subject == "" || len(subject) > emailSubjectMax {
-		return emailEnvelope(false, "noop", "", "email.send requires to and subject (subject ≤998 chars)")
+// emailMessage is a validated email.send input: bounded subject and bodies,
+// at most 20 short metadata entries, and the resolved sender.
+type emailMessage struct {
+	to, from, subject, text, html string
+	metadata                      map[string]string
+}
+
+// parseEmailMessage validates the tool input; a non-empty second value is
+// the noop-envelope error message.
+func parseEmailMessage(input map[string]any) (emailMessage, string) {
+	msg := emailMessage{metadata: map[string]string{}}
+	msg.to, _ = input["to"].(string)
+	msg.subject, _ = input["subject"].(string)
+	msg.text, _ = input["text"].(string)
+	msg.html, _ = input["html"].(string)
+	msg.from, _ = input["from"].(string)
+	if msg.to == "" || msg.subject == "" || len(msg.subject) > emailSubjectMax {
+		return msg, "email.send requires to and subject (subject ≤998 chars)"
 	}
-	if text == "" && html == "" {
-		return emailEnvelope(false, "noop", "", "email.send requires `text` or `html` (or both).")
+	if msg.text == "" && msg.html == "" {
+		return msg, "email.send requires `text` or `html` (or both)."
 	}
-	if len(text) > emailTextMax || len(html) > emailHTMLMax {
-		return emailEnvelope(false, "noop", "", "email.send body exceeds the size cap")
+	if len(msg.text) > emailTextMax || len(msg.html) > emailHTMLMax {
+		return msg, "email.send body exceeds the size cap"
 	}
-	metadata := map[string]string{}
 	if rawMetadata, ok := input["metadata"].(map[string]any); ok {
 		if len(rawMetadata) > emailMetadataMax {
-			return emailEnvelope(false, "noop", "", "email.send metadata supports at most 20 entries")
+			return msg, "email.send metadata supports at most 20 entries"
 		}
 		for key, value := range rawMetadata {
 			text, ok := value.(string)
 			if !ok || key == "" || len(key) > 64 || len(text) > 256 {
-				return emailEnvelope(false, "noop", "", "email.send metadata entries must be short strings")
+				return msg, "email.send metadata entries must be short strings"
 			}
-			metadata[key] = text
+			msg.metadata[key] = text
 		}
+	}
+	return msg, ""
+}
+
+// emailRequest is one provider's wire shape for a message plus how it
+// reports the message id (nil: the provider answers no id and one is
+// synthesized).
+type emailRequest struct {
+	label     string
+	url       string
+	headers   map[string]string
+	payload   map[string]any
+	messageID func(body string) string
+}
+
+func jsonMessageID(body string) string {
+	var parsed struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal([]byte(body), &parsed)
+	return parsed.ID
+}
+
+func bearerJSONHeaders(envKey string) map[string]string {
+	return map[string]string{
+		"Authorization": "Bearer " + os.Getenv(envKey),
+		"Content-Type":  "application/json",
+	}
+}
+
+// emailProviderRequests builds the provider request for a validated message.
+var emailProviderRequests = map[string]func(msg emailMessage) emailRequest{
+	"resend": func(msg emailMessage) emailRequest {
+		payload := map[string]any{"from": msg.from, "to": []string{msg.to}, "subject": msg.subject}
+		if msg.text != "" {
+			payload["text"] = msg.text
+		}
+		if msg.html != "" {
+			payload["html"] = msg.html
+		}
+		if len(msg.metadata) > 0 {
+			tags := make([]map[string]string, 0, len(msg.metadata))
+			for name, value := range msg.metadata {
+				tags = append(tags, map[string]string{"name": name, "value": value})
+			}
+			payload["tags"] = tags
+		}
+		return emailRequest{label: "Resend", url: "https://api.resend.com/emails",
+			headers: bearerJSONHeaders("RESEND_API_KEY"), payload: payload, messageID: jsonMessageID}
+	},
+	"sendgrid": func(msg emailMessage) emailRequest {
+		content := []map[string]string{}
+		if msg.text != "" {
+			content = append(content, map[string]string{"type": "text/plain", "value": msg.text})
+		}
+		if msg.html != "" {
+			content = append(content, map[string]string{"type": "text/html", "value": msg.html})
+		}
+		payload := map[string]any{
+			"personalizations": []map[string]any{{"to": []map[string]string{{"email": msg.to}}}},
+			"from":             map[string]string{"email": msg.from},
+			"subject":          msg.subject,
+			"content":          content,
+		}
+		if len(msg.metadata) > 0 {
+			payload["custom_args"] = msg.metadata
+		}
+		// SendGrid answers 202 + empty body; the id rides a response
+		// header FetchHTTPTarget doesn't expose — synthesize best-effort.
+		return emailRequest{label: "SendGrid", url: "https://api.sendgrid.com/v3/mail/send",
+			headers: bearerJSONHeaders("SENDGRID_API_KEY"), payload: payload}
+	},
+	"simulator": func(msg emailMessage) emailRequest {
+		payload := map[string]any{"to": msg.to, "from": msg.from, "subject": msg.subject}
+		if msg.text != "" {
+			payload["text"] = msg.text
+		}
+		if msg.html != "" {
+			payload["html"] = msg.html
+		}
+		return emailRequest{label: "Simulator", url: simulatorEndpoint("/email/send"),
+			headers: map[string]string{"content-type": "application/json"}, payload: payload, messageID: jsonMessageID}
+	},
+}
+
+// executeEmailSend runs the email.send tool through the chokepoint deps.
+// NEVER throws — every failure mode answers {ok:false, provider, error}.
+func executeEmailSend(ctx context.Context, input map[string]any, deps *IntegrationDeps) map[string]any {
+	start := time.Now()
+	msg, errMessage := parseEmailMessage(input)
+	if errMessage != "" {
+		return emailEnvelope(false, "noop", "", errMessage)
 	}
 
 	settings := EmailSettings{}
 	if deps != nil && deps.Email != nil {
 		settings = deps.Email()
 	}
-	from, _ := input["from"].(string)
-	if from == "" {
-		from = settings.From
+	if msg.from == "" {
+		msg.from = settings.From
 	}
-	if from == "" {
-		from = os.Getenv("JANUSLY_MAILER_FROM")
+	if msg.from == "" {
+		msg.from = os.Getenv("JANUSLY_MAILER_FROM")
 	}
-	if from == "" {
-		from = "onboarding@resend.dev"
+	if msg.from == "" {
+		msg.from = "onboarding@resend.dev"
 	}
-	if !validEmailMailbox(from) {
+	if !validEmailMailbox(msg.from) {
 		return emailEnvelope(false, "noop", "", "configured mailer from address is invalid")
 	}
 	latency := func() int { return int(time.Since(start).Milliseconds()) }
@@ -239,119 +337,36 @@ func executeEmailSend(ctx context.Context, input map[string]any, deps *Integrati
 	if deps == nil || deps.Post == nil {
 		return emailEnvelope(false, "noop", "", "integration tools require run context")
 	}
-	post := func(url string, headers map[string]string, body any) (int, string, string) {
-		serialized, err := json.Marshal(body)
-		if err != nil {
-			return 0, "", "payload serialization failed"
-		}
-		return deps.Post(ctx, url, headers, serialized)
-	}
-
-	switch provider {
-	case "resend":
-		payload := map[string]any{"from": from, "to": []string{to}, "subject": subject}
-		if text != "" {
-			payload["text"] = text
-		}
-		if html != "" {
-			payload["html"] = html
-		}
-		if len(metadata) > 0 {
-			tags := make([]map[string]string, 0, len(metadata))
-			for name, value := range metadata {
-				tags = append(tags, map[string]string{"name": name, "value": value})
-			}
-			payload["tags"] = tags
-		}
-		statusCode, body, errMessage := post("https://api.resend.com/emails", map[string]string{
-			"Authorization": "Bearer " + os.Getenv("RESEND_API_KEY"),
-			"Content-Type":  "application/json",
-		}, payload)
-		if errMessage != "" {
-			record("resend", false, errMessage)
-			return emailEnvelope(false, "resend", "", errMessage)
-		}
-		if statusCode < 200 || statusCode >= 300 {
-			message := fmt.Sprintf("Resend returned HTTP %d: %s", statusCode, truncateBody(body))
-			record("resend", false, message)
-			return emailEnvelope(false, "resend", "", message)
-		}
-		var parsed struct {
-			ID string `json:"id"`
-		}
-		_ = json.Unmarshal([]byte(body), &parsed)
-		if parsed.ID == "" {
-			record("resend", false, "Resend response missing message id")
-			return emailEnvelope(false, "resend", "", "Resend response missing message id")
-		}
-		record("resend", true, "")
-		return emailEnvelope(true, "resend", parsed.ID, "")
-	case "sendgrid":
-		content := []map[string]string{}
-		if text != "" {
-			content = append(content, map[string]string{"type": "text/plain", "value": text})
-		}
-		if html != "" {
-			content = append(content, map[string]string{"type": "text/html", "value": html})
-		}
-		payload := map[string]any{
-			"personalizations": []map[string]any{{"to": []map[string]string{{"email": to}}}},
-			"from":             map[string]string{"email": from},
-			"subject":          subject,
-			"content":          content,
-		}
-		if len(metadata) > 0 {
-			payload["custom_args"] = metadata
-		}
-		statusCode, body, errMessage := post("https://api.sendgrid.com/v3/mail/send", map[string]string{
-			"Authorization": "Bearer " + os.Getenv("SENDGRID_API_KEY"),
-			"Content-Type":  "application/json",
-		}, payload)
-		if errMessage != "" {
-			record("sendgrid", false, errMessage)
-			return emailEnvelope(false, "sendgrid", "", errMessage)
-		}
-		if statusCode < 200 || statusCode >= 300 {
-			message := fmt.Sprintf("SendGrid returned HTTP %d: %s", statusCode, truncateBody(body))
-			record("sendgrid", false, message)
-			return emailEnvelope(false, "sendgrid", "", message)
-		}
-		// SendGrid answers 202 + empty body; the id rides a response
-		// header FetchHTTPTarget doesn't expose — synthesize best-effort.
-		record("sendgrid", true, "")
-		return emailEnvelope(true, "sendgrid", fmt.Sprintf("sendgrid-%d", time.Now().UnixMilli()), "")
-	case "simulator":
-		endpoint := simulatorEndpoint("/email/send")
-		payload := map[string]any{"to": to, "from": from, "subject": subject}
-		if text != "" {
-			payload["text"] = text
-		}
-		if html != "" {
-			payload["html"] = html
-		}
-		statusCode, body, errMessage := post(endpoint, map[string]string{"content-type": "application/json"}, payload)
-		if errMessage != "" {
-			record("simulator", false, errMessage)
-			return emailEnvelope(false, "simulator", "", errMessage)
-		}
-		if statusCode < 200 || statusCode >= 300 {
-			message := fmt.Sprintf("Simulator returned HTTP %d: %s", statusCode, truncateBody(body))
-			record("simulator", false, message)
-			return emailEnvelope(false, "simulator", "", message)
-		}
-		var parsed struct {
-			ID string `json:"id"`
-		}
-		_ = json.Unmarshal([]byte(body), &parsed)
-		if parsed.ID == "" {
-			record("simulator", false, "Simulator response missing message id")
-			return emailEnvelope(false, "simulator", "", "Simulator response missing message id")
-		}
-		record("simulator", true, "")
-		return emailEnvelope(true, "simulator", parsed.ID, "")
-	default:
+	buildRequest := emailProviderRequests[provider]
+	if buildRequest == nil {
 		message := "Mailer not configured. Set JANUSLY_MAILER_PROVIDER=resend|sendgrid and the matching API key."
 		record("noop", false, message)
 		return emailEnvelope(false, "noop", "", message)
 	}
+	request := buildRequest(msg)
+	serialized, err := json.Marshal(request.payload)
+	if err != nil {
+		record(provider, false, "payload serialization failed")
+		return emailEnvelope(false, provider, "", "payload serialization failed")
+	}
+	statusCode, body, errMessage := deps.Post(ctx, request.url, request.headers, serialized)
+	if errMessage != "" {
+		record(provider, false, errMessage)
+		return emailEnvelope(false, provider, "", errMessage)
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		message := fmt.Sprintf("%s returned HTTP %d: %s", request.label, statusCode, truncateBody(body))
+		record(provider, false, message)
+		return emailEnvelope(false, provider, "", message)
+	}
+	messageID := fmt.Sprintf("%s-%d", provider, time.Now().UnixMilli())
+	if request.messageID != nil {
+		if messageID = request.messageID(body); messageID == "" {
+			message := request.label + " response missing message id"
+			record(provider, false, message)
+			return emailEnvelope(false, provider, "", message)
+		}
+	}
+	record(provider, true, "")
+	return emailEnvelope(true, provider, messageID, "")
 }
