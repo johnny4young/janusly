@@ -19,7 +19,8 @@
  * and `DeadLettersPanel.tsx` (selected-entry action bar).
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { useAliveRef } from '../hooks/useAliveRef'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, Play, RefreshCcw, X } from 'lucide-react'
 import { api, contractApi } from '../api'
@@ -65,13 +66,7 @@ export function ReplayLabDialog({
   const [step, setStep] = useState<Step>({ kind: 'idle' })
   const primaryRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useDialogFocusTrap(dialogRef)
-  const aliveRef = useRef(true)
-
-  useEffect(() => {
-    aliveRef.current = true
-    return () => { aliveRef.current = false }
-  }, [])
+  const aliveRef = useAliveRef()
 
   useEffect(() => { primaryRef.current?.focus() }, [step.kind])
 
@@ -79,19 +74,8 @@ export function ReplayLabDialog({
   // in flight — abandoning a poll silently is fine (the run still
   // completes in the background), but blocking ESC keeps the operator
   // from accidentally tossing the lab they just started.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return
-      if (
-        step.kind === 'starting'
-        || step.kind === 'replaying'
-        || step.kind === 'comparing'
-      ) return
-      onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [step.kind, onClose])
+  const escapeBlocked = step.kind === 'starting' || step.kind === 'replaying' || step.kind === 'comparing'
+  useDialogFocusTrap(dialogRef, { onEscape: escapeBlocked ? undefined : onClose })
 
   // Stable primitives derived from the prop + step. The polling effect
   // depends on these directly so the dep array is plain values (no

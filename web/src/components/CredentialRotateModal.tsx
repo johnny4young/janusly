@@ -12,7 +12,8 @@
  * dialogs. Mounted per credential by `ConnectionsPanel`.
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
+import { useAliveRef } from '../hooks/useAliveRef'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, KeyRound, X } from 'lucide-react'
 
@@ -62,16 +63,8 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
   const [storage, setStorage] = useState<'managed' | 'environment'>('managed')
   const [newSecretValue, setNewSecretValue] = useState('')
   const [newSecretRef, setNewSecretRef] = useState('')
-  const aliveRef = useRef(true)
+  const aliveRef = useAliveRef()
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useDialogFocusTrap(dialogRef, { initialFocus: true })
-
-  useEffect(() => {
-    aliveRef.current = true
-    return () => {
-      aliveRef.current = false
-    }
-  }, [])
 
   const loadPreview = React.useCallback(async () => {
     setStep({ kind: 'loading' })
@@ -96,15 +89,8 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
     void loadPreview()
   }, [loadPreview])
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return
-      if (step.kind === 'rotating') return
-      onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, step.kind])
+  const escapeBlocked = step.kind === 'rotating'
+  useDialogFocusTrap(dialogRef, { initialFocus: true, onEscape: escapeBlocked ? undefined : onClose })
 
   const trimmedRef = newSecretRef.trim()
   const secretValid = storage === 'managed'

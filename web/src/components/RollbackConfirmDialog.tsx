@@ -18,7 +18,8 @@
  * this dialog with the selected target version.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { useAliveRef } from '../hooks/useAliveRef'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, RotateCcw, X } from 'lucide-react'
 import { api } from '../api'
@@ -67,18 +68,11 @@ export function RollbackConfirmDialog({
   const [step, setStep] = useState<Step>({ kind: 'idle' })
   const primaryRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useDialogFocusTrap(dialogRef)
   // Tracks whether the dialog is still mounted. Set on unmount so an
   // in-flight rollback that resolves after dismount can't push toasts,
   // hydrate the canvas, or bump the platform version against a UI the
   // operator already moved on from.
-  const aliveRef = useRef(true)
-  useEffect(() => {
-    aliveRef.current = true
-    return () => {
-      aliveRef.current = false
-    }
-  }, [])
+  const aliveRef = useAliveRef()
 
   // Re-focus the primary action on every step transition that has one.
   // During `rolling-back` the only footer element is a disabled
@@ -89,15 +83,8 @@ export function RollbackConfirmDialog({
     primaryRef.current?.focus()
   }, [step.kind])
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return
-      if (step.kind === 'rolling-back') return
-      onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, step.kind])
+  const escapeBlocked = step.kind === 'rolling-back'
+  useDialogFocusTrap(dialogRef, { onEscape: escapeBlocked ? undefined : onClose })
 
   const onBackdropClick = () => {
     if (step.kind === 'rolling-back') return

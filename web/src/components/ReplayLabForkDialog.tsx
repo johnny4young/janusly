@@ -22,7 +22,8 @@
  * Used by `RightPanel.tsx`'s `RunsPanel` per-node fork buttons.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { useAliveRef } from '../hooks/useAliveRef'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, GitBranch, X } from 'lucide-react'
 import { api } from '../api'
@@ -62,27 +63,14 @@ export function ReplayLabForkDialog({
   const [parseError, setParseError] = useState<string | null>(null)
   const primaryRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useDialogFocusTrap(dialogRef)
-  const aliveRef = useRef(true)
-
-  useEffect(() => {
-    aliveRef.current = true
-    return () => { aliveRef.current = false }
-  }, [])
+  const aliveRef = useAliveRef()
 
   useEffect(() => { primaryRef.current?.focus() }, [step.kind])
 
   // ESC closes only when no async work is in flight. Starting is the
   // only async step (no polling, unlike the whole-run sibling).
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return
-      if (step.kind === 'starting') return
-      onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [step.kind, onClose])
+  const escapeBlocked = step.kind === 'starting'
+  useDialogFocusTrap(dialogRef, { onEscape: escapeBlocked ? undefined : onClose })
 
   const onBackdrop = () => {
     if (step.kind === 'starting') return

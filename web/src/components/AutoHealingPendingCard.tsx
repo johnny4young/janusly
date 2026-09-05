@@ -18,7 +18,8 @@
  * hide instead of rendering an error).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useAliveRef } from '../hooks/useAliveRef'
 import { CheckCircle2, CircleAlert, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useT } from '../i18n'
 import { api, isForbiddenApiError } from '../api'
@@ -159,11 +160,7 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
 
   // Guards every state write behind the mounted lifetime, like the other
   // fetching cards; a late response after the panel closes must not land.
-  const aliveRef = useRef(true)
-  useEffect(() => {
-    aliveRef.current = true
-    return () => { aliveRef.current = false }
-  }, [])
+  const aliveRef = useAliveRef()
 
   const load = useCallback(async () => {
     try {

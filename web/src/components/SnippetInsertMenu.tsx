@@ -20,6 +20,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAliveRef } from '../hooks/useAliveRef'
 import { Layers, Search, X } from 'lucide-react'
 import {
   BUILTIN_SNIPPET_ID_PREFIX,
@@ -69,20 +70,13 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
   const [targetNodeId, setTargetNodeId] = useState<string | null>(selectedNodeId)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  const aliveRef = useRef(true)
+  const aliveRef = useAliveRef()
 
   // True modal (aria-modal): trap Tab within the dialog and restore focus to the
   // trigger on close. The component focuses the search input itself on open, so
   // initialFocus stays off — the hook only adds the trap + restore the other
   // app modals already have (this was the lone aria-modal dialog without it).
   useDialogFocusTrap(dialogRef, { active: open, onEscape: onClose })
-
-  useEffect(() => {
-    aliveRef.current = true
-    return () => {
-      aliveRef.current = false
-    }
-  }, [])
 
   // Fetch snippets when the dialog opens (built-ins + org custom).
   useEffect(() => {

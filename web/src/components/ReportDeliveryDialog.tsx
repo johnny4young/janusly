@@ -23,6 +23,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useAliveRef } from '../hooks/useAliveRef'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, ExternalLink, Send, X } from 'lucide-react'
 import { api } from '../api'
@@ -102,27 +103,14 @@ export function ReportDeliveryDialog({
   const [repo, setRepo] = useState('')
   const [labels, setLabels] = useState('')
   const [webhookUrl, setWebhookUrl] = useState('')
-  const aliveRef = useRef(true)
+  const aliveRef = useAliveRef()
   const primaryRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useDialogFocusTrap(dialogRef)
-
-  useEffect(() => {
-    aliveRef.current = true
-    return () => { aliveRef.current = false }
-  }, [])
 
   useEffect(() => { primaryRef.current?.focus() }, [step.kind])
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return
-      if (step.kind === 'submitting') return
-      onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [step.kind, onClose])
+  const escapeBlocked = step.kind === 'submitting'
+  useDialogFocusTrap(dialogRef, { onEscape: escapeBlocked ? undefined : onClose })
 
   const onBackdrop = () => {
     if (step.kind === 'submitting') return
