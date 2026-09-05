@@ -52,7 +52,7 @@ WHERE id = ANY(sqlc.arg(ids)::text[])
     SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = run_nodes.id AND w.wake_at > now()
   )
-RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt,
+RETURNING id, run_id, org_id, node_id, COALESCE(attempts, 1)::int AS attempt,
   GREATEST(EXTRACT(EPOCH FROM clock_timestamp() - enqueued_at), 0)::float8
     AS queue_wait_seconds;
 
@@ -60,7 +60,7 @@ RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt,
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(run_id)::text, 0));
 
 -- name: FindStalledRunningNodes :many
-SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+SELECT rn.id, rn.run_id, rn.org_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
        rn.started_at
 FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id
@@ -74,7 +74,7 @@ LIMIT sqlc.arg(batch_size);
 -- tenant/run scope crosses the same running-node CAS and terminal boundary as
 -- the ordinary reaper after this bounded selection.
 -- name: FindScopedStalledRunningNodes :many
-SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+SELECT rn.id, rn.run_id, rn.org_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
        rn.started_at
 FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id

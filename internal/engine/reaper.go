@@ -29,6 +29,7 @@ type stalledCandidate struct {
 	NodeID    string
 	Attempt   int32
 	StartedAt *time.Time
+	OrgID     string
 }
 
 type stalledReapResult struct {
@@ -58,7 +59,7 @@ func (e *Engine) ReapStalledNodes(ctx context.Context, threshold time.Duration, 
 	fields := map[string]any{"reason": "worker_stalled"}
 	for _, row := range rows {
 		candidate := stalledCandidate{
-			RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID,
+			RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID, OrgID: row.OrgID,
 			Attempt: row.Attempt, StartedAt: row.StartedAt,
 		}
 		if e.reapStalledCandidate(ctx, candidate, threshold, fields, logger) {
@@ -82,7 +83,7 @@ func (e *Engine) reapScopedStalledNodes(ctx context.Context, orgID, runID string
 	result := stalledReapResult{Scanned: len(rows)}
 	for _, row := range rows {
 		candidate := stalledCandidate{
-			RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID,
+			RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID, OrgID: row.OrgID,
 			Attempt: row.Attempt, StartedAt: row.StartedAt,
 		}
 		if e.reapStalledCandidate(ctx, candidate, threshold, fields, logger) {
@@ -94,7 +95,7 @@ func (e *Engine) reapScopedStalledNodes(ctx context.Context, orgID, runID string
 
 func (e *Engine) reapStalledCandidate(ctx context.Context, row stalledCandidate, threshold time.Duration, fields map[string]any, logger *slog.Logger) bool {
 	minutes := int64(threshold.Round(time.Minute) / time.Minute)
-	claim := ClaimedNode{RowID: row.RowID, RunID: row.RunID, NodeID: row.NodeID, Attempt: row.Attempt}
+	claim := ClaimedNode{RowID: row.RowID, RunID: row.RunID, NodeID: row.NodeID, Attempt: row.Attempt, OrgID: row.OrgID}
 	since := "unknown"
 	if row.StartedAt != nil {
 		since = row.StartedAt.UTC().Format(time.RFC3339Nano)

@@ -171,8 +171,8 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 	lastStatus := ""
 
 	for {
-		rows, err := q.ListRunEventsAfter(r.Context(), store.ListRunEventsAfterParams{
-			RunID: runID, AfterCreatedAt: cursorAt, AfterID: cursorID,
+		rows, err := q.ListRunEventsAfterForOrg(r.Context(), store.ListRunEventsAfterForOrgParams{
+			RunID: runID, OrgID: rc.orgID, AfterCreatedAt: cursorAt, AfterID: cursorID,
 			PageLimit: streamCatchupMax + 1,
 		})
 		if err != nil {

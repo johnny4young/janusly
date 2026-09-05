@@ -131,7 +131,7 @@ func (s *V1Server) resolveRunExplain(ctx context.Context, orgID, runID string) (
 	if err != nil {
 		return nil, "", false
 	}
-	nodeRows, err := q.ListRunNodesByRun(ctx, runID)
+	nodeRows, err := q.ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: runID, OrgID: orgID})
 	if err != nil {
 		return nil, "", false
 	}
@@ -149,8 +149,8 @@ func (s *V1Server) resolveRunExplain(ctx context.Context, orgID, runID string) (
 		nodes = append(nodes, node)
 	}
 	farFuture := timeFarFuture()
-	eventRows, err := q.ListRunEvents(ctx, store.ListRunEventsParams{
-		RunID: runID, BeforeCreatedAt: farFuture, BeforeID: "￿", PageLimit: 200,
+	eventRows, err := q.ListRunEventsForOrg(ctx, store.ListRunEventsForOrgParams{
+		RunID: runID, OrgID: orgID, BeforeCreatedAt: farFuture, BeforeID: "￿", PageLimit: 200,
 	})
 	if err != nil {
 		return nil, "", false

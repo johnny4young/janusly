@@ -341,7 +341,7 @@ func (s *V1Server) explainRunCore(r *http.Request, rc v1Request) opResult {
 	// Evidence side-channel: signature rule for the failing node, when one
 	// exists (same rows the patch surface attaches; scrubbed).
 	evidence := []aievidence.Row{}
-	if nodes, err := store.New(s.pool).ListRunNodesByRun(ctx, body.RunID); err == nil {
+	if nodes, err := store.New(s.pool).ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: body.RunID, OrgID: rc.orgID}); err == nil {
 		for _, node := range nodes {
 			if node.Status != "failed" || len(node.ErrorJson) == 0 {
 				continue

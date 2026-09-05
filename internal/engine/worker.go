@@ -214,7 +214,7 @@ func (e *Engine) claimBatch(ctx context.Context, batch int32) ([]ClaimedNode, er
 		attemptPayload, _ := json.Marshal(map[string]any{"attempt": row.Attempt})
 		runningAt := e.eventNow()
 		if err := store.New(e.pool).InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: row.RunID,
+			ID: e.newID(), RunID: row.RunID, OrgID: row.OrgID,
 			NodeID: pgtype.Text{String: row.NodeID, Valid: true},
 			Type:   "node.running", Payload: attemptPayload,
 			CreatedAt: &runningAt,
@@ -225,7 +225,7 @@ func (e *Engine) claimBatch(ctx context.Context, batch int32) ([]ClaimedNode, er
 	claims := make([]ClaimedNode, 0, len(rows))
 	for _, row := range rows {
 		claims = append(claims, ClaimedNode{
-			RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID, Attempt: row.Attempt,
+			RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID, Attempt: row.Attempt, OrgID: row.OrgID,
 		})
 	}
 	return claims, nil

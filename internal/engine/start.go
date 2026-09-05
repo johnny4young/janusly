@@ -262,7 +262,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	nodeRows := make([]store.InsertRunNodesParams, 0, len(in.Workflow.Nodes))
 	for _, node := range in.Workflow.Nodes {
 		row := store.InsertRunNodesParams{
-			ID: e.newID(), RunID: runID, NodeID: node.ID,
+			ID: e.newID(), RunID: runID, OrgID: in.OrgID, NodeID: node.ID,
 			Status: "pending", Attempts: pgtype.Int4{Int32: 0, Valid: true},
 			StateJson: json.RawMessage(`{}`),
 		}

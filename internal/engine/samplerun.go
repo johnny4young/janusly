@@ -101,7 +101,7 @@ func (e *Engine) StartSandboxRun(ctx context.Context, in SandboxRunInput) (strin
 	}
 
 	startedAt := e.eventNow()
-	events := &runEventBuffer{}
+	events := &runEventBuffer{orgID: in.OrgID}
 	startedPayload := safePersist(map[string]any{
 		"workflowVersionId": runID,
 		"source":            in.Source,

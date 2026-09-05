@@ -381,7 +381,7 @@ func (q *Queries) DemoteQueuedRunNodes(ctx context.Context, runID string) (int64
 }
 
 const findScopedStalledRunningNodes = `-- name: FindScopedStalledRunningNodes :many
-SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+SELECT rn.id, rn.run_id, rn.org_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
        rn.started_at
 FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id
@@ -404,6 +404,7 @@ type FindScopedStalledRunningNodesParams struct {
 type FindScopedStalledRunningNodesRow struct {
 	ID        string
 	RunID     string
+	OrgID     string
 	NodeID    string
 	Attempt   int32
 	StartedAt *time.Time
@@ -429,6 +430,7 @@ func (q *Queries) FindScopedStalledRunningNodes(ctx context.Context, arg FindSco
 		if err := rows.Scan(
 			&i.ID,
 			&i.RunID,
+			&i.OrgID,
 			&i.NodeID,
 			&i.Attempt,
 			&i.StartedAt,
@@ -444,7 +446,7 @@ func (q *Queries) FindScopedStalledRunningNodes(ctx context.Context, arg FindSco
 }
 
 const findStalledRunningNodes = `-- name: FindStalledRunningNodes :many
-SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+SELECT rn.id, rn.run_id, rn.org_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
        rn.started_at
 FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id
@@ -463,6 +465,7 @@ type FindStalledRunningNodesParams struct {
 type FindStalledRunningNodesRow struct {
 	ID        string
 	RunID     string
+	OrgID     string
 	NodeID    string
 	Attempt   int32
 	StartedAt *time.Time
@@ -480,6 +483,7 @@ func (q *Queries) FindStalledRunningNodes(ctx context.Context, arg FindStalledRu
 		if err := rows.Scan(
 			&i.ID,
 			&i.RunID,
+			&i.OrgID,
 			&i.NodeID,
 			&i.Attempt,
 			&i.StartedAt,
@@ -658,7 +662,7 @@ WHERE id = ANY($1::text[])
     SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = run_nodes.id AND w.wake_at > now()
   )
-RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt,
+RETURNING id, run_id, org_id, node_id, COALESCE(attempts, 1)::int AS attempt,
   GREATEST(EXTRACT(EPOCH FROM clock_timestamp() - enqueued_at), 0)::float8
     AS queue_wait_seconds
 `
@@ -666,6 +670,7 @@ RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt,
 type MarkLockedNodesRunningRow struct {
 	ID               string
 	RunID            string
+	OrgID            string
 	NodeID           string
 	Attempt          int32
 	QueueWaitSeconds float64
@@ -684,6 +689,7 @@ func (q *Queries) MarkLockedNodesRunning(ctx context.Context, ids []string) ([]M
 		if err := rows.Scan(
 			&i.ID,
 			&i.RunID,
+			&i.OrgID,
 			&i.NodeID,
 			&i.Attempt,
 			&i.QueueWaitSeconds,

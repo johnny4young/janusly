@@ -147,6 +147,8 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		{"organizations", []string{"id", "owner_user_id", "name", "plan"}},
 		{"schedule_entries", []string{"next_fire_at"}},
 		{"runs", []string{"workflow_id", "trigger_kind"}},
+		{"run_nodes", []string{"org_id"}},
+		{"run_events", []string{"org_id"}},
 	}
 	for _, requirement := range requiredColumns {
 		for _, column := range requirement.columns {

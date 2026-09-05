@@ -179,7 +179,7 @@ func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	nodes, err := q.ListRunNodesByRun(ctx, runID)
+	nodes, err := q.ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: runID, OrgID: rc.orgID})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
@@ -197,8 +197,8 @@ func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 			limit = n
 		}
 	}
-	events, err := q.ListRunEvents(ctx, store.ListRunEventsParams{
-		RunID: runID, BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
+	events, err := q.ListRunEventsForOrg(ctx, store.ListRunEventsForOrgParams{
+		RunID: runID, OrgID: rc.orgID, BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
 		PageLimit: int32(limit + 1),
 	})
 	if err != nil {

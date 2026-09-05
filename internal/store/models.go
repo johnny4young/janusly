@@ -726,6 +726,7 @@ type Run struct {
 type RunEvent struct {
 	ID        string
 	RunID     string
+	OrgID     string
 	NodeID    pgtype.Text
 	Type      string
 	Payload   json.RawMessage
@@ -736,6 +737,7 @@ type RunEvent struct {
 type RunNode struct {
 	ID                          string
 	RunID                       string
+	OrgID                       string
 	NodeID                      string
 	Status                      string
 	StateJson                   json.RawMessage

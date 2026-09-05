@@ -212,6 +212,7 @@ func (e *Engine) completeNode(ctx context.Context, claim ClaimedNode, output any
 	finishedAt := e.eventNow()
 	terminal := false
 	if err := e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
+		events.scope(claim.OrgID)
 		completed, err := q.CompleteRunNode(ctx, store.CompleteRunNodeParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
 			StateJson:  stateJSON,

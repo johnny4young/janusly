@@ -341,7 +341,7 @@ func (d Deps) runStatus(ctx context.Context, runID string) (*mcp.CallToolResult,
 		}
 		return nil, nil, err
 	}
-	nodes, err := q.ListRunNodesByRun(ctx, runID)
+	nodes, err := q.ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: runID, OrgID: d.OrgID})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -374,12 +374,12 @@ func (d Deps) runInspect(ctx context.Context, runID string) (*mcp.CallToolResult
 		}
 		return nil, nil, err
 	}
-	nodes, err := q.ListRunNodesByRun(ctx, runID)
+	nodes, err := q.ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: runID, OrgID: d.OrgID})
 	if err != nil {
 		return nil, nil, err
 	}
-	events, err := q.ListRunEvents(ctx, store.ListRunEventsParams{
-		RunID: runID, BeforeCreatedAt: farFuture(), BeforeID: "￿", PageLimit: 50,
+	events, err := q.ListRunEventsForOrg(ctx, store.ListRunEventsForOrgParams{
+		RunID: runID, OrgID: d.OrgID, BeforeCreatedAt: farFuture(), BeforeID: "￿", PageLimit: 50,
 	})
 	if err != nil {
 		return nil, nil, err

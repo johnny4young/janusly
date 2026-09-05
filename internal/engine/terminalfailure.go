@@ -40,6 +40,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 	}
 	retriedAt := e.eventNow()
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
+		events.scope(claim.OrgID)
 		requeued, err := q.RequeueRunNodeForRetry(ctx, store.RequeueRunNodeForRetryParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
 			Attempt: pgtype.Int4{Int32: nextAttempt, Valid: true},
@@ -121,6 +122,7 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 
 	failedAt := e.eventNow()
 	committed, err = e.inCompletionTxCommitted(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
+		events.scope(claim.OrgID)
 		run, err := q.GetRunExecution(ctx, claim.RunID)
 		if err != nil {
 			return fmt.Errorf("read run: %w", err)

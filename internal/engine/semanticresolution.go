@@ -376,7 +376,7 @@ func (e *Engine) applySemanticResolution(
 		return ResolveSemanticOutcomeResult{}, ErrRecoveryCaseConflict
 	}
 
-	events := &runEventBuffer{}
+	events := &runEventBuffer{orgID: orgID}
 	events.add(eventID, snapshot.RunID, snapshot.SourceNodeID,
 		"recovery.semantic_resolved", safePersist(map[string]any{
 			"caseIds": caseIDs, "sourceNodeId": snapshot.SourceNodeID,

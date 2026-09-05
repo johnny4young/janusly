@@ -1059,6 +1059,7 @@ CREATE TABLE public.routing_stats (
 CREATE TABLE public.run_events (
     id text NOT NULL,
     run_id text NOT NULL,
+    org_id text NOT NULL,
     node_id text,
     type text NOT NULL,
     payload jsonb,
@@ -1074,6 +1075,7 @@ CREATE TABLE public.run_events (
 CREATE TABLE public.run_nodes (
     id text NOT NULL,
     run_id text NOT NULL,
+    org_id text NOT NULL,
     node_id text NOT NULL,
     status text NOT NULL,
     state_json jsonb,
@@ -3462,4 +3464,26 @@ CREATE INDEX workflows_org_deleted_idx ON public.workflows USING btree (org_id, 
 --
 -- PostgreSQL database dump complete
 --
+--
+-- Rows under a run carry the run's tenant. Hot writers stamp org_id
+-- themselves; every other insert path is stamped here from the run row, so a
+-- node or event can never exist without its organization and every read can
+-- scope by org_id directly instead of joining runs by convention.
+--
+
+CREATE FUNCTION public.stamp_run_row_org() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.org_id IS NULL OR NEW.org_id = '' THEN
+        SELECT org_id INTO NEW.org_id FROM public.runs WHERE id = NEW.run_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER run_nodes_stamp_org BEFORE INSERT ON public.run_nodes FOR EACH ROW EXECUTE FUNCTION public.stamp_run_row_org();
+
+CREATE TRIGGER run_events_stamp_org BEFORE INSERT ON public.run_events FOR EACH ROW EXECUTE FUNCTION public.stamp_run_row_org();
+
 -- +goose StatementEnd

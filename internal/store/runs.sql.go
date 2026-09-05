@@ -1158,13 +1158,14 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
 }
 
 const insertRunEvent = `-- name: InsertRunEvent :exec
-INSERT INTO run_events (id, run_id, node_id, type, payload)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO run_events (id, run_id, org_id, node_id, type, payload)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type InsertRunEventParams struct {
 	ID      string
 	RunID   string
+	OrgID   string
 	NodeID  pgtype.Text
 	Type    string
 	Payload json.RawMessage
@@ -1174,6 +1175,7 @@ func (q *Queries) InsertRunEvent(ctx context.Context, arg InsertRunEventParams) 
 	_, err := q.db.Exec(ctx, insertRunEvent,
 		arg.ID,
 		arg.RunID,
+		arg.OrgID,
 		arg.NodeID,
 		arg.Type,
 		arg.Payload,
@@ -1182,13 +1184,14 @@ func (q *Queries) InsertRunEvent(ctx context.Context, arg InsertRunEventParams) 
 }
 
 const insertRunEventAt = `-- name: InsertRunEventAt :exec
-INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO run_events (id, run_id, org_id, node_id, type, payload, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type InsertRunEventAtParams struct {
 	ID        string
 	RunID     string
+	OrgID     string
 	NodeID    pgtype.Text
 	Type      string
 	Payload   json.RawMessage
@@ -1199,6 +1202,7 @@ func (q *Queries) InsertRunEventAt(ctx context.Context, arg InsertRunEventAtPara
 	_, err := q.db.Exec(ctx, insertRunEventAt,
 		arg.ID,
 		arg.RunID,
+		arg.OrgID,
 		arg.NodeID,
 		arg.Type,
 		arg.Payload,
@@ -1210,6 +1214,7 @@ func (q *Queries) InsertRunEventAt(ctx context.Context, arg InsertRunEventAtPara
 type InsertRunEventsParams struct {
 	ID        string
 	RunID     string
+	OrgID     string
 	NodeID    pgtype.Text
 	Type      string
 	Payload   json.RawMessage
@@ -1219,6 +1224,7 @@ type InsertRunEventsParams struct {
 type InsertRunNodesParams struct {
 	ID                          string
 	RunID                       string
+	OrgID                       string
 	NodeID                      string
 	Status                      string
 	Attempts                    pgtype.Int4
@@ -1229,16 +1235,17 @@ type InsertRunNodesParams struct {
 
 const insertSeededRunNode = `-- name: InsertSeededRunNode :exec
 INSERT INTO run_nodes (
-  id, run_id, node_id, status, attempts, state_json,
+  id, run_id, org_id, node_id, status, attempts, state_json,
   started_at, finished_at,
   queue_publication_repair_after, queue_publication_generation
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `
 
 type InsertSeededRunNodeParams struct {
 	ID                          string
 	RunID                       string
+	OrgID                       string
 	NodeID                      string
 	Status                      string
 	Attempts                    pgtype.Int4
@@ -1255,6 +1262,7 @@ func (q *Queries) InsertSeededRunNode(ctx context.Context, arg InsertSeededRunNo
 	_, err := q.db.Exec(ctx, insertSeededRunNode,
 		arg.ID,
 		arg.RunID,
+		arg.OrgID,
 		arg.NodeID,
 		arg.Status,
 		arg.Attempts,
@@ -1773,6 +1781,124 @@ func (q *Queries) ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfter
 	return items, nil
 }
 
+const listRunEventsAfterForOrg = `-- name: ListRunEventsAfterForOrg :many
+SELECT id, run_id, node_id, type, payload, created_at
+FROM run_events
+WHERE run_id = $1 AND org_id = $2
+  AND (created_at, id) > ($3::timestamptz, $4::text)
+ORDER BY created_at ASC, id ASC
+LIMIT $5
+`
+
+type ListRunEventsAfterForOrgParams struct {
+	RunID          string
+	OrgID          string
+	AfterCreatedAt time.Time
+	AfterID        string
+	PageLimit      int32
+}
+
+type ListRunEventsAfterForOrgRow struct {
+	ID        string
+	RunID     string
+	NodeID    pgtype.Text
+	Type      string
+	Payload   json.RawMessage
+	CreatedAt *time.Time
+}
+
+func (q *Queries) ListRunEventsAfterForOrg(ctx context.Context, arg ListRunEventsAfterForOrgParams) ([]ListRunEventsAfterForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listRunEventsAfterForOrg,
+		arg.RunID,
+		arg.OrgID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunEventsAfterForOrgRow
+	for rows.Next() {
+		var i ListRunEventsAfterForOrgRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Type,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunEventsForOrg = `-- name: ListRunEventsForOrg :many
+SELECT id, run_id, node_id, type, payload, created_at
+FROM run_events
+WHERE run_id = $1 AND org_id = $2
+  AND (created_at, id) < ($3::timestamptz, $4::text)
+ORDER BY created_at DESC, id DESC
+LIMIT $5
+`
+
+type ListRunEventsForOrgParams struct {
+	RunID           string
+	OrgID           string
+	BeforeCreatedAt time.Time
+	BeforeID        string
+	PageLimit       int32
+}
+
+type ListRunEventsForOrgRow struct {
+	ID        string
+	RunID     string
+	NodeID    pgtype.Text
+	Type      string
+	Payload   json.RawMessage
+	CreatedAt *time.Time
+}
+
+func (q *Queries) ListRunEventsForOrg(ctx context.Context, arg ListRunEventsForOrgParams) ([]ListRunEventsForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listRunEventsForOrg,
+		arg.RunID,
+		arg.OrgID,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunEventsForOrgRow
+	for rows.Next() {
+		var i ListRunEventsForOrgRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Type,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunNodeStatuses = `-- name: ListRunNodeStatuses :many
 SELECT node_id, status FROM run_nodes WHERE run_id = $1
 `
@@ -1831,6 +1957,63 @@ func (q *Queries) ListRunNodesByRun(ctx context.Context, runID string) ([]ListRu
 	var items []ListRunNodesByRunRow
 	for rows.Next() {
 		var i ListRunNodesByRunRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Status,
+			&i.StateJson,
+			&i.Attempts,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.ErrorJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunNodesByRunForOrg = `-- name: ListRunNodesByRunForOrg :many
+SELECT id, run_id, node_id, status, state_json, attempts, started_at,
+       finished_at, error_json
+FROM run_nodes
+WHERE run_id = $1 AND org_id = $2
+ORDER BY id
+`
+
+type ListRunNodesByRunForOrgParams struct {
+	RunID string
+	OrgID string
+}
+
+type ListRunNodesByRunForOrgRow struct {
+	ID         string
+	RunID      string
+	NodeID     string
+	Status     string
+	StateJson  json.RawMessage
+	Attempts   pgtype.Int4
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	ErrorJson  json.RawMessage
+}
+
+// Tenant-facing reads scope by the row's own org_id: a run id alone, however
+// it was obtained, never returns another organization's rows.
+func (q *Queries) ListRunNodesByRunForOrg(ctx context.Context, arg ListRunNodesByRunForOrgParams) ([]ListRunNodesByRunForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listRunNodesByRunForOrg, arg.RunID, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunNodesByRunForOrgRow
+	for rows.Next() {
+		var i ListRunNodesByRunForOrgRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.RunID,

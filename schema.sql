@@ -76,6 +76,22 @@ END;
 $$;
 
 
+--
+-- Name: stamp_run_row_org(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.stamp_run_row_org() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.org_id IS NULL OR NEW.org_id = '' THEN
+        SELECT org_id INTO NEW.org_id FROM public.runs WHERE id = NEW.run_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -1034,6 +1050,7 @@ CREATE TABLE public.routing_stats (
 CREATE TABLE public.run_events (
     id text NOT NULL,
     run_id text NOT NULL,
+    org_id text NOT NULL,
     node_id text,
     type text NOT NULL,
     payload jsonb,
@@ -1049,6 +1066,7 @@ CREATE TABLE public.run_events (
 CREATE TABLE public.run_nodes (
     id text NOT NULL,
     run_id text NOT NULL,
+    org_id text NOT NULL,
     node_id text NOT NULL,
     status text NOT NULL,
     state_json jsonb,
@@ -3489,6 +3507,20 @@ CREATE TRIGGER protect_organization_owner_membership_delete BEFORE DELETE ON pub
 --
 
 CREATE TRIGGER protect_organization_owner_membership_update BEFORE UPDATE OF user_id, role ON public.org_members FOR EACH ROW EXECUTE FUNCTION public.protect_organization_owner_membership();
+
+
+--
+-- Name: run_events run_events_stamp_org; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER run_events_stamp_org BEFORE INSERT ON public.run_events FOR EACH ROW EXECUTE FUNCTION public.stamp_run_row_org();
+
+
+--
+-- Name: run_nodes run_nodes_stamp_org; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER run_nodes_stamp_org BEFORE INSERT ON public.run_nodes FOR EACH ROW EXECUTE FUNCTION public.stamp_run_row_org();
 
 
 --

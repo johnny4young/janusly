@@ -20,13 +20,19 @@ import (
 
 type runEventBuffer struct {
 	rows []store.InsertRunEventsParams
+	// orgID stamps every buffered row when the caller knows the tenant;
+	// left empty, the insert trigger resolves it from the run row.
+	orgID string
 }
+
+// scope records the tenant every later add carries.
+func (b *runEventBuffer) scope(orgID string) { b.orgID = orgID }
 
 // add appends one event with a node scope.
 func (b *runEventBuffer) add(id, runID, nodeID, kind string, payload json.RawMessage, at time.Time) {
 	created := at
 	b.rows = append(b.rows, store.InsertRunEventsParams{
-		ID: id, RunID: runID,
+		ID: id, RunID: runID, OrgID: b.orgID,
 		NodeID: pgtype.Text{String: nodeID, Valid: nodeID != ""},
 		Type:   kind, Payload: payload, CreatedAt: &created,
 	})

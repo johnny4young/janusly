@@ -56,6 +56,19 @@ create, accept, and revoke. Reactivating an accepted or revoked invitation
 replaces its opaque id and resets it to pending; audit rows retain prior
 transitions.
 
+## Tenant columns on run rows
+
+`run_nodes` and `run_events` carry `org_id NOT NULL` alongside `run_id`. The
+hot writers — run start, the claim's `node.running` event, executor events and
+the completion-family event buffer — stamp it from the tenant they already
+hold; every other insert path is stamped by the `stamp_run_row_org` trigger
+from the run row, so a node or event can never exist without its organization
+and a row for an unknown run is refused. Tenant-facing reads (run detail,
+reports, comparisons, the event stream, the MCP server) use the `ForOrg` query
+variants that scope by the row's own `org_id`: a run id alone, however it was
+obtained, never returns another organization's rows. Engine-internal reads
+stay run-scoped because the claim already carries the tenant.
+
 ## Tenant-scoped substring search
 
 Active workflow name/id and non-validation recovery node id/run id/error-message

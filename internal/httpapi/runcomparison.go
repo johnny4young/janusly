@@ -140,11 +140,11 @@ func (s *V1Server) runComparisonCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
-	baseRows, err := q.ListRunNodesByRun(ctx, baseRunID)
+	baseRows, err := q.ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: baseRunID, OrgID: rc.orgID})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	replayRows, err := q.ListRunNodesByRun(ctx, replayRunID)
+	replayRows, err := q.ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: replayRunID, OrgID: rc.orgID})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
@@ -159,11 +159,11 @@ func (s *V1Server) runComparisonCore(r *http.Request, rc v1Request) opResult {
 	replayByNode := make(map[string]store.ListRunNodesByRunRow, len(replayRows))
 	nodeIDs := make(map[string]struct{}, len(baseRows)+len(replayRows))
 	for _, row := range baseRows {
-		baseByNode[row.NodeID] = row
+		baseByNode[row.NodeID] = store.ListRunNodesByRunRow(row)
 		nodeIDs[row.NodeID] = struct{}{}
 	}
 	for _, row := range replayRows {
-		replayByNode[row.NodeID] = row
+		replayByNode[row.NodeID] = store.ListRunNodesByRunRow(row)
 		nodeIDs[row.NodeID] = struct{}{}
 	}
 	usageByNode := make(map[runComparisonUsageKey]store.ListRunComparisonUsageRow, len(usageRows))

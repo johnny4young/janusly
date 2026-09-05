@@ -67,6 +67,7 @@ func (r iteratorForInsertRunEvents) Values() ([]interface{}, error) {
 	return []interface{}{
 		r.rows[0].ID,
 		r.rows[0].RunID,
+		r.rows[0].OrgID,
 		r.rows[0].NodeID,
 		r.rows[0].Type,
 		r.rows[0].Payload,
@@ -82,7 +83,7 @@ func (r iteratorForInsertRunEvents) Err() error {
 // same columns and payload bytes as InsertRunEventAt, one
 // round trip instead of one per event.
 func (q *Queries) InsertRunEvents(ctx context.Context, arg []InsertRunEventsParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"run_events"}, []string{"id", "run_id", "node_id", "type", "payload", "created_at"}, &iteratorForInsertRunEvents{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"run_events"}, []string{"id", "run_id", "org_id", "node_id", "type", "payload", "created_at"}, &iteratorForInsertRunEvents{rows: arg})
 }
 
 // iteratorForInsertRunNodes implements pgx.CopyFromSource.
@@ -107,6 +108,7 @@ func (r iteratorForInsertRunNodes) Values() ([]interface{}, error) {
 	return []interface{}{
 		r.rows[0].ID,
 		r.rows[0].RunID,
+		r.rows[0].OrgID,
 		r.rows[0].NodeID,
 		r.rows[0].Status,
 		r.rows[0].Attempts,
@@ -125,5 +127,5 @@ func (r iteratorForInsertRunNodes) Err() error {
 // Run start writes every node row in one COPY; the queued roots carry the
 // publication stamp InsertRunNode computes in SQL.
 func (q *Queries) InsertRunNodes(ctx context.Context, arg []InsertRunNodesParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"run_nodes"}, []string{"id", "run_id", "node_id", "status", "attempts", "state_json", "queue_publication_repair_after", "queue_publication_generation"}, &iteratorForInsertRunNodes{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"run_nodes"}, []string{"id", "run_id", "org_id", "node_id", "status", "attempts", "state_json", "queue_publication_repair_after", "queue_publication_generation"}, &iteratorForInsertRunNodes{rows: arg})
 }

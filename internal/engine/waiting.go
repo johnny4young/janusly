@@ -80,6 +80,7 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 	}, defaultPersistMaxBytes())
 
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
+		events.scope(claim.OrgID)
 		marked, err := q.MarkRunNodeWaiting(ctx, store.MarkRunNodeWaitingParams{
 			RunID: claim.RunID, NodeID: claim.NodeID, StateJson: stateJSON,
 		})

@@ -46,20 +46,20 @@ WHERE id = $1 AND org_id = $2 AND status = $3;
 -- publication stamp InsertRunNode computes in SQL.
 -- name: InsertRunNodes :copyfrom
 INSERT INTO run_nodes (
-  id, run_id, node_id, status, attempts, state_json,
+  id, run_id, org_id, node_id, status, attempts, state_json,
   queue_publication_repair_after, queue_publication_generation
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- Server-owned sandbox adapters seed only the checkpoints required to enter
 -- one exact runtime boundary. This is deliberately not a general mutation API.
 -- name: InsertSeededRunNode :exec
 INSERT INTO run_nodes (
-  id, run_id, node_id, status, attempts, state_json,
+  id, run_id, org_id, node_id, status, attempts, state_json,
   started_at, finished_at,
   queue_publication_repair_after, queue_publication_generation
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 
 -- name: GetRunNode :one
 SELECT id, run_id, node_id, status, state_json, attempts, started_at,
@@ -72,6 +72,15 @@ SELECT id, run_id, node_id, status, state_json, attempts, started_at,
        finished_at, error_json
 FROM run_nodes
 WHERE run_id = $1
+ORDER BY id;
+
+-- Tenant-facing reads scope by the row's own org_id: a run id alone, however
+-- it was obtained, never returns another organization's rows.
+-- name: ListRunNodesByRunForOrg :many
+SELECT id, run_id, node_id, status, state_json, attempts, started_at,
+       finished_at, error_json
+FROM run_nodes
+WHERE run_id = $1 AND org_id = $2
 ORDER BY id;
 
 -- Aggregate comparison telemetry in Postgres so the read stays exact without
@@ -241,19 +250,19 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'pending';
 
 -- name: InsertRunEvent :exec
-INSERT INTO run_events (id, run_id, node_id, type, payload)
-VALUES ($1, $2, $3, $4, $5);
+INSERT INTO run_events (id, run_id, org_id, node_id, type, payload)
+VALUES ($1, $2, $3, $4, $5, $6);
 
 -- name: InsertRunEventAt :exec
-INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO run_events (id, run_id, org_id, node_id, type, payload, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- One COPY for every event a completion-family transaction appends:
 -- same columns and payload bytes as InsertRunEventAt, one
 -- round trip instead of one per event.
 -- name: InsertRunEvents :copyfrom
-INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO run_events (id, run_id, org_id, node_id, type, payload, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- Ascending page for the SSE catch-up: everything strictly after the
 
@@ -274,10 +283,26 @@ WHERE run_id = $1
 ORDER BY created_at ASC, id ASC
 LIMIT sqlc.arg(page_limit);
 
+-- name: ListRunEventsAfterForOrg :many
+SELECT id, run_id, node_id, type, payload, created_at
+FROM run_events
+WHERE run_id = $1 AND org_id = sqlc.arg(org_id)
+  AND (created_at, id) > (sqlc.arg(after_created_at)::timestamptz, sqlc.arg(after_id)::text)
+ORDER BY created_at ASC, id ASC
+LIMIT sqlc.arg(page_limit);
+
 -- name: ListRunEvents :many
 SELECT id, run_id, node_id, type, payload, created_at
 FROM run_events
 WHERE run_id = $1
+  AND (created_at, id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: ListRunEventsForOrg :many
+SELECT id, run_id, node_id, type, payload, created_at
+FROM run_events
+WHERE run_id = $1 AND org_id = sqlc.arg(org_id)
   AND (created_at, id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
