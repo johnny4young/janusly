@@ -212,6 +212,10 @@ func isAutonomyLevel(level int) bool {
 
 // ValidateRecoveryContract ports the contract's V1/V2 schemas + the
 // shared refinement rules. Returns path-prefixed problems (empty = valid).
+// ValidateRecoveryContract returns every contract problem as a stable
+// message, section by section: failure policy, evidence, effects, repairs,
+// validation level, approval, the autonomy ceiling and the verification and
+// recurrence envelopes. nil is valid; an unknown version stops early.
 func ValidateRecoveryContract(contract *RecoveryContract) []string {
 	var problems []string
 	push := func(format string, args ...any) {
@@ -223,7 +227,18 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 	if contract.Version != "1" && contract.Version != "2" {
 		return []string{"version: recovery contract version must be \"1\" or \"2\""}
 	}
+	validateRecoveryFailure(contract, push)
+	requiredSet := validateRecoveryEvidence(contract, push)
+	validateRecoveryEffects(contract, push)
+	allowedRepairs := validateRecoveryRepairs(contract, push)
+	validateRecoveryValidationLevel(contract, requiredSet, push)
+	validateRecoveryApproval(contract, push)
+	validateRecoveryAutonomy(contract, allowedRepairs, push)
+	validateRecoveryEnvelopes(contract, push)
+	return problems
+}
 
+func validateRecoveryFailure(contract *RecoveryContract, push func(format string, args ...any)) {
 	// Failure block: technical invariants + the versioned semantic mode.
 	if !contract.Failure.Technical.TerminalNodeFailure {
 		push("failure.technical.terminalNodeFailure: must be true")
@@ -259,9 +274,15 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 		if contract.Failure.Semantic.Mode != "deterministic" {
 			push("failure.semantic.mode: contract v2 requires semantic mode \"deterministic\"")
 		}
-		problems = append(problems, validateSemanticV2(&contract.Failure.Semantic, contract.AutonomyLevel)...)
+		for _, problem := range validateSemanticV2(&contract.Failure.Semantic, contract.AutonomyLevel) {
+			push("%s", problem)
+		}
 	}
+}
 
+// validateRecoveryEvidence returns the retained evidence kinds so later
+// sections can check their implications.
+func validateRecoveryEvidence(contract *RecoveryContract, push func(format string, args ...any)) map[string]bool {
 	// Evidence: unique, non-empty, base kinds retained.
 	if len(contract.Evidence.Required) < 1 || len(contract.Evidence.Required) > len(RecoveryEvidenceKinds) {
 		push("evidence.required: must declare 1..%d evidence kinds", len(RecoveryEvidenceKinds))
@@ -281,7 +302,10 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 			push("evidence.required: Recovery contract must retain %s", base)
 		}
 	}
+	return requiredSet
+}
 
+func validateRecoveryEffects(contract *RecoveryContract, push func(format string, args ...any)) {
 	// Effects: bounded, one per node, closed vocabularies.
 	if len(contract.Effects) > 100 {
 		push("effects: at most 100 declared effects")
@@ -305,7 +329,11 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 	if hasDuplicateStrings(effectNodeIds) {
 		push("effects: A workflow node may define only one recovery effect")
 	}
+}
 
+// validateRecoveryRepairs returns the allowed repair classes so the
+// narrow-autonomy bounds can be checked against them.
+func validateRecoveryRepairs(contract *RecoveryContract, push func(format string, args ...any)) map[string]bool {
 	// Repairs: unique closed classes.
 	if len(contract.Repairs.Allowed) < 1 {
 		push("repairs.allowed: must declare at least one repair class")
@@ -320,7 +348,10 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 		}
 		allowedRepairs[repair] = true
 	}
+	return allowedRepairs
+}
 
+func validateRecoveryValidationLevel(contract *RecoveryContract, requiredSet map[string]bool, push func(format string, args ...any)) {
 	// Validation level + its evidence implications.
 	level := contract.Validation.MinimumEvidenceLevel
 	if !ValidationEvidenceLevels[level] {
@@ -332,7 +363,9 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 	if SupportsAutonomousRecovery(level) && !requiredSet["effect_receipt"] {
 		push("evidence.required: Provider-simulated or live-canary validation requires effect_receipt retention")
 	}
+}
 
+func validateRecoveryApproval(contract *RecoveryContract, push func(format string, args ...any)) {
 	// Approval envelope.
 	if contract.Approval.Permission != "recovery.write" {
 		push("approval.permission: must be recovery.write")
@@ -340,7 +373,10 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 	if contract.Approval.ProductionMutation != "required" && contract.Approval.ProductionMutation != "autonomous_level_4" {
 		push("approval.productionMutation: must be required or autonomous_level_4")
 	}
+}
 
+func validateRecoveryAutonomy(contract *RecoveryContract, allowedRepairs map[string]bool, push func(format string, args ...any)) {
+	level := contract.Validation.MinimumEvidenceLevel
 	// Autonomy ceiling + the Level 4 vs below split.
 	if !isAutonomyLevel(contract.AutonomyLevel) {
 		push("autonomyLevel: must be 0..4")
@@ -393,7 +429,9 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 			push("narrowAutonomy: Narrow-autonomy bounds are valid only at autonomy level 4")
 		}
 	}
+}
 
+func validateRecoveryEnvelopes(contract *RecoveryContract, push func(format string, args ...any)) {
 	// Verification + recurrence envelopes.
 	if contract.Verification.Kind != "generation_bound_terminal_success" {
 		push("verification.kind: must be generation_bound_terminal_success")
@@ -401,7 +439,6 @@ func ValidateRecoveryContract(contract *RecoveryContract) []string {
 	if contract.Recurrence.WindowDays < 1 || contract.Recurrence.WindowDays > 30 {
 		push("recurrence.windowDays: must be 1..30")
 	}
-	return problems
 }
 
 // validateSemanticV2 checks the V2 detectors + bounded fixtures.
