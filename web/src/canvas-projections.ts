@@ -27,21 +27,6 @@ import type { EdgeMarker } from '@xyflow/react'
 import type { JsonObject, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape, RunNode, RunSummary } from './types'
 
 /**
- * Data envelope projected onto every edge passed to React Flow. The
- * `hasCondition` flag is the structural signal `WorkflowEdge` uses to
- * decide whether to render the locale-dependent condition label —
- * keeping the flag a boolean (not the resolved string) is what lets
- * the upstream memo skip re-projection on locale toggles.
- */
-export type EdgeData = {
-  condition?: string
-  onError?: boolean
-  contractId?: string
-  hasCondition?: boolean
-  hasOnError?: boolean
-}
-
-/**
  * Stable arrow marker shared by every projected workflow edge. Keeping
  * this module-scoped preserves React Flow identity checks while retaining
  * the directed-edge cue from the previous canvas renderer.

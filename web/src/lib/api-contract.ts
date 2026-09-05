@@ -31,8 +31,6 @@ export const V1_READ_PATHS = {
   failureClusters: "/dlq/clusters",
 } as const;
 
-export type V1ReadPath = typeof V1_READ_PATHS[keyof typeof V1_READ_PATHS];
-
 /** Stable mutation paths exposed to first-party and SDK callers. */
 export const V1_WRITE_PATHS = {
   compileWorkflowBrief: "/ai/workflow-briefs/compile",
@@ -56,8 +54,6 @@ export const V1_WRITE_PATHS = {
   applyRecoveryCandidate: "/recovery/cases/{caseId}/apply",
 } as const;
 
-export type V1WritePath = typeof V1_WRITE_PATHS[keyof typeof V1_WRITE_PATHS];
-
 /** Stable MCP connection-management paths, including OpenAPI templates. */
 export const V1_MCP_PATHS = {
   connections: "/mcp/connections",
@@ -66,8 +62,6 @@ export const V1_MCP_PATHS = {
   connectionTools: "/mcp/connections/{alias}/tools",
   connectionTool: "/mcp/connections/{alias}/tools/{toolName}",
 } as const;
-
-export type V1McpPath = typeof V1_MCP_PATHS[keyof typeof V1_MCP_PATHS];
 
 const V1_READ_PATH_SET: ReadonlySet<string> = new Set(Object.values(V1_READ_PATHS));
 const V1_READ_PATH_TEMPLATES = Object.values(V1_READ_PATHS)

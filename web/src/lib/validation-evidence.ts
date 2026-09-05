@@ -22,9 +22,3 @@ export function supportsAutonomousRecovery(
   return level === "provider_simulated" || level === "live_canary";
 }
 
-export function parseValidationEvidenceLevel(
-  value: unknown,
-): ValidationEvidenceLevel {
-  const parsed = ValidationEvidenceLevelSchema.safeParse(value);
-  return parsed.success ? parsed.data : "static";
-}

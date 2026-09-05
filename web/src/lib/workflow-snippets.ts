@@ -146,7 +146,6 @@ export const CreateSnippetBodySchema = /* @__PURE__ */ z.object({
   edges: z._default(z.array(SnippetEdgeSchema).check(z.maxLength(SNIPPET_MAX_EDGES)), []),
   entryNodeId: z.optional(z.string().check(z.trim(), z.minLength(1))),
 })
-export type CreateSnippetBody = z.infer<typeof CreateSnippetBodySchema>
 
 /**
  * Update-body for `POST /snippets/:id`. Every field optional — only the
@@ -167,7 +166,6 @@ export const UpdateSnippetBodySchema = /* @__PURE__ */ z.object({
   edges: z.optional(z.array(SnippetEdgeSchema).check(z.maxLength(SNIPPET_MAX_EDGES))),
   entryNodeId: z.optional(z.string().check(z.trim(), z.minLength(1))),
 })
-export type UpdateSnippetBody = z.infer<typeof UpdateSnippetBodySchema>
 
 // ---------- id generation (nanoid-shaped, zero-dep) ----------
 

@@ -19,7 +19,6 @@
 import { t as runtimeT } from '../../i18n/runtime'
 import type { RunNode, RunSummary } from '../../types'
 import type { ApiResponse } from '../../lib/api-types.generated'
-import type { DeadLetter } from '../dead-letter-types'
 import { isOpenRunStatus } from '@/lib/status'
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -578,17 +577,6 @@ export function readErrorSignature(errorJson: unknown): string {
   if (typeof candidate.message === 'string') return candidate.message
   if (typeof candidate.error === 'string') return candidate.error
   return fallback
-}
-
-export function readWorkflowName(dlq: DeadLetter, runs: RunSummary[]): string {
-  // List rows carry the cheap `workflowName` projection; detail rows carry
-  // the full snapshot. Prefer whichever is present.
-  if (typeof dlq.workflowName === 'string' && dlq.workflowName.length > 0) return dlq.workflowName
-  const fromWorkflow = (dlq.workflowJson as { name?: unknown } | null | undefined)?.name
-  if (typeof fromWorkflow === 'string' && fromWorkflow.length > 0) return fromWorkflow
-  const run = runs.find((entry) => entry.id === dlq.runId)
-  if (run?.workflowVersionId) return run.workflowVersionId
-  return runtimeT('recoveryCenter.adHocWorkflow')
 }
 
 export function clusterCategoryLabel(category: ClusterCategory): string {

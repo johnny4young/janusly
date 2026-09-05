@@ -70,21 +70,6 @@ export type OnboardingAction = (typeof ONBOARDING_ACTIONS)[number];
  */
 export type OnboardingTarget = "home" | "credentials" | "packs";
 
-/**
- * Panel each milestone's CTA navigates to. Server-owned single source of
- * truth — the route stamps each milestone's `target` from this map so the
- * web never hard-codes step→panel routing.
- */
-export const ONBOARDING_STEP_TARGETS: Record<OnboardingStep, OnboardingTarget> = {
-  org_created: "home",
-  credential_configured: "credentials",
-  pack_installed: "packs",
-  first_run_succeeded: "packs",
-  failure_injected: "packs",
-  recovery_applied: "home",
-  completed: "home",
-};
-
 /** One milestone in the `OnboardingState.milestones` array. */
 export type OnboardingMilestone = {
   /** The milestone key. */
@@ -125,20 +110,6 @@ export type OnboardingState = {
   /** Ordered milestones (length === `ONBOARDING_STEPS.length`). */
   milestones: OnboardingMilestone[];
 };
-
-const ONBOARDING_STEP_SET: ReadonlySet<string> = new Set(ONBOARDING_STEPS);
-
-/** Type guard for an onboarding step string from a persisted row / payload. */
-export function isOnboardingStep(value: unknown): value is OnboardingStep {
-  return typeof value === "string" && ONBOARDING_STEP_SET.has(value);
-}
-
-const ONBOARDING_ACTION_SET: ReadonlySet<string> = new Set(ONBOARDING_ACTIONS);
-
-/** Type guard for an accepted `POST /onboarding` action string. */
-export function isOnboardingAction(value: unknown): value is OnboardingAction {
-  return typeof value === "string" && ONBOARDING_ACTION_SET.has(value);
-}
 
 /**
  * Canonical index of a step — its position in `ONBOARDING_STEPS`. The

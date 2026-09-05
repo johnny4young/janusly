@@ -84,8 +84,6 @@ export const RecoveryItemCommentSchema = /* @__PURE__ */ z.strictObject({
   createdAt: z.string().check(z.minLength(1), z.maxLength(64)), // ISO timestamp
 })
 
-export type RecoveryItemComment = z.infer<typeof RecoveryItemCommentSchema>
-
 // ---------- request bodies (route → repo) ----------
 
 /** Optional ISO override for the SLA target. Capped at 30 days out. */
@@ -103,17 +101,6 @@ export const AcknowledgeBodySchema = /* @__PURE__ */ z.strictObject({
     severity: z.optional(RecoveryItemSeveritySchema),
     slaTargetAtOverrideIso: SlaOverrideSchema,
   })
-
-export const InProgressBodySchema = /* @__PURE__ */ z.strictObject({
-  owner: z.optional(z.string().check(z.minLength(1), z.maxLength(200))),
-})
-
-export const WaitingExternalBodySchema = /* @__PURE__ */ z.strictObject({
-  owner: z.optional(z.string().check(z.minLength(1), z.maxLength(200))),
-  comment: z.optional(
-    z.string().check(z.minLength(1), z.maxLength(RECOVERY_ITEM_COMMENT_BODY_MAX)),
-  ),
-})
 
 export const EscalateBodySchema = /* @__PURE__ */ z.strictObject({
     severity: RecoveryItemSeveritySchema,
@@ -146,7 +133,6 @@ export const AssignOwnerBodySchema = /* @__PURE__ */ z.strictObject({
 
 // ---------- list filter ----------
 
-export const RECOVERY_ITEMS_DEFAULT_LIMIT = 50
 export const RECOVERY_ITEMS_MAX_LIMIT = 200
 
 export const ListRecoveryItemsFilterSchema = /* @__PURE__ */ z.strictObject({
@@ -156,8 +142,6 @@ export const ListRecoveryItemsFilterSchema = /* @__PURE__ */ z.strictObject({
   limit: z.optional(z.int().check(z.minimum(1), z.maximum(RECOVERY_ITEMS_MAX_LIMIT))),
   cursorIso: z.optional(z.iso.datetime()),
 })
-
-export type ListRecoveryItemsFilter = z.infer<typeof ListRecoveryItemsFilterSchema>
 
 // ---------- helpers ----------
 

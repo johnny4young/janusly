@@ -49,9 +49,6 @@ export const WORKFLOW_EVENT_TYPES = [
   "run.status_checked",
 ] as const;
 
-/** Union of the lifecycle event-type strings. */
-export type WorkflowEventType = (typeof WORKFLOW_EVENT_TYPES)[number];
-
 /** Per-field caps for the stable operator-facing agent rationale contract. */
 export const AGENT_REASONING_AGENT_MAX_CHARS = 120;
 export const AGENT_REASONING_SCOPE_MAX_CHARS = 160;

@@ -43,7 +43,6 @@ export const nodeTerminalStatusValues = ["succeeded", "failed", "skipped", "canc
 export const nodeStatusValues = [...nodeOpenStatusValues, ...nodeTerminalStatusValues] as const;
 
 export type NodeOpenStatus = typeof nodeOpenStatusValues[number];
-export type NodeCancellableStatus = typeof nodeCancellableStatusValues[number];
 export type NodeTerminalStatus = typeof nodeTerminalStatusValues[number];
 export type NodeStatus = typeof nodeStatusValues[number];
 

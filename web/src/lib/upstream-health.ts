@@ -149,15 +149,11 @@ export const UpstreamHealthSourceConfigSchema = /* @__PURE__ */ z.object({
   ),
   enabled: z._default(z.boolean(), true),
 })
-export type UpstreamHealthSourceConfig = z.infer<typeof UpstreamHealthSourceConfigSchema>
 
 /** POST body for create/update — the config plus an optional id for upsert. */
 export const UpsertUpstreamHealthSourceBodySchema = /* @__PURE__ */ z.object({
   source: UpstreamHealthSourceConfigSchema,
 })
-export type UpsertUpstreamHealthSourceBody = z.infer<
-  typeof UpsertUpstreamHealthSourceBodySchema
->
 
 /**
  * The `workflow_versions.upstreamHealthSources` tag list — a bounded array of
@@ -168,7 +164,6 @@ export type UpsertUpstreamHealthSourceBody = z.infer<
 export const UpstreamHealthSourceTagsSchema = /* @__PURE__ */ z
   .array(z.string().check(z.trim(), z.minLength(1), z.maxLength(80)))
   .check(z.maxLength(MAX_EXPECTED_COMPONENTS))
-export type UpstreamHealthSourceTags = z.infer<typeof UpstreamHealthSourceTagsSchema>
 
 // ---------- feed parsing (PURE) ----------
 

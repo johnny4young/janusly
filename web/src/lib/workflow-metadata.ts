@@ -141,8 +141,6 @@ export const UpsertWorkflowMetadataBodySchema = /* @__PURE__ */ z.object({
   metadata: WorkflowMetadataSchema,
 })
 
-export type UpsertWorkflowMetadataBody = z.infer<typeof UpsertWorkflowMetadataBodySchema>
-
 /**
  * Body of the narrow folder-only reassignment route (`POST /workflows/:id/folder`).
  *
@@ -160,8 +158,6 @@ export const SetWorkflowFolderBodySchema = /* @__PURE__ */ z.strictObject({
   ),
 })
 
-export type SetWorkflowFolderBody = z.infer<typeof SetWorkflowFolderBodySchema>
-
 /**
  * Body of the folder-rename collection route (`POST /workflows/folders/rename`).
  * Re-keys every workflow whose folder is `from` to `to` in one write. Both are
@@ -173,8 +169,6 @@ export const RenameWorkflowFolderBodySchema = /* @__PURE__ */ z.strictObject({
   to: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_FOLDER_MAX_LENGTH)),
 })
 
-export type RenameWorkflowFolderBody = z.infer<typeof RenameWorkflowFolderBodySchema>
-
 /**
  * Body of the folder-delete collection route (`POST /workflows/folders/delete`).
  * Moves every member of `folder` back to "Ungrouped" (sets `folder` null). The
@@ -183,8 +177,6 @@ export type RenameWorkflowFolderBody = z.infer<typeof RenameWorkflowFolderBodySc
 export const DeleteWorkflowFolderBodySchema = /* @__PURE__ */ z.strictObject({
   folder: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_FOLDER_MAX_LENGTH)),
 })
-
-export type DeleteWorkflowFolderBody = z.infer<typeof DeleteWorkflowFolderBodySchema>
 
 /**
  * Upper bound on a single bulk folder-assignment request. The Flows list caps at
@@ -208,8 +200,6 @@ export const AssignWorkflowsToFolderBodySchema = /* @__PURE__ */ z.strictObject(
   ),
 })
 
-export type AssignWorkflowsToFolderBody = z.infer<typeof AssignWorkflowsToFolderBodySchema>
-
 /**
  * Body of the bulk tag-assign collection route (`POST /workflows/tags/assign`).
  * Adds or removes ONE `tag` across every listed workflow in a single write.
@@ -227,8 +217,6 @@ export const AssignTagToWorkflowsBodySchema = /* @__PURE__ */ z.strictObject({
   op: z.enum(['add', 'remove']),
 })
 
-export type AssignTagToWorkflowsBody = z.infer<typeof AssignTagToWorkflowsBodySchema>
-
 /**
  * Body of the tag-rename collection route (`POST /workflows/tags/rename`).
  * Renames the `from` tag to `to` across EVERY workflow in the org that carries
@@ -240,8 +228,6 @@ export const RenameWorkflowTagBodySchema = /* @__PURE__ */ z.strictObject({
   to: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)),
 })
 
-export type RenameWorkflowTagBody = z.infer<typeof RenameWorkflowTagBodySchema>
-
 /**
  * Body of the tag-delete collection route (`POST /workflows/tags/delete`).
  * Strips `tag` from EVERY workflow in the org that carries it. The workflows
@@ -251,8 +237,6 @@ export type RenameWorkflowTagBody = z.infer<typeof RenameWorkflowTagBodySchema>
 export const DeleteWorkflowTagBodySchema = /* @__PURE__ */ z.strictObject({
   tag: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)),
 })
-
-export type DeleteWorkflowTagBody = z.infer<typeof DeleteWorkflowTagBodySchema>
 
 /**
  * Body of the narrow per-row tag route (`POST /workflows/:id/tags`). Adds or
@@ -264,8 +248,6 @@ export const SetWorkflowTagBodySchema = /* @__PURE__ */ z.strictObject({
   tag: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)),
   op: z.enum(['add', 'remove']),
 })
-
-export type SetWorkflowTagBody = z.infer<typeof SetWorkflowTagBodySchema>
 
 /** Hydrated row shape returned by the data repo + the GET route. */
 export type WorkflowMetadataRecord = WorkflowMetadata & {

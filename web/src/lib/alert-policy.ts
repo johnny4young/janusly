@@ -132,30 +132,11 @@ export const ALERT_PARAMS_SCHEMAS = {
   'workflow.circuit_breaker_tripped': AlertParamsWorkflowCircuitBreakerTrippedSchema,
 } as const satisfies Record<AlertTrigger, z.ZodMiniType>
 
-export type AlertParamsByTrigger = {
-  'dlq.entry_created': z.infer<typeof AlertParamsDlqEntryCreatedSchema>
-  'failure_cluster.threshold': z.infer<typeof AlertParamsFailureClusterThresholdSchema>
-  'budget.blocked': z.infer<typeof AlertParamsBudgetBlockedSchema>
-  'limiter.degraded': z.infer<typeof AlertParamsLimiterDegradedSchema>
-  'workflow.slo_breach': z.infer<typeof AlertParamsWorkflowSloBreachSchema>
-  'approval.stalled': z.infer<typeof AlertParamsApprovalStalledSchema>
-  'recovery_item.created': z.infer<typeof AlertParamsRecoveryItemCreatedSchema>
-  'recovery_item.sla_breached': z.infer<typeof AlertParamsRecoveryItemSlaBreachedSchema>
-  'workflow.schedule_anomaly': z.infer<typeof AlertParamsWorkflowScheduleAnomalySchema>
-  'credential.expiring': z.infer<typeof AlertParamsCredentialExpiringSchema>
-  'workflow.circuit_breaker_tripped': z.infer<typeof AlertParamsWorkflowCircuitBreakerTrippedSchema>
-}
-
 // ---------- channels ----------
 
 export const ALERT_DESTINATIONS = ['slack', 'webhook', 'email', 'github'] as const
 export const AlertDestinationSchema = /* @__PURE__ */ z.enum(ALERT_DESTINATIONS)
 export type AlertDestination = z.infer<typeof AlertDestinationSchema>
-
-/** Stable Block Kit callback ids shared by alert rendering and API verification. */
-export const SLACK_ACTION_ACKNOWLEDGE = 'janusly_recovery_acknowledge'
-export const SLACK_ACTION_ASSIGN_TO_ME = 'janusly_recovery_assign_to_me'
-export const SLACK_ACTION_OPEN = 'janusly_recovery_open'
 
 export const AlertChannelSlackParamsSchema = /* @__PURE__ */ z.strictObject({
   channel: z.optional(boundedString(1, 120)),
@@ -191,13 +172,6 @@ export const ALERT_CHANNEL_PARAMS_SCHEMAS = {
   github: AlertChannelGithubParamsSchema,
 } as const satisfies Record<AlertDestination, z.ZodMiniType>
 
-export type AlertChannelParamsByDestination = {
-  slack: z.infer<typeof AlertChannelSlackParamsSchema>
-  webhook: z.infer<typeof AlertChannelWebhookParamsSchema>
-  email: z.infer<typeof AlertChannelEmailParamsSchema>
-  github: z.infer<typeof AlertChannelGithubParamsSchema>
-}
-
 /**
  * Base channel shape — leaves `params` as a bounded record so the wire shape
  * stays provider-strict friendly. Use `validateAlertChannel` to refine
@@ -208,8 +182,6 @@ export const AlertChannelSchema = /* @__PURE__ */ z.strictObject({
     credentialName: boundedString(1, 200),
     params: z.optional(z.record(z.string(), z.unknown())),
   })
-
-export type AlertChannel = z.infer<typeof AlertChannelSchema>
 
 // ---------- policy base ----------
 
@@ -293,10 +265,6 @@ export function validateAlertPolicyConfig(policy: AlertPolicyConfig): AlertPolic
 
 // ---------- dispatch outcomes ----------
 
-export const ALERT_OUTCOMES = ['delivered', 'delivery_failed'] as const
-export const AlertOutcomeSchema = /* @__PURE__ */ z.enum(ALERT_OUTCOMES)
-export type AlertOutcome = z.infer<typeof AlertOutcomeSchema>
-
 export const AlertChannelResultSchema = /* @__PURE__ */ z.strictObject({
     destination: AlertDestinationSchema,
     credentialName: boundedString(1, 200),
@@ -306,4 +274,3 @@ export const AlertChannelResultSchema = /* @__PURE__ */ z.strictObject({
     latencyMs: z.int().check(z.minimum(0)),
   })
 
-export type AlertChannelResult = z.infer<typeof AlertChannelResultSchema>

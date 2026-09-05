@@ -11,9 +11,6 @@ import { scrubSecretShapes } from './error-signature'
 /** Maximum UTF-8 bytes stored for either the org or workflow scope. */
 export const AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES = 8 * 1024
 
-/** Maximum UTF-8 bytes injected after both scopes are composed. */
-export const AI_OPERATOR_GUIDANCE_COMBINED_MAX_BYTES = 12 * 1024
-
 /** Secret families that free-form guidance must never persist or send to an LLM. */
 const OPERATOR_GUIDANCE_SECRET_PATTERNS: readonly RegExp[] = [
   /sk-(?:(?:ant|proj)-)?[A-Za-z0-9_-]{20,}/gi,

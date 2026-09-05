@@ -21,10 +21,7 @@ const boundedInt = (minimum: number, maximum: number) =>
 
 export const RECOVERY_CONTRACT_VERSION = "1" as const;
 export const RECOVERY_CONTRACT_V2_VERSION = "2" as const;
-export const RECOVERY_QUALIFICATION_DATASET_VERSION =
-  "semantic-outcomes-v1" as const;
 
-export const RECOVERY_AUTONOMY_LEVELS = [0, 1, 2, 3, 4] as const;
 export const RecoveryAutonomyLevelSchema = /* @__PURE__ */ z.union([
   z.literal(0),
   z.literal(1),
@@ -83,7 +80,6 @@ export const RecoveryEffectV1Schema = /* @__PURE__ */ z.strictObject({
   idempotency: RecoveryEffectIdempotencySchema,
   receipt: RecoveryEffectReceiptSchema,
 });
-export type RecoveryEffectV1 = z.infer<typeof RecoveryEffectV1Schema>;
 
 export const RECOVERY_REPAIR_CLASSES = [
   "retry",
@@ -394,9 +390,6 @@ export const RecoverySemanticDetectorV2Schema = /* @__PURE__ */ z.discriminatedU
     RecoverySemanticSchemaDetectorV2Schema,
   ],
 );
-export type RecoverySemanticDetectorV2 = z.infer<
-  typeof RecoverySemanticDetectorV2Schema
->;
 
 export const RecoverySemanticEvaluationFixtureV2Schema = /* @__PURE__ */ z.strictObject({
     id: boundedTrimmedString(1, 200),
@@ -407,9 +400,6 @@ export const RecoverySemanticEvaluationFixtureV2Schema = /* @__PURE__ */ z.stric
     context: z.optional(z.record(z.string(), z.unknown())),
     expected: z.enum(["pass", "violation"]),
   });
-export type RecoverySemanticEvaluationFixtureV2 = z.infer<
-  typeof RecoverySemanticEvaluationFixtureV2Schema
->;
 
 export const RecoveryContractV2Schema = /* @__PURE__ */ z.strictObject({
     version: z.literal(RECOVERY_CONTRACT_V2_VERSION),
@@ -474,10 +464,6 @@ export const RecoveryContractV2Schema = /* @__PURE__ */ z.strictObject({
       });
     }
   }));
-
-export type RecoveryContractV2 = z.infer<
-  typeof RecoveryContractV2Schema
->;
 
 export const RecoveryContractSchema = /* @__PURE__ */ z.discriminatedUnion("version", [
   RecoveryContractV1Schema,

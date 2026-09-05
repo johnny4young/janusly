@@ -127,7 +127,3 @@ export function isAppLanguage(language: string): language is AppLanguage {
   return language === 'system' || isSupportedLanguage(language)
 }
 
-/** Coerce any string to a runtime locale, falling back to `FALLBACK_LOCALE`. */
-export function coerceSupportedLanguage(language: string): RuntimeLocale {
-  return isSupportedLanguage(language) ? language : FALLBACK_LOCALE
-}

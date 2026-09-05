@@ -68,10 +68,6 @@ export function registerRuntimeCatalog(
   })
 }
 
-export function hasRuntimeCatalog(language: RuntimeLocale): boolean {
-  return catalogs.has(language)
-}
-
 export function setRuntimeLocale(language: RuntimeLocale): void {
   if (!catalogs.has(language)) {
     throw new Error(`Locale catalog must be registered before selecting ${language}`)

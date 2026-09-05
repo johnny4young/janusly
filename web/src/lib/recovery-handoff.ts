@@ -68,13 +68,7 @@ export const HandoffRequestBodySchema = /* @__PURE__ */ z.strictObject({
     }
   }))
 
-export type HandoffRequestBody = z.infer<typeof HandoffRequestBodySchema>
-
 // ---------- dispatch outcomes ----------
-
-export const HANDOFF_OUTCOMES = ['delivered', 'delivery_failed'] as const
-export const HandoffOutcomeSchema = /* @__PURE__ */ z.enum(HANDOFF_OUTCOMES)
-export type HandoffOutcome = z.infer<typeof HandoffOutcomeSchema>
 
 /**
  * Result envelope from the per-destination dispatch helper. Never thrown —
@@ -99,8 +93,6 @@ export const HandoffDispatchResultSchema = /* @__PURE__ */ z.strictObject({
     /** Set on the second-call append branch for GitHub (commentId, etc). */
     commentId: z.optional(z.nullable(z.string().check(z.maxLength(200)))),
   })
-
-export type HandoffDispatchResult = z.infer<typeof HandoffDispatchResultSchema>
 
 // ---------- idempotency key ----------
 

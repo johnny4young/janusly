@@ -15,10 +15,6 @@ const TONES: Record<ValidationEvidenceLevel, string> = {
   live_canary: 'primary',
 }
 
-export function validationEvidenceLabelKey(level: ValidationEvidenceLevel): string {
-  return LABEL_KEYS[level]
-}
-
 export function ValidationEvidencePill({
   level,
   tone,
