@@ -160,3 +160,5 @@ func nullableInt(v pgtype.Int4) any {
 // flip audits who, and the pause's buffered trigger events drain
 // oldest-first (capped page; repeated calls drain the rest). Other pause
 // sources are distinct operator situations and reject.
+
+func isUniqueViolation(err error) bool { return httpkit.IsUniqueViolation(err) }

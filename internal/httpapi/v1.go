@@ -24,6 +24,7 @@ import (
 	"github.com/johnny4young/janusly/internal/browsersession"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/executors"
+	"github.com/johnny4young/janusly/internal/httpapi/externalruntime"
 	"github.com/johnny4young/janusly/internal/httpapi/scim"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/ratelimit"
@@ -376,7 +377,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.mountRolloutRoutes(mux)
 	s.mountCredentialRoutes(mux)
 	s.mountSlackInteractionRoutes(mux)
-	s.mountExternalRuntimeRoutes(mux)
+	externalruntime.Mount(mux, externalruntime.Deps{Pool: s.pool, Routes: s})
 	s.mountUpstreamHealthRoutes(mux)
 	s.mountAutoHealingRoutes(mux)
 	s.mountProductSurfaceRoutes(mux)

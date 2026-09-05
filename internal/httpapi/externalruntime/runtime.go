@@ -15,7 +15,7 @@
 // applied. All projected strings/snapshots pass the secret scrubber and
 // the bounded persist chokepoint; identity fields that LOOK like secrets
 // are rejected outright (they'd be corrupted by scrubbing).
-package httpapi
+package externalruntime
 
 import (
 	"context"
@@ -30,8 +30,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/secretstore"
@@ -302,7 +304,7 @@ type externalRecordResult struct {
 	priorState string // duplicate: the original receipt's projection state
 }
 
-func (s *V1Server) recordExternalRuntimeEvent(
+func (s *Service) recordExternalRuntimeEvent(
 	ctx context.Context, orgID, connectionID string, event *externalRuntimeEvent, rawEvent any,
 ) (externalRecordResult, error) {
 	now := time.Now().UTC()
@@ -377,7 +379,7 @@ func optionalExternalTime(value string) *time.Time {
 	return &parsed
 }
 
-func (s *V1Server) projectExternalEvent(
+func (s *Service) projectExternalEvent(
 	ctx context.Context, txq *store.Queries, orgID, connectionID string,
 	event *externalRuntimeEvent, now time.Time,
 ) (string, error) {
@@ -473,7 +475,7 @@ func (s *V1Server) projectExternalEvent(
 // (re)opens the subject's case as `detected`; a succeeded observation with
 // a HIGHER sequence flips it to `observed_recovered`. Never a Janusly
 // verified recovery — external cases carry no credit.
-func (s *V1Server) projectExternalRecoveryCase(
+func (s *Service) projectExternalRecoveryCase(
 	ctx context.Context, txq *store.Queries, orgID, connectionID string,
 	event *externalRuntimeEvent, now time.Time,
 ) error {
@@ -528,9 +530,9 @@ func externalWorkflowView(row store.ExternalWorkflow) map[string]any {
 	return map[string]any{
 		"id": row.ID, "orgId": row.OrgID, "connectionId": row.ConnectionID,
 		"externalWorkflowId": row.ExternalWorkflowID, "name": row.Name,
-		"version": textOrNull(row.Version), "snapshotJson": normalizedRaw(row.SnapshotJson),
-		"evidenceJson": normalizedRaw(row.EvidenceJson), "lastSequence": row.LastSequence,
-		"lastEventId": textOrNull(row.LastEventID), "lastObservedAt": timeOrNull(row.LastObservedAt),
+		"version": httpkit.TextOrNull(row.Version), "snapshotJson": httpkit.NormalizedRaw(row.SnapshotJson),
+		"evidenceJson": httpkit.NormalizedRaw(row.EvidenceJson), "lastSequence": row.LastSequence,
+		"lastEventId": httpkit.TextOrNull(row.LastEventID), "lastObservedAt": httpkit.TimeOrNull(row.LastObservedAt),
 		"createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
 	}
 }
@@ -539,10 +541,10 @@ func externalRunView(row store.ExternalRun) map[string]any {
 	return map[string]any{
 		"id": row.ID, "orgId": row.OrgID, "connectionId": row.ConnectionID,
 		"externalWorkflowId": row.ExternalWorkflowID, "externalRunId": row.ExternalRunID,
-		"status": row.Status, "startedAt": timeOrNull(row.StartedAt),
-		"completedAt": timeOrNull(row.CompletedAt), "snapshotJson": normalizedRaw(row.SnapshotJson),
-		"evidenceJson": normalizedRaw(row.EvidenceJson), "lastSequence": row.LastSequence,
-		"lastEventId": textOrNull(row.LastEventID), "lastObservedAt": timeOrNull(row.LastObservedAt),
+		"status": row.Status, "startedAt": httpkit.TimeOrNull(row.StartedAt),
+		"completedAt": httpkit.TimeOrNull(row.CompletedAt), "snapshotJson": httpkit.NormalizedRaw(row.SnapshotJson),
+		"evidenceJson": httpkit.NormalizedRaw(row.EvidenceJson), "lastSequence": row.LastSequence,
+		"lastEventId": httpkit.TextOrNull(row.LastEventID), "lastObservedAt": httpkit.TimeOrNull(row.LastObservedAt),
 		"createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
 	}
 }
@@ -552,10 +554,10 @@ func externalRunStepView(row store.ExternalRunStep) map[string]any {
 		"id": row.ID, "orgId": row.OrgID, "connectionId": row.ConnectionID,
 		"externalWorkflowId": row.ExternalWorkflowID, "externalRunId": row.ExternalRunID,
 		"externalStepId": row.ExternalStepID, "name": row.Name, "status": row.Status,
-		"attempt": row.Attempt, "startedAt": timeOrNull(row.StartedAt),
-		"completedAt": timeOrNull(row.CompletedAt), "snapshotJson": normalizedRaw(row.SnapshotJson),
-		"evidenceJson": normalizedRaw(row.EvidenceJson), "lastSequence": row.LastSequence,
-		"lastEventId": textOrNull(row.LastEventID), "lastObservedAt": timeOrNull(row.LastObservedAt),
+		"attempt": row.Attempt, "startedAt": httpkit.TimeOrNull(row.StartedAt),
+		"completedAt": httpkit.TimeOrNull(row.CompletedAt), "snapshotJson": httpkit.NormalizedRaw(row.SnapshotJson),
+		"evidenceJson": httpkit.NormalizedRaw(row.EvidenceJson), "lastSequence": row.LastSequence,
+		"lastEventId": httpkit.TextOrNull(row.LastEventID), "lastObservedAt": httpkit.TimeOrNull(row.LastObservedAt),
 		"createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
 	}
 }
@@ -565,10 +567,10 @@ func externalRecoveryCaseView(row store.ExternalRecoveryCase) map[string]any {
 		"id": row.ID, "orgId": row.OrgID, "connectionId": row.ConnectionID,
 		"subjectKey": row.SubjectKey, "subjectKind": row.SubjectKind,
 		"externalWorkflowId": row.ExternalWorkflowID, "externalRunId": row.ExternalRunID,
-		"externalStepId": textOrNull(row.ExternalStepID), "state": row.State,
-		"failureSnapshotJson": normalizedRaw(row.FailureSnapshotJson),
-		"evidenceJson":        normalizedRaw(row.EvidenceJson), "firstDetectedAt": row.FirstDetectedAt,
-		"lastObservedAt": row.LastObservedAt, "observedRecoveredAt": timeOrNull(row.ObservedRecoveredAt),
+		"externalStepId": httpkit.TextOrNull(row.ExternalStepID), "state": row.State,
+		"failureSnapshotJson": httpkit.NormalizedRaw(row.FailureSnapshotJson),
+		"evidenceJson":        httpkit.NormalizedRaw(row.EvidenceJson), "firstDetectedAt": row.FirstDetectedAt,
+		"lastObservedAt": row.LastObservedAt, "observedRecoveredAt": httpkit.TimeOrNull(row.ObservedRecoveredAt),
 		"lastSequence": row.LastSequence, "lastEventId": row.LastEventID,
 		"createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
 	}
@@ -582,8 +584,6 @@ func mapRows[T any](rows []T, view func(T) map[string]any) []map[string]any {
 	return out
 }
 
-func isUniqueViolation(err error) bool { return httpkit.IsUniqueViolation(err) }
-
 type externalConnectionBody struct {
 	Name                  string `json:"name"`
 	RuntimeKey            string `json:"runtimeKey"`
@@ -591,13 +591,13 @@ type externalConnectionBody struct {
 	Enabled               *bool  `json:"enabled"`
 }
 
-func (s *V1Server) parseExternalConnectionBody(r *http.Request, rc v1Request) (store.UpdateExternalRuntimeConnectionParams, bool, *opResult) {
-	fail := func(status int, code, message string) *opResult {
-		res := opError(status, code, message, nil)
+func (s *Service) parseExternalConnectionBody(r *http.Request, rc httpkit.Request) (store.UpdateExternalRuntimeConnectionParams, bool, *httpkit.Result) {
+	fail := func(status int, code, message string) *httpkit.Result {
+		res := httpkit.Error(status, code, message, nil)
 		return &res
 	}
 	var body externalConnectionBody
-	if err := decodeBody(r, &body); err != nil {
+	if err := httpkit.DecodeBody(r, &body); err != nil {
 		return store.UpdateExternalRuntimeConnectionParams{}, false, fail(http.StatusBadRequest,
 			"external_runtime_invalid_request", "invalid external runtime connection")
 	}
@@ -612,9 +612,9 @@ func (s *V1Server) parseExternalConnectionBody(r *http.Request, rc v1Request) (s
 	}
 	q := store.New(s.pool)
 	credential, err := q.GetCredentialByName(r.Context(), store.GetCredentialByNameParams{
-		OrgID: rc.orgID, Kind: "external_runtime_signing_secret", Name: credentialName,
+		OrgID: rc.OrgID, Kind: "external_runtime_signing_secret", Name: credentialName,
 	})
-	if err != nil || !secretstore.HasCredentialSecretRef(r.Context(), q, rc.orgID, credential.SecretRef) {
+	if err != nil || !secretstore.HasCredentialSecretRef(r.Context(), q, rc.OrgID, credential.SecretRef) {
 		return store.UpdateExternalRuntimeConnectionParams{}, false, fail(http.StatusUnprocessableEntity,
 			"external_runtime_invalid_request", "external runtime signing credential not found")
 	}
@@ -627,12 +627,12 @@ func (s *V1Server) parseExternalConnectionBody(r *http.Request, rc v1Request) (s
 	}, enabled, nil
 }
 
-func (s *V1Server) externalRuntimeCallbackHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Service) externalRuntimeCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := store.New(s.pool)
 	connection, err := q.GetExternalRuntimeConnectionForCallback(ctx, r.PathValue("id"))
 	if err != nil || !connection.Enabled {
-		writeUnversioned(w, opError(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil))
+		httpkit.WriteUnversioned(w, httpkit.Error(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil))
 		return
 	}
 	secret := ""
@@ -641,21 +641,21 @@ func (s *V1Server) externalRuntimeCallbackHandler(w http.ResponseWriter, r *http
 	}); err == nil {
 		secret = secretstore.ResolveCredentialSecretRef(ctx, q, connection.OrgID, credential.SecretRef)
 	}
-	rawBody, ok := readRawBody(w, r, externalRuntimeBodyMaxBytes)
+	rawBody, ok := httpkit.ReadRawBody(w, r, externalRuntimeBodyMaxBytes)
 	if !ok {
 		return
 	}
 	if !verifyExternalRuntimeSignature(r.Header.Get("x-janusly-signature"), string(rawBody), secret, time.Now().Unix()) {
-		writeUnversioned(w, opError(http.StatusUnauthorized, "external_runtime_invalid_signature", "invalid external runtime signature", nil))
+		httpkit.WriteUnversioned(w, httpkit.Error(http.StatusUnauthorized, "external_runtime_invalid_signature", "invalid external runtime signature", nil))
 		return
 	}
 	event := parseExternalRuntimeEvent(rawBody)
 	if event == nil {
-		writeUnversioned(w, opError(http.StatusBadRequest, "external_runtime_invalid_request", "invalid external runtime event", nil))
+		httpkit.WriteUnversioned(w, httpkit.Error(http.StatusBadRequest, "external_runtime_invalid_request", "invalid external runtime event", nil))
 		return
 	}
 	if externalIdentitySensitive(event) {
-		writeUnversioned(w, opError(http.StatusBadRequest, "external_runtime_invalid_request",
+		httpkit.WriteUnversioned(w, httpkit.Error(http.StatusBadRequest, "external_runtime_invalid_request",
 			"external runtime identity contains sensitive material", nil))
 		return
 	}
@@ -663,130 +663,161 @@ func (s *V1Server) externalRuntimeCallbackHandler(w http.ResponseWriter, r *http
 	_ = json.Unmarshal(rawBody, &rawEvent)
 	result, err := s.recordExternalRuntimeEvent(ctx, connection.OrgID, connection.ID, event, rawEvent)
 	if err != nil {
-		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+		httpkit.WriteUnversioned(w, httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 		return
 	}
 	if result.kind == "connection_not_found" {
-		writeUnversioned(w, opError(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil))
+		httpkit.WriteUnversioned(w, httpkit.Error(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil))
 		return
 	}
 	projectionState := result.kind
 	if result.kind == "duplicate" {
 		projectionState = result.priorState
 	}
-	writeUnversioned(w, opResult{status: http.StatusAccepted, data: map[string]any{
+	httpkit.WriteUnversioned(w, httpkit.Result{Status: http.StatusAccepted, Data: map[string]any{
 		"accepted": true, "duplicate": result.kind == "duplicate",
 		"projectionState": projectionState, "eventId": result.eventID,
 		"receivedAt": result.receivedAt.Format(time.RFC3339),
 	}})
 }
 
-func (s *V1Server) mountExternalRuntimeRoutes(mux *http.ServeMux) {
+// Deps are the root package's hooks the external-runtime Service needs.
+type Deps struct {
+	Pool   *pgxpool.Pool
+	Routes httpkit.Registrar
+}
+
+// Service serves the external-runtime integration surface: connection
+// CRUD and the signed callback receiver.
+type Service struct {
+	pool   *pgxpool.Pool
+	routes httpkit.Registrar
+}
+
+// Mount registers the external-runtime routes into mux through the root
+// registry.
+func Mount(mux *http.ServeMux, deps Deps) {
+	s := &Service{pool: deps.Pool, routes: deps.Routes}
+	s.mountRoutes(mux)
+}
+
+func (s *Service) mountRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /webhooks/external-runtimes/{id}", s.externalRuntimeCallbackHandler)
 
-	mux.HandleFunc("GET /integrations/external-runtimes", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		ctx := r.Context()
-		q := store.New(s.pool)
-		connections, err := q.ListExternalRuntimeConnections(ctx, rc.orgID)
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		workflows, _ := q.ListExternalWorkflows(ctx, rc.orgID)
-		runs, _ := q.ListExternalRuns(ctx, rc.orgID)
-		steps, _ := q.ListExternalRunSteps(ctx, rc.orgID)
-		cases, _ := q.ListExternalRecoveryCases(ctx, rc.orgID)
-		connectionViews := make([]map[string]any, 0, len(connections))
-		for _, row := range connections {
-			connectionViews = append(connectionViews, externalRuntimeConnectionView(row))
-		}
-		writeUnversioned(w, opOK(map[string]any{
-			"observerOnly": true,
-			"connections":  connectionViews,
-			"workflows":    mapRows(workflows, externalWorkflowView),
-			"runs":         mapRows(runs, externalRunView),
-			"steps":        mapRows(steps, externalRunStepView),
-			"cases":        mapRows(cases, externalRecoveryCaseView),
-		}))
-	}))
+	s.routes.Route(mux, "GET /integrations/external-runtimes", httpkit.Gate{Role: auth.RoleViewer, Permission: "external-runtimes.read"}, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.getIntegrationsExternalRuntimesCore(r, rc))
+	})
 
-	mux.HandleFunc("POST /integrations/external-runtimes", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		params, enabled, bad := s.parseExternalConnectionBody(r, rc)
-		if bad != nil {
-			writeUnversioned(w, *bad)
-			return
-		}
-		_ = enabled
-		connection, err := store.New(s.pool).InsertExternalRuntimeConnection(r.Context(), store.InsertExternalRuntimeConnectionParams{
-			ID: uuid.NewString(), OrgID: rc.orgID,
-			Name: params.Name, RuntimeKey: params.RuntimeKey,
-			SigningCredentialName: params.SigningCredentialName, Enabled: params.Enabled,
-			CreatedBy: rc.userID,
-		})
-		if err != nil {
-			if isUniqueViolation(err) {
-				writeUnversioned(w, opError(http.StatusConflict, "external_runtime_conflict",
-					"connection name or runtime key already exists", nil))
-				return
-			}
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "external_runtime.connection.created", audit.Options{
-			TargetType: "external-runtime-connection", TargetID: connection.ID,
-			Metadata: map[string]any{"runtimeKey": connection.RuntimeKey, "enabled": connection.Enabled},
-		})
-		writeUnversioned(w, opResult{status: http.StatusCreated,
-			data: map[string]any{"connection": externalRuntimeConnectionView(connection)}})
-	}))
+	s.routes.Route(mux, "POST /integrations/external-runtimes", httpkit.Gate{Role: auth.RoleAdmin, Permission: "external-runtimes.write"}, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.postIntegrationsExternalRuntimesCore(r, rc))
+	})
 
-	mux.HandleFunc("POST /integrations/external-runtimes/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		q := store.New(s.pool)
-		existing, err := q.GetExternalRuntimeConnection(r.Context(), store.GetExternalRuntimeConnectionParams{
-			OrgID: rc.orgID, ID: r.PathValue("id"),
-		})
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil))
-			return
-		}
-		params, _, bad := s.parseExternalConnectionBody(r, rc)
-		if bad != nil {
-			writeUnversioned(w, *bad)
-			return
-		}
-		params.OrgID, params.ID = rc.orgID, existing.ID
-		connection, err := q.UpdateExternalRuntimeConnection(r.Context(), params)
-		if err != nil {
-			if isUniqueViolation(err) {
-				writeUnversioned(w, opError(http.StatusConflict, "external_runtime_conflict",
-					"connection name or runtime key already exists", nil))
-				return
-			}
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "external_runtime.connection.updated", audit.Options{
-			TargetType: "external-runtime-connection", TargetID: connection.ID,
-			Metadata: map[string]any{
-				"before": map[string]any{"runtimeKey": existing.RuntimeKey, "enabled": existing.Enabled},
-				"after":  map[string]any{"runtimeKey": connection.RuntimeKey, "enabled": connection.Enabled},
-			},
-		})
-		writeUnversioned(w, opOK(map[string]any{"connection": externalRuntimeConnectionView(connection)}))
-	}))
+	s.routes.Route(mux, "POST /integrations/external-runtimes/{id}", httpkit.Gate{Role: auth.RoleAdmin, Permission: "external-runtimes.write"}, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.postIntegrationsExternalRuntimes2Core(r, rc))
+	})
 
-	mux.HandleFunc("DELETE /integrations/external-runtimes/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		deleted, err := store.New(s.pool).DeleteExternalRuntimeConnection(r.Context(), store.DeleteExternalRuntimeConnectionParams{
-			OrgID: rc.orgID, ID: r.PathValue("id"),
-		})
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil))
-			return
+	s.routes.Route(mux, "DELETE /integrations/external-runtimes/{id}", httpkit.Gate{Role: auth.RoleAdmin, Permission: "external-runtimes.write"}, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.deleteIntegrationsExternalRuntimesCore(r, rc))
+	})
+}
+
+func (s *Service) getIntegrationsExternalRuntimesCore(r *http.Request, rc httpkit.Request) httpkit.Result {
+	ctx := r.Context()
+	q := store.New(s.pool)
+	connections, err := q.ListExternalRuntimeConnections(ctx, rc.OrgID)
+	if err != nil {
+		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	workflows, _ := q.ListExternalWorkflows(ctx, rc.OrgID)
+	runs, _ := q.ListExternalRuns(ctx, rc.OrgID)
+	steps, _ := q.ListExternalRunSteps(ctx, rc.OrgID)
+	cases, _ := q.ListExternalRecoveryCases(ctx, rc.OrgID)
+	connectionViews := make([]map[string]any, 0, len(connections))
+	for _, row := range connections {
+		connectionViews = append(connectionViews, externalRuntimeConnectionView(row))
+	}
+	return httpkit.OK(map[string]any{
+		"observerOnly": true,
+		"connections":  connectionViews,
+		"workflows":    mapRows(workflows, externalWorkflowView),
+		"runs":         mapRows(runs, externalRunView),
+		"steps":        mapRows(steps, externalRunStepView),
+		"cases":        mapRows(cases, externalRecoveryCaseView),
+	})
+
+}
+
+func (s *Service) postIntegrationsExternalRuntimesCore(r *http.Request, rc httpkit.Request) httpkit.Result {
+	params, enabled, bad := s.parseExternalConnectionBody(r, rc)
+	if bad != nil {
+		return *bad
+	}
+	_ = enabled
+	connection, err := store.New(s.pool).InsertExternalRuntimeConnection(r.Context(), store.InsertExternalRuntimeConnectionParams{
+		ID: uuid.NewString(), OrgID: rc.OrgID,
+		Name: params.Name, RuntimeKey: params.RuntimeKey,
+		SigningCredentialName: params.SigningCredentialName, Enabled: params.Enabled,
+		CreatedBy: rc.UserID,
+	})
+	if err != nil {
+		if httpkit.IsUniqueViolation(err) {
+			return httpkit.Error(http.StatusConflict, "external_runtime_conflict",
+				"connection name or runtime key already exists", nil)
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "external_runtime.connection.deleted", audit.Options{
-			TargetType: "external-runtime-connection", TargetID: deleted.ID,
-			Metadata: map[string]any{"runtimeKey": deleted.RuntimeKey},
-		})
-		writeUnversioned(w, opOK(map[string]any{"ok": true}))
-	}))
+		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.Auth, "external_runtime.connection.created", audit.Options{
+		TargetType: "external-runtime-connection", TargetID: connection.ID,
+		Metadata: map[string]any{"runtimeKey": connection.RuntimeKey, "enabled": connection.Enabled},
+	})
+	return httpkit.Result{Status: http.StatusCreated,
+		Data: map[string]any{"connection": externalRuntimeConnectionView(connection)}}
+
+}
+
+func (s *Service) postIntegrationsExternalRuntimes2Core(r *http.Request, rc httpkit.Request) httpkit.Result {
+	q := store.New(s.pool)
+	existing, err := q.GetExternalRuntimeConnection(r.Context(), store.GetExternalRuntimeConnectionParams{
+		OrgID: rc.OrgID, ID: r.PathValue("id"),
+	})
+	if err != nil {
+		return httpkit.Error(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil)
+	}
+	params, _, bad := s.parseExternalConnectionBody(r, rc)
+	if bad != nil {
+		return *bad
+	}
+	params.OrgID, params.ID = rc.OrgID, existing.ID
+	connection, err := q.UpdateExternalRuntimeConnection(r.Context(), params)
+	if err != nil {
+		if httpkit.IsUniqueViolation(err) {
+			return httpkit.Error(http.StatusConflict, "external_runtime_conflict",
+				"connection name or runtime key already exists", nil)
+		}
+		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.Auth, "external_runtime.connection.updated", audit.Options{
+		TargetType: "external-runtime-connection", TargetID: connection.ID,
+		Metadata: map[string]any{
+			"before": map[string]any{"runtimeKey": existing.RuntimeKey, "enabled": existing.Enabled},
+			"after":  map[string]any{"runtimeKey": connection.RuntimeKey, "enabled": connection.Enabled},
+		},
+	})
+	return httpkit.OK(map[string]any{"connection": externalRuntimeConnectionView(connection)})
+
+}
+
+func (s *Service) deleteIntegrationsExternalRuntimesCore(r *http.Request, rc httpkit.Request) httpkit.Result {
+	deleted, err := store.New(s.pool).DeleteExternalRuntimeConnection(r.Context(), store.DeleteExternalRuntimeConnectionParams{
+		OrgID: rc.OrgID, ID: r.PathValue("id"),
+	})
+	if err != nil {
+		return httpkit.Error(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.Auth, "external_runtime.connection.deleted", audit.Options{
+		TargetType: "external-runtime-connection", TargetID: deleted.ID,
+		Metadata: map[string]any{"runtimeKey": deleted.RuntimeKey},
+	})
+	return httpkit.OK(map[string]any{"ok": true})
+
 }
