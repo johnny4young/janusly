@@ -189,101 +189,8 @@ func Parse(raw []byte) (*Workflow, []Issue) {
 		}
 	}
 
-	if doc.Nodes == nil {
-		contract("nodes", "Invalid input: expected array, received undefined")
-	} else {
-		// The raw pass only tells an explicit null from an absent field. A
-		// document without the token cannot carry one, so the stored
-		// snapshot re-parsed on every claim decodes its nodes once.
-		var rawNodes []map[string]json.RawMessage
-		if bytes.Contains(document["nodes"], []byte("null")) {
-			_ = json.Unmarshal(document["nodes"], &rawNodes)
-		}
-		// Non-nil even when empty: the workflow snapshot persisted at run
-		// start must round-trip as "nodes": [] — a nil slice would marshal
-		// as null and fail this same contract on re-parse.
-		wf.Nodes = []Node{}
-		for i, n := range *doc.Nodes {
-			path := "nodes." + strconv.Itoa(i)
-			if i < len(rawNodes) && rawNodes[i] != nil {
-				for _, field := range []string{"label", "config"} {
-					if value, present := rawNodes[i][field]; present && isJSONNull(value) {
-						contract(path+"."+field, "expected a non-null value")
-					}
-				}
-			}
-			node := Node{Config: n.Config}
-			if node.Config == nil {
-				node.Config = map[string]any{}
-			}
-			if n.ID == nil || strings.TrimSpace(*n.ID) == "" {
-				contract(path+".id", "Node id is required")
-			} else {
-				node.ID = strings.TrimSpace(*n.ID)
-			}
-			if n.Type == nil || strings.TrimSpace(*n.Type) == "" {
-				contract(path+".type", "Node type is required")
-			} else {
-				node.Type = strings.TrimSpace(*n.Type)
-			}
-			if n.Label != nil {
-				node.Label = strings.TrimSpace(*n.Label)
-				if node.Label == "" || len(node.Label) > 80 {
-					contract(path+".label", "expected 1..80 characters")
-				}
-			}
-			wf.Nodes = append(wf.Nodes, node)
-		}
-	}
-
-	if doc.Edges != nil {
-		wf.Edges = []Edge{}
-	}
-	if doc.Edges == nil {
-		contract("edges", "Invalid input: expected array, received undefined")
-	} else {
-		var rawEdges []map[string]json.RawMessage
-		if bytes.Contains(document["edges"], []byte("null")) {
-			_ = json.Unmarshal(document["edges"], &rawEdges)
-		}
-		for i, e := range *doc.Edges {
-			path := "edges." + strconv.Itoa(i)
-			if i < len(rawEdges) && rawEdges[i] != nil {
-				for _, field := range []string{"id", "condition", "onError"} {
-					if value, present := rawEdges[i][field]; present && isJSONNull(value) {
-						contract(path+"."+field, "expected a non-null value")
-					}
-				}
-			}
-			edge := Edge{}
-			if e.ID != nil {
-				edge.ID = strings.TrimSpace(*e.ID)
-				if edge.ID == "" {
-					contract(path+".id", "expected a non-empty string")
-				}
-			}
-			if e.From == nil || strings.TrimSpace(*e.From) == "" {
-				contract(path+".from", "Edge source is required")
-			} else {
-				edge.From = strings.TrimSpace(*e.From)
-			}
-			if e.To == nil || strings.TrimSpace(*e.To) == "" {
-				contract(path+".to", "Edge target is required")
-			} else {
-				edge.To = strings.TrimSpace(*e.To)
-			}
-			if e.Condition != nil {
-				edge.Condition = strings.TrimSpace(*e.Condition)
-				if edge.Condition == "" {
-					contract(path+".condition", "expected a non-empty string")
-				}
-			}
-			if e.OnError != nil {
-				edge.OnError = *e.OnError
-			}
-			wf.Edges = append(wf.Edges, edge)
-		}
-	}
+	wf.Nodes = parseNodes(&doc, document, contract)
+	wf.Edges = parseEdges(&doc, document, contract)
 
 	if encoded, present := document["ui"]; present && !isJSONNull(encoded) {
 		nodeIDs := make(map[string]struct{}, len(wf.Nodes))
@@ -309,6 +216,113 @@ func Parse(raw []byte) (*Workflow, []Issue) {
 type workflowFieldProblem struct {
 	path    string
 	message string
+}
+
+// parseNodes decodes the node array, reporting an explicit null in a
+// field, a missing id or type, and an out-of-range label with path-prefixed
+// contract issues. The slice is non-nil even when empty: the snapshot
+// persisted at run start must round-trip as "nodes": [].
+func parseNodes(doc *rawWorkflow, document map[string]json.RawMessage, contract func(path, message string)) []Node {
+	if doc.Nodes == nil {
+		contract("nodes", "Invalid input: expected array, received undefined")
+		return nil
+	}
+	// The raw pass only tells an explicit null from an absent field. A
+	// document without the token cannot carry one, so the stored
+	// snapshot re-parsed on every claim decodes its nodes once.
+	var rawNodes []map[string]json.RawMessage
+	if bytes.Contains(document["nodes"], []byte("null")) {
+		_ = json.Unmarshal(document["nodes"], &rawNodes)
+	}
+	// Non-nil even when empty: the workflow snapshot persisted at run
+	// start must round-trip as "nodes": [] — a nil slice would marshal
+	// as null and fail this same contract on re-parse.
+	nodes := []Node{}
+	for i, n := range *doc.Nodes {
+		path := "nodes." + strconv.Itoa(i)
+		if i < len(rawNodes) && rawNodes[i] != nil {
+			for _, field := range []string{"label", "config"} {
+				if value, present := rawNodes[i][field]; present && isJSONNull(value) {
+					contract(path+"."+field, "expected a non-null value")
+				}
+			}
+		}
+		node := Node{Config: n.Config}
+		if node.Config == nil {
+			node.Config = map[string]any{}
+		}
+		if n.ID == nil || strings.TrimSpace(*n.ID) == "" {
+			contract(path+".id", "Node id is required")
+		} else {
+			node.ID = strings.TrimSpace(*n.ID)
+		}
+		if n.Type == nil || strings.TrimSpace(*n.Type) == "" {
+			contract(path+".type", "Node type is required")
+		} else {
+			node.Type = strings.TrimSpace(*n.Type)
+		}
+		if n.Label != nil {
+			node.Label = strings.TrimSpace(*n.Label)
+			if node.Label == "" || len(node.Label) > 80 {
+				contract(path+".label", "expected 1..80 characters")
+			}
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
+// parseEdges decodes the edge array with the same contract posture as
+// parseNodes: explicit nulls, missing endpoints and empty conditions are
+// path-prefixed issues rather than silently dropped fields.
+func parseEdges(doc *rawWorkflow, document map[string]json.RawMessage, contract func(path, message string)) []Edge {
+	if doc.Edges == nil {
+		contract("edges", "Invalid input: expected array, received undefined")
+		return nil
+	}
+	edges := []Edge{}
+	var rawEdges []map[string]json.RawMessage
+	if bytes.Contains(document["edges"], []byte("null")) {
+		_ = json.Unmarshal(document["edges"], &rawEdges)
+	}
+	for i, e := range *doc.Edges {
+		path := "edges." + strconv.Itoa(i)
+		if i < len(rawEdges) && rawEdges[i] != nil {
+			for _, field := range []string{"id", "condition", "onError"} {
+				if value, present := rawEdges[i][field]; present && isJSONNull(value) {
+					contract(path+"."+field, "expected a non-null value")
+				}
+			}
+		}
+		edge := Edge{}
+		if e.ID != nil {
+			edge.ID = strings.TrimSpace(*e.ID)
+			if edge.ID == "" {
+				contract(path+".id", "expected a non-empty string")
+			}
+		}
+		if e.From == nil || strings.TrimSpace(*e.From) == "" {
+			contract(path+".from", "Edge source is required")
+		} else {
+			edge.From = strings.TrimSpace(*e.From)
+		}
+		if e.To == nil || strings.TrimSpace(*e.To) == "" {
+			contract(path+".to", "Edge target is required")
+		} else {
+			edge.To = strings.TrimSpace(*e.To)
+		}
+		if e.Condition != nil {
+			edge.Condition = strings.TrimSpace(*e.Condition)
+			if edge.Condition == "" {
+				contract(path+".condition", "expected a non-empty string")
+			}
+		}
+		if e.OnError != nil {
+			edge.OnError = *e.OnError
+		}
+		edges = append(edges, edge)
+	}
+	return edges
 }
 
 func parseWorkflowJSONMetadata(raw json.RawMessage) (*WorkflowJSONMetadata, []workflowFieldProblem) {
