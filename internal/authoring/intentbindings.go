@@ -18,17 +18,17 @@ var (
 // requested trigger, effect, approval, or exact catalog capability. Missing
 // requirements remain explicit; this function never inserts or rewrites a
 // node and therefore cannot turn model prose into execution authority.
-func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow) BindingReport {
-	report := BindWorkflow(catalog, workflow)
-	if workflow == nil {
-		return report
-	}
+// nodeFact is the executable identity a proposed node carries: the tool,
+// MCP tool or subworkflow it names, and whether that identity writes.
+type nodeFact struct {
+	ID, Type, Tool, MCP, Subworkflow string
+	ToolWrite, MCPWrite, HTTPWrite   bool
+	AgentWrite                       bool
+}
 
-	type nodeFact struct {
-		ID, Type, Tool, MCP, Subworkflow string
-		ToolWrite, MCPWrite, HTTPWrite   bool
-		AgentWrite                       bool
-	}
+// collectProposalFacts projects every node (and every multi-agent member)
+// to the identity the intent brief can be matched against.
+func collectProposalFacts(catalog Catalog, workflow *domain.Workflow) []nodeFact {
 	builtinWrite := map[string]bool{}
 	for _, entry := range catalog.BuiltinTools {
 		builtinWrite[entry.Name] = entry.WriteSide
@@ -99,115 +99,136 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 		}
 		facts = append(facts, fact)
 	}
+	return facts
+}
 
-	addResolved := func(binding Binding) {
-		if !hasBinding(report.Resolved, binding.Kind, binding.Field, binding.Requested) {
-			report.Resolved = append(report.Resolved, bindingForWire(binding))
-		}
-	}
-	addMissing := func(binding Binding) {
-		if !hasBinding(report.Missing, binding.Kind, binding.Field, binding.Requested) {
-			report.Missing = append(report.Missing, bindingForWire(binding))
-		}
-		report.Complete = false
-	}
-	find := func(predicate func(nodeFact) bool) (nodeFact, bool) {
-		for _, fact := range facts {
-			if predicate(fact) {
-				return fact, true
-			}
-		}
-		return nodeFact{}, false
-	}
-	require := func(kind, field, requested string, alternatives []string, predicate func(nodeFact) bool) {
-		if fact, ok := find(predicate); ok {
-			addResolved(Binding{Kind: kind, NodeID: fact.ID, Field: field, Requested: requested, ResolvedID: requested, Alternatives: []string{}})
-			return
-		}
-		addMissing(Binding{Kind: kind, Field: field, Requested: requested, Alternatives: alternatives, Reason: "requested_intent_not_proposed"})
-	}
+// proposalBinder matches an intent brief against the proposed nodes' facts
+// and records what the proposal delivers, misses or adds undeclared.
+type proposalBinder struct {
+	catalog Catalog
+	facts   []nodeFact
+	report  *BindingReport
+}
 
+func (b *proposalBinder) addResolved(binding Binding) {
+	if !hasBinding(b.report.Resolved, binding.Kind, binding.Field, binding.Requested) {
+		b.report.Resolved = append(b.report.Resolved, bindingForWire(binding))
+	}
+}
+func (b *proposalBinder) addMissing(binding Binding) {
+	if !hasBinding(b.report.Missing, binding.Kind, binding.Field, binding.Requested) {
+		b.report.Missing = append(b.report.Missing, bindingForWire(binding))
+	}
+	b.report.Complete = false
+}
+func (b *proposalBinder) find(predicate func(nodeFact) bool) (nodeFact, bool) {
+	for _, fact := range b.facts {
+		if predicate(fact) {
+			return fact, true
+		}
+	}
+	return nodeFact{}, false
+}
+func (b *proposalBinder) require(kind, field, requested string, alternatives []string, predicate func(nodeFact) bool) {
+	if fact, ok := b.find(predicate); ok {
+		b.addResolved(Binding{Kind: kind, NodeID: fact.ID, Field: field, Requested: requested, ResolvedID: requested, Alternatives: []string{}})
+		return
+	}
+	b.addMissing(Binding{Kind: kind, Field: field, Requested: requested, Alternatives: alternatives, Reason: "requested_intent_not_proposed"})
+}
+
+// bindIntentTrigger checks the brief's trigger is proposed as the matching node.
+func (b *proposalBinder) bindIntentTrigger(brief IntentBrief) {
 	triggerTypes := map[string]string{
 		"schedule": "schedule", "webhook": "webhook_received", "email": "email_received",
 		"file": "file_dropped", "mcp_event": "mcp_server_event", "pagerduty": "pagerduty_incident",
 	}
 	if brief.Trigger != "" && brief.Trigger != "manual" {
 		if nodeType, supported := triggerTypes[brief.Trigger]; supported {
-			require("intent_trigger", "brief.trigger", brief.Trigger, []string{nodeType}, func(f nodeFact) bool { return f.Type == nodeType })
+			b.require("intent_trigger", "brief.trigger", brief.Trigger, []string{nodeType}, func(f nodeFact) bool { return f.Type == nodeType })
 		} else {
-			addMissing(Binding{Kind: "intent_trigger", Field: "brief.trigger", Requested: brief.Trigger, Alternatives: sortedTriggerIDs(catalog), Reason: "requested_trigger_not_supported"})
+			b.addMissing(Binding{Kind: "intent_trigger", Field: "brief.trigger", Requested: brief.Trigger, Alternatives: sortedTriggerIDs(b.catalog), Reason: "requested_trigger_not_supported"})
 		}
 	}
+}
 
+// bindIntentEffects checks every declared external effect is delivered by a
+// proposed write-capable identity.
+func (b *proposalBinder) bindIntentEffects(brief IntentBrief) {
 	for _, effect := range brief.ExternalEffects {
 		switch effect {
 		case "slack_message":
-			require("intent_effect", "brief.externalEffects", effect, []string{"slack.post"}, func(f nodeFact) bool { return f.Tool == "slack.post" })
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"slack.post"}, func(f nodeFact) bool { return f.Tool == "slack.post" })
 		case "github_issue":
-			require("intent_effect", "brief.externalEffects", effect, []string{"github.create_issue"}, func(f nodeFact) bool { return f.Tool == "github.create_issue" })
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"github.create_issue"}, func(f nodeFact) bool { return f.Tool == "github.create_issue" })
 		case "email_delivery":
-			require("intent_effect", "brief.externalEffects", effect, []string{"email.send"}, func(f nodeFact) bool { return f.Tool == "email.send" })
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"email.send"}, func(f nodeFact) bool { return f.Tool == "email.send" })
 		case "outbound_webhook":
-			require("intent_effect", "brief.externalEffects", effect, []string{"webhook.send", "http POST"}, func(f nodeFact) bool { return f.Tool == "webhook.send" || f.HTTPWrite })
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"webhook.send", "http POST"}, func(f nodeFact) bool { return f.Tool == "webhook.send" || f.HTTPWrite })
 		case "database_write":
-			require("intent_effect", "brief.externalEffects", effect, []string{"db.query.write", "db.query.transaction"}, func(f nodeFact) bool {
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"db.query.write", "db.query.transaction"}, func(f nodeFact) bool {
 				return f.Tool == "db.query.write" || f.Tool == "db.query.transaction"
 			})
 		case "pagerduty_acknowledge":
-			require("intent_effect", "brief.externalEffects", effect, []string{"pagerduty.incident.acknowledge"}, func(f nodeFact) bool {
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"pagerduty.incident.acknowledge"}, func(f nodeFact) bool {
 				return f.Tool == "pagerduty.incident.acknowledge"
 			})
 		case "pagerduty_snooze":
-			require("intent_effect", "brief.externalEffects", effect, []string{"pagerduty.incident.snooze"}, func(f nodeFact) bool {
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"pagerduty.incident.snooze"}, func(f nodeFact) bool {
 				return f.Tool == "pagerduty.incident.snooze"
 			})
 		case "sheet_append":
-			require("intent_effect", "brief.externalEffects", effect, []string{"sheet.append"}, func(f nodeFact) bool {
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"sheet.append"}, func(f nodeFact) bool {
 				return f.Tool == "sheet.append"
 			})
 		case "vector_memory_write":
-			require("intent_effect", "brief.externalEffects", effect, []string{"vector.upsert"}, func(f nodeFact) bool {
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"vector.upsert"}, func(f nodeFact) bool {
 				return f.Tool == "vector.upsert"
 			})
 		case "pdf_generation":
-			require("intent_effect", "brief.externalEffects", effect, []string{"pdf.generate"}, func(f nodeFact) bool {
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"pdf.generate"}, func(f nodeFact) bool {
 				return f.Tool == "pdf.generate"
 			})
 		case "mcp_write":
-			require("intent_effect", "brief.externalEffects", effect, sortedMcpNames(catalog), func(f nodeFact) bool {
+			b.require("intent_effect", "brief.externalEffects", effect, sortedMcpNames(b.catalog), func(f nodeFact) bool {
 				return f.MCPWrite
 			})
 		case "agent_write":
-			require("intent_effect", "brief.externalEffects", effect, []string{"agent with allowWriteTools"}, func(f nodeFact) bool {
+			b.require("intent_effect", "brief.externalEffects", effect, []string{"agent with allowWriteTools"}, func(f nodeFact) bool {
 				return f.AgentWrite
 			})
 		default:
 			switch {
 			case strings.HasPrefix(effect, "tool:"):
 				name := strings.TrimSpace(strings.TrimPrefix(effect, "tool:"))
-				require("intent_effect", "brief.externalEffects", effect, []string{name}, func(f nodeFact) bool {
+				b.require("intent_effect", "brief.externalEffects", effect, []string{name}, func(f nodeFact) bool {
 					return f.Tool == name && f.ToolWrite
 				})
 			case strings.HasPrefix(effect, "mcp:"):
 				identifier := strings.TrimSpace(strings.TrimPrefix(effect, "mcp:"))
-				require("intent_effect", "brief.externalEffects", effect, []string{identifier}, func(f nodeFact) bool {
+				b.require("intent_effect", "brief.externalEffects", effect, []string{identifier}, func(f nodeFact) bool {
 					return f.MCP == identifier && f.MCPWrite
 				})
 			case strings.HasPrefix(effect, "subworkflow:"):
 				workflowID := strings.TrimSpace(strings.TrimPrefix(effect, "subworkflow:"))
-				require("intent_effect", "brief.externalEffects", effect, []string{workflowID}, func(f nodeFact) bool {
+				b.require("intent_effect", "brief.externalEffects", effect, []string{workflowID}, func(f nodeFact) bool {
 					return workflowID != "" && f.Subworkflow == workflowID
 				})
 			default:
-				addMissing(Binding{Kind: "intent_effect", Field: "brief.externalEffects", Requested: effect, Alternatives: []string{}, Reason: "requested_effect_not_supported"})
+				b.addMissing(Binding{Kind: "intent_effect", Field: "brief.externalEffects", Requested: effect, Alternatives: []string{}, Reason: "requested_effect_not_supported"})
 			}
 		}
 	}
+}
+
+// reportUndeclaredEffects flags proposed writes the brief did not declare;
+// unknown write tools and subworkflows fail closed until named exactly.
+func (b *proposalBinder) reportUndeclaredEffects(brief IntentBrief) {
 	declaredEffects := make(map[string]bool, len(brief.ExternalEffects))
 	for _, effect := range brief.ExternalEffects {
 		declaredEffects[effect] = true
 	}
-	for _, fact := range facts {
+	for _, fact := range b.facts {
 		proposedEffect := ""
 		switch fact.Tool {
 		case "slack.post":
@@ -250,65 +271,87 @@ func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow)
 			// its transitive effects after this proposal was reviewed, and a pinned
 			// child can still perform writes hidden from the parent graph. Require
 			// the exact child id in the Intent Brief rather than trying to infer
-			// mutable transitive authority from a bounded catalog projection.
+			// mutable transitive authority from a bounded b.catalog projection.
 			proposedEffect = "subworkflow:" + fact.Subworkflow
 		}
 		if proposedEffect != "" && !declaredEffects[proposedEffect] {
-			addMissing(Binding{
+			b.addMissing(Binding{
 				Kind: "proposal_effect", NodeID: fact.ID, Field: "brief.externalEffects",
 				Requested: proposedEffect, Alternatives: []string{proposedEffect}, Reason: "proposed_effect_not_declared",
 			})
 		}
 	}
+}
+
+// bindIntentApprovals and bindIntentCapabilities check the brief's approvals
+// and every capability the intent text names against the proposal.
+func (b *proposalBinder) bindIntentApprovals(brief IntentBrief) {
 	if len(brief.Approvals) > 0 {
-		require("intent_approval", "brief.approvals", strings.Join(brief.Approvals, ","), []string{"approval", "human_form"}, func(f nodeFact) bool {
+		b.require("intent_approval", "brief.approvals", strings.Join(brief.Approvals, ","), []string{"approval", "human_form"}, func(f nodeFact) bool {
 			return f.Type == "approval" || f.Type == "human_form"
 		})
 	}
+}
 
+func (b *proposalBinder) bindIntentCapabilities(brief IntentBrief) {
 	intentText := strings.ToLower(strings.Join([]string{
 		brief.Objective, brief.ExpectedOutcome, strings.Join(brief.Inputs, " "),
 		strings.Join(brief.ExternalEffects, " "), strings.Join(brief.Examples, " "),
 	}, " "))
 	knownTools := map[string]bool{}
-	for _, entry := range catalog.BuiltinTools {
+	for _, entry := range b.catalog.BuiltinTools {
 		knownTools[strings.ToLower(entry.Name)] = true
 		if strings.Contains(intentText, strings.ToLower(entry.Name)) {
 			name := entry.Name
-			require("intent_capability", "brief.objective", name, []string{name}, func(f nodeFact) bool { return f.Tool == name })
+			b.require("intent_capability", "brief.objective", name, []string{name}, func(f nodeFact) bool { return f.Tool == name })
 		}
 	}
 	for _, match := range explicitToolPattern.FindAllStringSubmatch(intentText, -1) {
 		requested := strings.ToLower(match[1])
 		if !knownTools[requested] {
-			addMissing(Binding{Kind: "intent_capability", Field: "brief.objective", Requested: requested, Alternatives: sortedBuiltinNames(catalog), Reason: "requested_tool_not_in_catalog"})
+			b.addMissing(Binding{Kind: "intent_capability", Field: "brief.objective", Requested: requested, Alternatives: sortedBuiltinNames(b.catalog), Reason: "requested_tool_not_in_catalog"})
 		}
 	}
 
 	knownMCP := map[string]bool{}
-	for _, entry := range catalog.McpTools {
+	for _, entry := range b.catalog.McpTools {
 		if entry.ConnectionAlias == "_truncated" || entry.ToolName == "_truncated" {
 			continue
 		}
 		identifier := entry.ConnectionAlias + "/" + entry.ToolName
 		knownMCP[strings.ToLower(identifier)] = true
 		if strings.Contains(intentText, strings.ToLower(identifier)) {
-			require("intent_capability", "brief.objective", identifier, []string{identifier}, func(f nodeFact) bool { return f.MCP == identifier })
+			b.require("intent_capability", "brief.objective", identifier, []string{identifier}, func(f nodeFact) bool { return f.MCP == identifier })
 		}
 	}
 	for _, match := range explicitMCPPattern.FindAllStringSubmatch(intentText, -1) {
 		requested := strings.ToLower(match[1])
 		if !knownMCP[requested] {
-			addMissing(Binding{Kind: "intent_capability", Field: "brief.objective", Requested: requested, Alternatives: sortedMcpNames(catalog), Reason: "requested_mcp_not_in_catalog"})
+			b.addMissing(Binding{Kind: "intent_capability", Field: "brief.objective", Requested: requested, Alternatives: sortedMcpNames(b.catalog), Reason: "requested_mcp_not_in_catalog"})
 		}
 	}
 
-	for _, entry := range catalog.Subworkflows {
+	for _, entry := range b.catalog.Subworkflows {
 		if strings.Contains(intentText, strings.ToLower(entry.WorkflowID)) {
 			workflowID := entry.WorkflowID
-			require("intent_capability", "brief.objective", workflowID, []string{workflowID}, func(f nodeFact) bool { return f.Subworkflow == workflowID })
+			b.require("intent_capability", "brief.objective", workflowID, []string{workflowID}, func(f nodeFact) bool { return f.Subworkflow == workflowID })
 		}
 	}
+}
+
+// BindProposal binds the workflow like BindWorkflow, then checks the
+// proposal against the intent brief it claims to implement.
+func BindProposal(catalog Catalog, brief IntentBrief, workflow *domain.Workflow) BindingReport {
+	report := BindWorkflow(catalog, workflow)
+	if workflow == nil {
+		return report
+	}
+	b := &proposalBinder{catalog: catalog, facts: collectProposalFacts(catalog, workflow), report: &report}
+	b.bindIntentTrigger(brief)
+	b.bindIntentEffects(brief)
+	b.reportUndeclaredEffects(brief)
+	b.bindIntentApprovals(brief)
+	b.bindIntentCapabilities(brief)
 	return report
 }
 
