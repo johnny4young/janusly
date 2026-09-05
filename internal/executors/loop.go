@@ -173,39 +173,62 @@ func loopBudgetExceeded(failedCount, totalCount int, toleratedCount, toleratedPe
 	return false
 }
 
-func executeForEachLoop(ctx context.Context, registry *tools.Registry, httpExec Func, in Input, items []any) (any, error) {
+// forEachConfig is the validated shape of a for_each loop node: the tool it
+// fans out to, its concurrency, and exactly one failure budget.
+type forEachConfig struct {
+	tool                string
+	concurrency         int
+	toleratedCount      *float64
+	toleratedPercentage *float64
+}
+
+// forEachSummary is the aggregate a run reports: counts, the bounded
+// diagnostics, and the per-item entries kept within the result budget.
+type forEachSummary struct {
+	details      map[string]any
+	items        []any
+	failedCount  int
+	skippedCount int
+}
+
+func parseForEachConfig(in Input) (forEachConfig, error) {
 	tool, _ := in.Config["tool"].(string)
 	if tool == "" {
-		return nil, fmt.Errorf("loop for_each requires config.tool")
+		return forEachConfig{}, fmt.Errorf("loop for_each requires config.tool")
 	}
-	concurrency := loopDefaultConcurrency
+	cfg := forEachConfig{tool: tool, concurrency: loopDefaultConcurrency}
 	if raw, present := in.Config["concurrency"]; present {
 		value, ok := raw.(float64)
 		if !ok || value != math.Trunc(value) || value < 1 || value > loopMaxConcurrency {
-			return nil, fmt.Errorf("loop concurrency must be an integer between 1 and %d", loopMaxConcurrency)
+			return forEachConfig{}, fmt.Errorf("loop concurrency must be an integer between 1 and %d", loopMaxConcurrency)
 		}
-		concurrency = int(value)
+		cfg.concurrency = int(value)
 	}
 	// Exactly ONE failure budget: count or percentage, never both.
-	var toleratedCount, toleratedPercentage *float64
 	if raw, present := in.Config["toleratedFailureCount"]; present {
 		value, ok := raw.(float64)
 		if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value != math.Trunc(value) || value < 0 || value > loopMaxItems {
-			return nil, fmt.Errorf("loop toleratedFailureCount must be an integer between 0 and %d", loopMaxItems)
+			return forEachConfig{}, fmt.Errorf("loop toleratedFailureCount must be an integer between 0 and %d", loopMaxItems)
 		}
-		toleratedCount = &value
+		cfg.toleratedCount = &value
 	}
 	if raw, present := in.Config["toleratedFailurePercentage"]; present {
 		value, ok := raw.(float64)
 		if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 100 {
-			return nil, fmt.Errorf("loop toleratedFailurePercentage must be between 0 and 100")
+			return forEachConfig{}, fmt.Errorf("loop toleratedFailurePercentage must be between 0 and 100")
 		}
-		toleratedPercentage = &value
+		cfg.toleratedPercentage = &value
 	}
-	if toleratedCount != nil && toleratedPercentage != nil {
-		return nil, fmt.Errorf("loop accepts exactly one failure budget: toleratedFailureCount or toleratedFailurePercentage")
+	if cfg.toleratedCount != nil && cfg.toleratedPercentage != nil {
+		return forEachConfig{}, fmt.Errorf("loop accepts exactly one failure budget: toleratedFailureCount or toleratedFailurePercentage")
 	}
+	return cfg, nil
+}
 
+// renderForEachInputs resolves EVERY per-item template before any side
+// effect starts — strict mode fails the entire node without partially
+// processing.
+func renderForEachInputs(in Input, items []any) ([]map[string]any, error) {
 	// Resolve EVERY per-item template before starting any side effect —
 	// strict mode fails the entire node without partially processing.
 	inputTemplate := in.Config["input"]
@@ -240,23 +263,18 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, httpExec 
 			return nil, err
 		}
 	}
+	return renderedInputs, nil
+}
 
-	if in.Emit != nil {
-		payload := map[string]any{"tool": tool, "count": len(items), "concurrency": concurrency}
-		if toleratedCount != nil {
-			payload["toleratedFailureCount"] = *toleratedCount
-		}
-		if toleratedPercentage != nil {
-			payload["toleratedFailurePercentage"] = *toleratedPercentage
-		}
-		in.Emit("loop.for_each.started", payload)
-	}
-
-	// Ordered worker pool: the node owns the concurrency. A cancelled
+// runForEachItems fans the items across an ordered worker pool: the node
+// owns the concurrency, and a cancelled context stops dequeuing NEW items
+// cooperatively.
+func runForEachItems(ctx context.Context, registry *tools.Registry, httpExec Func, in Input, cfg forEachConfig, items []any, renderedInputs []map[string]any) ([]loopItemOutcome, error) {
+	// Ordered worker pool: the node owns the cfg.concurrency. A cancelled
 	// context (node timeout) stops dequeuing NEW items cooperatively.
 	outcomes := make([]loopItemOutcome, len(items))
 	var nextIndex atomic.Int64
-	workerCount := min(concurrency, len(items))
+	workerCount := min(cfg.concurrency, len(items))
 	var wg sync.WaitGroup
 	for range workerCount {
 		wg.Go(func() {
@@ -265,7 +283,7 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, httpExec 
 				if index >= len(items) || ctx.Err() != nil {
 					return
 				}
-				result := executeRegisteredTool(ctx, registry, httpExec, tool, renderedInputs[index], in)
+				result := executeRegisteredTool(ctx, registry, httpExec, cfg.tool, renderedInputs[index], in)
 				outcome := loopItemOutcome{index: index}
 				switch {
 				case result["skipped"] == true:
@@ -294,10 +312,15 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, httpExec 
 	if ctx.Err() != nil {
 		return nil, &ExecErrorShape{
 			Message: "Loop execution aborted", Name: "LoopExecutionAbortedError",
-			Code: "LOOP_EXECUTION_ABORTED", WriteSide: !in.DryRun && registry.IsWriteSide(tool),
+			Code: "LOOP_EXECUTION_ABORTED", WriteSide: !in.DryRun && registry.IsWriteSide(cfg.tool),
 		}
 	}
+	return outcomes, nil
+}
 
+// summarizeForEach aggregates the outcomes into counts, bounded failure
+// samples and per-item entries that fit the result budget.
+func summarizeForEach(cfg forEachConfig, items []any, outcomes []loopItemOutcome) forEachSummary {
 	// Aggregate accounting + bounded diagnostics.
 	succeededCount, skippedCount := 0, 0
 	var failedIndices []any
@@ -344,45 +367,71 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, httpExec 
 		failureSample = []any{}
 	}
 	details := map[string]any{
-		"tool": tool, "count": len(items),
+		"tool": cfg.tool, "count": len(items),
 		"succeededCount": succeededCount, "skippedCount": skippedCount,
 		"failedCount": failedCount, "failedPercentage": failedPercentage,
 		"failedIndices": failedIndices, "failures": failureSample,
 		"failureDetailsTruncated": failedCount > len(failureSample),
 		"resultTruncatedCount":    resultTruncatedCount,
 	}
-	if toleratedCount != nil {
-		details["toleratedFailureCount"] = *toleratedCount
+	if cfg.toleratedCount != nil {
+		details["toleratedFailureCount"] = *cfg.toleratedCount
 	}
-	if toleratedPercentage != nil {
-		details["toleratedFailurePercentage"] = *toleratedPercentage
+	if cfg.toleratedPercentage != nil {
+		details["toleratedFailurePercentage"] = *cfg.toleratedPercentage
 	}
+	return forEachSummary{details: details, items: boundedItems, failedCount: failedCount, skippedCount: skippedCount}
+}
 
-	if skippedCount > 0 && in.Emit != nil {
+func executeForEachLoop(ctx context.Context, registry *tools.Registry, httpExec Func, in Input, items []any) (any, error) {
+	cfg, err := parseForEachConfig(in)
+	if err != nil {
+		return nil, err
+	}
+	renderedInputs, err := renderForEachInputs(in, items)
+	if err != nil {
+		return nil, err
+	}
+	if in.Emit != nil {
+		payload := map[string]any{"tool": cfg.tool, "count": len(items), "concurrency": cfg.concurrency}
+		if cfg.toleratedCount != nil {
+			payload["toleratedFailureCount"] = *cfg.toleratedCount
+		}
+		if cfg.toleratedPercentage != nil {
+			payload["toleratedFailurePercentage"] = *cfg.toleratedPercentage
+		}
+		in.Emit("loop.for_each.started", payload)
+	}
+	outcomes, err := runForEachItems(ctx, registry, httpExec, in, cfg, items, renderedInputs)
+	if err != nil {
+		return nil, err
+	}
+	summary := summarizeForEach(cfg, items, outcomes)
+	if summary.skippedCount > 0 && in.Emit != nil {
 		in.Emit("loop.dry_run.skipped", map[string]any{
-			"tool": tool, "skippedCount": skippedCount, "count": len(items),
+			"tool": cfg.tool, "skippedCount": summary.skippedCount, "count": len(items),
 		})
 	}
 
-	if loopBudgetExceeded(failedCount, len(items), toleratedCount, toleratedPercentage) {
+	if loopBudgetExceeded(summary.failedCount, len(items), cfg.toleratedCount, cfg.toleratedPercentage) {
 		if in.Emit != nil {
-			in.Emit("loop.failure_budget.exceeded", details)
+			in.Emit("loop.failure_budget.exceeded", summary.details)
 		}
 		return nil, &ExecErrorShape{
-			Message: fmt.Sprintf("Loop failure budget exceeded: %d of %d items failed", failedCount, len(items)),
+			Message: fmt.Sprintf("Loop failure budget exceeded: %d of %d items failed", summary.failedCount, len(items)),
 			Name:    "LoopFailureBudgetExceededError", Code: "LOOP_FAILURE_BUDGET_EXCEEDED",
-			Details: details,
+			Details: summary.details,
 			// Effects may already have happened: never whole-node retry.
-			WriteSide: !in.DryRun && registry.IsWriteSide(tool),
+			WriteSide: !in.DryRun && registry.IsWriteSide(cfg.tool),
 		}
 	}
 
 	output := map[string]any{"mode": "for_each"}
-	maps.Copy(output, details)
+	maps.Copy(output, summary.details)
 	if in.Emit != nil {
 		in.Emit("loop.completed", output)
 	}
-	output["items"] = boundedItems
+	output["items"] = summary.items
 	return output, nil
 }
 
