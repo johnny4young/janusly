@@ -155,6 +155,20 @@ export function SchemaFieldsEditor({
 
 export default SchemaFieldsEditor
 
+/** Shared name-editing state for input and output rows: the draft, the
+ *  rejected-rename flag, and the commit that trims an accepted name. */
+function useNameDraft(name: string, onRename: (name: string) => boolean) {
+  const nameErrorId = useId()
+  const [nameDraft, setNameDraft] = useState(name)
+  const [nameError, setNameError] = useState(false)
+  const commitName = () => {
+    const accepted = onRename(nameDraft)
+    setNameError(!accepted)
+    if (accepted) setNameDraft(nameDraft.trim())
+  }
+  return { nameErrorId, nameDraft, setNameDraft, nameError, setNameError, commitName }
+}
+
 function InputRow({ name, shape, form, required, onRename, onTypeChange, onDescriptionChange, onDefaultChange, onRequiredChange, onRemove }: {
   name: string
   shape: WorkflowInputSchemaShape
@@ -169,14 +183,7 @@ function InputRow({ name, shape, form, required, onRename, onTypeChange, onDescr
   onRemove: () => void
 }) {
   const { t } = useT()
-  const nameErrorId = useId()
-  const [nameDraft, setNameDraft] = useState(name)
-  const [nameError, setNameError] = useState(false)
-  const commitName = () => {
-    const accepted = onRename(nameDraft)
-    setNameError(!accepted)
-    if (accepted) setNameDraft(nameDraft.trim())
-  }
+  const { nameErrorId, nameDraft, setNameDraft, nameError, setNameError, commitName } = useNameDraft(name, onRename)
   return (
     <div className="we-workflow-io__row" data-testid={`workflow-input-${name}`}>
       <div className="we-workflow-io__row-main">
@@ -464,14 +471,7 @@ function OutputRow({ name, template, onRename, onTemplateChange, onRemove }: {
   onRemove: () => void
 }) {
   const { t } = useT()
-  const nameErrorId = useId()
-  const [nameDraft, setNameDraft] = useState(name)
-  const [nameError, setNameError] = useState(false)
-  const commitName = () => {
-    const accepted = onRename(nameDraft)
-    setNameError(!accepted)
-    if (accepted) setNameDraft(nameDraft.trim())
-  }
+  const { nameErrorId, nameDraft, setNameDraft, nameError, setNameError, commitName } = useNameDraft(name, onRename)
   return (
     <div className="we-workflow-io__row" data-testid={`workflow-output-${name}`}>
       <div className="we-workflow-io__row-main we-workflow-io__row-main--output">

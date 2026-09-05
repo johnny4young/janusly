@@ -2,23 +2,10 @@ import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { initI18n } from '../i18n'
-import { loadLocaleCatalog } from '../i18n/resources'
+import { bootstrapTestCatalogs } from './i18n-bootstrap'
 import '../index.css'
 
-// Bootstrap the catalog runtime once for the browser-mode suite — components that route
-// through `useT()` need an initialised instance to look up strings. The
-// production path runs `initI18n()` in `main.tsx`; vitest doesn't import it.
-const [enCore, enWorkspace, esCore, esWorkspace] = await Promise.all([
-  loadLocaleCatalog('en', 'core'),
-  loadLocaleCatalog('en', 'workspace'),
-  loadLocaleCatalog('es', 'core'),
-  loadLocaleCatalog('es', 'workspace'),
-])
-initI18n('en', enCore, 'core')
-initI18n('en', enWorkspace, 'workspace')
-initI18n('es', esCore, 'core')
-initI18n('es', esWorkspace, 'workspace')
-initI18n('en')
+await bootstrapTestCatalogs()
 
 beforeEach(() => {
   // Reset to English between tests so locale-mutating tests don't leak state.

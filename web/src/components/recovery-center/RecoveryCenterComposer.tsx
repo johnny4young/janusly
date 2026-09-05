@@ -52,18 +52,15 @@ export function RecoveryCenterComposer({
     }
   }
 
-  const askWorkflow = async (prompt: string) => {
-    if (nodes.length === 0) {
-      addToast(runtimeT('recoveryCenter.composer.needWorkflow'), 'info')
-      onOpenTab('ai-studio')
-      return
-    }
+  // Both askers share one request lifecycle; only the endpoint and body
+  // differ. Errors surface as toasts, never as a half-rendered answer.
+  const askExplain = async (path: string, body: Record<string, unknown>) => {
     setBusy(true)
     setAnswer(null)
     try {
-      const result = await api('/ai/explain-workflow', {
+      const result = await api(path, {
         method: 'POST',
-        body: JSON.stringify({ workflow: buildWorkflowPayload(), prompt }),
+        body: JSON.stringify(body),
       }) as { mode?: 'ai' | 'fallback' | 'error'; explanation?: string; aiError?: string; error?: string }
       if (result.error) {
         addToast(result.error, 'error')
@@ -82,29 +79,17 @@ export function RecoveryCenterComposer({
     }
   }
 
-  const askRun = async (runId: string, question: string) => {
-    setBusy(true)
-    setAnswer(null)
-    try {
-      const result = await api('/ai/explain-run', {
-        method: 'POST',
-        body: JSON.stringify({ runId, question }),
-      }) as { mode?: 'ai' | 'fallback' | 'error'; explanation?: string; aiError?: string; error?: string }
-      if (result.error) {
-        addToast(result.error, 'error')
-        return
-      }
-      const mode: 'ai' | 'fallback' = result.mode === 'ai' ? 'ai' : 'fallback'
-      setAnswer({
-        text: result.explanation ?? runtimeT('recoveryCenter.composer.noAnswer'),
-        mode,
-        aiError: result.aiError,
-      })
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : runtimeT('recoveryCenter.composer.callFailed'), 'error')
-    } finally {
-      setBusy(false)
+  const askWorkflow = async (prompt: string) => {
+    if (nodes.length === 0) {
+      addToast(runtimeT('recoveryCenter.composer.needWorkflow'), 'info')
+      onOpenTab('ai-studio')
+      return
     }
+    await askExplain('/ai/explain-workflow', { workflow: buildWorkflowPayload(), prompt })
+  }
+
+  const askRun = async (runId: string, question: string) => {
+    await askExplain('/ai/explain-run', { runId, question })
   }
 
   const submit = async (event?: React.FormEvent) => {

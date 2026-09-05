@@ -426,47 +426,20 @@ function splitComparison(expression: string, operator: ComparisonOperator) {
 }
 
 function splitWordComparison(expression: string, operator: ComparisonOperator): string[] {
-  const parts: string[] = [];
-  let parenDepth = 0;
-  let bracketDepth = 0;
-  let quote: string | null = null;
-  let start = 0;
-
-  for (let i = 0; i < expression.length; i++) {
-    const char = expression[i];
-    if ((char === '"' || char === "'") && !isEscaped(expression, i)) {
-      quote = quote === char ? null : quote ?? char;
-      continue;
-    }
-    if (quote) continue;
-    if (char === "(") parenDepth++;
-    else if (char === ")") parenDepth--;
-    else if (char === "[") bracketDepth++;
-    else if (char === "]") bracketDepth--;
-
-    const before = expression[i - 1];
-    const after = expression[i + operator.length];
-    if (
-      parenDepth === 0
-      && bracketDepth === 0
-      && expression.slice(i, i + operator.length) === operator
-      && before !== undefined
-      && after !== undefined
-      && /\s/.test(before)
-      && /\s/.test(after)
-    ) {
-      parts.push(expression.slice(start, i).trim());
-      start = i + operator.length;
-      i += operator.length - 1;
-    }
-  }
-
-  if (!parts.length) return [expression.trim()];
-  parts.push(expression.slice(start).trim());
-  return parts;
+  return splitOutsideNesting(expression, operator, true);
 }
 
 function splitTopLevel(expression: string, operator: string) {
+  return splitOutsideNesting(expression, operator, false);
+}
+
+/**
+ * Split `expression` on `operator` wherever it appears outside quotes,
+ * parentheses and brackets. A word operator (`and`, `or`, `in`, …) must also
+ * be delimited by whitespace on both sides so it never matches inside an
+ * identifier.
+ */
+function splitOutsideNesting(expression: string, operator: string, wordBoundary: boolean): string[] {
   const parts: string[] = [];
   let parenDepth = 0;
   let bracketDepth = 0;
@@ -475,23 +448,25 @@ function splitTopLevel(expression: string, operator: string) {
 
   for (let i = 0; i < expression.length; i++) {
     const char = expression[i];
-
     if ((char === '"' || char === "'") && !isEscaped(expression, i)) {
       quote = quote === char ? null : quote ?? char;
       continue;
     }
-
     if (quote) continue;
     if (char === "(") parenDepth++;
     else if (char === ")") parenDepth--;
     else if (char === "[") bracketDepth++;
     else if (char === "]") bracketDepth--;
 
-    if (parenDepth === 0 && bracketDepth === 0 && expression.slice(i, i + operator.length) === operator) {
-      parts.push(expression.slice(start, i).trim());
-      start = i + operator.length;
-      i += operator.length - 1;
+    if (parenDepth !== 0 || bracketDepth !== 0 || expression.slice(i, i + operator.length) !== operator) continue;
+    if (wordBoundary) {
+      const before = expression[i - 1];
+      const after = expression[i + operator.length];
+      if (before === undefined || after === undefined || !/\s/.test(before) || !/\s/.test(after)) continue;
     }
+    parts.push(expression.slice(start, i).trim());
+    start = i + operator.length;
+    i += operator.length - 1;
   }
 
   if (!parts.length) return [expression.trim()];

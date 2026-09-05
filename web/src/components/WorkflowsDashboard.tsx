@@ -608,9 +608,10 @@ function useWorkflowsDashboardController({
     },
     [selectedIds, bulkTagDraft, workflows, addToast, bumpPlatformVersion, t],
   )
-  const deleteWorkflow = useCallback(
-    async (workflowId: string) => {
-      setConfirmDeleteId(null)
+  // Delete and restore share one optimistic lifecycle: drop the row and its
+  // selection at once, call the server, and put the row back if it refuses.
+  const removeWorkflowOptimistically = useCallback(
+    async (workflowId: string, request: () => Promise<unknown>, successKey: string, failureKey: string) => {
       const current = workflowsRef.current.find((w) => w.id === workflowId)
       if (!current) return
       setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
@@ -621,37 +622,38 @@ function useWorkflowsDashboardController({
         return next
       })
       try {
-        await api(`/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE' })
-        addToast(t('workflowsDashboard.workflowDeleted', { name: current.name }), 'success')
+        await request()
+        addToast(t(successKey, { name: current.name }), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
-        addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed')), 'error')
+        addToast(tApiError(err) || (t(failureKey)), 'error')
       }
     },
     [addToast, bumpPlatformVersion, t],
   )
+  const deleteWorkflow = useCallback(
+    async (workflowId: string) => {
+      setConfirmDeleteId(null)
+      await removeWorkflowOptimistically(
+        workflowId,
+        () => api(`/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE' }),
+        'workflowsDashboard.workflowDeleted',
+        'workflowsDashboard.deleteFailed',
+      )
+    },
+    [removeWorkflowOptimistically],
+  )
   const restoreWorkflow = useCallback(
     async (workflowId: string) => {
-      const current = workflowsRef.current.find((w) => w.id === workflowId)
-      if (!current) return
-      setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
-      setSelectedIds((prev) => {
-        if (!prev.has(workflowId)) return prev
-        const next = new Set(prev)
-        next.delete(workflowId)
-        return next
-      })
-      try {
-        await api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' })
-        addToast(t('workflowsDashboard.workflowRestored', { name: current.name }), 'success')
-        bumpPlatformVersion()
-      } catch (err) {
-        setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
-        addToast(tApiError(err) || (t('workflowsDashboard.restoreFailed')), 'error')
-      }
+      await removeWorkflowOptimistically(
+        workflowId,
+        () => api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' }),
+        'workflowsDashboard.workflowRestored',
+        'workflowsDashboard.restoreFailed',
+      )
     },
-    [addToast, bumpPlatformVersion, t],
+    [removeWorkflowOptimistically],
   )
   const bulkRestore = useCallback(
     async () => {
