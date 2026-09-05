@@ -12,7 +12,7 @@
  * dialogs. Mounted per credential by `ConnectionsPanel`.
  */
 
-import React, { useEffect, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useAliveRef } from '../hooks/useAliveRef'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, KeyRound, X } from 'lucide-react'
