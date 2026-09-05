@@ -34,23 +34,25 @@ type SemanticFixtureOutcome struct {
 // callers); every product surface injects the real one.
 type SemanticFixtureEvaluator func(contract *RecoveryContract) []SemanticFixtureOutcome
 
-// validateSemanticContractDAG appends the contract-vs-DAG issues.
-func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidator, replayFixtures SemanticFixtureEvaluator, push func(Issue)) {
-	if wf.Recovery == nil || wf.Recovery.Contract == nil || wf.Recovery.Contract.Version != "2" {
-		return
-	}
-	contract := wf.Recovery.Contract
-	semantic := contract.Failure.Semantic
+// semanticDagIndex is what the semantic contract rules look up about the
+// DAG: nodes by id, which nodes carry a detector, and every effect node a
+// quarantine detector must dominate (declared or actually write-side).
+type semanticDagIndex struct {
+	nodeByID         map[string]Node
+	detectorSources  map[string]bool
+	guardedEffectIDs []string
+}
 
-	nodeByID := map[string]Node{}
-	nodeIds := map[string]bool{}
+// indexSemanticDag builds the index and reports write-side nodes the contract
+// never declared as effects.
+func indexSemanticDag(wf *Workflow, contract *RecoveryContract, push func(Issue)) semanticDagIndex {
+	semantic := contract.Failure.Semantic
+	index := semanticDagIndex{nodeByID: map[string]Node{}, detectorSources: map[string]bool{}}
 	for _, node := range wf.Nodes {
-		nodeByID[node.ID] = node
-		nodeIds[node.ID] = true
+		index.nodeByID[node.ID] = node
 	}
-	detectorSources := map[string]bool{}
 	for _, detector := range semantic.Detectors {
-		detectorSources[detector.SourceNodeID] = true
+		index.detectorSources[detector.SourceNodeID] = true
 	}
 
 	declaredEffects := map[string]bool{}
@@ -74,14 +76,20 @@ func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidat
 	for _, id := range actualEffects {
 		guardedEffects[id] = true
 	}
-	guardedEffectIDs := make([]string, 0, len(guardedEffects))
+	index.guardedEffectIDs = make([]string, 0, len(guardedEffects))
 	for id := range guardedEffects {
-		guardedEffectIDs = append(guardedEffectIDs, id)
+		index.guardedEffectIDs = append(index.guardedEffectIDs, id)
 	}
-	slices.Sort(guardedEffectIDs)
+	slices.Sort(index.guardedEffectIDs)
+	return index
+}
 
+// validateSemanticDetectors checks every detector's source node, expression
+// and, for quarantine detectors, that it runs before every guarded effect.
+func validateSemanticDetectors(wf *Workflow, contract *RecoveryContract, index semanticDagIndex, validExpression ExpressionValidator, push func(Issue)) {
+	semantic := contract.Failure.Semantic
 	for _, detector := range semantic.Detectors {
-		sourceNode, known := nodeByID[detector.SourceNodeID]
+		sourceNode, known := index.nodeByID[detector.SourceNodeID]
 		switch {
 		case !known:
 			push(Issue{Code: "semantic_detector_unknown_source", NodeID: detector.SourceNodeID,
@@ -108,7 +116,7 @@ func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidat
 		// effect. Traverse once per detector instead of once per detector/effect
 		// pair; V2 permits up to 50 detectors and 100 declared effects.
 		reachable := reachableNodesWithout(wf, detector.SourceNodeID)
-		for _, effectNodeID := range guardedEffectIDs {
+		for _, effectNodeID := range index.guardedEffectIDs {
 			if detector.SourceNodeID == effectNodeID ||
 				reachable[effectNodeID] {
 				push(Issue{Code: "semantic_detector_does_not_guard_effect", NodeID: effectNodeID,
@@ -116,17 +124,27 @@ func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidat
 			}
 		}
 	}
+}
 
+// validateSemanticFixtures checks every evaluation fixture names a source
+// node that exists and carries a detector.
+func validateSemanticFixtures(contract *RecoveryContract, index semanticDagIndex, push func(Issue)) {
+	semantic := contract.Failure.Semantic
 	for _, fixture := range semantic.EvaluationFixtures {
-		if !nodeIds[fixture.SourceNodeID] {
+		if index.nodeByID[fixture.SourceNodeID].ID == "" {
 			push(Issue{Code: "semantic_fixture_unknown_source", NodeID: fixture.SourceNodeID,
 				Message: "Semantic evaluation fixture \"" + fixture.ID + "\" references an unknown source node: " + fixture.SourceNodeID})
-		} else if !detectorSources[fixture.SourceNodeID] {
+		} else if !index.detectorSources[fixture.SourceNodeID] {
 			push(Issue{Code: "semantic_fixture_without_detector", NodeID: fixture.SourceNodeID,
 				Message: "Semantic evaluation fixture \"" + fixture.ID + "\" has no detector on source node \"" + fixture.SourceNodeID + "\""})
 		}
 	}
+}
 
+// validateSemanticReplay replays the fixtures with the runtime evaluator and
+// requires a passing and a violating fixture per detector.
+func validateSemanticReplay(contract *RecoveryContract, replayFixtures SemanticFixtureEvaluator, push func(Issue)) {
+	semantic := contract.Failure.Semantic
 	if replayFixtures == nil {
 		return
 	}
@@ -160,6 +178,18 @@ func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidat
 				Message: "Semantic detector \"" + detector.ID + "\" requires a violation fixture that exercises that detector"})
 		}
 	}
+}
+
+// validateSemanticContractDAG appends the contract-vs-DAG issues.
+func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidator, replayFixtures SemanticFixtureEvaluator, push func(Issue)) {
+	if wf.Recovery == nil || wf.Recovery.Contract == nil || wf.Recovery.Contract.Version != "2" {
+		return
+	}
+	contract := wf.Recovery.Contract
+	index := indexSemanticDag(wf, contract, push)
+	validateSemanticDetectors(wf, contract, index, validExpression, push)
+	validateSemanticFixtures(contract, index, push)
+	validateSemanticReplay(contract, replayFixtures, push)
 }
 
 // reachableNodesWithout returns every node still reachable from an original
