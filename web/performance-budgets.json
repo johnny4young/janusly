@@ -139,6 +139,7 @@
     "workflow-workspace.js": 43.4,
     "WorkflowDiffView.js": 1.55,
     "WorkflowIoEditor.js": 2.54,
+    "useAliveRef.js": 0.19,
     "WorkflowMetadataPanel.js": 2.7,
     "WorkflowRecoveryQualification.js": 1.81,
     "WorkflowRolloutPanel.js": 2.69,

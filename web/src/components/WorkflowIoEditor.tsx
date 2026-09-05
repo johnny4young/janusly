@@ -157,31 +157,6 @@ export default SchemaFieldsEditor
 
 /** Shared name-editing state for input and output rows: the draft, the
  *  rejected-rename flag, and the commit that trims an accepted name. */
-/** The editable name of an input or output row: commits on blur or Enter. */
-function IoNameField({ ariaLabel, draft, invalid, errorId, onDraft, onCommit }: {
-  ariaLabel: string
-  draft: string
-  invalid: boolean
-  errorId: string
-  onDraft: (value: string) => void
-  onCommit: () => void
-}) {
-  return (
-    <label>
-      <span className="we-sr-only">{ariaLabel}</span>
-      <TextInput
-        value={draft}
-        maxLength={80}
-        aria-invalid={invalid || undefined}
-        aria-describedby={invalid ? errorId : undefined}
-        onChange={(event) => onDraft(event.target.value)}
-        onBlur={onCommit}
-        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
-      />
-    </label>
-  )
-}
-
 function useNameDraft(name: string, onRename: (name: string) => boolean) {
   const nameErrorId = useId()
   const [nameDraft, setNameDraft] = useState(name)
@@ -212,14 +187,18 @@ function InputRow({ name, shape, form, required, onRename, onTypeChange, onDescr
   return (
     <div className="we-workflow-io__row" data-testid={`workflow-input-${name}`}>
       <div className="we-workflow-io__row-main">
-        <IoNameField
-          ariaLabel={t('rightPanel.inspector.inputNameAria', { name })}
-          draft={nameDraft}
-          invalid={nameError}
-          errorId={nameErrorId}
-          onDraft={(value) => { setNameDraft(value); setNameError(false) }}
-          onCommit={commitName}
-        />
+        <label>
+          <span className="we-sr-only">{t('rightPanel.inspector.inputNameAria', { name })}</span>
+          <TextInput
+            value={nameDraft}
+            maxLength={80}
+            aria-invalid={nameError || undefined}
+            aria-describedby={nameError ? nameErrorId : undefined}
+            onChange={(event) => { setNameDraft(event.target.value); setNameError(false) }}
+            onBlur={commitName}
+            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+          />
+        </label>
         <label>
           <span className="we-sr-only">{t('rightPanel.inspector.inputTypeAria', { name })}</span>
           <SelectControl  value={shape.type} onChange={(event) => onTypeChange(event.target.value as WorkflowInputSchemaShape['type'])}>
@@ -496,14 +475,18 @@ function OutputRow({ name, template, onRename, onTemplateChange, onRemove }: {
   return (
     <div className="we-workflow-io__row" data-testid={`workflow-output-${name}`}>
       <div className="we-workflow-io__row-main we-workflow-io__row-main--output">
-        <IoNameField
-          ariaLabel={t('rightPanel.inspector.outputNameAria', { name })}
-          draft={nameDraft}
-          invalid={nameError}
-          errorId={nameErrorId}
-          onDraft={(value) => { setNameDraft(value); setNameError(false) }}
-          onCommit={commitName}
-        />
+        <label>
+          <span className="we-sr-only">{t('rightPanel.inspector.outputNameAria', { name })}</span>
+          <TextInput
+            value={nameDraft}
+            maxLength={80}
+            aria-invalid={nameError || undefined}
+            aria-describedby={nameError ? nameErrorId : undefined}
+            onChange={(event) => { setNameDraft(event.target.value); setNameError(false) }}
+            onBlur={commitName}
+            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+          />
+        </label>
         <TextInput
           className="we-workflow-io__template"
           value={template}
