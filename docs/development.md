@@ -75,6 +75,17 @@ through `contractApi`), and duplicate runtime guards (`src/lib/guards.ts` is
 the only home). `web/src/modal-contract.test.ts` requires every
 `role="dialog"` file to call `useDialogFocusTrap` in the same file.
 
+Diagnostics that are not gates but drive the refactor backlog:
+
+```bash
+golangci-lint run --default=none -E gocognit,dupl,unparam --max-issues-per-linter 0 --max-same-issues 0 ./...
+cd web && npx jscpd src --min-lines 10 --min-tokens 80 --ignore '**/*.test.*,**/test/**,**/*.generated.ts,**/i18n/**'
+```
+
+`gocognit` lists a function twice when a package is analysed with and
+without its tests; the program keeps every function under 55 and splits new
+hot paths into named steps (see `docs/changes/2026-09-improvement-program.md`).
+
 ## Changing the database
 
 There is one migration, `internal/migrate/sql/00001_baseline.sql`, and no
@@ -151,6 +162,10 @@ i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
   `components/recovery-item/`). Panel reads subscribe by resource tag
   (`src/lib/query-cache.ts`); navigation state lives in the hash route
   (`src/lib/route.ts`).
+- Modal dialogs call `useDialogFocusTrap(dialogRef, { onEscape })` from the
+  file that renders `role="dialog"`; pass `onEscape: undefined` while an async
+  step is in flight instead of adding a keydown effect. Async work that may
+  resolve after unmount checks `useAliveRef()` before touching state.
 
 ## Gotchas
 
@@ -165,3 +180,5 @@ i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
   tests are deterministic only when no competing index shares the prefix.
 - macOS: BSD `sed` has no `\b`, there is no `timeout`, and zsh does not
   word-split unquoted variables.
+- `golangci-lint` caches by path: after deleting a scratch worktree, run
+  `golangci-lint cache clean` or it reports issues at the removed path.
