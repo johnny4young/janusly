@@ -10,12 +10,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/orgconfig"
@@ -24,6 +26,55 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/tools"
 )
+
+// resourceLockRetryDelay bounds the pause between advisory-lock attempts;
+// the wait is jittered so contending workers do not retry in lockstep.
+const resourceLockRetryDelay = 40 * time.Millisecond
+
+// acquireResourceLock takes a session advisory lock on lockKey without
+// pinning a pooled connection while it waits. A blocking pg_advisory_lock
+// held one connection per waiting caller, so N contending callers on a pool
+// of fewer than N connections starved the lock holder of the connection its
+// own work needed and every waiter timed out (12 sheet.append writers on the
+// 4-connection CI pool). Each attempt tries the lock and returns the
+// connection on a miss; only the holder keeps one until release.
+func acquireResourceLock(ctx context.Context, pool *pgxpool.Pool, lockKey string) (func(), string) {
+	for {
+		connection, err := pool.Acquire(ctx)
+		if err != nil {
+			return nil, "resource lock unavailable"
+		}
+		var locked bool
+		if err := connection.QueryRow(ctx,
+			`SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, lockKey).Scan(&locked); err != nil {
+			connection.Release()
+			return nil, "resource lock unavailable"
+		}
+		if locked {
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if _, err := connection.Exec(releaseCtx,
+						`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey); err != nil {
+						// Never return a connection that may still own a session
+						// advisory lock to the pool.
+						_ = connection.Conn().Close(releaseCtx)
+					}
+					connection.Release()
+				})
+			}, ""
+		}
+		connection.Release()
+		delay := resourceLockRetryDelay/2 + time.Duration(rand.Int64N(int64(resourceLockRetryDelay)))
+		select {
+		case <-ctx.Done():
+			return nil, "resource lock unavailable"
+		case <-time.After(delay):
+		}
+	}
+}
 
 // integrationEnvBound reads JANUSLY_<FAMILY>_RATE_LIMIT_PER_MIN.
 func integrationEnvBound(family string, fallback int) int {
@@ -148,30 +199,7 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 		},
 		OrgID: func() string { return orgID },
 		Lock: func(ctx context.Context, resource string) (func(), string) {
-			connection, err := e.pool.Acquire(ctx)
-			if err != nil {
-				return nil, "resource lock unavailable"
-			}
-			lockKey := orgID + "\x1f" + resource
-			if _, err := connection.Exec(ctx,
-				`SELECT pg_advisory_lock(hashtextextended($1, 0))`, lockKey); err != nil {
-				connection.Release()
-				return nil, "resource lock unavailable"
-			}
-			var once sync.Once
-			return func() {
-				once.Do(func() {
-					releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					if _, err := connection.Exec(releaseCtx,
-						`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey); err != nil {
-						// Never return a connection that may still own a session
-						// advisory lock to the pool.
-						_ = connection.Conn().Close(releaseCtx)
-					}
-					connection.Release()
-				})
-			}, ""
+			return acquireResourceLock(ctx, e.pool, orgID+"\x1f"+resource)
 		},
 		RateLimitPerMin: func(family string, fallback int) int {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
