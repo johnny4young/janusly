@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/orgconfig"
@@ -273,413 +274,54 @@ func validateSnippetBody(body *snippetBody) string {
 
 func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 	/* snippets */
-	mux.HandleFunc("GET /snippets", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		custom, err := store.New(s.pool).ListSnippets(r.Context(), rc.orgID)
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		views := make([]map[string]any, 0, len(builtinSnippets)+len(custom))
-		for _, snippet := range builtinSnippets {
-			views = append(views, snippet.view())
-		}
-		for _, row := range custom {
-			views = append(views, customSnippetView(row))
-		}
-		writeUnversioned(w, opOK(map[string]any{"snippets": views}))
-	}))
+	s.route(mux, "GET /snippets", routeGate{auth.RoleViewer, "snippets.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.getSnippetsCore(r, rc))
+	})
 
-	mux.HandleFunc("POST /snippets", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		var body snippetBody
-		if err := decodeBodyBounded(r, &body, snippetBodyMaxBytes); err != nil {
-			writeUnversioned(w, opError(http.StatusUnprocessableEntity, "snippet_invalid", "invalid snippet body", nil))
-			return
-		}
-		if message := validateSnippetBody(&body); message != "" {
-			writeUnversioned(w, opError(http.StatusUnprocessableEntity, "snippet_invalid", message, nil))
-			return
-		}
-		q := store.New(s.pool)
-		if _, err := q.FindSnippetByName(r.Context(), store.FindSnippetByNameParams{
-			OrgID: rc.orgID, Lower: body.Name,
-		}); err == nil {
-			writeUnversioned(w, opError(http.StatusConflict, "snippet_name_exists", "A snippet with that name already exists", nil))
-			return
-		}
-		tags, _ := json.Marshal(orEmptySlice(body.Tags))
-		nodes, _ := json.Marshal(body.Nodes)
-		edges, _ := json.Marshal(orEmptyMaps(body.Edges))
-		row, err := q.InsertSnippet(r.Context(), store.InsertSnippetParams{
-			ID: s.newID(), OrgID: rc.orgID, Name: body.Name,
-			Description: body.Description,
-			Category:    body.Category, Tags: tags, NodesJson: nodes, EdgesJson: edges,
-			EntryNodeID: pgtype.Text{String: body.EntryNodeID, Valid: body.EntryNodeID != ""},
-			CreatedBy:   pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-		})
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "snippet.created", audit.Options{
-			TargetType: "snippet", TargetID: row.ID,
-			Metadata: map[string]any{"name": row.Name, "category": row.Category, "nodeCount": len(body.Nodes)},
-		})
-		writeUnversioned(w, opResult{status: http.StatusCreated, data: map[string]any{"snippet": customSnippetView(row)}})
-	}))
+	s.route(mux, "POST /snippets", routeGate{auth.RoleAdmin, "snippets.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.postSnippetsCore(r, rc))
+	})
 
-	mux.HandleFunc("POST /snippets/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		id := r.PathValue("id")
-		if strings.HasPrefix(id, builtinSnippetPrefix) {
-			writeUnversioned(w, opError(http.StatusConflict, "snippet_builtin_immutable", "Built-in snippets are read-only", nil))
-			return
-		}
-		var body snippetBody
-		if err := decodeBodyBounded(r, &body, snippetBodyMaxBytes); err != nil {
-			writeUnversioned(w, opError(http.StatusUnprocessableEntity, "snippet_invalid", "invalid snippet body", nil))
-			return
-		}
-		if message := validateSnippetBody(&body); message != "" {
-			writeUnversioned(w, opError(http.StatusUnprocessableEntity, "snippet_invalid", message, nil))
-			return
-		}
-		q := store.New(s.pool)
-		if clash, err := q.FindSnippetByName(r.Context(), store.FindSnippetByNameParams{
-			OrgID: rc.orgID, Lower: body.Name,
-		}); err == nil && clash.ID != id {
-			writeUnversioned(w, opError(http.StatusConflict, "snippet_name_exists", "A snippet with that name already exists", nil))
-			return
-		}
-		tags, _ := json.Marshal(orEmptySlice(body.Tags))
-		nodes, _ := json.Marshal(body.Nodes)
-		edges, _ := json.Marshal(orEmptyMaps(body.Edges))
-		row, err := q.UpdateSnippet(r.Context(), store.UpdateSnippetParams{
-			OrgID: rc.orgID, ID: id, Name: body.Name,
-			Description: body.Description,
-			Category:    body.Category, Tags: tags, NodesJson: nodes, EdgesJson: edges,
-			EntryNodeID: pgtype.Text{String: body.EntryNodeID, Valid: body.EntryNodeID != ""},
-		})
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusNotFound, "snippet_not_found", "Snippet not found", nil))
-			return
-		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "snippet.updated", audit.Options{
-			TargetType: "snippet", TargetID: id,
-			Metadata: map[string]any{"name": row.Name, "category": row.Category},
-		})
-		writeUnversioned(w, opOK(map[string]any{"snippet": customSnippetView(row)}))
-	}))
+	s.route(mux, "POST /snippets/{id}", routeGate{auth.RoleAdmin, "snippets.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.updateSnippetCore(r, rc))
+	})
 
-	mux.HandleFunc("DELETE /snippets/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		id := r.PathValue("id")
-		if strings.HasPrefix(id, builtinSnippetPrefix) {
-			writeUnversioned(w, opError(http.StatusConflict, "snippet_builtin_immutable", "Built-in snippets are read-only", nil))
-			return
-		}
-		row, err := store.New(s.pool).DeleteSnippet(r.Context(), store.DeleteSnippetParams{OrgID: rc.orgID, ID: id})
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusNotFound, "snippet_not_found", "Snippet not found", nil))
-			return
-		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "snippet.deleted", audit.Options{
-			TargetType: "snippet", TargetID: id,
-			Metadata: map[string]any{"name": row.Name, "category": row.Category},
-		})
-		writeUnversioned(w, opOK(map[string]any{"ok": true}))
-	}))
+	s.route(mux, "DELETE /snippets/{id}", routeGate{auth.RoleAdmin, "snippets.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.deleteSnippetsCore(r, rc))
+	})
 
-	mux.HandleFunc("POST /snippets/{id}/inserted", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		id := r.PathValue("id")
-		builtin := strings.HasPrefix(id, builtinSnippetPrefix)
-		exists := builtin && builtinSnippetByID(id) != nil
-		if !builtin {
-			_, err := store.New(s.pool).GetSnippet(r.Context(), store.GetSnippetParams{OrgID: rc.orgID, ID: id})
-			exists = err == nil
-		}
-		if !exists {
-			writeUnversioned(w, opError(http.StatusNotFound, "snippet_not_found", "Snippet not found", nil))
-			return
-		}
-		var body struct {
-			WorkflowID        string  `json:"workflowId"`
-			InsertedNodeCount float64 `json:"insertedNodeCount"`
-		}
-		if err := decodeBody(r, &body); err != nil {
-			writeUnversioned(w, opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil))
-			return
-		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "snippet.inserted", audit.Options{
-			TargetType: "snippet", TargetID: id,
-			Metadata: map[string]any{
-				"snippetId": id, "builtin": builtin,
-				"workflowId": body.WorkflowID, "insertedNodeCount": body.InsertedNodeCount,
-			},
-		})
-		writeUnversioned(w, opOK(map[string]any{"ok": true}))
-	}))
+	s.route(mux, "POST /snippets/{id}/inserted", routeGate{auth.RoleEditor, "snippets.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.postSnippetsInsertedCore(r, rc))
+	})
 
 	/* solution packs */
-	mux.HandleFunc("GET /solution-packs", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		views := make([]map[string]any, 0, len(packs.List()))
-		for _, pack := range packs.List() {
-			views = append(views, s.packView(r, rc, pack))
-		}
-		writeUnversioned(w, opOK(map[string]any{"packs": views}))
-	}))
+	s.route(mux, "GET /solution-packs", routeGate{auth.RoleViewer, "packs.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.getSolutionPacksCore(r, rc))
+	})
 
-	mux.HandleFunc("GET /solution-packs/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		pack := packs.Get(r.PathValue("id"))
-		if pack == nil {
-			writeUnversioned(w, opError(http.StatusNotFound, "solution_pack_not_found", "Solution pack not found", nil))
-			return
-		}
-		view := s.packView(r, rc, *pack)
-		var workflowDoc any
-		_ = json.Unmarshal(pack.WorkflowJSON, &workflowDoc)
-		view["workflow"] = workflowDoc
-		writeUnversioned(w, opOK(map[string]any{"pack": view}))
-	}))
+	s.route(mux, "GET /solution-packs/{id}", routeGate{auth.RoleViewer, "packs.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.getSolutionPackCore(r, rc))
+	})
 
-	mux.HandleFunc("POST /workflows/import-pack", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		var body struct {
-			PackID string `json:"packId"`
-		}
-		if err := decodeBody(r, &body); err != nil || body.PackID == "" {
-			writeUnversioned(w, opError(http.StatusBadRequest, "solution_pack_invalid_request", "packId is required", nil))
-			return
-		}
-		pack := packs.Get(body.PackID)
-		if pack == nil {
-			writeUnversioned(w, opError(http.StatusNotFound, "solution_pack_not_found", "Solution pack not found", nil))
-			return
-		}
-		workflowID, versionID, err := s.installPackWorkflow(r, rc, pack)
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.pack_imported", audit.Options{
-			TargetType: "workflow", TargetID: workflowID,
-			Metadata: map[string]any{"packId": pack.ID, "packVersion": pack.Version, "versionId": versionID},
-		})
-		writeUnversioned(w, opResult{status: http.StatusCreated, data: map[string]any{
-			"ok": true, "workflowId": workflowID, "versionId": versionID, "packId": pack.ID,
-		}})
-	}))
+	s.route(mux, "POST /workflows/import-pack", routeGate{auth.RoleEditor, "packs.install"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.postWorkflowsImportPackCore(r, rc))
+	})
 
-	mux.HandleFunc("POST /solution-packs/{id}/sample-run", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		pack := packs.Get(r.PathValue("id"))
-		if pack == nil {
-			writeUnversioned(w, opError(http.StatusNotFound, "pack_not_found", "Solution pack not found", nil))
-			return
-		}
-		body, rejection := decodeJSONRecord(r, 1_048_576)
-		if rejection != nil {
-			writeUnversioned(w, *rejection)
-			return
-		}
-		samplePayloadID := ""
-		if raw, present := body["samplePayloadId"]; present {
-			value, valid := raw.(string)
-			samplePayloadID = strings.TrimSpace(value)
-			if !valid || samplePayloadID == "" {
-				writeUnversioned(w, opResult{status: http.StatusUnprocessableEntity, data: map[string]any{
-					"error": "invalid sample-run body",
-					"issues": []map[string]any{{
-						"path": []string{"samplePayloadId"}, "message": "Expected a non-empty string",
-					}},
-				}})
-				return
-			}
-		}
-		var sample *packs.SamplePayload
-		for i := range pack.SamplePayloads {
-			if samplePayloadID == "" || pack.SamplePayloads[i].ID == samplePayloadID {
-				sample = &pack.SamplePayloads[i]
-				break
-			}
-		}
-		if sample == nil {
-			writeUnversioned(w, opError(http.StatusBadRequest, "pack_missing_sample_payload",
-				"No matching sample payload for this pack", nil))
-			return
-		}
-		wf, _ := domain.Parse(pack.WorkflowJSON)
-		if wf == nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		// The sample run is a SANDBOX whose external trigger has already fired:
-		// roots carry the bundled payload while write sides remain dry-run skipped.
-		runID, err := s.engine.StartSandboxRun(r.Context(), engine.SandboxRunInput{
-			OrgID: rc.orgID, Workflow: wf, CreatedBy: rc.userID,
-			Input: sample.Input, Source: "pack:" + pack.ID,
-		})
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.sample_run_started", audit.Options{
-			TargetType: "solution_pack", TargetID: pack.ID,
-			Metadata: map[string]any{
-				"packId": pack.ID, "samplePayloadId": sample.ID, "runId": runID,
-			},
-		})
-		writeUnversioned(w, opOK(map[string]any{"runId": runID, "samplePayloadId": sample.ID}))
-	}))
+	s.route(mux, "POST /solution-packs/{id}/sample-run", routeGate{auth.RoleEditor, "packs.install"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.postSolutionPacksSampleRunCore(r, rc))
+	})
 
-	mux.HandleFunc("POST /solution-packs/{id}/inject-failure", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		pack := packs.Get(r.PathValue("id"))
-		if pack == nil {
-			writeUnversioned(w, opError(http.StatusNotFound, "pack_not_found", "Solution pack not found", nil))
-			return
-		}
-		body, rejection := decodeJSONRecord(r, 1_048_576)
-		if rejection != nil {
-			writeUnversioned(w, *rejection)
-			return
-		}
-		fixtureID := ""
-		if raw, present := body["fixtureId"]; present {
-			value, valid := raw.(string)
-			fixtureID = strings.TrimSpace(value)
-			if !valid || fixtureID == "" {
-				writeUnversioned(w, opResult{status: http.StatusUnprocessableEntity, data: map[string]any{
-					"error": "invalid inject-failure body",
-					"issues": []map[string]any{{
-						"path": []string{"fixtureId"}, "message": "Expected a non-empty string",
-					}},
-				}})
-				return
-			}
-		}
-		var fixture *packs.FailureFixture
-		for i := range pack.FailureFixtures {
-			if fixtureID == "" || pack.FailureFixtures[i].ID == fixtureID {
-				fixture = &pack.FailureFixtures[i]
-				break
-			}
-		}
-		if fixture == nil {
-			writeUnversioned(w, opError(http.StatusBadRequest, "pack_no_failure_fixture", "No matching failure fixture for this pack", nil))
-			return
-		}
-		wf, _ := domain.Parse(pack.WorkflowJSON)
-		if wf == nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		// Once this organization installs the pack, drills must exercise that
-		// persisted workflow identity and latest draft—not the catalog's global
-		// template id. Otherwise a validated recovery later tries to save the
-		// template id, which can belong to another tenant under the global
-		// workflows PK and fails with a misleading conflict.
-		installedWorkflowID := wf.ID + "-" + shortHash(rc.orgID, 8)
-		latest, latestErr := store.New(s.pool).GetLatestWorkflowVersion(r.Context(), store.GetLatestWorkflowVersionParams{
-			WorkflowID: installedWorkflowID,
-			OrgID:      rc.orgID,
-		})
-		switch {
-		case latestErr == nil:
-			wf, _ = domain.Parse(latest.DagJson)
-			if wf == nil {
-				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-				return
-			}
-		case !errors.Is(latestErr, pgx.ErrNoRows):
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		source := engine.RecoveryDrillSource{
-			Kind: "solution_pack_drill", PackID: pack.ID, FixtureID: fixture.ID,
-			FailureMode: fixture.FailureMode, RecoveryPath: fixture.RecoveryPath,
-		}
-		drillInput := engine.RecoveryDrillInput{
-			OrgID: rc.orgID, CreatedBy: rc.userID, Workflow: wf,
-			FailedNodeID: fixture.FailedNodeID, Source: source,
-		}
-		if len(pack.SamplePayloads) > 0 {
-			drillInput.Input = pack.SamplePayloads[0].Input
-		}
-
-		var runID, deadLetterID string
-		var evidence any
-		switch fixture.RecoveryPath {
-		case "runtime_failure":
-			result, err := s.engine.RunRuntimeFailureDrill(r.Context(), drillInput)
-			if err != nil {
-				slog.Error("solution-pack runtime recovery drill failed",
-					"packId", pack.ID, "fixtureId", fixture.ID, "error", err)
-				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-				return
-			}
-			runID, deadLetterID, evidence = result.RunID, result.DeadLetterID, result.Evidence
-		case "stalled_node_reaper":
-			result, err := s.engine.RunStalledNodeDrill(r.Context(), drillInput)
-			if err != nil {
-				slog.Error("solution-pack stalled-node recovery drill failed",
-					"packId", pack.ID, "fixtureId", fixture.ID, "error", err)
-				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-				return
-			}
-			runID, deadLetterID, evidence = result.RunID, result.DeadLetterID, result.Evidence
-		default:
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.failure_injected", audit.Options{
-			TargetType: "solution_pack", TargetID: pack.ID,
-			Metadata: map[string]any{
-				"packId": pack.ID, "fixtureId": fixture.ID,
-				"failureMode": fixture.FailureMode, "recoveryPath": fixture.RecoveryPath,
-				"failedNodeId": fixture.FailedNodeID, "runId": runID,
-				"deadLetterId": deadLetterID, "evidence": evidence,
-			},
-		})
-		writeUnversioned(w, opOK(map[string]any{
-			"runId": runID, "deadLetterId": deadLetterID,
-			"fixtureId": fixture.ID, "failureMode": fixture.FailureMode,
-			"recoveryPath": fixture.RecoveryPath, "evidence": evidence,
-		}))
-	}))
+	s.route(mux, "POST /solution-packs/{id}/inject-failure", routeGate{auth.RoleEditor, "packs.install"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.postSolutionPacksInjectFailureCore(r, rc))
+	})
 
 	/* onboarding */
-	mux.HandleFunc("GET /onboarding", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, s.loadOnboardingState(r, rc))
-	}))
-	mux.HandleFunc("POST /onboarding", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		var body struct {
-			Action string `json:"action"`
-		}
-		if err := decodeBody(r, &body); err != nil ||
-			(body.Action != "skip" && body.Action != "resume" && body.Action != "restart") {
-			writeUnversioned(w, opError(http.StatusBadRequest, "onboarding_invalid_action", "Unknown onboarding action", nil))
-			return
-		}
-		q := store.New(s.pool)
-		_ = q.EnsureOnboardingRow(r.Context(), store.EnsureOnboardingRowParams{
-			ID: s.newID(), OrgID: rc.orgID, UserID: rc.userID,
-		})
-		switch body.Action {
-		case "restart":
-			if changed, err := q.RestartOnboarding(r.Context(), store.RestartOnboardingParams{
-				OrgID: rc.orgID, UserID: rc.userID,
-			}); err == nil && changed > 0 {
-				audit.Write(r.Context(), s.pool, rc.authContext, "onboarding.restarted", audit.Options{TargetType: "onboarding"})
-			}
-		default:
-			status := "active"
-			action := audit.Action("onboarding.resumed")
-			if body.Action == "skip" {
-				status, action = "skipped", audit.Action("onboarding.skipped")
-			}
-			if changed, err := q.SetOnboardingStatus(r.Context(), store.SetOnboardingStatusParams{
-				OrgID: rc.orgID, UserID: rc.userID, Status: status,
-			}); err == nil && changed > 0 {
-				audit.Write(r.Context(), s.pool, rc.authContext, action, audit.Options{TargetType: "onboarding"})
-			}
-		}
-		writeUnversioned(w, s.loadOnboardingState(r, rc))
-	}))
+	s.route(mux, "GET /onboarding", routeGate{auth.RoleViewer, "onboarding.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.getOnboardingCore(r, rc))
+	})
+	s.route(mux, "POST /onboarding", routeGate{auth.RoleViewer, "onboarding.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.postOnboardingCore(r, rc))
+	})
 }
 
 /* --------------------------- onboarding core --------------------------- */
@@ -899,3 +541,387 @@ func orEmptyMaps(values []map[string]any) []map[string]any {
 }
 
 var _ = time.Now
+
+func (s *V1Server) getSnippetsCore(r *http.Request, rc v1Request) opResult {
+	custom, err := store.New(s.pool).ListSnippets(r.Context(), rc.orgID)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	views := make([]map[string]any, 0, len(builtinSnippets)+len(custom))
+	for _, snippet := range builtinSnippets {
+		views = append(views, snippet.view())
+	}
+	for _, row := range custom {
+		views = append(views, customSnippetView(row))
+	}
+	return opOK(map[string]any{"snippets": views})
+
+}
+
+func (s *V1Server) postSnippetsCore(r *http.Request, rc v1Request) opResult {
+	var body snippetBody
+	if err := decodeBodyBounded(r, &body, snippetBodyMaxBytes); err != nil {
+		return opError(http.StatusUnprocessableEntity, "snippet_invalid", "invalid snippet body", nil)
+	}
+	if message := validateSnippetBody(&body); message != "" {
+		return opError(http.StatusUnprocessableEntity, "snippet_invalid", message, nil)
+	}
+	q := store.New(s.pool)
+	if _, err := q.FindSnippetByName(r.Context(), store.FindSnippetByNameParams{
+		OrgID: rc.orgID, Lower: body.Name,
+	}); err == nil {
+		return opError(http.StatusConflict, "snippet_name_exists", "A snippet with that name already exists", nil)
+	}
+	tags, _ := json.Marshal(orEmptySlice(body.Tags))
+	nodes, _ := json.Marshal(body.Nodes)
+	edges, _ := json.Marshal(orEmptyMaps(body.Edges))
+	row, err := q.InsertSnippet(r.Context(), store.InsertSnippetParams{
+		ID: s.newID(), OrgID: rc.orgID, Name: body.Name,
+		Description: body.Description,
+		Category:    body.Category, Tags: tags, NodesJson: nodes, EdgesJson: edges,
+		EntryNodeID: pgtype.Text{String: body.EntryNodeID, Valid: body.EntryNodeID != ""},
+		CreatedBy:   pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "snippet.created", audit.Options{
+		TargetType: "snippet", TargetID: row.ID,
+		Metadata: map[string]any{"name": row.Name, "category": row.Category, "nodeCount": len(body.Nodes)},
+	})
+	return opResult{status: http.StatusCreated, data: map[string]any{"snippet": customSnippetView(row)}}
+
+}
+
+func (s *V1Server) updateSnippetCore(r *http.Request, rc v1Request) opResult {
+	id := r.PathValue("id")
+	if strings.HasPrefix(id, builtinSnippetPrefix) {
+		return opError(http.StatusConflict, "snippet_builtin_immutable", "Built-in snippets are read-only", nil)
+	}
+	var body snippetBody
+	if err := decodeBodyBounded(r, &body, snippetBodyMaxBytes); err != nil {
+		return opError(http.StatusUnprocessableEntity, "snippet_invalid", "invalid snippet body", nil)
+	}
+	if message := validateSnippetBody(&body); message != "" {
+		return opError(http.StatusUnprocessableEntity, "snippet_invalid", message, nil)
+	}
+	q := store.New(s.pool)
+	if clash, err := q.FindSnippetByName(r.Context(), store.FindSnippetByNameParams{
+		OrgID: rc.orgID, Lower: body.Name,
+	}); err == nil && clash.ID != id {
+		return opError(http.StatusConflict, "snippet_name_exists", "A snippet with that name already exists", nil)
+	}
+	tags, _ := json.Marshal(orEmptySlice(body.Tags))
+	nodes, _ := json.Marshal(body.Nodes)
+	edges, _ := json.Marshal(orEmptyMaps(body.Edges))
+	row, err := q.UpdateSnippet(r.Context(), store.UpdateSnippetParams{
+		OrgID: rc.orgID, ID: id, Name: body.Name,
+		Description: body.Description,
+		Category:    body.Category, Tags: tags, NodesJson: nodes, EdgesJson: edges,
+		EntryNodeID: pgtype.Text{String: body.EntryNodeID, Valid: body.EntryNodeID != ""},
+	})
+	if err != nil {
+		return opError(http.StatusNotFound, "snippet_not_found", "Snippet not found", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "snippet.updated", audit.Options{
+		TargetType: "snippet", TargetID: id,
+		Metadata: map[string]any{"name": row.Name, "category": row.Category},
+	})
+	return opOK(map[string]any{"snippet": customSnippetView(row)})
+
+}
+
+func (s *V1Server) deleteSnippetsCore(r *http.Request, rc v1Request) opResult {
+	id := r.PathValue("id")
+	if strings.HasPrefix(id, builtinSnippetPrefix) {
+		return opError(http.StatusConflict, "snippet_builtin_immutable", "Built-in snippets are read-only", nil)
+	}
+	row, err := store.New(s.pool).DeleteSnippet(r.Context(), store.DeleteSnippetParams{OrgID: rc.orgID, ID: id})
+	if err != nil {
+		return opError(http.StatusNotFound, "snippet_not_found", "Snippet not found", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "snippet.deleted", audit.Options{
+		TargetType: "snippet", TargetID: id,
+		Metadata: map[string]any{"name": row.Name, "category": row.Category},
+	})
+	return opOK(map[string]any{"ok": true})
+
+}
+
+func (s *V1Server) postSnippetsInsertedCore(r *http.Request, rc v1Request) opResult {
+	id := r.PathValue("id")
+	builtin := strings.HasPrefix(id, builtinSnippetPrefix)
+	exists := builtin && builtinSnippetByID(id) != nil
+	if !builtin {
+		_, err := store.New(s.pool).GetSnippet(r.Context(), store.GetSnippetParams{OrgID: rc.orgID, ID: id})
+		exists = err == nil
+	}
+	if !exists {
+		return opError(http.StatusNotFound, "snippet_not_found", "Snippet not found", nil)
+	}
+	var body struct {
+		WorkflowID        string  `json:"workflowId"`
+		InsertedNodeCount float64 `json:"insertedNodeCount"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "snippet.inserted", audit.Options{
+		TargetType: "snippet", TargetID: id,
+		Metadata: map[string]any{
+			"snippetId": id, "builtin": builtin,
+			"workflowId": body.WorkflowID, "insertedNodeCount": body.InsertedNodeCount,
+		},
+	})
+	return opOK(map[string]any{"ok": true})
+
+}
+
+func (s *V1Server) getSolutionPacksCore(r *http.Request, rc v1Request) opResult {
+	views := make([]map[string]any, 0, len(packs.List()))
+	for _, pack := range packs.List() {
+		views = append(views, s.packView(r, rc, pack))
+	}
+	return opOK(map[string]any{"packs": views})
+
+}
+
+func (s *V1Server) getSolutionPackCore(r *http.Request, rc v1Request) opResult {
+	pack := packs.Get(r.PathValue("id"))
+	if pack == nil {
+		return opError(http.StatusNotFound, "solution_pack_not_found", "Solution pack not found", nil)
+	}
+	view := s.packView(r, rc, *pack)
+	var workflowDoc any
+	_ = json.Unmarshal(pack.WorkflowJSON, &workflowDoc)
+	view["workflow"] = workflowDoc
+	return opOK(map[string]any{"pack": view})
+
+}
+
+func (s *V1Server) postWorkflowsImportPackCore(r *http.Request, rc v1Request) opResult {
+	var body struct {
+		PackID string `json:"packId"`
+	}
+	if err := decodeBody(r, &body); err != nil || body.PackID == "" {
+		return opError(http.StatusBadRequest, "solution_pack_invalid_request", "packId is required", nil)
+	}
+	pack := packs.Get(body.PackID)
+	if pack == nil {
+		return opError(http.StatusNotFound, "solution_pack_not_found", "Solution pack not found", nil)
+	}
+	workflowID, versionID, err := s.installPackWorkflow(r, rc, pack)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.pack_imported", audit.Options{
+		TargetType: "workflow", TargetID: workflowID,
+		Metadata: map[string]any{"packId": pack.ID, "packVersion": pack.Version, "versionId": versionID},
+	})
+	return opResult{status: http.StatusCreated, data: map[string]any{
+		"ok": true, "workflowId": workflowID, "versionId": versionID, "packId": pack.ID,
+	}}
+
+}
+
+func (s *V1Server) postSolutionPacksSampleRunCore(r *http.Request, rc v1Request) opResult {
+	pack := packs.Get(r.PathValue("id"))
+	if pack == nil {
+		return opError(http.StatusNotFound, "pack_not_found", "Solution pack not found", nil)
+	}
+	body, rejection := decodeJSONRecord(r, 1_048_576)
+	if rejection != nil {
+		return *rejection
+	}
+	samplePayloadID := ""
+	if raw, present := body["samplePayloadId"]; present {
+		value, valid := raw.(string)
+		samplePayloadID = strings.TrimSpace(value)
+		if !valid || samplePayloadID == "" {
+			return opResult{status: http.StatusUnprocessableEntity, data: map[string]any{
+				"error": "invalid sample-run body",
+				"issues": []map[string]any{{
+					"path": []string{"samplePayloadId"}, "message": "Expected a non-empty string",
+				}},
+			}}
+		}
+	}
+	var sample *packs.SamplePayload
+	for i := range pack.SamplePayloads {
+		if samplePayloadID == "" || pack.SamplePayloads[i].ID == samplePayloadID {
+			sample = &pack.SamplePayloads[i]
+			break
+		}
+	}
+	if sample == nil {
+		return opError(http.StatusBadRequest, "pack_missing_sample_payload",
+			"No matching sample payload for this pack", nil)
+	}
+	wf, _ := domain.Parse(pack.WorkflowJSON)
+	if wf == nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	// The sample run is a SANDBOX whose external trigger has already fired:
+	// roots carry the bundled payload while write sides remain dry-run skipped.
+	runID, err := s.engine.StartSandboxRun(r.Context(), engine.SandboxRunInput{
+		OrgID: rc.orgID, Workflow: wf, CreatedBy: rc.userID,
+		Input: sample.Input, Source: "pack:" + pack.ID,
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.sample_run_started", audit.Options{
+		TargetType: "solution_pack", TargetID: pack.ID,
+		Metadata: map[string]any{
+			"packId": pack.ID, "samplePayloadId": sample.ID, "runId": runID,
+		},
+	})
+	return opOK(map[string]any{"runId": runID, "samplePayloadId": sample.ID})
+
+}
+
+func (s *V1Server) postSolutionPacksInjectFailureCore(r *http.Request, rc v1Request) opResult {
+	pack := packs.Get(r.PathValue("id"))
+	if pack == nil {
+		return opError(http.StatusNotFound, "pack_not_found", "Solution pack not found", nil)
+	}
+	body, rejection := decodeJSONRecord(r, 1_048_576)
+	if rejection != nil {
+		return *rejection
+	}
+	fixtureID := ""
+	if raw, present := body["fixtureId"]; present {
+		value, valid := raw.(string)
+		fixtureID = strings.TrimSpace(value)
+		if !valid || fixtureID == "" {
+			return opResult{status: http.StatusUnprocessableEntity, data: map[string]any{
+				"error": "invalid inject-failure body",
+				"issues": []map[string]any{{
+					"path": []string{"fixtureId"}, "message": "Expected a non-empty string",
+				}},
+			}}
+		}
+	}
+	var fixture *packs.FailureFixture
+	for i := range pack.FailureFixtures {
+		if fixtureID == "" || pack.FailureFixtures[i].ID == fixtureID {
+			fixture = &pack.FailureFixtures[i]
+			break
+		}
+	}
+	if fixture == nil {
+		return opError(http.StatusBadRequest, "pack_no_failure_fixture", "No matching failure fixture for this pack", nil)
+	}
+	wf, _ := domain.Parse(pack.WorkflowJSON)
+	if wf == nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	// Once this organization installs the pack, drills must exercise that
+	// persisted workflow identity and latest draft—not the catalog's global
+	// template id. Otherwise a validated recovery later tries to save the
+	// template id, which can belong to another tenant under the global
+	// workflows PK and fails with a misleading conflict.
+	installedWorkflowID := wf.ID + "-" + shortHash(rc.orgID, 8)
+	latest, latestErr := store.New(s.pool).GetLatestWorkflowVersion(r.Context(), store.GetLatestWorkflowVersionParams{
+		WorkflowID: installedWorkflowID,
+		OrgID:      rc.orgID,
+	})
+	switch {
+	case latestErr == nil:
+		wf, _ = domain.Parse(latest.DagJson)
+		if wf == nil {
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+	case !errors.Is(latestErr, pgx.ErrNoRows):
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	source := engine.RecoveryDrillSource{
+		Kind: "solution_pack_drill", PackID: pack.ID, FixtureID: fixture.ID,
+		FailureMode: fixture.FailureMode, RecoveryPath: fixture.RecoveryPath,
+	}
+	drillInput := engine.RecoveryDrillInput{
+		OrgID: rc.orgID, CreatedBy: rc.userID, Workflow: wf,
+		FailedNodeID: fixture.FailedNodeID, Source: source,
+	}
+	if len(pack.SamplePayloads) > 0 {
+		drillInput.Input = pack.SamplePayloads[0].Input
+	}
+
+	var runID, deadLetterID string
+	var evidence any
+	switch fixture.RecoveryPath {
+	case "runtime_failure":
+		result, err := s.engine.RunRuntimeFailureDrill(r.Context(), drillInput)
+		if err != nil {
+			slog.Error("solution-pack runtime recovery drill failed",
+				"packId", pack.ID, "fixtureId", fixture.ID, "error", err)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+		runID, deadLetterID, evidence = result.RunID, result.DeadLetterID, result.Evidence
+	case "stalled_node_reaper":
+		result, err := s.engine.RunStalledNodeDrill(r.Context(), drillInput)
+		if err != nil {
+			slog.Error("solution-pack stalled-node recovery drill failed",
+				"packId", pack.ID, "fixtureId", fixture.ID, "error", err)
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		}
+		runID, deadLetterID, evidence = result.RunID, result.DeadLetterID, result.Evidence
+	default:
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.failure_injected", audit.Options{
+		TargetType: "solution_pack", TargetID: pack.ID,
+		Metadata: map[string]any{
+			"packId": pack.ID, "fixtureId": fixture.ID,
+			"failureMode": fixture.FailureMode, "recoveryPath": fixture.RecoveryPath,
+			"failedNodeId": fixture.FailedNodeID, "runId": runID,
+			"deadLetterId": deadLetterID, "evidence": evidence,
+		},
+	})
+	return opOK(map[string]any{
+		"runId": runID, "deadLetterId": deadLetterID,
+		"fixtureId": fixture.ID, "failureMode": fixture.FailureMode,
+		"recoveryPath": fixture.RecoveryPath, "evidence": evidence,
+	})
+
+}
+
+func (s *V1Server) getOnboardingCore(r *http.Request, rc v1Request) opResult {
+	return s.loadOnboardingState(r, rc)
+
+}
+
+func (s *V1Server) postOnboardingCore(r *http.Request, rc v1Request) opResult {
+	var body struct {
+		Action string `json:"action"`
+	}
+	if err := decodeBody(r, &body); err != nil ||
+		(body.Action != "skip" && body.Action != "resume" && body.Action != "restart") {
+		return opError(http.StatusBadRequest, "onboarding_invalid_action", "Unknown onboarding action", nil)
+	}
+	q := store.New(s.pool)
+	_ = q.EnsureOnboardingRow(r.Context(), store.EnsureOnboardingRowParams{
+		ID: s.newID(), OrgID: rc.orgID, UserID: rc.userID,
+	})
+	switch body.Action {
+	case "restart":
+		if changed, err := q.RestartOnboarding(r.Context(), store.RestartOnboardingParams{
+			OrgID: rc.orgID, UserID: rc.userID,
+		}); err == nil && changed > 0 {
+			audit.Write(r.Context(), s.pool, rc.authContext, "onboarding.restarted", audit.Options{TargetType: "onboarding"})
+		}
+	default:
+		status := "active"
+		action := audit.Action("onboarding.resumed")
+		if body.Action == "skip" {
+			status, action = "skipped", audit.Action("onboarding.skipped")
+		}
+		if changed, err := q.SetOnboardingStatus(r.Context(), store.SetOnboardingStatusParams{
+			OrgID: rc.orgID, UserID: rc.userID, Status: status,
+		}); err == nil && changed > 0 {
+			audit.Write(r.Context(), s.pool, rc.authContext, action, audit.Options{TargetType: "onboarding"})
+		}
+	}
+	return s.loadOnboardingState(r, rc)
+
+}
