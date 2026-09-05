@@ -29,7 +29,7 @@ func TestDecodeIdentityRecordMatchesNodeBodyErrors(t *testing.T) {
 		message string
 	}{
 		{"malformed", `{`, http.StatusBadRequest, "server_request_failed", "Invalid JSON body"},
-		{"oversized", strings.Repeat("x", int(identityMaxJSONBodyBytes)+1), http.StatusRequestEntityTooLarge,
+		{"oversized", strings.Repeat("x", int(jsonRecordMaxBytes)+1), http.StatusRequestEntityTooLarge,
 			"server_request_failed", "Request body too large. Limit is 1048576 bytes"},
 	}
 	for _, tt := range tests {

@@ -159,7 +159,8 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 			map[string]any{"failedNodes": failedNodes}, completedAt, nil); err != nil {
 			return false, err
 		}
-		return true, e.appendStatusChecked(ctx, events, runID, completedAt)
+		e.appendStatusChecked(events, runID, completedAt)
+		return true, nil
 	}
 	if total > 0 && !anyOpen {
 		var outputJSON json.RawMessage
@@ -174,19 +175,20 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 			payload, completedAt, outputJSON); err != nil {
 			return false, err
 		}
-		return true, e.appendStatusChecked(ctx, events, runID, completedAt)
+		e.appendStatusChecked(events, runID, completedAt)
+		return true, nil
 	}
-	return false, e.appendStatusChecked(ctx, events, runID, completedAt)
+	e.appendStatusChecked(events, runID, completedAt)
+	return false, nil
 }
 
 // appendStatusChecked is the contract's fan-in settle marker: every
 // enqueue pass that queued NOTHING re-derived the run status and says so
 // (runtime.ts). +2ms so it always sorts after the terminal run event
 // (which sits at cause+1ms).
-func (e *Engine) appendStatusChecked(ctx context.Context, events *runEventBuffer, runID string, causeAt time.Time) error {
+func (e *Engine) appendStatusChecked(events *runEventBuffer, runID string, causeAt time.Time) {
 	checkedAt := causeAt.Add(2 * time.Millisecond)
 	events.add(e.newID(), runID, "", "run.status_checked", json.RawMessage(`{}`), checkedAt)
-	return nil
 }
 
 // edgeAllowsRun decides whether a ready pending node should run: roots are

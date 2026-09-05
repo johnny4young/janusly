@@ -591,14 +591,14 @@ type externalConnectionBody struct {
 	Enabled               *bool  `json:"enabled"`
 }
 
-func (s *Service) parseExternalConnectionBody(r *http.Request, rc httpkit.Request) (store.UpdateExternalRuntimeConnectionParams, bool, *httpkit.Result) {
+func (s *Service) parseExternalConnectionBody(r *http.Request, rc httpkit.Request) (store.UpdateExternalRuntimeConnectionParams, *httpkit.Result) {
 	fail := func(status int, code, message string) *httpkit.Result {
 		res := httpkit.Error(status, code, message, nil)
 		return &res
 	}
 	var body externalConnectionBody
 	if err := httpkit.DecodeBody(r, &body); err != nil {
-		return store.UpdateExternalRuntimeConnectionParams{}, false, fail(http.StatusBadRequest,
+		return store.UpdateExternalRuntimeConnectionParams{}, fail(http.StatusBadRequest,
 			"external_runtime_invalid_request", "invalid external runtime connection")
 	}
 	name := strings.TrimSpace(body.Name)
@@ -607,7 +607,7 @@ func (s *Service) parseExternalConnectionBody(r *http.Request, rc httpkit.Reques
 	if name == "" || len(name) > externalRuntimeNameMax ||
 		runtimeKey == "" || len(runtimeKey) > externalRuntimeKeyMax || !externalRuntimeKeyPattern.MatchString(runtimeKey) ||
 		credentialName == "" || len(credentialName) > externalRuntimeCredentialMax {
-		return store.UpdateExternalRuntimeConnectionParams{}, false, fail(http.StatusBadRequest,
+		return store.UpdateExternalRuntimeConnectionParams{}, fail(http.StatusBadRequest,
 			"external_runtime_invalid_request", "invalid external runtime connection")
 	}
 	q := store.New(s.pool)
@@ -615,7 +615,7 @@ func (s *Service) parseExternalConnectionBody(r *http.Request, rc httpkit.Reques
 		OrgID: rc.OrgID, Kind: "external_runtime_signing_secret", Name: credentialName,
 	})
 	if err != nil || !secretstore.HasCredentialSecretRef(r.Context(), q, rc.OrgID, credential.SecretRef) {
-		return store.UpdateExternalRuntimeConnectionParams{}, false, fail(http.StatusUnprocessableEntity,
+		return store.UpdateExternalRuntimeConnectionParams{}, fail(http.StatusUnprocessableEntity,
 			"external_runtime_invalid_request", "external runtime signing credential not found")
 	}
 	enabled := true
@@ -624,7 +624,7 @@ func (s *Service) parseExternalConnectionBody(r *http.Request, rc httpkit.Reques
 	}
 	return store.UpdateExternalRuntimeConnectionParams{
 		Name: name, RuntimeKey: runtimeKey, SigningCredentialName: credentialName, Enabled: enabled,
-	}, enabled, nil
+	}, nil
 }
 
 func (s *Service) externalRuntimeCallbackHandler(w http.ResponseWriter, r *http.Request) {
@@ -748,11 +748,10 @@ func (s *Service) getIntegrationsExternalRuntimesCore(r *http.Request, rc httpki
 }
 
 func (s *Service) postIntegrationsExternalRuntimesCore(r *http.Request, rc httpkit.Request) httpkit.Result {
-	params, enabled, bad := s.parseExternalConnectionBody(r, rc)
+	params, bad := s.parseExternalConnectionBody(r, rc)
 	if bad != nil {
 		return *bad
 	}
-	_ = enabled
 	connection, err := store.New(s.pool).InsertExternalRuntimeConnection(r.Context(), store.InsertExternalRuntimeConnectionParams{
 		ID: uuid.NewString(), OrgID: rc.OrgID,
 		Name: params.Name, RuntimeKey: params.RuntimeKey,
@@ -783,7 +782,7 @@ func (s *Service) postIntegrationsExternalRuntimes2Core(r *http.Request, rc http
 	if err != nil {
 		return httpkit.Error(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil)
 	}
-	params, _, bad := s.parseExternalConnectionBody(r, rc)
+	params, bad := s.parseExternalConnectionBody(r, rc)
 	if bad != nil {
 		return *bad
 	}

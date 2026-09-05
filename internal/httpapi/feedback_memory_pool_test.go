@@ -33,19 +33,18 @@ func testFeedbackMemoryPool(t *testing.T, workers, capacity int, timeout time.Du
 	return pool
 }
 
-func waitFeedbackPool(t *testing.T, pool *feedbackMemoryPool, predicate func(feedbackMemoryPoolSnapshot) bool) feedbackMemoryPoolSnapshot {
+func waitFeedbackPool(t *testing.T, pool *feedbackMemoryPool, predicate func(feedbackMemoryPoolSnapshot) bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		snapshot := pool.snapshot()
 		if predicate(snapshot) {
-			return snapshot
+			return
 		}
 		time.Sleep(time.Millisecond)
 	}
 	snapshot := pool.snapshot()
 	t.Fatalf("feedback memory pool condition not met: %+v", snapshot)
-	return feedbackMemoryPoolSnapshot{}
 }
 
 func TestFeedbackMemoryPoolBoundsConcurrency(t *testing.T) {

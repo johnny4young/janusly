@@ -89,21 +89,21 @@ func registerOperatorTools(server *mcp.Server, deps Deps) {
 
 	mcp.AddTool(server, writeTool(
 		"recovery.cases.diagnose", "Diagnose recovery case",
-		"Persist a deterministic or bounded AI-enriched diagnosis and one to three engine-owned immutable typed recovery candidates. Provider absence never blocks this operation.", false, false,
+		"Persist a deterministic or bounded AI-enriched diagnosis and one to three engine-owned immutable typed recovery candidates. Provider absence never blocks this operation.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args mcpRecoveryDiagnoseArgs) (*mcp.CallToolResult, any, error) {
 		return deps.diagnoseRecoveryCase(ctx, args)
 	})
 
 	mcp.AddTool(server, writeTool(
 		"recovery.cases.validate", "Validate recovery candidate",
-		"Validate one immutable candidate against the exact workflow snapshot and persist a content-bound validation artifact.", false, false,
+		"Validate one immutable candidate against the exact workflow snapshot and persist a content-bound validation artifact.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args mcpRecoveryValidateArgs) (*mcp.CallToolResult, any, error) {
 		return deps.validateRecoveryCase(ctx, args)
 	})
 
 	mcp.AddTool(server, writeTool(
 		"recovery.cases.apply", "Apply recovery candidate",
-		"Apply an immutable validated candidate only after an independent active human approval. MCP never creates approvals.", true, false,
+		"Apply an immutable validated candidate only after an independent active human approval. MCP never creates approvals.", true,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args mcpRecoveryApplyArgs) (*mcp.CallToolResult, any, error) {
 		return deps.applyRecoveryCase(ctx, args)
 	})

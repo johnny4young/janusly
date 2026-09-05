@@ -15,11 +15,11 @@ func readTool(name, title, description string) *mcp.Tool {
 	}
 }
 
-func writeTool(name, title, description string, destructive, idempotent bool) *mcp.Tool {
+func writeTool(name, title, description string, destructive bool) *mcp.Tool {
 	return &mcp.Tool{
 		Name: name, Title: title, Description: description,
 		Annotations: &mcp.ToolAnnotations{
-			Title: title, ReadOnlyHint: false, IdempotentHint: idempotent,
+			Title: title, ReadOnlyHint: false, IdempotentHint: false,
 			DestructiveHint: new(destructive), OpenWorldHint: new(false),
 		},
 	}

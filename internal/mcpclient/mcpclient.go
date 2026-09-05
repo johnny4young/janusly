@@ -241,7 +241,7 @@ func (c *Client) Execute(ctx context.Context, call Call) (envelope executors.Mcp
 			message = "timeout"
 		}
 		envelope.OK = false
-		envelope.Error = truncate(signature.ScrubSecretShapes(message), 200)
+		envelope.Error = truncate(signature.ScrubSecretShapes(message))
 		return envelope
 	}
 	if result.IsError {
@@ -250,7 +250,7 @@ func (c *Client) Execute(ctx context.Context, call Call) (envelope executors.Mcp
 			text = extracted
 		}
 		envelope.OK = false
-		envelope.Error = truncate(signature.ScrubSecretShapes(text), 200)
+		envelope.Error = truncate(signature.ScrubSecretShapes(text))
 		return envelope
 	}
 	envelope.OK = true
@@ -534,7 +534,11 @@ func clampTimeout(value float64) time.Duration {
 	return time.Duration(value) * time.Millisecond
 }
 
-func truncate(value string, max int) string {
+// errorTextMaxRunes bounds every provider diagnostic surfaced downstream.
+const errorTextMaxRunes = 200
+
+func truncate(value string) string {
+	const max = errorTextMaxRunes
 	runes := []rune(value)
 	if len(runes) <= max {
 		return value

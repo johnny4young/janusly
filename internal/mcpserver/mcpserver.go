@@ -77,7 +77,7 @@ func NewServer(deps Deps) *mcp.Server {
 	}
 	mcp.AddTool(server, writeTool(
 		"workflows.save", "Save workflow",
-		"Validate a workflow document and save it as a new immutable version.", false, false,
+		"Validate a workflow document and save it as a new immutable version.", false,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args saveArgs) (*mcp.CallToolResult, any, error) {
 		return deps.saveWorkflow(ctx, args.Workflow)
 	})
@@ -89,7 +89,7 @@ func NewServer(deps Deps) *mcp.Server {
 	}
 	mcp.AddTool(server, writeTool(
 		"runs.start", "Start run",
-		"Start a run for the given workflow document; returns the run id.", false, false,
+		"Start a run for the given workflow document; returns the run id.", false,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args startArgs) (*mcp.CallToolResult, any, error) {
 		return deps.startRun(ctx, args.Workflow, args.WorkflowVersionID, args.Input)
 	})
@@ -158,7 +158,7 @@ func NewServer(deps Deps) *mcp.Server {
 	}
 	mcp.AddTool(server, writeTool(
 		"dlq.redrive", "Redrive dead letter",
-		"Claim one dead letter and revive its run: the failed node requeues and workers take over.", true, false,
+		"Claim one dead letter and revive its run: the failed node requeues and workers take over.", true,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args redriveArgs) (*mcp.CallToolResult, any, error) {
 		return deps.redrive(ctx, args.DeadLetterID)
 	})

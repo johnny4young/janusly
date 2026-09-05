@@ -514,7 +514,7 @@ func validateCSVFilterInput(input map[string]any, options InputValidationOptions
 		if len(where) > csvMaxColumns {
 			return fmt.Errorf("where supports at most %d entries", csvMaxColumns)
 		}
-		if err := validateBoundedJSONValue(where, csvBufferedMaxBytes, true); err != nil {
+		if err := validateBoundedJSONValue(where, csvBufferedMaxBytes); err != nil {
 			return fmt.Errorf("where: %w", err)
 		}
 		for key, value := range where {

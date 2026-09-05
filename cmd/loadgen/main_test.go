@@ -128,7 +128,7 @@ func TestMonitorQueueFailsClosedOnTransportAndMalformedPayloads(t *testing.T) {
 		"transport": func(context.Context) (map[string]any, error) {
 			return nil, errors.New("connection reset")
 		},
-		"malformed": func(context.Context) (map[string]any, error) {
+		"malformed": func(context.Context) (map[string]any, error) { //nolint:unparam // fixture table shares the probe signature
 			return map[string]any{"active": float64(0)}, nil
 		},
 	} {

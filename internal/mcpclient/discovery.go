@@ -67,7 +67,7 @@ func (c *Client) RunDiscovery(ctx context.Context, orgID, alias string) Discover
 	if err != nil {
 		// SDK errors can embed URLs or path-encoded tokens — scrub + cap
 		// before the reason reaches status_reason or audit metadata.
-		reason := truncate(signature.ScrubSecretShapes(err.Error()), 200)
+		reason := truncate(signature.ScrubSecretShapes(err.Error()))
 		c.setStatus(ctx, connection, "failed", reason)
 		return DiscoveryResult{OK: false, Error: reason}
 	}
@@ -75,7 +75,7 @@ func (c *Client) RunDiscovery(ctx context.Context, orgID, alias string) Discover
 
 	listed, err := session.ListTools(callCtx, nil)
 	if err != nil {
-		reason := truncate(signature.ScrubSecretShapes(err.Error()), 200)
+		reason := truncate(signature.ScrubSecretShapes(err.Error()))
 		c.setStatus(ctx, connection, "failed", reason)
 		return DiscoveryResult{OK: false, Error: reason}
 	}

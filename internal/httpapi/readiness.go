@@ -25,7 +25,7 @@ func (s *V1Server) readinessOptions() domain.ReadinessOptions {
 // accepting a flat workflow JSON or the {workflow} envelope. No runtime
 // node-type carve-out here: /validate reports the FULL issue list (the
 // save path owns the carve-out decision).
-func (s *V1Server) validateCore(r *http.Request, rc v1Request) opResult {
+func (s *V1Server) validateCore(r *http.Request, rc v1Request) opResult { //nolint:unparam // handler cores share the (r, rc) signature
 	var body map[string]json.RawMessage
 	if err := decodeBody(r, &body); err != nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)

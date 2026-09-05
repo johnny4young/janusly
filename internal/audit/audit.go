@@ -61,11 +61,11 @@ func enrich(authCtx *auth.Context, metadata map[string]any) map[string]any {
 // redaction plus the default byte cap (env JANUSLY_PERSIST_MAX_BYTES) so a
 // runaway metadata blob truncates to the sentinel instead of bloating the
 // audit row.
-func marshalMetadata(metadata map[string]any) ([]byte, error) {
+func marshalMetadata(metadata map[string]any) []byte {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	return grammar.SafePersistPayload(metadata, grammar.PersistOptions{}), nil
+	return grammar.SafePersistPayload(metadata, grammar.PersistOptions{})
 }
 
 // created_at is stamped app-side and truncated to milliseconds; the read
@@ -79,10 +79,7 @@ func insert(ctx context.Context, exec func(context.Context, string, ...any) erro
 	if !IsKnown(action) {
 		return fmt.Errorf("audit action %q is not in the catalog", action)
 	}
-	metadata, err := marshalMetadata(enrich(authCtx, opts.Metadata))
-	if err != nil {
-		return fmt.Errorf("marshal audit metadata: %w", err)
-	}
+	metadata := marshalMetadata(enrich(authCtx, opts.Metadata))
 	var targetType, targetID any
 	if opts.TargetType != "" {
 		targetType = opts.TargetType

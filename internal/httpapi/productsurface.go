@@ -729,7 +729,7 @@ func (s *V1Server) postSolutionPacksSampleRunCore(r *http.Request, rc v1Request)
 	if pack == nil {
 		return opError(http.StatusNotFound, "pack_not_found", "Solution pack not found", nil)
 	}
-	body, rejection := decodeJSONRecord(r, 1_048_576)
+	body, rejection := decodeJSONRecord(r)
 	if rejection != nil {
 		return *rejection
 	}
@@ -785,7 +785,7 @@ func (s *V1Server) postSolutionPacksInjectFailureCore(r *http.Request, rc v1Requ
 	if pack == nil {
 		return opError(http.StatusNotFound, "pack_not_found", "Solution pack not found", nil)
 	}
-	body, rejection := decodeJSONRecord(r, 1_048_576)
+	body, rejection := decodeJSONRecord(r)
 	if rejection != nil {
 		return *rejection
 	}

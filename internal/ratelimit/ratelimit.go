@@ -136,7 +136,8 @@ func (l *Limiter) EnforceTriggerEvent(
 	expiresAt := windowStart.Add(opts.Window)
 	tx, err := l.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return l.failOpen(opts.Name, key, err)
+		l.failOpen(opts.Name, key, err)
+		return nil
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(tx)
@@ -145,7 +146,8 @@ func (l *Limiter) EnforceTriggerEvent(
 		OrgID: orgID, ID: eventID,
 	})
 	if err != nil {
-		return l.failOpen(opts.Name, key, err)
+		l.failOpen(opts.Name, key, err)
+		return nil
 	}
 	if admission.Status != "received" {
 		// No state changed in this transaction. Rollback only releases the row
@@ -165,7 +167,8 @@ func (l *Limiter) EnforceTriggerEvent(
 		Name: opts.Name, Key: key, WindowStart: windowStart, ExpiresAt: expiresAt,
 	})
 	if err != nil {
-		return l.failOpen(opts.Name, key, err)
+		l.failOpen(opts.Name, key, err)
+		return nil
 	}
 	if int(count) > opts.Max {
 		updated, updateErr := q.MarkTriggerEventRateLimited(ctx, store.MarkTriggerEventRateLimitedParams{
@@ -175,7 +178,8 @@ func (l *Limiter) EnforceTriggerEvent(
 			if updateErr == nil {
 				updateErr = fmt.Errorf("trigger event rate-limit settlement updated %d rows", updated)
 			}
-			return l.failOpen(opts.Name, key, updateErr)
+			l.failOpen(opts.Name, key, updateErr)
+			return nil
 		}
 		if err := l.commitTx(ctx, tx); err != nil {
 			return l.indeterminate(opts.Name, key, err)
@@ -192,7 +196,8 @@ func (l *Limiter) EnforceTriggerEvent(
 		if err == nil {
 			err = fmt.Errorf("trigger event rate admission updated %d rows", updated)
 		}
-		return l.failOpen(opts.Name, key, err)
+		l.failOpen(opts.Name, key, err)
+		return nil
 	}
 	if err := l.commitTx(ctx, tx); err != nil {
 		return l.indeterminate(opts.Name, key, err)
@@ -201,10 +206,9 @@ func (l *Limiter) EnforceTriggerEvent(
 	return nil
 }
 
-func (l *Limiter) failOpen(bucket, key string, err error) error {
+func (l *Limiter) failOpen(bucket, key string, err error) {
 	fireHook(func() { l.hooks.OnError(bucket, key, err) }, l.hooks.OnError == nil)
 	slog.Warn("[rate-limit] postgres error, failing open", "bucket", bucket, "error", err)
-	return nil
 }
 
 func (l *Limiter) indeterminate(bucket, key string, err error) error {

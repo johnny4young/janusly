@@ -171,7 +171,7 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 			return err
 		}
 
-		if err := e.insertDeadLetter(ctx, q, claim, run, serr, failedAt); err != nil {
+		if err := e.insertDeadLetter(ctx, q, claim, run, serr); err != nil {
 			return err
 		}
 
@@ -230,7 +230,7 @@ func (e *Engine) afterTerminalFailure(ctx context.Context, claim ClaimedNode) {
 // insertDeadLetter captures the exact failed job for operator replay: the
 // full workflow and node snapshots (key-redacted, never size-truncated —
 // replay needs the exact JSON) plus the bounded error.
-func (e *Engine) insertDeadLetter(ctx context.Context, q *store.Queries, claim ClaimedNode, run store.GetRunExecutionRow, serr map[string]any, failedAt time.Time) error {
+func (e *Engine) insertDeadLetter(ctx context.Context, q *store.Queries, claim ClaimedNode, run store.GetRunExecutionRow, serr map[string]any) error {
 	var envelope struct {
 		Workflow any `json:"workflow"`
 	}

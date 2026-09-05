@@ -49,7 +49,8 @@ func validateNormalizedJSONTree(value any, depth int, rejectPrototype bool) erro
 	return nil
 }
 
-func validateBoundedJSONValue(value any, maximum int, rejectPrototype bool) error {
+func validateBoundedJSONValue(value any, maximum int) error {
+	const rejectPrototype = true
 	serialized, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("value must be valid JSON")
@@ -114,7 +115,7 @@ func validateJSONPickInput(input map[string]any, options InputValidationOptions)
 		}
 	}
 	if raw, present := input["source"]; present && !isDeferredWholeTemplate(raw, options) {
-		return validateBoundedJSONValue(raw, jsonToolMaxBytes, true)
+		return validateBoundedJSONValue(raw, jsonToolMaxBytes)
 	}
 	return nil
 }
@@ -130,14 +131,14 @@ func validateJSONSetInput(input map[string]any, options InputValidationOptions) 
 	sourceRaw, sourcePresent := input["source"]
 	sourceDeferred := sourcePresent && isDeferredWholeTemplate(sourceRaw, options)
 	if sourcePresent && !sourceDeferred {
-		if err := validateBoundedJSONValue(sourceRaw, jsonToolMaxBytes, true); err != nil {
+		if err := validateBoundedJSONValue(sourceRaw, jsonToolMaxBytes); err != nil {
 			return fmt.Errorf("source: %w", err)
 		}
 	}
 	valueRaw, valuePresent := input["value"]
 	valueDeferred := valuePresent && isDeferredWholeTemplate(valueRaw, options)
 	if valuePresent && !valueDeferred {
-		if err := validateBoundedJSONValue(valueRaw, jsonToolMaxBytes, true); err != nil {
+		if err := validateBoundedJSONValue(valueRaw, jsonToolMaxBytes); err != nil {
 			return fmt.Errorf("value: %w", err)
 		}
 	}
@@ -146,7 +147,7 @@ func validateJSONSetInput(input map[string]any, options InputValidationOptions) 
 		if err != nil {
 			return err
 		}
-		if err := validateBoundedJSONValue(result, jsonToolMaxBytes, true); err != nil {
+		if err := validateBoundedJSONValue(result, jsonToolMaxBytes); err != nil {
 			return fmt.Errorf("result: %w", err)
 		}
 	}
@@ -159,18 +160,18 @@ func validateJSONMergeInput(input map[string]any, options InputValidationOptions
 	leftDeferred := leftPresent && isDeferredWholeTemplate(leftRaw, options)
 	rightDeferred := rightPresent && isDeferredWholeTemplate(rightRaw, options)
 	if leftPresent && !leftDeferred {
-		if err := validateBoundedJSONValue(leftRaw, jsonToolMaxBytes, true); err != nil {
+		if err := validateBoundedJSONValue(leftRaw, jsonToolMaxBytes); err != nil {
 			return fmt.Errorf("a: %w", err)
 		}
 	}
 	if rightPresent && !rightDeferred {
-		if err := validateBoundedJSONValue(rightRaw, jsonToolMaxBytes, true); err != nil {
+		if err := validateBoundedJSONValue(rightRaw, jsonToolMaxBytes); err != nil {
 			return fmt.Errorf("b: %w", err)
 		}
 	}
 	if leftPresent && rightPresent && !leftDeferred && !rightDeferred {
 		result := deepMerge(leftRaw.(map[string]any), rightRaw.(map[string]any))
-		if err := validateBoundedJSONValue(result, jsonToolMaxBytes, true); err != nil {
+		if err := validateBoundedJSONValue(result, jsonToolMaxBytes); err != nil {
 			return fmt.Errorf("result: %w", err)
 		}
 	}

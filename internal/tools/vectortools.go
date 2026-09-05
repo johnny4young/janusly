@@ -38,7 +38,7 @@ func validateVectorUpsertInput(input map[string]any, options InputValidationOpti
 		return err
 	}
 	if raw, present := input["metadata"]; present && !isDeferredWholeTemplate(raw, options) {
-		if err := validateBoundedJSONValue(raw, vectorMetadataMaxBytes, true); err != nil {
+		if err := validateBoundedJSONValue(raw, vectorMetadataMaxBytes); err != nil {
 			return fmt.Errorf("metadata: %w", err)
 		}
 	}

@@ -72,8 +72,8 @@ func TestCompilePagerDutyWorkflowBuildsCanonicalBoundedGraph(t *testing.T) {
 	if actionClock.Type != "tool" || actionClock.Config["tool"] != "time.now" {
 		t.Fatalf("action clock=%+v", actionClock)
 	}
-	if !workflowHasEdge(workflow, "load_incident", "action_clock", "") ||
-		!workflowHasEdge(workflow, "action_clock", "evaluate_policy", "") {
+	if !workflowHasEdge(workflow, "load_incident", "action_clock") ||
+		!workflowHasEdge(workflow, "action_clock", "evaluate_policy") {
 		t.Fatalf("policy must consume a clock captured after the authoritative read: %+v", workflow.Edges)
 	}
 	inputs, ok := domain.ParseInputSchemaValue(document["inputs"])
@@ -110,8 +110,8 @@ func TestCompilePagerDutyWorkflowBuildsCanonicalBoundedGraph(t *testing.T) {
 		t.Fatalf("automatic evidence must identify its effective clock and approval posture: %+v", actionEvidence)
 	}
 	if workflow.Outputs["result"] != "{{context.outcome_projection.output}}" ||
-		!workflowHasEdge(workflow, "action_evidence", "outcome_projection", "") ||
-		!workflowHasEdge(workflow, "ignored_evidence", "outcome_projection", "") {
+		!workflowHasEdge(workflow, "action_evidence", "outcome_projection") ||
+		!workflowHasEdge(workflow, "ignored_evidence", "outcome_projection") {
 		t.Fatalf("mutually exclusive terminals need one stable intent projection: outputs=%+v edges=%+v", workflow.Outputs, workflow.Edges)
 	}
 	assertPagerDutyActionBranchIsTransitivelyGuarded(t, workflow)
@@ -511,9 +511,9 @@ func workflowNodeInput(t *testing.T, node domain.Node) map[string]any {
 	return input
 }
 
-func workflowHasEdge(workflow *domain.Workflow, from, to, condition string) bool {
+func workflowHasEdge(workflow *domain.Workflow, from, to string) bool {
 	for _, edge := range workflow.Edges {
-		if edge.From == from && edge.To == to && edge.Condition == condition {
+		if edge.From == from && edge.To == to && edge.Condition == "" {
 			return true
 		}
 	}

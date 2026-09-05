@@ -10,11 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/johnny4young/janusly/internal/ratelimit"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/ratelimit"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -27,8 +28,6 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/workos"
 )
-
-const ssoMaxJSONBodyBytes int64 = 1_048_576
 
 func ssoConnectionView(row store.SsoConnection) map[string]any {
 	return map[string]any{
@@ -45,7 +44,7 @@ func writeUnversionedValue(w http.ResponseWriter, value any) {
 }
 
 func decodeSsoRecord(r *http.Request) (map[string]any, *opResult) {
-	return decodeJSONRecord(r, ssoMaxJSONBodyBytes)
+	return decodeJSONRecord(r)
 }
 
 func (s *V1Server) listSsoConnections(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -419,16 +418,16 @@ func (s *V1Server) callbackSso(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *V1Server) mountSsoRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /org/sso/connections", s.auth(s.listSsoConnections))
-	mux.HandleFunc("POST /org/sso/connections", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	s.route(mux, "GET /org/sso/connections", routeGate{auth.RoleAdmin, "org.config.write"}, s.listSsoConnections)
+	s.route(mux, "POST /org/sso/connections", routeGate{auth.RoleAdmin, "org.config.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.createSsoConnection(r, rc))
-	}))
-	mux.HandleFunc("POST /org/sso/connections/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "POST /org/sso/connections/{id}", routeGate{auth.RoleAdmin, "org.config.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.updateSsoConnection(r, rc))
-	}))
-	mux.HandleFunc("DELETE /org/sso/connections/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	})
+	s.route(mux, "DELETE /org/sso/connections/{id}", routeGate{auth.RoleAdmin, "org.config.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.revokeSsoConnection(r, rc))
-	}))
+	})
 	mux.HandleFunc("GET /auth/sso/start", s.startSso)
 	mux.HandleFunc("GET /auth/sso/callback", s.callbackSso)
 }

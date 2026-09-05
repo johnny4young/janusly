@@ -217,8 +217,7 @@ func renderString(value string, scope map[string]any, state *renderState) (any, 
 			return resolveSecret(expr, state)
 		}
 		if strings.HasPrefix(expr, "env.") {
-			resolved, err := resolveEnv(expr, state)
-			return resolved, err
+			return resolveEnv(expr, state), nil
 		}
 		resolved, found := GetByPath(scope, expr)
 		if !found {
@@ -249,8 +248,7 @@ func renderString(value string, scope map[string]any, state *renderState) (any, 
 			return resolved.(string)
 		}
 		if strings.HasPrefix(expr, "env.") {
-			resolved, _ := resolveEnv(expr, state)
-			return resolved.(string)
+			return resolveEnv(expr, state).(string)
 		}
 		resolved, found := GetByPath(scope, expr)
 		if !found {
@@ -296,7 +294,7 @@ func resolveSecret(expr string, state *renderState) (any, error) {
 	return resolved, nil
 }
 
-func resolveEnv(expr string, state *renderState) (any, error) {
+func resolveEnv(expr string, state *renderState) any {
 	name := strings.ToUpper(strings.TrimPrefix(expr, "env."))
 	var value string
 	defined := false
@@ -305,12 +303,12 @@ func resolveEnv(expr string, state *renderState) (any, error) {
 	}
 	if !defined {
 		state.trackUnresolved(expr)
-		return "", nil
+		return ""
 	}
 	if value != "" && len(value) >= 4 {
 		state.trackRedacted(value)
 	}
-	return value, nil
+	return value
 }
 
 func (s *renderState) trackRedacted(value string) {

@@ -39,7 +39,11 @@ func decodeBodyBounded(r *http.Request, into any, maxBytes int64) error {
 // decodeJSONRecord mirrors the contract's readJson + asRecord pair: it
 // enforces the caller's byte cap, preserves the standard body errors, and
 // converts valid non-object JSON into an empty record.
-func decodeJSONRecord(r *http.Request, maxBytes int64) (map[string]any, *opResult) {
+// jsonRecordMaxBytes bounds every JSON-record body the surfaces below accept.
+const jsonRecordMaxBytes int64 = 1 << 20
+
+func decodeJSONRecord(r *http.Request) (map[string]any, *opResult) {
+	const maxBytes = jsonRecordMaxBytes
 	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxBytes))
 	if err != nil {
 		var tooLarge *http.MaxBytesError

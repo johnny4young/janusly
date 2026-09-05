@@ -18,10 +18,8 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-const identityMaxJSONBodyBytes int64 = 1_048_576
-
 func decodeIdentityRecord(r *http.Request) (map[string]any, *opResult) {
-	return decodeJSONRecord(r, identityMaxJSONBodyBytes)
+	return decodeJSONRecord(r)
 }
 
 // normalizedIdentityName mirrors the contract: trim, collapse interior
