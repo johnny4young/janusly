@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/johnny4young/janusly/internal/httpapi/scim"
 )
 
 // Property-based SCIM. A deterministic generator produces random
@@ -107,7 +108,7 @@ func (p *scimPropHarness) deliver(directory string, event scimPropEvent) map[str
 	})
 	req, _ := http.NewRequest("POST", p.h.server.URL+"/webhooks/workos/directory", bytes.NewReader(payload))
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("WorkOS-Signature", signScimHeader(p.secret, string(payload), time.Now().UnixMilli()))
+	req.Header.Set("WorkOS-Signature", scim.SignWebhookHeader(p.secret, string(payload), time.Now().UnixMilli()))
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
 		p.t.Fatalf("webhook: %v", err)
@@ -215,7 +216,7 @@ func scimPropInvariants(t *testing.T, p *scimPropHarness, org, directory string,
 			for groupRows.Next() {
 				var groupID string
 				_ = groupRows.Scan(&groupID)
-				if mapped, ok := mappings[groupID]; ok && scimRoleRank[mapped] > scimRoleRank[expected] {
+				if mapped, ok := mappings[groupID]; ok && scim.RoleRank[mapped] > scim.RoleRank[expected] {
 					expected = mapped
 				}
 			}

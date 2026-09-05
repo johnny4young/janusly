@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/httpapi/scim"
 )
 
 // The full WorkOS Directory Sync lifecycle against fixtures — never a real
@@ -70,7 +72,7 @@ func TestScimDirectorySyncLifecycle(t *testing.T) {
 		return string(payload)
 	}
 	deliver := func(body string) map[string]any {
-		status, parsed := post(body, signScimHeader(secret, body, time.Now().UnixMilli()))
+		status, parsed := post(body, scim.SignWebhookHeader(secret, body, time.Now().UnixMilli()))
 		if status != 200 {
 			t.Fatalf("delivery must 200: %d %+v (body %s)", status, parsed, body)
 		}
@@ -95,11 +97,11 @@ func TestScimDirectorySyncLifecycle(t *testing.T) {
 	if status, _ := post(probe, ""); status != 401 {
 		t.Fatalf("missing signature must 401: %d", status)
 	}
-	if status, _ := post(probe, signScimHeader("wrong-secret", probe, time.Now().UnixMilli())); status != 401 {
+	if status, _ := post(probe, scim.SignWebhookHeader("wrong-secret", probe, time.Now().UnixMilli())); status != 401 {
 		t.Fatalf("wrong secret must 401: %d", status)
 	}
 	stale := time.Now().Add(-10 * time.Minute).UnixMilli()
-	if status, _ := post(probe, signScimHeader(secret, probe, stale)); status != 401 {
+	if status, _ := post(probe, scim.SignWebhookHeader(secret, probe, stale)); status != 401 {
 		t.Fatalf("stale timestamp must 401: %d", status)
 	}
 	var signatureAudits int

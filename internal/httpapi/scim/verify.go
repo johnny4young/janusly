@@ -2,9 +2,13 @@
 // (fail-closed reason ladder, constant-time), the event envelope parser,
 // primary-email extraction, and the pure role derivation (highest-rank
 // wins, defaultRole fallback).
-package httpapi
+package scim
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/johnny4young/janusly/internal/webhooksig"
@@ -26,11 +30,11 @@ const (
 	scimGroupStateMaxLimit     = 200
 )
 
-// scimRoleRank orders the built-in roles for highest-wins derivation.
+// RoleRank orders the built-in roles for highest-wins derivation.
 // Unknown / custom role names rank -1 so they never beat a built-in.
-var scimRoleRank = map[string]int{"viewer": 1, "editor": 2, "admin": 3}
+var RoleRank = map[string]int{"viewer": 1, "editor": 2, "admin": 3}
 
-func isScimBuiltinRole(role string) bool { return scimRoleRank[role] > 0 }
+func isScimBuiltinRole(role string) bool { return RoleRank[role] > 0 }
 
 // deriveScimRole picks the HIGHEST-rank role among the user's mapped
 // groups; with no mapped group it returns defaultRole — byte-for-byte the
@@ -42,7 +46,7 @@ func deriveScimRole(userGroupIDs []string, mappings map[string]string, defaultRo
 		if !ok {
 			continue
 		}
-		rank, known := scimRoleRank[role]
+		rank, known := RoleRank[role]
 		if !known {
 			rank = -1
 		}
@@ -182,3 +186,12 @@ type scimResult struct {
 
 func scimProcessed(action string) scimResult { return scimResult{Processed: true, Action: action} }
 func scimSkipped(reason string) scimResult   { return scimResult{Reason: reason} }
+
+// SignWebhookHeader produces the WorkOS-Signature header value the
+// receiver accepts for rawBody at instant now; tests and local tooling
+// sign with it.
+func SignWebhookHeader(secret, body string, atMs int64) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = fmt.Fprintf(mac, "%d.%s", atMs, body)
+	return fmt.Sprintf("t=%d,v1=%s", atMs, hex.EncodeToString(mac.Sum(nil)))
+}

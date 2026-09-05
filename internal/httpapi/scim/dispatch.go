@@ -21,7 +21,7 @@
 //     provider_directory_id — never an org id from the upstream payload.
 //   - Membership writes are keyed on (org_id, lower(email)); the re-sync
 //     omits invited_by so the original provisioning actor survives.
-package httpapi
+package scim
 
 import (
 	"context"
@@ -33,12 +33,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
 /* ------------------------------ dispatcher -------------------------------- */
 
-func (s *V1Server) scimAudit(ctx context.Context, orgID string, action audit.Action, targetType, targetID string, metadata map[string]any) {
+func (s *Service) scimAudit(ctx context.Context, orgID string, action audit.Action, targetType, targetID string, metadata map[string]any) {
 	audit.WriteAs(ctx, s.pool, orgID, scimActor, action, audit.Options{
 		TargetType: targetType, TargetID: targetID, Metadata: metadata,
 	})
@@ -47,7 +48,7 @@ func (s *V1Server) scimAudit(ctx context.Context, orgID string, action audit.Act
 // handleScimEvent runs the deterministic guard ladder and dispatches one
 // event. Guard rejections audit + return a skipped result; real I/O errors
 // release the replay claim (best-effort) and bubble up so the route 5xxs.
-func (s *V1Server) handleScimEvent(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
+func (s *Service) handleScimEvent(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
 	q := store.New(s.pool)
 	orgID := directory.OrgID
 
@@ -93,7 +94,7 @@ func (s *V1Server) handleScimEvent(ctx context.Context, directory store.ScimDire
 	return result, nil
 }
 
-func (s *V1Server) dispatchScimEvent(ctx context.Context, directory store.ScimDirectory, event *scimEvent, eventTimestamp time.Time) (scimResult, error) {
+func (s *Service) dispatchScimEvent(ctx context.Context, directory store.ScimDirectory, event *scimEvent, eventTimestamp time.Time) (scimResult, error) {
 	switch event.Event {
 	case "dsync.user.created":
 		return s.scimUserCreated(ctx, directory, event, eventTimestamp)
@@ -119,7 +120,7 @@ func (s *V1Server) dispatchScimEvent(ctx context.Context, directory store.ScimDi
 
 /* ----------------------------- user handlers ------------------------------ */
 
-func (s *V1Server) scimUserCreated(ctx context.Context, directory store.ScimDirectory, event *scimEvent, eventTimestamp time.Time) (scimResult, error) {
+func (s *Service) scimUserCreated(ctx context.Context, directory store.ScimDirectory, event *scimEvent, eventTimestamp time.Time) (scimResult, error) {
 	q := store.New(s.pool)
 	orgID := directory.OrgID
 	providerUserID := scimStringField(event.Data, "id")
@@ -199,7 +200,7 @@ func (s *V1Server) scimUserCreated(ctx context.Context, directory store.ScimDire
 	if err == nil && member.InvitedBy.String != scimActor {
 		s.scimAudit(ctx, orgID, "scim.user.provision_collision", "scim_user", providerUserID, map[string]any{
 			"email": lowerEmail, "conflictingRole": member.Role,
-			"conflictingInvitedBy": textOrNull(member.InvitedBy),
+			"conflictingInvitedBy": httpkit.TextOrNull(member.InvitedBy),
 			"scimDirectoryId":      directory.ID, "eventId": event.ID,
 		})
 		return scimSkipped("provision_collision"), nil
@@ -222,7 +223,7 @@ func (s *V1Server) scimUserCreated(ctx context.Context, directory store.ScimDire
 	return scimProcessed("provisioned"), nil
 }
 
-func (s *V1Server) scimUserUpdated(ctx context.Context, directory store.ScimDirectory, event *scimEvent, eventTimestamp time.Time) (scimResult, error) {
+func (s *Service) scimUserUpdated(ctx context.Context, directory store.ScimDirectory, event *scimEvent, eventTimestamp time.Time) (scimResult, error) {
 	q := store.New(s.pool)
 	orgID := directory.OrgID
 	providerUserID := scimStringField(event.Data, "id")
@@ -276,7 +277,7 @@ func (s *V1Server) scimUserUpdated(ctx context.Context, directory store.ScimDire
 			s.scimAudit(ctx, orgID, "scim.user.rekey_collision", "scim_user", providerUserID, map[string]any{
 				"fromEmail": oldEmail, "toEmail": lowerEmail,
 				"conflictingRole":      target.Role,
-				"conflictingInvitedBy": textOrNull(target.InvitedBy),
+				"conflictingInvitedBy": httpkit.TextOrNull(target.InvitedBy),
 				"scimDirectoryId":      directory.ID, "eventId": event.ID,
 			})
 			return scimSkipped("rekey_collision"), nil
@@ -311,7 +312,7 @@ func (s *V1Server) scimUserUpdated(ctx context.Context, directory store.ScimDire
 	return scimProcessed("updated"), nil
 }
 
-func (s *V1Server) scimUserDeleted(ctx context.Context, directory store.ScimDirectory, event *scimEvent, eventTimestamp time.Time) (scimResult, error) {
+func (s *Service) scimUserDeleted(ctx context.Context, directory store.ScimDirectory, event *scimEvent, eventTimestamp time.Time) (scimResult, error) {
 	q := store.New(s.pool)
 	orgID := directory.OrgID
 	providerUserID := scimStringField(event.Data, "id")

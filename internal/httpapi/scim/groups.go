@@ -1,7 +1,7 @@
 // SCIM group handlers + shared membership write paths:
 // group sync/delete, membership add/remove with role recompute, the
 // (org_id, lower(email))-keyed upsert, and the domain-policy reader.
-package httpapi
+package scim
 
 import (
 	"context"
@@ -27,7 +27,7 @@ import (
 // off until the next membership event corrects it; it can never escalate
 // beyond an admin-configured mapping. Accepted v1 posture (reference).
 
-func (s *V1Server) scimGroupUpsert(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
+func (s *Service) scimGroupUpsert(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
 	providerGroupID := scimStringField(event.Data, "id")
 	name := scimStringField(event.Data, "name")
 	if providerGroupID == "" || name == "" {
@@ -48,7 +48,7 @@ func (s *V1Server) scimGroupUpsert(ctx context.Context, directory store.ScimDire
 	return scimProcessed("group_synced"), nil
 }
 
-func (s *V1Server) scimGroupDeleted(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
+func (s *Service) scimGroupDeleted(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
 	q := store.New(s.pool)
 	providerGroupID := scimStringField(event.Data, "id")
 	if providerGroupID == "" {
@@ -91,7 +91,7 @@ func (s *V1Server) scimGroupDeleted(ctx context.Context, directory store.ScimDir
 	return scimProcessed("group_deleted"), nil
 }
 
-func (s *V1Server) scimGroupUserAdded(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
+func (s *Service) scimGroupUserAdded(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
 	providerUserID := scimStringField(event.Data, "user_id")
 	providerGroupID := scimStringField(event.Data, "directory_group_id")
 	if providerUserID == "" || providerGroupID == "" {
@@ -113,7 +113,7 @@ func (s *V1Server) scimGroupUserAdded(ctx context.Context, directory store.ScimD
 	return scimProcessed("group_membership_added"), nil
 }
 
-func (s *V1Server) scimGroupUserRemoved(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
+func (s *Service) scimGroupUserRemoved(ctx context.Context, directory store.ScimDirectory, event *scimEvent) (scimResult, error) {
 	providerUserID := scimStringField(event.Data, "user_id")
 	providerGroupID := scimStringField(event.Data, "directory_group_id")
 	if providerUserID == "" || providerGroupID == "" {
@@ -138,7 +138,7 @@ func (s *V1Server) scimGroupUserRemoved(ctx context.Context, directory store.Sci
 
 /* --------------------------- shared write paths --------------------------- */
 
-func (s *V1Server) upsertScimUserState(ctx context.Context, directory store.ScimDirectory, providerUserID, lowerEmail string, event *scimEvent, eventTimestamp time.Time) error {
+func (s *Service) upsertScimUserState(ctx context.Context, directory store.ScimDirectory, providerUserID, lowerEmail string, event *scimEvent, eventTimestamp time.Time) error {
 	firstName := scimStringField(event.Data, "first_name")
 	lastName := scimStringField(event.Data, "last_name")
 	return store.New(s.pool).UpsertScimUserState(ctx, store.UpsertScimUserStateParams{
@@ -154,7 +154,7 @@ func (s *V1Server) upsertScimUserState(ctx context.Context, directory store.Scim
 // resolveDerivedScimRole loads the user's current groups + the directory's
 // mappings and derives the member role (highest-rank mapped role, else the
 // directory's defaultRole).
-func (s *V1Server) resolveDerivedScimRole(ctx context.Context, directory store.ScimDirectory, providerUserID string) (string, error) {
+func (s *Service) resolveDerivedScimRole(ctx context.Context, directory store.ScimDirectory, providerUserID string) (string, error) {
 	q := store.New(s.pool)
 	groupIDs, err := q.ListScimUserGroupIDs(ctx, store.ListScimUserGroupIDsParams{
 		OrgID: directory.OrgID, ScimDirectoryID: directory.ID, ProviderUserID: providerUserID,
@@ -169,7 +169,7 @@ func (s *V1Server) resolveDerivedScimRole(ctx context.Context, directory store.S
 	return deriveScimRole(groupIDs, mappings, directory.DefaultRole), nil
 }
 
-func (s *V1Server) scimGroupRoleMappingsMap(ctx context.Context, directory store.ScimDirectory) (map[string]string, error) {
+func (s *Service) scimGroupRoleMappingsMap(ctx context.Context, directory store.ScimDirectory) (map[string]string, error) {
 	rows, err := store.New(s.pool).ListScimGroupRoleMappings(ctx, store.ListScimGroupRoleMappingsParams{
 		OrgID: directory.OrgID, ScimDirectoryID: directory.ID,
 	})
@@ -188,7 +188,7 @@ func (s *V1Server) scimGroupRoleMappingsMap(ctx context.Context, directory store
 // is provisioned, or a deprovisioned user) the join row is already
 // persisted by the caller — a later create/update derives the role — so
 // only the membership-change audit is written.
-func (s *V1Server) recomputeScimMemberRole(ctx context.Context, directory store.ScimDirectory, event *scimEvent, providerUserID, providerGroupID, change string) error {
+func (s *Service) recomputeScimMemberRole(ctx context.Context, directory store.ScimDirectory, event *scimEvent, providerUserID, providerGroupID, change string) error {
 	q := store.New(s.pool)
 	orgID := directory.OrgID
 	userState, err := q.GetScimUserState(ctx, store.GetScimUserStateParams{
@@ -223,7 +223,7 @@ func (s *V1Server) recomputeScimMemberRole(ctx context.Context, directory store.
 // upsertScimMembership writes the (org_id, lower(email))-keyed membership
 // row. invitedBy "" preserves the row's current inviter (the re-sync
 // path); a non-empty inviter is written on both update and insert.
-func (s *V1Server) upsertScimMembership(ctx context.Context, orgID, lowerEmail, role, invitedBy string) error {
+func (s *Service) upsertScimMembership(ctx context.Context, orgID, lowerEmail, role, invitedBy string) error {
 	q := store.New(s.pool)
 	inviter := pgtype.Text{String: invitedBy, Valid: invitedBy != ""}
 	existing, err := q.FindScimMemberByEmail(ctx, store.FindScimMemberByEmailParams{

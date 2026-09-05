@@ -1,9 +1,6 @@
-package httpapi
+package scim
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"testing"
 	"time"
@@ -40,19 +37,13 @@ func TestDeriveScimRole(t *testing.T) {
 	}
 }
 
-func signScimHeader(secret, body string, atMs int64) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = fmt.Fprintf(mac, "%d.%s", atMs, body)
-	return fmt.Sprintf("t=%d,v1=%s", atMs, hex.EncodeToString(mac.Sum(nil)))
-}
-
 // The verifier fails CLOSED (no secret rejects everything) and walks the
 // contract's exact reason ladder.
 func TestVerifyWorkOsSignature(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	body := `{"id":"evt_1"}`
 	secret := "whsec_test"
-	valid := signScimHeader(secret, body, now.UnixMilli())
+	valid := SignWebhookHeader(secret, body, now.UnixMilli())
 
 	cases := []struct {
 		name   string
@@ -64,9 +55,9 @@ func TestVerifyWorkOsSignature(t *testing.T) {
 		{"missing header", "", secret, "missing_header"},
 		{"malformed header", "t=abc", secret, "malformed_header"},
 		{"non-hex signature", fmt.Sprintf("t=%d,v1=zz", now.UnixMilli()), secret, "malformed_header"},
-		{"expired", signScimHeader(secret, body, now.Add(-6*time.Minute).UnixMilli()), secret, "expired"},
-		{"future timestamp", signScimHeader(secret, body, now.Add(6*time.Minute).UnixMilli()), secret, "future_timestamp"},
-		{"wrong secret", signScimHeader("other", body, now.UnixMilli()), secret, "signature_mismatch"},
+		{"expired", SignWebhookHeader(secret, body, now.Add(-6*time.Minute).UnixMilli()), secret, "expired"},
+		{"future timestamp", SignWebhookHeader(secret, body, now.Add(6*time.Minute).UnixMilli()), secret, "future_timestamp"},
+		{"wrong secret", SignWebhookHeader("other", body, now.UnixMilli()), secret, "signature_mismatch"},
 	}
 	for _, c := range cases {
 		ok, reason := verifyWorkOsSignature(c.header, body, c.secret, now)

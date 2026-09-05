@@ -24,6 +24,7 @@ import (
 	"github.com/johnny4young/janusly/internal/browsersession"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/executors"
+	"github.com/johnny4young/janusly/internal/httpapi/scim"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/webdist"
@@ -383,7 +384,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.mountWorkflowMetadataRoutes(mux)
 	s.mountInputPresetRoutes(mux)
 	s.mountEvalRoutes(mux)
-	s.mountScimRoutes(mux)
+	scim.Mount(mux, scim.Deps{Pool: s.pool, NewID: s.newID, Routes: s})
 	s.mountF1SweepRoutes(mux)
 	s.mountRunSearchRoutes(mux)
 	s.mountStatusPageRoutes(mux)
