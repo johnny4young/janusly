@@ -76,6 +76,10 @@ Frontend commands must run from `/web`. In nested worktrees use
 
 Read the relevant document before changing a feature:
 
+- Development (run, test lanes, schema changes, qualification, gotchas):
+  `docs/development.md`
+- Change log of the 2026-09 program: `docs/changes/2026-09-improvement-program.md`
+
 - Auth: `docs/architecture/auth-and-identity.md`
 - AI: `docs/architecture/ai-pipeline.md`
 - API: `docs/architecture/api-contract.md`
