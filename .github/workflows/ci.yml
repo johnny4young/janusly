@@ -213,6 +213,15 @@ jobs:
       - run: pnpm --dir web build
       - run: go run ./cmd/artifact
       - run: ./artifacts/janusly provenance
+      # `docker build --provenance --attest` needs a BuildKit builder on the
+      # docker-container driver, and `--load` keeps those attestations only
+      # when the daemon uses the containerd image store (Docker Desktop's
+      # default; the runner's stock driver rejects attestations outright).
+      - uses: docker/setup-docker-action@77e84dbf09b47d1e29270283c22f16145aa85ca1 # v5.4.0
+        with:
+          daemon-config: |
+            {"features": {"containerd-snapshotter": true}}
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - run: make supply-chain IMAGE=janusly:supply-chain-${{ github.sha }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
