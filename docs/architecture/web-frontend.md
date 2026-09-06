@@ -67,10 +67,15 @@ consistent without counting UTF-16 code units as characters.
 Runtime shape guards (`isRecord`, `asRecord`, `asRecordOrEmpty`) live in
 `src/lib/guards.ts` only; `scripts/check-duplicate-guards.mjs` (part of
 `pnpm lint`) rejects a second definition. The `/org/config` payload has one
-reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector stay in
-the eager workspace chunk on purpose: splitting them fans their shared helpers
-into small chunks whose wrapper overhead costs more total bytes than the split
-saves, and the artifact budget counts every chunk. Stylesheets follow the
+reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector load
+lazily like every other tab panel: `src/components/panel-loaders.ts` holds one
+dynamic importer per tab, `RightPanel` builds its `lazy()` components from
+them, and `WorkspaceSectionNav` preloads a panel's chunk on hover/focus (the
+authoring chunk also preloads as soon as the Workflows destination is active),
+so the first click is instant without shipping the surface to Home.
+`manualChunks` keeps the whole authoring surface in one `authoring-workspace`
+chunk so its shared helpers do not fan out into micro-chunks; the eager
+`workflow-workspace` chunk fell from 43 to 14 KiB gzip. Stylesheets follow the
 chunk that renders them: a rule whose classes are owned only by lazy-loaded
 components lives next to its owner (`<Component>.css`, or `<folder>/<folder>.css`
 for a split panel such as `recovery-dialog/`) and is imported by that component,

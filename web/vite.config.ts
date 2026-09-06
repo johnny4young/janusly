@@ -117,6 +117,20 @@ export default defineConfig(({ mode }) => ({
             return 'app-workspace'
           }
           if (
+            id.endsWith('/src/components/AiStudioPanel.tsx')
+            || id.includes('/src/components/ai-studio/')
+            || id.endsWith('/src/components/AuthoringPanel.tsx')
+            || id.endsWith('/src/components/InspectorPanel.tsx')
+            || id.endsWith('/src/components/QuickConfigEditor.tsx')
+            || id.endsWith('/src/components/BranchRuleEditor.tsx')
+            || id.endsWith('/src/components/AuthoringProblemsPanel.tsx')
+            || id.endsWith('/src/components/WorkflowIoEditor.tsx')
+            || id.endsWith('/src/components/AiUsageFooter.tsx')
+            || id.endsWith('/src/components/workflow-io-loader.ts')
+          ) {
+            return 'authoring-workspace'
+          }
+          if (
             id.endsWith('/src/components/RightPanel.tsx')
             || id.endsWith('/src/components/WorkflowsDashboard.tsx')
             || id.endsWith('/src/components/WorkflowsDashboardView.tsx')

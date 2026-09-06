@@ -20,6 +20,7 @@ import {
   listWorkspaceSections,
   workspaceDestinationForTab,
 } from '../workspace-locations'
+import { preloadPanel } from './panel-loaders'
 
 const SECTION_ICONS: Partial<Record<ActiveTab, ReactNode>> = {
   workflows: <Database size={14} />,
@@ -78,6 +79,8 @@ export function WorkspaceSectionNav({
                 data-active={active ? 'true' : 'false'}
                 aria-current={active ? 'page' : undefined}
                 onClick={() => onOpenTab(section.tab)}
+                onPointerEnter={() => preloadPanel(section.tab)}
+                onFocus={() => preloadPanel(section.tab)}
                 title={`${label} — ${t(section.helperKey)}`}
               >
                 <span aria-hidden="true">{SECTION_ICONS[section.tab]}</span>

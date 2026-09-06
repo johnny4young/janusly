@@ -33,11 +33,11 @@
       "maxGzipKiB": 68
     },
     "workflowWorkspace": {
-      "label": "Workflow workspace",
+      "label": "Workflow workspace (eager)",
       "assets": [
         "workflow-workspace.js"
       ],
-      "maxGzipKiB": 44.5
+      "maxGzipKiB": 16
     },
     "eagerCss": {
       "label": "Eager stylesheet",
@@ -88,6 +88,8 @@
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 2.47,
+    "authoring-workspace.css": 0.51,
+    "authoring-workspace.js": 34.55,
     "AuthPolicySettingsPanel.js": 1.73,
     "AutoHealingPendingCard.css": 0.81,
     "AutoHealingPendingCard.js": 2.34,
@@ -170,7 +172,7 @@
     "VersionHistoryPanel.js": 2.54,
     "VitalSignsStrip.css": 0.94,
     "VitalSignsStrip.js": 2.11,
-    "workflow-workspace.js": 43.4,
+    "workflow-workspace.js": 14.09,
     "WorkflowDiffView.css": 0.62,
     "WorkflowDiffView.js": 1.55,
     "WorkflowIoEditor.css": 0.51,

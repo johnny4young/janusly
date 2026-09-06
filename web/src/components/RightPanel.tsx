@@ -20,40 +20,41 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Activity, Boxes, Database, FlaskConical, Layers3, Plug, Users, Workflow } from 'lucide-react'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
-import { AiStudioPanel } from './AiStudioPanel'
-import { AuthoringPanel, type AuthoringPanelModel } from './AuthoringPanel'
+import type { AuthoringPanelModel } from './AuthoringPanel'
+import { panelLoaders, preloadPanel } from './panel-loaders'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { ErrorBoundary } from './ErrorBoundary'
 import { PanelErrorFallback } from './PanelErrorFallback'
 import { WorkspaceSectionNav } from './WorkspaceSectionNav'
-// Tab-specific panels are code-split out of the eager App chunk: each is only
-// rendered when the operator navigates to its own tab (never on Home or the
-// default authoring tab), so it loads on demand behind the shared <Suspense> in
-// RightPanel. AI Studio + the core Inspector (node/edge config) stay eager:
-// they are the operator's immediate authoring surface, and splitting them
-// fans their shared helpers into small chunks whose wrapper overhead costs
-// more total bytes than the split saves under the artifact budget (the
-// per-route win waits for the stylesheet split). The inspector's auxiliary
-// sub-panels (version history / SLO / schedule history / metadata) are lazy,
-// rendered behind an inner <Suspense> so the node config stays instant while
-// they load on first inspector visit. OperationsPage additionally pulls ~11
+// Every tab panel is code-split out of the eager shell: each renders only when
+// the operator navigates to its tab, behind the shared <Suspense> below. AI
+// Studio and the Inspector (node/edge config) are lazy too — their chunk is
+// preloaded when the section navigation is hovered or focused and as soon as
+// the Workflows destination is active, so the first authoring click is
+// instant without shipping the surface to Home. `manualChunks` keeps the
+// whole authoring surface in one `authoring-workspace` chunk so its shared
+// helpers do not fan out into wrapper-heavy micro-chunks. The inspector's
+// auxiliary sub-panels (version history / SLO / schedule history / metadata)
+// are lazy behind an inner <Suspense>. OperationsPage additionally pulls ~11
 // admin sub-panels + alert/budget/scim/permission forms.
 
-const MultiAgentTimeline = lazy(() => import('../MultiAgentTimeline').then((m) => ({ default: m.MultiAgentTimeline })))
-const WorkflowsDashboard = lazy(() => import('./WorkflowsDashboard').then((m) => ({ default: m.WorkflowsDashboard })))
-const MembersPanel = lazy(() => import('./MembersPanel').then((m) => ({ default: m.MembersPanel })))
-const ConnectionsPanel = lazy(() => import('./ConnectionsPanel').then((m) => ({ default: m.ConnectionsPanel })))
-const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) => ({ default: m.SolutionPacksPanel })))
-const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
-const ExperimentsPanel = lazy(() => import('./ExperimentsPanel').then((m) => ({ default: m.ExperimentsPanel })))
-const ActivityWorkspace = lazy(() => import('./ActivityWorkspace').then((m) => ({ default: m.ActivityWorkspace })))
-const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
-const RecoveryCasePanel = lazy(() => import('./RecoveryCasePanel').then((m) => ({ default: m.RecoveryCasePanel })))
-const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
+const MultiAgentTimeline = lazy(() => panelLoaders.multiAgent().then((m) => ({ default: m.MultiAgentTimeline })))
+const WorkflowsDashboard = lazy(() => panelLoaders.workflows().then((m) => ({ default: m.WorkflowsDashboard })))
+const MembersPanel = lazy(() => panelLoaders.members().then((m) => ({ default: m.MembersPanel })))
+const ConnectionsPanel = lazy(() => panelLoaders.credentials().then((m) => ({ default: m.ConnectionsPanel })))
+const SolutionPacksPanel = lazy(() => panelLoaders.packs().then((m) => ({ default: m.SolutionPacksPanel })))
+const OperationsPage = lazy(() => panelLoaders.operations().then((m) => ({ default: m.OperationsPage })))
+const ExperimentsPanel = lazy(() => panelLoaders.experiments().then((m) => ({ default: m.ExperimentsPanel })))
+const ActivityWorkspace = lazy(() => panelLoaders.recover().then((m) => ({ default: m.ActivityWorkspace })))
+const RunsPanel = lazy(() => panelLoaders.runs().then((m) => ({ default: m.RunsPanel })))
+const RecoveryCasePanel = lazy(() => panelLoaders.recoveryCase().then((m) => ({ default: m.RecoveryCasePanel })))
+const ReasoningPanel = lazy(() => panelLoaders.reasoning().then((m) => ({ default: m.ReasoningPanel })))
+const AiStudioPanel = lazy(() => panelLoaders['ai-studio']().then((m) => ({ default: m.AiStudioPanel })))
+const AuthoringPanel = lazy(() => panelLoaders.inspector().then((m) => ({ default: m.AuthoringPanel })))
 import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { workspaceDestinationForTab } from '../workspace-locations'
@@ -154,10 +155,16 @@ export type RightPanelProps = {
 // are stable references between ticks that do not concern it.
 export const RightPanel = memo(function RightPanel(props: RightPanelProps) {
   const { t } = useT()
+  const destination = workspaceDestinationForTab(props.tab)
+  useEffect(() => {
+    if (destination !== 'workflows') return
+    preloadPanel('inspector')
+    preloadPanel('ai-studio')
+  }, [destination])
   return (
     <div
       className="workspace-panel-stack"
-      data-destination={workspaceDestinationForTab(props.tab)}
+      data-destination={destination}
     >
       <WorkspaceSectionNav
         activeTab={props.tab}
