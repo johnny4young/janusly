@@ -137,7 +137,7 @@ export const en = {
       price: 'Talk to us',
       tagline: 'For teams that run workflows others depend on.',
       features: ['Everything in Self-hosted', 'WorkOS SSO and SCIM provisioning', 'Managed updates and priority support'],
-      cta: 'Start a conversation',
+      cta: 'Reach out on GitHub',
     },
     enterprise: {
       name: 'Enterprise',

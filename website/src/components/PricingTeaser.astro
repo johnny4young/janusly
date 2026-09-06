@@ -9,11 +9,11 @@ interface Props {
 const { locale } = Astro.props;
 const copy = t(locale);
 const p = copy.pricing;
-const contact = `mailto:${SITE.contactEmail}`;
+const contact = SITE.contactUrl;
 const tiers = [
   { ...p.selfHosted, href: SITE.getStartedUrl, primary: false, external: true },
-  { ...p.team, href: contact, primary: true, external: false },
-  { ...p.enterprise, href: contact, primary: false, external: false },
+  { ...p.team, href: contact, primary: true, external: true },
+  { ...p.enterprise, href: contact, primary: false, external: true },
 ];
 ---
 

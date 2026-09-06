@@ -9,7 +9,8 @@ export const SITE = {
   tagline: 'The AI operator for your business workflows.',
   description:
     'Janusly designs, runs, recovers and operates business workflows from one Go executable: React control plane, PostgreSQL as the durable queue, MCP client and server, OpenTelemetry built in.',
-  contactEmail: 'hello@janusly.app',
+  // No support mailbox exists yet: conversations start on GitHub until one does.
+  contactUrl: 'https://github.com/johnny4young/janusly',
   social: {
     githubUrl: 'https://github.com/johnny4young/janusly',
   },

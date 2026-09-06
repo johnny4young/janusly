@@ -139,7 +139,7 @@ export const es: Dictionary = {
       price: 'Hablemos',
       tagline: 'Para equipos que corren workflows de los que otros dependen.',
       features: ['Todo lo de Self-hosted', 'SSO y aprovisionamiento SCIM con WorkOS', 'Actualizaciones gestionadas y soporte prioritario'],
-      cta: 'Iniciar una conversación',
+      cta: 'Escríbenos en GitHub',
     },
     enterprise: {
       name: 'Enterprise',

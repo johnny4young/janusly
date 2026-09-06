@@ -21,7 +21,7 @@ const copy = t(locale);
       <a href={SITE.docsUrl} rel="external noopener">{copy.footer.docs}</a>
       <a href={SITE.social.githubUrl} rel="external noopener">{copy.footer.github}</a>
       <a href={SITE.securityUrl} rel="external noopener">{copy.footer.security}</a>
-      <a href={`mailto:${SITE.contactEmail}`}>{copy.footer.contact}</a>
+      <a href={SITE.contactUrl} rel="external noopener">{copy.footer.contact}</a>
     </nav>
     <LanguageSelect locale={locale} currentPath={Astro.url.pathname} />
   </div>
