@@ -158,6 +158,20 @@ and the postbuild step refuses inline executable scripts.
 cd website && npm ci && npm run check && npm run build && npm run preview
 ```
 
+The product screenshots under `website/public/screens/` come from
+`web/e2e/marketing-screens.spec.ts`, which runs only with
+`JANUSLY_MARKETING_SCREENS_DIR` set, against a seeded runtime stack booted
+the way `scripts/test-e2e.sh` does it (compose project, `cmd/seed`, no
+provider key; the AI proposal is answered by the spec's own mock and rendered
+by the real UI):
+
+```bash
+cd web && PLAYWRIGHT_SKIP_WEB_SERVER=1 JANUSLY_E2E_RUNTIME_BASE_URL=http://127.0.0.1:33011 \
+  E2E_API_URL=http://127.0.0.1:33011 JANUSLY_MARKETING_SCREENS_DIR=/tmp/screens \
+  pnpm exec playwright test e2e/marketing-screens.spec.ts --project=chromium
+sips -s format jpeg -s formatOptions 78 -Z 1440 /tmp/screens/home.png --out website/public/screens/home.jpg
+```
+
 `.github/workflows/deploy-website.yml` deploys `dist/` to the Cloudflare
 Pages project `janusly-web` on every push to `main` that touches `website/`;
 it needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets and,
