@@ -39,7 +39,8 @@ jobs:
           if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
             changed="everything"
           else
-            changed=$(git diff --name-only "$base" "${{ github.sha }}")
+            # The marketing site has its own workflow; its files never touch the product lanes.
+            changed=$(git diff --name-only "$base" "${{ github.sha }}" | grep -Ev '^(website/|\.github/workflows/deploy-website\.yml$)' || true)
           fi
           web=false; go=false
           if [ "$changed" = "everything" ]; then web=true; go=true; fi
