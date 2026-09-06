@@ -48,6 +48,7 @@ import type { ActiveTab, AiHealth } from '../types'
 import { parseDocsUrl } from '../docs-link'
 import { currentSessionOrganization, sessionCan } from '../identity-context'
 import { TextInput } from '@/components/ui/Form'
+import { Button } from './ui/Button'
 
 type UserMenuProps = {
   aiHealth?: AiHealth | null
@@ -378,9 +379,16 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
                       required
                       autoFocus
                     />
-                    <button type="submit" disabled={workspaceAction !== null || workspaceName.trim().length < 2}>
-                      {workspaceAction === 'create' ? t('common.working') : t('auth.workspace.createAction')}
-                    </button>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      loading={workspaceAction === 'create'}
+                      loadingLabel={t('common.working')}
+                      disabled={(workspaceAction !== null && workspaceAction !== 'create') || workspaceName.trim().length < 2}
+                    >
+                      {t('auth.workspace.createAction')}
+                    </Button>
                   </form>
                 ) : (
                   <button type="button" className="user-menu__recent-add" onClick={() => setShowWorkspaceCreate(true)}>
@@ -514,10 +522,17 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
                 autoComplete="name"
               />
               <div>
-                <button type="button" onClick={() => setShowProfileEditor(false)}>{t('common.cancel')}</button>
-                <button type="submit" disabled={workspaceAction !== null}>
-                  {workspaceAction === 'profile' ? t('common.working') : t('userMenu.profile.save')}
-                </button>
+                <Button size="sm" onClick={() => setShowProfileEditor(false)}>{t('common.cancel')}</Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  loading={workspaceAction === 'profile'}
+                  loadingLabel={t('common.working')}
+                  disabled={workspaceAction !== null && workspaceAction !== 'profile'}
+                >
+                  {t('userMenu.profile.save')}
+                </Button>
               </div>
             </form>
           )}

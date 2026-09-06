@@ -166,7 +166,8 @@ i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
   (`src/lib/route.ts`).
 - Actions are `<Button>` (`components/ui/Button.tsx`): `size="sm"` inline,
   `variant="primary"` once per surface, `variant="danger"` for destructive,
-  `size="icon" variant="ghost"` for icon-only, `aria-pressed` for toggles. Raw
+  `size="icon" variant="ghost"` for icon-only, `aria-pressed` for toggles,
+  `loading`/`loadingLabel` for async work instead of a hand-rolled label. Raw
   `<button>` is for tabs, radios, menu items and rows with their own styles.
 - Modal dialogs call `useDialogFocusTrap(dialogRef, { onEscape })` from the
   file that renders `role="dialog"`; pass `onEscape: undefined` while an async

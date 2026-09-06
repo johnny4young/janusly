@@ -196,8 +196,8 @@ export function RollbackConfirmDialog({
           )}
 
           {step.kind === 'rolling-back' && (
-            <Button variant="secondary" type="button"  disabled>
-              {t('common.working')}
+            <Button loading loadingLabel={t('common.working')}>
+              {t('rollback.action')}
             </Button>
           )}
 

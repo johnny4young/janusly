@@ -516,15 +516,6 @@
   height: 30px;
 }
 
-.user-menu__recent-create button {
-  border: 1px solid var(--we-primary);
-  border-radius: 6px;
-  background: var(--we-primary);
-  color: var(--we-brand-glyph);
-  padding: 0 9px;
-  font-size: 10px;
-  font-weight: 700;
-}
 
 .user-menu__profile-editor {
   display: flex;
@@ -549,21 +540,7 @@
   gap: 6px;
 }
 
-.user-menu__profile-editor button {
-  border: 1px solid var(--we-line);
-  border-radius: 6px;
-  background: var(--we-surface);
-  color: var(--we-ink);
-  padding: 5px 8px;
-  font-size: 10px;
-  font-weight: 700;
-}
 
-.user-menu__profile-editor button[type="submit"] {
-  border-color: var(--we-primary);
-  background: var(--we-primary);
-  color: var(--we-brand-glyph);
-}
 
 .user-menu__ai {
   margin: 0 8px 6px;

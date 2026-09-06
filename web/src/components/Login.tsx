@@ -98,9 +98,15 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
 
         {error && <div className="issue issue-error" role="alert">{error}</div>}
 
-        <Button variant="primary" type="submit" className="auth-submit" disabled={pending}>
-          {mode === 'login' ? <LogIn size={16} aria-hidden="true" /> : <UserPlus size={16} aria-hidden="true" />}
-          <span>{pending ? t('common.working') : mode === 'login' ? t('auth.login.login') : t('auth.login.signUp')}</span>
+        <Button
+          variant="primary"
+          type="submit"
+          className="auth-submit"
+          loading={pending}
+          loadingLabel={t('common.working')}
+          leadingIcon={mode === 'login' ? <LogIn size={16} /> : <UserPlus size={16} />}
+        >
+          {mode === 'login' ? t('auth.login.login') : t('auth.login.signUp')}
         </Button>
 
         <button
