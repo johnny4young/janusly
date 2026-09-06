@@ -20,6 +20,11 @@ import { Button } from '@/components/ui/Button'
 import { isRecord } from '../lib/guards'
 import type { Credential as CredentialRecord } from '../types'
 import './SlackInteractionsPanel.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const SLACK_INTERACTION_MUTATION_TAGS = ['slack-interactions'] as const
+
+const SLACK_INTERACTION_TAGS = [PLATFORM_TAG, 'slack-interactions', 'credentials', 'members'] as const
 
 type SlackUserMapping = { slackUserId: string; userId: string }
 type SlackConnection = {
@@ -93,7 +98,7 @@ function parseMembers(value: unknown): Member[] {
 export function SlackInteractionsPanel() {
   const { t } = useT()
   const confirmDialog = useConfirm()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(SLACK_INTERACTION_TAGS)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const [connections, setConnections] = useState<SlackConnection[]>([])
@@ -185,7 +190,7 @@ export function SlackInteractionsPanel() {
       })
       addToast(t(editingId ? 'slackInteractions.toast.updated' : 'slackInteractions.toast.created'), 'success')
       closeForm()
-      bumpPlatformVersion()
+      bumpPlatformVersion(SLACK_INTERACTION_MUTATION_TAGS)
     } catch (saveError) {
       addToast(tApiError(saveError) || t('slackInteractions.error.save'), 'error')
     } finally {
@@ -201,7 +206,7 @@ export function SlackInteractionsPanel() {
     try {
       await api(`/integrations/slack/interactions/${encodeURIComponent(connection.id)}`, { method: 'DELETE' })
       addToast(t('slackInteractions.toast.deleted'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(SLACK_INTERACTION_MUTATION_TAGS)
     } catch (deleteError) {
       addToast(tApiError(deleteError) || t('slackInteractions.error.delete'), 'error')
     }

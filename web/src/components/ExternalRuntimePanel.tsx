@@ -27,6 +27,11 @@ import { Button } from '@/components/ui/Button'
 import { isRecord } from '../lib/guards'
 import type { Credential as CredentialRecord } from '../types'
 import './ExternalRuntimePanel.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const EXTERNAL_RUNTIME_MUTATION_TAGS = ['external-runtimes'] as const
+
+const EXTERNAL_RUNTIME_TAGS = [PLATFORM_TAG, 'external-runtimes', 'credentials'] as const
 
 type ExternalRuntimeConnection = {
   id: string
@@ -155,7 +160,7 @@ function evidenceCount(value: unknown): number {
 export function ExternalRuntimePanel({ canWrite }: { canWrite: boolean }) {
   const { t } = useT()
   const confirmDialog = useConfirm()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(EXTERNAL_RUNTIME_TAGS)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const [shadow, setShadow] = useState<ExternalRuntimeShadow>(() => parseShadow(null))
@@ -215,7 +220,7 @@ export function ExternalRuntimePanel({ canWrite }: { canWrite: boolean }) {
       addToast(t('externalRuntime.toast.created'), 'success')
       setForm(emptyForm())
       setShowForm(false)
-      bumpPlatformVersion()
+      bumpPlatformVersion(EXTERNAL_RUNTIME_MUTATION_TAGS)
     } catch (saveError) {
       addToast(tApiError(saveError) || t('externalRuntime.error.save'), 'error')
     } finally {
@@ -233,7 +238,7 @@ export function ExternalRuntimePanel({ canWrite }: { canWrite: boolean }) {
         method: 'DELETE',
       })
       addToast(t('externalRuntime.toast.deleted'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(EXTERNAL_RUNTIME_MUTATION_TAGS)
     } catch (deleteError) {
       addToast(tApiError(deleteError) || t('externalRuntime.error.delete'), 'error')
     }

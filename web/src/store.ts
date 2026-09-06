@@ -38,7 +38,7 @@ import { isTerminalNodeStatus } from '@/lib/status'
 import { workflowToGraph } from './canvas-projections'
 import { PERSISTED_WORKSPACE_TABS } from './workspace-locations'
 import { readRoute, writeRoute, type WorkspaceRoute } from '@/lib/route'
-import { PLATFORM_TAG, invalidateTags } from '@/lib/query-cache'
+import { PLATFORM_TAG, invalidateTags, type ResourceTag } from '@/lib/query-cache'
 
 /**
  * Build the config for an explicit step-kind change.
@@ -307,7 +307,9 @@ type WorkflowStore = {
   setBudgetBlocked: (envelope: BudgetBlockedEnvelope | null) => void
   clearBudgetBlocked: () => void
   setOnboarding: (state: OnboardingState | null) => void
-  bumpPlatformVersion: () => void
+  /** Tell panels their data changed. With `tags`, only panels subscribed to
+   *  one of them refetch; without, every panel does (the legacy broadcast). */
+  bumpPlatformVersion: (tags?: readonly ResourceTag[]) => void
 }
 
 /**
@@ -319,6 +321,8 @@ type WorkflowStore = {
  */
 const BUMP_COALESCE_MS = 100
 let pendingBumpTimer: ReturnType<typeof setTimeout> | null = null
+let pendingBumpBroadcast = false
+const pendingBumpTags = new Set<ResourceTag>()
 
 // Toast auto-dismiss windows. Errors stay ~2x longer because they typically
 // carry an action the reader must take before the toast disappears.
@@ -913,12 +917,20 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     setTimeout(() => get().removeToast(id), tone === 'error' ? TOAST_TTL_ERROR_MS : TOAST_TTL_DEFAULT_MS)
   },
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
-  bumpPlatformVersion: () => {
+  bumpPlatformVersion: (tags) => {
+    if (tags) for (const tag of tags) pendingBumpTags.add(tag)
+    else pendingBumpBroadcast = true
     if (pendingBumpTimer !== null) clearTimeout(pendingBumpTimer)
     pendingBumpTimer = setTimeout(() => {
       pendingBumpTimer = null
+      const broadcast = pendingBumpBroadcast
+      const tagged = [...pendingBumpTags]
+      pendingBumpBroadcast = false
+      pendingBumpTags.clear()
+      // The counter still advances for every bump: tests and the devtools read
+      // it as "a mutation landed"; only the invalidation is selective.
       set((state) => ({ platformVersion: state.platformVersion + 1 }))
-      invalidateTags([PLATFORM_TAG])
+      invalidateTags(broadcast ? [PLATFORM_TAG, ...tagged] : tagged)
     }, BUMP_COALESCE_MS)
   },
   setBudgetBlocked: (envelope) => set({ budgetBlocked: envelope }),

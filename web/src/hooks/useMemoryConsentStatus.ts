@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { contractApi } from '../api'
 import { parseMemoryConsentStatus, type MemoryConsentStatus } from '../memory-consent-status'
 import { useWorkflowStore } from '../store'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const MEMORY_CONSENT_TAGS = [PLATFORM_TAG, 'org-config', 'memory'] as const
 
 type Snapshot = { orgId: string; value: MemoryConsentStatus }
 
@@ -12,7 +15,7 @@ export function useMemoryConsentStatus(): {
   unavailable: boolean
 } {
   const activeOrgId = useWorkflowStore((state) => state.orgId)
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(MEMORY_CONSENT_TAGS)
   const orgId = activeOrgId ?? 'default'
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [loading, setLoading] = useState(true)

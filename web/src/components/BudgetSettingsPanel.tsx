@@ -9,7 +9,7 @@
  *   2. Per-workflow override — workflow dropdown + monthly USD + policy,
  *      written to `POST /workflows/:id/budget` (admin).
  *
- * Admin-only. Calls `bumpPlatformVersion()` after a successful save so
+ * Admin-only. Calls `bumpPlatformVersion(BUDGET_MUTATION_TAGS)` after a successful save so
  * the Recovery Center Budget tile + Operations bar refetch via their existing
  * `platformVersion` deps.
  *
@@ -25,6 +25,11 @@ import { Button } from "./ui/Button";
 import { FormActions, FormField, FormSection } from "./ui/Form";
 import { StatusSummary } from "./ui/StatusSummary";
 import { parseOrgConfigEntries } from "../lib/org-config-model";
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const BUDGET_MUTATION_TAGS = ['billing', 'org-config'] as const
+
+const BUDGET_TAGS = [PLATFORM_TAG, 'billing', 'org-config', 'workflows'] as const
 
 type OrgBudgetForm = {
   monthlyUsd: string;
@@ -72,7 +77,7 @@ export function BudgetSettingsPanel() {
   const { t } = useT();
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion);
   const addToast = useWorkflowStore((state) => state.addToast);
-  const platformVersion = useWorkflowStore((state) => state.platformVersion);
+  const platformVersion = useInvalidationNonce(BUDGET_TAGS)
 
   const [form, setForm] = useState<OrgBudgetForm>({ monthlyUsd: "0", warnPercent: "80", policy: "warn" });
   const [loading, setLoading] = useState(true);
@@ -201,7 +206,7 @@ export function BudgetSettingsPanel() {
         body: JSON.stringify({ key: ORG_CONFIG_KEYS.policy, value: form.policy }),
       });
       addToast(t("budget.toastOrgSaved"), "success");
-      bumpPlatformVersion();
+      bumpPlatformVersion(BUDGET_MUTATION_TAGS);
     } catch (err) {
       // Surface the failure inline only — the persistent form error below is
       // the single feedback channel here (no duplicate transient toast).
@@ -229,7 +234,7 @@ export function BudgetSettingsPanel() {
       });
       setWfStatus("saved");
       addToast(t("budget.workflow.toastSaved"), "success");
-      bumpPlatformVersion();
+      bumpPlatformVersion(BUDGET_MUTATION_TAGS);
     } catch (err) {
       // Inline-only feedback (the per-workflow status line renders the error);
       // no duplicate transient toast.

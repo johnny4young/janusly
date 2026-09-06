@@ -20,6 +20,11 @@ import { Button } from '@/components/ui/Button'
 import { FormField } from '@/components/ui/Form'
 import { asRecord } from '../lib/guards'
 import './WorkflowRolloutPanel.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const WORKFLOW_ROLLOUT_MUTATION_TAGS = ['workflows', 'rollouts', 'versions'] as const
+
+const WORKFLOW_ROLLOUT_TAGS = [PLATFORM_TAG, 'workflows', 'rollouts', 'versions'] as const
 
 const WorkflowRecoveryQualification = lazy(() => import('./WorkflowRecoveryQualification').then(module => ({
   default: module.WorkflowRecoveryQualification,
@@ -127,7 +132,7 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
   const { t } = useT()
   const confirm = useConfirm()
   const workflowId = useWorkflowStore(state => state.currentWorkflowSaved ? state.currentWorkflowId : undefined)
-  const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const platformVersion = useInvalidationNonce(WORKFLOW_ROLLOUT_TAGS)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const addToast = useWorkflowStore(state => state.addToast)
   const [versions, setVersions] = useState<VersionRow[]>([])
@@ -203,7 +208,7 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
       if (!created) throw new Error(t('workflowRollout.invalidResponse'))
       setRollout(created)
       addToast(t('workflowRollout.started'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(WORKFLOW_ROLLOUT_MUTATION_TAGS)
     } catch (error) {
       addToast(tApiError(error) || (error instanceof Error ? error.message : t('workflowRollout.startFailed')), 'error')
     } finally {
@@ -230,7 +235,7 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
       if (!updated) throw new Error(t('workflowRollout.invalidResponse'))
       setRollout(updated)
       addToast(t(decision === 'promote' ? 'workflowRollout.promoted' : 'workflowRollout.rolledBack'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(WORKFLOW_ROLLOUT_MUTATION_TAGS)
     } catch (error) {
       addToast(tApiError(error) || (error instanceof Error ? error.message : t('workflowRollout.decisionFailed')), 'error')
     } finally {

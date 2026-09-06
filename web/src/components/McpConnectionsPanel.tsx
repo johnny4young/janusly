@@ -13,7 +13,7 @@
  * panel does NOT subscribe to a live discovery stream; status badges
  * reflect the cached `status` column.
  *
- * Admin-only. Calls `bumpPlatformVersion()` after each mutation so
+ * Admin-only. Calls `bumpPlatformVersion(MCP_MUTATION_TAGS)` after each mutation so
  * other panels that depend on `mcp_tool` availability refetch.
  */
 
@@ -31,6 +31,11 @@ import { t as runtimeT } from '../i18n/runtime'
 import { Button } from './ui/Button'
 import { FormActions, FormDisclosure, FormField, FormGrid, FormSection } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const MCP_MUTATION_TAGS = ['mcp'] as const
+
+const MCP_CONNECTION_TAGS = [PLATFORM_TAG, 'mcp', 'credentials'] as const
 
 type ConnectionListEntry = McpConnection & { toolCount?: number; enabledToolCount?: number }
 
@@ -99,7 +104,7 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
   const confirmDialog = useConfirm()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(MCP_CONNECTION_TAGS)
 
   const [connections, setConnections] = useState<ConnectionListEntry[]>([])
   const [toolsByConnection, setToolsByConnection] = useState<Record<string, McpToolDescriptor[]>>({})
@@ -198,7 +203,7 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
         addToast(t('mcpConnections.toasts.connectedNoDiscovery', { reason }), 'info')
       }
       setForm(EMPTY_FORM)
-      bumpPlatformVersion()
+      bumpPlatformVersion(MCP_MUTATION_TAGS)
     } catch (err) {
       setError(err instanceof Error ? err.message : (t('mcpConnections.errors.createFailed')))
     } finally {
@@ -218,7 +223,7 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
           : (t('mcpConnections.toasts.connectionDisabled')),
         'success',
       )
-      bumpPlatformVersion()
+      bumpPlatformVersion(MCP_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('mcpConnections.errors.updateFailed')), 'error')
     }
@@ -237,7 +242,7 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
         const reason = discovery?.error ?? (t('mcpConnections.toasts.unknownReason'))
         addToast(t('mcpConnections.toasts.rediscoveryFailed', { reason }), 'error')
       }
-      bumpPlatformVersion()
+      bumpPlatformVersion(MCP_MUTATION_TAGS)
       await loadToolsFor(connection)
     } catch (err) {
       addToast(tApiError(err) || (t('mcpConnections.errors.rediscoverFailed')), 'error')
@@ -249,7 +254,7 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
     try {
       await api(`/mcp/connections/${encodeURIComponent(connection.alias)}`, { method: 'DELETE' })
       addToast(t('mcpConnections.toasts.deleted'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(MCP_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('mcpConnections.errors.deleteFailed')), 'error')
     }
@@ -263,7 +268,7 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
       })
       // Refetch the descriptor list so the UI reflects the new flags.
       await loadToolsFor(connection)
-      bumpPlatformVersion()
+      bumpPlatformVersion(MCP_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('mcpConnections.errors.updateToolFailed')), 'error')
     }

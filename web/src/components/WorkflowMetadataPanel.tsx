@@ -31,6 +31,9 @@ import { useWorkflowStore } from '../store'
 import { Button } from './ui/Button'
 import { FormActions, FormField } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
+import type { ResourceTag } from '../lib/query-cache'
+
+const WORKFLOW_METADATA_MUTATION_TAGS: readonly ResourceTag[] = ['workflows']
 
 type WorkflowMetadataForm = {
   owners: string[]
@@ -239,7 +242,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
         dirtyRef.current = false
       }
       addToast(t('workflowMetadata.toast.saved'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(WORKFLOW_METADATA_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('workflowMetadata.toast.saveFailed')), 'error')
     } finally {

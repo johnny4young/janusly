@@ -25,10 +25,15 @@ import { EmptyView } from './panel-primitives'
 import { Button } from '@/components/ui/Button'
 import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
 import './experiments/experiments.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const EXPERIMENT_MUTATION_TAGS = ['experiments'] as const
+
+const EXPERIMENT_TAGS = [PLATFORM_TAG, 'experiments'] as const
 
 export function ExperimentsPanel(): React.ReactElement {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(EXPERIMENT_TAGS)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const [experiments, setExperiments] = useState<Experiment[]>([])
@@ -97,7 +102,7 @@ export function ExperimentsPanel(): React.ReactElement {
       setDatasetDescription('')
       setDatasetRetentionDays('')
       addToast(t('experiments.toast.datasetCreated'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(EXPERIMENT_MUTATION_TAGS)
     } catch (error) {
       addToast(tApiError(error) || t('experiments.toast.datasetError'), 'error')
     } finally {
@@ -127,7 +132,7 @@ export function ExperimentsPanel(): React.ReactElement {
       setExperiments((current) => updateExperiment(current, completed))
       setSelected(completed)
       addToast(t('experiments.toast.runCompleted'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(EXPERIMENT_MUTATION_TAGS)
     } catch (error) {
       addToast(tApiError(error) || t('experiments.toast.runError'), 'error')
     } finally {
@@ -249,14 +254,14 @@ export function ExperimentsPanel(): React.ReactElement {
             <div className="section-kicker">{t('experiments.history.kicker')}</div>
             <h3 id="experiments-history-title">{t('experiments.history.title')}</h3>
           </div>
-          <Button variant="ghost" type="button"  onClick={() => bumpPlatformVersion()} aria-label={t('experiments.action.refresh')}>
+          <Button variant="ghost" type="button"  onClick={() => bumpPlatformVersion(EXPERIMENT_MUTATION_TAGS)} aria-label={t('experiments.action.refresh')}>
             <RefreshCw size={14} aria-hidden="true" />
           </Button>
         </div>
         {loadError && (
           <div className="run-input-form-error" role="alert">
             <span>{loadError}</span>
-            <Button variant="ghost" type="button"  onClick={() => bumpPlatformVersion()}>{t('common.retry')}</Button>
+            <Button variant="ghost" type="button"  onClick={() => bumpPlatformVersion(EXPERIMENT_MUTATION_TAGS)}>{t('common.retry')}</Button>
           </div>
         )}
         {loading ? <p className="helper-text">{t('common.loading')}</p> : experiments.length === 0 ? (

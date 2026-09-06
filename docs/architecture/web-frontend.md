@@ -109,14 +109,17 @@ from alert notifications remains a supported alias of the dlq route.
 ## Data invalidation
 
 Panel reads subscribe to the resources they depend on through
-`src/lib/query-cache.ts` (`useInvalidationNonce(tags)`), and mutations name
-what they changed with `invalidateTags`; only panels whose tags intersect
-refetch. The store's `bumpPlatformVersion()` broadcast still exists and also
-invalidates the `platform` bridge tag, so a migrated panel subscribes to
-`[PLATFORM_TAG, ...its tags]` and keeps refreshing on every mutation until the
-mutations it cares about name their tags, at which point it drops the bridge.
-The AI guidance, alert policies and auth policy settings panels are the first
-adopters; the remaining `platformVersion` subscribers migrate the same way.
+`src/lib/query-cache.ts` (`useInvalidationNonce(tags)`, tags typed as
+`ResourceTag`), and mutations name what they changed: the store action
+`bumpPlatformVersion(tags)` invalidates only those tags, while the bare
+`bumpPlatformVersion()` still broadcasts through the `platform` bridge tag.
+Every panel subscribes to `[PLATFORM_TAG, ...its tags]`, so a same-domain
+mutation (a member role change, an MCP connection, a budget save) refreshes
+only the panels that read that resource, and a cross-domain command (a run
+start, a workflow save, a recovery replay) still refreshes everything. Bumps
+within 100 ms coalesce into one invalidation wave. When adding a panel,
+declare its tags next to the component; when adding a mutation, pass the tags
+it changes, or leave the call untagged when the blast radius is unclear.
 
 ## Bundle budgets
 

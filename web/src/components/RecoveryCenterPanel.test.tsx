@@ -16,6 +16,7 @@ import {
   presentOperatorBrief,
   readErrorSignature,
 } from './recovery-center/recovery-center-model'
+import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 
 vi.mock('../api', () => {
   const module = ({ api: vi.fn() })
@@ -1333,6 +1334,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       sinceIso: '2026-07-13T12:00:00.000Z',
     }
     platformVersion = 1
+    act(() => invalidateTags([PLATFORM_TAG]))
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
 
     await waitFor(() => expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(/^All clear$/))
@@ -1469,6 +1471,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       sinceIso: '2026-07-13T12:00:00.000Z',
     }
     platformVersion = 1
+    act(() => invalidateTags([PLATFORM_TAG]))
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[failure] as never} />)
     await waitFor(
       () => expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('1 failure recovered'),

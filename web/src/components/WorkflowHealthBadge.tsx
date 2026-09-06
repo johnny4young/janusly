@@ -27,8 +27,10 @@
 import { useEffect, useState } from 'react'
 import { Activity } from 'lucide-react'
 import { contractApi } from '../api'
-import { useWorkflowStore } from '../store'
 import { tHealthRationale, useT } from '../i18n'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const WORKFLOW_HEALTH_TAGS = [PLATFORM_TAG, 'workflows', 'runs', 'dlq', 'recovery'] as const
 
 type HealthCategory =
   | 'reliability'
@@ -103,7 +105,7 @@ type WorkflowHealthBadgeProps = {
 
 export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHealthBadgeProps) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(WORKFLOW_HEALTH_TAGS)
   const [result, setResult] = useState<HealthScore | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

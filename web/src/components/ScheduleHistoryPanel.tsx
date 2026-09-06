@@ -30,6 +30,7 @@ import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
 import './ScheduleHistoryPanel.css'
 
+
 export type ScheduleHistoryPanelProps = {
   /** Optional explicit workflowId. When omitted, the panel pulls the current
    *  workflow id from the store — matches the WorkflowSloPanel pattern. */

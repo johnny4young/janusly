@@ -35,6 +35,9 @@ import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
 import './RecoveryDeltaCard.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const RECOVERY_DELTA_TAGS = [PLATFORM_TAG, 'workflows', 'recovery', 'dlq', 'runs'] as const
 
 /** Minimum after-side run count for the full delta to render. Mirrors `MIN_RUNS_FOR_DELTA` in the engine. */
 const MIN_RUNS_FOR_DELTA = 5
@@ -91,7 +94,7 @@ export function RecoveryDeltaCard({
   preSaveBeforeSnapshot,
 }: RecoveryDeltaCardProps) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(RECOVERY_DELTA_TAGS)
   const identityContext = useWorkflowStore((state) => state.identityContext)
   const [state, setState] = useState<FetchState>({ kind: 'loading' })
   const [rollback, setRollback] = useState<RollbackState>({ kind: 'idle' })

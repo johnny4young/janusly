@@ -20,6 +20,9 @@ import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import './UsageSummaryCard.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const USAGE_TAGS = [PLATFORM_TAG, 'billing', 'usage', 'runs'] as const
 
 /**
  * Closed enum mirroring `USAGE_BREAKDOWN_DIMENSIONS` in
@@ -123,7 +126,7 @@ export function UsageSummaryCard({
   onRefreshPlatform: () => void
 }) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const platformVersion = useInvalidationNonce(USAGE_TAGS)
   const addToast = useWorkflowStore(state => state.addToast)
   const [activeDims, setActiveDims] = useState<UsageBreakdownDimension[]>([])
   const [breakdown, setBreakdown] = useState<UsageBreakdownBucket[] | null>(null)

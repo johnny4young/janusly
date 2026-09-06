@@ -29,6 +29,9 @@ import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useConfirm } from './ConfirmDialog'
 import { Button } from '@/components/ui/Button'
+import type { ResourceTag } from '../lib/query-cache'
+
+const UPSTREAM_MUTATION_TAGS: readonly ResourceTag[] = ['upstream']
 
 type UpstreamHealthSource = {
   id: string
@@ -149,7 +152,7 @@ export function UpstreamHealthPanel({ canWrite = true }: { canWrite?: boolean } 
         addToast(t('upstreamHealth.toast.created'), 'success')
       }
       cancelForm()
-      bumpPlatformVersion()
+      bumpPlatformVersion(UPSTREAM_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('upstreamHealth.toast.error')), 'error')
     } finally {
@@ -162,7 +165,7 @@ export function UpstreamHealthPanel({ canWrite = true }: { canWrite?: boolean } 
     try {
       await api(`/upstream/sources/${s.id}`, { method: 'DELETE' })
       addToast(t('upstreamHealth.toast.deleted'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(UPSTREAM_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('upstreamHealth.toast.error')), 'error')
     }
@@ -173,7 +176,7 @@ export function UpstreamHealthPanel({ canWrite = true }: { canWrite?: boolean } 
     try {
       await api(`/upstream/sources/${s.id}/check`, { method: 'POST', body: '{}' })
       addToast(t('upstreamHealth.toast.checked'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(UPSTREAM_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('upstreamHealth.toast.error')), 'error')
     } finally {

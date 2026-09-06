@@ -20,6 +20,9 @@ import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
 import { Button } from '@/components/ui/Button'
 import { FieldStack, FormField } from '@/components/ui/Form'
+import type { ResourceTag } from '../lib/query-cache'
+
+const WORKFLOW_SLO_MUTATION_TAGS: readonly ResourceTag[] = ['workflows']
 
 export type WorkflowSloPanelProps = {
   /** Optional explicit workflowId. When omitted, the panel pulls the current
@@ -108,7 +111,7 @@ export function WorkflowSloPanel({ workflowId: explicit, readOnly = false }: Wor
       })
       addToast(t('workflowSlo.saved'), 'success')
       setSlo(next ?? DEFAULT_SLO)
-      bumpPlatformVersion()
+      bumpPlatformVersion(WORKFLOW_SLO_MUTATION_TAGS)
     } catch (err) {
       addToast(
         tApiError(err) || (t('workflowSlo.error', { message: err instanceof Error ? err.message : 'unknown' })),

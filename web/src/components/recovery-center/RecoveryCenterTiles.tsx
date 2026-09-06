@@ -24,7 +24,6 @@ import {
 } from 'lucide-react'
 import type { ActiveTab } from '../../types'
 import { api } from '../../api'
-import { useWorkflowStore } from '../../store'
 import { getResolvedLocale, useT } from '../../i18n'
 import { requestOperationsSection } from '../operations-section-bus'
 import { selectRecoveryTimeMetric } from '../recovery-metrics'
@@ -41,6 +40,9 @@ import {
   type RecoveryMetrics,
 } from './recovery-center-model'
 import './recovery-center.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../../lib/query-cache'
+
+const RECOVERY_TILE_TAGS = [PLATFORM_TAG, 'billing', 'recovery', 'dlq', 'runs'] as const
 
 // ─────────────────────────────────────────────────────────────────────────
 // RecoveryCenterTile — the shared shell every tile renders into.
@@ -242,7 +244,7 @@ export function FailureClustersTile({
 
 export function CalibrationHealthTile() {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(RECOVERY_TILE_TAGS)
   const [status, setStatus] = useState<CalibrationStatusEnvelope | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -343,7 +345,7 @@ export function CalibrationHealthTile() {
 
 export function BudgetTile({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void }) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(RECOVERY_TILE_TAGS)
   const [envelope, setEnvelope] = useState<BudgetEnvelope | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

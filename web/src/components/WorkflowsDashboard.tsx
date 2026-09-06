@@ -18,6 +18,11 @@ import {
   TEXT_SEARCH_MIN_INDEXABLE_CHARACTERS,
 } from '../lib/text-search'
 import { orgConfigValue } from '../lib/org-config-model'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const WORKFLOW_MUTATION_TAGS = ['workflows'] as const
+
+const WORKFLOW_DASHBOARD_TAGS = [PLATFORM_TAG, 'workflows', 'org-config', 'runs'] as const
 
 const FAILED_RUN_STATUSES = new Set(['failed', 'cancelled', 'timed_out'])
 const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
@@ -43,7 +48,7 @@ function useWorkflowsDashboardController({
 }: WorkflowsDashboardProps) {
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
-  const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const platformVersion = useInvalidationNonce(WORKFLOW_DASHBOARD_TAGS)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const [workflows, setWorkflows] = useState<SavedWorkflow[]>([])
   // Callbacks read the latest list through a ref, so an optimistic edit
@@ -296,7 +301,7 @@ function useWorkflowsDashboardController({
             : (t('workflowsDashboard.movedToUngrouped')),
           'success',
         )
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) =>
           prev.map((w) => (w.id === workflowId ? { ...w, folder: previousFolder } : w)),
@@ -328,7 +333,7 @@ function useWorkflowsDashboardController({
             : (t('workflowsDashboard.rowTagRemoved', { tag })),
           'success',
         )
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (w.id === workflowId ? { ...w, tags: prior } : w)))
         addToast(tApiError(err) || (t('workflowsDashboard.rowTagFailed')), 'error')
@@ -362,7 +367,7 @@ function useWorkflowsDashboardController({
           body: JSON.stringify({ from, to: trimmed }),
         })
         addToast(t('workflowsDashboard.folderRenamed', { folder: trimmed }), 'success')
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder: from } : w)))
         addToast(tApiError(err) || (t('workflowsDashboard.renameFailed')), 'error')
@@ -382,7 +387,7 @@ function useWorkflowsDashboardController({
           body: JSON.stringify({ folder }),
         })
         addToast(t('workflowsDashboard.folderDeleted'), 'success')
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder } : w)))
         addToast(tApiError(err) || (t('workflowsDashboard.folderDeleteFailed')), 'error')
@@ -414,7 +419,7 @@ function useWorkflowsDashboardController({
       try {
         await api('/workflows/tags/rename', { method: 'POST', body: JSON.stringify({ from, to: trimmed }) })
         addToast(t('workflowsDashboard.tagRenamed', { tag: trimmed }), 'success')
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)))
         setTagOptions((prev) => {
@@ -441,7 +446,7 @@ function useWorkflowsDashboardController({
       try {
         await api('/workflows/tags/delete', { method: 'POST', body: JSON.stringify({ tag }) })
         addToast(t('workflowsDashboard.tagDeleted'), 'success')
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)))
         setTagOptions((prev) => (prev.includes(tag) ? prev : [...prev, tag].sort((a, b) => a.localeCompare(b, getResolvedLocale()))))
@@ -484,7 +489,7 @@ function useWorkflowsDashboardController({
               : t('workflowsDashboard.backfillCompleted', { count: backfilled }),
           'success',
         )
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) =>
           prev.map((w) => (w.id === workflowId && prior
@@ -553,7 +558,7 @@ function useWorkflowsDashboardController({
             : (t('workflowsDashboard.bulkMovedUngrouped', { count })),
           'success',
         )
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) =>
           prev.map((w) => (priorFolders.has(w.id) ? { ...w, folder: priorFolders.get(w.id) ?? null } : w)),
@@ -598,7 +603,7 @@ function useWorkflowsDashboardController({
             : (t('workflowsDashboard.bulkTagRemoved', { tag, count })),
           'success',
         )
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) =>
           prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)),
@@ -624,7 +629,7 @@ function useWorkflowsDashboardController({
       try {
         await request()
         addToast(t(successKey, { name: current.name }), 'success')
-        bumpPlatformVersion()
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
         addToast(tApiError(err) || (t(failureKey)), 'error')
@@ -668,7 +673,7 @@ function useWorkflowsDashboardController({
       const ok = results.filter((r) => r.status === 'fulfilled').length
       if (ok > 0) addToast(t('workflowsDashboard.bulkRestored', { count: ok }), 'success')
       if (ok < ids.length) addToast(t('workflowsDashboard.bulkRestoreFailed'), 'error')
-      bumpPlatformVersion()
+      bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
     },
     [selectedIds, workflows, addToast, bumpPlatformVersion, t],
   )

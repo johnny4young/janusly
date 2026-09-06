@@ -13,11 +13,21 @@ import { useEffect, useState } from 'react'
 
 export const PLATFORM_TAG = 'platform'
 
+/** Resources a panel can depend on and a mutation can name. `platform` is
+ *  the bridge every untagged `bumpPlatformVersion()` still invalidates. */
+export type ResourceTag =
+  | typeof PLATFORM_TAG
+  | 'alert-policies' | 'auth-policy' | 'auto-healing' | 'billing' | 'campaigns'
+  | 'credentials' | 'dlq' | 'experiments' | 'external-runtimes' | 'health'
+  | 'mcp' | 'members' | 'memory' | 'onboarding' | 'org-config' | 'packs'
+  | 'recovery' | 'roles' | 'rollouts' | 'runs' | 'schedules' | 'scim'
+  | 'slack-interactions' | 'upstream' | 'usage' | 'versions' | 'workflows'
+
 type Listener = () => void
 const subscribers = new Map<string, Set<Listener>>()
 
 /** Run `listener` whenever any of `tags` is invalidated; returns unsubscribe. */
-export function subscribeToTags(tags: readonly string[], listener: Listener): () => void {
+export function subscribeToTags(tags: readonly ResourceTag[], listener: Listener): () => void {
   for (const tag of tags) {
     let set = subscribers.get(tag)
     if (!set) subscribers.set(tag, (set = new Set()))
@@ -35,7 +45,7 @@ export function subscribeToTags(tags: readonly string[], listener: Listener): ()
 
 /** Tell every subscriber of `tags` that its data may be stale. A listener
  *  subscribed through several matching tags runs once. */
-export function invalidateTags(tags: readonly string[]): void {
+export function invalidateTags(tags: readonly ResourceTag[]): void {
   const pending = new Set<Listener>()
   for (const tag of tags) {
     for (const listener of subscribers.get(tag) ?? []) pending.add(listener)
@@ -48,7 +58,7 @@ export function invalidateTags(tags: readonly string[]): void {
  * fetch effect's dependency list where `platformVersion` used to be. `tags`
  * is read on mount; pass a stable array.
  */
-export function useInvalidationNonce(tags: readonly string[]): number {
+export function useInvalidationNonce(tags: readonly ResourceTag[]): number {
   const [nonce, setNonce] = useState(0)
   // eslint-disable-next-line react-hooks/exhaustive-deps -- tags are a stable declaration
   useEffect(() => subscribeToTags(tags, () => setNonce((current) => current + 1)), [])

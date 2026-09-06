@@ -8,7 +8,7 @@
  *   - `auth.sessionTtlSeconds` (range 300..86400)
  *   - `runs.humanFormResumeTtlSeconds` (range 300..604800)
  *
- * Admin-only. Calls `bumpPlatformVersion()` after a successful save so
+ * Admin-only. Calls `bumpPlatformVersion(AUTH_POLICY_MUTATION_TAGS)` after a successful save so
  * any panel that reads org config refetches.
  *
  * Used by `OperationsPage.tsx`.
@@ -25,6 +25,8 @@ import { StatusSummary } from "./ui/StatusSummary";
 import { SwitchField } from "./ui/SwitchField";
 import { parseOrgConfigEntries } from "../lib/org-config-model";
 import { PLATFORM_TAG, useInvalidationNonce } from '@/lib/query-cache';
+
+const AUTH_POLICY_MUTATION_TAGS = ['auth-policy', 'org-config'] as const
 
 const KEYS = {
   allowedEmailDomains: "auth.allowedEmailDomains",
@@ -169,7 +171,7 @@ export function AuthPolicySettingsPanel() {
         }),
       });
       addToast(t("authPolicy.toastSaved"), "success");
-      bumpPlatformVersion();
+      bumpPlatformVersion(AUTH_POLICY_MUTATION_TAGS);
     } catch (err) {
       setError(err instanceof Error ? err.message : (t("authPolicy.errorSave")));
     } finally {

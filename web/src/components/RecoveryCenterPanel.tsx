@@ -65,6 +65,9 @@ import {
   RECOVERY_ALL_CLEAR_WINDOW_MS,
   type RecoveryAllClearRequest,
 } from './recovery-all-clear-bus'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const RECOVERY_CENTER_TAGS = [PLATFORM_TAG, 'recovery', 'runs', 'dlq', 'auto-healing', 'campaigns'] as const
 
 export type RecoveryCenterPanelProps = {
   runs: RunSummary[]
@@ -102,7 +105,7 @@ const RECOVERY_IMPACT_IDLE_POLL_MS = 60_000
 
 function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   const { t, i18n } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(RECOVERY_CENTER_TAGS)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const { status: memoryConsentStatus } = useMemoryConsentStatus()
   const activeOrgId = useWorkflowStore((state) => state.orgId)

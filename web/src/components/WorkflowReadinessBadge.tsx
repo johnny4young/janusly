@@ -27,6 +27,9 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import type { ReadinessResult } from '../types'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const WORKFLOW_READINESS_TAGS = [PLATFORM_TAG, 'workflows', 'credentials', 'mcp'] as const
 
 export function WorkflowReadinessBadge({
   onOpenProblems,
@@ -44,7 +47,7 @@ export function WorkflowReadinessBadge({
   // returns the stable function reference, so the effect below only refires
   // for an explicit platform tick or serialized-workflow revision.
   const getWorkflowJson = useWorkflowStore((state) => state.getWorkflowJson)
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(WORKFLOW_READINESS_TAGS)
   const workflowRevision = useWorkflowStore((state) => state.workflowRevision)
   const [result, setResult] = useState<ReadinessResult | null>(null)
   const [loading, setLoading] = useState(false)

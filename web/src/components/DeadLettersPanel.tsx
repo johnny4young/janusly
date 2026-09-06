@@ -1,6 +1,6 @@
 /**
  * Dead-letter operations panel — surfaces `dead_letters` rows with replay
- * + resolve actions. Calls `bumpPlatformVersion()` after a successful
+ * + resolve actions. Calls `bumpPlatformVersion(DEAD_LETTER_MUTATION_TAGS)` after a successful
  * replay so the Runs panel re-fetches and the row's status flips.
  *
  * Mounted by `RunsPanel.tsx` for Activity → Recover.
@@ -46,6 +46,11 @@ export type {
   RecoveryDrillProvenance,
   SuspectVersionInfo,
 } from './dead-letter-types'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const DEAD_LETTER_MUTATION_TAGS = ['dlq', 'recovery', 'runs'] as const
+
+const DEAD_LETTER_TAGS = [PLATFORM_TAG, 'dlq', 'recovery', 'runs', 'auto-healing'] as const
 
 /** Fixed DLQ row height (54px) plus the 6px `.we-list` gap. The matching
  *  `.we-dlq-row` rule prevents metadata wrapping so virtual offsets stay
@@ -115,7 +120,7 @@ export function DeadLettersPanel({
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
   const addToast = useWorkflowStore((state) => state.addToast)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(DEAD_LETTER_TAGS)
   // Multi-select for bulk resolve. `selectionMode` reveals per-row checkboxes;
   // `selectedIds` holds the ticked rows. Orthogonal to `selectedId` (the
   // single-row detail box), which is hidden while selecting.
@@ -188,7 +193,7 @@ export function DeadLettersPanel({
 
       if (result.resolved > 0) {
         await requestRecoveryAllClearIfQueueEmpty()
-        bumpPlatformVersion()
+        bumpPlatformVersion(DEAD_LETTER_MUTATION_TAGS)
         refreshQueue()
         void onRefresh()
       }
@@ -224,7 +229,7 @@ export function DeadLettersPanel({
       if (!isBulkReplayResult(result)) throw new Error(t('dlq.bulkReplayFailed'))
 
       if (result.replayed > 0) {
-        bumpPlatformVersion()
+        bumpPlatformVersion(DEAD_LETTER_MUTATION_TAGS)
         refreshQueue()
         void onRefresh()
       }
@@ -255,7 +260,7 @@ export function DeadLettersPanel({
         : t('replayCampaign.created', { name: result.campaign.name, count: result.campaign.totalCount }),
       'success',
     )
-    bumpPlatformVersion()
+    bumpPlatformVersion(DEAD_LETTER_MUTATION_TAGS)
     refreshQueue()
     void onRefresh()
     exitSelection()

@@ -50,6 +50,9 @@ import {
 } from './operations-section-bus'
 import { useT } from '../i18n'
 import './OperationsPage.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const OPERATIONS_TAGS = [PLATFORM_TAG, 'health', 'org-config', 'runs'] as const
 
 const FailureClustersCard = lazy(() => import('./FailureClustersCard').then(module => ({ default: module.FailureClustersCard })))
 const BudgetSettingsPanel = lazy(() => import('./BudgetSettingsPanel').then(module => ({ default: module.BudgetSettingsPanel })))
@@ -133,7 +136,7 @@ export function OperationsPage({
   onOpenTab?: (tab: ActiveTab) => void
 }) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(OPERATIONS_TAGS)
   const budgetBlocked = useWorkflowStore((state) => state.budgetBlocked)
   const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
   const [error, setError] = useState<string | null>(null)

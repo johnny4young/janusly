@@ -24,12 +24,12 @@ describe('tagged invalidation', () => {
   })
 
   it('advances a hook nonce for its tags and stops on unmount', () => {
-    const tags = ['org-config']
+    const tags = ['org-config'] as const
     const { result, unmount } = renderHook(() => useInvalidationNonce(tags))
     expect(result.current).toBe(0)
     act(() => invalidateTags(['org-config']))
     expect(result.current).toBe(1)
-    act(() => invalidateTags(['unrelated']))
+    act(() => invalidateTags(['usage']))
     expect(result.current).toBe(1)
     unmount()
     expect(() => invalidateTags(['org-config'])).not.toThrow()

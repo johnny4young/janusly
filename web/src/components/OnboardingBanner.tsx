@@ -23,6 +23,9 @@ import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { api } from '../api'
 import { Button } from '@/components/ui/Button'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const ONBOARDING_TAGS = [PLATFORM_TAG, 'onboarding', 'credentials', 'workflows', 'runs', 'packs', 'mcp'] as const
 
 /**
  * Steps whose copy changes when no AI provider key is configured — both have
@@ -45,7 +48,7 @@ export function OnboardingBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab) =>
   const authReady = useWorkflowStore((state) => state.authReady)
   const identityReady = useWorkflowStore((state) => state.identityReady)
   const currentOrganizationId = useWorkflowStore((state) => state.identityContext?.currentOrganizationId ?? null)
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(ONBOARDING_TAGS)
 
   // Derive-on-read: refetch the snapshot on boot and on any cross-panel
   // mutation. A transient failure keeps the prior state (no flicker).

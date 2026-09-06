@@ -11,7 +11,7 @@
  *     `inheritsFrom` rank inheritance + an explicit permission set.
  *   - Edit / delete custom roles (built-ins can't be deleted).
  *
- * Admin-only. Calls `bumpPlatformVersion()` after a successful save so
+ * Admin-only. Calls `bumpPlatformVersion(PERMISSION_MUTATION_TAGS)` after a successful save so
  * panels that depend on roles (MembersPanel) refetch.
  *
  * Used by `OperationsPage.tsx`.
@@ -28,6 +28,9 @@ import { Button } from "./ui/Button";
 import { FormActions, FormField, FormGrid } from "./ui/Form";
 import { StatusSummary } from "./ui/StatusSummary";
 import './PermissionGrantsPanel.css'
+import type { ResourceTag } from '../lib/query-cache'
+
+const PERMISSION_MUTATION_TAGS: readonly ResourceTag[] = ['roles', 'members']
 
 type Role = "viewer" | "editor" | "admin";
 
@@ -150,7 +153,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
         body: JSON.stringify({ grantedPermissions: granted }),
       });
       addToast(t("permissions.toastUpdated", { role: role.name }), "success");
-      bumpPlatformVersion();
+      bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
       addToast(tApiError(err) || (t("permissions.errorSave")), "error");
     } finally {
@@ -163,7 +166,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
     try {
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
       addToast(t("permissions.toastReverted", { role: role.name }), "success");
-      bumpPlatformVersion();
+      bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
       addToast(tApiError(err) || (t("permissions.errorRevert")), "error");
     }
@@ -174,7 +177,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
     try {
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
       addToast(t("permissions.toastDeleted", { role: role.name }), "success");
-      bumpPlatformVersion();
+      bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
       addToast(tApiError(err) || (t("permissions.errorDelete")), "error");
     }
@@ -213,7 +216,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
       setNewRoleDescription("");
       setNewRolePermissions(new Set());
       setNewRoleInherits("viewer");
-      bumpPlatformVersion();
+      bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
       setError(err instanceof Error ? err.message : (t("permissions.errorCreate")));
     } finally {

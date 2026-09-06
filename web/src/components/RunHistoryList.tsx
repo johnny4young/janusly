@@ -27,6 +27,9 @@ import { ValidationEvidencePill } from './ValidationEvidencePill'
 import { SemanticOutcomePill } from './SemanticOutcomePill'
 import { SelectControl } from '@/components/ui/Form'
 import './RunHistoryList.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const RUN_HISTORY_TAGS = [PLATFORM_TAG, 'runs', 'dlq', 'recovery'] as const
 
 /** Fixed card pitch for the compact row plus its 8px bottom margin. */
 const RUN_HISTORY_ROW_HEIGHT = 156
@@ -67,7 +70,7 @@ export function RunHistoryList({
 }) {
   const { t, i18n } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
-  const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const platformVersion = useInvalidationNonce(RUN_HISTORY_TAGS)
   const [workflowId, setWorkflowId] = useState('')
   const [status, setStatus] = useState<RunStatus | ''>('')
   const [retryNonce, setRetryNonce] = useState(0)

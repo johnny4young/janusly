@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { useMemoryConsentStatus } from './useMemoryConsentStatus'
+import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 
 vi.mock('../api', () => {
   const module = ({ api: vi.fn() })
@@ -41,7 +42,7 @@ describe('useMemoryConsentStatus', () => {
     const { result } = renderHook(() => useMemoryConsentStatus())
     await waitFor(() => expect(result.current.status).toEqual(VALID_STATUS))
 
-    act(() => useWorkflowStore.setState({ platformVersion: 1 }))
+    act(() => invalidateTags([PLATFORM_TAG]))
 
     await waitFor(() => expect(result.current.unavailable).toBe(true))
     expect(result.current.status).toBeNull()

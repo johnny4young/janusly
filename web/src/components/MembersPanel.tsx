@@ -1,6 +1,6 @@
 /**
  * Org members panel — invite by email + role, change a member's role,
- * remove a member. Calls `bumpPlatformVersion()` after every mutation so
+ * remove a member. Calls `bumpPlatformVersion(MEMBER_MUTATION_TAGS)` after every mutation so
  * cross-panel state (RBAC checks elsewhere) refetches.
  *
  * Used by `RightPanel.tsx` (the `members` tab).
@@ -26,6 +26,11 @@ import { Button } from './ui/Button'
 import { FieldStack, FormActions, FormField, SelectControl } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
 import './MembersPanel.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const MEMBER_MUTATION_TAGS = ['members', 'roles'] as const
+
+const MEMBER_TAGS = [PLATFORM_TAG, 'members', 'roles', 'scim'] as const
 
 type OrgRoleEntry = {
   name: string
@@ -84,7 +89,7 @@ export function MembersPanel() {
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
-  const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const platformVersion = useInvalidationNonce(MEMBER_TAGS)
   const identityContext = useWorkflowStore(state => state.identityContext)
   const setIdentityContext = useWorkflowStore(state => state.setIdentityContext)
   const confirm = useConfirm()
@@ -204,7 +209,7 @@ export function MembersPanel() {
       // Reset the role to the least-privilege default so the next invite
       // doesn't silently reuse the previous (possibly elevated) selection.
       setRole('viewer')
-      bumpPlatformVersion()
+      bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await Promise.all([load(), loadInvitations()])
     } catch (error) {
       addToast(tApiError(error) || (t('members.inviteFailed')), 'error')
@@ -225,7 +230,7 @@ export function MembersPanel() {
     try {
       await api(`/members/invitations/${encodeURIComponent(invitation.id)}/revoke`, { method: 'POST' })
       addToast(t('members.invitations.revokeDone', { email: invitation.email }), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await loadInvitations()
     } catch (error) {
       addToast(tApiError(error) || t('members.invitations.revokeFailed'), 'error')
@@ -241,7 +246,7 @@ export function MembersPanel() {
         body: JSON.stringify({ userId, role: nextRole }),
       })
       addToast(t('members.toastRoleUpdated'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await load()
     } catch (error) {
       addToast(tApiError(error) || (t('members.updateFailed')), 'error')
@@ -253,7 +258,7 @@ export function MembersPanel() {
     try {
       await api(`/members?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' })
       addToast(t('members.toastRemoved'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await load()
     } catch (error) {
       addToast(tApiError(error) || (t('members.removeFailed')), 'error')
@@ -278,7 +283,7 @@ export function MembersPanel() {
         })
       }
       addToast(t('members.toastOwnershipTransferred'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await load()
     } catch (error) {
       addToast(tApiError(error) || t('members.transferFailed'), 'error')

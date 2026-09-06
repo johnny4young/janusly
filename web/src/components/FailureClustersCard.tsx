@@ -28,7 +28,6 @@ import type {
   FailureClusters as ClustersResponse,
 } from '../lib/recovery-metrics-model'
 import { EmptyState } from './EmptyState'
-import { useWorkflowStore } from '../store'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
 import type { DeadLetter } from './dead-letter-types'
@@ -36,6 +35,9 @@ import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { Button } from '@/components/ui/Button'
 import './FailureClustersCard.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const FAILURE_CLUSTER_TAGS = [PLATFORM_TAG, 'dlq', 'recovery', 'runs'] as const
 
 type ClusterData = ClustersResponse & {
   fetchedAtMs: number
@@ -84,7 +86,7 @@ function severityForCategory(category: ClusterCategory): 'pass' | 'warn' | 'fail
 
 export function FailureClustersCard({ canRecover = true }: { canRecover?: boolean }) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(FAILURE_CLUSTER_TAGS)
   const [data, setData] = useState<ClusterData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

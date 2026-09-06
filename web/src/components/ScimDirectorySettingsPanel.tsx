@@ -10,7 +10,7 @@
  * directory form is where the admin configures those mappings (a synced
  * group is picked by name, not by raw id).
  *
- * Admin-only. Calls `bumpPlatformVersion()` after a successful
+ * Admin-only. Calls `bumpPlatformVersion(SCIM_MUTATION_TAGS)` after a successful
  * attach / revoke / mapping change so other panels that depend on
  * membership counts refetch.
  *
@@ -26,6 +26,11 @@ import { getResolvedLocale, useT } from "../i18n";
 import { useConfirm } from "./ConfirmDialog";
 import { Button } from '@/components/ui/Button'
 import { FormField, SelectControl } from '@/components/ui/Form'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const SCIM_MUTATION_TAGS = ['scim', 'members', 'roles'] as const
+
+const SCIM_TAGS = [PLATFORM_TAG, 'scim', 'roles'] as const
 
 type DefaultRole = "viewer" | "editor" | "admin";
 type DirectoryStatus = "active" | "revoked";
@@ -80,7 +85,7 @@ export function ScimDirectorySettingsPanel({
   const confirmDialog = useConfirm();
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion);
   const addToast = useWorkflowStore((state) => state.addToast);
-  const platformVersion = useWorkflowStore((state) => state.platformVersion);
+  const platformVersion = useInvalidationNonce(SCIM_TAGS)
 
   const [directories, setDirectories] = useState<ScimDirectoryRow[]>([]);
   const [mappings, setMappings] = useState<ScimGroupRoleMappingRow[]>([]);
@@ -160,7 +165,7 @@ export function ScimDirectorySettingsPanel({
       });
       addToast(t("scim.toast.attached"), "success");
       setForm(EMPTY_FORM);
-      bumpPlatformVersion();
+      bumpPlatformVersion(SCIM_MUTATION_TAGS);
     } catch (err) {
       setError(err instanceof Error ? err.message : (t("scim.errorAttach")));
     } finally {
@@ -175,7 +180,7 @@ export function ScimDirectorySettingsPanel({
     try {
       await api(`/org/scim/directories/${row.id}`, { method: "DELETE" });
       addToast(t("scim.toast.disconnected"), "success");
-      bumpPlatformVersion();
+      bumpPlatformVersion(SCIM_MUTATION_TAGS);
     } catch (err) {
       addToast(err instanceof Error ? err.message : (t("scim.errorDisconnect")), "error");
     }
@@ -192,7 +197,7 @@ export function ScimDirectorySettingsPanel({
       });
       addToast(t("scim.mappings.toast.added"), "success");
       setMappingForm({ providerGroupId: "", role: "viewer" });
-      bumpPlatformVersion();
+      bumpPlatformVersion(SCIM_MUTATION_TAGS);
     } catch (err) {
       addToast(err instanceof Error ? err.message : (t("scim.mappings.errorAdd")), "error");
     } finally {
@@ -213,7 +218,7 @@ export function ScimDirectorySettingsPanel({
         body: JSON.stringify({ role }),
       });
       addToast(t("scim.mappings.toast.updated"), "success");
-      bumpPlatformVersion();
+      bumpPlatformVersion(SCIM_MUTATION_TAGS);
     } catch (err) {
       setMappings((current) => current.map((m) => (m.id === row.id ? { ...m, role: previousRole } : m)));
       addToast(err instanceof Error ? err.message : (t("scim.mappings.errorUpdate")), "error");
@@ -227,7 +232,7 @@ export function ScimDirectorySettingsPanel({
     try {
       await api(`/org/scim/group-role-mappings/${row.id}`, { method: "DELETE" });
       addToast(t("scim.mappings.toast.removed"), "success");
-      bumpPlatformVersion();
+      bumpPlatformVersion(SCIM_MUTATION_TAGS);
     } catch (err) {
       addToast(err instanceof Error ? err.message : (t("scim.mappings.errorRemove")), "error");
     }
@@ -249,7 +254,7 @@ export function ScimDirectorySettingsPanel({
         }),
         "success",
       );
-      bumpPlatformVersion();
+      bumpPlatformVersion(SCIM_MUTATION_TAGS);
     } catch (err) {
       addToast(err instanceof Error ? err.message : (t("scim.mappings.resync.error")), "error");
     } finally {

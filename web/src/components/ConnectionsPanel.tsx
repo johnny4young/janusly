@@ -27,6 +27,9 @@ import { EmptyView, PanelChrome } from './panel-primitives'
 import { Button } from './ui/Button'
 import { FieldStack, FormField, SelectControl, TextInput } from './ui/Form'
 import './ConnectionsPanel.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const CONNECTION_TAGS = [PLATFORM_TAG, 'credentials'] as const
 
 const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 const CONNECTION_ROW_HEIGHT = 166
@@ -269,7 +272,7 @@ export function ConnectionsPanel({
   canWrite: boolean
 }) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(CONNECTION_TAGS)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const confirm = useConfirm()

@@ -12,6 +12,9 @@ import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import './ReplayCampaignsCard.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const REPLAY_CAMPAIGN_TAGS = [PLATFORM_TAG, 'campaigns', 'recovery', 'dlq'] as const
 
 type ReplayCampaign = {
   id: string
@@ -63,7 +66,7 @@ function campaignList(value: unknown): ReplayCampaign[] {
 
 export function ReplayCampaignsCard({ canCancel = true }: { canCancel?: boolean }) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(REPLAY_CAMPAIGN_TAGS)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const [campaigns, setCampaigns] = useState<ReplayCampaign[]>([])

@@ -6,7 +6,7 @@
  * Reads `GET /auto-healing/pending` once at mount and on every
  * `platformVersion` bump. Each row shows the cluster signature, the
  * LLM's `approachLabel` chip, confidence, and Apply / Decline
- * buttons. Mutation buttons call `bumpPlatformVersion()` so the rest
+ * buttons. Mutation buttons call `bumpPlatformVersion(AUTO_HEALING_MUTATION_TAGS)` so the rest
  * of the Recovery Center refetches.
  *
  * Empty state has two sub-states:
@@ -33,6 +33,11 @@ import {
 } from '@/lib/technical-recovery-autonomy'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
 import './AutoHealingPendingCard.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const AUTO_HEALING_MUTATION_TAGS = ['auto-healing', 'dlq', 'recovery', 'runs'] as const
+
+const AUTO_HEALING_TAGS = [PLATFORM_TAG, 'auto-healing', 'dlq', 'recovery'] as const
 
 type PendingRow = {
   id: string
@@ -106,7 +111,7 @@ function readAutonomyAssessment(
 
 export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boolean }) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(AUTO_HEALING_TAGS)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const [rows, setRows] = useState<PendingRow[] | null>(null)
   const [hidden, setHidden] = useState(false)
@@ -201,7 +206,7 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
       if (accepted && result.status === 'pending') {
         setNotice(t('autoHealing.publicationPending'))
       }
-      bumpPlatformVersion()
+      bumpPlatformVersion(AUTO_HEALING_MUTATION_TAGS)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('autoHealing.error.decide'))
     } finally {

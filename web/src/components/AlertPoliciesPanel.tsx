@@ -29,6 +29,8 @@ import type { Credential as CredentialRecord } from '../types'
 import { PLATFORM_TAG, useInvalidationNonce } from '@/lib/query-cache'
 import './AlertPoliciesPanel.css'
 
+const ALERT_POLICY_MUTATION_TAGS = ['alert-policies'] as const
+
 type Channel = {
   destination: AlertDestination
   credentialName: string
@@ -291,7 +293,7 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
       setForm(EMPTY_FORM)
       setEditingId(null)
       setShowForm(false)
-      bumpPlatformVersion()
+      bumpPlatformVersion(ALERT_POLICY_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('alerts.toast.error')), 'error')
     } finally {
@@ -306,7 +308,7 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
         body: JSON.stringify({ enabled: !policy.enabled }),
       })
       addToast(t('alerts.toast.updated'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(ALERT_POLICY_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('alerts.toast.error')), 'error')
     }
@@ -317,7 +319,7 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
     try {
       await api(`/alerts/policies/${policy.id}`, { method: 'DELETE' })
       addToast(t('alerts.toast.deleted'), 'success')
-      bumpPlatformVersion()
+      bumpPlatformVersion(ALERT_POLICY_MUTATION_TAGS)
     } catch (err) {
       addToast(tApiError(err) || (t('alerts.toast.error')), 'error')
     }

@@ -25,6 +25,9 @@ import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
 import './VersionHistoryPanel.css'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const VERSION_HISTORY_TAGS = [PLATFORM_TAG, 'workflows', 'versions', 'rollouts'] as const
 
 type VersionRow = { id: string; version: number; dagJson: WorkflowDefinition; createdAt?: string }
 
@@ -100,7 +103,7 @@ export function VersionHistoryPanel() {
   const identityContext = useWorkflowStore(state => state.identityContext)
   const hydrateWorkflow = useWorkflowStore(state => state.hydrateWorkflow)
   const addToast = useWorkflowStore(state => state.addToast)
-  const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const platformVersion = useInvalidationNonce(VERSION_HISTORY_TAGS)
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [hasMoreVersions, setHasMoreVersions] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)

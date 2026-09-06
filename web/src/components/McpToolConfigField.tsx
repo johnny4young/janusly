@@ -18,7 +18,6 @@
 import { useEffect, useState } from 'react'
 import type { JsonObject, McpConnection, McpToolDescriptor } from '../types'
 import { api } from '../api'
-import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import {
   asJsonObject,
@@ -27,10 +26,13 @@ import {
   readConfigString,
 } from './quick-config-fields'
 import { FormField } from './ui/Form'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+
+const MCP_TOOL_TAGS = [PLATFORM_TAG, 'mcp'] as const
 
 export function McpToolConfigField({ scope, config, onPatch }: { scope: string; config: JsonObject; onPatch: (next: Record<string, unknown>) => void }) {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const platformVersion = useInvalidationNonce(MCP_TOOL_TAGS)
   const [connections, setConnections] = useState<McpConnection[]>([])
   const [toolsByAlias, setToolsByAlias] = useState<Record<string, McpToolDescriptor[]>>({})
   const [loading, setLoading] = useState(true)
