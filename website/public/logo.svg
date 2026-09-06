@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 64" width="220" height="64" role="img" aria-label="Janusly">
+  <defs>
+    <linearGradient id="janusly-lockup-grad" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#245BFF"></stop>
+      <stop offset="1" stop-color="#06B6D4"></stop>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#janusly-lockup-grad)"></rect>
+  <path d="M20 20 L32 44 L44 20" stroke="#FFFFFF" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+  <circle cx="20" cy="20" r="5" fill="#FFFFFF"></circle>
+  <circle cx="44" cy="20" r="5" fill="#FFFFFF"></circle>
+  <circle cx="32" cy="44" r="5" fill="#FFFFFF"></circle>
+  <text x="80" y="42" font-family="Inter Tight, Avenir Next, system-ui, sans-serif" font-size="26" font-weight="800" letter-spacing="-0.02em" fill="#0F172A">Janusly</text>
+</svg>

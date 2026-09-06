@@ -1,0 +1,80 @@
+---
+import { type Locale, t } from '~/lib/i18n';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = t(locale);
+const faqSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: copy.faq.items.map((item) => ({
+    '@type': 'Question',
+    name: item.q,
+    acceptedAnswer: { '@type': 'Answer', text: item.a },
+  })),
+};
+---
+
+<section id="faq" class="section">
+  <div class="container faq">
+    <div class="section-head">
+      <span class="kicker">{copy.faq.kicker}</span>
+      <h2 class="h2">{copy.faq.title}</h2>
+    </div>
+    <dl class="faq-list">
+      {
+        copy.faq.items.map((item) => (
+          <div class="faq-item">
+            <dt>{item.q}</dt>
+            <dd>{item.a}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </div>
+  <script is:inline type="application/ld+json" set:html={JSON.stringify(faqSchema)} />
+</section>
+
+<style>
+  .faq {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    gap: 4rem;
+  }
+  .faq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+    margin: 0;
+  }
+  .faq-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-bottom: 1.75rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .faq-item:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+  dt {
+    font-size: 1.0625rem;
+    font-weight: 700;
+  }
+  dd {
+    margin: 0;
+    font-size: var(--text-body);
+    line-height: 1.55;
+    color: var(--color-ink-soft);
+  }
+  @media (max-width: 900px) {
+    .faq {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2rem;
+    }
+  }
+</style>

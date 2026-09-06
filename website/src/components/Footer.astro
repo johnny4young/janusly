@@ -1,0 +1,63 @@
+---
+import LanguageSelect from './LanguageSelect.astro';
+import { SITE } from '~/lib/site';
+import { type Locale, t } from '~/lib/i18n';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = t(locale);
+---
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="/logomark.svg" alt="" width="24" height="24" />
+      <span>{copy.footer.rights}</span>
+    </div>
+    <nav class="footer-links" aria-label="Footer">
+      <a href={SITE.docsUrl} rel="external noopener">{copy.footer.docs}</a>
+      <a href={SITE.social.githubUrl} rel="external noopener">{copy.footer.github}</a>
+      <a href={SITE.securityUrl} rel="external noopener">{copy.footer.security}</a>
+      <a href={`mailto:${SITE.contactEmail}`}>{copy.footer.contact}</a>
+    </nav>
+    <LanguageSelect locale={locale} currentPath={Astro.url.pathname} />
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    padding: 2.5rem 0;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .footer-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem 2rem;
+  }
+  .footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.875rem;
+    color: var(--color-muted);
+  }
+  .footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.5rem;
+  }
+  .footer-links a {
+    font-size: 0.875rem;
+    color: var(--color-muted);
+  }
+  .footer-links a:hover {
+    color: var(--color-ink);
+  }
+</style>

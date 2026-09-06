@@ -1,0 +1,86 @@
+---
+import { SITE } from '~/lib/site';
+import { type Locale, t } from '~/lib/i18n';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = t(locale);
+---
+
+<section class="final">
+  <div class="container final-inner">
+    <div class="final-copy">
+      <h2>{copy.finalCta.title}</h2>
+      <p>{copy.finalCta.body}</p>
+    </div>
+    <div class="final-actions">
+      <a href={SITE.getStartedUrl} class="btn final-primary" rel="external noopener">{copy.common.getStarted}</a>
+      <a href={SITE.docsUrl} class="btn final-secondary" rel="external noopener">{copy.common.readDocs}</a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .final {
+    padding: 0 0 var(--space-section);
+  }
+  .final-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 3rem;
+    padding: clamp(2rem, 4vw, 3.5rem) clamp(1.5rem, 4vw, 4rem);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-accent) 100%);
+    color: #ffffff;
+    box-shadow: 0 24px 48px rgba(36, 91, 255, 0.24);
+  }
+  .final-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    max-width: 40rem;
+  }
+  .final-copy h2 {
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    line-height: 1.1;
+    letter-spacing: var(--tracking-tight);
+    font-weight: 800;
+  }
+  .final-copy p {
+    font-size: 1.0625rem;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.86);
+  }
+  .final-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+  }
+  .final-primary {
+    border-color: #ffffff;
+    background: #ffffff;
+    color: var(--color-ink);
+  }
+  .final-secondary {
+    border-color: rgba(255, 255, 255, 0.5);
+    background: transparent;
+    color: #ffffff;
+    box-shadow: none;
+  }
+  .final-secondary:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+  }
+  @media (max-width: 900px) {
+    .final-inner {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  }
+</style>

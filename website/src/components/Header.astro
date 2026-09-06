@@ -1,0 +1,169 @@
+---
+import LanguageSelect from './LanguageSelect.astro';
+import { NAV, SITE } from '~/lib/site';
+import { type Locale, localizePath, t } from '~/lib/i18n';
+
+interface Props {
+  locale: Locale;
+  currentPath: string;
+}
+
+const { locale, currentPath } = Astro.props;
+const copy = t(locale);
+---
+
+<a href="#main" class="skip-link">{copy.common.skipToContent}</a>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <a href={localizePath(locale, '/')} class="brand" aria-label={copy.common.homeAria}>
+      <img src="/logomark.svg" alt="" width="32" height="32" />
+      <span class="brand-name">Janusly</span>
+    </a>
+
+    <nav class="primary-nav" aria-label={copy.common.primaryNav}>
+      {NAV.map((item) => <a href={item.href} class="nav-link">{copy.nav[item.key]}</a>)}
+      <a href={SITE.docsUrl} class="nav-link" rel="external noopener">{copy.nav.docs}</a>
+    </nav>
+
+    <div class="header-actions">
+      <div class="header-language"><LanguageSelect locale={locale} currentPath={currentPath} /></div>
+      <a href={SITE.social.githubUrl} class="btn btn-sm header-github" rel="external noopener">{copy.common.github}</a>
+      <a href={SITE.getStartedUrl} class="btn btn-primary btn-sm" rel="external noopener">{copy.common.getStarted}</a>
+      <button id="nav-toggle" class="nav-toggle" aria-label={copy.common.openMenu} aria-expanded="false" aria-controls="mobile-nav">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </div>
+
+  <nav id="mobile-nav" class="mobile-nav" hidden aria-label={copy.common.mobileNav}>
+    {NAV.map((item) => <a href={item.href} class="mobile-nav-link">{copy.nav[item.key]}</a>)}
+    <a href={SITE.docsUrl} class="mobile-nav-link" rel="external noopener">{copy.nav.docs}</a>
+    <a href={SITE.social.githubUrl} class="mobile-nav-link" rel="external noopener">{copy.common.github}</a>
+    <div class="mobile-language"><LanguageSelect locale={locale} currentPath={currentPath} /></div>
+  </nav>
+</header>
+
+<!-- External on purpose: the CSP allows script-src 'self' only, and the
+     postbuild hash step refuses executable inline scripts. -->
+<script is:inline defer src="/scripts/nav.js"></script>
+
+<style>
+  .skip-link {
+    position: absolute;
+    left: 1rem;
+    top: -3rem;
+    z-index: 100;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm);
+    background: var(--color-ink);
+    color: #ffffff;
+  }
+  .skip-link:focus {
+    top: 1rem;
+  }
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    border-bottom: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: saturate(160%) blur(8px);
+  }
+  .header-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    height: 72px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--color-ink);
+  }
+  .brand-name {
+    font-size: 1.25rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .primary-nav {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+  }
+  .nav-link {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-ink-soft);
+  }
+  .nav-link:hover {
+    color: var(--color-ink);
+  }
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .nav-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .mobile-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 1.25rem 1.25rem;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .mobile-nav[hidden] {
+    display: none;
+  }
+  .mobile-nav-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 0.5rem;
+    border-radius: var(--radius-sm);
+    color: var(--color-ink);
+    font-weight: 600;
+  }
+  .mobile-nav-link:hover {
+    background: var(--color-surface-muted);
+  }
+  .mobile-language {
+    display: flex;
+    padding: 0.75rem 0.5rem 0;
+  }
+  @media (max-width: 960px) {
+    .primary-nav,
+    .header-github,
+    .header-language {
+      display: none;
+    }
+    .nav-toggle {
+      display: inline-flex;
+    }
+  }
+  @media (max-width: 400px) {
+    .header-inner {
+      gap: 0.75rem;
+    }
+    .brand-name {
+      font-size: 1.125rem;
+    }
+  }
+  @media (min-width: 961px) {
+    .mobile-nav {
+      display: none !important;
+    }
+  }
+</style>

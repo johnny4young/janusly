@@ -145,6 +145,24 @@ bytes no minifier removes; the caps were raised once for that in 2026-09 and
 are not raised for features. The bundle held no duplicated modules and the
 i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
 
+## Marketing site (`website/`)
+
+`website/` is the janusly.app landing: Astro 7 + Tailwind 4, English at `/`
+and Spanish at `/es`, a standalone npm package (not the pnpm web project and
+not part of `make verify`). Copy lives in `src/i18n/{en,es}.ts` and the
+parity test keeps both dictionaries key-for-key. Scripts stay external under
+`public/scripts/` because `public/_headers` ships a `script-src 'self'` CSP
+and the postbuild step refuses inline executable scripts.
+
+```bash
+cd website && npm ci && npm run check && npm run build && npm run preview
+```
+
+`.github/workflows/deploy-website.yml` deploys `dist/` to the Cloudflare
+Pages project `janusly-web` on every push to `main` that touches `website/`;
+it needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets and,
+optionally, the `PUBLIC_CF_ANALYTICS_TOKEN` variable.
+
 ## Conventions
 
 - HTTP handlers: `s.route(mux, pattern, gate, handler)` with the gate

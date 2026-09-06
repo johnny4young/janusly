@@ -1,0 +1,101 @@
+---
+import { Icon } from 'astro-icon/components';
+import { type Locale, t } from '~/lib/i18n';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = t(locale);
+const cards = [
+  { icon: 'lucide:sparkles', ...copy.why.design, featured: false },
+  { icon: 'lucide:play', ...copy.why.run, featured: false },
+  { icon: 'lucide:rotate-ccw', ...copy.why.recover, featured: true },
+  { icon: 'lucide:bar-chart-3', ...copy.why.operate, featured: false },
+];
+---
+
+<section id="why" class="section">
+  <div class="container why">
+    <div class="section-head">
+      <span class="kicker">{copy.why.kicker}</span>
+      <h2 class="h2">{copy.why.title}</h2>
+      <p class="lede">{copy.why.lede}</p>
+    </div>
+    <div class="why-grid">
+      {
+        cards.map((card) => (
+          <article class:list={['card', 'why-card', card.featured && 'is-featured']}>
+            <div class="why-icon">
+              <Icon name={card.icon} />
+            </div>
+            <h3>{card.title}</h3>
+            <p>{card.body}</p>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .why {
+    display: flex;
+    flex-direction: column;
+    gap: 3rem;
+  }
+  .why-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1.25rem;
+  }
+  .why-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    padding: 1.75rem;
+  }
+  .why-card.is-featured {
+    border-color: #b9d0ff;
+    background: linear-gradient(180deg, #ffffff 0%, #f3f7ff 100%);
+  }
+  .why-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+  }
+  .is-featured .why-icon {
+    background: var(--color-primary);
+    color: #ffffff;
+  }
+  .why-icon :global(svg) {
+    width: 22px;
+    height: 22px;
+  }
+  .why-card h3 {
+    font-size: var(--text-h3);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .why-card p {
+    font-size: var(--text-body);
+    line-height: 1.55;
+    color: var(--color-ink-soft);
+  }
+  @media (max-width: 1100px) {
+    .why-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 640px) {
+    .why-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

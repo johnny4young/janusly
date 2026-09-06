@@ -1,0 +1,32 @@
+{
+  "name": "janusly-website",
+  "private": true,
+  "type": "module",
+  "description": "Marketing site for janusly.app (Astro, standalone npm package; not part of the pnpm web project).",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "postbuild": "node scripts/apply-csp-hashes.mjs",
+    "preview": "astro preview",
+    "test": "node --no-warnings --experimental-strip-types --test tests/*.test.mts",
+    "check": "npm test && astro check"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.7.3",
+    "@fontsource-variable/inter-tight": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@iconify-json/lucide": "^1.2.116",
+    "@tailwindcss/vite": "^4.3.2",
+    "astro": "^7.1.4",
+    "astro-icon": "^1.1.5",
+    "tailwindcss": "^4.3.2"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@types/node": "^26.1.0",
+    "typescript": "^6.0.3"
+  }
+}
