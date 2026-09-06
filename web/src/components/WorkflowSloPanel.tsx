@@ -10,7 +10,7 @@
  * the 403 surfaced through the existing toast envelope, so we keep the
  * form mounted for every effective role and let the server reject.
  *
- * Bumps the platform-version tick on success so `WorkflowHealthBadge`
+ * Invalidates workflow resources on success so `WorkflowHealthBadge`
  * + every other dependent panel refetches without a page reload.
  */
 
@@ -20,7 +20,9 @@ import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
 import { Button } from '@/components/ui/Button'
 import { FieldStack, FormField } from '@/components/ui/Form'
-import type { ResourceTag } from '../lib/query-cache'
+import { PLATFORM_TAG, useInvalidationNonce, type ResourceTag } from '../lib/query-cache'
+
+const WORKFLOW_SLO_TAGS = [PLATFORM_TAG, 'workflows'] as const
 
 const WORKFLOW_SLO_MUTATION_TAGS: readonly ResourceTag[] = ['workflows']
 
@@ -62,7 +64,7 @@ export function WorkflowSloPanel({ workflowId: explicit, readOnly = false }: Wor
   const { t } = useT()
   const addToast = useWorkflowStore((s) => s.addToast)
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
-  const platformVersion = useWorkflowStore((s) => s.platformVersion)
+  const invalidationNonce = useInvalidationNonce(WORKFLOW_SLO_TAGS)
   const storeWorkflowId = useWorkflowStore((s) => s.currentWorkflowId)
   const storeWorkflowSaved = useWorkflowStore((s) => s.currentWorkflowSaved)
   // With no explicit id this panel targets the current draft — but only once
@@ -97,7 +99,7 @@ export function WorkflowSloPanel({ workflowId: explicit, readOnly = false }: Wor
     return () => {
       cancelled = true
     }
-  }, [workflowId, platformVersion])
+  }, [workflowId, invalidationNonce])
 
   if (!workflowId) return null
 

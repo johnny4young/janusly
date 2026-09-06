@@ -34,7 +34,6 @@ const addToast = vi.fn()
 const dismissRecoveryIntroThisSession = vi.fn()
 let activeOrgId: string | null = 'default'
 let activeUserId: string | null = 'dev-user'
-let platformVersion = 0
 
 vi.mock('../store', () => ({
   useWorkflowStore: (
@@ -42,7 +41,6 @@ vi.mock('../store', () => ({
       bumpPlatformVersion: () => void
       addToast: typeof addToast
       user: unknown
-      platformVersion: number
       orgId: string | null
       userId: string | null
       recoveryIntroDismissedThisSession: boolean
@@ -52,7 +50,6 @@ vi.mock('../store', () => ({
     bumpPlatformVersion,
     addToast,
     user: { email: 'jane@example.com' },
-    platformVersion,
     orgId: activeOrgId,
     userId: activeUserId,
     recoveryIntroDismissedThisSession: false,
@@ -227,7 +224,6 @@ beforeEach(() => {
   dismissRecoveryIntroThisSession.mockReset()
   activeOrgId = 'default'
   activeUserId = 'dev-user'
-  platformVersion = 0
   localStorage.removeItem('janusly:recovery:hideIntro')
   baseProps.onOpenTab = vi.fn()
   baseProps.onOpenRun = vi.fn()
@@ -1333,7 +1329,6 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       downtimeEndedMs: 7_200_000,
       sinceIso: '2026-07-13T12:00:00.000Z',
     }
-    platformVersion = 1
     act(() => invalidateTags([PLATFORM_TAG]))
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
 
@@ -1470,7 +1465,6 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       downtimeEndedMs: 90_000,
       sinceIso: '2026-07-13T12:00:00.000Z',
     }
-    platformVersion = 1
     act(() => invalidateTags([PLATFORM_TAG]))
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[failure] as never} />)
     await waitFor(

@@ -2,19 +2,15 @@
  * Tagged invalidation for panel reads.
  *
  * A panel names the resources its data depends on; a mutation names the
- * resources it changed; only panels whose tags intersect refetch. This
- * replaces the store's `platformVersion` broadcast, which re-fetched every
- * mounted panel after any mutation. `PLATFORM_TAG` is the bridge: every
- * `bumpPlatformVersion()` still invalidates it, so a panel that subscribes
- * to `[PLATFORM_TAG, ...its own tags]` keeps refreshing on the broadcast
- * until every mutation names its tags, and can drop the bridge tag then.
+ * resources it changed; only panels whose tags intersect refetch.
+ * `PLATFORM_TAG` lets cross-domain mutations request a full refresh:
+ * panels subscribe to `[PLATFORM_TAG, ...their own tags]`.
  */
 import { useEffect, useState } from 'react'
 
 export const PLATFORM_TAG = 'platform'
 
-/** Resources a panel can depend on and a mutation can name. `platform` is
- *  the bridge every untagged `bumpPlatformVersion()` still invalidates. */
+/** Resources a panel can depend on and a mutation can name. */
 export type ResourceTag =
   | typeof PLATFORM_TAG
   | 'alert-policies' | 'auth-policy' | 'auto-healing' | 'billing' | 'campaigns'
@@ -24,7 +20,7 @@ export type ResourceTag =
   | 'slack-interactions' | 'upstream' | 'usage' | 'versions' | 'workflows'
 
 type Listener = () => void
-const subscribers = new Map<string, Set<Listener>>()
+const subscribers = new Map<ResourceTag, Set<Listener>>()
 
 /** Run `listener` whenever any of `tags` is invalidated; returns unsubscribe. */
 export function subscribeToTags(tags: readonly ResourceTag[], listener: Listener): () => void {
@@ -55,12 +51,10 @@ export function invalidateTags(tags: readonly ResourceTag[]): void {
 
 /**
  * A counter that advances when any of `tags` is invalidated: put it in a
- * fetch effect's dependency list where `platformVersion` used to be. `tags`
- * is read on mount; pass a stable array.
+ * fetch effect's dependency list. Pass a stable array to avoid resubscribing.
  */
 export function useInvalidationNonce(tags: readonly ResourceTag[]): number {
   const [nonce, setNonce] = useState(0)
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- tags are a stable declaration
-  useEffect(() => subscribeToTags(tags, () => setNonce((current) => current + 1)), [])
+  useEffect(() => subscribeToTags(tags, () => setNonce((current) => current + 1)), [tags])
   return nonce
 }

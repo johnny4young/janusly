@@ -67,7 +67,6 @@ describe('<RecoveryDeltaCard />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({
-      platformVersion: 0,
       session: null,
       userId: 'dev-user',
       orgId: 'default',

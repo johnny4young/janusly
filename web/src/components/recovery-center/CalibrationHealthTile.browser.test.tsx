@@ -14,10 +14,6 @@ vi.mock('../../api', () => {
   }
 })
 
-vi.mock('../../store', () => ({
-  useWorkflowStore: (selector: (state: { platformVersion: number }) => unknown) => selector({ platformVersion: 0 }),
-}))
-
 describe('<CalibrationHealthTile /> (browser smoke)', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()

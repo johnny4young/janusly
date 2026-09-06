@@ -1,7 +1,7 @@
 /**
  * Edit form for per-workflow operational metadata. Mounted inside the
  * Inspector right panel next to `WorkflowSloPanel`. Saves via
- * `POST /workflows/:id/metadata` and bumps the platform-version tick on
+ * `POST /workflows/:id/metadata` and invalidates workflow resources on
  * success so `WorkflowAboutCard` (in the Recovery dialog) refetches
  * without a reload.
  *
@@ -31,7 +31,9 @@ import { useWorkflowStore } from '../store'
 import { Button } from './ui/Button'
 import { FormActions, FormField } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
-import type { ResourceTag } from '../lib/query-cache'
+import { PLATFORM_TAG, useInvalidationNonce, type ResourceTag } from '../lib/query-cache'
+
+const WORKFLOW_METADATA_TAGS = [PLATFORM_TAG, 'workflows'] as const
 
 const WORKFLOW_METADATA_MUTATION_TAGS: readonly ResourceTag[] = ['workflows']
 
@@ -125,7 +127,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
   const { t } = useT()
   const addToast = useWorkflowStore((s) => s.addToast)
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
-  const platformVersion = useWorkflowStore((s) => s.platformVersion)
+  const invalidationNonce = useInvalidationNonce(WORKFLOW_METADATA_TAGS)
   const storeWorkflowId = useWorkflowStore((s) => s.currentWorkflowId)
   const storeWorkflowSaved = useWorkflowStore((s) => s.currentWorkflowSaved)
   // With no explicit id this panel targets the current draft — but only once
@@ -202,7 +204,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
       cancelled = true
       controller.abort()
     }
-  }, [workflowId, platformVersion, reloadNonce, t])
+  }, [workflowId, invalidationNonce, reloadNonce, t])
 
   if (!workflowId) return null
 

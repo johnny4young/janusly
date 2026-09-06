@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useInvalidationNonce } from '../lib/query-cache'
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
@@ -11,6 +12,7 @@ vi.mock('../api', async (importOriginal) => {
   return { ...actual, api: vi.fn() }
 })
 
+const REFRESH_TAGS = ['platform'] as const
 const initialState = useWorkflowStore.getState()
 
 const sourceRun = {
@@ -27,7 +29,7 @@ describe('<ReplayLabForkDialog />', () => {
     // test so the 100ms debounce can't bleed across cases.
     __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, runId: null, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, runId: null, toasts: [] }, true)
   })
 
   it('renders idle state with source run, fork node, and an empty override textarea', () => {
@@ -47,6 +49,7 @@ describe('<ReplayLabForkDialog />', () => {
   })
 
   it('POSTs without an inputOverride field when the textarea is empty, then redirects to the fork run', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     vi.mocked(api).mockResolvedValueOnce(forkResponse)
     const onClose = vi.fn()
     render(
@@ -74,7 +77,7 @@ describe('<ReplayLabForkDialog />', () => {
     // bumpPlatformVersion is debounced (100ms trailing edge) — assert
     // via waitFor so the timer fires under real wallclock during the
     // poll window.
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+    await waitFor(() => expect(refresh.current).toBe(1))
   })
 
   it('parses the textarea as JSON and forwards it as inputOverride when valid', async () => {

@@ -70,12 +70,12 @@ Runtime shape guards (`isRecord`, `asRecord`, `asRecordOrEmpty`) live in
 reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector load
 lazily like every other tab panel: `src/components/panel-loaders.ts` holds one
 dynamic importer per tab, `RightPanel` builds its `lazy()` components from
-them, and `WorkspaceSectionNav` preloads a panel's chunk on hover/focus (the
-authoring chunk also preloads as soon as the Workflows destination is active),
-so the first click is instant without shipping the surface to Home.
-`manualChunks` keeps the whole authoring surface in one `authoring-workspace`
-chunk so its shared helpers do not fan out into micro-chunks; the eager
-`workflow-workspace` chunk fell from 43 to 14 KiB gzip. Stylesheets follow the
+them, and `WorkspaceSectionNav` reuses those importers on hover/focus. The
+`authoring-workspace` group also contains shared dependencies, so its code can
+load before an authoring panel mounts. `lazy()` defers mounting, not necessarily
+transfer; a second destination-level preload effect is unnecessary. First-open
+navigation uses the Suspense fallback if its import is still pending.
+Stylesheets follow the
 chunk that renders them: a rule whose classes are owned only by lazy-loaded
 components lives next to its owner (`<Component>.css`, or `<folder>/<folder>.css`
 for a split panel such as `recovery-dialog/`) and is imported by that component,
@@ -125,7 +125,8 @@ Every panel subscribes to `[PLATFORM_TAG, ...its tags]`, so a same-domain
 mutation (a member role change, an MCP connection, a budget save) refreshes
 only the panels that read that resource, and a cross-domain command (a run
 start, a workflow save, a recovery replay) still refreshes everything. Bumps
-within 100 ms coalesce into one invalidation wave. When adding a panel,
+within 100 ms coalesce into one invalidation wave without updating the workflow
+store. There is no parallel global refresh counter. When adding a panel,
 declare its tags next to the component; when adding a mutation, pass the tags
 it changes, or leave the call untagged when the blast radius is unclear.
 

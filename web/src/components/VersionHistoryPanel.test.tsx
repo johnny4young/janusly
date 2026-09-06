@@ -73,7 +73,6 @@ describe('<VersionHistoryPanel />', () => {
         currentWorkflowName: 'Compare workflow',
         currentWorkflowSaved: true,
         toasts: [],
-        platformVersion: 0,
       },
       true,
     )

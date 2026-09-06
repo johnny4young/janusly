@@ -63,7 +63,7 @@ const props = {
 
 beforeEach(() => {
   vi.mocked(api).mockReset()
-  useWorkflowStore.setState({ platformVersion: 0, toasts: [] })
+  useWorkflowStore.setState({ toasts: [] })
   props.onOpenRun.mockClear()
   props.onOpenLab.mockClear()
   props.onSend.mockClear()

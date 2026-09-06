@@ -20,10 +20,12 @@ import { ExternalLink, Copy } from 'lucide-react'
 import type { RecoveryItemSeverity } from '@/lib/recovery-item'
 import { api } from '../api'
 import { useT } from '../i18n'
-import { useWorkflowStore } from '../store'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { SafeMarkdown } from './SafeMarkdown'
 import { Button } from '@/components/ui/Button'
 import './WorkflowAboutCard.css'
+
+const WORKFLOW_ABOUT_TAGS = [PLATFORM_TAG, 'workflows'] as const
 
 type WorkflowMetadataRecord = {
   workflowId: string
@@ -65,7 +67,7 @@ function normalizeLinearUrl(value: string): string {
 
 export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | null {
   const { t } = useT()
-  const platformVersion = useWorkflowStore((s) => s.platformVersion)
+  const invalidationNonce = useInvalidationNonce(WORKFLOW_ABOUT_TAGS)
   const [metadata, setMetadata] = useState<WorkflowMetadataRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
@@ -96,7 +98,7 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
     return () => {
       cancelled = true
     }
-  }, [workflowId, platformVersion])
+  }, [workflowId, invalidationNonce])
 
   const ownersDisplay = useMemo(() => {
     if (!metadata) return []

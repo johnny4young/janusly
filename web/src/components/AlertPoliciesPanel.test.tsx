@@ -14,7 +14,7 @@ const slackInteractionId = 'f36c0018-ae36-4d96-96c2-c7ed81669e9e'
 
 beforeEach(() => {
   vi.mocked(api).mockReset()
-  useWorkflowStore.setState({ orgId: 'default', platformVersion: 0 })
+  useWorkflowStore.setState({ orgId: 'default' })
 })
 
 describe('<AlertPoliciesPanel />', () => {

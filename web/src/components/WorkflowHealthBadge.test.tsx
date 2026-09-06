@@ -36,7 +36,7 @@ function makeHealth(overrides?: Partial<{ score: number; status: string; slo: un
 describe('<WorkflowHealthBadge /> — SLO breach pill', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0 }, true)
+    useWorkflowStore.setState({ ...initialState }, true)
   })
 
   it('does not render the SLO pill when no SLO is declared', async () => {

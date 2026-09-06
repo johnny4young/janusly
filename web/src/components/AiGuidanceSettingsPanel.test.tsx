@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useInvalidationNonce } from '../lib/query-cache'
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
@@ -8,16 +9,18 @@ import { PLATFORM_TAG, invalidateTags } from '@/lib/query-cache'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
+const REFRESH_TAGS = ['platform'] as const
 const initialState = useWorkflowStore.getState()
 
 describe('<AiGuidanceSettingsPanel />', () => {
   beforeEach(() => {
     __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('loads and saves the organization guidance through the config chokepoint', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     vi.mocked(api).mockImplementation(async (path, init) => {
       if (path === '/org/config' && init?.method === 'POST') return JSON.parse(String(init.body))
       if (path === '/org/config') return { config: [{ key: 'ai.operatorGuidance', value: 'Prefer approval gates.' }] }
@@ -32,7 +35,7 @@ describe('<AiGuidanceSettingsPanel />', () => {
       method: 'POST',
       body: JSON.stringify({ key: 'ai.operatorGuidance', value: 'Prefer bounded retries.' }),
     })))
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+    await waitFor(() => expect(refresh.current).toBe(1))
   })
 
   it('gates save when UTF-8 content exceeds 8 KiB', async () => {

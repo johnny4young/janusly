@@ -29,7 +29,9 @@ import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useConfirm } from './ConfirmDialog'
 import { Button } from '@/components/ui/Button'
-import type { ResourceTag } from '../lib/query-cache'
+import { PLATFORM_TAG, useInvalidationNonce, type ResourceTag } from '../lib/query-cache'
+
+const UPSTREAM_TAGS = [PLATFORM_TAG, 'upstream'] as const
 
 const UPSTREAM_MUTATION_TAGS: readonly ResourceTag[] = ['upstream']
 
@@ -87,7 +89,7 @@ function statusTint(s: UpstreamHealthSource): 'green' | 'amber' | 'red' | 'gray'
 export function UpstreamHealthPanel({ canWrite = true }: { canWrite?: boolean } = {}): React.ReactElement {
   const { t } = useT()
   const confirmDialog = useConfirm()
-  const platformVersion = useWorkflowStore((s) => s.platformVersion)
+  const invalidationNonce = useInvalidationNonce(UPSTREAM_TAGS)
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
   const addToast = useWorkflowStore((s) => s.addToast)
 
@@ -114,7 +116,7 @@ export function UpstreamHealthPanel({ canWrite = true }: { canWrite?: boolean } 
     return () => {
       cancelled = true
     }
-  }, [platformVersion])
+  }, [invalidationNonce])
 
   function cancelForm(): void {
     setShowForm(false)

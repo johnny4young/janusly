@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
-import { useWorkflowStore } from '../store'
 import { ExternalRuntimePanel } from './ExternalRuntimePanel'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
@@ -34,7 +33,6 @@ const recoveryCase = {
 
 beforeEach(() => {
   vi.mocked(api).mockReset()
-  useWorkflowStore.setState({ platformVersion: 0 })
 })
 
 describe('<ExternalRuntimePanel />', () => {

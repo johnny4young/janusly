@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useInvalidationNonce } from '../lib/query-cache'
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
@@ -15,6 +16,7 @@ vi.mock('../api', () => {
   }
 })
 
+const REFRESH_TAGS = ['billing'] as const
 const initialState = useWorkflowStore.getState()
 
 function mockBudgetApi() {
@@ -57,7 +59,7 @@ describe('<BudgetSettingsPanel />', () => {
     // test so the 100ms debounce can't bleed across cases.
     __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [], budgetBlocked: null }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [], budgetBlocked: null }, true)
   })
 
   it('loads org budget values from the /org/config envelope', async () => {
@@ -98,7 +100,8 @@ describe('<BudgetSettingsPanel />', () => {
     expect(wfPolicy).toHaveTextContent('Block new calls at the recorded threshold')
   })
 
-  it('saves org budget fields through the existing org config route and bumps platformVersion', async () => {
+  it('saves org budget fields through the existing org config route and invalidates dependent resources', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     mockBudgetApi()
     render(<BudgetSettingsPanel />)
 
@@ -115,7 +118,7 @@ describe('<BudgetSettingsPanel />', () => {
     // bumpPlatformVersion is debounced (100ms trailing edge) — assert
     // via waitFor so the timer fires under real wallclock during the
     // poll window.
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+    await waitFor(() => expect(refresh.current).toBe(1))
   })
 
   it('flags a fractional warning threshold inline and gates save', async () => {

@@ -20,12 +20,12 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react'
 import { Activity, Boxes, Database, FlaskConical, Layers3, Plug, Users, Workflow } from 'lucide-react'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
 import type { AuthoringPanelModel } from './AuthoringPanel'
-import { panelLoaders, preloadPanel } from './panel-loaders'
+import { panelLoaders } from './panel-loaders'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { ErrorBoundary } from './ErrorBoundary'
 import { PanelErrorFallback } from './PanelErrorFallback'
@@ -33,14 +33,9 @@ import { WorkspaceSectionNav } from './WorkspaceSectionNav'
 // Every tab panel is code-split out of the eager shell: each renders only when
 // the operator navigates to its tab, behind the shared <Suspense> below. AI
 // Studio and the Inspector (node/edge config) are lazy too — their chunk is
-// preloaded when the section navigation is hovered or focused and as soon as
-// the Workflows destination is active, so the first authoring click is
-// instant without shipping the surface to Home. `manualChunks` keeps the
-// whole authoring surface in one `authoring-workspace` chunk so its shared
-// helpers do not fan out into wrapper-heavy micro-chunks. The inspector's
-// auxiliary sub-panels (version history / SLO / schedule history / metadata)
-// are lazy behind an inner <Suspense>. OperationsPage additionally pulls ~11
-// admin sub-panels + alert/budget/scim/permission forms.
+// requested by the same importers as the section navigation's hover/focus
+// preload. Chunk grouping lives in vite.config.ts; shared dependencies can
+// load a chunk before its lazy component mounts.
 
 const MultiAgentTimeline = lazy(() => panelLoaders.multiAgent().then((m) => ({ default: m.MultiAgentTimeline })))
 const WorkflowsDashboard = lazy(() => panelLoaders.workflows().then((m) => ({ default: m.WorkflowsDashboard })))
@@ -157,11 +152,6 @@ export type RightPanelProps = {
 export const RightPanel = memo(function RightPanel(props: RightPanelProps) {
   const { t } = useT()
   const destination = workspaceDestinationForTab(props.tab)
-  useEffect(() => {
-    if (destination !== 'workflows') return
-    preloadPanel('inspector')
-    preloadPanel('ai-studio')
-  }, [destination])
   return (
     <div
       className="workspace-panel-stack"

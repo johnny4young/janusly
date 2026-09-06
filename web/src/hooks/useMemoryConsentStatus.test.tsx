@@ -25,12 +25,12 @@ const VALID_STATUS = {
 
 beforeEach(() => {
   vi.mocked(api).mockReset()
-  useWorkflowStore.setState({ orgId: 'memory-hook-org', platformVersion: 0 })
+  useWorkflowStore.setState({ orgId: 'memory-hook-org' })
 })
 
 afterEach(() => {
   cleanup()
-  useWorkflowStore.setState({ orgId: null, platformVersion: 0 })
+  useWorkflowStore.setState({ orgId: null })
 })
 
 describe('useMemoryConsentStatus', () => {

@@ -181,8 +181,8 @@ i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
   `t.Cleanup(pool.Close)`; defer the rollback first.
 - Tests that call `request*Focus` or `requestOperationsSection` leave a hash
   behind; reset `window.history.replaceState(null, '', '/')` in `beforeEach`.
-- A test that used to poke `platformVersion` through `setState` must now call
-  `invalidateTags([PLATFORM_TAG])`.
+- Test refreshes through resource invalidation (`invalidateTags`), not a
+  workflow-store counter. Untagged mutations refresh all panels.
 - The planner on a populated database uses PG18 skip scans; EXPLAIN pins in
   tests are deterministic only when no competing index shares the prefix.
 - macOS: BSD `sed` has no `\b`, there is no `timeout`, and zsh does not

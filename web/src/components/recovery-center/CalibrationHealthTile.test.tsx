@@ -5,10 +5,6 @@ import { CalibrationHealthTile } from './RecoveryCenterTiles'
 
 vi.mock('../../api', () => ({ api: vi.fn() }))
 
-vi.mock('../../store', () => ({
-  useWorkflowStore: (selector: (state: { platformVersion: number }) => unknown) => selector({ platformVersion: 0 }),
-}))
-
 describe('<CalibrationHealthTile />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()

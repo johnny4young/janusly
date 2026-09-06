@@ -6,6 +6,7 @@ import { useWorkflowStore } from '../store'
 import { useRecoveryQueueFilters } from './useRecoveryQueueFilters'
 import type { DeadLetter, DeadLetterRecovery } from '../components/DeadLettersPanel'
 import { consumeRecoveryFocusDay, requestRecoveryDayFocus } from '../components/recovery-day-focus-bus'
+import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 
 // The hook fetches `/dlq/queue?…` itself (server filters + sorts before the page
 // cap and returns a { items, nextCursor, hasMore } keyset envelope). The stub
@@ -146,7 +147,22 @@ describe('useRecoveryQueueFilters', () => {
     sessionStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(async () => emptyPage())
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0 }, true)
+    useWorkflowStore.setState({ ...initialState }, true)
+  })
+
+  it('refreshes queue rows and counts for recovery changes, not role edits', async () => {
+    render(<Harness />)
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(2))
+
+    act(() => invalidateTags(['roles', 'members']))
+    expect(api).toHaveBeenCalledTimes(2)
+
+    act(() => invalidateTags(['dlq', 'recovery']))
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(4))
+    expect(api).toHaveBeenLastCalledWith('/dlq/counts')
+
+    act(() => invalidateTags([PLATFORM_TAG]))
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(6))
   })
 
   it('defaults to open / all / all / newest and fetches /dlq/queue with those params', async () => {

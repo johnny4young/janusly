@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import { useWorkflowStore } from '../store'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import {
   acknowledgeRecoveryFocusDay,
   consumeRecoveryFocusDay,
@@ -27,6 +27,8 @@ import {
   TEXT_SEARCH_MAX_CHARACTERS,
   type TextSearchState,
 } from '../lib/text-search'
+
+const RECOVERY_QUEUE_TAGS = [PLATFORM_TAG, 'dlq', 'recovery', 'runs', 'auto-healing'] as const
 
 /** DLQ-status filter values; `'all'` shows every status. */
 export const statuses = ['all', 'open', 'replayed', 'resolved'] as const
@@ -266,14 +268,14 @@ export type RecoveryQueueFilters = {
   loadingMore: boolean
   /** Org-wide DLQ status breakdown for the mini-grid — total / open / replayed /
    *  resolved across the WHOLE queue, NOT the filtered page. Refetched on
-   *  `platformVersion` / refresh only, never on a filter or sort change. */
+   *  `invalidationNonce` / refresh only, never on a filter or sort change. */
   counts: RecoveryQueueCounts
 }
 
 /**
  * Own the recovery-queue's filter/sort state AND its data fetch. The persisted
  * view selections restore on mount and write back on change; the `/dlq/queue`
- * fetch re-runs on any filter/sort change + `platformVersion` bump and asks the
+ * fetch re-runs on any filter/sort change + `invalidationNonce` bump and asks the
  * server to filter + sort BEFORE the page cap (so a P1 older than the newest
  * page still surfaces). Each row carries its recovery overlay inline, so there's
  * one cap-correct source — no separate `/recovery/items` fetch. Paging is
@@ -309,7 +311,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   // Bumped on every first-page fetch; `loadMore` captures it and drops a stale
   // append if a filter/sort/refresh landed mid-fetch (the page-1 reset wins).
   const requestEpochRef = useRef(0)
-  const platformVersion = useWorkflowStore((s) => s.platformVersion)
+  const invalidationNonce = useInvalidationNonce(RECOVERY_QUEUE_TAGS)
   const refresh = useCallback(() => {
     setRefreshNonce((value) => value + 1)
   }, [])
@@ -361,9 +363,9 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     return () => {
       cancelled = true
     }
-  }, [platformVersion, refreshNonce, status, ownerScope, severityFilter, sortKey, search, dayFilter])
+  }, [invalidationNonce, refreshNonce, status, ownerScope, severityFilter, sortKey, search, dayFilter])
 
-  // Org-wide status counts for the mini-grid. Keyed ONLY on platformVersion +
+  // Org-wide status counts for the mini-grid. Keyed ONLY on invalidationNonce +
   // refresh — NOT on the filter/sort, because the mini-grid summarizes the WHOLE
   // queue, not the filtered page. A failed fetch degrades to zeros.
   useEffect(() => {
@@ -386,7 +388,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     return () => {
       cancelled = true
     }
-  }, [platformVersion, refreshNonce])
+  }, [invalidationNonce, refreshNonce])
 
   // Fetch the next keyset page and APPEND it. The epoch guard drops the result
   // if a filter/sort/refresh reset the queue mid-fetch (so stale rows never

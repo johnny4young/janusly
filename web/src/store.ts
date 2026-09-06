@@ -2,9 +2,8 @@
  * Zustand store — single global state for Janusly Studio.
  *
  * Holds the workflow being edited (nodes, edges), the active run (runId,
- * runNodes, events, paginated cursor + hasMore), tabs, toasts,
- * Supabase session, and `platformVersion` — the cross-panel reactivity
- * counter that mutations bump so independent panels refetch (AGENTS.md).
+ * runNodes, events, paginated cursor + hasMore), tabs, toasts, and
+ * Supabase session. Panel refreshes use resource-tag invalidation.
  *
  * Used by every component under `web/src/`. Lives in one file
  * intentionally; the project's small enough that splitting the store into
@@ -17,7 +16,7 @@
  *   change. Calls within `BUMP_COALESCE_MS` (100ms) collapse to ONE
  *   subscriber notification via trailing-edge debounce — a chained
  *   mutation that fires N internal bumps still triggers one refresh
- *   wave across the ~20 subscribers.
+ *   wave across the matching subscribers.
  * - `mergeEvents(events)` deduplicates by id and re-sorts by `(createdAt,
  *   id)`. It's the path polling uses; `setEvents` is the hard-replace path
  *   that resets the cursor. Don't conflate the two.
@@ -238,13 +237,12 @@ type WorkflowStore = {
   streamStatus: StreamStatus
   streamTransport: StreamTransport
   toasts: Toast[]
-  platformVersion: number
   /** Most recent HTTP 402 budget-block envelope from any /ai/* route. The
    *  AI Studio top-of-canvas BudgetBlockedBanner reads this slot; the
    *  api() wrapper sets it on every 402; clearBudgetBlocked() unsets. */
   budgetBlocked: BudgetBlockedEnvelope | null
   /** Latest "first recovered run" onboarding snapshot. The contextual
-   *  OnboardingBanner self-fetches `/onboarding` on mount + every platformVersion bump
+   *  OnboardingBanner self-fetches `/onboarding` on mount + resource invalidation
    *  and stores the result here; renders only while `status === 'active'`. */
   onboarding: OnboardingState | null
   /** Session-only Recovery Center walkthrough dismissal. Fresh workspaces do
@@ -308,20 +306,17 @@ type WorkflowStore = {
   clearBudgetBlocked: () => void
   setOnboarding: (state: OnboardingState | null) => void
   /** Tell panels their data changed. With `tags`, only panels subscribed to
-   *  one of them refetch; without, every panel does (the legacy broadcast). */
+   *  one of them refetch; without, every panel does. */
   bumpPlatformVersion: (tags?: readonly ResourceTag[]) => void
 }
 
 /**
  * Trailing-edge debounce window for `bumpPlatformVersion()`. Bumps
- * arriving within this window reset the timer; the final fire does ONE
- * `set(...)`. 100ms is below the perceptible threshold for
- * user-initiated mutations (~6 frames at 60Hz) and collapses bursts
- * from chained mutations into a single refresh wave.
+ * arriving within this window reset the timer, collapsing chained mutations
+ * into a single resource invalidation wave without updating the store.
  */
 const BUMP_COALESCE_MS = 100
 let pendingBumpTimer: ReturnType<typeof setTimeout> | null = null
-let pendingBumpBroadcast = false
 const pendingBumpTags = new Set<ResourceTag>()
 
 // Toast auto-dismiss windows. Errors stay ~2x longer because they typically
@@ -514,7 +509,6 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   streamStatus: 'idle',
   streamTransport: 'idle',
   toasts: [],
-  platformVersion: 0,
   budgetBlocked: null,
   onboarding: null,
   recoveryIntroDismissedThisSession: false,
@@ -917,20 +911,14 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     setTimeout(() => get().removeToast(id), tone === 'error' ? TOAST_TTL_ERROR_MS : TOAST_TTL_DEFAULT_MS)
   },
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
-  bumpPlatformVersion: (tags) => {
-    if (tags) for (const tag of tags) pendingBumpTags.add(tag)
-    else pendingBumpBroadcast = true
+  bumpPlatformVersion: (tags = [PLATFORM_TAG]) => {
+    for (const tag of tags) pendingBumpTags.add(tag)
     if (pendingBumpTimer !== null) clearTimeout(pendingBumpTimer)
     pendingBumpTimer = setTimeout(() => {
       pendingBumpTimer = null
-      const broadcast = pendingBumpBroadcast
       const tagged = [...pendingBumpTags]
-      pendingBumpBroadcast = false
       pendingBumpTags.clear()
-      // The counter still advances for every bump: tests and the devtools read
-      // it as "a mutation landed"; only the invalidation is selective.
-      set((state) => ({ platformVersion: state.platformVersion + 1 }))
-      invalidateTags(broadcast ? [PLATFORM_TAG, ...tagged] : tagged)
+      invalidateTags(tagged)
     }, BUMP_COALESCE_MS)
   },
   setBudgetBlocked: (envelope) => set({ budgetBlocked: envelope }),
@@ -974,4 +962,5 @@ export function __resetBumpCoalesceForTests(): void {
     clearTimeout(pendingBumpTimer)
     pendingBumpTimer = null
   }
+  pendingBumpTags.clear()
 }

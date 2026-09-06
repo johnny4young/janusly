@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { __resetBumpCoalesceForTests, registerFlowOps, registerNodePlacementResolver, useWorkflowStore } from './store'
 import type { RunEvent, RunNode, WorkflowDefinition } from './types'
+import { PLATFORM_TAG, subscribeToTags } from './lib/query-cache'
 
 const initialState = useWorkflowStore.getState()
 
@@ -31,7 +32,6 @@ beforeEach(() => {
       activeRecoveryCaseId: null,
       streamStatus: 'idle',
       toasts: [],
-      platformVersion: 0,
       budgetBlocked: null,
       recoveryIntroDismissedThisSession: false,
     },
@@ -811,24 +811,36 @@ describe('useWorkflowStore', () => {
 })
 
 describe('useWorkflowStore.bumpPlatformVersion (coalesce)', () => {
+  const refresh = vi.fn()
+  let unsubscribe: () => void
   beforeEach(() => {
     vi.useFakeTimers()
-    useWorkflowStore.setState({ platformVersion: 0 })
     __resetBumpCoalesceForTests()
+    refresh.mockClear()
+    unsubscribe = subscribeToTags([PLATFORM_TAG, 'workflows', 'runs'], refresh)
   })
 
   afterEach(() => {
+    unsubscribe()
     __resetBumpCoalesceForTests()
     vi.useRealTimers()
   })
 
-  it('collapses multiple bumps within the 100ms window into ONE increment', () => {
+  it('coalesces matching tags without notifying unrelated panels or the workflow store', () => {
     const bump = useWorkflowStore.getState().bumpPlatformVersion
-    for (let i = 0; i < 5; i += 1) bump()
-    // No increment yet — trailing edge has not fired.
-    expect(useWorkflowStore.getState().platformVersion).toBe(0)
+    const unrelated = vi.fn()
+    const storeChanged = vi.fn()
+    const stopUnrelated = subscribeToTags([PLATFORM_TAG, 'roles'], unrelated)
+    const stopStore = useWorkflowStore.subscribe(storeChanged)
+    bump(['workflows'])
+    bump(['runs', 'workflows'])
+    expect(refresh).not.toHaveBeenCalled()
     vi.advanceTimersByTime(100)
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    stopUnrelated()
+    stopStore()
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(unrelated).not.toHaveBeenCalled()
+    expect(storeChanged).not.toHaveBeenCalled()
   })
 
   it('each bump resets the trailing edge — extending the window keeps the count at zero', () => {
@@ -839,19 +851,32 @@ describe('useWorkflowStore.bumpPlatformVersion (coalesce)', () => {
     vi.advanceTimersByTime(50)
     // 100ms wallclock has elapsed but only 50ms since the LAST bump.
     // Trailing edge has NOT fired yet.
-    expect(useWorkflowStore.getState().platformVersion).toBe(0)
+    expect(refresh).not.toHaveBeenCalled()
     vi.advanceTimersByTime(50)
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 
-  it('a single bump fires exactly one increment after the window elapses', () => {
+  it('merges broad and tagged refreshes into a single one-shot wave', () => {
+    useWorkflowStore.getState().bumpPlatformVersion(['workflows'])
     useWorkflowStore.getState().bumpPlatformVersion()
-    expect(useWorkflowStore.getState().platformVersion).toBe(0)
+    const broadRefresh = vi.fn()
+    const stop = subscribeToTags([PLATFORM_TAG, 'roles'], broadRefresh)
+    expect(refresh).not.toHaveBeenCalled()
     vi.advanceTimersByTime(100)
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(broadRefresh).toHaveBeenCalledTimes(1)
+    stop()
     // No follow-up tick should fire — the timer is one-shot per bump cluster.
     vi.advanceTimersByTime(1000)
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops cancelled pending tags as well as their timer', () => {
+    useWorkflowStore.getState().bumpPlatformVersion()
+    __resetBumpCoalesceForTests()
+    useWorkflowStore.getState().bumpPlatformVersion(['roles'])
+    vi.advanceTimersByTime(100)
+    expect(refresh).not.toHaveBeenCalled()
   })
 })
 

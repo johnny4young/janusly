@@ -28,7 +28,9 @@ import { Button } from "./ui/Button";
 import { FormActions, FormField, FormGrid } from "./ui/Form";
 import { StatusSummary } from "./ui/StatusSummary";
 import './PermissionGrantsPanel.css'
-import type { ResourceTag } from '../lib/query-cache'
+import { PLATFORM_TAG, useInvalidationNonce, type ResourceTag } from '../lib/query-cache'
+
+const PERMISSION_TAGS = [PLATFORM_TAG, 'roles'] as const
 
 const PERMISSION_MUTATION_TAGS: readonly ResourceTag[] = ['roles', 'members']
 
@@ -61,7 +63,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
   const confirmDialog = useConfirm();
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion);
   const addToast = useWorkflowStore((s) => s.addToast);
-  const platformVersion = useWorkflowStore((s) => s.platformVersion);
+  const invalidationNonce = useInvalidationNonce(PERMISSION_TAGS);
 
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [mandatoryAdmin, setMandatoryAdmin] = useState<string[]>([]);
@@ -93,7 +95,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
         const r = (rolesResp as { roles?: RoleEntry[] }) ?? {};
         setRoles(r.roles ?? []);
         // Only seed `editing` for roles we haven't touched yet — refetches
-        // from a platformVersion bump must NOT clobber an admin's in-progress
+        // from a invalidationNonce bump must NOT clobber an admin's in-progress
         // edits on roles they haven't saved yet. New roles that appeared in
         // the server response (e.g. someone else created a custom role)
         // still get their default initial state.
@@ -123,7 +125,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
     return () => {
       cancelled = true;
     };
-  }, [platformVersion, t]);
+  }, [invalidationNonce, t]);
 
   const grouped = useMemo(() => {
     const out = new Map<string, CatalogEntry[]>();

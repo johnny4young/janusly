@@ -46,7 +46,6 @@ describe('<UsageSummaryCard />', () => {
       {
         ...initialState,
         toasts: [],
-        platformVersion: 0,
         userId: 'dev-user',
         orgId: 'default',
       },

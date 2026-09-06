@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useInvalidationNonce } from '../lib/query-cache'
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
@@ -9,6 +10,7 @@ vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
+const REFRESH_TAGS = ['platform'] as const
 const initialState = useWorkflowStore.getState()
 
 function makeWorkflow(url: string): WorkflowDefinition {
@@ -38,7 +40,7 @@ describe('<RollbackConfirmDialog />', () => {
     // test so the 100ms debounce can't bleed across cases.
     __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, toasts: [], platformVersion: 0 }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('renders the diff (current → target) and the Roll back primary button at idle', () => {
@@ -50,12 +52,11 @@ describe('<RollbackConfirmDialog />', () => {
     expect(screen.getByText(/v3 \(rolling back to\)/i)).toBeInTheDocument()
   })
 
-  it('posts to /workflows/rollback, hydrates the canvas, bumps platform version, and toasts on success', async () => {
+  it('posts to /workflows/rollback, hydrates the canvas, invalidates dependent resources, and toasts on success', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     vi.mocked(api).mockResolvedValueOnce({ workflowId: 'wf_rollback', versionId: 'v6', version: 6, sourceVersion: 3 })
     const onClose = vi.fn()
     render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={onClose} />)
-
-    const platformVersionBefore = useWorkflowStore.getState().platformVersion
 
     fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
 
@@ -71,7 +72,7 @@ describe('<RollbackConfirmDialog />', () => {
     // bumpPlatformVersion is debounced (100ms trailing edge) — assert
     // via waitFor so the timer fires under real wallclock during the
     // poll window.
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(platformVersionBefore + 1))
+    await waitFor(() => expect(refresh.current).toBe(1))
     const state = useWorkflowStore.getState()
     expect(state.toasts.some((toast) => /Rolled back to v3 as v6/i.test(toast.message) && toast.tone === 'success')).toBe(true)
     // hydrateWorkflow swaps currentWorkflowId to the rolled-back DAG's id
@@ -79,18 +80,17 @@ describe('<RollbackConfirmDialog />', () => {
   })
 
   it('shows an inline error and no canvas hydrate when the rollback request fails (e.g. 403/404)', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     vi.mocked(api).mockRejectedValueOnce(new Error('Forbidden'))
     const onClose = vi.fn()
     render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={onClose} />)
-
-    const platformVersionBefore = useWorkflowStore.getState().platformVersion
 
     fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(/Forbidden/i)
     })
-    expect(useWorkflowStore.getState().platformVersion).toBe(platformVersionBefore)
+    expect(refresh.current).toBe(0)
     expect(useWorkflowStore.getState().toasts).toEqual([])
     // No api retry-button mounted on error — operator re-picks from the panel
     expect(screen.queryByRole('button', { name: /Retry/i })).not.toBeInTheDocument()

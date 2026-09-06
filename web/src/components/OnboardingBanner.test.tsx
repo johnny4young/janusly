@@ -33,13 +33,13 @@ function buildState(overrides: Partial<OnboardingState> = {}): OnboardingState {
 }
 
 function mount(state: OnboardingState | null) {
-  useWorkflowStore.setState({ onboarding: state, authReady: true, platformVersion: 0 })
+  useWorkflowStore.setState({ onboarding: state, authReady: true })
   apiMock.mockResolvedValue(state)
   return render(<OnboardingBanner onOpenTab={vi.fn()} />)
 }
 
 beforeEach(() => {
-  useWorkflowStore.setState({ onboarding: null, authReady: false, platformVersion: 0 })
+  useWorkflowStore.setState({ onboarding: null, authReady: false })
 })
 
 afterEach(() => {

@@ -111,7 +111,7 @@ describe('<OperationsPage />', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/')
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, budgetBlocked: null }, true)
+    useWorkflowStore.setState({ ...initialState, budgetBlocked: null }, true)
     try {
       window.localStorage.removeItem(STORAGE_KEY)
     } catch {
@@ -481,7 +481,6 @@ describe('<OperationsPage />', () => {
   it('escalates the AI dot to danger when a budget block is in store', async () => {
     useWorkflowStore.setState({
       ...initialState,
-      platformVersion: 0,
       budgetBlocked: { monthlyUsdSpent: 12, monthlyUsdLimit: 10, exceededAt: 'org', policy: 'block' },
     }, true)
     stubApiByPath({
@@ -616,7 +615,7 @@ describe('<OperationsPage />', () => {
 describe('<OperationsPage /> survives payloads the contract did not promise', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, budgetBlocked: null }, true)
+    useWorkflowStore.setState({ ...initialState, budgetBlocked: null }, true)
   })
 
   // Every one of these used to throw inside the Operations panel:

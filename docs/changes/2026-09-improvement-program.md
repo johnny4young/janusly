@@ -36,8 +36,9 @@ checkpoints in 73 minutes instead of one every ~25 seconds.
 - Recovery governance stays in the API root package: it depends on effective
   permissions, clusters, metrics, readiness, text search, locale and the
   engine, and two root files call its cores. It is the hub, not a leaf.
-- FA7 (UI primitives: 292 raw `<button>`) needs a visual QA pass and was not
-  done autonomously. The remaining stylesheet split waits on rule blocks that
-  are self-contained (`.we-ops` shares rules with settings and sparklines).
-- 43 panels still refetch on the `platformVersion` broadcast; the `platform`
-  bridge tag keeps them correct while they migrate to resource tags.
+- Action controls use `Button`; tabs, radios, menu items and rows retain
+  their native buttons and component styles.
+- Panel refreshes use resource tags only; untagged cross-domain mutations
+  still request a full refresh. The duplicate destination-level authoring
+  preload is removed; shared chunk dependencies can still load authoring code
+  before its panel mounts.

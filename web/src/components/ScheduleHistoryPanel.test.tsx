@@ -10,7 +10,6 @@ vi.mock('../api', () => ({
 const storeState = {
   currentWorkflowId: 'wf-1',
   currentWorkflowSaved: true,
-  platformVersion: 1,
 }
 
 vi.mock('../store', () => ({

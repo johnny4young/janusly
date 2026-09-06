@@ -11,7 +11,7 @@ vi.mock('../api', () => ({
 
 beforeEach(() => {
   vi.mocked(api).mockReset()
-  useWorkflowStore.setState({ orgId: 'default', platformVersion: 0 })
+  useWorkflowStore.setState({ orgId: 'default' })
 })
 
 describe('<UpstreamHealthPanel />', () => {

@@ -5,13 +5,6 @@ vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
-vi.mock('../store', () => ({
-  useWorkflowStore: vi.fn((selector?: (s: { platformVersion: number }) => unknown) => {
-    if (typeof selector === 'function') return selector({ platformVersion: 1 })
-    return { platformVersion: 1 }
-  }),
-}))
-
 import { api } from '../api'
 import { WorkflowAboutCard } from './WorkflowAboutCard'
 

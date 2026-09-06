@@ -48,7 +48,7 @@ function setupApi(catalogResp: unknown, rolesResp: unknown) {
 describe('<PermissionGrantsPanel />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('renders all three built-ins with no overrides', async () => {

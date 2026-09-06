@@ -84,7 +84,6 @@ describe('<WorkflowRolloutPanel />', () => {
       ...initialState,
       currentWorkflowId: 'workflow-1',
       currentWorkflowSaved: true,
-      platformVersion: 0,
       toasts: [],
     }, true)
   })

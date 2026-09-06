@@ -11,10 +11,8 @@ const bumpPlatformVersion = vi.fn()
 
 vi.mock('../store', () => ({
   useWorkflowStore: (selector: (state: {
-    platformVersion: number
     bumpPlatformVersion: () => void
   }) => unknown) => selector({
-    platformVersion: 0,
     bumpPlatformVersion,
   }),
 }))

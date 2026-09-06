@@ -1,3 +1,4 @@
+import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -148,7 +149,7 @@ describe('<DeadLettersPanel />', () => {
     sessionStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('renders the empty state when the server returns no rows', async () => {
@@ -553,7 +554,7 @@ describe('<DeadLettersPanel /> — severity filter', () => {
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('renders the severity filter defaulting to all', async () => {
@@ -642,7 +643,7 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('restores the persisted status / owner / severity selections on mount', async () => {
@@ -710,7 +711,7 @@ describe('<DeadLettersPanel /> — sort', () => {
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('renders the sort control defaulting to newest', async () => {
@@ -819,7 +820,7 @@ describe('<DeadLettersPanel /> — bulk replay', () => {
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('offers Replay selected alongside Resolve selected once a row is ticked', async () => {
@@ -926,7 +927,7 @@ describe('<DeadLettersPanel /> — search', () => {
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('filters the queue by the search box (server honors ?search=)', async () => {
@@ -964,7 +965,7 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     vi.mocked(api).mockClear()
     vi.mocked(copyText).mockClear()
     vi.mocked(copyText).mockResolvedValue(true)
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('moves roving focus with J and K', async () => {
@@ -1103,7 +1104,7 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     })
     const onReplay = vi.fn(async (id: string) => {
       rows = rows.filter((row) => row.id !== id)
-      useWorkflowStore.setState((state) => ({ platformVersion: state.platformVersion + 1 }))
+      invalidateTags([PLATFORM_TAG])
       return true
     })
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={vi.fn()} />)
@@ -1153,7 +1154,7 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     outside.focus()
     rows = [mockDeadLetter('b')]
     act(() => {
-      useWorkflowStore.setState((state) => ({ platformVersion: state.platformVersion + 1 }))
+      invalidateTags([PLATFORM_TAG])
     })
 
     await waitFor(() => expect(screen.queryByTestId('dlq-row-a')).toBeNull())

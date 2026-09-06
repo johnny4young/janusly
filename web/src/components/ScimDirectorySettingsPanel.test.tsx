@@ -50,7 +50,7 @@ function mockApi(opts: {
 describe('<ScimDirectorySettingsPanel />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
 
   it('renders the connect form when no directory exists', async () => {

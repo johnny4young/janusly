@@ -10,7 +10,6 @@ const addToast = vi.fn()
 const bumpPlatformVersion = vi.fn()
 vi.mock('../store', () => ({
   useWorkflowStore: (selector: (state: unknown) => unknown) => selector({
-    platformVersion: 0,
     addToast,
     bumpPlatformVersion,
   }),

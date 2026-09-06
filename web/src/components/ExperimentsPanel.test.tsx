@@ -1,12 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { changeAppLanguage } from '../i18n'
-import { useWorkflowStore } from '../store'
+import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { ExperimentsPanel } from './ExperimentsPanel'
+import { useInvalidationNonce } from '../lib/query-cache'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
+
+const EXPERIMENT_TAGS = ['experiments'] as const
 
 const summary = {
   scorerKind: 'string_equality',
@@ -35,10 +38,13 @@ const experiment = {
 }
 
 beforeEach(() => {
+  __resetBumpCoalesceForTests()
   changeAppLanguage('en')
   vi.mocked(api).mockReset()
-  useWorkflowStore.setState({ platformVersion: 0, toasts: [] })
+  useWorkflowStore.setState({ toasts: [] })
 })
+
+afterEach(() => __resetBumpCoalesceForTests())
 
 describe('<ExperimentsPanel />', () => {
   it('loads a selected experiment and renders aggregate control/candidate metrics', async () => {
@@ -111,12 +117,16 @@ describe('<ExperimentsPanel />', () => {
   })
 
   it('creates a dataset locally, selects it for the next comparison, and signals the shared refresh', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(EXPERIMENT_TAGS))
+    const dataset = { id: 'dataset-new', name: 'June recoveries', description: 'Accepted samples', exampleCount: 8 }
+    const datasets: typeof dataset[] = []
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/experiments') return { experiments: [] }
       if (path === '/eval/datasets' && options?.method === 'POST') {
-        return { dataset: { id: 'dataset-new', name: 'June recoveries', description: 'Accepted samples', exampleCount: 8 } }
+        datasets.push(dataset)
+        return { dataset }
       }
-      if (path === '/eval/datasets') return { datasets: [] }
+      if (path === '/eval/datasets') return { datasets }
       return {}
     })
 
@@ -130,6 +140,7 @@ describe('<ExperimentsPanel />', () => {
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/eval/datasets', expect.objectContaining({ method: 'POST' })))
     const call = vi.mocked(api).mock.calls.find(([path, options]) => path === '/eval/datasets' && options?.method === 'POST')
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: 'June recoveries', retentionDays: 90 })
+    await waitFor(() => expect(refresh.current).toBe(1))
     expect(screen.getByRole('option', { name: 'June recoveries · 8 examples' })).toBeInTheDocument()
   })
 

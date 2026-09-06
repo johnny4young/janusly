@@ -1,3 +1,4 @@
+import { invalidateTags } from '../lib/query-cache'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,7 +9,6 @@ vi.mock('../api', () => ({
 const storeState = vi.hoisted(() => ({
   addToast: vi.fn(),
   bumpPlatformVersion: vi.fn(),
-  platformVersion: 1,
   currentWorkflowId: null as string | null,
   currentWorkflowSaved: true,
 }))
@@ -42,7 +42,6 @@ const LOADED_METADATA = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  storeState.platformVersion = 1
   storeState.currentWorkflowId = null
   storeState.currentWorkflowSaved = true
 })
@@ -123,7 +122,7 @@ describe('WorkflowMetadataPanel', () => {
     }))
   })
 
-  it('preserves an unsaved draft across unrelated platform invalidations', async () => {
+  it('preserves an unsaved draft across workflow invalidations', async () => {
     apiMock
       .mockResolvedValueOnce(LOADED_METADATA)
       .mockResolvedValueOnce({
@@ -131,12 +130,11 @@ describe('WorkflowMetadataPanel', () => {
         metadata: { ...LOADED_METADATA.metadata, aiGuidanceMarkdown: 'Server changed elsewhere.' },
       })
 
-    const { rerender } = render(<WorkflowMetadataPanel workflowId="wf-1" />)
+    render(<WorkflowMetadataPanel workflowId="wf-1" />)
     const guidance = await screen.findByTestId('workflow-metadata-ai-guidance')
     fireEvent.change(guidance, { target: { value: 'Unsaved workflow draft.' } })
 
-    storeState.platformVersion = 2
-    rerender(<WorkflowMetadataPanel workflowId="wf-1" />)
+    act(() => invalidateTags(['workflows']))
 
     await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2))
     expect(guidance).toHaveValue('Unsaved workflow draft.')
@@ -155,11 +153,10 @@ describe('WorkflowMetadataPanel', () => {
       return readCount === 1 ? LOADED_METADATA : staleRefresh
     })
 
-    const { rerender } = render(<WorkflowMetadataPanel workflowId="wf-1" />)
+    render(<WorkflowMetadataPanel workflowId="wf-1" />)
     const guidance = await screen.findByTestId('workflow-metadata-ai-guidance')
 
-    storeState.platformVersion = 2
-    rerender(<WorkflowMetadataPanel workflowId="wf-1" />)
+    act(() => invalidateTags(['workflows']))
     await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2))
 
     fireEvent.change(guidance, { target: { value: 'Saved while refresh was pending.' } })

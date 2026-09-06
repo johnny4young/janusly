@@ -56,7 +56,7 @@ beforeEach(() => {
       },
     ],
   })
-  useWorkflowStore.setState({ ...initialStore, platformVersion: 0 }, true)
+  useWorkflowStore.setState({ ...initialStore }, true)
 })
 
 describe('<ConnectionsPanel />', () => {

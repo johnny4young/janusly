@@ -1,6 +1,6 @@
 /**
  * Recent-alerts feed inside `OperationsPage`. Polls
- * `GET /alerts/recent` on `platformVersion` cadence and renders the last
+ * `GET /alerts/recent` on `invalidationNonce` cadence and renders the last
  * 50 dispatches with per-row severity tint (cobalt = delivered, amber =
  * delivery_failed).
  *
@@ -15,8 +15,10 @@ import { LoadingSkeleton } from './LoadingSkeleton'
 import { Bell, BellOff } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
-import { useWorkflowStore } from '../store'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { getResolvedLocale, useT } from '../i18n'
+
+const RECENT_ALERT_TAGS = [PLATFORM_TAG, 'alert-policies', 'runs', 'dlq', 'recovery', 'auto-healing', 'upstream', 'billing'] as const
 
 type AlertDispatch = {
   id: string
@@ -53,7 +55,7 @@ function relativeTime(iso: string, locale: string): string {
 export function RecentAlertsCard(): React.ReactElement {
   const { t } = useT()
   const locale = getResolvedLocale()
-  const platformVersion = useWorkflowStore((s) => s.platformVersion)
+  const invalidationNonce = useInvalidationNonce(RECENT_ALERT_TAGS)
   const [items, setItems] = useState<AlertDispatch[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -78,7 +80,7 @@ export function RecentAlertsCard(): React.ReactElement {
     return () => {
       cancelled = true
     }
-  }, [platformVersion])
+  }, [invalidationNonce])
 
   const cardSeverity: 'warning' | undefined = items.some(
     (item) => item.outcome === 'delivery_failed',

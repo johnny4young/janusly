@@ -1,6 +1,7 @@
+import { useInvalidationNonce } from '../lib/query-cache'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
@@ -9,6 +10,7 @@ import { MembersPanel } from './MembersPanel'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
+const REFRESH_TAGS = ['members'] as const
 const initialState = useWorkflowStore.getState()
 
 function setupApi(opts: { roles?: unknown; members?: unknown[]; invitations?: unknown[] }) {
@@ -43,7 +45,6 @@ describe('<MembersPanel /> dynamic role list', () => {
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({
       ...initialState,
-      platformVersion: 0,
       toasts: [],
       identityContext: {
         identity: { userId: 'admin-user', email: 'admin@example.com', mode: 'supabase', source: 'web' },
@@ -104,6 +105,7 @@ describe('<MembersPanel /> dynamic role list', () => {
   })
 
   it('invites a user with a custom role name', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     setupApi({
       roles: {
         roles: [
@@ -128,10 +130,11 @@ describe('<MembersPanel /> dynamic role list', () => {
         }),
       )
     })
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+    await waitFor(() => expect(refresh.current).toBe(1))
   })
 
-  it('bumps platformVersion after changing a member role', async () => {
+  it('invalidates dependent resources after changing a member role', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     setupApi({
       members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer', isOwner: false }],
     })
@@ -146,10 +149,11 @@ describe('<MembersPanel /> dynamic role list', () => {
         expect.objectContaining({ method: 'POST', body: expect.stringContaining('editor') }),
       )
     })
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+    await waitFor(() => expect(refresh.current).toBe(1))
   })
 
   it('requires inline confirmation before removing a member', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     setupApi({
       members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer', isOwner: false }],
     })
@@ -165,7 +169,7 @@ describe('<MembersPanel /> dynamic role list', () => {
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/members?userId=user-1', { method: 'DELETE' })
     })
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+    await waitFor(() => expect(refresh.current).toBe(1))
   })
 
   it('protects the owner row and confirms an explicit transfer to an admin', async () => {

@@ -24,7 +24,7 @@ vi.mock('../api', () => {
 describe('<FailureClustersCard /> recovery lifecycle (browser smoke)', () => {
   beforeEach(() => {
     __resetBumpCoalesceForTests()
-    useWorkflowStore.setState({ platformVersion: 0, toasts: [] })
+    useWorkflowStore.setState({ toasts: [] })
     vi.mocked(api).mockReset()
   })
 

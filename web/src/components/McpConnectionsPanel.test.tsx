@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useInvalidationNonce } from '../lib/query-cache'
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
@@ -6,6 +7,7 @@ import { McpConnectionsPanel } from './McpConnectionsPanel'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
+const REFRESH_TAGS = ['mcp'] as const
 const initialState = useWorkflowStore.getState()
 
 const EMPTY = { connections: [] }
@@ -56,7 +58,7 @@ beforeEach(() => {
   // so the 100ms debounce can't bleed across cases.
   __resetBumpCoalesceForTests()
   vi.mocked(api).mockReset()
-  useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+  useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
 })
 
 describe('<McpConnectionsPanel />', () => {
@@ -109,6 +111,7 @@ describe('<McpConnectionsPanel />', () => {
   })
 
   it('sends exposeToAi when the per-tool AI exposure toggle changes', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     let toolsFetches = 0
     vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/mcp/connections') return ONE_CONNECTION
@@ -142,10 +145,11 @@ describe('<McpConnectionsPanel />', () => {
         }),
       )
     })
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+    await waitFor(() => expect(refresh.current).toBe(1))
   })
 
-  it('submits a stdio create-connection form and bumps platformVersion on success', async () => {
+  it('submits a stdio create-connection form and invalidates dependent resources on success', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/mcp/connections' && (!init || init.method !== 'POST')) return EMPTY
       if (path === '/mcp/connections' && init?.method === 'POST') {
@@ -168,7 +172,7 @@ describe('<McpConnectionsPanel />', () => {
         }),
       )
     })
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+    await waitFor(() => expect(refresh.current).toBe(1))
   })
 
   it('flags a malformed URL inline and gates submit until it is valid', async () => {
@@ -207,6 +211,7 @@ describe('<McpConnectionsPanel />', () => {
   })
 
   it('submits an http create-connection form with the url transport payload', async () => {
+    const { result: refresh } = renderHook(() => useInvalidationNonce(REFRESH_TAGS))
     vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/mcp/connections' && (!init || init.method !== 'POST')) return EMPTY
       if (path === '/mcp/connections' && init?.method === 'POST') {
@@ -234,6 +239,6 @@ describe('<McpConnectionsPanel />', () => {
         }),
       )
     })
-    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+    await waitFor(() => expect(refresh.current).toBe(1))
   })
 })

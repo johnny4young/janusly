@@ -20,7 +20,7 @@ vi.mock('../api', () => {
 describe('<FailureClustersCard />', () => {
   beforeEach(() => {
     __resetBumpCoalesceForTests()
-    useWorkflowStore.setState({ platformVersion: 0, toasts: [] })
+    useWorkflowStore.setState({ toasts: [] })
     vi.mocked(api).mockReset()
   })
 

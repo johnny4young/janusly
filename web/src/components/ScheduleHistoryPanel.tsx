@@ -27,8 +27,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { CalendarClock } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { getResolvedLocale, useT } from '../i18n'
 import './ScheduleHistoryPanel.css'
+
+const SCHEDULE_HISTORY_TAGS = [PLATFORM_TAG, 'workflows', 'schedules', 'runs'] as const
 
 
 export type ScheduleHistoryPanelProps = {
@@ -96,7 +99,7 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
   const { t } = useT()
   const storeWorkflowId = useWorkflowStore((s) => s.currentWorkflowId)
   const storeWorkflowSaved = useWorkflowStore((s) => s.currentWorkflowSaved)
-  const platformVersion = useWorkflowStore((s) => s.platformVersion)
+  const invalidationNonce = useInvalidationNonce(SCHEDULE_HISTORY_TAGS)
   // With no explicit id this panel targets the current draft — but only once
   // it has been saved. An unsaved draft has no server row, so the lookup would
   // 404; an explicit id always resolves.
@@ -125,7 +128,7 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
     return () => {
       cancelled = true
     }
-  }, [workflowId, platformVersion])
+  }, [workflowId, invalidationNonce])
 
   const locale = getResolvedLocale()
   const dayLabels = useMemo(() => {

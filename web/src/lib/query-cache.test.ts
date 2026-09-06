@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { invalidateTags, subscribeToTags, useInvalidationNonce } from './query-cache'
+import { invalidateTags, subscribeToTags, useInvalidationNonce, type ResourceTag } from './query-cache'
 
 describe('tagged invalidation', () => {
   it('notifies only the subscribers whose tags intersect, once each', () => {
@@ -33,5 +33,17 @@ describe('tagged invalidation', () => {
     expect(result.current).toBe(1)
     unmount()
     expect(() => invalidateTags(['org-config'])).not.toThrow()
+  })
+
+  it('replaces the subscription when the declared resources change', () => {
+    const { result, rerender } = renderHook(
+      ({ tags }: { tags: readonly ResourceTag[] }) => useInvalidationNonce(tags),
+      { initialProps: { tags: ['workflows'] } },
+    )
+    rerender({ tags: ['roles'] })
+    act(() => invalidateTags(['workflows']))
+    expect(result.current).toBe(0)
+    act(() => invalidateTags(['roles']))
+    expect(result.current).toBe(1)
   })
 })
