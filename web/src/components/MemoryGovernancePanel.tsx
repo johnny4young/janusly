@@ -3,6 +3,7 @@
 import { BrainCircuit, Clock3, Database, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { getResolvedLocale, useT } from '../i18n'
 import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
+import './MemoryGovernancePanel.css'
 
 export function MemoryGovernancePanel() {
   const { t } = useT()

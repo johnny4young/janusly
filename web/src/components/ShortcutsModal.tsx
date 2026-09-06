@@ -15,6 +15,7 @@ import {
   canOpenWorkspaceDestination,
   type WorkspaceDestination,
 } from '../workspace-locations'
+import './ShortcutsModal.css'
 
 type Group = {
   title: string

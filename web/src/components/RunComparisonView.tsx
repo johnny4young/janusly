@@ -12,6 +12,7 @@ import { useMemo } from 'react'
 import { ArrowRight, Minus, Check, AlertCircle, Beaker, GitCompareArrows } from 'lucide-react'
 import { useT } from '../i18n'
 import { formatStatusLabel } from '../constants'
+import './RunComparisonView.css'
 
 export type RunComparisonNodeSide = {
   status: string

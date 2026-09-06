@@ -35,6 +35,7 @@ import type { DeadLetter } from './dead-letter-types'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { Button } from '@/components/ui/Button'
+import './FailureClustersCard.css'
 
 type ClusterData = ClustersResponse & {
   fetchedAtMs: number

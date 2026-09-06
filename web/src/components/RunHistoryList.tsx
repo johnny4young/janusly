@@ -26,6 +26,7 @@ import { RunHistoryComparisonDialog } from './RunHistoryComparisonDialog'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
 import { SemanticOutcomePill } from './SemanticOutcomePill'
 import { SelectControl } from '@/components/ui/Form'
+import './RunHistoryList.css'
 
 /** Fixed card pitch for the compact row plus its 8px bottom margin. */
 const RUN_HISTORY_ROW_HEIGHT = 156

@@ -27,6 +27,7 @@ import { useConfirm } from './ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import type { Credential as CredentialRecord } from '../types'
 import { PLATFORM_TAG, useInvalidationNonce } from '@/lib/query-cache'
+import './AlertPoliciesPanel.css'
 
 type Channel = {
   destination: AlertDestination

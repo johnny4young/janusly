@@ -23,6 +23,7 @@ import { EmptyState } from './components/EmptyState'
 import { useWorkflowStore } from './store'
 import { useT } from './i18n'
 import { t as runtimeT } from './i18n/runtime'
+import './MultiAgentTimeline.css'
 
 /** Phantom lanes shown in the empty timeline so the operator sees the four
  *  phases a team run will record before anything has run. Purely

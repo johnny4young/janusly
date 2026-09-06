@@ -1,0 +1,84 @@
+/* Styles for MemoryGovernancePanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+.we-memory-governance {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--we-primary) 3%, var(--we-surface-1));
+}
+
+.we-memory-governance__summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-1);
+  color: var(--we-text-2);
+}
+
+.we-memory-governance__summary[data-enabled="true"] {
+  border-color: color-mix(in srgb, var(--we-success) 40%, var(--we-line));
+  background: var(--we-success-soft);
+  color: var(--we-success-text);
+}
+
+.we-memory-governance__summary div { display: grid; gap: 3px; }
+
+.we-memory-governance__summary strong { color: var(--we-text-1); font-size: 13px; }
+
+.we-memory-governance__summary span { font-size: 12px; line-height: 1.45; }
+
+.we-memory-governance__gates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.we-memory-governance__gates > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-1);
+}
+
+.we-memory-governance__gates dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--we-text-2);
+  font-size: 11px;
+}
+
+.we-memory-governance__gates dd {
+  margin: 0;
+  color: var(--we-text-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.we-memory-governance__gates dd[data-enabled="true"] { color: var(--we-success-text); }
+
+.we-memory-governance__purge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--we-warning-soft);
+  color: var(--we-warning-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.we-memory-governance__purge--clear { background: var(--we-surface-2); color: var(--we-text-2); }

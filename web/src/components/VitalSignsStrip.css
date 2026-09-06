@@ -1,0 +1,186 @@
+/* Styles for VitalSignsStrip.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+.we-ops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.we-ops-metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+
+.we-ops-metric-card--healthy { border-left-color: var(--we-success); }
+
+.we-ops-metric-card--warn { border-left-color: var(--we-warning); }
+
+.we-ops-metric-card--unhealthy { border-left-color: var(--we-danger); }
+
+.we-ops-metric-card--neutral { border-left-color: var(--we-line-strong); }
+
+.we-ops-metric-card--info { border-left-color: var(--we-info); }
+
+.we-ops-metric-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.we-ops-metric-card__icon {
+  display: grid;
+  place-items: center;
+  color: var(--we-text-2);
+}
+
+.we-ops-metric-card__label {
+  margin-bottom: 0;
+}
+
+.we-ops-metric-card__value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--we-text-1);
+  letter-spacing: 0;
+}
+
+.we-ops-metric-card__rationale {
+  margin: 0;
+}
+
+/* Inline recovery-time trend sparkline under a metric value. Color encodes direction:
+   improving (last <= mean) is green, worsening is red. */
+.we-sparkline {
+  display: block;
+  margin-top: 4px;
+  height: 16px;
+  width: 80px;
+  overflow: visible;
+}
+
+.we-sparkline--down polyline {
+  stroke: var(--we-success);
+}
+
+.we-sparkline--up polyline {
+  stroke: var(--we-danger);
+}
+
+.we-sparkline__hit-target {
+  fill: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.we-sparkline__focus-dot {
+  fill: var(--we-surface-1);
+  stroke: var(--we-primary);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.we-sparkline__hit-target:hover + .we-sparkline__focus-dot,
+.we-sparkline__hit-target:focus-visible + .we-sparkline__focus-dot {
+  opacity: 1;
+}
+
+.we-ops-metric-card--split-action {
+  transition: border-color 80ms ease-out, background-color 80ms ease-out;
+}
+
+.we-ops-metric-card--split-action:focus-within {
+  border-color: color-mix(in srgb, var(--we-primary) 30%, var(--we-line));
+}
+
+.we-ops-metric-card__main-action {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.we-ops-metric-card__main-action:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.we-ops-progress {
+  position: relative;
+  height: 6px;
+  width: 100%;
+}
+
+.we-ops-progress__rail {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--we-radius-pill);
+  background: var(--we-surface-muted);
+}
+
+.we-ops-progress__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: var(--we-radius-pill);
+}
+
+.we-ops-progress__fill--healthy { background: var(--we-success); }
+
+.we-ops-progress__fill--warn { background: var(--we-warning); }
+
+.we-ops-progress__fill--unhealthy { background: var(--we-danger); }
+
+.we-ops-progress__fill--neutral { background: var(--we-line-strong); }
+
+.we-ops-progress__fill--info { background: var(--we-info); }
+
+/* Clickable variant of a metric card — used by `<VitalSignsStrip />` when
+   a tile carries an `onClick` handler (today: the home page's strip whose
+   tiles navigate to other tabs). The base `.we-card` + `.we-ops-metric-card`
+   classes already paint the border, padding, flex layout, and severity tint;
+   the button variant only neutralizes browser button styling that would
+   otherwise leak through (light-gray background, centered text, button font)
+   and adds the affordances that make it feel clickable. */
+button.we-ops-metric-card,
+button.we-ops-metric-card--button {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.we-ops-metric-card--button {
+  cursor: pointer;
+  transition: border-color 80ms ease-out, background-color 80ms ease-out, transform 120ms ease-out;
+}
+
+.we-ops-metric-card--button:hover {
+  border-color: color-mix(in srgb, var(--we-primary) 30%, var(--we-line));
+  transform: translateY(-1px);
+}
+
+.we-ops-metric-card--button:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .we-ops-metric-card--button { transition: none; }
+  .we-ops-metric-card--button:hover { transform: none; }
+  .we-ops-metric-card--split-action { transition: none; }
+}

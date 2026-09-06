@@ -40,6 +40,7 @@ import {
   type RecommendedActionSeverity,
   type RecoveryMetrics,
 } from './recovery-center-model'
+import './recovery-center.css'
 
 // ─────────────────────────────────────────────────────────────────────────
 // RecoveryCenterTile — the shared shell every tile renders into.

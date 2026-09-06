@@ -4,6 +4,7 @@ import { getResolvedLocale, useT } from '../i18n'
 import { EmptyView } from './panel-primitives'
 
 import type { CacheEfficiency, CostProviderRow } from '../lib/recovery-metrics-model'
+import './SettingsUsageSection.css'
 
 export type { CacheEfficiency, CostProviderRow }
 

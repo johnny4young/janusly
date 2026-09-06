@@ -24,6 +24,7 @@ import { useConfirm } from './ConfirmDialog'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
+import './VersionHistoryPanel.css'
 
 type VersionRow = { id: string; version: number; dagJson: WorkflowDefinition; createdAt?: string }
 

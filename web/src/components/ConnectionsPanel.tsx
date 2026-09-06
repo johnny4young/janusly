@@ -26,6 +26,7 @@ import { useConfirm } from './ConfirmDialog'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { Button } from './ui/Button'
 import { FieldStack, FormField, SelectControl, TextInput } from './ui/Form'
+import './ConnectionsPanel.css'
 
 const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 const CONNECTION_ROW_HEIGHT = 166

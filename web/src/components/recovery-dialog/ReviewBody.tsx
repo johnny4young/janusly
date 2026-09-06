@@ -23,6 +23,7 @@ import { RecoveryPassportCard } from './RecoveryPassportCard'
 import { SimilarRunsCard } from './SimilarRunsCard'
 import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './recovery-dialog-model'
 import type { PatchSuggestion, SuggestionTab } from './types'
+import './recovery-dialog.css'
 
 export function ReviewBody({
   suggestion,

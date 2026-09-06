@@ -34,6 +34,7 @@ import type { WorkflowDefinition } from '../types'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
+import './RecoveryDeltaCard.css'
 
 /** Minimum after-side run count for the full delta to render. Mirrors `MIN_RUNS_FOR_DELTA` in the engine. */
 const MIN_RUNS_FOR_DELTA = 5

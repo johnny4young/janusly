@@ -1,0 +1,65 @@
+/* Styles for SolutionPacksPanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+/* Solution-pack drills keep the selected controlled failure truthful and
+   inspectable before the operator opens the recovery queue. */
+.we-pack-drill {
+  border-top: 1px solid var(--we-line);
+  margin-top: 8px;
+  padding-top: 12px;
+  width: 100%;
+}
+
+.we-pack-drill__header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.we-pack-drill__header strong {
+  align-items: center;
+  color: var(--we-ink);
+  display: inline-flex;
+  gap: 6px;
+}
+
+.we-pack-drill__select { margin-top: 0; }
+
+.we-pack-drill__summary {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.we-pack-pills { display: flex; flex: 0 0 auto; flex-direction: column; gap: 4px; }
+
+.we-pack-drill__action { margin-top: 12px; width: 100%; }
+
+@media (max-width: 520px) {
+  .we-pack-drill__summary { flex-direction: column; }
+  .we-pack-pills { flex-direction: row; flex-wrap: wrap; }
+}
+
+.we-pack-cred-legend {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.we-pack-cred-legend > span { align-items: center; display: inline-flex; gap: 3px; }
+
+.we-param {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--we-radius-pill);
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.we-param--missing { color: var(--we-warning-text); background: var(--we-warning-soft); border-color: var(--we-warning-border-30); }
+
+.we-param--optional { color: var(--we-muted); background: var(--we-surface-muted); border-color: var(--we-line); }

@@ -1,0 +1,65 @@
+/* Styles for RunsPanel.tsx: shipped with the lazy chunk that renders them (moved from control-plane.css). */
+
+.action-card {
+  display: grid;
+  gap: 10px;
+}
+
+.we-run-overview {
+  display: grid;
+  gap: 12px;
+  background: linear-gradient(145deg, var(--we-surface) 0%, var(--we-primary-soft) 180%);
+}
+
+.we-run-overview__header { align-items: flex-start; }
+
+.we-run-overview__title,
+.we-run-overview__actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.we-run-overview__trace dd {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.we-run-overview__status-copy { margin: 0; }
+
+.we-run-overview__payload {
+  border-top: 1px solid var(--we-line);
+  padding-top: 9px;
+}
+
+.we-run-overview__payload summary {
+  color: var(--we-ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.we-wait-card {
+  background: var(--we-warning-soft);
+  border: 1px solid var(--we-warning-border-30);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.we-wait-card__timing {
+  color: var(--we-warning-text);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 6px 12px;
+}
+
+.we-failed-node__id {
+  font-size: 12px;
+  font-weight: 700;
+}

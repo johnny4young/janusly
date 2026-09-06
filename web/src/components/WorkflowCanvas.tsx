@@ -25,6 +25,7 @@ import { hasNodePaletteDrag, readNodePaletteDrag } from '../canvas-node-drag'
 import { CanvasStepPicker } from './CanvasStepPicker'
 import '@xyflow/react/dist/style.css'
 import { Button } from '@/components/ui/Button'
+import './WorkflowCanvas.css'
 
 type WorkflowCanvasProps = {
   nodes: WorkflowGraphNode[]

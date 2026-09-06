@@ -1,0 +1,201 @@
+/* Styles for VersionHistoryPanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+.version-history__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.small-command--active {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.version-button--selected {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+}
+
+.version-button__check {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border-radius: 4px;
+  border: 1px solid var(--we-line-strong);
+  background: var(--we-surface);
+  font-size: 11px;
+  color: var(--we-primary);
+}
+
+.version-button__check--on {
+  background: var(--we-primary);
+  color: var(--we-surface);
+  border-color: var(--we-primary);
+}
+
+.version-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 8px;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+}
+
+.version-row[data-latest="true"] {
+  border-left-color: var(--we-primary);
+  background: color-mix(in srgb, var(--we-primary) 4%, var(--we-surface) 96%);
+}
+
+.version-row[data-selected="true"] {
+  border-left-color: var(--we-accent);
+}
+
+.version-row .version-button {
+  margin-top: 0;
+  flex: 1 1 auto;
+}
+
+.version-row__rollback {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface);
+  color: var(--we-text-2);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.version-row__rollback:hover {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.version-row__rollback:active { transform: translateY(1px); }
+
+/* AI improvement-suggestion affordance — sits below the structural
+ * diff in Compare mode. Editor-role-only. The button is the same
+ * `small-command` style as Compare/Cancel; the result pane mirrors the
+ * Recovery dialog's chip-list pattern but lives inline in the panel. */
+.we-suggest-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.we-suggest-hint {
+  margin: 0;
+  font-size: 11px;
+}
+
+.we-suggest-result {
+  margin-top: 12px;
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--we-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.we-suggest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.we-suggest-close {
+  border: 1px solid var(--we-line);
+  background: transparent;
+  color: var(--we-text-2);
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.we-suggest-close:hover {
+  border-color: var(--we-text-1);
+  color: var(--we-text-1);
+}
+
+.we-suggest-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.we-suggest-chip {
+  border: 1px solid var(--we-line);
+  background: transparent;
+  color: var(--we-text-2);
+  border-radius: var(--we-radius-pill);
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.we-suggest-chip:hover {
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.we-suggest-chip--active {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.we-suggest-fallback {
+  margin-top: 12px;
+  border: 1px solid var(--we-warning);
+  background: var(--we-warning-soft);
+  color: var(--we-warning-text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;
+}
+
+.we-suggest-fallback__title {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.we-suggest-fallback__detail {
+  font-size: 11px;
+  color: var(--we-text-1);
+}
+
+.we-suggest-fallback__close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--we-warning-text);
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.we-suggest-fallback__close:hover {
+  border-color: var(--we-warning);
+}

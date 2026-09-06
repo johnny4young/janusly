@@ -1,0 +1,214 @@
+/* Styles for MultiAgentTimeline.tsx: shipped with the lazy chunk that renders them (moved from control-plane.css, workflow.css). */
+
+/* Phantom lanes under the empty multi-agent timeline — attenuated phase
+   rows that prefigure the populated structure before any team has run. */
+.we-ghost-lanes {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.we-ghost-lane {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.we-ghost-lane:nth-child(1) { opacity: 0.55; }
+
+.we-ghost-lane:nth-child(2) { opacity: 0.45; }
+
+.we-ghost-lane:nth-child(3) { opacity: 0.35; }
+
+.we-ghost-lane:nth-child(4) { opacity: 0.28; }
+
+.we-ghost-lane__phase {
+  min-width: 104px;
+  justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--we-radius-pill);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.we-ghost-lane__phase--config { color: var(--we-info); background: var(--we-info-soft); border-color: color-mix(in srgb, var(--we-info) 30%, transparent); }
+
+.we-ghost-lane__phase--ai { color: var(--we-accent-text); background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 32%, transparent); }
+
+.we-ghost-lane__phase--http { color: var(--we-warning-text); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
+
+.we-ghost-lane__phase--success { color: var(--we-success-text); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
+
+.we-ghost-lane__bar {
+  flex: 1;
+  height: 8px;
+  border-radius: var(--we-radius-pill);
+  background: var(--we-surface-muted);
+}
+
+/* ==========================================================================
+   Agent team timeline
+   Multi-agent run timeline lanes, event cards, tones, and selected detail.
+   ========================================================================== */
+.timeline-shell { display: grid; gap: 14px; }
+
+.timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.timeline-header h3 { margin: 0; font-size: 16px; font-weight: 700; }
+
+.timeline-lane {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.timeline-lane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.timeline-track {
+  position: relative;
+  padding-left: 22px;
+}
+
+.timeline-track::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--we-line);
+}
+
+.timeline-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--we-line-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--we-surface);
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.timeline-card:hover { transform: translateX(2px); border-color: var(--we-primary); }
+
+.timeline-card::before {
+  content: "";
+  position: absolute;
+  left: -18px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--we-radius-pill);
+  background: var(--we-faint);
+}
+
+.timeline-card[data-tone="success"] { background: var(--we-success-soft); border-color: var(--we-success-border-30); }
+
+.timeline-card[data-tone="success"]::before { background: var(--we-success); }
+
+.timeline-card[data-tone="warning"] { background: var(--we-warning-soft); border-color: var(--we-warning-border-30); }
+
+.timeline-card[data-tone="warning"]::before { background: var(--we-warning); }
+
+.timeline-card[data-tone="error"] { background: var(--we-danger-soft); border-color: var(--we-danger-border-30); }
+
+.timeline-card[data-tone="error"]::before { background: var(--we-danger); }
+
+.timeline-card[data-tone="info"] { background: var(--we-primary-soft); border-color: color-mix(in srgb, var(--we-primary) 30%, transparent); }
+
+.timeline-card[data-tone="info"]::before { background: var(--we-primary); }
+
+.timeline-card[data-tone="config"] { background: var(--we-info-soft); border-color: var(--we-info-border-30); }
+
+.timeline-card[data-tone="config"]::before { background: var(--we-info); }
+
+.timeline-card[data-tone="tool"] { background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 30%, transparent); }
+
+.timeline-card[data-tone="tool"]::before { background: var(--we-accent); }
+
+/* Tone → meaning legend above the lanes: the chips below encode phase only via
+   colour, so the legend names each hue (planning / tool call / reflection /
+   completed / failed / other). Swatch colours mirror the .timeline-card dots. */
+.we-timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+}
+
+.we-timeline-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--we-muted);
+}
+
+.we-timeline-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--we-radius-pill);
+  background: var(--we-faint);
+  flex: none;
+}
+
+.we-timeline-legend__swatch[data-tone="success"] { background: var(--we-success); }
+
+.we-timeline-legend__swatch[data-tone="warning"] { background: var(--we-warning); }
+
+.we-timeline-legend__swatch[data-tone="error"] { background: var(--we-danger); }
+
+.we-timeline-legend__swatch[data-tone="info"] { background: var(--we-primary); }
+
+.we-timeline-legend__swatch[data-tone="config"] { background: var(--we-info); }
+
+.we-timeline-legend__swatch[data-tone="tool"] { background: var(--we-accent); }
+
+.timeline-card-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--we-ink);
+}
+
+.timeline-card-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--we-muted);
+}
+
+.timeline-detail {
+  margin-top: 4px;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  padding: 14px;
+}

@@ -5,6 +5,7 @@ import { writeNodePaletteDrag } from '../canvas-node-drag'
 import { getNodeHelper, getNodeLabel, nodeTypes } from '../constants'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useT } from '../i18n'
+import './CanvasStepPicker.css'
 
 const STEP_GROUPS: readonly { id: string; labelKey: string; types: readonly string[] }[] = [
   { id: 'ai', labelKey: 'sidebar.category.ai', types: ['ai', 'agent', 'multi_agent', 'agent_reflection'] },

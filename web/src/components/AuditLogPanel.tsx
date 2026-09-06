@@ -17,6 +17,7 @@ import { api } from "../api";
 import { getResolvedLocale, useT } from "../i18n";
 import { Button } from '@/components/ui/Button'
 import { FormField } from '@/components/ui/Form'
+import './AuditLogPanel.css'
 
 /** One audit row as returned by `GET /audit`. `action` is a stable technical
  *  identifier shown verbatim (not translated); `metadata` is the redacted

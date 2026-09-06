@@ -1,0 +1,71 @@
+/* Styles for WorkflowIoEditor.tsx: shipped with the lazy chunk that renders them (moved from control-plane.css). */
+
+.we-workflow-io {
+  display: grid;
+  gap: 4px;
+}
+
+.we-workflow-io__section {
+  border-top: 1px solid var(--we-line);
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.we-workflow-io__heading,
+.we-workflow-io__row-main {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.we-workflow-io__heading > div { min-width: 0; }
+
+.we-workflow-io__heading strong { color: var(--we-ink); font-size: 12px; }
+
+.we-workflow-io__heading p,
+.we-workflow-io__empty,
+.we-workflow-io__error {
+  color: var(--we-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 3px 0 0;
+}
+
+.we-workflow-io__rows { display: grid; gap: 8px; }
+
+.we-workflow-io__row {
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+}
+
+.we-workflow-io__row-main > label:first-child { flex: 1 1 32%; min-width: 0; }
+
+.we-workflow-io__row-main > label:nth-child(2) { flex: 1 1 28%; min-width: 0; }
+
+.we-workflow-io__row-main--output > label:first-child { flex: 0 1 34%; }
+
+.we-workflow-io__required { flex: 0 0 auto; margin: 0; }
+
+.we-workflow-io__description,
+.we-workflow-io__template { font-family: inherit; }
+
+.we-workflow-io__default { display: block; }
+
+.we-workflow-io__template { flex: 1 1 auto; min-width: 0; }
+
+.we-workflow-io__error { color: var(--we-danger); }
+
+@media (max-width: 560px) {
+  .we-workflow-io__row-main { align-items: stretch; flex-wrap: wrap; }
+  .we-workflow-io__row-main > label:first-child,
+  .we-workflow-io__row-main > label:nth-child(2) { flex-basis: calc(50% - 8px); }
+  .we-workflow-io__row-main--output > label:first-child,
+  .we-workflow-io__template { flex-basis: calc(100% - 38px); }
+}

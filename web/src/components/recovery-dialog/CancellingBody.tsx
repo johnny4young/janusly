@@ -14,6 +14,7 @@ import type { DeadLetter } from '../dead-letter-types'
 import { approachLabelDisplay } from './recovery-dialog-model'
 import type { PatchSuggestion } from './types'
 import { Button } from '@/components/ui/Button'
+import './recovery-dialog.css'
 
 /**
  * Closed enum of quick-pick reasons shown as chips in the cancel UX.

@@ -11,6 +11,7 @@ import { useMemo } from 'react'
 import { scrubEvidenceRow, type EvidenceRow } from '@/lib/ai-evidence'
 import { useT } from '../../i18n'
 import { evidenceKindLabel } from './recovery-dialog-model'
+import './recovery-dialog.css'
 
 /**
  * Collapsible "Why this suggestion?" panel. Renders one chip per evidence

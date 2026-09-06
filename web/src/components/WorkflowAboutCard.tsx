@@ -23,6 +23,7 @@ import { useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { SafeMarkdown } from './SafeMarkdown'
 import { Button } from '@/components/ui/Button'
+import './WorkflowAboutCard.css'
 
 type WorkflowMetadataRecord = {
   workflowId: string

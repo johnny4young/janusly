@@ -135,8 +135,10 @@ Reference numbers (p95 / p99 ms, 20-minute measured phases):
 ## Bundle budgets
 
 `web/performance-budgets.json` is a ratchet: caps on the total artifact, the
-worst single-locale artifact and the eager `workflow-workspace` chunk, plus a
-10 % allowance over each other chunk's recorded baseline. `pnpm bundle-check`
+worst single-locale artifact, the eager `index.css` stylesheet and the eager
+`workflow-workspace` chunk, plus a 10 % allowance over each other chunk's
+recorded baseline. Styles for a lazy panel live next to the component
+(`<Component>.css`) so they ship with its chunk instead of the cold path. `pnpm bundle-check`
 reports; a new named asset must get a baseline entry after review. Structural
 changes that add object keys (a controller/view model, a router) cost gzip
 bytes no minifier removes; the caps were raised once for that in 2026-09 and

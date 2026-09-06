@@ -11,6 +11,7 @@ import { CircleCheck, RefreshCw, TimerReset, XCircle } from 'lucide-react'
 import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
+import './ReplayCampaignsCard.css'
 
 type ReplayCampaign = {
   id: string

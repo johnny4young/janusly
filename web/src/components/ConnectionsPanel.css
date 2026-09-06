@@ -1,0 +1,150 @@
+/* Styles for ConnectionsPanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+.we-connection-row__facts dt {
+  color: var(--we-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.we-connection-row__facts dd {
+  color: var(--we-ink);
+  font-size: 12px;
+  font-weight: 650;
+  margin: 0;
+}
+
+/* Connections is inventory-first. Secret creation and rotation are modal
+   actions; the list never renders secret values or environment names. */
+.we-connections-inventory {
+  display: grid;
+  gap: 14px;
+}
+
+.we-connections-inventory__type-filter {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.we-connections-inventory__type-filter select {
+  max-width: 220px;
+}
+
+.we-connections-inventory__notice {
+  align-items: center;
+  background: var(--we-warning-soft);
+  border: 1px solid var(--we-warning-border-30);
+  border-radius: 8px;
+  color: var(--we-warning-text);
+  display: flex;
+  font-size: 12px;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 10px;
+}
+
+.we-connections-inventory__list {
+  max-height: min(580px, 62vh);
+}
+
+.we-connections-inventory__row-slot {
+  box-sizing: border-box;
+  height: 166px;
+  padding-bottom: 8px;
+}
+
+.we-connection-row {
+  align-items: center;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(170px, 0.78fr) minmax(360px, 1.65fr) auto;
+  height: 100%;
+  padding: 14px;
+}
+
+.we-connection-row__identity {
+  align-items: flex-start;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.we-connection-row__identity strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-connection-row__facts {
+  display: grid;
+  gap: 10px 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  min-width: 0;
+}
+
+.we-connection-row__facts div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.we-connection-row__facts dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-connection-row__facts dd[data-expiry="expired"] {
+  color: var(--we-danger-text);
+}
+
+.we-connection-row__facts dd[data-expiry="soon"] {
+  color: var(--we-warning-text);
+}
+
+.we-connection-row__actions {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.we-connection-dialog {
+  max-width: 620px;
+}
+
+/* Secret status stays a tinted pill so linked versus missing is never raw
+   color-only text. */
+.we-secret-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: var(--we-radius-pill);
+  border: 1px solid transparent;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.we-secret-pill::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: var(--we-radius-pill);
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.we-secret-pill--healthy { color: var(--we-success-text); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
+
+.we-secret-pill--warn { color: var(--we-warning-text); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
+
+.we-secret-pill--unhealthy { color: var(--we-danger-text); background: var(--we-danger-soft); border-color: color-mix(in srgb, var(--we-danger) 28%, transparent); }
+
+.we-secret-pill--neutral { color: var(--we-muted); background: var(--we-surface-2); border-color: var(--we-line-strong); }

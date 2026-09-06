@@ -1,0 +1,62 @@
+/* Styles for AlertPoliciesPanel.tsx: shipped with the lazy chunk that renders them (moved from control-plane.css). */
+
+.we-alert-policies__form {
+  background: color-mix(in srgb, var(--we-primary) 3%, var(--we-surface) 97%);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.we-alert-policies__form label {
+  color: var(--we-muted);
+  display: grid;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.we-alert-policies__form input,
+.we-alert-policies__form select {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line-strong);
+  border-radius: 8px;
+  color: var(--we-ink);
+  font-size: 13px;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.we-alert-policies__form input[type="checkbox"] {
+  min-height: 0;
+  padding: 0;
+}
+
+.we-alert-policies__channels {
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+}
+
+.we-alert-policies__channels legend {
+  color: var(--we-muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.we-alert-policies__channel {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.we-alert-policies__form-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

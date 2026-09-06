@@ -15,6 +15,7 @@ import type {
   RecoveryItemStatus,
 } from '@/lib/recovery-item'
 import { getResolvedLocale, useT } from '../i18n'
+import './RecoveryItemBadge.css'
 
 export type RecoveryItemBadgeData = {
   id: string

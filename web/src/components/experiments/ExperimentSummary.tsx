@@ -15,6 +15,7 @@ import { Clipboard } from 'lucide-react'
 import { useT } from '../../i18n'
 import { formatCurrency, formatDelta, formatPercent, formatScorePoints, parseSummary, type Experiment, type ExperimentSummary } from './types'
 import { Button } from '@/components/ui/Button'
+import './experiments.css'
 
 function getRecommendationReason(summary: ExperimentSummary, t: ReturnType<typeof useT>['t']): string {
   // Derive a code for summaries persisted before the API exposed reason codes.

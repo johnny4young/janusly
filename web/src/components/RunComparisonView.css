@@ -1,0 +1,165 @@
+/* Styles for RunComparisonView.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+.we-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.we-comparison-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--we-text-2);
+  background: var(--we-surface-2);
+  border: 1px dashed var(--we-line);
+  border-radius: 8px;
+}
+
+.we-comparison-summary {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--we-surface-2);
+  border: 1px solid var(--we-line);
+  font-size: 12px;
+  color: var(--we-text-1);
+}
+
+.we-comparison-summary__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.we-comparison-summary__line > span {
+  white-space: nowrap;
+}
+
+.we-comparison-summary__metric {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.we-comparison-summary__line strong {
+  color: var(--we-text-1);
+}
+
+.we-comparison-delta {
+  color: var(--we-text-2);
+  margin-left: 4px;
+}
+
+.we-comparison-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.we-comparison-table {
+  min-width: 680px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.we-comparison-table thead th {
+  text-align: left;
+  font-weight: 500;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--we-line);
+  color: var(--we-text-2);
+  background: var(--we-surface-2);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.we-comparison-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--we-line);
+  vertical-align: middle;
+}
+
+.we-comparison-cell-node {
+  font-family: ui-monospace, "SF Mono", monospace;
+  color: var(--we-text-1);
+}
+
+.we-comparison-cell-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--we-text-1);
+}
+
+.we-comparison-row--equal td {
+  background: transparent;
+}
+
+.we-comparison-row--changed td {
+  background: var(--we-warning-soft);
+}
+
+.we-comparison-row--only-base td,
+.we-comparison-row--only-replay td {
+  background: var(--we-surface-muted);
+}
+
+.we-comparison-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--we-radius-pill);
+  border: 1px solid var(--we-line);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.we-comparison-pill--success {
+  color: var(--we-success-text);
+  border-color: var(--we-success-border-30);
+  background: var(--we-success-soft);
+}
+
+.we-comparison-pill--danger {
+  color: var(--we-danger-text);
+  border-color: var(--we-danger-border-30);
+  background: var(--we-danger-soft);
+}
+
+.we-comparison-pill--warn {
+  color: var(--we-warning-text);
+  border-color: var(--we-warning-border-30);
+  background: var(--we-warning-soft);
+}
+
+.we-comparison-pill--neutral {
+  color: var(--we-text-2);
+  background: var(--we-surface-2);
+}
+
+.we-comparison-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.we-comparison-chip--equal {
+  background: var(--we-success-soft);
+  color: var(--we-success-text);
+}
+
+.we-comparison-chip--changed {
+  background: var(--we-warning-soft);
+  color: var(--we-warning-text);
+}
+
+.we-comparison-chip--only-base,
+.we-comparison-chip--only-replay {
+  background: var(--we-surface-2);
+  color: var(--we-text-2);
+}

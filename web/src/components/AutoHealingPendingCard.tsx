@@ -32,6 +32,7 @@ import {
   type TechnicalRecoveryAutonomyAssessment,
 } from '@/lib/technical-recovery-autonomy'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
+import './AutoHealingPendingCard.css'
 
 type PendingRow = {
   id: string

@@ -19,6 +19,7 @@ import type {
 import { Button } from '@/components/ui/Button'
 import { FormField } from '@/components/ui/Form'
 import { asRecord } from '../lib/guards'
+import './WorkflowRolloutPanel.css'
 
 const WorkflowRecoveryQualification = lazy(() => import('./WorkflowRecoveryQualification').then(module => ({
   default: module.WorkflowRecoveryQualification,

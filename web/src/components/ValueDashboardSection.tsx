@@ -26,6 +26,7 @@ import {
   type OperatorWins,
   type RecoveryLedger,
 } from './recovery-center/recovery-center-model'
+import './ValueDashboardSection.css'
 
 export type ClustersResolvedMetric = {
   value: number | null

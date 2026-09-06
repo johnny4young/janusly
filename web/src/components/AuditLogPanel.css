@@ -1,0 +1,71 @@
+/* Styles for AuditLogPanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+.we-audit-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--we-text-2);
+  font-size: 11px;
+}
+
+.we-audit-preset {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: var(--we-radius-pill);
+  background: transparent;
+  color: var(--we-text-2);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.we-audit-preset:hover,
+.we-audit-preset--active {
+  border-color: var(--we-primary);
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+}
+
+.we-audit-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.we-audit-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.we-audit-table th,
+.we-audit-table td {
+  border-bottom: 1px solid var(--we-line);
+  overflow-wrap: anywhere;
+  padding: 8px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.we-audit-table th {
+  color: var(--we-text-2);
+  font-size: 11px;
+}
+
+.we-audit-table th:nth-child(1) { width: 15%; }
+
+.we-audit-table th:nth-child(2) { width: 20%; }
+
+.we-audit-table th:nth-child(3) { width: 12%; }
+
+.we-audit-table th:nth-child(4) { width: 21%; }
+
+.we-audit-table th:nth-child(5) { width: 32%; }
+
+.we-audit-table td,
+.we-audit-table code {
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: normal;
+}

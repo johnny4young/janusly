@@ -14,6 +14,7 @@ import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
 import { useT } from '../../i18n'
 import { buildHeatmapCells, type HeatmapCell, type HeatmapDay } from './recovery-center-model'
+import './recovery-center.css'
 
 export function RecoveryHeatmap({
   days,

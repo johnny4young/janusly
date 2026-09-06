@@ -41,6 +41,7 @@ import {
   type RecoveryQueueFocusRequest,
 } from './recovery-queue-focus-bus'
 import type { RunWorkspaceProps } from './RunWorkspace'
+import './ActivityWorkspace.css'
 
 const RunWorkspace = lazy(() => import('./RunWorkspace').then(module => ({
   default: module.RunWorkspace,

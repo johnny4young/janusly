@@ -5,6 +5,7 @@ import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { Button } from '@/components/ui/Button'
 import { asRecord } from '../lib/guards'
+import './WorkflowRecoveryQualification.css'
 
 export type RecoveryQualification = {
   id: string

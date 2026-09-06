@@ -10,6 +10,7 @@
 
 import { getResolvedLocale, useT } from '../i18n'
 import { isRecord } from '../lib/guards'
+import './QueueLagChip.css'
 
 export type QueueHealth = {
   waiting: number

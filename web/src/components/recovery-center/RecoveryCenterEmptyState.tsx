@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useT } from '../../i18n'
+import './recovery-center.css'
 
 export function RecoveryLabEntry({
   onOpenStudio,

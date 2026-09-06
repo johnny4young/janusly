@@ -49,6 +49,7 @@ import {
   type OpsSection,
 } from './operations-section-bus'
 import { useT } from '../i18n'
+import './OperationsPage.css'
 
 const FailureClustersCard = lazy(() => import('./FailureClustersCard').then(module => ({ default: module.FailureClustersCard })))
 const BudgetSettingsPanel = lazy(() => import('./BudgetSettingsPanel').then(module => ({ default: module.BudgetSettingsPanel })))

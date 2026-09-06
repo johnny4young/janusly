@@ -28,6 +28,7 @@ import type { RunEvent } from '../types'
 import { useT } from '../i18n'
 import { PanelChrome } from './panel-primitives'
 import { RunsPanel, type RunsPanelProps } from './RunsPanel'
+import './RunWorkspace.css'
 
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then(module => ({ default: module.ReasoningPanel })))
 const MultiAgentTimeline = lazy(() => import('../MultiAgentTimeline').then(module => ({ default: module.MultiAgentTimeline })))

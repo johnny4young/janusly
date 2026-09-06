@@ -25,6 +25,7 @@ import { useWorkflowStore } from '../../store'
 import { useT } from '../../i18n'
 import { t as runtimeT } from '../../i18n/runtime'
 import { Button } from '@/components/ui/Button'
+import './recovery-center.css'
 
 export function RecoveryCenterComposer({
   onOpenTab,

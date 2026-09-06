@@ -22,6 +22,7 @@ import type { RunSummary } from '../types'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { RunComparisonView, type RunComparisonPayload } from './RunComparisonView'
 import { Button } from '@/components/ui/Button'
+import './RunHistoryComparisonDialog.css'
 
 type ComparableRun = RunSummary & {
   workflowId: string

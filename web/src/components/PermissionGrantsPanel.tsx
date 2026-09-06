@@ -27,6 +27,7 @@ import { useConfirm } from "./ConfirmDialog";
 import { Button } from "./ui/Button";
 import { FormActions, FormField, FormGrid } from "./ui/Form";
 import { StatusSummary } from "./ui/StatusSummary";
+import './PermissionGrantsPanel.css'
 
 type Role = "viewer" | "editor" | "admin";
 

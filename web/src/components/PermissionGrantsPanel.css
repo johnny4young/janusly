@@ -1,0 +1,83 @@
+/* Styles for PermissionGrantsPanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+.we-permissions-role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-1);
+}
+
+.we-permissions-role-card header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.we-permissions-role-card header p {
+  margin: 0;
+  color: var(--we-text-2);
+  font-size: 12px;
+}
+
+.we-permissions-role-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--we-text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.we-permissions-role-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.we-permissions-role-card--new {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--we-primary) 5%, var(--we-surface-1));
+}
+
+.we-permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.we-permissions-grid__category {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-2);
+}
+
+.we-permissions-grid__category > strong {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--we-text-2);
+}
+
+.we-permissions-grid__entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.we-permissions-grid__entry span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

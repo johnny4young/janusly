@@ -2,6 +2,7 @@ import { lazy, Suspense, useId, useState } from 'react'
 import { ChevronDown, Network } from 'lucide-react'
 
 import { useT } from '../i18n'
+import './RecoveryAutomationDisclosure.css'
 
 const FailureClustersCard = lazy(() => import('./FailureClustersCard').then((module) => ({
   default: module.FailureClustersCard,

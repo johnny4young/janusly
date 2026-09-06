@@ -1,0 +1,24 @@
+/* Styles for MembersPanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+/* described role radio-cards (invite form) */
+.we-role-options { display: flex; flex-direction: column; gap: 6px; }
+
+.we-role-option { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--we-line-strong); border-radius: 8px; cursor: pointer; }
+
+.we-role-option:hover { background: var(--we-surface-muted); }
+
+.we-role-option input { position: absolute; opacity: 0; pointer-events: none; }
+
+.we-role-option[data-selected="true"] { border-color: var(--we-primary); background: var(--we-primary-soft); }
+
+.we-role-option__copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.we-role-option__name { font-size: 13px; font-weight: 600; color: var(--we-ink); text-transform: capitalize; }
+
+.we-role-option[data-selected="true"] .we-role-option__name { color: var(--we-primary-text); }
+
+.we-role-option__desc { font-size: 11.5px; color: var(--we-muted); line-height: 1.4; }
+
+.we-role-option__radio { width: 16px; height: 16px; border-radius: var(--we-radius-pill); border: 1.5px solid var(--we-line-strong); flex-shrink: 0; }
+
+.we-role-option[data-selected="true"] .we-role-option__radio { border-color: var(--we-primary); background: radial-gradient(circle, var(--we-primary) 0 38%, transparent 42%); }

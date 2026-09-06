@@ -13,6 +13,7 @@ import { getResolvedLocale, useT } from '../../i18n'
 import { resolvePlaybookScorecard } from './playbook-scorecard'
 import type { DeadLetter } from '../dead-letter-types'
 import type { PatchSuggestion, SuggestionTab } from './types'
+import './recovery-dialog.css'
 
 export function RecoveryPassportCard({
   dlq,

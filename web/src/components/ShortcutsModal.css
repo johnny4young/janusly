@@ -1,0 +1,112 @@
+/* Styles for ShortcutsModal.tsx: shipped with the lazy chunk that renders them (moved from control-plane.css). */
+
+/* Shortcuts modal — `?` keyboard help overlay. */
+.we-shortcuts-backdrop {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--we-primary) 8%, transparent) 0%, transparent 50%),
+    color-mix(in srgb, var(--we-ink) 50%, transparent);
+  backdrop-filter: blur(4px);
+  z-index: 99;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  animation: run-input-fade-in 120ms ease-out;
+}
+
+.we-shortcuts-dialog {
+  width: 100%;
+  max-width: 520px;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 14px;
+  box-shadow: 0 24px 48px -12px var(--we-primary-shadow);
+  animation: run-input-rise 160ms ease-out;
+  max-height: calc(100vh - 80px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.we-shortcuts-head {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 18px 18px 12px;
+  border-bottom: 1px solid var(--we-line);
+}
+
+.we-shortcuts-head-ic {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+  display: grid;
+  place-items: center;
+}
+
+.we-shortcuts-head-body h2 {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--we-ink);
+}
+
+.we-shortcuts-body {
+  padding: 12px 16px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.we-shortcuts-group h3 {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--we-muted);
+}
+
+.we-shortcuts-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.we-shortcuts-group li {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.we-shortcuts-group li:hover { background: var(--we-surface-muted); }
+
+.we-shortcuts-kbds { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+.we-shortcuts-kbds kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line-strong);
+  border-radius: 5px;
+  padding: 2px 6px;
+  color: var(--we-ink);
+  min-width: 22px;
+  text-align: center;
+}
+
+.we-shortcuts-desc {
+  font-size: 12px;
+  color: var(--we-ink-soft);
+}

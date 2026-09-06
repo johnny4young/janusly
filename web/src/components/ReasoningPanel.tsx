@@ -36,6 +36,7 @@ import { useVirtualList } from '../hooks/useVirtualList'
 import { EmptyView } from './panel-primitives'
 import { Button } from '@/components/ui/Button'
 import { isRecord } from '../lib/guards'
+import './ReasoningPanel.css'
 
 const RUN_EVENT_ROW_HEIGHT = 172
 

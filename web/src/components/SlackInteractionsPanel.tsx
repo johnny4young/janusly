@@ -19,6 +19,7 @@ import { LoadingSkeleton } from './LoadingSkeleton'
 import { Button } from '@/components/ui/Button'
 import { isRecord } from '../lib/guards'
 import type { Credential as CredentialRecord } from '../types'
+import './SlackInteractionsPanel.css'
 
 type SlackUserMapping = { slackUserId: string; userId: string }
 type SlackConnection = {

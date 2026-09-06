@@ -38,6 +38,7 @@ import { pickErrorMessage } from './recovery-dialog/recovery-dialog-model'
 import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, type RunWaitKind } from '../run-observability'
 import { RunHistoryList } from './RunHistoryList'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
+import './RunsPanel.css'
 
 type HumanFormWaiting = {
   title?: string

@@ -1,0 +1,90 @@
+/* Styles for SettingsOverview.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+/* Settings opens on a searchable outcome index. Focused areas retain the
+   active-only mounting model so configuration forms fetch only when opened. */
+.we-settings-index {
+  display: grid;
+  gap: 16px;
+}
+
+.we-settings-index__heading {
+  align-items: end;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.72fr);
+}
+
+.we-settings-index__heading h3,
+.we-settings-index__heading p {
+  margin: 0;
+}
+
+.we-settings-index__heading h3 {
+  color: var(--we-ink);
+  font-size: 20px;
+}
+
+.we-settings-index__heading p {
+  color: var(--we-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
+.we-settings-index__search {
+  margin: 0;
+}
+
+.we-settings-index__grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.we-settings-index__card {
+  align-items: center;
+  color: var(--we-ink);
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 116px;
+  padding: 14px;
+  text-align: left;
+}
+
+.we-settings-index__card:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+.we-settings-index__card-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.we-settings-index__card-copy strong {
+  font-size: 14px;
+}
+
+.we-settings-index__card-copy > span {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.we-settings-index__card-copy small {
+  color: var(--we-primary-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.we-settings-index__quick-paths {
+  align-items: center;
+  border-top: 1px solid var(--we-line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+}

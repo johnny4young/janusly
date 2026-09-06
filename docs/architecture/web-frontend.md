@@ -70,12 +70,15 @@ Runtime shape guards (`isRecord`, `asRecord`, `asRecordOrEmpty`) live in
 reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector stay in
 the eager workspace chunk on purpose: splitting them fans their shared helpers
 into small chunks whose wrapper overhead costs more total bytes than the split
-saves, and the artifact budget counts every chunk. The stylesheet split has
-started where the rules are self-contained: the recovery case panel and the
-recovery item drawer import their own CSS next to the component, so Vite emits
-`RecoveryCasePanel.css` and `RunsPanel.css` with those lazy chunks and the
-eager `index.css` shrinks; every other panel still lives in `platform.css`
-until its rules are equally isolated. `RightPanel` and `AppWorkspace` are memoized, and the shell's derived counts
+saves, and the artifact budget counts every chunk. Stylesheets follow the
+chunk that renders them: a rule whose classes are owned only by lazy-loaded
+components lives next to its owner (`<Component>.css`, or `<folder>/<folder>.css`
+for a split panel such as `recovery-dialog/`) and is imported by that component,
+so Vite emits it with the lazy chunk; `src/styles/*.css` keeps only what the
+shell and eager panels use. That cut the eager `index.css` from 41 to 25 KiB
+gzip (2026-09). When adding styles for a lazy panel, put them in its adjacent
+sheet; `scripts/check-css-classes.mjs` still requires every class to have a
+production owner wherever the sheet lives. `RightPanel` and `AppWorkspace` are memoized, and the shell's derived counts
 are memoized on their inputs, because the shell renders on every store tick.
 Dialogs get Escape from `useDialogFocusTrap`'s `onEscape` option rather than
 their own keydown effects.
@@ -113,9 +116,12 @@ adopters; the remaining `platformVersion` subscribers migrate the same way.
 ## Bundle budgets
 
 `performance-budgets.json` is a ratchet, not a target: the total artifact,
-the worst single-locale artifact and the eager `workflow-workspace` chunk are
-capped, and every other chunk may grow at most 10 % over its recorded
-baseline. The caps were raised once (2026-09) by the measured cost of the
-controller/view splits and the hash router — about 1.5 KiB of gzip for the
-object keys a model boundary needs — after confirming the bundle held no
-duplicated modules and no removable code; they are not raised for features.
+the worst single-locale artifact, the eager `index.css` stylesheet and the
+eager `workflow-workspace` chunk are capped, and every other chunk may grow at
+most 10 % over its recorded baseline. The caps moved twice in 2026-09: by the
+measured cost of the controller/view splits and the hash router (about
+1.5 KiB of gzip for the object keys a model boundary needs), and by the
+per-chunk stylesheet split, which trades roughly 12 KiB of total gzip (one
+compressed CSS asset per lazy chunk) for 16 KiB less on every cold load. The
+cold path is what the caps protect: `index.css`, `workflow-workspace` and the
+route budgets in `performance/routes.performance.spec.ts` only ratchet down.

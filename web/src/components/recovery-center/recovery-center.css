@@ -1,0 +1,844 @@
+/* Styles for RecoveryCenterTiles.tsx, RecoveryHeatmap.tsx, RecoveryCenterEmptyState.tsx, RecoveryCenterComposer.tsx: shipped with the lazy chunk that renders them (moved from platform.css, control-plane.css, workflow.css). */
+
+.we-recovery-center-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border-radius: 8px;
+  background: var(--we-surface-1);
+  border: 1px solid var(--we-line);
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.we-recovery-center-tile::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  transition: background 120ms ease-out;
+}
+
+.we-recovery-center-tile[data-severity="cobalt"]::before { background: var(--we-primary); }
+
+.we-recovery-center-tile[data-severity="cyan"]::before { background: var(--we-accent); }
+
+.we-recovery-center-tile[data-severity="success"]::before { background: var(--we-success); }
+
+.we-recovery-center-tile[data-severity="warning"]::before { background: var(--we-warning); }
+
+.we-recovery-center-tile[data-severity="danger"]::before { background: var(--we-danger); }
+
+.we-recovery-center-tile__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.we-recovery-center-tile__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+  flex-shrink: 0;
+}
+
+.we-recovery-center-tile[data-severity="success"] .we-recovery-center-tile__icon {
+  background: var(--we-success-soft);
+  color: var(--we-success-text);
+}
+
+.we-recovery-center-tile[data-severity="warning"] .we-recovery-center-tile__icon {
+  background: var(--we-warning-soft);
+  color: var(--we-warning-text);
+}
+
+.we-recovery-center-tile[data-severity="danger"] .we-recovery-center-tile__icon {
+  background: var(--we-danger-soft);
+  color: var(--we-danger-text);
+}
+
+.we-recovery-center-tile[data-severity="cyan"] .we-recovery-center-tile__icon {
+  background: var(--we-accent-soft);
+  color: var(--we-accent-text);
+}
+
+.we-recovery-center-tile__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.we-recovery-center-tile__heading h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--we-text-1);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.we-recovery-center-tile__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.we-recovery-center-tile__empty {
+  font-size: 12px;
+  color: var(--we-text-2);
+  margin: 0;
+  padding: 12px 0;
+  line-height: 1.5;
+}
+
+.we-recovery-center-tile__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.we-recovery-center-tile__link {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--we-primary);
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: background 120ms ease-out;
+}
+
+.we-recovery-center-tile__link:hover {
+  background: var(--we-primary-soft);
+}
+
+.we-recovery-center-tile__link:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+.we-recovery-heatmap {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--we-border);
+  border-radius: 12px;
+  background: var(--we-surface-1);
+}
+
+.we-recovery-heatmap__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.we-recovery-heatmap__summary {
+  font-size: 12px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-heatmap__grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-columns: 11px;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.we-recovery-heatmap__cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--we-surface-3);
+}
+
+.we-recovery-heatmap__cell[data-outcome="recovered"] { background: var(--we-success); }
+
+.we-recovery-heatmap__cell[data-outcome="partial"] { background: var(--we-warning); }
+
+.we-recovery-heatmap__cell[data-outcome="unrecovered"] { background: var(--we-danger); }
+
+button.we-recovery-heatmap__cell {
+  padding: 0;
+  border: none;
+  color: inherit;
+}
+
+button.we-recovery-heatmap__cell--clickable {
+  cursor: pointer;
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+button.we-recovery-heatmap__cell--clickable:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 1px var(--we-surface-1);
+}
+
+button.we-recovery-heatmap__cell:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 1px;
+}
+
+.we-recovery-heatmap__legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.we-recovery-heatmap__legend-label {
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-heatmap__legend .we-recovery-heatmap__cell {
+  display: inline-block;
+}
+
+.we-recovery-center-budget {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.we-recovery-center-budget__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-center-budget__value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--we-text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.we-recovery-center-budget__bar {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--we-line) 50%, transparent);
+  overflow: hidden;
+}
+
+.we-recovery-center-budget__bar-rail {
+  position: absolute;
+  inset: 0;
+}
+
+.we-recovery-center-budget__bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 4px;
+  transition: width 400ms cubic-bezier(0.22, 1, 0.36, 1), background 240ms ease-out;
+}
+
+.we-recovery-center-budget__bar-fill--cobalt { background: var(--we-primary); }
+
+.we-recovery-center-budget__bar-fill--cyan { background: var(--we-accent); }
+
+.we-recovery-center-budget__bar-fill--success { background: var(--we-success); }
+
+.we-recovery-center-budget__bar-fill--warning { background: var(--we-warning); }
+
+.we-recovery-center-budget__bar-fill--danger { background: var(--we-danger); }
+
+.we-recovery-center-budget__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-center-budget__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--we-radius-pill);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.we-recovery-center-budget__pill[data-severity="warning"] {
+  background: var(--we-warning-soft);
+  color: var(--we-warning-text);
+}
+
+.we-recovery-center-budget__pill[data-severity="danger"] {
+  background: var(--we-danger-soft);
+  color: var(--we-danger-text);
+}
+
+/* Recovery learning health — one compact row per calibrated approach. */
+.we-recovery-center-calibration {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-recovery-center-calibration li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+}
+
+.we-recovery-center-calibration__head,
+.we-recovery-center-calibration__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.we-recovery-center-calibration__head strong {
+  color: var(--we-text-1);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-recovery-center-calibration__head span {
+  color: var(--we-success-text);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.we-recovery-center-calibration__meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  color: var(--we-text-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+[data-density="compact"] .we-recovery-center-tile { padding: 12px; }
+
+[data-density="compact"] .we-recovery-watch-row { padding: 6px 8px; }
+
+.we-operator-mini {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.we-operator-mini__cell {
+  padding: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface);
+}
+
+.we-operator-mini__lbl {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--we-muted);
+}
+
+.we-operator-mini__val {
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--we-ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.we-operator-mini__delta {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--we-muted);
+  font-family: var(--font-mono);
+}
+
+.we-operator-mini__delta[data-severity="success"],
+.we-operator-mini__delta[data-severity="healthy"] { color: var(--we-success-text); }
+
+.we-operator-mini__delta[data-severity="warn"] { color: var(--we-warning-text); }
+
+.we-operator-mini__delta[data-severity="unhealthy"],
+.we-operator-mini__delta[data-severity="danger"] { color: var(--we-danger-text); }
+
+/* Recovery Lab entry */
+.we-recovery-lab-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
+  gap: 20px;
+  padding: 18px 20px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--we-line);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--we-primary) 5%, var(--we-surface) 95%) 0%, color-mix(in srgb, var(--we-accent) 4%, var(--we-surface) 96%) 100%);
+  box-shadow: 0 1px 2px var(--we-shadow-ink-04);
+}
+
+.we-recovery-lab-entry__dismiss {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--we-text-2);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.we-recovery-lab-entry__dismiss:hover {
+  background: var(--we-surface-3);
+  color: var(--we-text-1);
+}
+
+.we-recovery-lab-entry__copy h2 {
+  margin: 4px 0 4px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--we-ink);
+}
+
+.we-recovery-lab-entry__copy > p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--we-ink-soft);
+  line-height: 1.5;
+  max-width: 60ch;
+}
+
+.we-recovery-lab-entry__actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.we-recovery-lab-entry__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--we-success-border-30);
+  border-radius: 8px;
+  background: var(--we-success-soft);
+  color: var(--we-success-text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.we-recovery-lab-entry__notice svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.we-recovery-lab-entry__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.we-recovery-lab-entry__steps li {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 9px;
+  background: var(--we-surface);
+}
+
+.we-recovery-lab-entry__steps li > svg {
+  padding: 6px;
+  box-sizing: content-box;
+  border-radius: 7px;
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+}
+
+.we-recovery-lab-entry__steps div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.we-recovery-lab-entry__steps strong {
+  color: var(--we-ink);
+  font-size: 12px;
+}
+
+.we-recovery-lab-entry__steps span {
+  color: var(--we-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1100px) {
+  .we-recovery-lab-entry {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   Home composer + tile severity (Recovery Center reskin)
+   The home tab adds a chat-style composer above the existing hero. Tiles
+   gain a 3px left-color border per severity (cobalt / warning / danger /
+   success / cyan / neutral) — mirrors `preview/25-operations.html`.
+   ========================================================================== */
+.recovery-center-composer {
+  position: relative;
+  border: 1px solid var(--we-line);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--we-primary) 6%, var(--we-surface) 94%) 0%, color-mix(in srgb, var(--we-accent) 5%, var(--we-surface) 95%) 100%);
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  box-shadow: 0 1px 2px var(--we-shadow-ink-04);
+}
+
+.recovery-center-composer__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.recovery-center-composer__avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--we-primary), var(--we-accent));
+  color: var(--we-brand-glyph);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  box-shadow: 0 6px 14px -6px var(--we-primary-shadow);
+}
+
+.recovery-center-composer__input {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--we-line-strong);
+  border-radius: 10px;
+  background: var(--we-surface);
+  padding: 10px 12px;
+}
+
+.recovery-center-composer__input:focus-within {
+  border-color: var(--we-primary);
+  box-shadow: 0 0 0 3px var(--we-primary-ring);
+}
+
+.recovery-center-composer__input svg { color: var(--we-ink-soft); }
+
+.recovery-center-composer__input input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 14px;
+  color: var(--we-ink);
+}
+
+.recovery-center-composer__input input::placeholder { color: var(--we-muted); }
+
+.recovery-center-composer__send {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 0;
+  background: linear-gradient(135deg, var(--we-primary), var(--we-primary-strong));
+  color: var(--we-brand-glyph);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 14px -6px var(--we-primary-shadow);
+}
+
+.recovery-center-composer__send:hover { filter: brightness(1.05); }
+
+.recovery-center-composer__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recovery-center-composer__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--we-radius-pill);
+  border: 1px solid var(--we-line);
+  background: var(--we-surface);
+  color: var(--we-ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.recovery-center-composer__chip:hover {
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.recovery-center-composer__chip svg { color: var(--we-primary); }
+
+/* Composer inline answer card — surfaces /ai/explain-workflow output. */
+.recovery-center-composer__answer {
+  position: relative;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface);
+  display: grid;
+  gap: 8px;
+}
+
+.recovery-center-composer__answer--ai {
+  border-color: color-mix(in srgb, var(--we-accent) 24%, transparent);
+  background: color-mix(in srgb, var(--we-accent) 5%, var(--we-surface) 95%);
+}
+
+.recovery-center-composer__answer--fallback {
+  border-color: var(--we-warning-border-30);
+  background: color-mix(in srgb, var(--we-warning) 4%, var(--we-surface) 96%);
+}
+
+.recovery-center-composer__answer p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--we-ink);
+  white-space: pre-wrap;
+}
+
+.recovery-center-composer__answer-pill {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: var(--we-radius-pill);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.recovery-center-composer__answer-pill--ai {
+  background: var(--we-accent-soft);
+  color: var(--we-accent-text);
+  border: 1px solid color-mix(in srgb, var(--we-accent) 30%, transparent);
+}
+
+.recovery-center-composer__answer-pill--fallback {
+  background: var(--we-warning-soft);
+  color: var(--we-warning-text);
+  border: 1px solid var(--we-warning-border-30);
+}
+
+.recovery-center-composer__answer-error {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--we-warning-text);
+}
+
+.recovery-center-composer__answer-acts {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Tile severity left-border — applies to every `[data-severity]` tile inside
+   `.we-recovery-center-tile`. Mirrors preview/25-operations.html cards. */
+.we-recovery-center-tile {
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+
+.we-recovery-center-tile[data-severity="cobalt"] { border-left-color: var(--we-primary); }
+
+.we-recovery-center-tile[data-severity="cyan"] { border-left-color: var(--we-accent); }
+
+.we-recovery-center-tile[data-severity="success"] { border-left-color: var(--we-success); }
+
+.we-recovery-center-tile[data-severity="warning"] { border-left-color: var(--we-warning); }
+
+.we-recovery-center-tile[data-severity="danger"] { border-left-color: var(--we-danger); }
+
+.we-recovery-center-tile[data-severity="neutral"] { border-left-color: var(--we-line-strong); }
+
+/* Watch-rows for the AI is watching tile (failure clusters). */
+.we-recovery-watch {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-recovery-watch-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface);
+}
+
+.we-recovery-watch-row__sig {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--we-muted);
+  background: var(--we-surface-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--we-line);
+}
+
+.we-recovery-watch-row__body { min-width: 0; }
+
+.we-recovery-watch-row__body strong {
+  display: block;
+  font-size: 12px;
+  color: var(--we-ink);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-recovery-watch-row__body small {
+  display: block;
+  font-size: 10px;
+  color: var(--we-muted);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+
+.we-recovery-watch-row__state {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--we-radius-pill);
+  white-space: nowrap;
+}
+
+.we-recovery-watch-row__state--ready {
+  background: var(--we-accent-soft);
+  color: var(--we-accent-text);
+  border: 1px solid color-mix(in srgb, var(--we-accent) 34%, transparent);
+}
+
+.we-recovery-watch-row__state--monitoring {
+  background: var(--we-surface-muted);
+  color: var(--we-muted);
+  border: 1px solid var(--we-line);
+}
+
+.we-recovery-watch-row__state--recurrent {
+  background: var(--we-danger-soft);
+  color: var(--we-danger-text);
+  border: 1px solid var(--we-danger-border-30);
+}
+
+.we-recovery-watch-row__state--cleared {
+  background: var(--we-success-soft);
+  color: var(--we-success-text);
+  border: 1px solid var(--we-success-border-30);
+}
+
+/* AllClearState — stylized empty-state across recovery tiles. */
+.we-recovery-allclear {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 14px;
+  border: 1px dashed var(--we-success-border-30);
+  background: var(--we-success-soft);
+  border-radius: 8px;
+}
+
+.we-recovery-allclear__ring {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--we-radius-pill);
+  background: var(--we-surface);
+  border: 1px solid var(--we-success-border-30);
+  color: var(--we-success-text);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 6px 14px -10px color-mix(in srgb, var(--we-success) 45%, transparent);
+}
+
+.we-recovery-allclear__copy { display: grid; gap: 2px; }
+
+.we-recovery-allclear__copy strong {
+  font-size: 13px;
+  color: var(--we-success-text);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.we-recovery-allclear__copy span {
+  font-size: 12px;
+  color: var(--we-ink-soft);
+  line-height: 1.45;
+}

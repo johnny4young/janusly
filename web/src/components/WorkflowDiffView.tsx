@@ -28,6 +28,7 @@ import {
 import type { WorkflowDefinition } from '../types'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
+import './WorkflowDiffView.css'
 
 type WorkflowDiffViewProps = {
   before: WorkflowDefinition

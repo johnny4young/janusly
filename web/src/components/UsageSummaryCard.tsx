@@ -19,6 +19,7 @@ import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
+import './UsageSummaryCard.css'
 
 /**
  * Closed enum mirroring `USAGE_BREAKDOWN_DIMENSIONS` in

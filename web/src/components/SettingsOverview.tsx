@@ -7,6 +7,7 @@ import { canOpenSettingsSection, SETTINGS_AREAS } from '../settings-sections'
 import type { OpsSection } from './operations-section-bus'
 import { EmptyView } from './panel-primitives'
 import { TextInput } from '@/components/ui/Form'
+import './SettingsOverview.css'
 
 export function SettingsOverview({
   permissions,

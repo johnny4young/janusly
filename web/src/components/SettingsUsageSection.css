@@ -1,0 +1,82 @@
+/* Styles for SettingsUsageSection.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+.we-ops-cost-table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.we-settings-usage {
+  min-width: 0;
+}
+
+.we-ops-cost-table-wrap {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.we-ops-cost-table-wrap:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+.we-ops-cache-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 2px;
+}
+
+.we-ops-cache-summary > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+}
+
+.we-ops-cache-summary dt {
+  color: var(--we-text-2);
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.we-ops-cache-summary dd {
+  margin: 4px 0 0;
+  color: var(--we-text-1);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .we-ops-cache-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+.we-ops-cost-table th,
+.we-ops-cost-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--we-line);
+}
+
+.we-ops-cost-table th {
+  color: var(--we-text-2);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.we-ops-cost-table td code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--we-text-1);
+}

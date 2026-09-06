@@ -28,6 +28,7 @@ import { CalendarClock } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
+import './ScheduleHistoryPanel.css'
 
 export type ScheduleHistoryPanelProps = {
   /** Optional explicit workflowId. When omitted, the panel pulls the current

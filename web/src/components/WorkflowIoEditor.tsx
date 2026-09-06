@@ -12,6 +12,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import type { WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
 import { SelectControl, TextInput } from '@/components/ui/Form'
+import './WorkflowIoEditor.css'
 
 type SchemaFieldsEditorProps = {
   scope: string

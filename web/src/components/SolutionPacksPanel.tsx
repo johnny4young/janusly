@@ -25,6 +25,7 @@ import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { Button } from '@/components/ui/Button'
 import { FieldLabel, SelectControl } from '@/components/ui/Form'
+import './SolutionPacksPanel.css'
 
 type SolutionPacksPanelProps = {
   packs: SolutionPackPublic[]

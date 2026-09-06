@@ -70,7 +70,7 @@ describe('<MembersPanel /> dynamic role list', () => {
   })
 
   it('uses the theme-aware accessible text token for the selected role', () => {
-    const css = readFileSync(resolve(process.cwd(), 'src/styles/platform.css'), 'utf8')
+    const css = readFileSync(resolve(process.cwd(), 'src/components/MembersPanel.css'), 'utf8')
     expect(css).toMatch(
       /\.we-role-option\[data-selected="true"\] \.we-role-option__name \{ color: var\(--we-primary-text\); \}/,
     )

@@ -26,6 +26,7 @@
 import React from 'react'
 import { useAnimatedNumber } from '../hooks/useAnimatedNumber'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
+import './VitalSignsStrip.css'
 
 export type VitalSignsTileSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral' | 'info'
 

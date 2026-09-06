@@ -24,6 +24,7 @@ import { asRecord, DEFAULT_MAX_PROVIDER_CALLS, estimateProviderCalls, formatDate
 import { EmptyView } from './panel-primitives'
 import { Button } from '@/components/ui/Button'
 import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
+import './experiments/experiments.css'
 
 export function ExperimentsPanel(): React.ReactElement {
   const { t } = useT()

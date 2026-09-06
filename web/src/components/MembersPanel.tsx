@@ -25,6 +25,7 @@ import { useConfirm } from './ConfirmDialog'
 import { Button } from './ui/Button'
 import { FieldStack, FormActions, FormField, SelectControl } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
+import './MembersPanel.css'
 
 type OrgRoleEntry = {
   name: string

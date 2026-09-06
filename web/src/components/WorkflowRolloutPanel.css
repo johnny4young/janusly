@@ -1,0 +1,67 @@
+/* Styles for WorkflowRolloutPanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+
+/* ── Workflow deployment rollout ──────────────────────────────────────── */
+.we-rollout-panel {
+  margin-top: 12px;
+}
+
+.we-rollout-panel .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 3px;
+}
+
+.we-rollout-panel__qualification-blocked {
+  margin: 0;
+  color: var(--we-warning-text);
+  font-size: 11px;
+}
+
+.we-rollout-panel__empty {
+  margin: 12px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+  color: var(--we-muted);
+  font-size: 12px;
+}
+
+.we-rollout-panel__pair {
+  align-items: stretch;
+}
+
+.we-rollout-panel__pair > * {
+  flex: 1;
+}
+
+.we-rollout-panel__fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.we-rollout-panel__fields input {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.we-rollout-panel__input-unit {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.we-rollout-panel__input-unit input {
+  padding-right: 28px;
+}
+
+.we-rollout-panel__input-unit > span {
+  position: absolute;
+  right: 10px;
+  color: var(--we-muted);
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+}

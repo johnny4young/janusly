@@ -12,8 +12,8 @@
  * Ordered entrypoint for Janusly's dependency-free web design system.
  *
  * Used by: web/src/main.tsx.
- * Invariant: keep imports in this order; canvas-only React Flow styles are
- * demand-loaded by CanvasWorkspace instead of joining the Home cold path, and
- * the recovery case panel and recovery item drawer ship their stylesheets
- * with their lazy chunks the same way.
+ * Invariant: keep imports in this order. Only rules the shell and eager
+ * panels need live here; a lazy panel imports its own stylesheet next to the
+ * component (`<Component>.css`, `<folder>/<folder>.css`) so Vite ships it
+ * with that chunk, the way CanvasWorkspace demand-loads canvas.css.
  */

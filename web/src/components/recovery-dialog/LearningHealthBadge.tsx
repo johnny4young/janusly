@@ -11,6 +11,7 @@ import { BrainCircuit } from 'lucide-react'
 import { useT } from '../../i18n'
 import { approachLabelDisplay } from './recovery-dialog-model'
 import type { PatchApproachLabel, RecoveryFeedbackHealthSnapshot } from './types'
+import './recovery-dialog.css'
 
 export function LearningHealthBadge({
   feedbackHealth,

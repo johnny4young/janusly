@@ -34,6 +34,7 @@ import { LoadingSkeleton } from './LoadingSkeleton'
 import { RecoveryItemBadge } from './RecoveryItemBadge'
 import { RecoveryItemDrawer } from './RecoveryItemDrawer'
 import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
+import './DeadLetterQueueView.css'
 
 type QueueSelectionState = {
   selectionMode: boolean
