@@ -27,6 +27,7 @@ import {
   type RecoveryLedger,
 } from './recovery-center/recovery-center-model'
 import './ValueDashboardSection.css'
+import { Button } from './ui/Button'
 
 export type ClustersResolvedMetric = {
   value: number | null
@@ -161,24 +162,26 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
           {ledgerLine}
         </div>
         <div className="we-recovery-center-value__actions">
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             disabled={exporting !== null}
             onClick={() => void handleExport('markdown')}
           >
             <FileText size={14} aria-hidden="true" />
             {t('recoveryCenter.value.export.markdown')}
-          </button>
-          <button
-            type="button"
-            className="small-command"
+          </Button>
+          <Button
+            size="sm"
+           
+           
             disabled={exporting !== null}
             onClick={() => void handleExport('json')}
           >
             <Download size={14} aria-hidden="true" />
             {t('recoveryCenter.value.export.json')}
-          </button>
+          </Button>
         </div>
       </header>
 

@@ -458,62 +458,70 @@ export function MembersPanel() {
                           <span className="we-list-row__confirm-text">
                             {t('members.row.transferConfirm', { member: label })}
                           </span>
-                          <button
-                            type="button"
-                            className="small-command danger"
+                          <Button
+                            size="sm"
+                            variant="danger"
+                           
+                           
                             onClick={() => transferOwnership(member.userId)}
                             data-testid={`members-transfer-confirm-${member.userId}`}
                           >
                             {t('members.row.transferConfirmCta')}
-                          </button>
-                          <button type="button" className="small-command" onClick={() => setConfirmTransferId(null)}>
+                          </Button>
+                          <Button size="sm" onClick={() => setConfirmTransferId(null)}>
                             {t('common.cancel')}
-                          </button>
+                          </Button>
                         </span>
                       ) : (
-                        <button
-                          type="button"
-                          className="small-command"
+                        <Button
+                          size="sm"
+                         
+                         
                           onClick={() => setConfirmTransferId(member.userId)}
                           aria-label={t('members.row.transferAria', { member: label })}
                           title={t('members.row.transferTitle')}
                           data-testid={`members-transfer-${member.userId}`}
                         >
                           <Crown size={14} aria-hidden="true" />
-                        </button>
+                        </Button>
                       ))}
                       {!canManageMembers || member.isOwner ? null : confirmRemoveId === member.userId ? (
                         <span className="we-list-row__confirm">
                           <span className="we-list-row__confirm-text">
                             {t('members.row.removeConfirm', { member: label })}
                           </span>
-                          <button
-                            type="button"
-                            className="small-command danger"
+                          <Button
+                            size="sm"
+                            variant="danger"
+                           
+                           
                             onClick={() => remove(member.userId)}
                             data-testid={`members-remove-confirm-${member.userId}`}
                           >
                             {t('members.row.removeConfirmCta')}
-                          </button>
-                          <button
-                            type="button"
-                            className="small-command"
+                          </Button>
+                          <Button
+                            size="sm"
+                           
+                           
                             onClick={() => setConfirmRemoveId(null)}
                           >
                             {t('common.cancel')}
-                          </button>
+                          </Button>
                         </span>
                       ) : (
-                        <button
-                          type="button"
-                          className="small-command danger"
+                        <Button
+                          size="sm"
+                          variant="danger"
+                         
+                         
                           onClick={() => setConfirmRemoveId(member.userId)}
                           aria-label={t('members.row.removeAria', { member: label })}
                           title={t('members.row.removeTitle')}
                           data-testid={`members-remove-${member.userId}`}
                         >
                           <Trash2 size={14} aria-hidden="true" />
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>

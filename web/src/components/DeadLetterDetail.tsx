@@ -6,6 +6,7 @@ import { getResolvedLocale, useT } from '../i18n'
 import type { DeadLetter } from './dead-letter-types'
 import { RecoveryDrillOutcomeCard } from './recovery/RecoveryDrillOutcomeCard'
 import { WorkflowDiffView } from './WorkflowDiffView'
+import { Button } from './ui/Button'
 
 type DeadLetterDetailProps = {
   selection: {
@@ -75,8 +76,10 @@ export function DeadLetterDetail({
 
           <div className="split-row">
             {canUseRecovery && (
-              <button
-                className="small-command small-command--primary"
+              <Button
+                size="sm"
+                variant="primary"
+               
                 disabled={
                   selected.status === 'replayed'
                   || selected.status === 'resolved'
@@ -89,51 +92,58 @@ export function DeadLetterDetail({
                 }}
               >
                 <Sparkles size={12} aria-hidden="true" /> {t('dlq.action.suggest')}
-              </button>
+              </Button>
             )}
             {canReplay && (
-              <button
-                className="small-command we-command-with-kbd"
+              <Button
+                size="sm"
+                className="we-command-with-kbd"
+               
                 disabled={selected.status === 'replayed' || replayingIds.has(selected.id)}
                 onClick={() => { void actions.replaySelected() }}
               >
                 <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
-              </button>
+              </Button>
             )}
             {canResolve && (
-              <button
-                className="small-command we-command-with-kbd"
+              <Button
+                size="sm"
+                className="we-command-with-kbd"
+               
                 disabled={selected.status === 'resolved' || replayingIds.has(selected.id)}
                 onClick={() => { void actions.resolveSelected() }}
               >
                 <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
-              className="small-command"
+            <Button
+              size="sm"
+             
+             
               onClick={() => { void actions.copySelectedError() }}
               data-testid="dlq-copy-error"
             >
               <Copy size={12} aria-hidden="true" /> {t('dlq.action.copyError')}
-            </button>
+            </Button>
             {canStartRuns && (
-              <button
-                className="small-command"
+              <Button
+                size="sm"
+               
                 onClick={() => actions.openReplayLab(selected.runId)}
                 data-testid="dlq-replay-in-lab"
               >
                 <FlaskConical size={12} aria-hidden="true" /> {t('dlq.action.replayInLab')}
-              </button>
+              </Button>
             )}
-            <button
-              className="small-command"
+            <Button
+              size="sm"
+             
               onClick={() => { void actions.exportRunExplain() }}
               data-testid="dlq-export-run-explain"
               aria-label={t('dlq.action.exportAria', { runId: selected.runId })}
             >
               <Download size={12} aria-hidden="true" /> {t('dlq.action.export')}
-            </button>
+            </Button>
           </div>
 
           {selectedFull?.drill && (
@@ -162,14 +172,15 @@ export function DeadLetterDetail({
                     time: new Date(selectedFull.suspectVersion.savedAt).toLocaleString(getResolvedLocale()),
                   })}
                 </span>
-                <button
-                  type="button"
-                  className="small-command"
+                <Button
+                  size="sm"
+                 
+                 
                   onClick={actions.toggleSuspectDiff}
                   data-testid="dlq-suspect-version-toggle"
                 >
                   {showSuspectDiff ? t('dlq.suspectVersion.hideDiff') : t('dlq.suspectVersion.viewDiff')}
-                </button>
+                </Button>
               </div>
               {showSuspectDiff && (
                 <WorkflowDiffView
@@ -198,9 +209,9 @@ function DetailBlock({ title, value }: { title: string; value: unknown }) {
 
   return (
     <div className="detail-block">
-      <button className="small-command" onClick={() => setOpen(!open)}>
+      <Button size="sm" onClick={() => setOpen(!open)}>
         {open ? t('dlq.detail.hide', { title }) : t('dlq.detail.show', { title })}
-      </button>
+      </Button>
       {open && <pre className="mini-pre">{JSON.stringify(value ?? {}, null, 2)}</pre>}
     </div>
   )

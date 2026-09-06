@@ -1353,17 +1353,6 @@
   opacity: 0.7;
 }
 
-.small-command--primary {
-  background: var(--we-primary-soft);
-  border-color: var(--we-primary);
-  color: var(--we-primary);
-}
-
-.small-command--primary:hover:not(:disabled) {
-  background: var(--we-primary);
-  color: var(--we-surface);
-}
-
 /* ----------------- Recovery delta card ---------------------------------- */
 /* Mounted inside the Recovery dialog's `applied` step alongside the
  * existing success ribbon. Surfaces five signals: run counter,

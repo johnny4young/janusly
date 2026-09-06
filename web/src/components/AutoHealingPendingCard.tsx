@@ -34,6 +34,7 @@ import {
 import { ValidationEvidencePill } from './ValidationEvidencePill'
 import './AutoHealingPendingCard.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { Button } from './ui/Button'
 
 const AUTO_HEALING_MUTATION_TAGS = ['auto-healing', 'dlq', 'recovery', 'runs'] as const
 
@@ -378,9 +379,11 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
                   )}
                 </div>
                 {canDecide && <div className="we-auto-healing__actions">
-                  <button
-                    type="button"
-                    className="small-command small-command--primary"
+                  <Button
+                    size="sm"
+                    variant="primary"
+                   
+                   
                     disabled={
                       busy === row.id
                       || (requiresRiskAcknowledgement && riskAcknowledged[row.id] !== true)
@@ -388,15 +391,16 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
                     onClick={() => void decide(row.id, true)}
                   >
                     {t('autoHealing.action.apply')}
-                  </button>
-                  <button
-                    type="button"
-                    className="small-command"
+                  </Button>
+                  <Button
+                    size="sm"
+                   
+                   
                     disabled={busy === row.id}
                     onClick={() => void decide(row.id, false)}
                   >
                     {t('autoHealing.action.decline')}
-                  </button>
+                  </Button>
                 </div>}
               </li>
             )

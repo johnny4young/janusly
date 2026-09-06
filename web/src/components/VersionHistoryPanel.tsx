@@ -26,6 +26,7 @@ import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
 import './VersionHistoryPanel.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { Button } from './ui/Button'
 
 const VERSION_HISTORY_TAGS = [PLATFORM_TAG, 'workflows', 'versions', 'rollouts'] as const
 
@@ -315,14 +316,14 @@ export function VersionHistoryPanel() {
           {t('versionHistory.heading')}
         </div>
         {versions.length >= 2 && (
-          <button
-            type="button"
-            className={`small-command${compareMode ? ' small-command--active' : ''}`}
-            onClick={onToggleCompare}
+          <Button
+            size="sm"
             aria-pressed={compareMode}
+            onClick={onToggleCompare}
+            leadingIcon={<GitCompare size={12} />}
           >
-            <GitCompare size={12} aria-hidden="true" /> {compareMode ? t('versionHistory.cancelCompare') : t('versionHistory.compare')}
-          </button>
+            {compareMode ? t('versionHistory.cancelCompare') : t('versionHistory.compare')}
+          </Button>
         )}
       </div>
 
@@ -379,15 +380,16 @@ export function VersionHistoryPanel() {
         )
       })}
       {hasMoreVersions && (
-        <button
-          type="button"
-          className="small-command"
+        <Button
+          size="sm"
+         
+         
           onClick={onLoadMoreVersions}
           disabled={loadingMore}
           data-testid="version-history-load-more"
         >
           {t('versionHistory.loadMore')}
-        </button>
+        </Button>
       )}
 
       {compareMode && comparePair && (
@@ -407,15 +409,16 @@ export function VersionHistoryPanel() {
 
       {showSuggestButton && (
         <div className="we-suggest-actions">
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             onClick={onSuggestImprovement}
             disabled={improvement.kind === 'loading'}
           >
             <Sparkles size={12} aria-hidden="true" />{' '}
             {improvement.kind === 'loading' ? t('versionHistory.generating') : t('versionHistory.suggest')}
-          </button>
+          </Button>
           <p className="helper-text we-suggest-hint">
             {t('versionHistory.suggestHint', { version: comparePair![1].version })}
           </p>

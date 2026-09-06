@@ -249,26 +249,28 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         <div className="canvas-toolbar__meta">
           {editing && (
             <div className="canvas-toolbar__history" role="group" aria-label={t('canvas.history.aria')}>
-              <button
-                type="button"
-                className="small-command"
+              <Button
+                size="sm"
+               
+               
                 disabled={!canUndo}
                 onClick={undoCanvas}
                 title={t('canvas.history.undo')}
                 aria-label={t('canvas.history.undo')}
               >
                 <Undo2 size={13} />
-              </button>
-              <button
-                type="button"
-                className="small-command"
+              </Button>
+              <Button
+                size="sm"
+               
+               
                 disabled={!canRedo}
                 onClick={redoCanvas}
                 title={t('canvas.history.redo')}
                 aria-label={t('canvas.history.redo')}
               >
                 <Redo2 size={13} />
-              </button>
+              </Button>
             </div>
           )}
           <span>{t('canvas.paths', { count: edges.length })}</span>

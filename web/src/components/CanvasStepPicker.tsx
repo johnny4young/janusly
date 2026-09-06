@@ -6,6 +6,7 @@ import { getNodeHelper, getNodeLabel, nodeTypes } from '../constants'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useT } from '../i18n'
 import './CanvasStepPicker.css'
+import { Button } from './ui/Button'
 
 const STEP_GROUPS: readonly { id: string; labelKey: string; types: readonly string[] }[] = [
   { id: 'ai', labelKey: 'sidebar.category.ai', types: ['ai', 'agent', 'multi_agent', 'agent_reflection'] },
@@ -74,16 +75,18 @@ export function CanvasStepPicker({
 
   return (
     <div className="canvas-step-picker" ref={rootRef}>
-      <button
-        type="button"
-        className="small-command canvas-step-picker__trigger"
+      <Button
+        size="sm"
+        className="canvas-step-picker__trigger"
+       
+       
         aria-expanded={open}
         aria-controls="canvas-step-picker-menu"
         onClick={() => setOpen((value) => !value)}
       >
         <Plus size={14} aria-hidden="true" />
         <span>{t('canvas.addStep')}</span>
-      </button>
+      </Button>
       {open && (
         <section
           ref={menuRef}
@@ -99,14 +102,15 @@ export function CanvasStepPicker({
               <strong>{t('canvas.stepPicker.title')}</strong>
               <small>{t('canvas.stepPicker.body')}</small>
             </div>
-            <button
-              type="button"
-              className="small-command"
+            <Button
+              size="sm"
+             
+             
               onClick={() => setOpen(false)}
               aria-label={t('canvas.stepPicker.close')}
             >
               <X size={14} aria-hidden="true" />
-            </button>
+            </Button>
           </div>
           <label className="we-panel-search">
             <Search size={14} aria-hidden="true" />

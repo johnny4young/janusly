@@ -42,6 +42,7 @@ import {
 } from './recovery-queue-focus-bus'
 import type { RunWorkspaceProps } from './RunWorkspace'
 import './ActivityWorkspace.css'
+import { Button } from './ui/Button'
 
 const RunWorkspace = lazy(() => import('./RunWorkspace').then(module => ({
   default: module.RunWorkspace,
@@ -307,13 +308,14 @@ export function ActivityWorkspace({
             <span className="section-kicker">{t('activity.advanced.kicker')}</span>
             <strong>{t('activity.advanced.runHistory')}</strong>
           </div>
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             onClick={() => setShowDetailedHistory(false)}
           >
             {t('activity.advanced.back')}
-          </button>
+          </Button>
         </div>
         <div data-testid="activity-run-history">
           <Suspense fallback={<p className="helper-text">{t('common.working')}</p>}>
@@ -335,18 +337,20 @@ export function ActivityWorkspace({
           </div>
         </div>
         <div className="we-activity-header__tools">
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             data-testid="activity-refresh"
             onClick={() => void runWorkspaceProps.onRefreshPlatform()}
           >
             <RefreshCw size={12} aria-hidden="true" />
             {t('common.refresh')}
-          </button>
-          <button
-            type="button"
-            className="small-command"
+          </Button>
+          <Button
+            size="sm"
+           
+           
             data-testid="activity-open-run-history"
             onClick={() => {
               setPendingRunId(null)
@@ -356,17 +360,18 @@ export function ActivityWorkspace({
           >
             <History size={12} aria-hidden="true" />
             {t('activity.advanced.runHistory')}
-          </button>
+          </Button>
           {canReadDeadLetters && (
-            <button
-              type="button"
-              className="small-command"
+            <Button
+              size="sm"
+             
+             
               data-testid="activity-open-recovery-tools"
               onClick={onOpenRecoveryTools}
             >
               <Wrench size={12} aria-hidden="true" />
               {t('activity.advanced.recoveryTools')}
-            </button>
+            </Button>
           )}
         </div>
         <div
@@ -375,10 +380,12 @@ export function ActivityWorkspace({
           aria-label={t('activity.filtersAria')}
         >
           {ACTIVITY_FILTERS.map(value => (
-            <button
+            <Button
+              size="sm"
+              className="we-activity-filter"
               key={value}
-              type="button"
-              className="small-command we-activity-filter"
+             
+             
               aria-pressed={filter === value}
               onClick={() => setFilter(value)}
               data-testid={`activity-filter-${value}`}
@@ -386,7 +393,7 @@ export function ActivityWorkspace({
               {filterIcon(value)}
               <span>{t(`activity.filter.${value}`)}</span>
               <strong>{counts[value]}</strong>
-            </button>
+            </Button>
           ))}
         </div>
       </header>

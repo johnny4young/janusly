@@ -455,20 +455,22 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
                 </div>
               </header>
               <div className="member-actions" style={{ marginTop: 8 }}>
-                <button
-                  type="button"
-                  className="small-command"
+                <Button
+                  size="sm"
+                 
+                 
                   onClick={() => toggleAccordion(connection)}
                   aria-expanded={openConnectionId === connection.id}
                   aria-controls={`mcp-tools-${connection.id}`}
                 >
                   {openConnectionId === connection.id ? t('mcpConnections.list.hideTools') : t('mcpConnections.list.showTools')}
-                </button>
+                </Button>
                 {canWrite && (
                   <>
-                    <button
-                      type="button"
-                      className="small-command"
+                    <Button
+                      size="sm"
+                     
+                     
                       onClick={() => setEnabled(connection, !connection.enabled)}
                       aria-label={
                         connection.enabled
@@ -482,25 +484,28 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
                       }
                     >
                       <Save size={14} aria-hidden="true" /> {connection.enabled ? t('mcpConnections.actions.disable') : t('mcpConnections.actions.enable')}
-                    </button>
-                    <button
-                      type="button"
-                      className="small-command"
+                    </Button>
+                    <Button
+                      size="sm"
+                     
+                     
                       onClick={() => rediscover(connection)}
                       aria-label={t('mcpConnections.actions.rediscoverAria', { alias: connection.alias })}
                       title={t('mcpConnections.actions.rediscoverTitle')}
                     >
                       <RefreshCw size={14} aria-hidden="true" /> {t('mcpConnections.actions.rediscover')}
-                    </button>
-                    <button
-                      type="button"
-                      className="small-command danger"
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                     
+                     
                       onClick={() => removeConnection(connection)}
                       aria-label={t('mcpConnections.actions.deleteAria', { alias: connection.alias })}
                       title={t('mcpConnections.actions.deleteTitle')}
                     >
                       <Trash2 size={14} aria-hidden="true" />
-                    </button>
+                    </Button>
                   </>
                 )}
               </div>

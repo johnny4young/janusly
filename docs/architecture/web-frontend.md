@@ -87,6 +87,14 @@ production owner wherever the sheet lives. `RightPanel` and `AppWorkspace` are m
 are memoized on their inputs, because the shell renders on every store tick.
 Dialogs get Escape from `useDialogFocusTrap`'s `onEscape` option rather than
 their own keydown effects.
+Every product action is the `Button` primitive (`components/ui/Button.tsx`):
+`size="sm"` for inline row and toolbar actions, `variant="primary"` for the
+one action a surface leads with, `variant="danger"` for destructive ones,
+`size="icon" variant="ghost"` for icon-only controls, and `aria-pressed` for
+toggles (the primitive styles the pressed state). The legacy `small-command`
+and `icon-button` classes are gone from buttons; raw `<button>` remains only
+for non-action semantics — tabs, radios, menu items, list rows, chips — that
+carry their own component styles.
 
 ## Routing
 

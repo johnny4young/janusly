@@ -15,6 +15,7 @@ import type { SavedWorkflow } from '../types'
 import { WorkflowHealthBadge } from './WorkflowHealthBadge'
 import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, useT } from '../i18n'
+import { Button } from './ui/Button'
 
 type TFunc = ReturnType<typeof useT>['t']
 
@@ -219,61 +220,69 @@ export const FlowRow = memo(function FlowRow({
               itself when the status page recovers. An active workflow can
               continue a capped buffered window without changing pause state. */}
           {canWrite && pausedByBreaker && (
-            <button
+            <Button
+              size="sm"
               onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
-              className="small-command"
+             
               title={t('workflowsDashboard.resumeFlowTitle')}
               data-testid={`workflows-resume-${workflow.id}`}
               disabled={recoveryBusy}
             >
               <PlayCircle size={12} aria-hidden="true" /> {t('workflowsDashboard.resumeFlow')}
-            </button>
+            </Button>
           )}
           {canWrite && !isPaused && hasBufferedTriggers && (
-            <button
+            <Button
+              size="sm"
               onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
-              className="small-command"
+             
               title={t('workflowsDashboard.continueBackfillTitle', { count: workflow.bufferedTriggerCount ?? 0 })}
               data-testid={`workflows-backfill-${workflow.id}`}
               disabled={recoveryBusy}
             >
               <PlayCircle size={12} aria-hidden="true" /> {t('workflowsDashboard.continueBackfill')}
-            </button>
+            </Button>
           )}
-          <button onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }} className="small-command">{t('workflowsDashboard.openFlow')}</button>
+          <Button size="sm" onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }}>{t('workflowsDashboard.openFlow')}</Button>
           {/* Soft-delete affordance: an inline confirm (one row at a time) so a
               click never deletes immediately. The delete is recoverable from the
               Trash view. stopPropagation so the controls never open the row. */}
           {!canWrite ? null : confirmDeleteId === workflow.id ? (
             <span className="we-list-row__confirm" onClick={(event) => event.stopPropagation()}>
               <span className="we-list-row__confirm-text">{t('workflowsDashboard.deleteConfirm', { name: workflow.name })}</span>
-              <button
-                type="button"
-                className="small-command danger"
+              <Button
+                size="sm"
+                variant="danger"
+               
+               
                 onClick={(event) => { event.stopPropagation(); void deleteWorkflow(workflow.id) }}
                 data-testid={`workflows-delete-confirm-${workflow.id}`}
               >
                 {t('workflowsDashboard.confirmDeleteCta')}
-              </button>
-              <button
-                type="button"
-                className="small-command"
+              </Button>
+              <Button
+                size="sm"
+               
+               
                 onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(null) }}
               >
                 {t('workflowsDashboard.cancelAction')}
-              </button>
+              </Button>
             </span>
           ) : (
-            <button
-              type="button"
-              className="small-command danger we-list-row__delete"
+            <Button
+              size="sm"
+              variant="danger"
+              className="we-list-row__delete"
+             
+             
               onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(workflow.id) }}
               title={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
               aria-label={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
               data-testid={`workflows-delete-${workflow.id}`}
             >
               <Trash2 size={14} aria-hidden="true" />
-            </button>
+            </Button>
           )}
         </div>
       </div>

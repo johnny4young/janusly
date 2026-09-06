@@ -18,6 +18,7 @@ import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
 import { InspectorPanel } from './InspectorPanel'
 import { PanelChrome } from './panel-primitives'
 import { WorkflowOperationsPanel } from './WorkflowOperationsPanel'
+import { Button } from './ui/Button'
 
 export type AuthoringPanelModel = {
   runNodes: RunNode[]
@@ -91,15 +92,16 @@ export function AuthoringPanel({
           </div>
           <div className="authoring-ai-actions__buttons">
             {actions.map((item) => (
-              <button
+              <Button
+                size="sm"
                 key={item.action}
-                type="button"
-                className="small-command"
+               
+               
                 onClick={() => onOpenAiAction(item.action)}
               >
                 {item.icon}
                 <span>{t(item.labelKey)}</span>
-              </button>
+              </Button>
             ))}
           </div>
         </section>

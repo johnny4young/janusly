@@ -21,6 +21,7 @@ import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import './UsageSummaryCard.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { Button } from './ui/Button'
 
 const USAGE_TAGS = [PLATFORM_TAG, 'billing', 'usage', 'runs'] as const
 
@@ -196,7 +197,7 @@ export function UsageSummaryCard({
     <section className="we-card">
       <div className="split-row">
         <strong>{t('rightPanel.usage.title')}</strong>
-        <button className="small-command" onClick={refreshUsage}>{t('rightPanel.usage.refresh')}</button>
+        <Button size="sm" onClick={refreshUsage}>{t('rightPanel.usage.refresh')}</Button>
       </div>
       {Object.keys(usage).length === 0 ? (
         <EmptyState
@@ -255,9 +256,9 @@ export function UsageSummaryCard({
           ))}
           {hiddenCount > 0 && !showAll && (
             <li className="we-usage-breakdown-more">
-              <button type="button" className="small-command" onClick={() => setShowAll(true)}>
+              <Button size="sm" onClick={() => setShowAll(true)}>
                 {t('rightPanel.usage.moreCount', { count: hiddenCount })}
-              </button>
+              </Button>
             </li>
           )}
         </ul>

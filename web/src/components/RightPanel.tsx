@@ -60,6 +60,7 @@ import { useWorkflowStore } from '../store'
 import { workspaceDestinationForTab } from '../workspace-locations'
 import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 import type { WorkflowCreationMode } from './WorkflowsDashboard'
+import { Button } from './ui/Button'
 
 export type RightPanelAuthoring = AuthoringPanelModel & {
   aiHealth: AiHealth | null
@@ -472,7 +473,7 @@ function ToolsPanel({ tools, onInstallPlugin, canInstall }: Pick<RightPanelCatal
               </div>
             </div>
             <span>{tToolDescription(tool)}</span>
-            <button className="small-command" disabled={!canInstall} onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</button>
+            <Button size="sm" disabled={!canInstall} onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</Button>
           </div>
         ))}
       </div>

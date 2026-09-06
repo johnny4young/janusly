@@ -563,7 +563,7 @@
   overflow-wrap: anywhere;
 }
 
-.we-run-overview__trace .icon-button {
+.we-run-overview__trace .ui-button--icon {
   height: 24px;
   min-height: 24px;
   min-width: 24px;

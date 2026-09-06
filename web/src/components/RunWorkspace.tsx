@@ -29,6 +29,7 @@ import { useT } from '../i18n'
 import { PanelChrome } from './panel-primitives'
 import { RunsPanel, type RunsPanelProps } from './RunsPanel'
 import './RunWorkspace.css'
+import { Button } from './ui/Button'
 
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then(module => ({ default: module.ReasoningPanel })))
 const MultiAgentTimeline = lazy(() => import('../MultiAgentTimeline').then(module => ({ default: module.MultiAgentTimeline })))
@@ -146,16 +147,18 @@ export function RunWorkspaceNavigation({
         </div>
 
         {activeView !== 'overview' && (
-          <button
-            type="button"
-            className="small-command we-run-workspace__full-view"
+          <Button
+            size="sm"
+            className="we-run-workspace__full-view"
+           
+           
             onClick={() => onOpenFullView(activeView === 'timeline' ? 'reasoning' : 'multiAgent')}
           >
             <ExternalLink size={13} aria-hidden="true" />
             {activeView === 'timeline'
               ? t('runWorkspace.openFullTimeline')
               : t('runWorkspace.openFullAgents')}
-          </button>
+          </Button>
         )}
       </div>
     </header>

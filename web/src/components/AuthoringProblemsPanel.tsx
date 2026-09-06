@@ -8,6 +8,7 @@ import { useWorkflowStore } from '../store'
 import { buildAuthoringProblems, type AuthoringProblem } from './authoring-problems'
 import { requestAuthoringFocus } from './authoring-focus-bus'
 import { requestResilienceFocus } from './resilience-focus-bus'
+import { Button } from './ui/Button'
 
 const resilienceIssueCodes = new Set(['external_node_missing_retry', 'http_missing_bounds', 'tool_result_policy_missing'])
 
@@ -85,15 +86,16 @@ export function AuthoringProblemsPanel({
           <h3 id="authoring-problems-heading">{t('problems.title')}</h3>
           <p className="helper-text">{t('problems.description')}</p>
         </div>
-        <button
-          type="button"
-          className="small-command"
+        <Button
+          size="sm"
+         
+         
           onClick={() => { void runValidation() }}
           disabled={checking}
         >
           <RefreshCw size={13} aria-hidden="true" />
           {checking ? t('problems.checking') : t('problems.check')}
-        </button>
+        </Button>
       </div>
 
       {problems.length === 0 ? (

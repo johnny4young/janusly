@@ -18,6 +18,7 @@ import type { DeadLetter } from './dead-letter-types'
 import { RecoveryDrillOutcomeCard } from './recovery/RecoveryDrillOutcomeCard'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { RunExplainChat } from './RunExplainChat'
+import { Button } from './ui/Button'
 
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then(module => ({
   default: module.RecoveryDialog,
@@ -80,9 +81,9 @@ function DetailBlock({
   const [open, setOpen] = useState(initiallyOpen)
   return (
     <div className="detail-block">
-      <button type="button" className="small-command" onClick={() => setOpen(value => !value)}>
+      <Button size="sm" onClick={() => setOpen(value => !value)}>
         {t(open ? 'dlq.detail.hide' : 'dlq.detail.show', { title })}
-      </button>
+      </Button>
       {open && <pre className="mini-pre">{JSON.stringify(value ?? {}, null, 2)}</pre>}
     </div>
   )
@@ -206,41 +207,45 @@ export function ActivityRecoveryDetail({
 
       <div className="we-activity-detail__actions">
         {canUseRecovery && (
-          <button
-            type="button"
-            className="small-command small-command--primary"
+          <Button
+            size="sm"
+            variant="primary"
+           
+           
             disabled={!isOpen || detail.kind !== 'ready' || busy !== null}
             onClick={() => setShowRecoveryDialog(true)}
           >
             <Sparkles size={12} aria-hidden="true" />
             {t('dlq.action.suggest')}
-          </button>
+          </Button>
         )}
         {canReplay && (
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             disabled={!isOpen || busy !== null}
             onClick={() => { void runMutation('replay') }}
           >
             <RefreshCcw size={12} aria-hidden="true" />
             {t('dlq.action.retry')}
-          </button>
+          </Button>
         )}
         {canResolve && (
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             disabled={current.status === 'resolved' || busy !== null}
             onClick={() => { void runMutation('resolve') }}
           >
             {t('dlq.action.resolve')}
-          </button>
+          </Button>
         )}
-        <button type="button" className="small-command" onClick={() => onOpenRun(current.runId)}>
+        <Button size="sm" onClick={() => onOpenRun(current.runId)}>
           <ExternalLink size={12} aria-hidden="true" />
           {t('activity.recoveryDetail.openRun')}
-        </button>
+        </Button>
       </div>
 
       <dl className="we-run-overview__facts we-activity-recovery__facts">
@@ -291,23 +296,25 @@ export function ActivityRecoveryDetail({
         <div className="split-row">
           <strong>{t('activity.recoveryDetail.evidence')}</strong>
           <div className="we-activity-detail__actions">
-            <button type="button" className="small-command" onClick={() => { void copyError() }}>
+            <Button size="sm" onClick={() => { void copyError() }}>
               <Copy size={12} aria-hidden="true" />
               {t('dlq.action.copyError')}
-            </button>
+            </Button>
             {canStartRuns && (
-              <button
-                type="button"
-                className="small-command"
+              <Button
+                size="sm"
+               
+               
                 onClick={() => setLabSourceRunId(current.runId)}
               >
                 <FlaskConical size={12} aria-hidden="true" />
                 {t('dlq.action.replayInLab')}
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
-              className="small-command"
+            <Button
+              size="sm"
+             
+             
               onClick={async () => {
                 try {
                   await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(current.runId)}`)
@@ -319,7 +326,7 @@ export function ActivityRecoveryDetail({
             >
               <Download size={12} aria-hidden="true" />
               {t('dlq.action.export')}
-            </button>
+            </Button>
           </div>
         </div>
         <DetailBlock title={t('dlq.detail.error')} value={current.errorJson} initiallyOpen />

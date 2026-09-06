@@ -140,9 +140,9 @@ export function RunHistoryComparisonDialog({
               <AlertCircle size={14} aria-hidden="true" />
               <div>
                 <span>{t('runHistoryComparison.error')}</span>
-                <button type="button" className="small-command" onClick={() => setRetryNonce(value => value + 1)}>
+                <Button size="sm" onClick={() => setRetryNonce(value => value + 1)}>
                   <RefreshCcw size={12} aria-hidden="true" /> {t('runHistoryComparison.retry')}
-                </button>
+                </Button>
               </div>
             </div>
           )}

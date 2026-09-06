@@ -8,12 +8,6 @@
   margin-bottom: 8px;
 }
 
-.small-command--active {
-  background: var(--we-primary-soft);
-  border-color: var(--we-primary);
-  color: var(--we-primary);
-}
-
 .version-button--selected {
   background: var(--we-primary-soft);
   border-color: var(--we-primary);

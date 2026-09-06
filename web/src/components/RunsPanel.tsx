@@ -39,6 +39,7 @@ import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingIn
 import { RunHistoryList } from './RunHistoryList'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
 import './RunsPanel.css'
+import { Button } from './ui/Button'
 
 type HumanFormWaiting = {
   title?: string
@@ -305,38 +306,42 @@ export function RunsPanel({
               <RunStreamChip />
             </span>
             <div className="we-run-overview__actions">
-              <button
-                type="button"
-                className="small-command"
+              <Button
+                size="sm"
+               
+               
                 onClick={() => onViewTimeline ? onViewTimeline() : setActiveTab('reasoning')}
               >
                 <Activity size={12} aria-hidden="true" /> {t('rightPanel.runs.viewTimeline')}
-              </button>
+              </Button>
               {canStartRuns && activeRun && !activeRun.replayMode && isTerminalRunStatus(activeRun.status) && (
-                <button
-                  type="button"
-                  className="small-command"
+                <Button
+                  size="sm"
+                 
+                 
                   onClick={() => setLabSourceRun(activeRun)}
                   data-testid="active-run-replay-in-lab"
                 >
                   <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.openInLab')}
-                </button>
+                </Button>
               )}
               {canCancelRuns && (
-                <button
-                  type="button"
-                  className="small-command"
+                <Button
+                  size="sm"
+                 
+                 
                   onClick={() => onCancelActiveRun?.()}
                   disabled={!isActiveRunCancellable}
                 >
                   {t('rightPanel.runs.cancelRun')}
-                </button>
+                </Button>
               )}
               {activeRun && (
                 <>
-                  <button
-                    type="button"
-                    className="small-command"
+                  <Button
+                    size="sm"
+                   
+                   
                     onClick={async () => {
                       try {
                         await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(activeRun.id)}`)
@@ -349,16 +354,17 @@ export function RunsPanel({
                   >
                     <Download size={12} aria-hidden="true" />
                     {t('rightPanel.runs.export')}
-                  </button>
-                  <button
-                    type="button"
-                    className="small-command"
+                  </Button>
+                  <Button
+                    size="sm"
+                   
+                   
                     onClick={() => setDeliveryRun(activeRun)}
                     aria-label={t('rightPanel.runs.sendAria', { id: activeRun.id })}
                   >
                     <Send size={12} aria-hidden="true" />
                     {t('rightPanel.runs.send')}
-                  </button>
+                  </Button>
                 </>
               )}
             </div>
@@ -387,9 +393,11 @@ export function RunsPanel({
                 <dt>{t('rightPanel.runs.traceId')}</dt>
                 <dd>
                   <code title={activeRunTraceId}>{activeRunTraceId.slice(0, 12)}…</code>
-                  <button
-                    type="button"
-                    className="icon-button"
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                   
+                   
                     aria-label={t('rightPanel.runs.copyTrace')}
                     title={t('rightPanel.runs.copyTrace')}
                     onClick={async () => {
@@ -402,7 +410,7 @@ export function RunsPanel({
                     }}
                   >
                     <Copy size={13} aria-hidden="true" />
-                  </button>
+                  </Button>
                 </dd>
               </div>
             )}
@@ -503,19 +511,21 @@ export function RunsPanel({
                   </div>
                 )}
                 {form && canStartRuns ? (
-                <button
-                  className="small-command small-command--primary"
+                <Button
+                  size="sm"
+                  variant="primary"
+                 
                   onClick={() => {
                     setHumanFormErrors([])
                     setActiveHumanFormNodeId(node.nodeId)
                   }}
                 >
                   {t('rightPanel.runs.fillForm', { nodeId: node.nodeId })}
-                </button>
+                </Button>
                 ) : canStartRuns && canResumeWaitingKind(waiting.kind) ? (
-                  <button className="small-command" onClick={() => onApproveNode(node.nodeId)}>
+                  <Button size="sm" onClick={() => onApproveNode(node.nodeId)}>
                     {t(waitActionLabelKey(waiting.kind), { nodeId: node.nodeId })}
-                  </button>
+                  </Button>
                 ) : (
                   <span className="helper-text">{t('rightPanel.runs.waitAutomatic')}</span>
                 )}
@@ -583,19 +593,21 @@ export function RunsPanel({
                 {(canReplayDeadLetters || canStartRuns) && (
                   <div className="split-row">
                     {canReplayDeadLetters && (
-                      <button className="small-command" onClick={() => onReplayNode(node.nodeId)}>
+                      <Button size="sm" onClick={() => onReplayNode(node.nodeId)}>
                         {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
-                      </button>
+                      </Button>
                     )}
                     {canStartRuns && (
-                      <button
-                        className="small-command small-command--primary"
+                      <Button
+                        size="sm"
+                        variant="primary"
+                       
                         onClick={() => onRedriveNode(node.nodeId)}
                         title={t('rightPanel.runs.redriveTitle')}
                         data-testid={`redrive-node-${node.nodeId}`}
                       >
                         {t('rightPanel.runs.redrive')}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 )}
@@ -612,10 +624,11 @@ export function RunsPanel({
             <p className="helper-text">{t('replayLab.fork.sectionDescription')}</p>
           </div>
           {forkableNodes.map(node => (
-            <button
+            <Button
+              size="sm"
               key={node.nodeId}
-              type="button"
-              className="small-command"
+             
+             
               onClick={() => setForkTargetNodeId(node.nodeId)}
               data-testid={`fork-in-lab-${node.nodeId}`}
             >
@@ -624,7 +637,7 @@ export function RunsPanel({
               {node.status === 'succeeded'
                 ? t('replayLab.fork.buttonStatusSucceeded', { nodeId: node.nodeId })
                 : t('replayLab.fork.buttonStatusFailed', { nodeId: node.nodeId })}
-            </button>
+            </Button>
           ))}
         </section>
       )}

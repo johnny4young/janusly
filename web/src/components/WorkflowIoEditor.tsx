@@ -13,6 +13,7 @@ import type { WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
 import { SelectControl, TextInput } from '@/components/ui/Form'
 import './WorkflowIoEditor.css'
+import { Button } from './ui/Button'
 
 type SchemaFieldsEditorProps = {
   scope: string
@@ -114,10 +115,10 @@ export function SchemaFieldsEditor({
           <p>{t(form ? 'rightPanel.quickConfig.humanFormHelper' : 'rightPanel.inspector.inputsHelper')}</p>
         </div>
         {editable && (
-          <button type="button" className="small-command" onClick={addField} data-testid="workflow-input-add">
+          <Button size="sm" onClick={addField} data-testid="workflow-input-add">
             <Plus size={13} aria-hidden="true" />
             {t('rightPanel.inspector.addInput')}
-          </button>
+          </Button>
         )}
       </div>
       {!editable ? (
@@ -215,9 +216,9 @@ function InputRow({ name, shape, form, required, onRename, onTypeChange, onDescr
           />
           {t('rightPanel.inspector.required')}
         </label>
-        <button type="button" className="icon-button" onClick={onRemove} aria-label={t('rightPanel.inspector.removeInput', { name })}>
+        <Button size="icon" variant="ghost" onClick={onRemove} aria-label={t('rightPanel.inspector.removeInput', { name })}>
           <Trash2 size={14} aria-hidden="true" />
-        </button>
+        </Button>
       </div>
       <TextInput
         className="we-workflow-io__description"
@@ -439,10 +440,10 @@ export function WorkflowIoEditor({
             <strong>{t('rightPanel.inspector.outputsLabel')}</strong>
             <p>{t('rightPanel.inspector.outputsHelper')}</p>
           </div>
-          <button type="button" className="small-command" onClick={addOutput} data-testid="workflow-output-add">
+          <Button size="sm" onClick={addOutput} data-testid="workflow-output-add">
             <Plus size={13} aria-hidden="true" />
             {t('rightPanel.inspector.addOutput')}
-          </button>
+          </Button>
         </div>
         {outputEntries.length === 0 ? (
           <p className="we-workflow-io__empty">{t('rightPanel.inspector.noOutputs')}</p>
@@ -495,9 +496,9 @@ function OutputRow({ name, template, onRename, onTemplateChange, onRemove }: {
           placeholder={t('rightPanel.inspector.outputTemplatePlaceholder')}
           aria-label={t('rightPanel.inspector.outputTemplateAria', { name })}
         />
-        <button type="button" className="icon-button" onClick={onRemove} aria-label={t('rightPanel.inspector.removeOutput', { name })}>
+        <Button size="icon" variant="ghost" onClick={onRemove} aria-label={t('rightPanel.inspector.removeOutput', { name })}>
           <Trash2 size={14} aria-hidden="true" />
-        </button>
+        </Button>
       </div>
       {nameError && <p id={nameErrorId} className="we-workflow-io__error" role="alert">{t('rightPanel.inspector.nameConflict')}</p>}
     </div>

@@ -397,7 +397,7 @@ export function ReportDeliveryDialog({
                   href={step.deliveryId}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="small-command"
+                  className="ui-button ui-button--sm"
                   data-testid="report-delivery-result-link"
                 >
                   <ExternalLink size={12} aria-hidden="true" /> {t('reportDelivery.viewDestination')}

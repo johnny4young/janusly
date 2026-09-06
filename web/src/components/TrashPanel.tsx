@@ -15,6 +15,7 @@ import { RotateCcw, Trash, Workflow } from 'lucide-react'
 import type { SavedWorkflow } from '../types'
 import { getResolvedLocale, useT } from '../i18n'
 import { daysUntilPurge } from '../trash-expiry'
+import { Button } from './ui/Button'
 
 type TFunc = ReturnType<typeof useT>['t']
 
@@ -92,14 +93,15 @@ export function TrashPanel({
             )
           })()}
           {canWrite && (
-            <button
-              type="button"
-              className="small-command"
+            <Button
+              size="sm"
+             
+             
               onClick={() => void restoreWorkflow(workflow.id)}
               data-testid={`workflows-restore-${workflow.id}`}
             >
               <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.restoreFlow')}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -126,9 +128,10 @@ export function TrashPanel({
         {selectedIds.size > 0 && (
           <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
         )}
-        <button
-          type="button"
-          className="small-command"
+        <Button
+          size="sm"
+         
+         
           aria-pressed={workflows.every((w) => selectedIds.has(w.id))}
           onClick={() => setSelectedIds(workflows.every((w) => selectedIds.has(w.id)) ? new Set() : new Set(workflows.map((w) => w.id)))}
           data-testid="workflows-trash-select-all"
@@ -136,16 +139,17 @@ export function TrashPanel({
           {workflows.every((w) => selectedIds.has(w.id))
             ? t('workflowsDashboard.clearSelection')
             : t('workflowsDashboard.trashSelectAll', { count: workflows.length })}
-        </button>
-        <button
-          type="button"
-          className="small-command"
+        </Button>
+        <Button
+          size="sm"
+         
+         
           disabled={selectedIds.size === 0}
           onClick={() => void bulkRestore()}
           data-testid="workflows-trash-restore-selected"
         >
           <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.trashRestoreSelected', { count: selectedIds.size })}
-        </button>
+        </Button>
       </div>}
       <ul className="we-list" data-testid="workflows-trash-list">
         {workflows.map(renderTrashRow)}

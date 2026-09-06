@@ -28,6 +28,7 @@ import { SemanticOutcomePill } from './SemanticOutcomePill'
 import { SelectControl } from '@/components/ui/Form'
 import './RunHistoryList.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { Button } from './ui/Button'
 
 const RUN_HISTORY_TAGS = [PLATFORM_TAG, 'runs', 'dlq', 'recovery'] as const
 
@@ -179,9 +180,9 @@ export function RunHistoryList({
           </SelectControl>
         </label>
         {hasActiveFilters && (
-          <button type="button" className="small-command" onClick={clearFilters} data-testid="run-history-clear-filters">
+          <Button size="sm" onClick={clearFilters} data-testid="run-history-clear-filters">
             <FilterX size={12} aria-hidden="true" /> {t('rightPanel.runs.clearFilters')}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -194,9 +195,9 @@ export function RunHistoryList({
         <div className="we-run-history-state we-run-history-state--error" role="alert">
           <AlertCircle size={15} aria-hidden="true" />
           <span>{t('rightPanel.runs.historyLoadError')}</span>
-          <button type="button" className="small-command" onClick={() => setRetryNonce(value => value + 1)}>
+          <Button size="sm" onClick={() => setRetryNonce(value => value + 1)}>
             <RefreshCcw size={12} aria-hidden="true" /> {t('rightPanel.runs.historyRetry')}
-          </button>
+          </Button>
         </div>
       )}
       {!loading && !failed && historyRuns.length === 0 && (
@@ -259,30 +260,34 @@ export function RunHistoryList({
                     </button>
                     <div className="we-run-history-card__actions">
                       {isComparableFailure(run) && (
-                        <button
-                          type="button"
-                          className="small-command small-command--primary"
+                        <Button
+                          size="sm"
+                          variant="primary"
+                         
+                         
                           onClick={() => setComparisonRun(run)}
                           data-testid={`history-compare-last-successful-${run.id}`}
                           aria-label={t('rightPanel.runs.compareLastSuccessfulAria', { id: run.id })}
                         >
                           <GitCompareArrows size={12} aria-hidden="true" /> {t('rightPanel.runs.compareLastSuccessful')}
-                        </button>
+                        </Button>
                       )}
                       {showLabAction && (
-                        <button
-                          type="button"
-                          className="small-command"
+                        <Button
+                          size="sm"
+                         
+                         
                           onClick={() => onOpenLab?.(run)}
                           data-testid={`history-replay-in-lab-${run.id}`}
                           aria-label={t('rightPanel.runs.replayInLabAria', { id: run.id })}
                         >
                           <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.lab')}
-                        </button>
+                        </Button>
                       )}
-                      <button
-                        type="button"
-                        className="small-command"
+                      <Button
+                        size="sm"
+                       
+                       
                         onClick={async () => {
                           try {
                             await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(run.id)}`)
@@ -295,16 +300,17 @@ export function RunHistoryList({
                         aria-label={t('rightPanel.runs.exportAria', { id: run.id })}
                       >
                         <Download size={12} aria-hidden="true" /> {t('rightPanel.runs.export')}
-                      </button>
-                      <button
-                        type="button"
-                        className="small-command"
+                      </Button>
+                      <Button
+                        size="sm"
+                       
+                       
                         onClick={() => onSend(run)}
                         data-testid={`history-send-${run.id}`}
                         aria-label={t('rightPanel.runs.sendAria', { id: run.id })}
                       >
                         <Send size={12} aria-hidden="true" /> {t('rightPanel.runs.send')}
-                      </button>
+                      </Button>
                     </div>
                   </article>
                 )

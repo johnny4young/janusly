@@ -8,6 +8,7 @@ import type { SavedWorkflow } from '../types'
 import type { WorkflowsDashboardController } from './WorkflowsDashboard'
 import { UNGROUPED_FOLDER as UNGROUPED } from './workflows-dashboard-model'
 import { TextInput } from '@/components/ui/Form'
+import { Button } from './ui/Button'
 
 export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardController }) {
   const {
@@ -143,23 +144,26 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
         </div>
         <div className="panel-toolbar__actions">
           {!showTrashed && onCreate && (
-            <button
-              type="button"
-              className="small-command small-command--primary"
+            <Button
+              size="sm"
+              variant="primary"
+             
+             
               onClick={() => setCreationOpen((open) => !open)}
               aria-expanded={creationOpen}
               aria-controls="workflow-creation-choices"
               disabled={!canWrite}
             >
               <Plus size={14} aria-hidden="true" /> {t('workflowsDashboard.newWorkflow')}
-            </button>
+            </Button>
           )}
           {/* Trash toggle — always reachable (it lives in the always-rendered
               header, not the filterable toolbar). Entering Trash clears any
               active-view selection + delete-confirm so the views don't bleed. */}
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             aria-pressed={showTrashed}
             onClick={toggleTrashView}
             data-testid="workflows-trash-toggle"
@@ -169,10 +173,10 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
             ) : (
               <><Trash size={14} aria-hidden="true" /> {t('workflowsDashboard.trashToggleToTrash')}</>
             )}
-          </button>
-          <button onClick={load} className="small-command" disabled={loading} aria-label={t('workflowsDashboard.refresh')}>
+          </Button>
+          <Button size="sm" onClick={load} disabled={loading} aria-label={t('workflowsDashboard.refresh')}>
             <RefreshCw size={14} aria-hidden="true" /> {loading ? t('workflowsDashboard.loading') : t('workflowsDashboard.refresh')}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -189,14 +193,15 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
               <h3 id="workflow-creation-title">{t('workflowCreation.title')}</h3>
               <p>{t('workflowCreation.body')}</p>
             </div>
-            <button
-              type="button"
-              className="small-command"
+            <Button
+              size="sm"
+             
+             
               onClick={() => setCreationOpen(false)}
               aria-label={t('workflowCreation.close')}
             >
               <X size={15} aria-hidden="true" />
-            </button>
+            </Button>
           </div>
           <div className="workflow-creation__choices">
             <button
@@ -290,23 +295,25 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
               <option key={folder} value={folder} />
             ))}
           </datalist>
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             disabled={!bulkFolderDraft.trim()}
             onClick={() => void bulkAssign(bulkFolderDraft.trim())}
             data-testid="workflows-bulk-move"
           >
             {t('workflowsDashboard.bulkMoveCta')}
-          </button>
-          <button
-            type="button"
-            className="small-command"
+          </Button>
+          <Button
+            size="sm"
+           
+           
             onClick={() => void bulkAssign(null)}
             data-testid="workflows-bulk-ungroup"
           >
             {t('workflowsDashboard.bulkUngroupCta')}
-          </button>
+          </Button>
           {/* Tag group — add OR remove ONE tag across the selected rows. A tag is
               multi-value (a workflow can carry several), so unlike the folder
               Move/Ungroup this has two verbs instead of a single target. */}
@@ -326,27 +333,29 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
               <option key={tag} value={tag} />
             ))}
           </datalist>
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             disabled={!bulkTagDraft.trim()}
             onClick={() => void bulkAssignTag('add')}
             data-testid="workflows-bulk-tag-add"
           >
             {t('workflowsDashboard.bulkTagAddCta')}
-          </button>
-          <button
-            type="button"
-            className="small-command"
+          </Button>
+          <Button
+            size="sm"
+           
+           
             disabled={!bulkTagDraft.trim()}
             onClick={() => void bulkAssignTag('remove')}
             data-testid="workflows-bulk-tag-remove"
           >
             {t('workflowsDashboard.bulkTagRemoveCta')}
-          </button>
-          <button type="button" className="small-command" onClick={() => setSelectedIds(new Set())}>
+          </Button>
+          <Button size="sm" onClick={() => setSelectedIds(new Set())}>
             {t('workflowsDashboard.clearSelection')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -500,22 +509,22 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
                         }}
                         data-testid={`workflows-renamefolder-input-${group.key}`}
                       />
-                      <button type="button" className="small-command" onClick={event => { event.preventDefault(); event.stopPropagation(); void renameFolder(group.key, renameDraft) }} data-testid={`workflows-renamefolder-save-${group.key}`}>
+                      <Button size="sm" onClick={event => { event.preventDefault(); event.stopPropagation(); void renameFolder(group.key, renameDraft) }} data-testid={`workflows-renamefolder-save-${group.key}`}>
                         {t('workflowsDashboard.saveRename')}
-                      </button>
-                      <button type="button" className="small-command" onClick={event => { event.preventDefault(); event.stopPropagation(); setRenamingFolder(null) }}>
+                      </Button>
+                      <Button size="sm" onClick={event => { event.preventDefault(); event.stopPropagation(); setRenamingFolder(null) }}>
                         {t('workflowsDashboard.cancelAction')}
-                      </button>
+                      </Button>
                     </span>
                   ) : confirmDeleteFolder === group.key ? (
                     <span className="we-list-folder__confirm" onClick={event => { event.preventDefault(); event.stopPropagation() }}>
                       <span className="we-list-folder__confirm-text">{t('workflowsDashboard.deleteFolderConfirm', { folder: group.key, count: group.items.length })}</span>
-                      <button type="button" className="small-command danger" onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteFolder(group.key) }} data-testid={`workflows-deletefolder-confirm-${group.key}`}>
+                      <Button size="sm" variant="danger" onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteFolder(group.key) }} data-testid={`workflows-deletefolder-confirm-${group.key}`}>
                         {t('workflowsDashboard.confirmDeleteCta')}
-                      </button>
-                      <button type="button" className="small-command" onClick={event => { event.preventDefault(); event.stopPropagation(); setConfirmDeleteFolder(null) }}>
+                      </Button>
+                      <Button size="sm" onClick={event => { event.preventDefault(); event.stopPropagation(); setConfirmDeleteFolder(null) }}>
                         {t('workflowsDashboard.cancelAction')}
-                      </button>
+                      </Button>
                     </span>
                   ) : (
                     <>
@@ -525,9 +534,11 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
                           own tick. Same preventDefault+stopPropagation as the
                           rename/delete controls. Only in selection mode. */}
                       {canWrite && selectionMode && (
-                        <button
-                          type="button"
-                          className="small-command we-list-folder__selectall"
+                        <Button
+                          size="sm"
+                          className="we-list-folder__selectall"
+                         
+                         
                           aria-pressed={group.items.every((w) => selectedIds.has(w.id))}
                           onClick={event => { event.preventDefault(); event.stopPropagation(); toggleSelectFolder(group.items) }}
                           title={t('workflowsDashboard.selectAllInFolderAria', { folder: label })}
@@ -535,7 +546,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
                           data-testid={`workflows-select-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
                         >
                           <ListChecks size={12} aria-hidden="true" />
-                        </button>
+                        </Button>
                       )}
                       <span className="we-list-folder__name">{label}</span>
                       <span className="we-pill" data-tone="ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
@@ -543,26 +554,29 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
                           synthetic bucket, not a real folder to manage. */}
                       {canWrite && group.key !== UNGROUPED && (
                         <span className="we-list-folder__actions">
-                          <button
-                            type="button"
-                            className="small-command"
+                          <Button
+                            size="sm"
+                           
+                           
                             onClick={event => { event.preventDefault(); event.stopPropagation(); setConfirmDeleteFolder(null); setRenameDraft(group.key); setRenamingFolder(group.key) }}
                             title={t('workflowsDashboard.renameFolder', { folder: group.key })}
                             aria-label={t('workflowsDashboard.renameFolder', { folder: group.key })}
                             data-testid={`workflows-renamefolder-${group.key}`}
                           >
                             <Pencil size={12} aria-hidden="true" />
-                          </button>
-                          <button
-                            type="button"
-                            className="small-command danger"
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                           
+                           
                             onClick={event => { event.preventDefault(); event.stopPropagation(); setRenamingFolder(null); setConfirmDeleteFolder(group.key) }}
                             title={t('workflowsDashboard.deleteFolder', { folder: group.key })}
                             aria-label={t('workflowsDashboard.deleteFolder', { folder: group.key })}
                             data-testid={`workflows-deletefolder-${group.key}`}
                           >
                             <Trash2 size={12} aria-hidden="true" />
-                          </button>
+                          </Button>
                         </span>
                       )}
                     </>
@@ -595,12 +609,12 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
                 }}
                 data-testid="workflows-newfolder-input"
               />
-              <button type="button" className="small-command" onClick={commitNewFolder} data-testid="workflows-newfolder-save">
+              <Button size="sm" onClick={commitNewFolder} data-testid="workflows-newfolder-save">
                 {t('workflowsDashboard.saveNewFolder')}
-              </button>
-              <button type="button" className="small-command" onClick={cancelNewFolder}>
+              </Button>
+              <Button size="sm" onClick={cancelNewFolder}>
                 {t('workflowsDashboard.cancelAction')}
-              </button>
+              </Button>
             </div>
           ) : draggingId ? (
             <div
@@ -633,15 +647,17 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
           Shown below both the flat and folder-grouped views when the last page
           came back full. */}
       {hasMore && (
-        <button
-          type="button"
-          className="small-command we-load-more"
+        <Button
+          size="sm"
+          className="we-load-more"
+         
+         
           onClick={() => { void loadMore() }}
           disabled={loadingMore}
           data-testid="workflows-load-more"
         >
           {loadingMore ? t('workflowsDashboard.loading') : t('workflowsDashboard.loadMore')}
-        </button>
+        </Button>
       )}
     </div>
   )

@@ -516,24 +516,27 @@ export function ConnectionsPanel({
                         </dl>
                         {canWrite && (
                           <div className="we-connection-row__actions">
-                            <button
-                              type="button"
-                              className="small-command"
+                            <Button
+                              size="sm"
+                             
+                             
                               onClick={() => setRotating(credential.name)}
                               disabled={revoking !== null}
                             >
                               {t('credentialRotation.action.rotate')}
-                            </button>
-                            <button
-                              type="button"
-                              className="small-command danger"
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                             
+                             
                               onClick={() => { void revoke(credential) }}
                               disabled={revoking !== null}
                             >
                               {revoking === credential.name
                                 ? t('common.working')
                                 : t('rightPanel.credentials.revoke')}
-                            </button>
+                            </Button>
                           </div>
                         )}
                       </article>

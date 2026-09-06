@@ -51,6 +51,7 @@ import {
 import { useT } from '../i18n'
 import './OperationsPage.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { Button } from './ui/Button'
 
 const OPERATIONS_TAGS = [PLATFORM_TAG, 'health', 'org-config', 'runs'] as const
 
@@ -512,9 +513,9 @@ function IntegrationsSection({
               <strong>{t('workspace.section.credentials.label')}</strong>
               <p className="helper-text">{t('workspace.section.credentials.helper')}</p>
             </div>
-            <button type="button" className="small-command" onClick={() => onOpenTab('credentials')}>
+            <Button size="sm" onClick={() => onOpenTab('credentials')}>
               {t('workspace.section.credentials.label')}
-            </button>
+            </Button>
           </div>
         </section>
       )}

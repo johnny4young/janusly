@@ -167,15 +167,15 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
 
       <div className="chat-starters" aria-label={t('runExplain.starterAria')}>
         {starterQuestions.map((starter) => (
-          <button
+          <Button
+            size="sm"
             key={starter}
-            className="small-command"
+           
             disabled={!runId || loading}
             onClick={() => setQuestion(starter)}
-            type="button"
           >
             {starter}
-          </button>
+          </Button>
         ))}
       </div>
 

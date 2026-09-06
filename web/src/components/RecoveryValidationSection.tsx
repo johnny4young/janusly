@@ -12,6 +12,7 @@ import { ClipboardCheck, Download, FileText } from 'lucide-react'
 import { downloadFromApi } from '../api'
 import { getResolvedLocale, useT } from '../i18n'
 import { formatDuration } from './recovery-center/recovery-center-model'
+import { Button } from './ui/Button'
 
 export type RecoveryValidationReport = {
   generatedAt: string
@@ -117,24 +118,26 @@ export function RecoveryValidationSection({ report }: RecoveryValidationSectionP
           </p>
         </div>
         <div className="we-recovery-validation__actions">
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             disabled={exporting !== null}
             onClick={() => void handleExport('markdown')}
           >
             <FileText size={14} aria-hidden="true" />
             {t('recoveryCenter.validation.export.markdown')}
-          </button>
-          <button
-            type="button"
-            className="small-command"
+          </Button>
+          <Button
+            size="sm"
+           
+           
             disabled={exporting !== null}
             onClick={() => void handleExport('json')}
           >
             <Download size={14} aria-hidden="true" />
             {t('recoveryCenter.validation.export.json')}
-          </button>
+          </Button>
         </div>
       </header>
 

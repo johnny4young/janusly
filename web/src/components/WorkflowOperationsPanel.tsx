@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, type ComponentType, type ReactNode } from 're
 import { CalendarClock, Gauge, GitBranch, History, Info } from 'lucide-react'
 
 import { useT } from '../i18n'
+import { Button } from './ui/Button'
 
 const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((module) => ({ default: module.VersionHistoryPanel })))
 const WorkflowRolloutPanel = lazy(() => import('./WorkflowRolloutPanel').then((module) => ({ default: module.WorkflowRolloutPanel })))
@@ -54,16 +55,17 @@ export function WorkflowOperationsPanel({ readOnly }: { readOnly: boolean }) {
       </div>
       <div className="authoring-workflow-tools__nav" role="group" aria-label={t('authoring.workflowTools.aria')}>
         {SECTIONS.map((section) => (
-          <button
+          <Button
+            size="sm"
             key={section.id}
-            type="button"
-            className="small-command"
+           
+           
             aria-pressed={section.id === activeSection}
             onClick={() => setActiveSection((current) => current === section.id ? null : section.id)}
           >
             {section.icon}
             <span>{t(section.labelKey)}</span>
-          </button>
+          </Button>
         ))}
       </div>
       {SelectedPanel && (

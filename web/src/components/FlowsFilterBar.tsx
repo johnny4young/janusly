@@ -14,6 +14,7 @@ import { FilterX, Pencil, Search, Trash2, X } from 'lucide-react'
 import { useT } from '../i18n'
 import type { SortKey } from '../flows-filters'
 import { SelectControl, TextInput } from '@/components/ui/Form'
+import { Button } from './ui/Button'
 
 type TFunc = ReturnType<typeof useT>['t']
 
@@ -166,45 +167,48 @@ export function FlowsFilterBar({
               }}
               data-testid="workflows-tag-rename-input"
             />
-            <button type="button" className="small-command" onClick={() => void renameTag(soleTagFilter, tagRenameDraft)} data-testid="workflows-tag-rename-save">
+            <Button size="sm" onClick={() => void renameTag(soleTagFilter, tagRenameDraft)} data-testid="workflows-tag-rename-save">
               {t('workflowsDashboard.saveRename')}
-            </button>
-            <button type="button" className="small-command" onClick={() => setRenamingTag(false)}>
+            </Button>
+            <Button size="sm" onClick={() => setRenamingTag(false)}>
               {t('workflowsDashboard.cancelAction')}
-            </button>
+            </Button>
           </span>
         ) : confirmDeleteTag ? (
           <span className="we-list-tag-manage">
             <span className="we-list-tag-manage__confirm">{t('workflowsDashboard.deleteTagConfirm', { tag: soleTagFilter })}</span>
-            <button type="button" className="small-command danger" onClick={() => void deleteTag(soleTagFilter)} data-testid="workflows-tag-delete-confirm">
+            <Button size="sm" variant="danger" onClick={() => void deleteTag(soleTagFilter)} data-testid="workflows-tag-delete-confirm">
               {t('workflowsDashboard.confirmDeleteCta')}
-            </button>
-            <button type="button" className="small-command" onClick={() => setConfirmDeleteTag(false)}>
+            </Button>
+            <Button size="sm" onClick={() => setConfirmDeleteTag(false)}>
               {t('workflowsDashboard.cancelAction')}
-            </button>
+            </Button>
           </span>
         ) : (
           <span className="we-list-tag-manage">
-            <button
-              type="button"
-              className="small-command"
+            <Button
+              size="sm"
+             
+             
               onClick={() => { setConfirmDeleteTag(false); setTagRenameDraft(soleTagFilter); setRenamingTag(true) }}
               title={t('workflowsDashboard.renameTag', { tag: soleTagFilter })}
               aria-label={t('workflowsDashboard.renameTag', { tag: soleTagFilter })}
               data-testid="workflows-tag-rename"
             >
               <Pencil size={12} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="small-command danger"
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+             
+             
               onClick={() => { setRenamingTag(false); setConfirmDeleteTag(true) }}
               title={t('workflowsDashboard.deleteTag', { tag: soleTagFilter })}
               aria-label={t('workflowsDashboard.deleteTag', { tag: soleTagFilter })}
               data-testid="workflows-tag-delete"
             >
               <Trash2 size={12} aria-hidden="true" />
-            </button>
+            </Button>
           </span>
         )
       )}
@@ -225,16 +229,17 @@ export function FlowsFilterBar({
       {/* One-click reset of the active search / tag / folder filters. Only
           shown when at least one is active; leaves sort + view state intact. */}
       {hasActiveFilters && (
-        <button
-          type="button"
-          className="small-command"
+        <Button
+          size="sm"
+         
+         
           onClick={clearAllFilters}
           aria-label={t('workflowsDashboard.clearFilters')}
           data-testid="workflows-clear-filters"
         >
           <FilterX size={12} aria-hidden="true" />
           {t('workflowsDashboard.clearFilters')}
-        </button>
+        </Button>
       )}
       <div className="we-seg" role="group" aria-label={t('workflowsDashboard.sortAria')}>
         <button type="button" aria-pressed={sort === 'recent'} onClick={() => setSort('recent')}>
@@ -250,23 +255,25 @@ export function FlowsFilterBar({
       {/* Bulk-select toggle — reveals per-row checkboxes + the bulk bar. Off
           by default so the list is unchanged. */}
       {canWrite && (
-        <button
-          type="button"
-          className="small-command"
+        <Button
+          size="sm"
+         
+         
           aria-pressed={selectionMode}
           onClick={() => { setSelectionMode((on) => !on); setSelectedIds(new Set()) }}
           data-testid="workflows-select-toggle"
         >
           {selectionMode ? t('workflowsDashboard.selectDone') : t('workflowsDashboard.selectFlows')}
-        </button>
+        </Button>
       )}
       {/* Select-all toggle — lives in the toolbar (not the bulk bar, which
           only appears once ≥1 row is ticked) so it's reachable at 0 selected.
           Operates on `visible`, so it works in flat AND foldered views. */}
       {canWrite && selectionMode && (
-        <button
-          type="button"
-          className="small-command"
+        <Button
+          size="sm"
+         
+         
           aria-pressed={allVisibleSelected}
           onClick={toggleSelectAll}
           data-testid="workflows-select-all"
@@ -274,7 +281,7 @@ export function FlowsFilterBar({
           {allVisibleSelected
             ? t('workflowsDashboard.deselectAll')
             : t('workflowsDashboard.selectAllCount', { count: visibleIds.length })}
-        </button>
+        </Button>
       )}
     </div>
   )

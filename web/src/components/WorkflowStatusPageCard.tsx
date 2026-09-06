@@ -14,6 +14,7 @@ import { api } from '../api'
 import { useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { useConfirm } from './ConfirmDialog'
+import { Button } from './ui/Button'
 
 type StatusPageState =
   | { phase: 'hidden' }
@@ -121,19 +122,20 @@ export function WorkflowStatusPageCard() {
       </header>
       <p className="we-status-page-card__hint">{t('workflowStatusPage.hint')}</p>
       {state.phase === 'error' && (
-        <button type="button" className="small-command" disabled={busy} onClick={() => { load() }}>
+        <Button size="sm" disabled={busy} onClick={() => { load() }}>
           <RefreshCw size={13} />
           <span>{t('workflowStatusPage.retry')}</span>
-        </button>
+        </Button>
       )}
       {state.phase === 'enabled' ? (
         <>
           {publicUrl ? (
             <div className="we-status-page-card__url">
               <code>{publicUrl}</code>
-              <button
-                type="button"
-                className="small-command"
+              <Button
+                size="sm"
+               
+               
                 disabled={busy}
                 onClick={() => {
                   const copy = navigator.clipboard?.writeText(publicUrl)
@@ -148,27 +150,27 @@ export function WorkflowStatusPageCard() {
               >
                 <Copy size={13} />
                 <span>{t('workflowStatusPage.copy')}</span>
-              </button>
+              </Button>
             </div>
           ) : (
             <p className="helper-text">{t('workflowStatusPage.linkProtected')}</p>
           )}
           <div className="we-status-page-card__actions">
-            <button type="button" className="small-command" disabled={busy} onClick={() => void mutate('POST')}>
+            <Button size="sm" disabled={busy} onClick={() => void mutate('POST')}>
               <RefreshCw size={13} />
               <span>{t('workflowStatusPage.rotate')}</span>
-            </button>
-            <button type="button" className="small-command" disabled={busy} onClick={() => void mutate('DELETE')}>
+            </Button>
+            <Button size="sm" disabled={busy} onClick={() => void mutate('DELETE')}>
               <Trash2 size={13} />
               <span>{t('workflowStatusPage.disable')}</span>
-            </button>
+            </Button>
           </div>
         </>
       ) : state.phase === 'disabled' ? (
-        <button type="button" className="small-command" disabled={busy} onClick={() => void mutate('POST')}>
+        <Button size="sm" disabled={busy} onClick={() => void mutate('POST')}>
           <Globe size={13} />
           <span>{t('workflowStatusPage.enable')}</span>
-        </button>
+        </Button>
       ) : null}
     </section>
   )

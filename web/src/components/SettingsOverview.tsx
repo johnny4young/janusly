@@ -8,6 +8,7 @@ import type { OpsSection } from './operations-section-bus'
 import { EmptyView } from './panel-primitives'
 import { TextInput } from '@/components/ui/Form'
 import './SettingsOverview.css'
+import { Button } from './ui/Button'
 
 export function SettingsOverview({
   permissions,
@@ -105,14 +106,14 @@ export function SettingsOverview({
 
       <div className="we-settings-index__quick-paths" aria-label={t('operations.section.railLabel')}>
         {can('credentials.read') && (
-          <button type="button" className="small-command" onClick={() => onOpenTab('credentials')}>
+          <Button size="sm" onClick={() => onOpenTab('credentials')}>
             {t('workspace.section.credentials.label')}
-          </button>
+          </Button>
         )}
         {can('members.read') && (
-          <button type="button" className="small-command" onClick={() => onOpenTab('members')}>
+          <Button size="sm" onClick={() => onOpenTab('members')}>
             {t('workspace.section.members.label')}
-          </button>
+          </Button>
         )}
       </div>
     </section>

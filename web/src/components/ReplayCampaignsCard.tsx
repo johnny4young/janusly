@@ -13,6 +13,7 @@ import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import './ReplayCampaignsCard.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { Button } from './ui/Button'
 
 const REPLAY_CAMPAIGN_TAGS = [PLATFORM_TAG, 'campaigns', 'recovery', 'dlq'] as const
 
@@ -117,9 +118,9 @@ export function ReplayCampaignsCard({ canCancel = true }: { canCancel?: boolean 
           <div className="section-kicker">{t('replayCampaign.kicker')}</div>
           <strong id="replay-campaigns-heading">{t('replayCampaign.title')}</strong>
         </div>
-        <button type="button" className="small-command" onClick={() => { void refresh() }} aria-label={t('replayCampaign.refresh')}>
+        <Button size="sm" onClick={() => { void refresh() }} aria-label={t('replayCampaign.refresh')}>
           <RefreshCw size={12} aria-hidden="true" />
-        </button>
+        </Button>
       </div>
       {!loaded && <p className="helper-text">{t('common.loading')}</p>}
       <div className="we-replay-campaigns__list">
@@ -165,28 +166,31 @@ export function ReplayCampaignsCard({ canCancel = true }: { canCancel?: boolean 
                   {confirmCancelId === campaign.id ? (
                     <>
                       <span className="helper-text">{t('replayCampaign.cancelConfirm')}</span>
-                      <button
-                        type="button"
-                        className="small-command danger"
+                      <Button
+                        size="sm"
+                        variant="danger"
+                       
+                       
                         disabled={cancellingId === campaign.id}
                         onClick={() => { void cancel(campaign) }}
                         data-testid={`replay-campaign-cancel-confirm-${campaign.id}`}
                       >
                         {cancellingId === campaign.id ? t('replayCampaign.cancelling') : t('replayCampaign.cancelConfirmCta')}
-                      </button>
-                      <button type="button" className="small-command" onClick={() => setConfirmCancelId(null)}>
+                      </Button>
+                      <Button size="sm" onClick={() => setConfirmCancelId(null)}>
                         {t('common.cancel')}
-                      </button>
+                      </Button>
                     </>
                   ) : (
-                    <button
-                      type="button"
-                      className="small-command"
+                    <Button
+                      size="sm"
+                     
+                     
                       onClick={() => setConfirmCancelId(campaign.id)}
                       data-testid={`replay-campaign-cancel-${campaign.id}`}
                     >
                       {t('replayCampaign.cancel')}
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}

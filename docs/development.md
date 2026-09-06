@@ -164,6 +164,10 @@ i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
   `components/recovery-item/`). Panel reads subscribe by resource tag
   (`src/lib/query-cache.ts`); navigation state lives in the hash route
   (`src/lib/route.ts`).
+- Actions are `<Button>` (`components/ui/Button.tsx`): `size="sm"` inline,
+  `variant="primary"` once per surface, `variant="danger"` for destructive,
+  `size="icon" variant="ghost"` for icon-only, `aria-pressed` for toggles. Raw
+  `<button>` is for tabs, radios, menu items and rows with their own styles.
 - Modal dialogs call `useDialogFocusTrap(dialogRef, { onEscape })` from the
   file that renders `role="dialog"`; pass `onEscape: undefined` while an async
   step is in flight instead of adding a keydown effect. Async work that may

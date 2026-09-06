@@ -35,6 +35,7 @@ import { RecoveryItemBadge } from './RecoveryItemBadge'
 import { RecoveryItemDrawer } from './RecoveryItemDrawer'
 import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
 import './DeadLetterQueueView.css'
+import { Button } from './ui/Button'
 
 type QueueSelectionState = {
   selectionMode: boolean
@@ -169,17 +170,18 @@ export function DeadLetterQueueView({
         </div>
         <div className="split-row">
           {(canReplay || canResolve) && (
-            <button
-              type="button"
-              className="small-command"
+            <Button
+              size="sm"
+             
+             
               aria-pressed={selectionMode}
               onClick={actions.toggleSelectionMode}
               data-testid="dlq-select-toggle"
             >
               {selectionMode ? t('dlq.selectDone') : t('dlq.selectRows')}
-            </button>
+            </Button>
           )}
-          <button className="small-command" onClick={actions.refresh}>{t('dlq.refresh')}</button>
+          <Button size="sm" onClick={actions.refresh}>{t('dlq.refresh')}</Button>
         </div>
       </div>
 
@@ -289,14 +291,15 @@ export function DeadLetterQueueView({
       {selectionMode && (
         <>
         <div className="we-list-bulk-bar" data-testid="dlq-bulk-bar">
-          <button
-            type="button"
-            className="small-command"
+          <Button
+            size="sm"
+           
+           
             onClick={actions.toggleSelectAll}
             data-testid="dlq-select-all"
           >
             {allLoadedSelected ? t('dlq.deselectAll') : t('dlq.selectAllCount', { count: loadedIds.length })}
-          </button>
+          </Button>
           {selectedIds.size > 0 && (
             <>
               <span className="we-list-bulk-bar__divider" aria-hidden="true" />
@@ -309,43 +312,49 @@ export function DeadLetterQueueView({
                   <span className="we-list-row__confirm-text">
                     {t('dlq.bulkReplayConfirm', { count: selectedIds.size })}
                   </span>
-                  <button
-                    type="button"
-                    className="small-command small-command--primary"
+                  <Button
+                    size="sm"
+                    variant="primary"
+                   
+                   
                     onClick={() => { void actions.bulkReplay() }}
                     data-testid="dlq-bulk-replay-confirm"
                   >
                     {t('dlq.bulkReplayConfirmCta')}
-                  </button>
-                  <button
-                    type="button"
-                    className="small-command"
+                  </Button>
+                  <Button
+                    size="sm"
+                   
+                   
                     onClick={() => actions.setConfirmBulkReplay(false)}
                   >
                     {t('common.cancel')}
-                  </button>
+                  </Button>
                 </span>
               ) : (
-                <button
-                  type="button"
-                  className="small-command small-command--primary"
+                <Button
+                  size="sm"
+                  variant="primary"
+                 
+                 
                   onClick={() => actions.setConfirmBulkReplay(true)}
                   data-testid="dlq-bulk-replay"
                 >
                   {t('dlq.bulkReplayCta')}
-                </button>
+                </Button>
               ))}
               {canReplay && (
-                <button
-                  type="button"
-                  className="small-command"
+                <Button
+                  size="sm"
+                 
+                 
                   disabled={selectedIds.size < 2}
                   title={selectedIds.size < 2 ? t('replayCampaign.minimumSelection') : undefined}
                   onClick={() => actions.createReplayCampaign([...selectedIds])}
                   data-testid="dlq-create-replay-campaign"
                 >
                   <TimerReset size={12} aria-hidden="true" /> {t('replayCampaign.createCta')}
-                </button>
+                </Button>
               )}
               {/* Resolve dismisses N open failures without recovery, so it
                   earns the same inline confirm as replay. */}
@@ -354,31 +363,35 @@ export function DeadLetterQueueView({
                   <span className="we-list-row__confirm-text">
                     {t('dlq.bulkResolveConfirm', { count: selectedIds.size })}
                   </span>
-                  <button
-                    type="button"
-                    className="small-command small-command--primary"
+                  <Button
+                    size="sm"
+                    variant="primary"
+                   
+                   
                     onClick={() => { void actions.bulkResolve() }}
                     data-testid="dlq-bulk-resolve-confirm"
                   >
                     {t('dlq.bulkResolveConfirmCta')}
-                  </button>
-                  <button
-                    type="button"
-                    className="small-command"
+                  </Button>
+                  <Button
+                    size="sm"
+                   
+                   
                     onClick={() => actions.setConfirmBulkResolve(false)}
                   >
                     {t('common.cancel')}
-                  </button>
+                  </Button>
                 </span>
               ) : (
-                <button
-                  type="button"
-                  className="small-command"
+                <Button
+                  size="sm"
+                 
+                 
                   onClick={() => actions.setConfirmBulkResolve(true)}
                   data-testid="dlq-bulk-resolve"
                 >
                   {t('dlq.bulkResolveCta')}
-                </button>
+                </Button>
               ))}
             </>
           )}
@@ -547,15 +560,17 @@ export function DeadLetterQueueView({
           {/* Sibling BELOW the scroll container — never buried inside the
               virtual list's internal scroll, so it stays reachable. */}
           {hasMore && (
-            <button
-              type="button"
-              className="small-command we-load-more"
+            <Button
+              size="sm"
+              className="we-load-more"
+             
+             
               onClick={() => { void actions.loadMore() }}
               disabled={loadingMore}
               data-testid="dlq-load-more"
             >
               {loadingMore ? t('dlq.loadingMore') : t('dlq.loadMore')}
-            </button>
+            </Button>
           )}
           </>
         )}

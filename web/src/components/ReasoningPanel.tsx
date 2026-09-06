@@ -604,9 +604,9 @@ function RunDiagnosticsCard({ diagnostics, partial }: { diagnostics: RunDiagnost
 function CausalAnalysisCard({ state, onClose }: { state: Exclude<CausalState, { status: 'idle' }>; onClose: () => void }) {
   const { t } = useT()
   const closeButton = (
-    <button type="button" className="icon-button" onClick={onClose} aria-label={t('rightPanel.reasoning.causal.close')}>
+    <Button size="icon" variant="ghost" onClick={onClose} aria-label={t('rightPanel.reasoning.causal.close')}>
       <X size={14} aria-hidden="true" />
-    </button>
+    </Button>
   )
   if (state.status === 'loading') {
     return (

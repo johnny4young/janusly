@@ -58,6 +58,14 @@
   box-shadow: none;
 }
 
+/* A pressed toggle (filter chips, sort order, compare mode) reads as selected
+   in every variant: primary-soft fill with the primary border. */
+.ui-button[aria-pressed="true"] {
+  border-color: var(--we-primary);
+  background: var(--we-primary-soft);
+  color: var(--we-primary-text);
+}
+
 .ui-button--ghost { border-color: transparent; background: transparent; box-shadow: none; }
 .ui-button--ghost:hover:not(:disabled) { border-color: transparent; background: var(--we-surface-muted); }
 
