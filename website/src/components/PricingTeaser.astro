@@ -8,108 +8,21 @@ interface Props {
 
 const { locale } = Astro.props;
 const copy = t(locale);
-const p = copy.pricing;
-const contact = SITE.contactUrl;
-const tiers = [
-  { ...p.selfHosted, href: SITE.getStartedUrl, primary: false, external: true },
-  { ...p.team, href: contact, primary: true, external: true },
-  { ...p.enterprise, href: contact, primary: false, external: true },
-];
 ---
 
-<section id="pricing" class="section pricing">
-  <div class="container pricing-inner">
-    <div class="section-head">
-      <span class="kicker">{p.kicker}</span>
-      <h2 class="h2">{p.title}</h2>
-    </div>
-    <div class="tiers">
-      {
-        tiers.map((tier) => (
-          <article class:list={['card', 'tier', tier.primary && 'is-primary']}>
-            <div class="tier-head">
-              <span class="tier-name">{tier.name}</span>
-              <span class="tier-price">{tier.price}</span>
-              <span class="tier-tagline">{tier.tagline}</span>
-            </div>
-            <ul class="tier-features">
-              {tier.features.map((feature) => <li>{feature}</li>)}
-            </ul>
-            <a href={tier.href} class:list={['btn', 'tier-cta', tier.primary && 'btn-primary']} rel={tier.external ? 'external noopener' : undefined}>
-              {tier.cta}
-            </a>
-          </article>
-        ))
-      }
-    </div>
+<section id="pricing" class="section access">
+  <div class="container section-head">
+    <span class="kicker">{copy.pricing.kicker}</span>
+    <h2 class="h2">{copy.pricing.title}</h2>
+    <p>{copy.pricing.body}</p>
+    <a href={SITE.contactUrl} class="btn btn-primary" rel="external noopener">{copy.pricing.cta}</a>
   </div>
 </section>
 
 <style>
-  .pricing {
+  .access {
     background: var(--color-surface);
     border-top: 1px solid var(--color-border);
     border-bottom: 1px solid var(--color-border);
-  }
-  .pricing-inner {
-    display: flex;
-    flex-direction: column;
-    gap: 2.5rem;
-  }
-  .tiers {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1.25rem;
-  }
-  .tier {
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-    padding: 2rem;
-  }
-  .tier.is-primary {
-    border-color: var(--color-primary);
-    box-shadow: var(--shadow-md);
-  }
-  .tier-head {
-    display: flex;
-    flex-direction: column;
-    gap: 0.375rem;
-  }
-  .tier-name {
-    font-size: 0.875rem;
-    font-weight: 700;
-    color: var(--color-muted);
-  }
-  .is-primary .tier-name {
-    color: var(--color-primary);
-  }
-  .tier-price {
-    font-size: 2.5rem;
-    font-weight: 800;
-    letter-spacing: -0.04em;
-    line-height: 1.1;
-  }
-  .tier-tagline {
-    font-size: 0.875rem;
-    color: var(--color-muted);
-  }
-  .tier-features {
-    display: flex;
-    flex-direction: column;
-    gap: 0.625rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    font-size: var(--text-body);
-    color: var(--color-ink-soft);
-  }
-  .tier-cta {
-    margin-top: auto;
-  }
-  @media (max-width: 900px) {
-    .tiers {
-      grid-template-columns: minmax(0, 1fr);
-    }
   }
 </style>

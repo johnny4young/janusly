@@ -21,8 +21,7 @@ export const en = {
   nav: {
     why: 'Why Janusly',
     product: 'Product',
-    compare: 'Compare',
-    pricing: 'Pricing',
+    pricing: 'Access',
     faq: 'FAQ',
     docs: 'Docs',
   },
@@ -30,7 +29,7 @@ export const en = {
     pill: 'Self-hosted · one executable · your PostgreSQL',
     title: 'The AI operator for your business workflows.',
     lede:
-      'Janusly designs workflows with you, runs them on a durable queue, and when a step breaks it clusters the failures, replays them and shows you the evidence. One Go binary, on your infrastructure.',
+      'Janusly turns intent into a reviewable workflow, checks declared business outcomes, and brings failures into governed recovery. Technical completion is not the same as a verified result. One Go binary, on your infrastructure.',
     note: 'Docker image or a single binary. PostgreSQL 18. No control plane to rent.',
     screenshotAlt: 'Janusly Recovery queue with two open failures and one selected',
     caption: 'The Recovery queue: every failed step, clustered by cause, one click from a replay.',
@@ -40,11 +39,11 @@ export const en = {
     postgres: 'PostgreSQL as the durable queue',
     mcp: 'MCP client and server',
     otel: 'OpenTelemetry built in',
-    selfHosted: 'Self-hosted, credentials never leave',
+    selfHosted: 'Tenant-scoped credentials',
   },
   why: {
     kicker: 'Why Janusly',
-    title: 'Four jobs most tools split across four products.',
+    title: 'Design, run, verify and recover in one place.',
     lede:
       'Design, run, recover and operate live in the same runtime, so a failure on Tuesday is a workflow change on Wednesday, with the evidence attached.',
     design: {
@@ -90,48 +89,11 @@ export const en = {
       },
     },
   },
-  compare: {
-    kicker: 'Compare',
-    title: 'Where it sits next to what you may already run.',
-    lede:
-      'Integration platforms are fast to start; workflow engines are durable; Janusly is the operator on top: durable, self-hosted, and built around recovery.',
-    capability: 'Capability',
-    columns: { janusly: 'Janusly', ipaas: 'Hosted iPaaS', lowcode: 'Low-code automation', engine: 'Workflow engine' },
-    yes: 'Yes',
-    no: 'No',
-    rows: {
-      selfHosted: { label: 'Self-hosted single binary + PostgreSQL', engine: 'Cluster + services' },
-      recovery: { label: 'Recovery with evidence (clusters, replay, validated auto-healing)', ipaas: 'Manual replay', lowcode: 'Manual replay', engine: 'Retries, no operator' },
-      operator: { label: 'AI operator: intent brief to a readable workflow', ipaas: 'Assistants, hosted', lowcode: 'Nodes, not an operator' },
-      mcp: { label: 'MCP client and MCP server', ipaas: 'Client only', lowcode: 'Client only' },
-      budgets: { label: 'AI spend budgets, RED metrics and traces included', ipaas: 'Task quotas', lowcode: 'Add-ons', engine: 'Metrics, no budgets' },
-    },
-    note: 'Categories, not vendors.',
-  },
   pricing: {
-    kicker: 'Pricing',
-    title: 'Run it yourself for free. Pay when you want us on call.',
-    selfHosted: {
-      name: 'Self-hosted',
-      price: 'Free',
-      tagline: 'The binary, the image, unlimited workflows.',
-      features: ['Full runtime and Recovery Center', 'Bring your own AI provider key', 'Community support'],
-      cta: 'Get the binary',
-    },
-    team: {
-      name: 'Team',
-      price: 'Talk to us',
-      tagline: 'For teams that run workflows others depend on.',
-      features: ['Everything in Self-hosted', 'WorkOS SSO and SCIM provisioning', 'Managed updates and priority support'],
-      cta: 'Reach out on GitHub',
-    },
-    enterprise: {
-      name: 'Enterprise',
-      price: 'Custom',
-      tagline: 'Recovery SLAs, dedicated support, procurement.',
-      features: ['Everything in Team', 'Audit log retention', 'Named engineer, onboarding'],
-      cta: 'Talk to us',
-    },
+    kicker: 'Access',
+    title: 'Evaluate Janusly on your infrastructure.',
+    body: 'Review the product and its evidence first. Use requires prior written permission; contact the copyright holder about licensing and deployment.',
+    cta: 'Discuss access on GitHub',
   },
   faq: {
     kicker: 'FAQ',
@@ -143,11 +105,11 @@ export const en = {
       },
       {
         q: 'Where does my data live?',
-        a: 'In your PostgreSQL. Credentials are envelope-encrypted at rest and never appear in lists, logs or error payloads; outbound calls pass SSRF checks, DNS pinning and byte limits.',
+        a: 'Workflow state and evidence live in your PostgreSQL. Configured integrations and AI providers receive the data needed for their calls. Credentials are encrypted at rest and withheld from lists, logs and error payloads; authorized provider calls use them.',
       },
       {
         q: 'What happens when the AI provider is down or over budget?',
-        a: 'The run keeps going. Every AI step has a deterministic fallback envelope, and a budget block stops the paid call, not the workflow. Anthropic is the provider today; you bring the key.',
+        a: 'AI calls return a deterministic fallback envelope when unavailable or over budget. A fallback is not proof that the business objective was met: configured outcome checks can still reject it or quarantine downstream work.',
       },
       {
         q: 'Can it use my existing tools and agents?',
@@ -160,8 +122,8 @@ export const en = {
     ],
   },
   finalCta: {
-    title: 'Run your first workflow in ten minutes.',
-    body: 'Pull the image, point it at PostgreSQL, open the Recovery Center. Nothing to sign up for.',
+    title: 'Start with one workflow you can verify.',
+    body: 'Review the provider-free walkthrough and its evidence limits before authorizing actions against a real service.',
   },
   footer: {
     rights: '© 2026 Janusly · janusly.app',

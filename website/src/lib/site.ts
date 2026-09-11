@@ -22,7 +22,6 @@ export const SITE = {
 export const NAV = [
   { href: '#why', key: 'why' },
   { href: '#product', key: 'product' },
-  { href: '#compare', key: 'compare' },
   { href: '#pricing', key: 'pricing' },
   { href: '#faq', key: 'faq' },
 ] as const;

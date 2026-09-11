@@ -223,6 +223,19 @@ beforeEach(() => {
 })
 
 describe('<RecoveryCasePanel />', () => {
+  it.each([
+    ['monitoring', 'Monitoring', 'info'],
+    ['accepted_loss', 'Accepted loss', 'neutral'],
+    ['verified_recovered', 'Recovered', 'success'],
+  ] as const)('uses the authoritative %s state instead of a second inferred checklist', async (state, label, tone) => {
+    vi.mocked(api).mockResolvedValue(detail(state, 3, [diagnosis, replacementCandidate, validation, publication]))
+    render(<RecoveryCasePanel caseId="case-1" canResolve onBack={vi.fn()} onOpenRun={vi.fn()} onResolved={vi.fn()} />)
+
+    await screen.findByTestId('recovery-case-workspace-case-1')
+    expect(screen.getByText(label, { selector: '.we-pill' })).toHaveAttribute('data-tone', tone)
+    expect(screen.queryByRole('list', { name: 'Recovery progress' })).not.toBeInTheDocument()
+  })
+
   it('renders bounded evidence and append-only transition history', async () => {
     vi.mocked(api).mockResolvedValue(detail())
     const onOpenRun = vi.fn()

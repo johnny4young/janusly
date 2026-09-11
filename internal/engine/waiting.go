@@ -318,6 +318,9 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 		if target == nil {
 			return ErrResumeNodeNotFound
 		}
+		if !domain.ExecutableNodeTypes[target.Type] {
+			return fmt.Errorf("cannot resume unsupported node type %q", target.Type)
+		}
 
 		output := map[string]any{}
 		if target.Type == "human_form" {

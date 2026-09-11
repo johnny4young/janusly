@@ -1,17 +1,11 @@
 import { useT } from '../i18n'
 import type { ValidationEvidenceLevel } from '../types'
 
-const LABEL_KEYS: Record<ValidationEvidenceLevel, string> = {
-  static: 'validationEvidence.static',
-  writes_skipped: 'validationEvidence.writes_skipped',
-  provider_simulated: 'validationEvidence.provider_simulated',
-  live_canary: 'validationEvidence.live_canary',
-}
-
-const TONES: Record<ValidationEvidenceLevel, string> = {
+const TONES: Record<ValidationEvidenceLevel | 'unknown', string> = {
+  unknown: 'warning',
   static: 'neutral',
   writes_skipped: 'warning',
-  provider_simulated: 'success',
+  provider_simulated: 'info',
   live_canary: 'primary',
 }
 
@@ -20,18 +14,20 @@ export function ValidationEvidencePill({
   tone,
   testId,
 }: {
-  level: ValidationEvidenceLevel
+  level: ValidationEvidenceLevel | null | undefined
   tone?: string
   testId?: string
 }) {
   const { t } = useT()
+  const evidenceLevel = level ?? 'unknown'
   return (
     <span
       className="we-pill"
-      data-tone={tone ?? TONES[level]}
+      data-tone={tone ?? TONES[evidenceLevel]}
       data-testid={testId}
+      title={t(`validationEvidence.${evidenceLevel}.description`)}
     >
-      {t(LABEL_KEYS[level])}
+      {t(`validationEvidence.${evidenceLevel}`)}
     </span>
   )
 }

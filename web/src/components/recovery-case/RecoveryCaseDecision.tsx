@@ -5,7 +5,7 @@ import { Button } from '../ui/Button'
 import { FormActions, FormDisclosure, FormField } from '../ui/Form'
 import type { RecoveryCaseModel } from './useRecoveryCaseController'
 
-// The governed decision ladder: progress, diagnosis, candidates, manual
+// The governed decision: diagnosis, candidates, manual
 // follow-up, validation and the action for the current step.
 export function RecoveryCaseDecision({ model }: { model: RecoveryCaseModel }) {
   const { t } = useT()
@@ -30,19 +30,16 @@ export function RecoveryCaseDecision({ model }: { model: RecoveryCaseModel }) {
     approveCandidate,
     applyCandidate,
     recoveryCase,
-    diagnoses,
     latestDiagnosisPayload,
     candidates,
     selectedPayload,
     manualFollowUpTarget,
-    selectedValidation,
     selectedValidationPayload,
     canReplace,
     canDiagnose,
     canPropose,
     canValidate,
     canApprove,
-    activeApprovalMatchesSelection,
     canApply,
   } = model
   if (!recoveryCase) return null
@@ -55,27 +52,6 @@ export function RecoveryCaseDecision({ model }: { model: RecoveryCaseModel }) {
                   ? t('recoveryCase.governed.description')
                   : t('recoveryCase.decisionReadOnly')}
               </p>
-
-              <ol className="we-recovery-case__steps" aria-label={t('recoveryCase.governed.progress')}>
-                {[
-                  ['diagnosis', diagnoses.length > 0],
-                  ['candidates', candidates.length > 0],
-                  ['validation', Boolean(selectedValidation)],
-                  ['approval', activeApprovalMatchesSelection],
-                  ['verification', ['verified_recovered', 'accepted_loss'].includes(recoveryCase.state)],
-                ].map(([step, complete], index) => (
-                  <li key={String(step)} data-complete={complete} data-current={!complete && index === [
-                    diagnoses.length > 0,
-                    candidates.length > 0,
-                    Boolean(selectedValidation),
-                    activeApprovalMatchesSelection,
-                    ['verified_recovered', 'accepted_loss'].includes(recoveryCase.state),
-                  ].findIndex(value => !value)}>
-                    <span>{complete ? <ShieldCheck size={14} /> : index + 1}</span>
-                    {t(`recoveryCase.governed.step.${step}`)}
-                  </li>
-                ))}
-              </ol>
 
               {latestDiagnosisPayload && (
                 <div className="we-recovery-case__diagnosis" data-testid={`recovery-diagnosis-${recoveryCase.id}`}>

@@ -246,6 +246,70 @@ test service, real organization-scoped secrets, an HTTPS public callback, and a
 prompt that explicitly requires human approval before writes. Start with one
 test incident and verify the audit trail before increasing scope.
 
+### Bounded pilot procedure
+
+1. **Authorize the scope.** Record the consenting operator, organization,
+   test service, exact assignee, one test incident, finite campaign and daily
+   window, allowed acknowledge/snooze effects, and a stop time. Do not enroll
+   production incidents or enable AI spending as part of this pilot.
+2. **Rehearse without a provider.** Use the isolated qualification above.
+   Review the immutable proposal, credential bindings, approval branch and
+   semantic detector. Dummy credentials are for authoring only.
+3. **Connect deliberately.** Configure real tenant-scoped secrets through
+   Connections and register the signed HTTPS callback only after consent.
+   Review the graph and require approval before both write steps. Activate
+   only the reviewed version for the authorized window.
+4. **Observe before approving.** Record the test incident's authoritative
+   state. Accept one signed test event; inspect the waiting run and confirm
+   that no mutation occurred. Review the current incident and approve once.
+   The workflow must re-read assignment, status and time policy after approval.
+5. **Verify independently.** Compare Janusly's receipt and authoritative
+   re-read with PagerDuty's incident/audit view: same incident, acknowledged
+   status and exact retained snooze deadline. Keep a bounded, redacted evidence
+   summary linked to the run, not raw credentials or unrestricted payloads.
+6. **Stop and review.** Disable the pilot trigger and remove its callback when
+   the window ends. Reconcile any existing waiting or ambiguous run explicitly;
+   disabling a trigger does not undo an external effect. Review the evidence
+   before authorizing another incident or broader scope.
+
+Stop immediately on an out-of-scope mutation, repeated write, stale-approval
+write, missing authoritative evidence or an unverified result presented as
+verified. If a response is lost after a write, inspect the provider before any
+new approval or replay. A timeout does not prove that the write failed. Do not
+induce transport failures or kill the runtime against a live service merely
+to reproduce the local fixtures.
+
+### What the evidence can establish
+
+Technical `succeeded` is not a business-outcome verdict. Inspect the semantic
+outcome beside it. Recovery monitoring is not recovery success, and accepted
+loss is not verified recovery. Validation labels describe the method, not a
+passing verdict; inspect the recorded result as well. Each has a limited scope:
+
+| Evidence | What it establishes | What it does not establish |
+| --- | --- | --- |
+| Static checks | Static validation and its recorded result | A real provider effect or retained outcome |
+| Writes skipped | The validation path suppressed external writes | Whether the provider would accept or retain them |
+| Provider simulated | Behavior against the configured local simulator | A live PagerDuty result |
+| Live canary | The observed canary under its recorded conditions | All incidents, all deployments or universal exactly-once effects |
+| Evidence unavailable | No validation level was recorded | Any assumed provider verification |
+
+Use the existing regression suite to inspect failure behavior before a pilot:
+
+| Scenario | Executable evidence | Boundary |
+| --- | --- | --- |
+| Provider accepts an incorrect outcome | `TestCompiledPagerDutyFlagshipVerifiesProviderOutcome` | Local simulator; semantic case despite technical completion |
+| Provider commits a write but loses its response | `TestPagerDutyLostWriteResponseDoesNotReplayEffect` | Local TCP response loss; one write, no automatic replay |
+| Worker loses completion after an effect | `TestReaperPreservesCommittedEffectAfterLostCompletion` | Deliberately omitted persistence, then a fresh engine/reaper; not binary SIGKILL |
+| Approval becomes stale | `TestCompiledPagerDutyFlagshipVerifiesProviderOutcome` | Incident changes while waiting; authoritative re-read prevents a write |
+| Recovery fails downstream | `TestSemanticRecoveryTerminalFailureRecurs` | Seeded monitoring state reaches failed/cancelled, not verified recovery |
+| Snapshot is incompatible | `TestUnsupportedSnapshotVersionFailsBeforeExecution`, `TestIncompatibleSnapshotRejectsApprovalWithoutMutation` | Current-runtime rejection; not a two-version upgrade test |
+
+The effect-boundary cases live in `internal/httpapi` and `internal/engine`;
+snapshot and semantic cases live in `internal/engine`. Run them with the
+`integration` tag against an isolated PostgreSQL 18 database. Workflow snapshots
+do not pin executable versions; see [run model](../architecture/run-model.md#snapshot-compatibility).
+
 ## Value measurement
 
 Do not turn local timings into a marketing claim. A real pilot should measure:
@@ -257,7 +321,16 @@ Do not turn local timings into a marketing claim. A real pilot should measure:
 | Manual touches avoided | Baseline acknowledge/snooze steps | Human actions required by the governed flow |
 | Safe no-action rate | Policy evaluations | Explicit no-action decisions by reason |
 | Unverified-effect rate | Accepted external writes | Semantic recovery cases opened |
+| Integration effort | First configuration attempt | First authorized, independently verified test incident |
+| Operator decision time | Evidence ready for review | Explicit approval, rejection or accepted loss |
 
 Keep the local Operational Preview, provider call count, run evidence, and
 pilot outcome metrics separate. Together they show authoring speed, safety, and
 operational value without inventing a production baseline.
+
+Record a manual baseline before comparing time or touches. Report counts and
+denominators, including ambiguous effects and expected no-action decisions;
+one successful incident establishes feasibility, not a reliability percentage
+or product-market fit. Expand only if the operator can explain the outcome from
+the evidence and considers the measured effort worthwhile. Otherwise simplify
+the flow or stop the pilot rather than adding automation.
