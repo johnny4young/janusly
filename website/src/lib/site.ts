@@ -15,13 +15,12 @@ export const SITE = {
     githubUrl: 'https://github.com/johnny4young/janusly',
   },
   docsUrl: 'https://github.com/johnny4young/janusly/tree/main/docs',
-  getStartedUrl: 'https://github.com/johnny4young/janusly#start-locally',
   securityUrl: 'https://github.com/johnny4young/janusly#security-posture',
 } as const;
 
 export const NAV = [
   { href: '#why', key: 'why' },
   { href: '#product', key: 'product' },
-  { href: '#pricing', key: 'pricing' },
+  { href: '#access', key: 'access' },
   { href: '#faq', key: 'faq' },
 ] as const;

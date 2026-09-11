@@ -13,7 +13,7 @@ export const en = {
     openMenu: 'Open menu',
     closeMenu: 'Close menu',
     github: 'GitHub',
-    getStarted: 'Get started',
+    requestAccess: 'Request access',
     seeRecoveryCenter: 'See the Recovery Center',
     readDocs: 'Read the docs',
     talkToUs: 'Talk to us',
@@ -21,7 +21,7 @@ export const en = {
   nav: {
     why: 'Why Janusly',
     product: 'Product',
-    pricing: 'Access',
+    access: 'Access',
     faq: 'FAQ',
     docs: 'Docs',
   },
@@ -32,14 +32,14 @@ export const en = {
       'Janusly turns intent into a reviewable workflow, checks declared business outcomes, and brings failures into governed recovery. Technical completion is not the same as a verified result. One Go binary, on your infrastructure.',
     note: 'Docker image or a single binary. PostgreSQL 18. No control plane to rent.',
     screenshotAlt: 'Janusly Recovery queue with two open failures and one selected',
-    caption: 'The Recovery queue: every failed step, clustered by cause, one click from a replay.',
+    caption: 'The Recovery queue: every failed step, clustered by cause, with the evidence for a governed decision.',
   },
   trust: {
     binary: 'One Go executable',
     postgres: 'PostgreSQL as the durable queue',
     mcp: 'MCP client and server',
     otel: 'OpenTelemetry built in',
-    selfHosted: 'Tenant-scoped credentials',
+    credentials: 'Tenant-scoped credentials',
   },
   why: {
     kicker: 'Why Janusly',
@@ -89,7 +89,7 @@ export const en = {
       },
     },
   },
-  pricing: {
+  access: {
     kicker: 'Access',
     title: 'Evaluate Janusly on your infrastructure.',
     body: 'Review the product and its evidence first. Use requires prior written permission; contact the copyright holder about licensing and deployment.',

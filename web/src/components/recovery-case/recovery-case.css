@@ -642,7 +642,10 @@
   }
 
   .we-recovery-case__autonomy-ladder,
-  .we-recovery-case__autonomy-meta,
+  .we-recovery-case__autonomy-meta {
+    grid-template-columns: 1fr;
+  }
+
   .we-recovery-case__approval-ready {
     align-items: stretch;
     flex-direction: column;

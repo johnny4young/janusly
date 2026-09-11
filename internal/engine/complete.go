@@ -525,6 +525,11 @@ func (e *Engine) inCompletionTxCommitted(ctx context.Context, runID string, hand
 // outputs on success. The scan loops to a fixpoint so an in-scan skip can
 // enable nodes regardless of declaration order.
 
+// ErrRunSnapshotInvalid reports a persisted workflow this executable cannot
+// interpret: an invalid document, an unsupported DSL version, or a node type
+// it cannot run. The snapshot is immutable, so retrying cannot succeed.
+var ErrRunSnapshotInvalid = errors.New("run workflow snapshot invalid")
+
 func workflowFromRunInput(inputJSON []byte) (*domain.Workflow, map[string]any, error) {
 	var envelope struct {
 		Workflow json.RawMessage `json:"workflow"`
@@ -535,7 +540,12 @@ func workflowFromRunInput(inputJSON []byte) (*domain.Workflow, map[string]any, e
 	}
 	wf, issues := domain.Parse(envelope.Workflow)
 	if wf == nil {
-		return nil, nil, fmt.Errorf("run workflow snapshot invalid: %+v", issues)
+		return nil, nil, fmt.Errorf("%w: %+v", ErrRunSnapshotInvalid, issues)
+	}
+	for _, node := range wf.Nodes {
+		if !domain.ExecutableNodeTypes[node.Type] {
+			return nil, nil, fmt.Errorf("%w: node %q has unsupported type %q", ErrRunSnapshotInvalid, node.ID, node.Type)
+		}
 	}
 	return wf, envelope.Input, nil
 }

@@ -117,11 +117,18 @@ func NewToolExecutor(registry *tools.Registry, httpExecutors ...Func) Func {
 				method, _ := input["method"].(string)
 				writeSide = httpMethodWriteSide(method)
 			}
+			var details any
+			if writeSide && (statusCode < 400 || statusCode >= 500) {
+				// Only a provider 4xx proves the write was rejected. A lost
+				// receipt, 5xx or unverifiable 2xx may follow an applied effect.
+				details = map[string]any{"effectOutcome": "unknown"}
+			}
 			return nil, &ExecErrorShape{
 				Message:    fmt.Sprintf("Tool %s returned an unsuccessful result: %s", name, message), //nolint:staticcheck // contract message is the wire contract
 				Name:       "ToolResultError",
 				Code:       "TOOL_RESULT_NOT_OK",
 				StatusCode: statusCode,
+				Details:    details,
 				// The envelope does not prove whether a write-side provider failed
 				// before or after accepting the effect. Conservatively suppress
 				// whole-node retries; an operator can inspect and redrive.

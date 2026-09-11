@@ -299,16 +299,17 @@ Use the existing regression suite to inspect failure behavior before a pilot:
 | Scenario | Executable evidence | Boundary |
 | --- | --- | --- |
 | Provider accepts an incorrect outcome | `TestCompiledPagerDutyFlagshipVerifiesProviderOutcome` | Local simulator; semantic case despite technical completion |
-| Provider commits a write but loses its response | `TestPagerDutyLostWriteResponseDoesNotReplayEffect` | Local TCP response loss; one write, no automatic replay |
+| Provider commits a write but loses its response | `TestPagerDutyLostWriteResponseDoesNotReplayEffect` | Local TCP response loss; one write, no automatic replay, effect outcome recorded as unknown |
 | Worker loses completion after an effect | `TestReaperPreservesCommittedEffectAfterLostCompletion` | Deliberately omitted persistence, then a fresh engine/reaper; not binary SIGKILL |
 | Approval becomes stale | `TestCompiledPagerDutyFlagshipVerifiesProviderOutcome` | Incident changes while waiting; authoritative re-read prevents a write |
 | Recovery fails downstream | `TestSemanticRecoveryTerminalFailureRecurs` | Seeded monitoring state reaches failed/cancelled, not verified recovery |
-| Snapshot is incompatible | `TestUnsupportedSnapshotVersionFailsBeforeExecution`, `TestIncompatibleSnapshotRejectsApprovalWithoutMutation` | Current-runtime rejection; not a two-version upgrade test |
+| Snapshot is incompatible | `TestIncompatibleSnapshotFailsBeforeExecution`, `TestIncompatibleSnapshotFailsDueTimer`, `TestIncompatibleSnapshotRejectsApprovalWithoutMutation` | Current-runtime rejection; not a two-version upgrade test |
 
-The effect-boundary cases live in `internal/httpapi` and `internal/engine`;
-snapshot and semantic cases live in `internal/engine`. Run them with the
-`integration` tag against an isolated PostgreSQL 18 database. Workflow snapshots
-do not pin executable versions; see [run model](../architecture/run-model.md#snapshot-compatibility).
+The PagerDuty flagship and lost-response cases live in `internal/httpapi`; the
+lost-completion, semantic recovery and snapshot cases live in `internal/engine`.
+Run them with the `integration` tag against an isolated PostgreSQL 18 database.
+Workflow snapshots do not pin executable versions; see
+[run model](../architecture/run-model.md#snapshot-compatibility).
 
 ## Value measurement
 

@@ -233,7 +233,8 @@ describe('<RecoveryCasePanel />', () => {
 
     await screen.findByTestId('recovery-case-workspace-case-1')
     expect(screen.getByText(label, { selector: '.we-pill' })).toHaveAttribute('data-tone', tone)
-    expect(screen.queryByRole('list', { name: 'Recovery progress' })).not.toBeInTheDocument()
+    const decision = screen.getByRole('region', { name: 'Governed recovery' })
+    expect(decision.querySelector('ol, [data-complete], [data-current]')).toBeNull()
   })
 
   it('renders bounded evidence and append-only transition history', async () => {

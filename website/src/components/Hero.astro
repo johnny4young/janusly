@@ -1,6 +1,5 @@
 ---
 import { Icon } from 'astro-icon/components';
-import { SITE } from '~/lib/site';
 import { type Locale, t } from '~/lib/i18n';
 
 interface Props {
@@ -22,7 +21,7 @@ const copy = t(locale);
       <h1>{copy.hero.title}</h1>
       <p class="lede">{copy.hero.lede}</p>
       <div class="hero-actions">
-        <a href={SITE.getStartedUrl} class="btn btn-primary" rel="external noopener">{copy.common.getStarted}</a>
+        <a href="#access" class="btn btn-primary">{copy.common.requestAccess}</a>
         <a href="#product" class="btn">{copy.common.seeRecoveryCenter}</a>
       </div>
       <p class="hero-note">{copy.hero.note}</p>

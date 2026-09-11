@@ -30,11 +30,14 @@ that will interpret it. Janusly does not route pending work to an older runtime
 version. A changed executor can change behavior even when the DSL version stays
 the same; qualify waiting runs and their evidence before adopting such a change.
 
-Unsupported explicit DSL versions are rejected before execution. A claimed
-node with an invalid snapshot fails durably without dispatching its effect.
-Manual resume rejects an invalid snapshot or unknown node type without changing
-the waiting checkpoint, deadline, events, or downstream readiness. These are
-rejection guarantees, not proof of compatibility between two executable versions.
+A snapshot is invalid when it does not parse, declares an unsupported DSL
+version, or contains a node type this executable cannot run. A claimed node or
+a due `wait_until` timer with an invalid snapshot fails durably with a dead
+letter, without dispatching an effect or scheduling downstream work. Manual
+resume rejects an invalid snapshot with a conflict and leaves the waiting
+checkpoint, deadline, events, and downstream readiness unchanged. These are
+rejection guarantees for the current executable, not proof of compatibility
+between two executable versions.
 
 ## Edge eligibility
 

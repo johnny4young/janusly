@@ -187,20 +187,34 @@ func TestToolNodeValidatesRenderedInputBeforeDryRunOrSpecialDispatch(t *testing.
 }
 
 func TestToolRequireOKMarksAmbiguousWriteFailure(t *testing.T) {
-	registry := tools.NewRegistry()
-	registry.Register(tools.Definition{
-		Name: "test.ambiguous-write", Description: "test ambiguous write",
-		Required: []string{}, Fields: []tools.Field{}, WriteSide: true,
-		Execute: func(context.Context, map[string]any) (map[string]any, error) {
-			return map[string]any{"ok": false, "error": "receipt unavailable", "statusCode": 503}, nil
-		},
-	})
-	exec := NewToolExecutor(registry)
-	_, err := exec(context.Background(), Input{Config: map[string]any{
-		"tool": "test.ambiguous-write", "resultPolicy": "require_ok",
-	}})
-	var shape *ExecErrorShape
-	if !errors.As(err, &shape) || !shape.WriteSide || shape.Code != "TOOL_RESULT_NOT_OK" || shape.StatusCode != 503 {
-		t.Fatalf("require_ok write failure lost no-retry identity: %#v", err)
+	for _, test := range []struct {
+		statusCode    int
+		effectOutcome any
+	}{
+		{statusCode: 0, effectOutcome: "unknown"},
+		{statusCode: 503, effectOutcome: "unknown"},
+		{statusCode: 409, effectOutcome: nil},
+	} {
+		registry := tools.NewRegistry()
+		registry.Register(tools.Definition{
+			Name: "test.ambiguous-write", Description: "test ambiguous write",
+			Required: []string{}, Fields: []tools.Field{}, WriteSide: true,
+			Execute: func(context.Context, map[string]any) (map[string]any, error) {
+				return map[string]any{"ok": false, "error": "receipt unavailable", "statusCode": test.statusCode}, nil
+			},
+		})
+		exec := NewToolExecutor(registry)
+		_, err := exec(context.Background(), Input{Config: map[string]any{
+			"tool": "test.ambiguous-write", "resultPolicy": "require_ok",
+		}})
+		var shape *ExecErrorShape
+		if !errors.As(err, &shape) || !shape.WriteSide || shape.Code != "TOOL_RESULT_NOT_OK" || shape.StatusCode != test.statusCode {
+			t.Fatalf("require_ok write failure lost no-retry identity: %#v", err)
+		}
+		// Only a provider rejection proves no effect was applied.
+		details, _ := shape.Details.(map[string]any)
+		if details["effectOutcome"] != test.effectOutcome {
+			t.Fatalf("status %d effect outcome: %#v", test.statusCode, shape.Details)
+		}
 	}
 }

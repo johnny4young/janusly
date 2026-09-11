@@ -10,12 +10,12 @@ const { locale } = Astro.props;
 const copy = t(locale);
 ---
 
-<section id="pricing" class="section access">
+<section id="access" class="section access">
   <div class="container section-head">
-    <span class="kicker">{copy.pricing.kicker}</span>
-    <h2 class="h2">{copy.pricing.title}</h2>
-    <p>{copy.pricing.body}</p>
-    <a href={SITE.contactUrl} class="btn btn-primary" rel="external noopener">{copy.pricing.cta}</a>
+    <span class="kicker">{copy.access.kicker}</span>
+    <h2 class="h2">{copy.access.title}</h2>
+    <p>{copy.access.body}</p>
+    <a href={SITE.contactUrl} class="btn btn-primary" rel="external noopener">{copy.access.cta}</a>
   </div>
 </section>
 

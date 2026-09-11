@@ -83,9 +83,11 @@ func TestPagerDutyLostWriteResponseDoesNotReplayEffect(t *testing.T) {
 	if err := json.Unmarshal(errorJSON, &failure); err != nil {
 		t.Fatalf("decode failure: %v", err)
 	}
+	details, _ := failure["details"].(map[string]any)
 	if acknowledgements.Load() != 1 || unexpectedCalls.Load() != 0 || attempts != 1 ||
 		deadLetters != 1 || retryEvents != 0 || downstreamStatus != "pending" ||
-		failure["writeSide"] != true || failure["code"] != "TOOL_RESULT_NOT_OK" {
+		failure["writeSide"] != true || failure["code"] != "TOOL_RESULT_NOT_OK" ||
+		details["effectOutcome"] != "unknown" {
 		t.Fatalf("lost response must preserve one ambiguous effect: writes=%d unexpected=%d attempts=%d dlq=%d retries=%d downstream=%s error=%s",
 			acknowledgements.Load(), unexpectedCalls.Load(), attempts, deadLetters, retryEvents, downstreamStatus, errorJSON)
 	}

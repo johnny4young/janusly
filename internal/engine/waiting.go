@@ -318,9 +318,6 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 		if target == nil {
 			return ErrResumeNodeNotFound
 		}
-		if !domain.ExecutableNodeTypes[target.Type] {
-			return fmt.Errorf("cannot resume unsupported node type %q", target.Type)
-		}
 
 		output := map[string]any{}
 		if target.Type == "human_form" {
@@ -401,12 +398,23 @@ func (e *Engine) processDueWaitingWakeups(ctx context.Context, q *store.Queries)
 				}
 			case "wait_until":
 				err := e.ResumeRun(ctx, wakeup.RunID, wakeup.NodeID)
-				if err == nil {
+				switch {
+				case err == nil:
 					processed++
 					progressed++
-				} else if errors.Is(err, ErrResumeConflict) {
+				case errors.Is(err, ErrResumeConflict):
 					// Another actor advanced it — the backlog still shrank.
 					progressed++
+				case errors.Is(err, ErrRunSnapshotInvalid):
+					// No later sweep can interpret this immutable snapshot:
+					// fail the timer durably instead of re-listing it forever.
+					applied, failErr := e.failInvalidSnapshotTimer(ctx, wakeup.RunID, wakeup.NodeID, err)
+					if failErr == nil {
+						progressed++
+						if applied {
+							processed++
+						}
+					}
 				}
 			}
 			// Infrastructure/config errors leave the clock for the next sweep.
@@ -421,6 +429,75 @@ func (e *Engine) processDueWaitingWakeups(ctx context.Context, q *store.Queries)
 		}
 	}
 	return processed
+}
+
+// failInvalidSnapshotTimer settles a due wait_until whose run snapshot this
+// executable cannot interpret, with the evidence a rejected claim commits:
+// failed node, dead letter, node.failed event and failed run.
+func (e *Engine) failInvalidSnapshotTimer(ctx context.Context, runID, nodeID string, cause error) (bool, error) {
+	applied := false
+	serr := serializeError(cause)
+	err := e.inCompletionTx(ctx, runID, func(q *store.Queries, events *runEventBuffer) error {
+		run, err := q.GetRunExecution(ctx, runID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errSkipCommit
+			}
+			return fmt.Errorf("read timer run: %w", err)
+		}
+		if run.Status != "running" {
+			return errSkipCommit
+		}
+		node, err := q.GetRunNode(ctx, store.GetRunNodeParams{RunID: runID, NodeID: nodeID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errSkipCommit
+			}
+			return fmt.Errorf("read waiting timer: %w", err)
+		}
+		failedAt := e.eventNow()
+		failed, err := q.FailWaitingTimerNode(ctx, store.FailWaitingTimerNodeParams{
+			RunID: runID, NodeID: nodeID,
+			ErrorJson: safePersist(serr, deadLetterErrorMaxBytes), FinishedAt: &failedAt,
+		})
+		if err != nil {
+			return fmt.Errorf("fail waiting timer: %w", err)
+		}
+		if failed == 0 {
+			return errSkipCommit
+		}
+		metricNodeCompletions.WithLabelValues("failed").Inc()
+		if err := q.DeleteWakeup(ctx, node.ID); err != nil {
+			return fmt.Errorf("clear failed timer wakeup: %w", err)
+		}
+		events.scope(run.OrgID)
+		claim := ClaimedNode{RowID: node.ID, RunID: runID, NodeID: nodeID, Attempt: node.Attempts.Int32, OrgID: run.OrgID}
+		if err := e.insertDeadLetter(ctx, q, claim, run, serr); err != nil {
+			return err
+		}
+		eventJSON, err := json.Marshal(map[string]any{"error": serr, "attempt": claim.Attempt})
+		if err != nil {
+			return fmt.Errorf("marshal timer failure: %w", err)
+		}
+		events.add(e.newID(), runID, nodeID, "node.failed", eventJSON, failedAt)
+		statuses, err := e.nodeStatuses(ctx, q, runID)
+		if err != nil {
+			return err
+		}
+		failedNodes := 0
+		for _, status := range statuses {
+			if status == "failed" {
+				failedNodes++
+			}
+		}
+		if err := e.flipRunTerminal(ctx, q, events, runID, "failed",
+			map[string]any{"failedNodes": failedNodes}, failedAt, nil); err != nil {
+			return err
+		}
+		applied = true
+		return nil
+	})
+	return applied, err
 }
 
 // humanFormSchema projects the node's config.schema into the domain's

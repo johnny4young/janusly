@@ -263,16 +263,7 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
                         {t('autoHealing.confidence', { value: row.confidence })}
                       </span>
                     )}
-                    {evidenceLevel == null ? (
-                      <span className="we-pill" data-tone="warning">
-                        {t('autoHealing.evidence.unknown')}
-                      </span>
-                    ) : (
-                      <ValidationEvidencePill
-                        level={evidenceLevel}
-                        tone={requiresRiskAcknowledgement ? 'warning' : undefined}
-                      />
-                    )}
+                    <ValidationEvidencePill level={evidenceLevel} />
                   </div>
                   {autonomy ? (
                     <section

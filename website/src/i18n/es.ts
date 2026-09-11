@@ -15,7 +15,7 @@ export const es: Dictionary = {
     openMenu: 'Abrir menú',
     closeMenu: 'Cerrar menú',
     github: 'GitHub',
-    getStarted: 'Empezar',
+    requestAccess: 'Solicitar acceso',
     seeRecoveryCenter: 'Ver el Recovery Center',
     readDocs: 'Leer la documentación',
     talkToUs: 'Hablemos',
@@ -23,7 +23,7 @@ export const es: Dictionary = {
   nav: {
     why: 'Por qué Janusly',
     product: 'Producto',
-    pricing: 'Acceso',
+    access: 'Acceso',
     faq: 'Preguntas',
     docs: 'Docs',
   },
@@ -34,14 +34,14 @@ export const es: Dictionary = {
       'Janusly convierte la intención en un workflow revisable, comprueba los resultados de negocio declarados y lleva los fallos a una recuperación gobernada. Completar una ejecución no equivale a verificar su resultado. Un binario en Go, en tu infraestructura.',
     note: 'Imagen Docker o un solo binario. PostgreSQL 18. Sin plano de control que alquilar.',
     screenshotAlt: 'Cola de recuperación de Janusly con dos fallos abiertos y uno seleccionado',
-    caption: 'La cola de recuperación: cada paso fallido, agrupado por causa, a un clic del reintento.',
+    caption: 'La cola de recuperación: cada paso fallido, agrupado por causa, con la evidencia para una decisión gobernada.',
   },
   trust: {
     binary: 'Un ejecutable en Go',
     postgres: 'PostgreSQL como cola durable',
     mcp: 'Cliente y servidor MCP',
     otel: 'OpenTelemetry integrado',
-    selfHosted: 'Credenciales aisladas por organización',
+    credentials: 'Credenciales aisladas por organización',
   },
   why: {
     kicker: 'Por qué Janusly',
@@ -91,7 +91,7 @@ export const es: Dictionary = {
       },
     },
   },
-  pricing: {
+  access: {
     kicker: 'Acceso',
     title: 'Evalúa Janusly en tu infraestructura.',
     body: 'Revisa primero el producto y su evidencia. El uso requiere permiso previo por escrito; consulta al titular sobre la licencia y el despliegue.',
