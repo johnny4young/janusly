@@ -6,7 +6,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RunsPanel } from './RunsPanel'
-import type { RunNode } from '../types'
+import type { RunNode, RunSummary } from '../types'
 import { useWorkflowStore } from '../store'
 
 vi.mock('./DeadLettersPanel', () => ({ DeadLettersPanel: () => null }))
@@ -37,6 +37,30 @@ const handlers = {
   onReplayDeadLetter: vi.fn(),
   onResolveDeadLetter: vi.fn(),
 }
+
+describe('selected-run outcome evidence', () => {
+  it.each([
+    ['semantic_violation', 'Semantic failure'],
+    ['semantic_quarantined', 'Outcome blocked'],
+    ['semantic_recovering', 'Recovery monitoring'],
+    ['semantic_recovered', 'Outcome recovered'],
+    ['semantic_accepted_loss', 'Accepted loss'],
+  ] as const)('keeps %s visible beside technical status', (outcomeStatus, label) => {
+    const run: RunSummary = { id: 'run-outcome', status: 'succeeded', outcomeStatus }
+    render(<RunsPanel {...handlers} activeRunId={run.id} runs={[run]} workflows={[]} runNodes={[]} usage={{}} />)
+
+    expect(screen.getByTestId('run-overview')).toHaveTextContent(label)
+    expect(screen.getByTestId('active-run-semantic-outcome')).toHaveAttribute('data-outcome-status', outcomeStatus)
+  })
+
+  it('does not silently hide a missing validation evidence level', () => {
+    const run: RunSummary = { id: 'run-validation', status: 'succeeded', replayMode: 'validation' }
+    render(<RunsPanel {...handlers} activeRunId={run.id} runs={[run]} workflows={[]} runNodes={[]} usage={{}} />)
+
+    expect(screen.getByTestId('active-run-validation-evidence')).toHaveTextContent('Evidence unavailable')
+    expect(screen.getByTestId('run-validation-evidence-run-validation')).toHaveTextContent('Evidence unavailable')
+  })
+})
 
 beforeEach(() => {
   useWorkflowStore.setState({ activeTab: 'runs', toasts: [] })

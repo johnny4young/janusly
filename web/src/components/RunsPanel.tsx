@@ -38,6 +38,7 @@ import { pickErrorMessage } from './recovery-dialog/recovery-dialog-model'
 import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, type RunWaitKind } from '../run-observability'
 import { RunHistoryList } from './RunHistoryList'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
+import { SemanticOutcomePill } from './SemanticOutcomePill'
 import './RunsPanel.css'
 import { Button } from './ui/Button'
 
@@ -297,7 +298,10 @@ export function RunsPanel({
             <span className="we-run-overview__title">
               <strong>{activeRunIdentity?.name ?? activeRunIdentity?.id ?? t('rightPanel.runs.activeRun')}</strong>
               {activeRun && <span className="status-pill" data-status={activeRun.status}>{formatStatusLabel(activeRun.status)}</span>}
-              {activeRun?.replayMode === 'validation' && activeRun.validationEvidenceLevel && (
+              {activeRun?.outcomeStatus && (
+                <SemanticOutcomePill status={activeRun.outcomeStatus} testId="active-run-semantic-outcome" />
+              )}
+              {activeRun?.replayMode === 'validation' && (
                 <ValidationEvidencePill
                   level={activeRun.validationEvidenceLevel}
                   testId="active-run-validation-evidence"

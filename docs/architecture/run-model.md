@@ -23,6 +23,24 @@ requires an operator-facing service contract and load evidence first.
 PostgreSQL notifications wake workers and SSE readers. Polling and table state
 remain authoritative after missed notifications or process restarts.
 
+## Snapshot compatibility
+
+A persisted workflow version pins the workflow document, not the executable
+that will interpret it. Janusly does not route pending work to an older runtime
+version. A changed executor can change behavior even when the DSL version stays
+the same; qualify waiting runs and their evidence before adopting such a change.
+
+A snapshot is invalid when it does not parse, declares an unsupported DSL
+version, or contains a node type this executable cannot run. A claimed node or
+a due `wait_until` timer with an invalid snapshot fails durably with a dead
+letter, without dispatching an effect or scheduling downstream work. Manual
+resume rejects an invalid snapshot with a conflict and leaves the waiting
+checkpoint, deadline, events, and downstream readiness unchanged. These are
+rejection guarantees for the current executable, not proof of compatibility
+between two executable versions.
+
+## Edge eligibility
+
 Edges gate downstream eligibility. A conditional edge skips its target when
 the expression is falsy. An on-error edge inverts the gate: it fires only when
 its source node fails terminally. A failure with at least one on-error route

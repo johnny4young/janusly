@@ -237,7 +237,7 @@ export function RunHistoryList({
                       <div className="split-row" style={{ width: '100%' }}>
                         <strong title={workflowLabel}>{workflowLabel}</strong>
                         <span className="we-run-history-card__badges">
-                          {run.replayMode === 'validation' && run.validationEvidenceLevel && (
+                          {run.replayMode === 'validation' && (
                             <ValidationEvidencePill
                               level={run.validationEvidenceLevel}
                               testId={`run-validation-evidence-${run.id}`}

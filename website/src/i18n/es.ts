@@ -15,7 +15,7 @@ export const es: Dictionary = {
     openMenu: 'Abrir menú',
     closeMenu: 'Cerrar menú',
     github: 'GitHub',
-    getStarted: 'Empezar',
+    requestAccess: 'Solicitar acceso',
     seeRecoveryCenter: 'Ver el Recovery Center',
     readDocs: 'Leer la documentación',
     talkToUs: 'Hablemos',
@@ -23,8 +23,7 @@ export const es: Dictionary = {
   nav: {
     why: 'Por qué Janusly',
     product: 'Producto',
-    compare: 'Comparar',
-    pricing: 'Precios',
+    access: 'Acceso',
     faq: 'Preguntas',
     docs: 'Docs',
   },
@@ -32,21 +31,21 @@ export const es: Dictionary = {
     pill: 'Self-hosted · un ejecutable · tu PostgreSQL',
     title: 'El operador de IA para tus workflows de negocio.',
     lede:
-      'Janusly diseña los workflows contigo, los ejecuta sobre una cola durable y, cuando un paso falla, agrupa los fallos, los reintenta y te muestra la evidencia. Un solo binario en Go, en tu infraestructura.',
+      'Janusly convierte la intención en un workflow revisable, comprueba los resultados de negocio declarados y lleva los fallos a una recuperación gobernada. Completar una ejecución no equivale a verificar su resultado. Un binario en Go, en tu infraestructura.',
     note: 'Imagen Docker o un solo binario. PostgreSQL 18. Sin plano de control que alquilar.',
     screenshotAlt: 'Cola de recuperación de Janusly con dos fallos abiertos y uno seleccionado',
-    caption: 'La cola de recuperación: cada paso fallido, agrupado por causa, a un clic del reintento.',
+    caption: 'La cola de recuperación: cada paso fallido, agrupado por causa, con la evidencia para una decisión gobernada.',
   },
   trust: {
     binary: 'Un ejecutable en Go',
     postgres: 'PostgreSQL como cola durable',
     mcp: 'Cliente y servidor MCP',
     otel: 'OpenTelemetry integrado',
-    selfHosted: 'Self-hosted, las credenciales no salen',
+    credentials: 'Credenciales aisladas por organización',
   },
   why: {
     kicker: 'Por qué Janusly',
-    title: 'Cuatro trabajos que casi todas las herramientas reparten en cuatro productos.',
+    title: 'Diseña, ejecuta, verifica y recupera en un solo lugar.',
     lede:
       'Diseñar, ejecutar, recuperar y operar viven en el mismo runtime: un fallo del martes es un cambio de workflow el miércoles, con la evidencia adjunta.',
     design: {
@@ -92,48 +91,11 @@ export const es: Dictionary = {
       },
     },
   },
-  compare: {
-    kicker: 'Comparar',
-    title: 'Dónde queda frente a lo que quizá ya usas.',
-    lede:
-      'Las plataformas de integración arrancan rápido; los motores de workflows son durables; Janusly es el operador encima: durable, self-hosted y construido alrededor de la recuperación.',
-    capability: 'Capacidad',
-    columns: { janusly: 'Janusly', ipaas: 'iPaaS hospedado', lowcode: 'Automatización low-code', engine: 'Motor de workflows' },
-    yes: 'Sí',
-    no: 'No',
-    rows: {
-      selfHosted: { label: 'Self-hosted, un binario + PostgreSQL', engine: 'Clúster + servicios' },
-      recovery: { label: 'Recuperación con evidencia (grupos, reintentos, auto-healing validado)', ipaas: 'Reintento manual', lowcode: 'Reintento manual', engine: 'Reintentos, sin operador' },
-      operator: { label: 'Operador de IA: de un brief a un workflow legible', ipaas: 'Asistentes hospedados', lowcode: 'Nodos, no un operador' },
-      mcp: { label: 'Cliente MCP y servidor MCP', ipaas: 'Solo cliente', lowcode: 'Solo cliente' },
-      budgets: { label: 'Presupuestos de IA, métricas RED y trazas incluidas', ipaas: 'Cuotas de tareas', lowcode: 'Complementos', engine: 'Métricas, sin presupuestos' },
-    },
-    note: 'Categorías, no marcas.',
-  },
-  pricing: {
-    kicker: 'Precios',
-    title: 'Ejecútalo tú mismo gratis. Paga cuando nos quieras de guardia.',
-    selfHosted: {
-      name: 'Self-hosted',
-      price: 'Gratis',
-      tagline: 'El binario, la imagen, workflows ilimitados.',
-      features: ['Runtime completo y Recovery Center', 'Trae tu propia clave del proveedor de IA', 'Soporte de la comunidad'],
-      cta: 'Descargar el binario',
-    },
-    team: {
-      name: 'Team',
-      price: 'Hablemos',
-      tagline: 'Para equipos que corren workflows de los que otros dependen.',
-      features: ['Todo lo de Self-hosted', 'SSO y aprovisionamiento SCIM con WorkOS', 'Actualizaciones gestionadas y soporte prioritario'],
-      cta: 'Escríbenos en GitHub',
-    },
-    enterprise: {
-      name: 'Enterprise',
-      price: 'A medida',
-      tagline: 'SLAs de recuperación, soporte dedicado, compras.',
-      features: ['Todo lo de Team', 'Retención del registro de auditoría', 'Ingeniero asignado, onboarding'],
-      cta: 'Hablemos',
-    },
+  access: {
+    kicker: 'Acceso',
+    title: 'Evalúa Janusly en tu infraestructura.',
+    body: 'Revisa primero el producto y su evidencia. El uso requiere permiso previo por escrito; consulta al titular sobre la licencia y el despliegue.',
+    cta: 'Consultar acceso en GitHub',
   },
   faq: {
     kicker: 'Preguntas',
@@ -145,11 +107,11 @@ export const es: Dictionary = {
       },
       {
         q: '¿Dónde viven mis datos?',
-        a: 'En tu PostgreSQL. Las credenciales se cifran con envelope encryption y nunca aparecen en listados, logs ni errores; las llamadas salientes pasan validación SSRF, DNS pinning y límites de bytes.',
+        a: 'El estado y la evidencia de los workflows viven en tu PostgreSQL. Las integraciones y proveedores de IA configurados reciben los datos necesarios para sus llamadas. Las credenciales se cifran en reposo y se excluyen de listados, logs y errores; se usan en llamadas autorizadas al proveedor.',
       },
       {
         q: '¿Qué pasa cuando el proveedor de IA se cae o se acaba el presupuesto?',
-        a: 'La ejecución sigue. Cada paso de IA tiene un sobre de respaldo determinista, y un bloqueo de presupuesto detiene la llamada pagada, no el workflow. Hoy el proveedor es Anthropic; tú traes la clave.',
+        a: 'Las llamadas de IA devuelven un sobre de respaldo determinista ante indisponibilidad o falta de presupuesto. Ese respaldo no prueba que se logró el objetivo: las comprobaciones configuradas pueden rechazarlo o poner en cuarentena los pasos siguientes.',
       },
       {
         q: '¿Puede usar mis herramientas y agentes actuales?',
@@ -162,8 +124,8 @@ export const es: Dictionary = {
     ],
   },
   finalCta: {
-    title: 'Corre tu primer workflow en diez minutos.',
-    body: 'Descarga la imagen, apúntala a PostgreSQL y abre el Recovery Center. Nada que registrar.',
+    title: 'Empieza con un workflow cuyo resultado puedas verificar.',
+    body: 'Revisa el recorrido sin proveedores reales y sus límites de evidencia antes de autorizar acciones sobre un servicio real.',
   },
   footer: {
     rights: '© 2026 Janusly · janusly.app',

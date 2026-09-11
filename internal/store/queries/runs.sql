@@ -233,6 +233,16 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND state_json #>> '{waiting,deadlineAt}' = sqlc.arg(expected_deadline_at)::text
   AND state_json #>> '{waiting,timeoutState}' IS NULL;
 
+-- A due timer whose run snapshot this executable cannot interpret fails
+-- instead of retrying. Manual resume or cancellation makes this a no-op.
+-- name: FailWaitingTimerNode :execrows
+UPDATE run_nodes
+SET status = 'failed', error_json = sqlc.arg(error_json),
+    finished_at = sqlc.arg(finished_at), waiting_repair_after = NULL
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'waiting'
+  AND state_json #>> '{waiting,kind}' = 'timer';
+
 -- name: EscalateWaitingApprovalDeadline :execrows
 UPDATE run_nodes
 SET state_json = sqlc.arg(state_json), waiting_repair_after = NULL

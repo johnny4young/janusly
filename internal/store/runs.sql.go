@@ -449,6 +449,37 @@ func (q *Queries) FailWaitingApprovalDeadline(ctx context.Context, arg FailWaiti
 	return result.RowsAffected(), nil
 }
 
+const failWaitingTimerNode = `-- name: FailWaitingTimerNode :execrows
+UPDATE run_nodes
+SET status = 'failed', error_json = $1,
+    finished_at = $2, waiting_repair_after = NULL
+WHERE run_id = $3 AND node_id = $4
+  AND status = 'waiting'
+  AND state_json #>> '{waiting,kind}' = 'timer'
+`
+
+type FailWaitingTimerNodeParams struct {
+	ErrorJson  json.RawMessage
+	FinishedAt *time.Time
+	RunID      string
+	NodeID     string
+}
+
+// A due timer whose run snapshot this executable cannot interpret fails
+// instead of retrying. Manual resume or cancellation makes this a no-op.
+func (q *Queries) FailWaitingTimerNode(ctx context.Context, arg FailWaitingTimerNodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failWaitingTimerNode,
+		arg.ErrorJson,
+		arg.FinishedAt,
+		arg.RunID,
+		arg.NodeID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const findLatestDeadLetterForNode = `-- name: FindLatestDeadLetterForNode :one
 SELECT id, node_id, attempt, node_json, error_json FROM dead_letters
 WHERE org_id = $1 AND run_id = $2 AND node_id = $3

@@ -332,6 +332,8 @@ func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusConflict, "runs_resume_conflict", "Node is not waiting", nil)
 		case errors.Is(err, engine.ErrResumeNodeNotFound):
 			return opError(http.StatusNotFound, "runs_resume_not_found", "Node not found", nil)
+		case errors.Is(err, engine.ErrRunSnapshotInvalid):
+			return opError(http.StatusConflict, "runs_resume_snapshot_invalid", "Run workflow snapshot is not supported by this runtime", nil)
 		default:
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
