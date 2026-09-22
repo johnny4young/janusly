@@ -1,6 +1,6 @@
 /**
  * Cross-component bus for the Operations sub-section
- * (overview plus six focused settings areas), spelled as the route
+ * (overview plus seven focused settings areas), spelled as the route
  * `#/operations/<section>`.
  *
  * Lives in its own tiny module so deep-linkers (BudgetBlockedBanner,
@@ -10,8 +10,8 @@
  * from OperationsPage would otherwise pull the whole panel back into the
  * main chunk.
  *
- * `OperationsPage` re-exports `requestOperationsSection` for back-compat;
- * new callers should import from here.
+ * Callers import from this bus rather than pulling the lazy settings page
+ * into the main workspace chunk.
  */
 import { readRoute, writeRoute } from '../lib/route'
 
@@ -19,6 +19,7 @@ import { readRoute, writeRoute } from '../lib/route'
  *  persisted navigation, and the active-only panel dispatcher. */
 export const OPERATIONS_SUB_SECTIONS = [
   'overview',
+  'organization',
   'reliability',
   'integrations',
   'access',

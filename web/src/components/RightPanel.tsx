@@ -247,7 +247,6 @@ function RightPanelRouter(props: RightPanelProps) {
   if (props.tab === 'operations') return (
     <OperationsPage
       permissions={props.permissions}
-      connectionCount={catalog.credentials.length}
       aiHealth={authoring.aiHealth}
       onOpenTab={navigation.onOpenTab}
     />

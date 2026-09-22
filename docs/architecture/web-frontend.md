@@ -154,6 +154,22 @@ chunk or render failure and offers an in-place retry; navigation changes reset
 only the failed area. Full-screen boot UI is reserved for application bootstrap,
 not route-level loading.
 
+Settings keeps one workspace destination and a permission-aware focused-area
+rail. The configuration-first order is Organization, Access, Connections and
+AI configuration, followed by Reliability, Usage and Infrastructure. Organization
+owns workspace-wide data governance and audit history; Access owns membership,
+roles, authentication, SSO and SCIM. Connections is the stable user-facing name
+for credentials and external services, while the existing `integrations` route
+identifier remains compatible with saved deep links. The canonical Connections
+inventory stays list-first with a separate add dialog; Settings links to it
+rather than duplicating the secret form. Focused areas expose their own heading,
+persist in the hash, remain horizontally reachable on narrow screens and mount
+only their active cards. On narrow Connections views, the primary action stacks
+inside the card and each fixed-height virtual row keeps status, kind, expiry and
+both mutation actions visible; secondary owner and last-used facts remain on the
+wider inventory. The overview no longer presents a credential-only count as if
+it represented every connection type.
+
 ## Data invalidation
 
 Panel reads subscribe to the resources they depend on through

@@ -85,6 +85,7 @@ const copy = {
     workspace: 'Workspace',
     team: 'Team',
     connections: 'Connections',
+    openConnections: 'Open Connections',
     addConnection: 'Add connection',
     addConnectionDialog: 'Register a protected secret',
     connectionName: 'Connection name',
@@ -97,6 +98,7 @@ const copy = {
     workspace: 'Espacio de trabajo',
     team: 'Equipo',
     connections: 'Conexiones',
+    openConnections: 'Abrir Conexiones',
     addConnection: 'Añadir conexión',
     addConnectionDialog: 'Registrar un secreto protegido',
     connectionName: 'Nombre de la conexión',
@@ -322,7 +324,7 @@ async function captureCombination(
   await openWorkspaceSection(page, copy[locale].settings, copy[locale].workspace)
   await page.getByTestId('settings-index-integrations').click()
   await page.locator('.we-operations-page__content')
-    .getByRole('button', { name: copy[locale].connections, exact: true })
+    .getByRole('button', { name: copy[locale].openConnections, exact: true })
     .click()
   await expect(page.getByRole('button', { name: copy[locale].addConnection }).first()).toBeVisible()
   surfaces.push(await captureSurface(page, 'connections', slug))

@@ -1,16 +1,18 @@
 import type { OpsSection } from './components/operations-section-bus'
 
 export const SETTINGS_AREAS = [
-  'reliability',
-  'integrations',
+  'organization',
   'access',
+  'integrations',
   'ai',
+  'reliability',
   'usage',
   'infrastructure',
 ] as const satisfies readonly Exclude<OpsSection, 'overview'>[]
 
 const SETTINGS_SECTION_PERMISSIONS: Record<OpsSection, readonly string[]> = {
   overview: ['recovery.read'],
+  organization: ['org.config.write', 'recovery.read'],
   reliability: ['alerts.read', 'upstream.read', 'dlq.read'],
   integrations: [
     'credentials.read',
@@ -18,7 +20,7 @@ const SETTINGS_SECTION_PERMISSIONS: Record<OpsSection, readonly string[]> = {
     'mcp.connections.read',
     'external-runtimes.read',
   ],
-  access: ['members.read', 'org.config.write', 'recovery.read'],
+  access: ['members.read', 'org.config.write', 'org.permissions.write'],
   ai: ['recovery.read', 'org.config.write'],
   usage: ['recovery.read'],
   infrastructure: ['recovery.read'],

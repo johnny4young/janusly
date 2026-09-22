@@ -29,6 +29,10 @@ const LOCALES = [
     runs: 'Runs',
     workspace: 'Workspace',
     operationsHeading: 'Workspace settings',
+    organization: 'Organization',
+    access: 'Access',
+    connections: 'Connections',
+    aiConfiguration: 'AI configuration',
     automation: 'Automation and patterns',
     primaryGroup: 'Workspace',
     homeKicker: 'Home',
@@ -47,6 +51,10 @@ const LOCALES = [
     runs: 'Ejecuciones',
     workspace: 'Espacio de trabajo',
     operationsHeading: 'Configuración del espacio',
+    organization: 'Organización',
+    access: 'Acceso',
+    connections: 'Conexiones',
+    aiConfiguration: 'Configuración de IA',
     automation: 'Automatización y patrones',
     primaryGroup: 'Principal',
     homeKicker: 'Inicio',
@@ -365,6 +373,31 @@ for (const locale of LOCALES) {
       name: locale.operationsHeading,
       exact: true,
     })).toBeVisible()
+    const settingsRail = page.getByTestId('operations-rail')
+    for (const [section, label] of [
+      ['organization', locale.organization],
+      ['access', locale.access],
+      ['integrations', locale.connections],
+      ['ai', locale.aiConfiguration],
+    ] as const) {
+      const tab = settingsRail.getByTestId(`operations-rail-tab-${section}`)
+      await expect(tab).toHaveText(label)
+      await tab.click()
+      await expect(tab).toHaveAttribute('aria-current', 'page')
+      await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
+      await expect(page).toHaveURL(new RegExp(`#\\/operations\\/${section}$`))
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(settingsRail).toBeVisible()
+    expect(await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    )).toBeLessThanOrEqual(2)
+    await expectAccessible(page, `${locale.locale} Settings focused areas on mobile`)
+    await capture(
+      shell,
+      `web-${locale.locale}-settings-focused-mobile`,
+    )
+    await page.setViewportSize({ width: 1280, height: 720 })
     await expectAccessible(page, `${locale.locale} Settings task space`)
     await capture(
       shell,

@@ -236,3 +236,17 @@ surface. Namespace, chunk and render failures stop at the owning area and expose
 the existing in-place retry. The production-built navigation journey holds the
 Settings chunk in flight and verifies stable shell chrome, no boot-screen
 replacement, accessibility and recovery after release.
+
+Settings now separates Organization, Access, Connections and AI configuration
+with stable bilingual labels and focused headings, while keeping operational
+Reliability, Usage and Infrastructure areas. Memory governance and audit history
+move out of Access into Organization; auth, SSO, SCIM, membership roles and grants
+remain under Access. The user-facing Connections name covers credentials, Slack,
+MCP and external runtimes without breaking the existing `operations/integrations`
+deep link. Its canonical inventory remains list-first with an explicit add dialog,
+and the overview no longer shows the narrower credential count as a total for the
+whole area. The real-stack task-space journey traverses the four configuration
+areas in English and Spanish, verifies their hashes and focused headings, and
+checks the horizontal rail at 390 CSS pixels without document overflow. The same
+mobile evidence now bounds the Connections primary action inside its card and
+proves both row actions remain inside the fixed-height virtualized inventory.
