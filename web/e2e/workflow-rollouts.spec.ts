@@ -167,9 +167,10 @@ async function captureForeground(surface: Locator, name: string): Promise<void> 
   }
 }
 
-async function expectAccessible(page: Page, context: string): Promise<void> {
+async function expectAccessible(page: Page, context: string, selector = '[data-testid="workflow-rollout-panel"]'): Promise<void> {
+  await expect(page.locator(selector)).toBeVisible()
   const results = await new AxeBuilder({ page })
-    .include('[data-testid="workflow-rollout-panel"]')
+    .include(selector)
     .withTags(WCAG_TAGS)
     .analyze()
   const blocking = results.violations
@@ -333,7 +334,7 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await page.getByRole('button', { name: 'Revertir a v1', exact: true }).click()
   const confirmation = page.getByRole('dialog', { name: '¿Revertir a v1?' })
   await expect(confirmation.getByRole('button', { name: 'Cancelar', exact: true })).toBeFocused()
-  await expectAccessible(page, 'Confirmación de reversión')
+  await expectAccessible(page, 'Confirmación de reversión', '[role="dialog"][aria-labelledby="rollback-dialog-title"]')
   const rollbackResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/workflows/rollback' && response.request().method() === 'POST')
   await confirmation.getByRole('button', { name: 'Revertir', exact: true }).click()
   const rolled = await rollbackResponse
