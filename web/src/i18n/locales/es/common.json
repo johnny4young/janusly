@@ -3505,7 +3505,6 @@
   "recoveryCenter.greeting.subline.failures_one": "{{count}} ejecución necesita recuperación.",
   "recoveryCenter.greeting.subline.failures_other": "{{count}} ejecuciones necesitan recuperación.",
   "recoveryCenter.greeting.subline.allClear": "Todo en orden — la salud está en {{score}}.",
-  "recoveryCenter.greeting.subline.stable": "Estable, pero la salud está en {{score}}. Vale la pena revisarlo.",
   "recoveryCenter.greeting.subline.semanticCases_one": "{{count}} incidente de resultado de negocio necesita revisión.",
   "recoveryCenter.greeting.subline.semanticCases_other": "{{count}} incidentes de resultado de negocio necesitan revisión.",
   "recoveryCenter.greeting.subline.semanticUnavailable": "No se pudo confirmar la postura de resultados de negocio. Revisa el estado más abajo.",
@@ -4326,5 +4325,6 @@
   "home.evidence.empty": "Aún no hay ejecuciones completadas en este periodo. No hay suficiente evidencia para evaluar la salud.",
   "home.evidence.loading": "Cargando evidencia antes de evaluar la salud del espacio.",
   "home.evidence.unavailable": "No se pudo confirmar la salud actual. Reintenta para cargar la evidencia.",
-  "home.evidence.stale": "Se muestran datos anteriores; la salud actual no está confirmada. Actualiza antes de tomar decisiones."
+  "home.evidence.stale": "Se muestran datos anteriores; la salud actual no está confirmada. Actualiza antes de tomar decisiones.",
+  "recoveryCenter.greeting.subline.needsReview": "La salud está en {{score}}. Revisa los resultados recientes antes de asumir una recuperación."
 }

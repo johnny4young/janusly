@@ -245,6 +245,9 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
 
   useEffect(() => {
     let cancelled = false
+    // Each refresh owns its request: a manual retry must not reuse a rejected
+    // promise from the API client's short GET deduplication window.
+    const controller = new AbortController()
     setMetricsLoading(true)
     setMetricsErrorSnapshot(null)
     setSemanticCasesSnapshot(current => ({
@@ -255,7 +258,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       },
     }))
 
-    void api('/recovery/home')
+    void api('/recovery/home', { signal: controller.signal })
       .then((payload) => {
         if (cancelled) return
         const snapshot = parseRecoveryHomeSnapshot(payload)
@@ -356,7 +359,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
         if (!cancelled) setMetricsLoading(false)
       })
 
-    return () => { cancelled = true }
+    return () => { cancelled = true; controller.abort() }
   }, [applyImpactSnapshot, platformVersion, resolvedOrgId, resolvedUserId])
 
   useEffect(() => {

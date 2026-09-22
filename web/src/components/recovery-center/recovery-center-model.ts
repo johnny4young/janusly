@@ -382,7 +382,7 @@ export function buildGreeting(args: {
   } else if (args.healthScore !== null && args.healthScore >= 80) {
     subline = runtimeT('recoveryCenter.greeting.subline.allClear', { score: args.healthScore })
   } else if (args.healthScore !== null) {
-    subline = runtimeT('recoveryCenter.greeting.subline.stable', { score: args.healthScore })
+    subline = runtimeT('recoveryCenter.greeting.subline.needsReview', { score: args.healthScore })
   } else {
     subline = runtimeT('home.evidence.unavailable')
   }

@@ -399,6 +399,12 @@ describe('buildGreeting', () => {
     const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: 96, evidenceStatus: 'available', ...semanticClear })
     expect(g.subline).toContain('All clear')
   })
+  it('does not describe a zero success score as stable after failures are closed', () => {
+    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0,
+      healthScore: 0, evidenceStatus: 'available', ...semanticClear })
+    expect(g.subline).toContain('Review recent outcomes')
+    expect(g.subline).not.toMatch(/Stable|All clear/)
+  })
   it('prioritizes known semantic incidents over clean health signals', () => {
     const g = buildGreeting({
       hour: 9,
@@ -489,7 +495,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
     render(<RecoveryCenterPanel {...baseProps} />)
 
-    expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home')
+    expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home', { signal: expect.any(AbortSignal) })
     expect(vi.mocked(api)).not.toHaveBeenCalledWith('/recovery/metrics')
     await openHomeInsights()
     expect(screen.getByTestId('recovery-center-metric-verified-recovery'))
@@ -1385,7 +1391,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
     await openHomeInsights()
     await waitFor(() => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track'))
-    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home'))
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home', { signal: expect.any(AbortSignal) }))
 
     recoveryLedger = {
       totalRecovered: 1,
@@ -1410,7 +1416,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home')
+      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home', { signal: expect.any(AbortSignal) })
 
       recoveryLedger = {
         totalRecovered: 1,
@@ -1493,7 +1499,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home')
+      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home', { signal: expect.any(AbortSignal) })
 
       recoveryLedger = {
         totalRecovered: 1,
@@ -1576,6 +1582,29 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
 })
 
 describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
+  it('owns a new cancellable full-snapshot request on retry and aborts it on unmount', async () => {
+    mockRecoveryApi(async path => {
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
+      if (path === '/operations/brief') return operatorBrief()
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return baseClusters
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+    const view = render(<RecoveryCenterPanel {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track'))
+    const fullCalls = () => vi.mocked(api).mock.calls.filter(([path]) => path === '/recovery/home')
+    const first = fullCalls()[0][1]?.signal
+    expect(first).toBeInstanceOf(AbortSignal)
+    act(() => invalidateTags([PLATFORM_TAG]))
+    await waitFor(() => expect(fullCalls()).toHaveLength(2))
+    const second = fullCalls()[1][1]?.signal
+    expect(second).toBeInstanceOf(AbortSignal)
+    expect(second).not.toBe(first)
+    expect(first?.aborted).toBe(true)
+    view.unmount()
+    expect(second?.aborted).toBe(true)
+  })
+
   it('marks the mounted full metrics sample stale while impact polling continues', async () => {
     vi.useFakeTimers()
     mockRecoveryApi(async path => {

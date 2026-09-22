@@ -176,7 +176,10 @@ An empty completed-run sample is neither healthy nor failed. First-load errors
 are unavailable; retained metrics are explicitly stale during refresh, after
 partial/read failures, or five minutes after the last successful full metrics
 read (checked by the existing minute clock). Impact-only polling does not renew
-that timestamp. Retry requests fresh evidence. The hero withholds scores,
+that timestamp. Retry calls the invalidator without forwarding a click event.
+Each full snapshot request owns an AbortController and aborts on effect cleanup;
+this also bypasses the API client’s short rejected-GET cache so an immediate
+retry actually requests fresh evidence. The hero withholds scores,
 healthy-history copy and celebrations while evidence is empty or unconfirmed;
 known work remains accessible through the action inbox.
 
