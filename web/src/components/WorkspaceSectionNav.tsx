@@ -19,6 +19,7 @@ import {
   getWorkspaceDestination,
   listWorkspaceSections,
   workspaceDestinationForTab,
+  workspaceSectionForTab,
 } from '../workspace-locations'
 import { preloadPanel } from './panel-loaders'
 
@@ -54,6 +55,8 @@ export function WorkspaceSectionNav({
   const destination = getWorkspaceDestination(destinationId)
   const sections = listWorkspaceSections(destinationId, permissions)
   const destinationLabel = t(destination.labelKey)
+  const currentSection = workspaceSectionForTab(activeTab)
+  const currentSectionLabel = currentSection ? t(currentSection.labelKey) : null
 
   return (
     <nav
@@ -64,7 +67,16 @@ export function WorkspaceSectionNav({
     >
       <div className="workspace-section-nav__intro">
         <strong>{destinationLabel}</strong>
-        <span>{t(destination.helperKey)}</span>
+        {currentSectionLabel && currentSectionLabel !== destinationLabel && (
+          <span
+            className="workspace-section-nav__context"
+            data-testid="workspace-section-context"
+            aria-current="page"
+          >
+            {currentSectionLabel}
+          </span>
+        )}
+        <span>{t(currentSection?.helperKey ?? destination.helperKey)}</span>
       </div>
       {(destinationId !== 'activity' || sections.length > 1) && (
         <div className="workspace-section-nav__rail">

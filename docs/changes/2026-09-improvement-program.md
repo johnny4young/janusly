@@ -218,3 +218,13 @@ provider-free fallback satisfy the same strict browser contract as an AI
 proposal. Corrupt stored snapshots fail closed with a typed 422 instead of
 claiming that an unreadable workflow is an applicable suggestion. The executable
 browser journey exercises the real fallback rather than a hand-built substitute.
+
+## Task-space navigation context
+
+The workspace keeps four primary destinations while exposing the exact routed
+section in both the top breadcrumb and the contextual rail introduction. Hidden
+compact-rail entries such as Recover no longer collapse to an ambiguous
+Activity label, and recovery-case aliases resolve back to Recover. The bilingual
+real-stack journey verifies `#/recover`, reload persistence, contextual labels
+and accessibility. The onboarding entrance now uses motion without opacity so
+its primary action keeps AA contrast throughout the initial task-space render.

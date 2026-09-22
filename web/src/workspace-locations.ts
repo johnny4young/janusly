@@ -96,6 +96,7 @@ export const WORKSPACE_DESTINATION_DEFINITIONS: readonly WorkspaceDestinationDef
         labelKey: 'workspace.section.recover.label',
         helperKey: 'workspace.section.recover.helper',
         hidden: true,
+        activeAliases: ['recoveryCase'],
       },
       {
         tab: 'reasoning',
@@ -178,6 +179,15 @@ export function getWorkspaceDestination(
 
 export function workspaceDestinationForTab(tab: ActiveTab): WorkspaceDestination {
   return DESTINATION_BY_TAB[tab]
+}
+
+/** Exact contextual section for breadcrumbs and compact navigation. Hidden
+ * sections stay out of the task-level rail but remain visible as location. */
+export function workspaceSectionForTab(tab: ActiveTab): WorkspaceSection | null {
+  const destination = getWorkspaceDestination(workspaceDestinationForTab(tab))
+  return destination.sections.find((section) => section.tab === tab)
+    ?? destination.sections.find((section) => section.activeAliases?.includes(tab) === true)
+    ?? null
 }
 
 export function listWorkspaceSections(

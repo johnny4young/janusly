@@ -137,6 +137,15 @@ for consumers already mounted; the DOM-focus buses (authoring problems,
 resilience) stay events because they are not navigation. `?deadLetterId=`
 from alert notifications remains a supported alias of the dlq route.
 
+The shell presents four stable top-level task spaces: Home, Workflows,
+Activity and Settings. A routed section remains visible as location context
+even when it is intentionally omitted from the compact section rail: the top
+bar renders destination then section, and the rail introduction names the
+exact section with its own helper copy. For example, `#/recover` reads as
+Activity / Recover, and a recovery-case route resolves to the same Recover
+context. Reloading or browser navigation must preserve both the route and that
+context; grouping a section never makes its deep link anonymous.
+
 ## Data invalidation
 
 Panel reads subscribe to the resources they depend on through

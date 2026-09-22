@@ -126,6 +126,8 @@ describe('<RightPanel /> recovery task space', () => {
     expect(sectionNav).toHaveAttribute('data-destination', 'activity')
     expect(within(sectionNav).queryByRole('button')).not.toBeInTheDocument()
     expect(within(sectionNav).getByText('Activity')).toBeVisible()
+    expect(within(sectionNav).getByTestId('workspace-section-context'))
+      .toHaveTextContent('Recover')
   })
 
   it('filters contextual sections with the same effective permissions as global navigation', () => {

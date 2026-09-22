@@ -3605,8 +3605,11 @@ button.we-authoring-problems__row:focus-visible {
 }
 
 @keyframes onboarding-banner-in {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  /* Keep copy fully opaque throughout the entrance. Fading the whole banner
+     blends primary-button text into the page and creates a transient WCAG AA
+     contrast failure while the initial task space is becoming interactive. */
+  from { transform: translateY(-8px); }
+  to { transform: translateY(0); }
 }
 
 @media (max-width: 760px) {
@@ -3688,4 +3691,3 @@ button.we-authoring-problems__row:focus-visible {
 
 /* --- C7 forms: inline validation message + described role radio-cards --- */
 .helper-text--error { color: var(--we-danger-text); display: inline-flex; align-items: center; gap: 5px; }
-

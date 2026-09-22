@@ -41,6 +41,7 @@ import {
 import {
   getWorkspaceDestination,
   workspaceDestinationForTab,
+  workspaceSectionForTab,
 } from './workspace-locations'
 import { DOCS_URL } from './docs-link'
 import { I18nNamespaceGate, useT } from './i18n'
@@ -149,6 +150,9 @@ function WorkspaceContent(props: AppWorkspaceProps) {
   } = props
   const authoringMode = isCanvasTab(activeTab)
   const destination = getWorkspaceDestination(workspaceDestinationForTab(activeTab))
+  const section = workspaceSectionForTab(activeTab)
+  const destinationLabel = t(destination.labelKey)
+  const sectionLabel = section ? t(section.labelKey) : null
   const environmentLabel = header.environment === 'production'
     ? t('topbar.env.production')
     : t('topbar.env.sandbox')
@@ -243,7 +247,13 @@ function WorkspaceContent(props: AppWorkspaceProps) {
             <nav className="top-bar-breadcrumb" aria-label={t('layout.workflowStatus')}>
               <span>{header.organizationLabel}</span>
               <ChevronRight size={12} aria-hidden="true" />
-              <b>{authoringMode ? header.workflowName : t(destination.labelKey)}</b>
+              <b>{authoringMode ? header.workflowName : destinationLabel}</b>
+              {!authoringMode && activeTab !== 'home' && sectionLabel && sectionLabel !== destinationLabel && (
+                <>
+                  <ChevronRight size={12} aria-hidden="true" />
+                  <b data-testid="workspace-breadcrumb-section">{sectionLabel}</b>
+                </>
+              )}
               {authoringMode && (
                 <span className={`top-bar-env top-bar-env--${header.environment}`}>
                   {environmentLabel}

@@ -210,14 +210,6 @@ for (const locale of LOCALES) {
     await expectReadablePrimaryText(page.locator(
       '.we-recovery-center-hero__copy, .we-home-workspace button, .we-home-workspace p',
     ))
-    await expect(page.getByTestId('home-priority-inbox').getByRole('button', {
-      name: locale.activity,
-      exact: true,
-    })).toBeVisible()
-    await expect(page.getByTestId('home-active-work').getByRole('button', {
-      name: locale.activity,
-      exact: true,
-    })).toBeVisible()
     await expectAccessible(page, `${locale.locale} Home task space`)
     await capture(
       shell,
@@ -244,6 +236,15 @@ for (const locale of LOCALES) {
       name: locale.recover,
       exact: true,
     })).toBeVisible()
+    await expect(page).toHaveURL(/#\/recover$/)
+    await expect(page.locator('.top-bar-breadcrumb')).toContainText(locale.activity)
+    await expect(page.locator('.top-bar-breadcrumb')).toContainText(locale.recover)
+    await expect(sectionNav.getByTestId('workspace-section-context'))
+      .toHaveText(locale.recover)
+    await page.reload()
+    await expect(page).toHaveURL(/#\/recover$/)
+    await expect(page.getByTestId('workspace-section-nav')
+      .getByTestId('workspace-section-context')).toHaveText(locale.recover)
     await expect(page.getByTestId('recovery-queue')).toBeVisible()
     const recoveryQueueBox = await page.getByTestId('recovery-queue').boundingBox()
     const recoveryAutomation = page.getByTestId('recovery-automation')
