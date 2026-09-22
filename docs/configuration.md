@@ -4,6 +4,10 @@ Janusly reads process configuration from environment variables. The application
 validates core values before opening listeners. Tenant-adjustable behavior lives
 in `org_configs`; secrets never do.
 
+See the [classified environment reference](environment-reference.md) for types,
+defaults, ranges, precedence, restart scope, CLI/build inputs and unsupported
+names. It distinguishes strict boot validation from feature-specific fallbacks.
+
 ## Core runtime
 
 | Variable | Default | Meaning |
@@ -52,6 +56,15 @@ restart; deployment environment changes require restarting the process. One
 tenant's setting never becomes another tenant's default. Invalid legacy rows
 fall through, while new fractional HTTP tenant writes are rejected, not rounded.
 
+## Persistence payload limit
+
+`JANUSLY_PERSIST_MAX_BYTES` is a process-only integer byte cap, default **256000**,
+minimum **2**, maximum the platform signed integer. Invalid input rejects boot
+without echoing it; changing the value requires restart. Engine events and all
+audit producers share the immutable policy. Fixed state/recovery limits and
+unbounded redacted replay snapshots keep their own rules. See
+[engine persistence](architecture/engine-persistence.md#process-serialization-policy).
+
 ## External database tool pool budget
 
 `JANUSLY_DB_TOOL_MAX_PROCESS_POOLS` is a process-wide integer in **1–500**,
@@ -94,7 +107,7 @@ policy different from the actual worker policy.
 Invalid validated core values fail startup with their variable name and accepted
 range, never the supplied value. Unset or whitespace-only values use the documented
 default. The validated core settings (ports, pools, concurrency, polling, default
-HTTP timeout, feedback workers and reaper) are restart-scoped. This does **not**
+HTTP defaults, feedback workers, reaper and persistence) are restart-scoped. This does **not**
 freeze tenant configuration: organization settings continue through their
 existing database → environment → default resolution at runtime.
 
