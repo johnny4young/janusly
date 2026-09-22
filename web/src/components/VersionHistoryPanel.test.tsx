@@ -381,7 +381,7 @@ describe('<VersionHistoryPanel />', () => {
     expect(screen.queryByRole('button', { name: /Roll back to/i })).not.toBeInTheDocument()
   })
 
-  it('opens the Rollback dialog with current and target labels when Rollback is clicked', async () => {
+  it.each(['refresh', 'workflow', 'organization', 'user', 'permissions'] as const)('owns the exact rollback preview until %s changes', async change => {
     mockVersionHistoryApi({
       wf_compare: [
         { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
@@ -397,6 +397,14 @@ describe('<VersionHistoryPanel />', () => {
     expect(screen.getByRole('heading', { name: /Roll back to v1/i })).toBeInTheDocument()
     expect(screen.getByText(/v2 \(current\)/i)).toBeInTheDocument()
     expect(screen.getByText(/v1 \(rolling back to\)/i)).toBeInTheDocument()
+    act(() => {
+      if (change === 'refresh') invalidateTags([PLATFORM_TAG])
+      else if (change === 'permissions') setPermissions(['workflows.read'])
+      else useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'wf_next' }
+        : change === 'organization' ? { orgId: 'next-org' } : { userId: 'next-user' })
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
   })
 
   it('exposes the Suggest improvement button only in compare mode with two versions selected and editor role', async () => {

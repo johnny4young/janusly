@@ -102,12 +102,8 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
   const [loadingMore, setLoadingMore] = useState(false)
   const [compareMode, setCompareMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  // Snapshot the (current, target) ids at the moment the operator clicks
-  // Rollback. We don't read `versions[0]` at dialog-render time because a
-  // sibling save bumping `platformVersion` between open and close would
-  // shift "current" to a newer version under the operator — the diff
-  // they're looking at would silently change.
-  const [rollbackPair, setRollbackPair] = useState<{ currentId: string; targetId: string } | null>(null)
+  // Retain the exact diff the operator opened; refresh clears this pair.
+  const [rollbackPair, setRollbackPair] = useState<{ current: VersionRow; target: VersionRow } | null>(null)
   const [improvement, setImprovement] = useState<ImprovementState>({ kind: 'idle' })
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [retry, setRetry] = useState(0)
@@ -340,7 +336,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
             {showRollback && versions[0] && (
               <Button size="icon" variant="ghost"
                 className="version-row__rollback"
-                onClick={() => setRollbackPair({ currentId: versions[0]!.id, targetId: version.id })}
+                onClick={() => setRollbackPair({ current: versions[0]!, target: version })}
                 aria-label={t('versionHistory.rollbackAria', { version: version.version })}
                 title={t('versionHistory.rollbackAria', { version: version.version })}
               >
@@ -447,21 +443,14 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
         </div>
       )}
 
-      {rollbackPair && (() => {
-        const current = versions.find((row) => row.id === rollbackPair.currentId)
-        const target = versions.find((row) => row.id === rollbackPair.targetId)
-        // If either snapshot row dropped out (e.g. a deletion / refetch
-        // race) the dialog can't render meaningfully — close it.
-        if (!current || !target) return null
-        return (
-          <RollbackConfirmDialog
-            workflowId={currentWorkflowId}
-            current={current}
-            target={target}
-            onClose={() => setRollbackPair(null)}
-          />
-        )
-      })()}
+      {rollbackPair && (
+        <RollbackConfirmDialog
+          workflowId={currentWorkflowId}
+          current={rollbackPair.current}
+          target={rollbackPair.target}
+          onClose={() => setRollbackPair(null)}
+        />
+      )}
     </div>
   )
 }
