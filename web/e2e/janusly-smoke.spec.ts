@@ -607,6 +607,8 @@ for (const locale of ['en', 'es'] as const) {
   test(`Home evidence and provider-free first action against Go in ${locale}`, async ({ page, request }) => {
     test.setTimeout(90_000)
     const orgId = `go-home-${locale}-${Date.now()}`
+    const pageErrors: string[] = []
+    page.on('pageerror', error => pageErrors.push(String(error)))
     await page.addInitScript(({ orgId, locale }) => {
       localStorage.setItem('janusly:activeOrg', orgId)
       localStorage.setItem('janusly:locale', locale)
@@ -665,6 +667,7 @@ for (const locale of ['en', 'es'] as const) {
     await expect(page.getByTestId('recovery-lab-entry')).toBeHidden()
     await page.unroute('**/recovery/home')
     await health.getByRole('button', { name: locale === 'en' ? 'Retry' : 'Reintentar', exact: true }).click()
-    await expect(health).not.toContainText(locale === 'en' ? 'Status is incomplete' : 'El estado está incompleto')
+    await expect(health).toContainText(locale === 'en' ? 'Needs attention' : 'Necesita atención')
+    expect(pageErrors).toHaveLength(0)
   })
 }

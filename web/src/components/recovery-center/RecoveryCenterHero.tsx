@@ -151,7 +151,7 @@ export function RecoveryCenterHero({
         <div>
           <strong>{healthTitle}</strong>
           {(metricsStatus === 'unavailable' || metricsStatus === 'stale') && onRefreshStatus && (
-            <Button variant="ghost" size="sm" type="button"  onClick={onRefreshStatus}>
+            <Button variant="ghost" size="sm" type="button"  onClick={() => onRefreshStatus()}>
               {t('common.retry')}
             </Button>
           )}

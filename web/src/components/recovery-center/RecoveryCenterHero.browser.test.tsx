@@ -65,7 +65,7 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
 
     expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(onRefreshStatus).toHaveBeenCalledOnce()
+    expect(onRefreshStatus).toHaveBeenCalledExactlyOnceWith()
   })
 
   it('renders the all-clear summary and animated burst as a focused hero state', () => {
@@ -164,6 +164,6 @@ describe('Home evidence truth in Chromium', () => {
     const retry = vi.fn()
     render(<RecoveryCenterHero {...baseProps} metricsStatus="stale" onRefreshStatus={retry} />)
     await userEvent.keyboard('{Tab}{Enter}')
-    expect(retry).toHaveBeenCalledOnce()
+    expect(retry).toHaveBeenCalledExactlyOnceWith()
   })
 })
