@@ -120,7 +120,7 @@ describe('Recovery Playbook reuse', () => {
       if (path === '/dlq/validate-fix') return { runId: 'validation-regressed' }
       if (path.startsWith('/run?runId=validation-regressed')) {
         return {
-          run: { id: 'validation-regressed', status: 'failed' },
+          events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'validation-regressed', status: 'failed' },
           nodes: [{ nodeId: 'fetch', status: 'failed', errorJson: { message: 'timeout still exceeded' } }],
         }
       }

@@ -99,3 +99,15 @@ for a website-only push. Wrangler is locked to an exact local dependency.
 The retention countdown regression freezes its clock before mount and fixture
 reads, with explicit millisecond-boundary tests rather than relaxed assertions
 or retry-to-green. Repository protection settings remain owner-controlled.
+
+## Typed run snapshots
+
+Run/status now declare the full required response schema and serialize typed Go
+snapshot, node and event views. Nullable metadata and millisecond timestamps keep
+the established wire, with schema conformance checks against real responses.
+Generated browser types replace generic run/node/event records; history, Replay
+Lab and recovery validation reuse the snapshot guard instead of double casts.
+Malformed or wrong-run success cannot authorize Apply or discard history. A
+validation run that reaches `timed_out` is now handled as terminal failure.
+This is a vertical contract change, not a universal response-validation layer;
+extensible JSON payloads remain intentionally unconstrained.

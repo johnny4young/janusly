@@ -12,6 +12,7 @@
  * confidence-display + suggestion-normalisation + error-extraction logic.
  */
 
+import type { RunNode } from '../../types'
 import { computeWorkflowDiff } from '@/lib/workflow-diff'
 import type { EvidenceKind } from '@/lib/ai-evidence'
 import { scrubOperatorGuidanceSecrets } from '@/lib/operator-guidance'
@@ -21,7 +22,6 @@ import type {
   PatchApproachLabel,
   ConsideredAlternative,
   PatchSuggestion,
-  RunStatusPayload,
   SuggestionTab,
 } from './types'
 
@@ -120,7 +120,7 @@ export function resolveConfidenceDisplay(tab: SuggestionTab): {
   }
 }
 
-export function pickFailedNodeErrorJson(nodes: RunStatusPayload['nodes'], failingNodeId: string): unknown {
+export function pickFailedNodeErrorJson(nodes: readonly RunNode[] | undefined, failingNodeId: string): unknown {
   if (!nodes) return null
   // Prefer the originally-failing node's error so the operator sees the
   // reason their proposed fix didn't unstick the run; fall back to any

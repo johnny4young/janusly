@@ -16,6 +16,13 @@ describe('run status snapshot boundary', () => {
     expect(parseRunStatusSnapshot({ ...snapshot(), nodes: [], events: [], futureField: true }, 'run-a')).toMatchObject({ nodes: [], events: [] })
   })
 
+  it('honors the existing 500-event page ceiling without adding a node limit', () => {
+    const events = Array.from({ length: 500 }, (_, index) => ({ id: `event-${index}`, type: 'node.running' }))
+    const nodes = Array.from({ length: 501 }, (_, index) => ({ nodeId: `node-${index}`, status: 'pending' }))
+    expect(parseRunStatusSnapshot({ ...snapshot(), nodes, events }, 'run-a')).not.toBeNull()
+    expect(parseRunStatusSnapshot({ ...snapshot(), events: [...events, { id: 'extra', type: 'node.running' }] }, 'run-a')).toBeNull()
+  })
+
   it('accepts a complete paginated latest page', () => {
     expect(parseRunStatusSnapshot({ ...snapshot(), eventsCursor: 'cursor-a', eventsHasMore: true }, 'run-a')).not.toBeNull()
   })

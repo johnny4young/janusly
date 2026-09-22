@@ -23,37 +23,37 @@ type RunView struct {
 	ID                                   string          `json:"id"`
 	OrgID                                string          `json:"orgId"`
 	WorkflowVersionID                    string          `json:"workflowVersionId"`
-	WorkflowRolloutID                    any             `json:"workflowRolloutId"`
-	WorkflowRolloutVariant               any             `json:"workflowRolloutVariant"`
+	WorkflowRolloutID                    *string         `json:"workflowRolloutId"`
+	WorkflowRolloutVariant               *string         `json:"workflowRolloutVariant"`
 	Status                               string          `json:"status"`
-	OutcomeStatus                        any             `json:"outcomeStatus"`
+	OutcomeStatus                        *string         `json:"outcomeStatus"`
 	SemanticViolationCount               int32           `json:"semanticViolationCount"`
 	InputJSON                            json.RawMessage `json:"inputJson"`
 	OutputJSON                           json.RawMessage `json:"outputJson"`
-	ParentRunID                          any             `json:"parentRunId"`
-	ParentNodeID                         any             `json:"parentNodeId"`
-	ParentLinkKind                       any             `json:"parentLinkKind"`
-	ParentNotificationAfter              any             `json:"parentNotificationAfter"`
-	RecoveryPlaybookAppliedRecordedAt    any             `json:"recoveryPlaybookAppliedRecordedAt"`
-	RecoveryPlaybookValidationRecordedAt any             `json:"recoveryPlaybookValidationRecordedAt"`
-	ReplayMode                           any             `json:"replayMode"`
-	TraceID                              any             `json:"traceId"`
-	ValidationEvidenceLevel              any             `json:"validationEvidenceLevel"`
-	CreatedBy                            any             `json:"createdBy"`
-	CreatedAt                            any             `json:"createdAt"`
+	ParentRunID                          *string         `json:"parentRunId"`
+	ParentNodeID                         *string         `json:"parentNodeId"`
+	ParentLinkKind                       *string         `json:"parentLinkKind"`
+	ParentNotificationAfter              *string         `json:"parentNotificationAfter"`
+	RecoveryPlaybookAppliedRecordedAt    *string         `json:"recoveryPlaybookAppliedRecordedAt"`
+	RecoveryPlaybookValidationRecordedAt *string         `json:"recoveryPlaybookValidationRecordedAt"`
+	ReplayMode                           *string         `json:"replayMode"`
+	TraceID                              *string         `json:"traceId"`
+	ValidationEvidenceLevel              *string         `json:"validationEvidenceLevel"`
+	CreatedBy                            *string         `json:"createdBy"`
+	CreatedAt                            *string         `json:"createdAt"`
 }
 
 func newRunView(run store.GetRunRow) RunView {
 	return RunView{
 		ID: run.ID, OrgID: run.OrgID,
 		WorkflowVersionID: run.WorkflowVersionID,
-		Status:            run.Status, OutcomeStatus: textOrNull(run.OutcomeStatus),
+		Status:            run.Status, OutcomeStatus: nullableTextValue(run.OutcomeStatus),
 		SemanticViolationCount: run.SemanticViolationCount,
 		InputJSON:              normalizedRaw(run.InputJson), OutputJSON: normalizedRaw(run.OutputJson),
-		ParentRunID: textOrNull(run.ParentRunID), ParentNodeID: textOrNull(run.ParentNodeID),
-		ReplayMode: textOrNull(run.ReplayMode), TraceID: textOrNull(run.TraceID),
-		ValidationEvidenceLevel: textOrNull(run.ValidationEvidenceLevel),
-		CreatedBy:               textOrNull(run.CreatedBy), CreatedAt: timeOrNull(run.CreatedAt),
+		ParentRunID: nullableTextValue(run.ParentRunID), ParentNodeID: nullableTextValue(run.ParentNodeID),
+		ReplayMode: nullableTextValue(run.ReplayMode), TraceID: nullableTextValue(run.TraceID),
+		ValidationEvidenceLevel: nullableTextValue(run.ValidationEvidenceLevel),
+		CreatedBy:               nullableTextValue(run.CreatedBy), CreatedAt: nullableTimeValue(run.CreatedAt),
 	}
 }
 

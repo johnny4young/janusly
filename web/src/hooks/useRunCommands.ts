@@ -4,22 +4,10 @@ import { requestRecoveryAllClearIfQueueEmpty } from '../components/recovery-all-
 import { formatStatusLabel } from '../constants'
 import { isRunRequestCurrent } from '../run-transition'
 import { useWorkflowStore } from '../store'
-import type {
-  ActiveTab,
-  RunEvent,
-  RunNode,
-  RunSummary,
-} from '../types'
+import type { ActiveTab } from '../types'
 import { isTerminalRunStatus } from '@/lib/status'
+import { parseRunStatusSnapshot } from '../lib/run-status-contract'
 import type { AppCommandsOptions } from './app-command-types'
-
-type RunResponse = {
-  run?: RunSummary
-  nodes?: RunNode[]
-  events?: RunEvent[]
-  eventsCursor?: string | null
-  eventsHasMore?: boolean
-}
 
 type WorkflowCommands = {
   validateWorkflow: () => Promise<boolean>
@@ -181,16 +169,16 @@ export function useRunCommands(
     setActivityRecoveryId(null)
     setActiveTab(targetTab ?? 'runs')
     try {
-      const data = await contractApi('GET /run', `/run?runId=${encodeURIComponent(id)}`, undefined) as unknown as RunResponse
+      const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(id)}`, undefined)
       if (!runTransitionGuard.isCurrent(requestId)) return
+      const data = parseRunStatusSnapshot(payload, id)
+      if (!data) throw new Error(t('api.error.malformedResponse'))
       setRunId(id)
-      if (data.run) {
-        setRunDetail(data.run)
-        projectRunSummary(id, data.run)
-      }
-      setRunNodes(data.nodes ?? [])
-      setEvents(data.events ?? [])
-      setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
+      setRunDetail(data.run)
+      projectRunSummary(id, data.run)
+      setRunNodes(data.nodes)
+      setEvents(data.events)
+      setEventsPagination(data.eventsCursor, data.eventsHasMore)
     } catch (error) {
       if (!runTransitionGuard.isCurrent(requestId)) return
       addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
@@ -233,10 +221,12 @@ export function useRunCommands(
       generation: useWorkflowStore.getState().runTransitionGeneration,
     }
     try {
-      const data = await contractApi('GET /run', `/run?runId=${encodeURIComponent(runId)}&eventsCursor=${encodeURIComponent(eventsCursor)}`, undefined) as unknown as RunResponse
+      const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(runId)}&eventsCursor=${encodeURIComponent(eventsCursor)}`, undefined)
       if (!isRunRequestCurrent(context, useWorkflowStore.getState())) return
-      addEvents(data.events ?? [])
-      setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
+      const data = parseRunStatusSnapshot(payload, runId)
+      if (!data) throw new Error(t('api.error.malformedResponse'))
+      addEvents(data.events)
+      setEventsPagination(data.eventsCursor, data.eventsHasMore)
     } catch (error) {
       if (!isRunRequestCurrent(context, useWorkflowStore.getState())) return
       addToast(error instanceof Error ? error.message : t('toasts.olderEventsFailed'), 'error')

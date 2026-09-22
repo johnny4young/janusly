@@ -4,6 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { normalizeErrorSignature } from '@/lib/error-signature'
 import { api, contractApi } from '../../api'
+import { parseRunStatusSnapshot } from '../../lib/run-status-contract'
+import { isTerminalRunStatus } from '../../lib/status'
 import { useWorkflowStore } from '../../store'
 import type { DeadLetter } from '../dead-letter-types'
 import { useT } from '../../i18n'
@@ -17,13 +19,11 @@ import type {
   ClusterApplyResult,
   PatchSuggestion,
   PreSaveBeforeSnapshot,
-  RunStatusPayload,
   RecoveryPlaybookSummary,
   Step,
   SuggestionTab,
 } from './types'
 
-const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled'])
 const VALIDATION_POLL_INTERVAL_MS = 1500
 // A sandbox run that never reaches a terminal status used to hold the
 // dialog open forever: ESC, the backdrop and the close button are all
@@ -203,10 +203,12 @@ export function useRecoveryDialogController({
         return
       }
       try {
-        const result = await contractApi('GET /run', `/run?runId=${encodeURIComponent(step.runId)}`, undefined) as unknown as RunStatusPayload
+        const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(step.runId)}`, undefined)
         if (cancelled) return
-        const status = result.run?.status
-        if (!status || !TERMINAL_STATUSES.has(status)) {
+        const result = parseRunStatusSnapshot(payload, step.runId)
+        if (!result) throw new Error(runtimeT('api.error.malformedResponse'))
+        const status = result.run.status
+        if (!isTerminalRunStatus(status)) {
           return
         }
         // Claim the terminal-status path BEFORE yielding to async work
@@ -243,7 +245,7 @@ export function useRecoveryDialogController({
           })
           return
         }
-        const errorJson = pickFailedNodeErrorJson(result.nodes ?? [], dlq.nodeId)
+        const errorJson = pickFailedNodeErrorJson(result.nodes, dlq.nodeId)
         setStep({
           kind: 'validation-failed',
           suggestion: step.suggestion,

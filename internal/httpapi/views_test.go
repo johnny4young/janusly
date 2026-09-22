@@ -39,6 +39,9 @@ func TestViewKeySetsPinned(t *testing.T) {
 		view any
 		want string
 	}{
+		{"runSnapshot", RunSnapshotView{}, "events,eventsCursor,eventsHasMore,nodes,run"},
+		{"runNode", RunNodeView{}, "attempts,errorJson,finishedAt,id,nodeId,runId,startedAt,stateJson,status"},
+		{"runEvent", RunEventView{}, "createdAt,holdUntil,id,nodeId,payload,runId,type"},
 		{"run", RunView{}, "createdAt,createdBy,id,inputJson,orgId,outcomeStatus,outputJson,parentLinkKind,parentNodeId,parentNotificationAfter,parentRunId,recoveryPlaybookAppliedRecordedAt,recoveryPlaybookValidationRecordedAt,replayMode,semanticViolationCount,status,traceId,validationEvidenceLevel,workflowRolloutId,workflowRolloutVariant,workflowVersionId"},
 		{"runSummary", RunSummaryView{}, "createdAt,createdBy,hasWaitingNodes,id,orgId,outcomeStatus,outputJson,parentNodeId,parentRunId,replayMode,semanticViolationCount,status,traceId,validationEvidenceLevel,workflowId,workflowName,workflowVersionId"},
 		{"dlqSummary", DeadLetterSummaryView{}, "attempt,createdAt,errorJson,id,nodeId,nodeType,orgId,recovery,replayedAt,runId,status,workflowName"},
@@ -60,7 +63,7 @@ func TestViewKeySetsPinned(t *testing.T) {
 // explicit nulls, never missing keys).
 func TestViewTagsExplicitAndNeverOmitEmpty(t *testing.T) {
 	for _, view := range []any{
-		RunView{}, RunSummaryView{}, DeadLetterSummaryView{}, DeadLetterDetailView{},
+		RunSnapshotView{}, RunNodeView{}, RunEventView{}, RunView{}, RunSummaryView{}, DeadLetterSummaryView{}, DeadLetterDetailView{},
 		RecoveryOverlayView{}, WorkflowListItemView{}, VersionView{},
 	} {
 		viewType := reflect.TypeOf(view)

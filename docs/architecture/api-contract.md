@@ -4,8 +4,11 @@
 Go HTTP server. `cmd/contract` generates `contract/openapi.json`.
 
 Contracted `/v1` routes return a stable envelope with `apiVersion`,
-`requestId`, and either `data` or `error`. Request and response payloads are
-validated at runtime. `X-Request-Id` is always safe to expose.
+`requestId`, and either `data` or `error`. Handlers validate their requests and
+serialize response envelopes; the manifest is a schema description, not a
+universal production response validator. Conformance tests compare supported
+wire responses to those schemas, and high-risk browser boundaries validate the
+received projection before applying it. `X-Request-Id` is always safe to expose.
 
 Generic server failures are deliberately opaque at the public boundary. Every
 `internal_error` response uses the stable `Internal error` message, omits
@@ -63,6 +66,23 @@ Proposal responses expose the canonical parsed workflow, not the raw provider
 document. This matches workflow save: unknown carrier fields are stripped and
 normalization happens before the workflow, intent/recovery contract projections,
 qualification flags, bindings, and readiness leave the server.
+
+`GET /v1/run` and `/v1/status` share an explicit required snapshot contract:
+run identity/lifecycle, typed node and event rows, nullable persisted metadata,
+and event pagination. Their unversioned aliases serialize the same typed Go
+views. Timestamps retain the existing UTC millisecond format; absent columns
+remain explicit nulls, while empty collections remain arrays. Event pages retain
+the existing 500-row maximum; this does not impose a new graph-size limit.
+Extensible input/output/state/error/event JSON remains a JSON value rather than
+an invented closed business schema. Unit fixtures and actual PostgreSQL-backed
+responses (including pagination and tenancy errors) protect the wire shape.
+
+The browser uses the generated pagination types and one validated run display
+projection for polling, history, Replay Lab and recovery validation. An unreadable,
+malformed or wrong-run snapshot cannot replace the last known history, consume a
+pagination cursor, start a comparison or authorize Apply. Recovery validation
+uses the shared terminal-status set, including `timed_out`, rather than waiting
+for a separate dialog timeout after the run has already terminated.
 
 Run `make generate` after contract changes and require a clean diff on a second
 run.

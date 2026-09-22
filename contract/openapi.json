@@ -3325,11 +3325,53 @@
                     {
                       "properties": {
                         "data": {
+                          "additionalProperties": false,
                           "properties": {
                             "events": {
                               "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "createdAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "holdUntil": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "payload": {},
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "runId",
+                                  "nodeId",
+                                  "type",
+                                  "payload",
+                                  "createdAt",
+                                  "holdUntil"
+                                ],
                                 "type": "object"
                               },
+                              "maxItems": 500,
                               "type": "array"
                             },
                             "eventsCursor": {
@@ -3343,14 +3385,222 @@
                             },
                             "nodes": {
                               "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "attempts": {
+                                    "minimum": 0,
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
+                                  },
+                                  "errorJson": {},
+                                  "finishedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "startedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "stateJson": {},
+                                  "status": {
+                                    "enum": [
+                                      "pending",
+                                      "queued",
+                                      "running",
+                                      "waiting",
+                                      "succeeded",
+                                      "failed",
+                                      "skipped",
+                                      "cancelled"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "runId",
+                                  "nodeId",
+                                  "status",
+                                  "stateJson",
+                                  "errorJson",
+                                  "attempts",
+                                  "startedAt",
+                                  "finishedAt"
+                                ],
                                 "type": "object"
                               },
                               "type": "array"
                             },
                             "run": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "inputJson": {},
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "outcomeStatus": {
+                                  "enum": [
+                                    null,
+                                    "semantic_violation",
+                                    "semantic_quarantined",
+                                    "semantic_recovering",
+                                    "semantic_recovered",
+                                    "semantic_accepted_loss"
+                                  ]
+                                },
+                                "outputJson": {},
+                                "parentLinkKind": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentNodeId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentNotificationAfter": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentRunId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "recoveryPlaybookAppliedRecordedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "recoveryPlaybookValidationRecordedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "replayMode": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "semanticViolationCount": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "created",
+                                    "running",
+                                    "waiting",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "timed_out"
+                                  ],
+                                  "type": "string"
+                                },
+                                "traceId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "validationEvidenceLevel": {
+                                  "enum": [
+                                    null,
+                                    "static",
+                                    "writes_skipped",
+                                    "provider_simulated",
+                                    "live_canary"
+                                  ]
+                                },
+                                "workflowRolloutId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowRolloutVariant": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowVersionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "workflowVersionId",
+                                "workflowRolloutId",
+                                "workflowRolloutVariant",
+                                "status",
+                                "outcomeStatus",
+                                "semanticViolationCount",
+                                "inputJson",
+                                "outputJson",
+                                "parentRunId",
+                                "parentNodeId",
+                                "parentLinkKind",
+                                "parentNotificationAfter",
+                                "recoveryPlaybookAppliedRecordedAt",
+                                "recoveryPlaybookValidationRecordedAt",
+                                "replayMode",
+                                "traceId",
+                                "validationEvidenceLevel",
+                                "createdBy",
+                                "createdAt"
+                              ],
                               "type": "object"
                             }
                           },
+                          "required": [
+                            "run",
+                            "nodes",
+                            "events",
+                            "eventsCursor",
+                            "eventsHasMore"
+                          ],
                           "type": "object"
                         }
                       },
@@ -3850,11 +4100,53 @@
                     {
                       "properties": {
                         "data": {
+                          "additionalProperties": false,
                           "properties": {
                             "events": {
                               "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "createdAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "holdUntil": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "payload": {},
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "runId",
+                                  "nodeId",
+                                  "type",
+                                  "payload",
+                                  "createdAt",
+                                  "holdUntil"
+                                ],
                                 "type": "object"
                               },
+                              "maxItems": 500,
                               "type": "array"
                             },
                             "eventsCursor": {
@@ -3868,14 +4160,222 @@
                             },
                             "nodes": {
                               "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "attempts": {
+                                    "minimum": 0,
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
+                                  },
+                                  "errorJson": {},
+                                  "finishedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "startedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "stateJson": {},
+                                  "status": {
+                                    "enum": [
+                                      "pending",
+                                      "queued",
+                                      "running",
+                                      "waiting",
+                                      "succeeded",
+                                      "failed",
+                                      "skipped",
+                                      "cancelled"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "runId",
+                                  "nodeId",
+                                  "status",
+                                  "stateJson",
+                                  "errorJson",
+                                  "attempts",
+                                  "startedAt",
+                                  "finishedAt"
+                                ],
                                 "type": "object"
                               },
                               "type": "array"
                             },
                             "run": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "inputJson": {},
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "outcomeStatus": {
+                                  "enum": [
+                                    null,
+                                    "semantic_violation",
+                                    "semantic_quarantined",
+                                    "semantic_recovering",
+                                    "semantic_recovered",
+                                    "semantic_accepted_loss"
+                                  ]
+                                },
+                                "outputJson": {},
+                                "parentLinkKind": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentNodeId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentNotificationAfter": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentRunId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "recoveryPlaybookAppliedRecordedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "recoveryPlaybookValidationRecordedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "replayMode": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "semanticViolationCount": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "created",
+                                    "running",
+                                    "waiting",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "timed_out"
+                                  ],
+                                  "type": "string"
+                                },
+                                "traceId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "validationEvidenceLevel": {
+                                  "enum": [
+                                    null,
+                                    "static",
+                                    "writes_skipped",
+                                    "provider_simulated",
+                                    "live_canary"
+                                  ]
+                                },
+                                "workflowRolloutId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowRolloutVariant": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowVersionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "workflowVersionId",
+                                "workflowRolloutId",
+                                "workflowRolloutVariant",
+                                "status",
+                                "outcomeStatus",
+                                "semanticViolationCount",
+                                "inputJson",
+                                "outputJson",
+                                "parentRunId",
+                                "parentNodeId",
+                                "parentLinkKind",
+                                "parentNotificationAfter",
+                                "recoveryPlaybookAppliedRecordedAt",
+                                "recoveryPlaybookValidationRecordedAt",
+                                "replayMode",
+                                "traceId",
+                                "validationEvidenceLevel",
+                                "createdBy",
+                                "createdAt"
+                              ],
                               "type": "object"
                             }
                           },
+                          "required": [
+                            "run",
+                            "nodes",
+                            "events",
+                            "eventsCursor",
+                            "eventsHasMore"
+                          ],
                           "type": "object"
                         }
                       },

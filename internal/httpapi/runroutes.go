@@ -214,38 +214,35 @@ func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
 		events[i], events[j] = events[j], events[i]
 	}
-	var nextCursor any
+	var nextCursor *string
 	if hasMore && len(events) > 0 {
 		last := events[0]
 		// Millisecond ISO, exactly the contract's toISOString shape — the
 		// same precision events are WRITTEN at, so cursor comparisons are
 		// exact for cursors minted by either backend.
-		nextCursor = last.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z") + "|" + last.ID
+		cursor := last.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z") + "|" + last.ID
+		nextCursor = &cursor
 	}
 
-	nodeViews := make([]map[string]any, 0, len(nodes))
+	nodeViews := make([]RunNodeView, 0, len(nodes))
 	for _, node := range nodes {
-		nodeViews = append(nodeViews, map[string]any{
-			"id": node.ID, "runId": node.RunID, "nodeId": node.NodeID,
-			"status": node.Status, "stateJson": rawOrNull(node.StateJson),
-			"attempts": nullableInt(node.Attempts), "startedAt": timeOrNull(node.StartedAt),
-			"finishedAt": timeOrNull(node.FinishedAt), "errorJson": rawOrNull(node.ErrorJson),
+		nodeViews = append(nodeViews, RunNodeView{
+			ID: node.ID, RunID: node.RunID, NodeID: node.NodeID, Status: node.Status,
+			StateJSON: normalizedRaw(node.StateJson), ErrorJSON: normalizedRaw(node.ErrorJson),
+			Attempts: nullableIntValue(node.Attempts), StartedAt: nullableTimeValue(node.StartedAt),
+			FinishedAt: nullableTimeValue(node.FinishedAt),
 		})
 	}
-	eventViews := make([]map[string]any, 0, len(events))
+	eventViews := make([]RunEventView, 0, len(events))
 	for _, event := range events {
-		eventViews = append(eventViews, map[string]any{
-			"id": event.ID, "runId": event.RunID, "nodeId": textOrNull(event.NodeID),
-			"type": event.Type, "payload": rawOrNull(event.Payload),
-			"createdAt": timeOrNull(event.CreatedAt), "holdUntil": nil,
+		eventViews = append(eventViews, RunEventView{
+			ID: event.ID, RunID: event.RunID, NodeID: nullableTextValue(event.NodeID),
+			Type: event.Type, Payload: normalizedRaw(event.Payload), CreatedAt: nullableTimeValue(event.CreatedAt),
 		})
 	}
-	return opOK(map[string]any{
-		"run":           runView(run),
-		"nodes":         nodeViews,
-		"events":        eventViews,
-		"eventsCursor":  nextCursor,
-		"eventsHasMore": hasMore,
+	return opOK(RunSnapshotView{
+		Run: runView(run), Nodes: nodeViews, Events: eventViews,
+		EventsCursor: nextCursor, EventsHasMore: hasMore,
 	})
 }
 

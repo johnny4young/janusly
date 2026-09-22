@@ -1,13 +1,14 @@
+import type { ApiResponses } from './api-types.generated'
 import type { RunEvent, RunNode, RunSummary } from '../types'
 import { isRecord } from './guards'
 import { isOpenNodeStatus, isOpenRunStatus, isTerminalNodeStatus, isTerminalRunStatus } from './status'
 
-export type RunStatusSnapshot = {
+// A validated display projection: extension JSON is narrowed to the object
+// shapes consumed by the UI; wire pagination types come from the manifest.
+export type RunStatusSnapshot = Pick<ApiResponses['GET /status'], 'eventsCursor' | 'eventsHasMore'> & {
   run: RunSummary
   nodes: RunNode[]
   events: RunEvent[]
-  eventsCursor: string | null
-  eventsHasMore: boolean
 }
 
 const optionalString = (value: unknown) => value === undefined || typeof value === 'string'
@@ -51,7 +52,7 @@ function runEvent(value: unknown, runId: string): value is RunEvent {
 export function parseRunStatusSnapshot(value: unknown, runId: string): RunStatusSnapshot | null {
   if (!isRecord(value) || !runSummary(value.run) || value.run.id !== runId
     || !Array.isArray(value.nodes) || !value.nodes.every(node => runNode(node, runId))
-    || !Array.isArray(value.events) || !value.events.every(event => runEvent(event, runId))
+    || !Array.isArray(value.events) || value.events.length > 500 || !value.events.every(event => runEvent(event, runId))
     || typeof value.eventsHasMore !== 'boolean'
     || !(value.eventsCursor === null || typeof value.eventsCursor === 'string')
     || (value.eventsHasMore ? !nonempty(value.eventsCursor) : value.eventsCursor !== null)) return null

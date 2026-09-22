@@ -4,21 +4,9 @@ package httpapi
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
-
-	"github.com/johnny4young/janusly/internal/contract"
 )
-
-func manifestResponse(t *testing.T, method, path string) contract.Schema {
-	t.Helper()
-	for _, route := range contract.Routes {
-		if route.Method == method && route.Path == path {
-			return route.Response
-		}
-	}
-	t.Fatalf("manifest has no %s %s", method, path)
-	return nil
-}
 
 // The manifest is what the TypeScript client is generated from. These two
 // endpoints were described as shapes the handlers never emitted; the served
@@ -49,6 +37,46 @@ func TestDlqClustersAndRecoveryMetricsMatchManifest(t *testing.T) {
 			if _, described := properties[key]; !described {
 				t.Fatalf("%s: response emits %q which the manifest does not describe", path, key)
 			}
+		}
+	}
+}
+
+func TestRunStatusPaginationMatchesManifestAndLegacyWire(t *testing.T) {
+	h := newAPIHarness(t)
+	started := h.call("POST", "/v1/start", map[string]any{"workflow": makeLinearWorkflow("wf-" + h.org)}, "")
+	if started.status != http.StatusOK {
+		t.Fatalf("start: %v", started.body)
+	}
+	runID := started.body["data"].(map[string]any)["runId"].(string)
+	h.waitRun(runID, "succeeded")
+	for _, path := range []string{"/v1/run", "/v1/status", "/run", "/status"} {
+		res := h.call("GET", path+"?runId="+runID+"&eventsLimit=1", nil, "")
+		if res.status != http.StatusOK {
+			t.Fatalf("%s: %v", path, res.body)
+		}
+		data := res.body
+		if wrapped, ok := data["data"].(map[string]any); ok {
+			data = wrapped
+		}
+		requireManifestData(t, "/v1/status", data)
+		if data["eventsHasMore"] != true || len(data["events"].([]any)) != 1 {
+			t.Fatalf("expected bounded page with more history: %v", data)
+		}
+		cursor, ok := data["eventsCursor"].(string)
+		if !ok || cursor == "" {
+			t.Fatal("missing continuation cursor")
+		}
+		older := h.call("GET", path+"?runId="+runID+"&eventsLimit=1&eventsCursor="+url.QueryEscape(cursor), nil, "")
+		if older.status != http.StatusOK {
+			t.Fatalf("older: %v", older.body)
+		}
+		olderData := older.body
+		if wrapped, ok := olderData["data"].(map[string]any); ok {
+			olderData = wrapped
+		}
+		requireManifestData(t, "/v1/status", olderData)
+		if olderData["events"].([]any)[0].(map[string]any)["id"] == data["events"].([]any)[0].(map[string]any)["id"] {
+			t.Fatal("cursor returned the same event")
 		}
 	}
 }

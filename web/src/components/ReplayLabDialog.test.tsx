@@ -31,12 +31,12 @@ const replayResponse = { runId: 'replay-run-id' }
 const succeededRun = {
   run: { id: 'replay-run-id', status: 'succeeded' },
   nodes: [],
-  events: [],
+  events: [], eventsCursor: null, eventsHasMore: false,
 }
 const failedRun = {
   run: { id: 'replay-run-id', status: 'failed' },
   nodes: [],
-  events: [],
+  events: [], eventsCursor: null, eventsHasMore: false,
 }
 const emptyComparison = {
   baseRun: { id: 'src-run-id', status: 'failed', replayMode: null, parentRunId: null, createdAt: null },
@@ -45,6 +45,14 @@ const emptyComparison = {
 }
 
 describe('<ReplayLabDialog />', () => {
+  it.each([{}, { ...succeededRun, run: { id: 'other-run', status: 'succeeded' } }])('never compares an invalid replay snapshot: %j', async payload => {
+    vi.mocked(api).mockResolvedValueOnce(replayResponse).mockResolvedValueOnce(payload)
+    render(<ReplayLabDialog sourceRun={sourceRun} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByTestId('replay-lab-start'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('unreadable response'))
+    expect(vi.mocked(api).mock.calls.some(([path]) => path.startsWith('/runs/compare'))).toBe(false)
+  })
+
   beforeEach(() => {
     vi.mocked(api).mockReset()
     vi.useRealTimers()

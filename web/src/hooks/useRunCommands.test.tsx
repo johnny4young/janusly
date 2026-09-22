@@ -122,3 +122,28 @@ describe('useRunCommands workflow version authority', () => {
     expect(body.workflow).toMatchObject({ id: 'workflow-1', name: 'Edited draft' })
   })
 })
+
+describe('useRunCommands status projection boundary', () => {
+  it.each([{}, { run: { id: 'wrong', status: 'succeeded' }, nodes: [], events: [], eventsCursor: null, eventsHasMore: false }])('preserves the selected run on malformed history: %j', async payload => {
+    useWorkflowStore.setState({ runId: 'kept', runNodes: [{ nodeId: 'work', status: 'running' }] })
+    vi.mocked(api).mockResolvedValue(payload)
+    const opts = options()
+    const { result } = renderHook(() => useRunCommands(opts, { validateWorkflow: vi.fn(async () => true) }))
+    await act(async () => { await result.current.openRun('requested') })
+    expect(useWorkflowStore.getState().runId).toBe('kept')
+    expect(useWorkflowStore.getState().runNodes).toEqual([{ nodeId: 'work', status: 'running' }])
+    expect(opts.projectRunSummary).not.toHaveBeenCalled()
+    expect(useWorkflowStore.getState().toasts).toHaveLength(1)
+  })
+
+  it('does not consume the older-events cursor after an invalid page', async () => {
+    const events = [{ id: 'kept', type: 'node.running' }]
+    useWorkflowStore.setState({ runId: 'kept', events, eventsCursor: 'older', eventsHasMore: true })
+    vi.mocked(api).mockResolvedValue({})
+    const { result } = renderHook(() => useRunCommands(options(), { validateWorkflow: vi.fn(async () => true) }))
+    await act(async () => { await result.current.loadOlderEvents() })
+    expect(useWorkflowStore.getState().events).toEqual(events)
+    expect(useWorkflowStore.getState().eventsCursor).toBe('older')
+    expect(useWorkflowStore.getState().eventsHasMore).toBe(true)
+  })
+})

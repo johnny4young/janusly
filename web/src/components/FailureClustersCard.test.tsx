@@ -234,7 +234,7 @@ describe('<FailureClustersCard />', () => {
       }
       if (path === '/dlq/validate-fix') return { runId: 'validation-cluster' }
       if (path.startsWith('/run?runId=validation-cluster')) {
-        return { run: { id: 'validation-cluster', status: 'succeeded' }, nodes: [{ nodeId: 'fetch', status: 'succeeded' }] }
+        return { run: { id: 'validation-cluster', status: 'succeeded' }, nodes: [{ nodeId: 'fetch', status: 'succeeded' }], events: [], eventsCursor: null, eventsHasMore: false }
       }
       if (path === '/workflows/save') return { workflowId: 'wf-recovery', versionId: 'v2', version: 2 }
       if (path === '/dlq/cluster-apply') return { replayed: 2, failed: 0, errors: [] }

@@ -558,11 +558,51 @@ export interface ApiResponses {
   }
   /** One run with nodes and paginated events */
   "GET /run": {
-    "events"?: Record<string, unknown>[]
-    "eventsCursor"?: string | null
-    "eventsHasMore"?: boolean
-    "nodes"?: Record<string, unknown>[]
-    "run"?: Record<string, unknown>
+    "events": ({
+      "createdAt": string | null
+      "holdUntil": string | null
+      "id": string
+      "nodeId": string | null
+      "payload": unknown
+      "runId": string
+      "type": string
+    })[]
+    "eventsCursor": string | null
+    "eventsHasMore": boolean
+    "nodes": ({
+      "attempts": number | null
+      "errorJson": unknown
+      "finishedAt": string | null
+      "id": string
+      "nodeId": string
+      "runId": string
+      "startedAt": string | null
+      "stateJson": unknown
+      "status": "pending" | "queued" | "running" | "waiting" | "succeeded" | "failed" | "skipped" | "cancelled"
+    })[]
+    "run": {
+      "createdAt": string | null
+      "createdBy": string | null
+      "id": string
+      "inputJson": unknown
+      "orgId": string
+      "outcomeStatus": null | "semantic_violation" | "semantic_quarantined" | "semantic_recovering" | "semantic_recovered" | "semantic_accepted_loss"
+      "outputJson": unknown
+      "parentLinkKind": string | null
+      "parentNodeId": string | null
+      "parentNotificationAfter": string | null
+      "parentRunId": string | null
+      "recoveryPlaybookAppliedRecordedAt": string | null
+      "recoveryPlaybookValidationRecordedAt": string | null
+      "replayMode": string | null
+      "semanticViolationCount": number
+      "status": "created" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "timed_out"
+      "traceId": string | null
+      "validationEvidenceLevel": null | "static" | "writes_skipped" | "provider_simulated" | "live_canary"
+      "workflowRolloutId": string | null
+      "workflowRolloutVariant": string | null
+      "workflowVersionId": string
+    }
   }
   /** Bounded per-run AI and memory usage */
   "GET /run/usage": {
@@ -581,11 +621,51 @@ export interface ApiResponses {
   }
   /** Alias of /v1/run */
   "GET /status": {
-    "events"?: Record<string, unknown>[]
-    "eventsCursor"?: string | null
-    "eventsHasMore"?: boolean
-    "nodes"?: Record<string, unknown>[]
-    "run"?: Record<string, unknown>
+    "events": ({
+      "createdAt": string | null
+      "holdUntil": string | null
+      "id": string
+      "nodeId": string | null
+      "payload": unknown
+      "runId": string
+      "type": string
+    })[]
+    "eventsCursor": string | null
+    "eventsHasMore": boolean
+    "nodes": ({
+      "attempts": number | null
+      "errorJson": unknown
+      "finishedAt": string | null
+      "id": string
+      "nodeId": string
+      "runId": string
+      "startedAt": string | null
+      "stateJson": unknown
+      "status": "pending" | "queued" | "running" | "waiting" | "succeeded" | "failed" | "skipped" | "cancelled"
+    })[]
+    "run": {
+      "createdAt": string | null
+      "createdBy": string | null
+      "id": string
+      "inputJson": unknown
+      "orgId": string
+      "outcomeStatus": null | "semantic_violation" | "semantic_quarantined" | "semantic_recovering" | "semantic_recovered" | "semantic_accepted_loss"
+      "outputJson": unknown
+      "parentLinkKind": string | null
+      "parentNodeId": string | null
+      "parentNotificationAfter": string | null
+      "parentRunId": string | null
+      "recoveryPlaybookAppliedRecordedAt": string | null
+      "recoveryPlaybookValidationRecordedAt": string | null
+      "replayMode": string | null
+      "semanticViolationCount": number
+      "status": "created" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "timed_out"
+      "traceId": string | null
+      "validationEvidenceLevel": null | "static" | "writes_skipped" | "provider_simulated" | "live_canary"
+      "workflowRolloutId": string | null
+      "workflowRolloutVariant": string | null
+      "workflowVersionId": string
+    }
   }
   /** Built-in workflow authoring templates */
   "GET /templates": Record<string, unknown>[]

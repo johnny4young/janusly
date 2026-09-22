@@ -24,6 +24,8 @@ import { useAliveRef } from '../hooks/useAliveRef'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, Play, RefreshCcw, X } from 'lucide-react'
 import { api, contractApi } from '../api'
+import { parseRunStatusSnapshot } from '../lib/run-status-contract'
+import { isTerminalRunStatus } from '../lib/status'
 import { useWorkflowStore } from '../store'
 import { RunComparisonView, type RunComparisonPayload } from './RunComparisonView'
 import { useT } from '../i18n'
@@ -45,14 +47,8 @@ type Step =
   | { kind: 'done'; replayRunId: string; replayStatus: string; comparison: RunComparisonPayload }
   | { kind: 'error'; message: string }
 
-const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timed_out'])
 const POLL_INTERVAL_MS = 1500
 
-type RunStatusPayload = {
-  run?: { status?: string }
-  nodes?: unknown
-  events?: unknown
-}
 
 export function ReplayLabDialog({
   sourceRun,
@@ -94,11 +90,12 @@ export function ReplayLabDialog({
 
     const tick = async () => {
       try {
-        const result = await contractApi('GET /run', `/run?runId=${encodeURIComponent(replayingRunId)}`, undefined) as unknown as RunStatusPayload
+        const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(replayingRunId)}`, undefined)
         if (cancelled || !aliveRef.current) return
-        const status = result.run?.status
-        if (!status) return
-        if (!TERMINAL_STATUSES.has(status)) {
+        const result = parseRunStatusSnapshot(payload, replayingRunId)
+        if (!result) throw new Error(t('api.error.malformedResponse'))
+        const status = result.run.status
+        if (!isTerminalRunStatus(status)) {
           // Update the visible status so the operator sees "running →
           // succeeded" without waiting for the terminal flip.
           setStep((prev) => prev.kind === 'replaying'
@@ -138,7 +135,7 @@ export function ReplayLabDialog({
       cancelled = true
       window.clearInterval(handle)
     }
-  }, [replayingRunId, sourceRunId, bumpPlatformVersion])
+  }, [replayingRunId, sourceRunId, bumpPlatformVersion, t])
 
   const startReplay = async () => {
     setStep({ kind: 'starting' })

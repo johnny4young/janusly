@@ -177,14 +177,6 @@ var workflowProposalResponse = obj(map[string]any{
 	}, "workflow", "intentContract", "recoveryContract", "qualification", "assumptions", "risks", "readiness", "diff", "applicable"),
 }, "mode", "brief", "clarifyingQuestions", "bindings", "proposal")
 
-var runView = obj(map[string]any{
-	"run":           map[string]any{"type": "object"},
-	"nodes":         arr(map[string]any{"type": "object"}),
-	"events":        arr(map[string]any{"type": "object"}),
-	"eventsCursor":  map[string]any{"type": []any{"string", "null"}},
-	"eventsHasMore": boolT(),
-})
-
 var recoveryCase = obj(map[string]any{
 	"id": str(), "orgId": str(), "runId": str(),
 	"workflowId":        map[string]any{"type": []any{"string", "null"}},

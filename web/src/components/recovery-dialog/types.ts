@@ -186,8 +186,3 @@ export type Step =
       playbookUsePending?: boolean
     }
   | { kind: 'error'; message: string }
-
-export type RunStatusPayload = {
-  run?: { status?: string }
-  nodes?: Array<{ nodeId?: string; status?: string; errorJson?: unknown }>
-}
