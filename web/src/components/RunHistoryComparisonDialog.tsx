@@ -15,7 +15,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, GitCompareArrows, RefreshCcw, X } from 'lucide-react'
-import { api, contractApi } from '../api'
+import { api } from '../api'
+import { readRunSummaryPage } from '../lib/list-contract'
 import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, useT } from '../i18n'
 import type { RunSummary } from '../types'
@@ -65,9 +66,9 @@ export function RunHistoryComparisonDialog({
           before,
           limit: '1',
         })
-        const prior = await contractApi('GET /runs', `/runs?${params.toString()}`, undefined, { signal: controller.signal })
+        const prior = await readRunSummaryPage(`/runs?${params.toString()}`, controller.signal)
         if (controller.signal.aborted) return
-        const baseline = Array.isArray(prior) ? prior[0] as RunSummary | undefined : undefined
+        const baseline = prior[0]
         if (!baseline) {
           setState({ kind: 'missing' })
           return

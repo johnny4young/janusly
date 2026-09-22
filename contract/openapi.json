@@ -4228,8 +4228,124 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "createdAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "createdBy": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "hasWaitingNodes": {
+                                "type": "boolean"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "orgId": {
+                                "type": "string"
+                              },
+                              "outcomeStatus": {
+                                "enum": [
+                                  null,
+                                  "semantic_violation",
+                                  "semantic_quarantined",
+                                  "semantic_recovering",
+                                  "semantic_recovered",
+                                  "semantic_accepted_loss"
+                                ]
+                              },
+                              "outputJson": {},
+                              "parentNodeId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "parentRunId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "replayMode": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "semanticViolationCount": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "status": {
+                                "enum": [
+                                  "created",
+                                  "running",
+                                  "waiting",
+                                  "succeeded",
+                                  "failed",
+                                  "cancelled",
+                                  "timed_out"
+                                ],
+                                "type": "string"
+                              },
+                              "traceId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "validationEvidenceLevel": {
+                                "enum": [
+                                  null,
+                                  "static",
+                                  "writes_skipped",
+                                  "provider_simulated",
+                                  "live_canary"
+                                ]
+                              },
+                              "workflowId": {
+                                "type": "string"
+                              },
+                              "workflowName": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "workflowVersionId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "orgId",
+                              "workflowId",
+                              "workflowName",
+                              "workflowVersionId",
+                              "status",
+                              "hasWaitingNodes",
+                              "outcomeStatus",
+                              "semanticViolationCount",
+                              "outputJson",
+                              "parentRunId",
+                              "parentNodeId",
+                              "replayMode",
+                              "traceId",
+                              "validationEvidenceLevel",
+                              "createdBy",
+                              "createdAt"
+                            ],
                             "type": "object"
                           },
+                          "maxItems": 200,
                           "type": "array"
                         }
                       },
@@ -4873,6 +4989,47 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "category": {
+                                "type": "string"
+                              },
+                              "categoryCode": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "descriptionCode": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "nameCode": {
+                                "type": "string"
+                              },
+                              "requiredCredentials": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "workflow": {}
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "description",
+                              "category",
+                              "nameCode",
+                              "descriptionCode",
+                              "categoryCode",
+                              "workflow"
+                            ],
                             "type": "object"
                           },
                           "type": "array"
@@ -4916,6 +5073,73 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "description": {
+                                "type": "string"
+                              },
+                              "inputExample": {
+                                "additionalProperties": {},
+                                "type": "object"
+                              },
+                              "inputFields": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "kind": {
+                                      "enum": [
+                                        "string",
+                                        "number",
+                                        "integer",
+                                        "boolean",
+                                        "json",
+                                        "array",
+                                        "object",
+                                        "unknown"
+                                      ]
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "required": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "name",
+                                    "kind",
+                                    "required"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "optional": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "required": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "writeSide": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "description",
+                              "required",
+                              "writeSide",
+                              "inputFields"
+                            ],
                             "type": "object"
                           },
                           "type": "array"
@@ -5420,8 +5644,89 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "bufferedTriggerCount": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "createdAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "createdBy": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "deletedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "folder": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "lastRunStatus": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "orgId": {
+                                "type": "string"
+                              },
+                              "pausedReason": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "runCount": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "tags": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "orgId",
+                              "name",
+                              "createdBy",
+                              "createdAt",
+                              "lastRunStatus",
+                              "runCount",
+                              "bufferedTriggerCount",
+                              "status",
+                              "pausedReason",
+                              "tags",
+                              "folder",
+                              "deletedAt"
+                            ],
                             "type": "object"
                           },
+                          "maxItems": 200,
                           "type": "array"
                         }
                       },
@@ -5531,9 +5836,55 @@
                     {
                       "properties": {
                         "data": {
-                          "type": [
-                            "object",
-                            "null"
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "dagJson": {},
+                                "id": {
+                                  "type": "string"
+                                },
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "sloJson": {},
+                                "upstreamHealthSources": {},
+                                "version": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "workflowId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "workflowId",
+                                "version",
+                                "dagJson",
+                                "sloJson",
+                                "upstreamHealthSources",
+                                "createdBy",
+                                "createdAt"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
                           ]
                         }
                       },
@@ -6020,8 +6371,51 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "createdAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "createdBy": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "dagJson": {},
+                              "id": {
+                                "type": "string"
+                              },
+                              "orgId": {
+                                "type": "string"
+                              },
+                              "sloJson": {},
+                              "upstreamHealthSources": {},
+                              "version": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "workflowId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "orgId",
+                              "workflowId",
+                              "version",
+                              "dagJson",
+                              "sloJson",
+                              "upstreamHealthSources",
+                              "createdBy",
+                              "createdAt"
+                            ],
                             "type": "object"
                           },
+                          "maxItems": 200,
                           "type": "array"
                         }
                       },
@@ -6044,7 +6438,7 @@
             "description": "Error — the v1 error envelope"
           }
         },
-        "summary": "All versions of one workflow"
+        "summary": "Keyset-paginated versions of one workflow"
       }
     },
     "/workflows/versions/{versionId}": {

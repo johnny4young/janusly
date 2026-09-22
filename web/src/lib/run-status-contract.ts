@@ -19,7 +19,7 @@ const count = (value: unknown) => typeof value === 'number' && Number.isSafeInte
 const optionalCount = (value: unknown) => value === undefined || count(value)
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
 
-function runSummary(value: unknown): value is RunSummary {
+export function isRunSummary(value: unknown): value is RunSummary {
   if (!isRecord(value) || !nonempty(value.id) || (!isOpenRunStatus(value.status) && !isTerminalRunStatus(value.status))) return false
   return ['orgId', 'workflowId', 'workflowVersionId'].every(key => optionalString(value[key]))
     && ['workflowName', 'createdBy', 'createdAt', 'traceId', 'replayMode'].every(key => nullableString(value[key]))
@@ -50,7 +50,7 @@ function runEvent(value: unknown, runId: string): value is RunEvent {
 // syntactically valid JSON value (including {}) is not a status snapshot.
 // Unknown additive fields remain compatible; malformed known fields do not.
 export function parseRunStatusSnapshot(value: unknown, runId: string): RunStatusSnapshot | null {
-  if (!isRecord(value) || !runSummary(value.run) || value.run.id !== runId
+  if (!isRecord(value) || !isRunSummary(value.run) || value.run.id !== runId
     || !Array.isArray(value.nodes) || !value.nodes.every(node => runNode(node, runId))
     || !Array.isArray(value.events) || value.events.length > 500 || !value.events.every(event => runEvent(event, runId))
     || typeof value.eventsHasMore !== 'boolean'

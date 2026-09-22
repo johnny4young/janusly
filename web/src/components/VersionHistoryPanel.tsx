@@ -14,7 +14,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
-import { api, contractApi } from '../api'
+import { api } from '../api'
+import { readWorkflowVersionPage, type WorkflowVersionRow } from '../lib/list-contract'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
@@ -30,7 +31,7 @@ import { Button } from './ui/Button'
 
 const VERSION_HISTORY_TAGS = [PLATFORM_TAG, 'workflows', 'versions', 'rollouts'] as const
 
-type VersionRow = { id: string; version: number; dagJson: WorkflowDefinition; createdAt?: string }
+type VersionRow = WorkflowVersionRow
 
 /**
  * Improvement suggestion as the API returns it. Mirrors the helper's
@@ -74,11 +75,6 @@ type ImprovementState =
 // The history is a keyset page, newest first; the next page starts below
 // the oldest version already shown.
 const VERSIONS_PAGE_SIZE = 50
-
-function versionsPagePath(workflowId: string, beforeVersion?: number): string {
-  const cursor = beforeVersion === undefined ? '' : `&beforeVersion=${beforeVersion}`
-  return `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}&limit=${VERSIONS_PAGE_SIZE}${cursor}`
-}
 
 const APPROACH_KEYS: Record<string, string> = {
   add_retry: 'versionHistory.approach.add_retry',
@@ -150,9 +146,8 @@ export function VersionHistoryPanel() {
         return
       }
       try {
-        const data = await contractApi('GET /workflows/versions', versionsPagePath(currentWorkflowId), undefined)
+        const rows = await readWorkflowVersionPage(currentWorkflowId, { limit: VERSIONS_PAGE_SIZE })
         if (cancelled) return
-        const rows = Array.isArray(data) ? (data as VersionRow[]) : []
         setVersions(rows)
         setHasMoreVersions(rows.length >= VERSIONS_PAGE_SIZE)
         setSelectedIds((prev) => prev.filter((id) => rows.some((version) => version.id === id)))
@@ -221,8 +216,7 @@ export function VersionHistoryPanel() {
     const oldest = versions[versions.length - 1].version
     setLoadingMore(true)
     try {
-      const data = await contractApi('GET /workflows/versions', versionsPagePath(currentWorkflowId, oldest), undefined)
-      const rows = Array.isArray(data) ? (data as VersionRow[]) : []
+      const rows = await readWorkflowVersionPage(currentWorkflowId, { limit: VERSIONS_PAGE_SIZE, beforeVersion: oldest })
       setVersions((prev) => [...prev, ...rows.filter((row) => !prev.some((known) => known.id === row.id))])
       setHasMoreVersions(rows.length >= VERSIONS_PAGE_SIZE)
     } catch (error) {

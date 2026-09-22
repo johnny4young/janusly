@@ -30,7 +30,7 @@ function makeWorkflow(url: string): WorkflowDefinition {
 }
 
 function mockVersionHistoryApi(
-  versionsByWorkflow: Record<string, Array<{ id: string; version: number; dagJson: WorkflowDefinition }>>,
+  versionsByWorkflow: Record<string, Array<{ id: string; version: number; workflowId: string; createdAt: null; dagJson: WorkflowDefinition }>>,
 ) {
   vi.mocked(api).mockImplementation(async (path) => {
     if (path.startsWith('/workflows/versions')) {
@@ -82,8 +82,8 @@ describe('<VersionHistoryPanel />', () => {
   it('renders a structural diff after selecting two versions in compare mode', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
       ],
     })
 
@@ -102,7 +102,7 @@ describe('<VersionHistoryPanel />', () => {
   it('loads older versions below the oldest row shown', async () => {
     const page = (from: number, count: number) =>
       Array.from({ length: count }, (_, index) => ({
-        id: `v${from - index}`, version: from - index, dagJson: makeWorkflow(`https://example.test/${from - index}`),
+        workflowId: 'wf_compare', createdAt: null, id: `v${from - index}`, version: from - index, dagJson: makeWorkflow(`https://example.test/${from - index}`),
       }))
     vi.mocked(api).mockImplementation(async (path) => {
       const url = new URL(path, 'http://localhost')
@@ -120,6 +120,35 @@ describe('<VersionHistoryPanel />', () => {
     await screen.findByText('v8')
     expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'))
     // A short page means the history is exhausted.
+    expect(screen.queryByTestId('version-history-load-more')).toBeNull()
+  })
+
+  it('does not hydrate or enable comparison from a malformed version page', async () => {
+    vi.mocked(api).mockResolvedValue([{ workflowId: 'other', createdAt: null, id: 'foreign', version: 2, dagJson: makeWorkflow('https://foreign.test') }])
+    render(<VersionHistoryPanel />)
+    await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
+    expect(screen.queryByRole('button', { name: /v2/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Compare/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Roll back to/i })).toBeNull()
+  })
+
+  it('retains loaded versions and the cursor after rejecting an invalid older page', async () => {
+    const firstPage = Array.from({ length: 50 }, (_, i) => ({ workflowId: 'wf_compare', createdAt: null, id: `v${60 - i}`, version: 60 - i, dagJson: makeWorkflow('https://example.test') }))
+    vi.mocked(api).mockResolvedValueOnce(firstPage).mockResolvedValueOnce([
+      { ...firstPage[0], id: 'bad-cursor', version: 11 },
+    ]).mockResolvedValueOnce([{ ...firstPage[0], id: 'v10', version: 10 }])
+    render(<VersionHistoryPanel />)
+    await screen.findByText('v60')
+    fireEvent.click(screen.getByTestId('version-history-load-more'))
+    await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
+    expect(screen.getByText('v60')).toBeInTheDocument()
+    expect(screen.getByText('v11')).toBeInTheDocument()
+    expect(screen.queryByText('v10')).toBeNull()
+    const retry = screen.getByTestId('version-history-load-more')
+    await waitFor(() => expect(retry).toBeEnabled())
+    fireEvent.click(retry)
+    await screen.findByText('v10')
+    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'))
     expect(screen.queryByTestId('version-history-load-more')).toBeNull()
   })
 
@@ -141,7 +170,7 @@ describe('<VersionHistoryPanel />', () => {
   it('hides the Rollback button when only one version exists', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -154,9 +183,9 @@ describe('<VersionHistoryPanel />', () => {
   it('shows the Rollback button on older versions but not the latest', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -171,8 +200,8 @@ describe('<VersionHistoryPanel />', () => {
   it('hides Rollback buttons for viewers', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
     setPermissions(['workflows.read'], 'viewer', 'viewer')
@@ -188,8 +217,8 @@ describe('<VersionHistoryPanel />', () => {
   it('does not infer write access from an admin-rank custom role', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
     setPermissions(['workflows.read'], 'billing-admin', 'admin')
@@ -203,8 +232,8 @@ describe('<VersionHistoryPanel />', () => {
   it('honors an explicit write grant on a viewer-rank custom role', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
     setPermissions(['workflows.read', 'workflows.write'], 'workflow-operator', 'viewer')
@@ -217,8 +246,8 @@ describe('<VersionHistoryPanel />', () => {
   it('hides Rollback buttons in compare mode (the row checkbox owns the click)', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -233,8 +262,8 @@ describe('<VersionHistoryPanel />', () => {
   it('opens the Rollback dialog with current and target labels when Rollback is clicked', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -251,8 +280,8 @@ describe('<VersionHistoryPanel />', () => {
   it('exposes the Suggest improvement button only in compare mode with two versions selected and editor role', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -276,8 +305,8 @@ describe('<VersionHistoryPanel />', () => {
   it('hides the Suggest improvement button for viewers', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
     setPermissions(['workflows.read'], 'viewer', 'viewer')
@@ -323,8 +352,8 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') return aiResponse
@@ -355,8 +384,8 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') {
@@ -393,8 +422,8 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') {
@@ -426,9 +455,9 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') {
@@ -471,9 +500,9 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') {
@@ -517,11 +546,11 @@ describe('<VersionHistoryPanel />', () => {
   it('clears compare state when the active workflow changes', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'old_1', version: 7, dagJson: makeWorkflow('https://old.a') },
-        { id: 'old_2', version: 8, dagJson: makeWorkflow('https://old.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'old_1', version: 7, dagJson: makeWorkflow('https://old.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'old_2', version: 8, dagJson: makeWorkflow('https://old.b') },
       ],
       wf_new: [
-        { id: 'new_1', version: 1, dagJson: makeWorkflow('https://new.a') },
+        { workflowId: 'wf_new', createdAt: null, id: 'new_1', version: 1, dagJson: { ...makeWorkflow('https://new.a'), id: 'wf_new' } },
       ],
     })
 

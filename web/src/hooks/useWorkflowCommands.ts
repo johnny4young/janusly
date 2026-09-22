@@ -231,19 +231,14 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     if (!authority) return false
     try {
       const [data, { isWorkflowDefinition }] = await Promise.all([
-        contractApi('GET /workflows/latest', `/workflows/latest?workflowId=${encodeURIComponent(id)}`, undefined) as unknown as Promise<{
-          id?: unknown
-          workflowId?: unknown
-          dagJson?: unknown
-          version?: unknown
-        }>,
+        contractApi('GET /workflows/latest', `/workflows/latest?workflowId=${encodeURIComponent(id)}`, undefined),
         loadAuthoringContract(),
       ])
       if (!canvasAuthorityMatches(authority)) {
         addToast(t('toasts.workflowOpenFailed'), 'info')
         return false
       }
-      if (!isWorkflowDefinition(data.dagJson) || data.dagJson.id !== id
+      if (!data || !isWorkflowDefinition(data.dagJson) || data.dagJson.id !== id
         || !workflowVersionIdentity(data, id)) {
         throw new Error(t('apiErrors.workflows_version_malformed'))
       }

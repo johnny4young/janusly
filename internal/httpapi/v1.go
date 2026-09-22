@@ -345,11 +345,11 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/context", s.identity(s.authContext))
 	// The AI Studio's tool catalog; the web calls it through /v1.
 	mux.HandleFunc("GET /v1/tools", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeV1Data(w, rc.id, executors.SharedToolRegistry().Catalog())
+		writeV1Data(w, rc.id, executors.SharedToolRegistry().CatalogEntries())
 	}))
 	mux.HandleFunc("GET /tools", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(executors.SharedToolRegistry().Catalog())
+		_ = json.NewEncoder(w).Encode(executors.SharedToolRegistry().CatalogEntries())
 	}))
 	s.unversionedRoutes(mux)
 	s.mountCampaignRoutes(mux)

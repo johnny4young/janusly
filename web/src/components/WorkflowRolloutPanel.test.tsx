@@ -19,8 +19,8 @@ vi.mock('../api', () => {
 
 const initialState = useWorkflowStore.getState()
 const versions = [
-  { id: 'version-2', version: 2, dagJson: { nodes: [], edges: [] } },
-  { id: 'version-1', version: 1, dagJson: { nodes: [], edges: [] } },
+  { workflowId: 'workflow-1', createdAt: null, id: 'version-2', version: 2, dagJson: { nodes: [], edges: [] } },
+  { workflowId: 'workflow-1', createdAt: null, id: 'version-1', version: 1, dagJson: { nodes: [], edges: [] } },
 ]
 
 function activeRollout(overrides: Record<string, unknown> = {}) {
@@ -95,6 +95,19 @@ describe('<WorkflowRolloutPanel />', () => {
 
     expect(container).toBeEmptyDOMElement()
     expect(api).not.toHaveBeenCalled()
+  })
+
+  it('does not enable canary traffic from malformed version metadata', async () => {
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return versions.map(row => ({ ...row, workflowId: 'other' }))
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout: null }
+    })
+    render(<WorkflowRolloutPanel />)
+    await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
+    const start = screen.queryByRole('button', { name: 'Start canary' })
+    if (start) expect(start).toBeDisabled()
+    expect(vi.mocked(api).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false)
   })
 
   it('starts a bounded rollout from the previous version to latest', async () => {

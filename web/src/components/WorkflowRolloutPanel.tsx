@@ -9,7 +9,8 @@
 import { GitBranch } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 
-import { api, contractApi } from '../api'
+import { api } from '../api'
+import { readWorkflowVersionPage } from '../lib/list-contract'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { useConfirm } from './ConfirmDialog'
@@ -73,18 +74,6 @@ function boundedInteger(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER):
   return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
     ? value
     : null
-}
-
-function parseVersions(payload: unknown): VersionRow[] {
-  if (!Array.isArray(payload)) return []
-  const rows: VersionRow[] = []
-  for (const item of payload) {
-    const record = asRecord(item)
-    const id = typeof record?.id === 'string' ? record.id : null
-    const version = boundedInteger(record?.version, 1)
-    if (id && version !== null) rows.push({ id, version })
-  }
-  return rows.sort((left, right) => right.version - left.version)
 }
 
 function parseRollout(payload: unknown): WorkflowRollout | null {
@@ -152,11 +141,11 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
     let cancelled = false
     setLoading(true)
     Promise.all([
-      contractApi('GET /workflows/versions', `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}`, undefined),
+      readWorkflowVersionPage(workflowId),
       api(`/workflows/${encodeURIComponent(workflowId)}/rollout`),
     ]).then(([versionsPayload, rolloutPayload]) => {
       if (cancelled) return
-      const nextVersions = parseVersions(versionsPayload)
+      const nextVersions = [...versionsPayload].sort((left, right) => right.version - left.version)
       setVersions(nextVersions)
       setRollout(parseRollout(rolloutPayload))
       setDraft(current => ({

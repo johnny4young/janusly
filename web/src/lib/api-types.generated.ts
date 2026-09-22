@@ -57,7 +57,7 @@ export interface ApiRequests {
   "GET /workflows/latest": undefined
   /** Validate a cron expression and preview its next fires */
   "GET /workflows/schedule-preview": undefined
-  /** All versions of one workflow */
+  /** Keyset-paginated versions of one workflow */
   "GET /workflows/versions": undefined
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": undefined
@@ -681,7 +681,25 @@ export interface ApiResponses {
     "truncated"?: boolean
   }
   /** Keyset-paginated run list */
-  "GET /runs": Record<string, unknown>[]
+  "GET /runs": ({
+    "createdAt": string | null
+    "createdBy": string | null
+    "hasWaitingNodes": boolean
+    "id": string
+    "orgId": string
+    "outcomeStatus": null | "semantic_violation" | "semantic_quarantined" | "semantic_recovering" | "semantic_recovered" | "semantic_accepted_loss"
+    "outputJson": unknown
+    "parentNodeId": string | null
+    "parentRunId": string | null
+    "replayMode": string | null
+    "semanticViolationCount": number
+    "status": "created" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "timed_out"
+    "traceId": string | null
+    "validationEvidenceLevel": null | "static" | "writes_skipped" | "provider_simulated" | "live_canary"
+    "workflowId": string
+    "workflowName": string | null
+    "workflowVersionId": string
+  })[]
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": {
     "enabled": boolean
@@ -736,11 +754,47 @@ export interface ApiResponses {
     }
   }
   /** Built-in workflow authoring templates */
-  "GET /templates": Record<string, unknown>[]
+  "GET /templates": {
+    "category": string
+    "categoryCode": string
+    "description": string
+    "descriptionCode": string
+    "id": string
+    "name": string
+    "nameCode": string
+    "requiredCredentials"?: string[]
+    "workflow": unknown
+  }[]
   /** The AI Studio tool catalog */
-  "GET /tools": Record<string, unknown>[]
+  "GET /tools": ({
+    "description": string
+    "inputExample"?: Record<string, unknown>
+    "inputFields": ({
+      "kind": "string" | "number" | "integer" | "boolean" | "json" | "array" | "object" | "unknown"
+      "name": string
+      "required": boolean
+    })[]
+    "name": string
+    "optional"?: string[]
+    "required": string[]
+    "writeSide": boolean
+  })[]
   /** Keyset-paginated workflow list */
-  "GET /workflows": Record<string, unknown>[]
+  "GET /workflows": ({
+    "bufferedTriggerCount": number
+    "createdAt": string | null
+    "createdBy": string | null
+    "deletedAt": string | null
+    "folder": string | null
+    "id": string
+    "lastRunStatus": string | null
+    "name": string
+    "orgId": string
+    "pausedReason": string | null
+    "runCount": number
+    "status": string
+    "tags": string[]
+  })[]
   /** Workflow assurance health score */
   "GET /workflows/health": {
     "breakdown": Record<string, Record<string, unknown>>
@@ -750,14 +804,34 @@ export interface ApiResponses {
     "status": string
   }
   /** Latest version of one workflow (nullable) */
-  "GET /workflows/latest": Record<string, unknown> | null
+  "GET /workflows/latest": {
+    "createdAt": string | null
+    "createdBy": string | null
+    "dagJson": unknown
+    "id": string
+    "orgId": string
+    "sloJson": unknown
+    "upstreamHealthSources": unknown
+    "version": number
+    "workflowId": string
+  } | null
   /** Validate a cron expression and preview its next fires */
   "GET /workflows/schedule-preview": {
     "nextFires"?: string[]
     "valid"?: boolean
   }
-  /** All versions of one workflow */
-  "GET /workflows/versions": Record<string, unknown>[]
+  /** Keyset-paginated versions of one workflow */
+  "GET /workflows/versions": ({
+    "createdAt": string | null
+    "createdBy": string | null
+    "dagJson": unknown
+    "id": string
+    "orgId": string
+    "sloJson": unknown
+    "upstreamHealthSources": unknown
+    "version": number
+    "workflowId": string
+  })[]
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": {
     "dagJson": {
@@ -1167,7 +1241,7 @@ export interface ApiSuccessStatuses {
   "GET /workflows/latest": 200
   /** Validate a cron expression and preview its next fires */
   "GET /workflows/schedule-preview": 200
-  /** All versions of one workflow */
+  /** Keyset-paginated versions of one workflow */
   "GET /workflows/versions": 200
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": 200

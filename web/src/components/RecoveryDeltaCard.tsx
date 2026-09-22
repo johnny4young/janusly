@@ -27,10 +27,10 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, ArrowDownRight, ArrowUpRight, Minus, RotateCcw } from 'lucide-react'
-import { api, contractApi } from '../api'
+import { api } from '../api'
+import { readWorkflowVersionPage, type WorkflowVersionRow } from '../lib/list-contract'
 import { useWorkflowStore } from '../store'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
-import type { WorkflowDefinition } from '../types'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
@@ -80,7 +80,7 @@ type FetchState =
   | { kind: 'ready'; data: DeltaResponse }
   | { kind: 'error'; message: string }
 
-type RollbackVersion = { id: string; version: number; dagJson: WorkflowDefinition }
+type RollbackVersion = WorkflowVersionRow
 type RollbackState =
   | { kind: 'idle' }
   | { kind: 'fetching' }
@@ -129,21 +129,12 @@ export function RecoveryDeltaCard({
     setRollback({ kind: 'fetching' })
     try {
       const exact = (version: number) =>
-        contractApi('GET /workflows/versions', `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}&version=${version}`, undefined) as unknown as Promise<Array<RollbackVersion>>
+        readWorkflowVersionPage(workflowId, { version })
       const [currentRows, targetRows] = await Promise.all([exact(afterVersion), exact(priorVersionNumber)])
       const current = currentRows.find((v) => v.version === afterVersion)
       const target = targetRows.find((v) => v.version === priorVersionNumber)
       if (!current || !target) {
         setRollback({ kind: 'error', message: t('recoveryDelta.errorBothVersions') })
-        return
-      }
-      // Defense-in-depth: the `RollbackConfirmDialog` consumes the
-      // `dagJson` field of both versions to render the diff. If the
-      // /workflows/versions response shape ever drifts (e.g. column
-      // renamed) the soft cast above wouldn't catch it — guard here so
-      // the operator sees a usable error instead of a blank diff.
-      if (!current.dagJson || !target.dagJson) {
-        setRollback({ kind: 'error', message: t('recoveryDelta.errorIncomplete') })
         return
       }
       setRollback({ kind: 'open', current, target })

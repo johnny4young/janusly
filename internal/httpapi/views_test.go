@@ -85,9 +85,9 @@ func TestRunSummaryProjectsAssurancePosture(t *testing.T) {
 		SemanticViolationCount:  2,
 		ValidationEvidenceLevel: pgtype.Text{String: "provider_simulated", Valid: true},
 	})
-	if view.OutcomeStatus != "semantic_recovered" ||
+	if view.OutcomeStatus == nil || *view.OutcomeStatus != "semantic_recovered" ||
 		view.SemanticViolationCount != 2 ||
-		view.ValidationEvidenceLevel != "provider_simulated" {
+		view.ValidationEvidenceLevel == nil || *view.ValidationEvidenceLevel != "provider_simulated" {
 		t.Fatalf("run summary dropped assurance posture: %+v", view)
 	}
 }

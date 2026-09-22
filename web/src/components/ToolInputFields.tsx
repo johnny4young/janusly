@@ -10,6 +10,7 @@ import {
   applyToolInputDraft,
   formatToolInputDraft,
   isToolInputObject,
+  isJsonToolInputKind,
   parseToolInputDraft,
   type ParsedToolInputDraft,
   type ToolInputDraftError,
@@ -65,7 +66,7 @@ function ToolInputField({
     >
       {controlProps => (
         <>
-          {field.kind === 'json' || (field.kind === 'string' && MULTILINE_FIELDS.test(field.name)) ? (
+          {isJsonToolInputKind(field.kind) || (field.kind === 'string' && MULTILINE_FIELDS.test(field.name)) ? (
             <textarea
               {...controlProps}
               className="ui-config-code ui-config-code--short"

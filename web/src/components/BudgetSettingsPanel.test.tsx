@@ -33,7 +33,7 @@ function mockBudgetApi() {
         ],
       }
     }
-    if (path === '/workflows') return [{ id: 'wf_1', name: 'Refund triage' }]
+    if (path === '/workflows') return [{ id: 'wf_1', orgId: 'default', name: 'Refund triage' }]
     if (path.startsWith('/billing/budget?workflowId=wf_1')) {
       return {
         allowed: true,

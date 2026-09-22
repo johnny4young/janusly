@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +52,8 @@ func TestUnversionedRoutesMatchVersionedData(t *testing.T) {
 	h.waitRun(runID, "succeeded")
 
 	pairs := [][2]string{
+		{"/tools", "/v1/tools"},
+		{"/templates", "/v1/templates"},
 		{"/memory/consent-status", "/v1/memory/consent-status"},
 		{"/recovery/metrics?windowDays=30", "/v1/recovery/metrics?windowDays=30"},
 		{"/recovery/ledger", "/v1/recovery/ledger"},
@@ -73,6 +76,11 @@ func TestUnversionedRoutesMatchVersionedData(t *testing.T) {
 			t.Fatalf("%s omitted X-Request-Id", pair[1])
 		}
 		envelope := versioned.(map[string]any)
+		switch manifestPath := strings.SplitN(pair[1], "?", 2)[0]; manifestPath {
+		case "/v1/tools", "/v1/templates", "/v1/runs", "/v1/workflows", "/v1/workflows/versions", "/v1/workflows/latest":
+			requireManifestData(t, manifestPath, envelope["data"])
+			requireManifestData(t, manifestPath, unversioned)
+		}
 		if envelope["apiVersion"] != "v1" || !reflect.DeepEqual(envelope["data"], unversioned) {
 			t.Fatalf("wire drift for %s: unversioned=%v versioned=%v", pair[0], unversioned, versioned)
 		}

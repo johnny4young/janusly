@@ -176,3 +176,25 @@ was updated. Missing/foreign ids return `dlq_not_found` without a success audit.
 This is acceptance of loss, not verified recovery; the linked recovery item
 retains `accepted_loss`. The browser checks the affirmative receipt before
 showing success or refreshing projections.
+
+### List and catalog projections
+
+Runs, saved workflows and workflow versions have explicit row schemas and the
+existing 200-row ceiling. Version history remains newest-first keyset pagination;
+exact-version reads must return only that workflow and version. The latest-version
+read may return `null` when the workflow has no version. Nullable metadata keeps
+its explicit JSON nulls; DAGs and extension JSON are not redefined by the transport.
+
+Tools expose the typed registry catalog directly, including its `array`, `object`
+and `unknown` field kinds. The browser edits those kinds as JSON, without changing
+the public kind values. Runtime callbacks and accepted-type internals never enter
+the wire. Absent input examples remain omitted and explicit empty examples remain
+objects. The typed template envelope preserves the embedded workflows and absent
+versus empty credential requirements.
+
+Browser readers validate entire pages before updating a projection: malformed
+successful responses are errors, not empty lists or partially filtered success.
+They reject duplicate identities, invalid consumed fields and mismatched version
+ownership/cursors; authoring uses the existing workflow-definition guard. A failed
+bootstrap refresh retains previous lists and newer run-event patches. Version
+history does not advance its cursor when an older page is rejected.

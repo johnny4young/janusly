@@ -2034,7 +2034,6 @@
   "recoveryDelta.errorLoad": "Failed to load delta",
   "recoveryDelta.errorVersions": "Failed to fetch versions",
   "recoveryDelta.errorBothVersions": "Could not load both versions for rollback.",
-  "recoveryDelta.errorIncomplete": "Version data is incomplete for rollback.",
   "recoveryDelta.errorMessage": "Couldn't load delta — {{detail}}",
   "recoveryDelta.retry": "Retry",
   "recoveryDelta.skeletonLoading": "Loading delta against v{{version}}…",

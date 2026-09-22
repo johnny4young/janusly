@@ -507,6 +507,7 @@ func TestRunsKeysetCursorRoundTrip(t *testing.T) {
 			path += "&before=" + strings.ReplaceAll(cursor, "|", "%7C")
 		}
 		res := h.call("GET", path, nil, "")
+		requireManifestData(t, "/v1/runs", res.body["data"])
 		items, _ := res.body["data"].([]any)
 		if len(items) == 0 {
 			break

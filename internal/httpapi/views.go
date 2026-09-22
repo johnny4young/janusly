@@ -63,20 +63,20 @@ type RunSummaryView struct {
 	ID                      string          `json:"id"`
 	OrgID                   string          `json:"orgId"`
 	WorkflowID              string          `json:"workflowId"`
-	WorkflowName            any             `json:"workflowName"`
+	WorkflowName            *string         `json:"workflowName"`
 	WorkflowVersionID       string          `json:"workflowVersionId"`
 	Status                  string          `json:"status"`
 	HasWaitingNodes         bool            `json:"hasWaitingNodes"`
-	OutcomeStatus           any             `json:"outcomeStatus"`
+	OutcomeStatus           *string         `json:"outcomeStatus"`
 	SemanticViolationCount  int             `json:"semanticViolationCount"`
 	OutputJSON              json.RawMessage `json:"outputJson"`
-	ParentRunID             any             `json:"parentRunId"`
-	ParentNodeID            any             `json:"parentNodeId"`
-	ReplayMode              any             `json:"replayMode"`
-	TraceID                 any             `json:"traceId"`
-	ValidationEvidenceLevel any             `json:"validationEvidenceLevel"`
-	CreatedBy               any             `json:"createdBy"`
-	CreatedAt               any             `json:"createdAt"`
+	ParentRunID             *string         `json:"parentRunId"`
+	ParentNodeID            *string         `json:"parentNodeId"`
+	ReplayMode              *string         `json:"replayMode"`
+	TraceID                 *string         `json:"traceId"`
+	ValidationEvidenceLevel *string         `json:"validationEvidenceLevel"`
+	CreatedBy               *string         `json:"createdBy"`
+	CreatedAt               *string         `json:"createdAt"`
 }
 
 func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
@@ -85,13 +85,13 @@ func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
 		WorkflowID: row.WorkflowID, WorkflowName: textOrNullString(row.WorkflowName),
 		WorkflowVersionID: row.WorkflowVersionID, Status: row.Status,
 		HasWaitingNodes:        row.HasWaitingNodes,
-		OutcomeStatus:          textOrNull(row.OutcomeStatus),
+		OutcomeStatus:          nullableTextValue(row.OutcomeStatus),
 		SemanticViolationCount: int(row.SemanticViolationCount),
 		OutputJSON:             normalizedRaw(row.OutputJson),
-		ParentRunID:            textOrNull(row.ParentRunID), ParentNodeID: textOrNull(row.ParentNodeID),
-		ReplayMode: textOrNull(row.ReplayMode), TraceID: textOrNull(row.TraceID),
-		ValidationEvidenceLevel: textOrNull(row.ValidationEvidenceLevel),
-		CreatedBy:               textOrNull(row.CreatedBy), CreatedAt: timeOrNull(row.CreatedAt),
+		ParentRunID:            nullableTextValue(row.ParentRunID), ParentNodeID: nullableTextValue(row.ParentNodeID),
+		ReplayMode: nullableTextValue(row.ReplayMode), TraceID: nullableTextValue(row.TraceID),
+		ValidationEvidenceLevel: nullableTextValue(row.ValidationEvidenceLevel),
+		CreatedBy:               nullableTextValue(row.CreatedBy), CreatedAt: nullableTimeValue(row.CreatedAt),
 	}
 }
 
@@ -224,27 +224,27 @@ type WorkflowListItemView struct {
 	ID                   string   `json:"id"`
 	OrgID                string   `json:"orgId"`
 	Name                 string   `json:"name"`
-	CreatedBy            any      `json:"createdBy"`
-	CreatedAt            any      `json:"createdAt"`
-	LastRunStatus        any      `json:"lastRunStatus"`
-	RunCount             any      `json:"runCount"`
+	CreatedBy            *string  `json:"createdBy"`
+	CreatedAt            *string  `json:"createdAt"`
+	LastRunStatus        *string  `json:"lastRunStatus"`
+	RunCount             int32    `json:"runCount"`
 	BufferedTriggerCount int      `json:"bufferedTriggerCount"`
 	Status               string   `json:"status"`
-	PausedReason         any      `json:"pausedReason"`
+	PausedReason         *string  `json:"pausedReason"`
 	Tags                 []string `json:"tags"`
-	Folder               any      `json:"folder"`
-	DeletedAt            any      `json:"deletedAt"`
+	Folder               *string  `json:"folder"`
+	DeletedAt            *string  `json:"deletedAt"`
 }
 
 func newWorkflowListItemView(row store.ListWorkflowRowsRow) WorkflowListItemView {
 	return WorkflowListItemView{
 		ID: row.ID, OrgID: row.OrgID, Name: row.Name,
-		CreatedBy: textOrNull(row.CreatedBy), CreatedAt: timeOrNull(row.CreatedAt),
+		CreatedBy: nullableTextValue(row.CreatedBy), CreatedAt: nullableTimeValue(row.CreatedAt),
 		LastRunStatus: textOrNullString(row.LastRunStatus), RunCount: row.RunCount,
 		BufferedTriggerCount: int(row.BufferedTriggerCount),
-		Status:               row.Status, PausedReason: textOrNull(row.PausedReason),
-		Tags: decodeStringArray(row.Tags), Folder: textOrNull(row.Folder),
-		DeletedAt: timeOrNull(row.DeletedAt),
+		Status:               row.Status, PausedReason: nullableTextValue(row.PausedReason),
+		Tags: decodeStringArray(row.Tags), Folder: nullableTextValue(row.Folder),
+		DeletedAt: nullableTimeValue(row.DeletedAt),
 	}
 }
 
@@ -263,17 +263,17 @@ type VersionView struct {
 	WorkflowID            string          `json:"workflowId"`
 	Version               int32           `json:"version"`
 	DagJSON               json.RawMessage `json:"dagJson"`
-	SloJSON               any             `json:"sloJson"`
-	UpstreamHealthSources any             `json:"upstreamHealthSources"`
-	CreatedBy             any             `json:"createdBy"`
-	CreatedAt             any             `json:"createdAt"`
+	SloJSON               json.RawMessage `json:"sloJson"`
+	UpstreamHealthSources json.RawMessage `json:"upstreamHealthSources"`
+	CreatedBy             *string         `json:"createdBy"`
+	CreatedAt             *string         `json:"createdAt"`
 }
 
 func newVersionView(id, orgID, workflowID string, version int32, dagJSON json.RawMessage, createdBy pgtype.Text, createdAt *time.Time) VersionView {
 	return VersionView{
 		ID: id, OrgID: orgID, WorkflowID: workflowID, Version: version,
 		DagJSON:   normalizedRaw(dagJSON),
-		CreatedBy: textOrNull(createdBy), CreatedAt: timeOrNull(createdAt),
+		CreatedBy: nullableTextValue(createdBy), CreatedAt: nullableTimeValue(createdAt),
 	}
 }
 

@@ -123,3 +123,15 @@ extensible JSON payloads remain intentionally unconstrained.
 - Resolving a missing or foreign dead letter now returns an indistinguishable
   not-found response instead of a false success and audit. Owned resolutions
   remain acceptance of loss, with the same editor permission gate.
+
+### List contract and catalog compatibility
+
+- Explicit run, workflow, version, template and tool list contracts now generate
+  their browser wire types from the route manifest. Actual typed views, embedded
+  templates, tool registry and versioned/legacy HTTP responses are checked against
+  those schemas.
+- Shared page readers reject malformed or duplicate projections before updating
+  lists or enabling version actions; failed refreshes retain existing data and
+  version pagination cursors. Latest-version absence remains nullable.
+- Removed the duplicate map-based tool catalog projection. JSON editors recognize
+  the registry's array, object and unknown kinds and preserve literal quoting.

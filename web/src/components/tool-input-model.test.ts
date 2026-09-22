@@ -31,6 +31,16 @@ describe('tool-input-model', () => {
     })
   })
 
+  it.each(['array', 'object', 'unknown'] as const)('round-trips JSON drafts for the runtime %s kind', kind => {
+    const field = { name: 'value', kind, required: true }
+    for (const value of [[1, 'two'], { ready: true }, 'a literal', null]) {
+      expect(parseToolInputDraft(field, formatToolInputDraft(value, kind))).toEqual({ ok: true, value })
+    }
+    const template = '{{context.input.value}}'
+    expect(formatToolInputDraft(template, kind)).toBe(template)
+    expect(parseToolInputDraft(field, template)).toEqual({ ok: true, value: template })
+  })
+
   it('preserves complete template expressions for every runtime-resolved kind', () => {
     for (const field of fields) {
       expect(parseToolInputDraft(field, '{{context.input.value}}')).toEqual({

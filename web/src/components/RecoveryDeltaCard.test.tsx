@@ -210,11 +210,11 @@ describe('<RecoveryDeltaCard />', () => {
       before: { score: 81, status: 'healthy', signals: baseSignals({ totalRuns: 8 }) },
     }))
     const versionsResponse = [
-      { id: 'v-after', version: 2, dagJson: { dslVersion: '1.0', nodes: [], edges: [] } },
-      { id: 'v-before', version: 1, dagJson: { dslVersion: '1.0', nodes: [], edges: [] } },
+      { workflowId: 'wf-1', createdAt: null, id: 'v-after', version: 2, dagJson: { dslVersion: '1.0', nodes: [], edges: [] } },
+      { workflowId: 'wf-1', createdAt: null, id: 'v-before', version: 1, dagJson: { dslVersion: '1.0', nodes: [], edges: [] } },
     ]
     // The card pins each version with its own exact-version read.
-    vi.mocked(api).mockResolvedValueOnce(versionsResponse).mockResolvedValueOnce(versionsResponse)
+    vi.mocked(api).mockResolvedValueOnce([versionsResponse[0]]).mockResolvedValueOnce([versionsResponse[1]])
 
     render(<RecoveryDeltaCard {...baseProps} />)
     await waitFor(() => screen.getByRole('button', { name: /Roll back to v1/i }))

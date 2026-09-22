@@ -14,16 +14,16 @@ import (
 // entry needs for the EN/ES gallery.
 func TestTemplateCatalogWorkflowsValidate(t *testing.T) {
 	for _, template := range templateCatalog {
-		id, _ := template["id"].(string)
+		id := template.ID
 		if id == "" {
 			t.Fatal("template without id")
 		}
-		for _, field := range []string{"nameCode", "descriptionCode", "categoryCode"} {
-			if value, _ := template[field].(string); value == "" {
+		for field, value := range map[string]string{"nameCode": template.NameCode, "descriptionCode": template.DescriptionCode, "categoryCode": template.CategoryCode} {
+			if value == "" {
 				t.Errorf("%s: missing %s", id, field)
 			}
 		}
-		raw, err := json.Marshal(template["workflow"])
+		raw, err := json.Marshal(template.Workflow)
 		if err != nil {
 			t.Fatalf("%s: marshal workflow: %v", id, err)
 		}
