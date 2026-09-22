@@ -19,6 +19,7 @@ import (
 	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/tools"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -28,9 +29,10 @@ import (
 
 // Engine owns run lifecycle operations over the shared schema.
 type Engine struct {
-	reaper config.Reaper
-	pool   *pgxpool.Pool
-	newID  func() string
+	dbPools *tools.DBPools
+	reaper  config.Reaper
+	pool    *pgxpool.Pool
+	newID   func() string
 	// wrapTx lets tests interpose on the transaction's statements to prove
 	// atomicity; production keeps the identity wrapper.
 	wrapTx func(store.DBTX) store.DBTX
@@ -46,6 +48,12 @@ type Option func(*Engine)
 // is copied; later environment changes cannot alter a running engine or drill.
 func WithReaper(settings config.Reaper) Option {
 	return func(e *Engine) { e.reaper = settings }
+}
+
+// WithDBPools shares the runtime-owned pool budget. The caller must close it
+// after all engines and request handlers stop producing tool work.
+func WithDBPools(pools *tools.DBPools) Option {
+	return func(e *Engine) { e.dbPools = pools }
 }
 
 // New builds an Engine over the given pool.

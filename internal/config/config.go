@@ -12,9 +12,17 @@ import (
 	"time"
 )
 
+// DefaultDBToolMaxProcessPools is the external tools' default physical pool budget.
+const DefaultDBToolMaxProcessPools = 25
+
+// MaxDBToolProcessPools is the largest supported process pool budget.
+const MaxDBToolProcessPools = 500
+
 // Config is the validated process configuration.
 type Config struct {
-	Reaper Reaper
+	// DBToolMaxProcessPools bounds live external tool pools, including retired leases.
+	DBToolMaxProcessPools int
+	Reaper                Reaper
 
 	// Production enables the fail-closed boot posture for authentication,
 	// external integrations, and immutable build provenance.
@@ -97,6 +105,7 @@ func Load(getenv func(string) string) (Config, error) {
 	reaperDefaults := DefaultReaper()
 
 	cfg := Config{
+		DBToolMaxProcessPools: num("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", DefaultDBToolMaxProcessPools, 1, MaxDBToolProcessPools),
 		Reaper: Reaper{
 			Interval:        time.Duration(integer("JANUSLY_REAPER_INTERVAL_MS", int64(reaperDefaults.Interval/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond,
 			Threshold:       time.Duration(integer("JANUSLY_REAPER_THRESHOLD_MS", int64(reaperDefaults.Threshold/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond,

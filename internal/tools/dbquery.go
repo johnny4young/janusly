@@ -38,7 +38,6 @@ import (
 
 const (
 	dbMaxOrgPools            = 5
-	dbMaxProcessPoolsDefault = 25
 	dbMaxRowsDefault         = 100
 	dbMaxRowsLimit           = 1_000
 	dbMaxTransactionStmts    = 10
@@ -695,6 +694,9 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 	if deps == nil || deps.Gate == nil {
 		return envelopeError("integration tools require run context", latency())
 	}
+	if deps.DBPools == nil {
+		return answerError("external database pools not configured")
+	}
 	plan, rejected := planDbTool(name, input)
 	if rejected != "" {
 		return answerError(rejected)
@@ -717,7 +719,7 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 	}
 	// From here on every error may quote the resolved DSN verbatim.
 	safeErr := func(err error) string { return safeDbError(err, dsn) }
-	lease, err := getDbPool(ctx, orgID, credential, dsn)
+	lease, err := deps.DBPools.acquire(ctx, orgID, credential, dsn)
 	if err != nil {
 		return answerError(safeErr(err))
 	}

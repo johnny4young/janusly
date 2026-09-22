@@ -28,4 +28,10 @@ JANUSLY_REAPER_INTERVAL_MS=invalid JANUSLY_STALLED_NODE_THRESHOLD_MINUTES=60 \
   render | jq -e '.services.janusly.environment |
     .JANUSLY_REAPER_INTERVAL_MS == "invalid" and
     .JANUSLY_STALLED_NODE_THRESHOLD_MINUTES == "60"' >/dev/null
+for value in 25 1 500 invalid; do
+  JANUSLY_DB_TOOL_MAX_PROCESS_POOLS="$value" render |
+    jq -e --arg value "$value" '.services.janusly.environment.JANUSLY_DB_TOOL_MAX_PROCESS_POOLS == $value' >/dev/null
+done
+JANUSLY_DB_TOOL_MAX_PROCESS_POOLS='' render |
+  jq -e '.services.janusly.environment.JANUSLY_DB_TOOL_MAX_PROCESS_POOLS == "25"' >/dev/null
 printf 'Process configuration forwarding passed\n'

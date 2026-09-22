@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -30,6 +31,13 @@ import (
 // another integration test's queued fixtures. No provider credentials enter
 // the child process. The external credential names this same throwaway DB.
 func TestExecutableDrainsExternalDatabaseQuery(t *testing.T) {
+	for _, mode := range []string{"api", "mcp"} {
+		t.Run(mode, func(t *testing.T) { testExecutableDrainsExternalDatabaseQuery(t, mode) })
+	}
+}
+
+func testExecutableDrainsExternalDatabaseQuery(t *testing.T, mode string) {
+	t.Helper()
 	baseDSN := os.Getenv("JANUSLY_DATABASE_URL")
 	if baseDSN == "" {
 		t.Skip("JANUSLY_DATABASE_URL not set")
@@ -38,7 +46,7 @@ func TestExecutableDrainsExternalDatabaseQuery(t *testing.T) {
 	defer cancel()
 	dsn, pool := runtimeTestDatabase(t, ctx, baseDSN)
 	binary := filepath.Join(t.TempDir(), "janusly")
-	build := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
+	build := exec.CommandContext(ctx, "go", "build", "-o", binary, "../"+mode)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build executable: %v\n%s", err, out)
 	}
@@ -60,8 +68,16 @@ func TestExecutableDrainsExternalDatabaseQuery(t *testing.T) {
 	child.Env = []string{
 		"PATH=" + os.Getenv("PATH"), "JANUSLY_ENV=test", "OTEL_EXPORTER=none",
 		"JANUSLY_DATABASE_URL=" + dsn, "JANUSLY_PORT=" + port, "JANUSLY_INTERNAL_PORT=" + internalPort,
-		"JANUSLY_WORKER_CONCURRENCY=1", "JANUSLY_POLL_MS=50",
+		"JANUSLY_DB_TOOL_MAX_PROCESS_POOLS=1", "JANUSLY_WORKER_CONCURRENCY=1", "JANUSLY_POLL_MS=50",
 		"JANUSLY_CREDENTIAL_ENV_ALLOWLIST=RUNTIME_DB_DSN", "RUNTIME_DB_DSN=" + externalDSN,
+	}
+	var stdin io.WriteCloser
+	if mode == "mcp" {
+		stdin, err = child.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = stdin.Close() }()
 	}
 	child.Stdout, child.Stderr = log, log
 	if err := child.Start(); err != nil {
@@ -82,6 +98,13 @@ func TestExecutableDrainsExternalDatabaseQuery(t *testing.T) {
 	}()
 	client := &http.Client{Timeout: 200 * time.Millisecond}
 	runtimeWait(t, ctx, func() bool {
+		if mode == "mcp" {
+			data, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return strings.Contains(string(data), "mcp server ready")
+		}
 		response, err := client.Get("http://127.0.0.1:" + port + "/healthz")
 		if err != nil {
 			return false
@@ -105,7 +128,11 @@ func TestExecutableDrainsExternalDatabaseQuery(t *testing.T) {
 		}
 		return active
 	})
-	if err := child.Process.Signal(syscall.SIGTERM); err != nil {
+	if mode == "mcp" {
+		if err := stdin.Close(); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := child.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
 	select {

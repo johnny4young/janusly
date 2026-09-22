@@ -29,6 +29,23 @@ in `org_configs`; secrets never do.
 `JANUSLY_PORT` and `JANUSLY_INTERNAL_PORT` must differ. There are no alternate
 names for these settings.
 
+## External database tool pool budget
+
+`JANUSLY_DB_TOOL_MAX_PROCESS_POOLS` is a process-wide integer in **1–500**,
+default **25**. Blank/unset uses the default; a nonblank invalid value rejects
+startup in development and production, naming the key/range without echoing the
+value. Environment overrides the default; there is no tenant override. A change
+requires a process restart and affects new work only after that restart.
+
+API and MCP composition roots each construct one explicit external pool owner
+and share it across their engine producers. It is separate from Janusly's API
+and worker PostgreSQL pools. Each external pool is physically limited to one
+connection; the per-organization limit remains five. Retired pools with active
+leases still consume capacity until closed. Shutdown stops producers, drains
+external leases, then closes control-plane pools. No environment read during
+acquisition can change admission midway through a run, and no implicit global
+cache is created by an unconfigured engine.
+
 ## Process reaper settings
 
 These are process-wide integer millisecond settings, not `org_configs` keys.

@@ -6,13 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestDbPoolRotationDoesNotWaitForConnection(t *testing.T) {
@@ -20,11 +21,10 @@ func TestDbPoolRotationDoesNotWaitForConnection(t *testing.T) {
 	if dsn == "" {
 		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
-	ResetDbPoolsForTests()
-	t.Cleanup(ResetDbPoolsForTests)
+	cache := testDBPools(t, 25)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	lease, err := getDbPool(ctx, "rotation-a", "db", dsn)
+	lease, err := cache.acquire(ctx, "rotation-a", "db", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestDbPoolRotationDoesNotWaitForConnection(t *testing.T) {
 	}
 	rotated := make(chan error, 1)
 	go func() {
-		_, err := getIdleDbPool(ctx, "rotation-a", "db", dsn+"&application_name=rotated")
+		_, err := getIdleDbPool(cache, ctx, "rotation-a", "db", dsn+"&application_name=rotated")
 		rotated <- err
 	}()
 	defer func() { conn.Release(); <-rotated }()
@@ -48,14 +48,14 @@ func TestDbPoolRotationDoesNotWaitForConnection(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("credential rotation waited for the previous caller's connection")
 	}
-	if _, err := getIdleDbPool(ctx, "rotation-b", "db", dsn); err != nil {
+	if _, err := getIdleDbPool(cache, ctx, "rotation-b", "db", dsn); err != nil {
 		t.Fatalf("other tenant blocked: %v", err)
 	}
 }
 
 // Warm a cache entry without leaving a caller lease alive.
-func getIdleDbPool(ctx context.Context, org, credential, dsn string) (*pgxpool.Pool, error) {
-	lease, err := getDbPool(ctx, org, credential, dsn)
+func getIdleDbPool(cache *DBPools, ctx context.Context, org, credential, dsn string) (*pgxpool.Pool, error) {
+	lease, err := cache.acquire(ctx, org, credential, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -63,23 +63,21 @@ func getIdleDbPool(ctx context.Context, org, credential, dsn string) (*pgxpool.P
 	return lease.pool, nil
 }
 
-func dbPoolTestContext(t *testing.T) (context.Context, string) {
+func dbPoolTestContext(t *testing.T, maxPools int) (context.Context, string, *DBPools) {
 	t.Helper()
 	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
-	ResetDbPoolsForTests()
-	t.Cleanup(ResetDbPoolsForTests)
+	cache := testDBPools(t, maxPools)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	t.Cleanup(cancel)
-	return ctx, dsn
+	return ctx, dsn, cache
 }
 
 func TestDbPoolRetiredCapacityDoesNotBlockOtherTenant(t *testing.T) {
-	ctx, dsn := dbPoolTestContext(t)
-	t.Setenv("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", "2")
-	old, err := getDbPool(ctx, "a", "db", dsn)
+	ctx, dsn, cache := dbPoolTestContext(t, 2)
+	old, err := cache.acquire(ctx, "a", "db", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +87,11 @@ func TestDbPoolRetiredCapacityDoesNotBlockOtherTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Release()
-	if _, err := getIdleDbPool(ctx, "b", "db", dsn); err != nil {
+	if _, err := getIdleDbPool(cache, ctx, "b", "db", dsn); err != nil {
 		t.Fatal(err)
 	}
 	rotatedDSN := dsn + "&application_name=rotation-cap"
-	if _, err := getDbPool(ctx, "a", "db", rotatedDSN); !errors.Is(err, errDbPoolExhausted) {
+	if _, err := cache.acquire(ctx, "a", "db", rotatedDSN); !errors.Is(err, errDbPoolExhausted) {
 		t.Fatalf("live retired pool must consume capacity: %v", err)
 	}
 	if got := testutil.ToFloat64(metricDbToolPools); got != 2 {
@@ -101,7 +99,7 @@ func TestDbPoolRetiredCapacityDoesNotBlockOtherTenant(t *testing.T) {
 	}
 	bounded, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
 	defer cancel()
-	other, err := getDbPool(bounded, "b", "db", dsn)
+	other, err := cache.acquire(bounded, "b", "db", dsn)
 	if err != nil {
 		t.Fatalf("unrelated tenant: %v", err)
 	}
@@ -114,7 +112,7 @@ func TestDbPoolRetiredCapacityDoesNotBlockOtherTenant(t *testing.T) {
 	}
 	conn.Release()
 	old.Release()
-	fresh, err := getDbPool(ctx, "a", "db", rotatedDSN)
+	fresh, err := cache.acquire(ctx, "a", "db", rotatedDSN)
 	if err != nil {
 		t.Fatalf("capacity not recovered: %v", err)
 	}
@@ -129,7 +127,7 @@ func TestDbPoolRetiredCapacityDoesNotBlockOtherTenant(t *testing.T) {
 }
 
 func TestDbPoolRetiredRotationsRespectPhysicalOrgCap(t *testing.T) {
-	ctx, dsn := dbPoolTestContext(t)
+	ctx, dsn, cache := dbPoolTestContext(t, 25)
 	var leases []*dbPoolLease
 	defer func() {
 		for _, lease := range leases {
@@ -137,7 +135,7 @@ func TestDbPoolRetiredRotationsRespectPhysicalOrgCap(t *testing.T) {
 		}
 	}()
 	for i := range dbMaxOrgPools {
-		lease, err := getDbPool(ctx, "rotate", "db", dsn+fmt.Sprintf("&application_name=rotation-%d", i))
+		lease, err := cache.acquire(ctx, "rotate", "db", dsn+fmt.Sprintf("&application_name=rotation-%d", i))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,7 +144,7 @@ func TestDbPoolRetiredRotationsRespectPhysicalOrgCap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := getDbPool(ctx, "rotate", "db", dsn+"&application_name=over-cap"); !errors.Is(err, errDbPoolExhausted) {
+	if _, err := cache.acquire(ctx, "rotate", "db", dsn+"&application_name=over-cap"); !errors.Is(err, errDbPoolExhausted) {
 		t.Fatalf("retired rotations escaped org cap: %v", err)
 	}
 	if got := testutil.ToFloat64(metricDbToolPools); got != dbMaxOrgPools {
@@ -158,28 +156,28 @@ func TestDbPoolRetiredRotationsRespectPhysicalOrgCap(t *testing.T) {
 	if got := testutil.ToFloat64(metricDbToolPools); got != 0 {
 		t.Fatalf("retired pools leaked: %v", got)
 	}
-	if _, err := getIdleDbPool(ctx, "rotate", "db", dsn); err != nil {
+	if _, err := getIdleDbPool(cache, ctx, "rotate", "db", dsn); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestDbPoolLRUEvictsOnlyIdleSameTenant(t *testing.T) {
-	ctx, dsn := dbPoolTestContext(t)
-	busy, err := getDbPool(ctx, "lru", "busy", dsn)
+	ctx, dsn, cache := dbPoolTestContext(t, 25)
+	busy, err := cache.acquire(ctx, "lru", "busy", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer busy.Release()
-	oldest, err := getIdleDbPool(ctx, "lru", "idle-0", dsn)
+	oldest, err := getIdleDbPool(cache, ctx, "lru", "idle-0", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 1; i < dbMaxOrgPools-1; i++ {
-		if _, err := getIdleDbPool(ctx, "lru", fmt.Sprint(i), dsn); err != nil {
+		if _, err := getIdleDbPool(cache, ctx, "lru", fmt.Sprint(i), dsn); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := getIdleDbPool(ctx, "lru", "replacement", dsn); err != nil {
+	if _, err := getIdleDbPool(cache, ctx, "lru", "replacement", dsn); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := busy.pool.Exec(ctx, "SELECT 1"); err != nil {
@@ -195,8 +193,7 @@ func TestDbPoolLRUEvictsOnlyIdleSameTenant(t *testing.T) {
 }
 
 func TestDbPoolConcurrentAdmissionAndShutdown(t *testing.T) {
-	ctx, dsn := dbPoolTestContext(t)
-	cache := dbToolPools
+	ctx, dsn, cache := dbPoolTestContext(t, 25)
 	const callers = 24
 	leases := make(chan *dbPoolLease, callers)
 	errs := make(chan error, callers)
@@ -233,7 +230,7 @@ func TestDbPoolConcurrentAdmissionAndShutdown(t *testing.T) {
 		t.Fatalf("leases=%d", len(all))
 	}
 	done := make(chan struct{})
-	go func() { cache.close(); close(done) }()
+	go func() { cache.Close(); close(done) }()
 	// Observe closed admission rather than relying on scheduler sleeps.
 	for {
 		cache.mu.Lock()
@@ -267,15 +264,15 @@ func TestDbPoolConcurrentAdmissionAndShutdown(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("shutdown did not drain")
 	}
-	cache.close() // terminal close is idempotent
+	cache.Close() // terminal close is idempotent
 	if got := testutil.ToFloat64(metricDbToolPools); got != 0 {
 		t.Fatalf("shutdown gauge=%v", got)
 	}
 }
 
 func TestDbToolTimeoutCoversConnectionWait(t *testing.T) {
-	ctx, dsn := dbPoolTestContext(t)
-	lease, err := getDbPool(ctx, "waiter", "db", dsn)
+	ctx, dsn, cache := dbPoolTestContext(t, 25)
+	lease, err := cache.acquire(ctx, "waiter", "db", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,8 +283,9 @@ func TestDbToolTimeoutCoversConnectionWait(t *testing.T) {
 	}
 	defer conn.Release()
 	deps := &IntegrationDeps{
-		Gate:  func(context.Context, string, string, string, int) (string, string) { return dsn, "" },
-		OrgID: func() string { return "waiter" },
+		DBPools: cache,
+		Gate:    func(context.Context, string, string, string, int) (string, string) { return dsn, "" },
+		OrgID:   func() string { return "waiter" },
 	}
 	result := make(chan map[string]any, 1)
 	go func() {
@@ -303,13 +301,11 @@ func TestDbToolTimeoutCoversConnectionWait(t *testing.T) {
 	}
 	conn.Release()
 	lease.Release()
-	CloseDbPools() // canceled waiter released its lease, so this cannot hang
+	cache.Close() // canceled waiter released its lease, so this cannot hang
 }
 
 func TestDbPoolConcurrentRotationsStayBounded(t *testing.T) {
-	ctx, dsn := dbPoolTestContext(t)
-	t.Setenv("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", "6")
-	cache := dbToolPools
+	ctx, dsn, cache := dbPoolTestContext(t, 6)
 	var wg sync.WaitGroup
 	for worker := range 8 {
 		wg.Go(func() {
@@ -340,7 +336,7 @@ func TestDbPoolConcurrentRotationsStayBounded(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	CloseDbPools()
+	cache.Close()
 	if got := testutil.ToFloat64(metricDbToolPools); got != 0 {
 		t.Fatalf("live pools after concurrent drain=%v", got)
 	}

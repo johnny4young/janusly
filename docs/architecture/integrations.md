@@ -4,6 +4,13 @@ Integration tools are registered in `internal/tools` with input/output schemas,
 static write capability, and bounded execution. Workflow dispatch goes through
 `internal/executors`.
 
+External database tools receive one runtime-owned pool budget through their
+engine dependencies. API and MCP construct it with the validated boot-time
+limit and close it after producers stop; neither a registry nor an engine
+creates a hidden global cache. Leases span the entire operation and transaction
+rollback, retired pools retain their capacity until drained, and shutdown never
+closes another runtime's pools. See [configuration](../configuration.md#external-database-tool-pool-budget).
+
 Credentials are organization-scoped. Managed values are envelope-encrypted in
 PostgreSQL with an external root key. Environment-backed references are limited
 by reserved namespaces and an operator allowlist. API payloads never return

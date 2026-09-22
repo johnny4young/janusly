@@ -25,6 +25,7 @@ import (
 	"github.com/johnny4young/janusly/internal/mcpserver"
 	"github.com/johnny4young/janusly/internal/migrate"
 	"github.com/johnny4young/janusly/internal/ratelimit"
+	"github.com/johnny4young/janusly/internal/tools"
 )
 
 func main() {
@@ -55,7 +56,16 @@ func run() error {
 		return err
 	}
 
-	eng := engine.New(pool, engine.WithReaper(cfg.Reaper))
+	dbPools, err := tools.NewDBPools(cfg.DBToolMaxProcessPools)
+	if err != nil {
+		return err
+	}
+	// Registered before workers: drain external leases before the control pool.
+	defer func() {
+		dbPools.Close()
+		logger.Info("external database pools drained")
+	}()
+	eng := engine.New(pool, engine.WithReaper(cfg.Reaper), engine.WithDBPools(dbPools))
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()

@@ -195,10 +195,14 @@ func run() error {
 		return err
 	}
 	defer workerPool.Close()
+	dbPools, err := tools.NewDBPools(cfg.DBToolMaxProcessPools)
+	if err != nil {
+		return err
+	}
 	// Registered before the runner: external tool pools drain after workers,
 	// but before the runtime database pools close.
 	defer func() {
-		tools.CloseDbPools()
+		dbPools.Close()
 		logger.Info("external database pools drained")
 	}()
 	if err := boot.ProbeMigrations(ctx, pool); err != nil {
@@ -214,7 +218,7 @@ func run() error {
 
 	// Janusly ships as one binary: public requests and supervised workers
 	// share one lifecycle but use separately bounded database pools.
-	eng := engine.New(workerPool, engine.WithReaper(cfg.Reaper))
+	eng := engine.New(workerPool, engine.WithReaper(cfg.Reaper), engine.WithDBPools(dbPools))
 	prometheus.MustRegister(engine.NewQueueDepthCollector(pool))
 	prometheus.MustRegister(engine.NewDeadLetterCollector(pool))
 	prometheus.MustRegister(boot.NewPoolStatsCollector("api", pool))

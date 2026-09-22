@@ -16,6 +16,20 @@ that drove it lists every finding by id (S/C/P/D/O/B/FB/F/FA/FR/FT/R/A/T).
 | 6 — quality sweep | `e6b94d8d`.. | `unparam` in the lint gate with its fourteen findings fixed; every gated route through `s.route`; the workflow validator dispatches by node type (complexity 256 → 53), the parser decodes nodes and edges in their own functions (118 → 51), and the database tool, recovery contract validator, semantic contract validator, workflow binder, proposal binder, for-each loop, ai node, email tool and AI review sanitizer are each split into named steps (every function under 55, most under 30); 55 unused web exports removed; the duplicated blocks jscpd found folded; five modal dialogs close on Escape through `useDialogFocusTrap({ onEscape })` and seven components share `useAliveRef`; `AuthoringPanel` renders one `InspectorPanel`; `docs/development.md` written. |
 | 7 — frontend refactor (2026-09-05/06) | `27ec80ab`, `eb0af008`, `1f37b00b`, `254a2656`, `da72b2c0` | Every lazy panel ships its own stylesheet (46 component-adjacent sheets; eager `index.css` 41.3 → 25.4 KiB gzip, new 27 KiB cap); AI Studio and the Inspector load lazily from `panel-loaders.ts` with hover/focus/destination preload and a pinned `authoring-workspace` chunk (eager `workflow-workspace` 43.4 → 14.1 KiB, cap 16); the tagged data layer replaces the `platformVersion` broadcast as the default (typed `ResourceTag`, `bumpPlatformVersion(tags)`, 26 subscribers, 18 same-domain mutation sites); `Button` is the only action button (136 legacy `small-command`/`icon-button` sites, pressed-state styling, loading states on the login, rollback and workspace forms). Budgets re-based around the cold path: artifact 605, single-locale 560, eager CSS 27, workflow-workspace 16. |
 
+## Explicit external database pool ownership
+
+- API and MCP share one validated immutable external pool budget across their
+  producers and drain it before control-plane pools close. Removed the global
+  cache/reset hook and per-acquisition environment parsing.
+- Documented the default 25/range 1–500 process-only setting, restart semantics,
+  fail-closed boot validation and Compose passthrough. Leases, tenant caps,
+  physical one-connection pools and retirement accounting remain unchanged.
+- Added independent-owner/metric, missing-owner, boot boundary and configuration
+  snapshot tests; existing race/rotation/cancellation and executable drain
+  regressions now use explicit owners. Real API SIGTERM and MCP stdio EOF
+  tests check durable completion of an active query and zero remaining external
+  sessions after teardown.
+
 ## Measured results
 
 Load qualification, 20-minute measured phases, p95 / p99 ms:

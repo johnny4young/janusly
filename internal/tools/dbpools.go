@@ -4,20 +4,19 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"os"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/johnny4young/janusly/internal/config"
 )
 
 var (
 	errDbPoolExhausted = errors.New("db_pool_exhausted")
 	errDbPoolsClosed   = errors.New("db_pools_closed")
-	dbToolPools        = newDbPoolCache()
 	metricDbToolPools  = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "janusly_db_tool_pools",
 		Help: "Live external db-tool pools, including retired pools still draining.",
@@ -44,30 +43,27 @@ type dbPoolEntry struct {
 	retired, closing bool
 }
 
-type dbPoolCache struct {
-	mu      sync.Mutex
-	entries map[string]*dbPoolEntry
-	live    map[*dbPoolEntry]struct{}
-	closed  bool
-	drained chan struct{}
+// DBPools owns the external database connections of one runtime. Construct it
+// once, share it across producers, and Close it only after producers stop.
+// Its zero value is not usable.
+type DBPools struct {
+	maxPools int
+	mu       sync.Mutex
+	entries  map[string]*dbPoolEntry
+	live     map[*dbPoolEntry]struct{}
+	closed   bool
+	drained  chan struct{}
 }
 
-func newDbPoolCache() *dbPoolCache {
-	return &dbPoolCache{entries: make(map[string]*dbPoolEntry), live: make(map[*dbPoolEntry]struct{}), drained: make(chan struct{})}
-}
-
-func dbMaxProcessPools() int {
-	if n, err := strconv.Atoi(os.Getenv("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS")); err == nil && n >= 1 && n <= 500 {
-		return n
+// NewDBPools captures a process cap without reading environment or dialing a DB.
+func NewDBPools(maxPools int) (*DBPools, error) {
+	if maxPools < 1 || maxPools > config.MaxDBToolProcessPools {
+		return nil, errors.New("external database pool limit must be in [1, 500]")
 	}
-	return dbMaxProcessPoolsDefault
+	return &DBPools{maxPools: maxPools, entries: make(map[string]*dbPoolEntry), live: make(map[*dbPoolEntry]struct{}), drained: make(chan struct{})}, nil
 }
 
-func getDbPool(ctx context.Context, orgID, credentialName, dsn string) (*dbPoolLease, error) {
-	return dbToolPools.acquire(ctx, orgID, credentialName, dsn)
-}
-
-func (c *dbPoolCache) acquire(ctx context.Context, orgID, credentialName, dsn string) (*dbPoolLease, error) {
+func (c *DBPools) acquire(ctx context.Context, orgID, credentialName, dsn string) (*dbPoolLease, error) {
 	// Parsing may read local pg service/password configuration; keep it outside
 	// the mutex. The credential value never appears in cache errors or metrics.
 	config, err := pgxpool.ParseConfig(dsn)
@@ -91,7 +87,7 @@ func (c *dbPoolCache) acquire(ctx context.Context, orgID, credentialName, dsn st
 	}
 }
 
-func (c *dbPoolCache) acquireLocked(ctx context.Context, key, orgID string, fingerprint [32]byte, config *pgxpool.Config) (*dbPoolLease, *dbPoolEntry, error) {
+func (c *DBPools) acquireLocked(ctx context.Context, key, orgID string, fingerprint [32]byte, config *pgxpool.Config) (*dbPoolLease, *dbPoolEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -126,7 +122,7 @@ func (c *dbPoolCache) acquireLocked(ctx context.Context, key, orgID string, fing
 		c.retireLocked(oldest)
 		return nil, oldest, nil
 	}
-	if len(c.live) >= dbMaxProcessPools() {
+	if len(c.live) >= c.maxPools {
 		return nil, nil, errDbPoolExhausted
 	}
 	// NewWithConfig is lazy: with both minimums zero it constructs the pool
@@ -139,18 +135,18 @@ func (c *dbPoolCache) acquireLocked(ctx context.Context, key, orgID string, fing
 	entry := &dbPoolEntry{pool: pool, key: key, orgID: orgID, fingerprint: fingerprint}
 	c.entries[key] = entry
 	c.live[entry] = struct{}{}
-	metricDbToolPools.Set(float64(len(c.live)))
+	metricDbToolPools.Inc()
 	return c.leaseLocked(entry), nil, nil
 }
 
-func (c *dbPoolCache) leaseLocked(entry *dbPoolEntry) *dbPoolLease {
+func (c *DBPools) leaseLocked(entry *dbPoolEntry) *dbPoolLease {
 	entry.leases++
 	entry.touchedAt = time.Now()
 	return &dbPoolLease{pool: entry.pool, release: func() { c.release(entry) }}
 }
 
 // retireLocked transfers closure ownership only when the last lease is gone.
-func (c *dbPoolCache) retireLocked(entry *dbPoolEntry) bool {
+func (c *DBPools) retireLocked(entry *dbPoolEntry) bool {
 	delete(c.entries, entry.key)
 	entry.retired = true
 	if entry.leases == 0 && !entry.closing {
@@ -160,7 +156,7 @@ func (c *dbPoolCache) retireLocked(entry *dbPoolEntry) bool {
 	return false
 }
 
-func (c *dbPoolCache) release(entry *dbPoolEntry) {
+func (c *DBPools) release(entry *dbPoolEntry) {
 	c.mu.Lock()
 	entry.leases--
 	closeNow := entry.retired && entry.leases == 0 && !entry.closing
@@ -173,18 +169,19 @@ func (c *dbPoolCache) release(entry *dbPoolEntry) {
 	}
 }
 
-func (c *dbPoolCache) closeEntry(entry *dbPoolEntry) {
+func (c *DBPools) closeEntry(entry *dbPoolEntry) {
 	entry.pool.Close()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.live, entry)
-	metricDbToolPools.Set(float64(len(c.live)))
+	metricDbToolPools.Dec()
 	if c.closed && len(c.live) == 0 {
 		close(c.drained)
 	}
 }
 
-func (c *dbPoolCache) close() {
+// Close stops admission and waits for all leases to drain. It is idempotent.
+func (c *DBPools) Close() {
 	c.mu.Lock()
 	var idle []*dbPoolEntry
 	if !c.closed {
@@ -203,15 +200,4 @@ func (c *dbPoolCache) close() {
 		c.closeEntry(entry)
 	}
 	<-c.drained
-}
-
-// CloseDbPools stops admission and waits for all external pool leases to drain.
-// The runtime calls it after stopping tool producers (HTTP and workers).
-func CloseDbPools() { dbToolPools.close() }
-
-// ResetDbPoolsForTests must only run with test callers stopped. Unlike terminal
-// production shutdown, it installs a fresh accepting cache for the next test.
-func ResetDbPoolsForTests() {
-	CloseDbPools()
-	dbToolPools = newDbPoolCache()
 }
