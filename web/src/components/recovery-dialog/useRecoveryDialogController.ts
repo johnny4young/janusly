@@ -5,6 +5,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { normalizeErrorSignature } from '@/lib/error-signature'
 import { api, contractApi } from '../../api'
 import { parseRunStatusSnapshot } from '../../lib/run-status-contract'
+import {
+  parseRecoveryPatchSuggestion,
+  parseRecoveryPlaybookUseResponse,
+} from '../../lib/recovery-patch-contract'
 import { isTerminalRunStatus } from '../../lib/status'
 import { useWorkflowStore } from '../../store'
 import type { DeadLetter } from '../dead-letter-types'
@@ -12,7 +16,6 @@ import { useT } from '../../i18n'
 import { t as runtimeT } from '../../i18n/runtime'
 import {
   isActionableSuggestion,
-  normalisePatchSuggestion,
   pickFailedNodeErrorJson,
 } from './recovery-dialog-model'
 import type {
@@ -109,6 +112,15 @@ export function useRecoveryDialogController({
   // Apply" — if the operator's fix worked, that count stays at 0.
   // Defense-in-depth: the helper scrubs token-shaped substrings before
   // returning, so the signature surfaced through the URL is safe.
+  const persistedWorkflowId = useMemo(() => {
+    const metadataWorkflowId = dlq.recovery?.metadataWorkflowId
+    if (typeof metadataWorkflowId === 'string' && metadataWorkflowId.length > 0) return metadataWorkflowId
+    const snapshotWorkflowId = (dlq.workflowJson as { id?: unknown } | null)?.id
+    return typeof snapshotWorkflowId === 'string' && snapshotWorkflowId.length > 0
+      ? snapshotWorkflowId
+      : null
+  }, [dlq.recovery?.metadataWorkflowId, dlq.workflowJson])
+
   const priorFailureSignature = useMemo(() => {
     const errorJson = dlq.errorJson
     const nodeJson = dlq.nodeJson as { type?: string } | null
@@ -147,8 +159,7 @@ export function useRecoveryDialogController({
   // Offer only the server-derived exact workflow + signature match. A miss or
   // transient read failure never blocks the normal AI recovery path.
   useEffect(() => {
-    const savedWorkflowId = (dlq.workflowJson as { id?: unknown } | null)?.id
-    if (typeof savedWorkflowId !== 'string' || savedWorkflowId.length === 0) {
+    if (!persistedWorkflowId) {
       setMatchingPlaybook(null)
       return
     }
@@ -161,7 +172,7 @@ export function useRecoveryDialogController({
         if (!cancelled) setMatchingPlaybook(null)
       })
     return () => { cancelled = true }
-  }, [dlq.id])
+  }, [dlq.id, persistedWorkflowId])
 
   // ESC closes — but only when no async work is in flight, otherwise
   // the operator could lose an in-progress save. The cancelling step
@@ -276,8 +287,12 @@ export function useRecoveryDialogController({
       const result = await api('/ai/patch-workflow', {
         method: 'POST',
         body: JSON.stringify({ deadLetterId: dlq.id }),
-      }) as PatchSuggestion
-      const normalised = normalisePatchSuggestion(result, dlq.recovery?.metadataWorkflowId)
+      })
+      const normalised = parseRecoveryPatchSuggestion(result, {
+        persistedWorkflowId,
+        expectedFailureSignature: priorFailureSignature,
+      })
+      if (!normalised) throw new Error(runtimeT('api.error.malformedResponse'))
       setSelectedSuggestionIndex(0)
       setStep({ kind: 'review', suggestion: normalised })
     } catch (error) {
@@ -295,12 +310,15 @@ export function useRecoveryDialogController({
       const result = await api(`/recovery/playbooks/${encodeURIComponent(matchingPlaybook.id)}/use`, {
         method: 'POST',
         body: JSON.stringify({ deadLetterId: dlq.id }),
-      }) as { suggestion: PatchSuggestion }
-      setSelectedSuggestionIndex(0)
-      setStep({
-        kind: 'review',
-        suggestion: normalisePatchSuggestion(result.suggestion, dlq.recovery?.metadataWorkflowId),
       })
+      const suggestion = parseRecoveryPlaybookUseResponse(result, {
+        persistedWorkflowId,
+        expectedFailureSignature: priorFailureSignature,
+        expectedPlaybookId: matchingPlaybook.id,
+      })
+      if (!suggestion) throw new Error(runtimeT('api.error.malformedResponse'))
+      setSelectedSuggestionIndex(0)
+      setStep({ kind: 'review', suggestion })
     } catch (error) {
       setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.useFailed')) })
     } finally {

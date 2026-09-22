@@ -11,7 +11,7 @@
  * so consumers thread the delta-card snapshot type through one import.
  */
 
-import type { EvidenceRow } from '@/lib/ai-evidence'
+import type { EvidenceRow } from '@/lib/ai-evidence-runtime'
 import type { WorkflowDefinition } from '../../types'
 import type { PreSaveBeforeSnapshot } from '../RecoveryDeltaCard'
 
@@ -24,22 +24,6 @@ export type PatchApproachLabel =
   | 'add_approval'
   | 'fix_url'
   | 'other'
-
-export type FeedbackHealthState = 'active' | 'stale' | 'no_accepted_fix'
-
-/** Read-only freshness signal returned with a patch response. */
-export type FeedbackApproachHealth = {
-  approachLabel: PatchApproachLabel
-  feedbackLastSeen: string
-  acceptedFixLastSeen: string | null
-  acceptedFixAgeDays: number | null
-  state: FeedbackHealthState
-}
-
-export type RecoveryFeedbackHealthSnapshot = {
-  windowDays: number
-  approaches: FeedbackApproachHealth[]
-}
 
 export type ConsideredAlternative = {
   approach: string
@@ -73,17 +57,11 @@ export type SuggestionTab = {
 
 export type PriorSameSignatureOutcome = {
   status: string
-  approachLabel: string | null
-  declineReason: string | null
   occurredAt: string
 }
 
 export type PatchSuggestion = {
   mode: 'ai' | 'fallback' | 'playbook'
-  /** Legacy mirror of `suggestions[0]` — kept so older test fixtures and callers still work. */
-  suggestedWorkflow: WorkflowDefinition
-  /** Legacy mirror of `suggestions[0].rationale`. */
-  rationale: string
   /** 1-3 alternative patches sorted by confidence desc. The route guarantees length ≥ 1. */
   suggestions: SuggestionTab[]
   /**
@@ -94,20 +72,12 @@ export type PatchSuggestion = {
    * the renderer treats `undefined` as `[]` and hides the panel.
    */
   evidence?: EvidenceRow[]
-  /**
-   * Feedback-loop freshness for the failing workflow. Optional so legacy or
-   * cached patch responses remain renderable; the dialog hides the badge when
-   * the read-only side channel is unavailable.
-   */
-  feedbackHealth?: RecoveryFeedbackHealthSnapshot
   recoveryPassport?: {
     failureSignature: string
     priorSameSignatureOutcome: PriorSameSignatureOutcome | null
   }
-  model?: string
-  provider?: string
   aiError?: string
-  playbook?: RecoveryPlaybookSummary
+  playbook?: Pick<RecoveryPlaybookSummary, 'id' | 'version' | 'title' | 'successfulUses' | 'regressions'>
 }
 
 export type RecoveryPlaybookSummary = {

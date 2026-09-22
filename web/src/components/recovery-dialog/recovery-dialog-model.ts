@@ -4,17 +4,17 @@
  * Zero React: every function here is deterministic. The label helpers call
  * the non-React translation accessor `runtimeT` (the same accessor the
  * parent used inline before the split), so they need no `t` argument. The
- * shape/diff helpers (`isActionableSuggestion`, `toWorkflow`,
- * `normalisePatchSuggestion`, `pick*`) are render-free transforms.
+ * shape/diff helpers (`isActionableSuggestion`, `toWorkflow`, `pick*`) are
+ * render-free transforms.
  *
  * Used by: web/src/components/RecoveryDialog.tsx and its render bodies
  * under `./` (ReviewBody, ValidationFailedBody). Owns the
- * confidence-display + suggestion-normalisation + error-extraction logic.
+ * confidence-display + error-extraction logic.
  */
 
 import type { RunNode } from '../../types'
 import { computeWorkflowDiff } from '@/lib/workflow-diff'
-import type { EvidenceKind } from '@/lib/ai-evidence'
+import type { EvidenceKind } from '@/lib/ai-evidence-runtime'
 import { scrubOperatorGuidanceSecrets } from '@/lib/operator-guidance'
 import { t as runtimeT } from '../../i18n/runtime'
 import type { WorkflowDefinition } from '../../types'
@@ -183,47 +183,4 @@ export function isActionableSuggestion(
 export function toWorkflow(value: unknown): WorkflowDefinition {
   if (value && typeof value === 'object') return value as WorkflowDefinition
   return { dslVersion: '1.0', nodes: [], edges: [] }
-}
-
-/**
- * Normalise the patch-route response into the multi-suggestion shape.
- * The current route always emits `suggestions: [...]`, but older test
- * fixtures and a future cached response from before the upgrade might
- * still return only the legacy `{ mode, suggestedWorkflow, rationale }`
- * fields — fall back to a single-item array in that case so the dialog
- * code never has to branch on which shape it received.
- */
-export function normalisePatchSuggestion(
-  raw: PatchSuggestion,
-  persistedWorkflowId?: string | null,
-): PatchSuggestion {
-  const normalised: PatchSuggestion = Array.isArray(raw.suggestions) && raw.suggestions.length > 0
-    ? raw
-    : {
-    ...raw,
-    suggestions: [{
-      workflow: raw.suggestedWorkflow,
-      rationale: raw.rationale,
-      approachLabel: 'other',
-      confidence: raw.mode === 'ai' ? 50 : 0,
-      // No server-side calibration on the legacy shape — mirror raw so the
-      // renderer shows a single number (delta is 0, subtitle suppressed).
-      calibratedConfidence: raw.mode === 'ai' ? 50 : 0,
-    }],
-  }
-  if (!persistedWorkflowId) return normalised
-
-  const bindIdentity = (workflow: WorkflowDefinition): WorkflowDefinition => (
-    workflow.id === persistedWorkflowId
-      ? workflow
-      : { ...workflow, id: persistedWorkflowId }
-  )
-  return {
-    ...normalised,
-    suggestedWorkflow: bindIdentity(normalised.suggestedWorkflow),
-    suggestions: normalised.suggestions.map((suggestion) => ({
-      ...suggestion,
-      workflow: bindIdentity(suggestion.workflow),
-    })),
-  }
 }

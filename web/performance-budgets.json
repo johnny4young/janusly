@@ -6,7 +6,7 @@
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 560
+    "maxGzipKiB": 560.5
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -136,7 +136,7 @@
     "RecoveryCasePanel.css": 2.2,
     "RecoveryCasePanel.js": 5.32,
     "RecoveryDialog.css": 2.32,
-    "RecoveryDialog.js": 9.8,
+    "RecoveryDialog.js": 11.48,
     "ReplayCampaignsCard.css": 0.57,
     "ReplayCampaignsCard.js": 1.6,
     "RollbackConfirmDialog.js": 1.27,
@@ -184,6 +184,7 @@
     "WorkflowRolloutPanel.js": 2.69,
     "WorkflowRolloutStatus.js": 0.66,
     "WorkflowSloPanel.js": 1.22,
-    "WorkflowStatusPageCard.js": 1.19
+    "WorkflowStatusPageCard.js": 1.19,
+    "app-workspace.css": 2.85
   }
 }

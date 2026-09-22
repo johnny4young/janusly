@@ -18,7 +18,6 @@ import { WorkflowDiffView } from '../WorkflowDiffView'
 import type { DeadLetter } from '../dead-letter-types'
 import { EvidencePanel } from './EvidencePanel'
 import { AlternativeHypothesesPanel } from './AlternativeHypothesesPanel'
-import { LearningHealthBadge } from './LearningHealthBadge'
 import { RecoveryPassportCard } from './RecoveryPassportCard'
 import { SimilarRunsCard } from './SimilarRunsCard'
 import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './recovery-dialog-model'
@@ -142,10 +141,6 @@ export function ReviewBody({
           ))}
         </div>
       )}
-      <LearningHealthBadge
-        feedbackHealth={suggestion.feedbackHealth}
-        approachLabel={selected.approachLabel}
-      />
       <div
         id="we-recovery-tabpanel"
         role={showTabs ? 'tabpanel' : undefined}

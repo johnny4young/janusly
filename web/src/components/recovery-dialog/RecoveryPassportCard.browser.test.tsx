@@ -28,8 +28,6 @@ describe('<RecoveryPassportCard /> (browser smoke)', () => {
       dlq={dlq}
       suggestion={{
         mode: 'ai',
-        suggestedWorkflow: dlq.workflowJson as never,
-        rationale: 'Added retry',
         suggestions: [],
         evidence: [{ kind: 'signature_rule', sourceRef: 'network_timeout', snippet: 'Matched timeout' }],
       }}
@@ -65,8 +63,6 @@ describe('<RecoveryPassportCard /> (browser smoke)', () => {
       dlq={unlinked as DeadLetter}
       suggestion={{
         mode: 'ai',
-        suggestedWorkflow: dlq.workflowJson as never,
-        rationale: 'Added retry',
         suggestions: [],
         evidence: [{ kind: 'signature_rule', sourceRef: 'network_timeout', snippet: 'Matched timeout' }],
       }}
@@ -93,8 +89,6 @@ describe('<RecoveryPassportCard /> (browser smoke)', () => {
       dlq={dlq}
       suggestion={{
         mode: 'fallback',
-        suggestedWorkflow: dlq.workflowJson as never,
-        rationale: 'No model',
         suggestions: [],
       }}
       selected={{

@@ -39,6 +39,19 @@ Malformed snapshots leave the previous projection intact; stale requests are
 discarded before validation. A later valid poll can recover normally, and
 refreshing the latest event page never rewinds already-loaded history.
 
+Recovery AI patch and explicit playbook-use responses cross the dedicated
+untrusted-response boundary in `web/src/lib/recovery-patch-contract.ts` before
+entering dialog state. A current envelope (one with `suggestions`) must contain
+one to three bounded workflow proposals and a recovery passport whose failure
+signature matches the locally derived incident. Persisted workflow identity is
+added only when absent; an explicit foreign identity is rejected rather than
+rewritten. Playbook responses must also match the requested active playbook,
+workflow and signature. Evidence is bounded and re-scrubbed once at this HTTP
+boundary, and the React views consume only the projected read model. The legacy
+projection exists only for envelopes with no `suggestions` property; a present
+empty or malformed list fails closed. Do not add UI for response fields that no
+current server route produces.
+
 Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
 They must preserve the same strict-object, bound, default, transform, and
 refinement semantics as the API contract; do not trade validation coverage for
@@ -205,12 +218,14 @@ native range validation and visible localized labels.
 `performance-budgets.json` is a ratchet, not a target: the total artifact,
 the worst single-locale artifact, the eager `index.css` stylesheet and the
 eager `workflow-workspace` chunk are capped, and every other chunk may grow at
-most 10 % over its recorded baseline. The caps moved twice in 2026-09: by the
-measured cost of the controller/view splits and the hash router (about
-1.5 KiB of gzip for the object keys a model boundary needs), and by the
-per-chunk stylesheet split, which trades roughly 12 KiB of total gzip (one
-compressed CSS asset per lazy chunk) for 16 KiB less on every cold load. The
-cold path is what the caps protect: `index.css`, `workflow-workspace` and the
+most 10 % over its recorded baseline. The caps moved through three reviewed measurements in 2026-09: the measured
+cost of the controller/view splits and hash router (about 1.5 KiB of gzip for
+the object keys a model boundary needs), the per-chunk stylesheet split
+(roughly 12 KiB of total gzip in exchange for 16 KiB less on every cold load),
+and a 0.5 KiB single-locale allowance for the fail-closed RecoveryDialog AI
+response parser. The complete-artifact cap remained 605 KiB for that security
+change; the parser stays in the existing lazy dialog rather than adding a
+network request. The cold path is what the caps protect: `index.css`, `workflow-workspace` and the
 route budgets in `performance/routes.performance.spec.ts` only ratchet down.
 
 ## Closing failures without recovery

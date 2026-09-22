@@ -189,3 +189,24 @@ canonical activity route. Shared metric rendering and native progress replace
 duplicated branches and custom progress markup. The pure health-delta guard ships
 with the existing recovery-contract chunk, keeping the original artifact,
 single-locale, route and RecoveryDialog budgets intact without rebaselining.
+
+
+## Recovery AI response integrity
+
+Recovery patch and explicit playbook-use payloads now pass a dedicated runtime
+parser before they can enter the dialog state machine. Current envelopes require
+a non-empty bounded suggestion set and a passport matching the locally derived
+failure signature. Explicit foreign workflow IDs, stale playbook identities,
+invalid confidence or safety fields, malformed evidence and obsolete unwired
+feedback-health projections fail closed with the existing retryable malformed-
+response message. Only envelopes with no `suggestions` property retain the
+bounded legacy single-suggestion projection.
+
+The parser canonicalizes the first validated suggestion, re-scrubs evidence at
+the HTTP boundary and projects only metadata the UI consumes. The fixture-only
+Learning Health badge, its styles, translations and browser test were removed:
+no current Go route produced `feedbackHealth`, so the surface could communicate
+a state that production could never supply. The static parser does not add a parser-only
+lazy request. Its measured cost is 300 bytes beyond the old single-locale
+cap, so that cap moves narrowly from 560 to 560.5 KiB while the 605 KiB total
+artifact cap and route budgets remain unchanged.

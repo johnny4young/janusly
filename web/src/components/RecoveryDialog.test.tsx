@@ -36,6 +36,11 @@ const baseDlq: DeadLetter = {
   errorJson: { message: 'ECONNRESET' },
 }
 
+const currentRecoveryPassport = {
+  failureSignature: 'Network timeout on http node',
+  priorSameSignatureOutcome: null,
+}
+
 const aiSuggestion = {
   mode: 'ai' as const,
   suggestedWorkflow: {
@@ -103,34 +108,22 @@ describe('<RecoveryDialog />', () => {
     expect(screen.getByRole('button', { name: /Validate in sandbox/i })).toBeInTheDocument()
   })
 
-  it('surfaces stale feedback health for the selected recovery approach', async () => {
+  it('fails closed when the AI patch response is malformed', async () => {
     vi.mocked(api).mockResolvedValueOnce({
-      ...aiSuggestion,
-      suggestions: [{
-        workflow: aiSuggestion.suggestedWorkflow,
-        rationale: aiSuggestion.rationale,
-        approachLabel: 'add_retry',
-        confidence: 76,
-      }],
-      feedbackHealth: {
-        windowDays: 30,
-        approaches: [{
-          approachLabel: 'add_retry',
-          feedbackLastSeen: '2026-07-09T00:00:00.000Z',
-          acceptedFixLastSeen: '2026-05-29T00:00:00.000Z',
-          acceptedFixAgeDays: 42,
-          state: 'stale',
-        }],
-      },
+      mode: 'ai',
+      suggestedWorkflow: aiSuggestion.suggestedWorkflow,
+      rationale: aiSuggestion.rationale,
+      suggestions: [],
+      evidence: [],
+      recoveryPassport: currentRecoveryPassport,
     })
 
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
 
-    const health = await screen.findByTestId('recovery-dialog-learning-health')
-    expect(health).toHaveAttribute('data-state', 'stale')
-    expect(health).toHaveTextContent('Learning paused')
-    expect(health).toHaveTextContent('42 days')
+    await screen.findByText(/unreadable response/i)
+    expect(screen.queryByRole('button', { name: /Validate in sandbox/i })).not.toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.map(([path]) => path)).not.toContain('/dlq/validate-fix')
   })
 
   it('renders the "Why this suggestion?" evidence panel with chips and scrubs secrets at read', async () => {
@@ -186,8 +179,6 @@ describe('<RecoveryDialog />', () => {
           failureSignature: 'Network timeout on http node',
           priorSameSignatureOutcome: {
             status: 'applied',
-            approachLabel: 'add_retry',
-            declineReason: null,
             occurredAt: '2026-07-01T00:00:00.000Z',
           },
         },
@@ -480,6 +471,7 @@ describe('<RecoveryDialog />', () => {
         edges: [],
       },
       rationale: 'Added retry to handle transient ECONNRESET.',
+      recoveryPassport: currentRecoveryPassport,
       suggestions: [
         {
           workflow: {
