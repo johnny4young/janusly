@@ -353,7 +353,13 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
       nodes: [{ id: 'call', type: 'http', config: { url: upstreamUrl, timeoutMs: 500 } }],
       edges: [],
     }
-    await request.post(`${API_URL}/workflows/save`, { headers: headers(orgId), data: failing })
+    // Keep each fixture below the real five-failure circuit-breaker threshold.
+    // Replays and accepted-loss closures exercise distinct workflow histories.
+    const closing = { ...failing, id: `queue-close-${orgId}`, name: 'Queue close flow' }
+    for (const workflow of [failing, closing]) {
+      const saved = await request.post(`${API_URL}/workflows/save`, { headers: headers(orgId), data: workflow })
+      expect(saved.ok(), await saved.text()).toBe(true)
+    }
     const waitStatus = async (runId: string, want: string) => {
       const deadline = Date.now() + 30_000
       for (;;) {
@@ -367,9 +373,11 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     const runIds: string[] = []
     for (let i = 0; i < 6; i++) {
       const started = await request.post(`${API_URL}/start`, {
-        headers: headers(orgId), data: { workflow: failing },
+        headers: headers(orgId), data: { workflow: i < 3 ? failing : closing },
       })
+      expect(started.ok(), await started.text()).toBe(true)
       const { runId } = await started.json() as { runId: string }
+      expect(runId).toEqual(expect.any(String))
       runIds.push(runId)
       await waitStatus(runId, 'failed')
     }
@@ -393,7 +401,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     }, { activeOrg: orgId })
     await page.goto('/')
     await expect(page.getByTestId('recovery-queue')).toBeVisible()
-    // Default Show=Open lists the two open rows; the replayed one is
+    // Default Show=Open lists the five open rows; the replayed one is
     // filtered out until the operator widens the status filter.
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[1])}`)).toBeVisible()
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[2])}`)).toBeVisible()
