@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/httpkit"
+	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -99,53 +100,53 @@ func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
 // RecoveryOverlayView is the ownership incident riding a DLQ list row.
 type RecoveryOverlayView struct {
 	ID                 string          `json:"id"`
-	Owner              any             `json:"owner"`
+	Owner              *string         `json:"owner"`
 	Severity           string          `json:"severity"`
 	Status             string          `json:"status"`
-	SlaTargetAt        any             `json:"slaTargetAt"`
-	ResolutionReason   any             `json:"resolutionReason"`
+	SlaTargetAt        *string         `json:"slaTargetAt"`
+	ResolutionReason   *string         `json:"resolutionReason"`
 	Comments           json.RawMessage `json:"comments"`
-	WorkflowID         any             `json:"workflowId"`
-	MetadataWorkflowID any             `json:"metadataWorkflowId"`
+	WorkflowID         *string         `json:"workflowId"`
+	MetadataWorkflowID *string         `json:"metadataWorkflowId"`
 	OccurrenceCount    int32           `json:"occurrenceCount"`
-	LastOccurredAt     any             `json:"lastOccurredAt"`
+	LastOccurredAt     *string         `json:"lastOccurredAt"`
 }
 
 // DeadLetterSummaryView is one GET /v1/dlq list row.
 type DeadLetterSummaryView struct {
-	ID           string          `json:"id"`
-	OrgID        string          `json:"orgId"`
-	RunID        string          `json:"runId"`
-	NodeID       string          `json:"nodeId"`
-	Attempt      int32           `json:"attempt"`
-	ErrorJSON    json.RawMessage `json:"errorJson"`
-	Status       string          `json:"status"`
-	ReplayedAt   any             `json:"replayedAt"`
-	CreatedAt    any             `json:"createdAt"`
-	NodeType     any             `json:"nodeType"`
-	WorkflowName any             `json:"workflowName"`
-	Recovery     any             `json:"recovery"`
+	ID           string               `json:"id"`
+	OrgID        string               `json:"orgId"`
+	RunID        string               `json:"runId"`
+	NodeID       string               `json:"nodeId"`
+	Attempt      int32                `json:"attempt"`
+	ErrorJSON    json.RawMessage      `json:"errorJson"`
+	Status       string               `json:"status"`
+	ReplayedAt   *string              `json:"replayedAt"`
+	CreatedAt    *string              `json:"createdAt"`
+	NodeType     *string              `json:"nodeType"`
+	WorkflowName *string              `json:"workflowName"`
+	Recovery     *RecoveryOverlayView `json:"recovery"`
 }
 
 func newDeadLetterSummaryView(row store.ListDeadLetterSummariesRow) DeadLetterSummaryView {
-	var recovery any
+	var recovery *RecoveryOverlayView
 	if row.RecoveryID.Valid {
-		recovery = RecoveryOverlayView{
-			ID: row.RecoveryID.String, Owner: textOrNull(row.RecoveryOwner),
+		recovery = &RecoveryOverlayView{
+			ID: row.RecoveryID.String, Owner: nullableTextValue(row.RecoveryOwner),
 			Severity: row.RecoverySeverity, Status: row.RecoveryStatus,
-			SlaTargetAt:        timeOrNull(row.RecoverySlaTargetAt),
-			ResolutionReason:   textOrNull(row.RecoveryResolutionReason),
+			SlaTargetAt:        nullableTimeValue(row.RecoverySlaTargetAt),
+			ResolutionReason:   nullableTextValue(row.RecoveryResolutionReason),
 			Comments:           normalizedRaw(row.RecoveryComments),
-			WorkflowID:         textOrNull(row.RecoveryWorkflowID),
-			MetadataWorkflowID: textOrNull(row.RecoveryMetadataWorkflowID),
+			WorkflowID:         nullableTextValue(row.RecoveryWorkflowID),
+			MetadataWorkflowID: nullableTextValue(row.RecoveryMetadataWorkflowID),
 			OccurrenceCount:    row.RecoveryOccurrenceCount,
-			LastOccurredAt:     timeOrNull(row.RecoveryLastOccurredAt),
+			LastOccurredAt:     nullableTimeValue(row.RecoveryLastOccurredAt),
 		}
 	}
 	return DeadLetterSummaryView{
 		ID: row.ID, OrgID: row.OrgID, RunID: row.RunID, NodeID: row.NodeID,
 		Attempt: row.Attempt, ErrorJSON: normalizedRaw(row.ErrorJson), Status: row.Status,
-		ReplayedAt: timeOrNull(row.ReplayedAt), CreatedAt: timeOrNull(row.CreatedAt),
+		ReplayedAt: nullableTimeValue(row.ReplayedAt), CreatedAt: nullableTimeValue(row.CreatedAt),
 		NodeType: textOrNullString(row.NodeType), WorkflowName: textOrNullString(row.WorkflowName),
 		Recovery: recovery,
 	}
@@ -153,21 +154,21 @@ func newDeadLetterSummaryView(row store.ListDeadLetterSummariesRow) DeadLetterSu
 
 // DeadLetterDetailView is the legacy GET /dlq?id= exact-snapshot detail.
 type DeadLetterDetailView struct {
-	ID              string          `json:"id"`
-	OrgID           string          `json:"orgId"`
-	RunID           string          `json:"runId"`
-	NodeID          string          `json:"nodeId"`
-	Attempt         int32           `json:"attempt"`
-	WorkflowJSON    json.RawMessage `json:"workflowJson"`
-	NodeJSON        json.RawMessage `json:"nodeJson"`
-	ErrorJSON       json.RawMessage `json:"errorJson"`
-	Status          string          `json:"status"`
-	ReplayedAt      any             `json:"replayedAt"`
-	CreatedAt       any             `json:"createdAt"`
-	ReplayClaimedAt any             `json:"replayClaimedAt"`
-	SuspectVersion  any             `json:"suspectVersion"`
-	Drill           any             `json:"drill"`
-	DrillOutcome    any             `json:"drillOutcome"`
+	ID              string                   `json:"id"`
+	OrgID           string                   `json:"orgId"`
+	RunID           string                   `json:"runId"`
+	NodeID          string                   `json:"nodeId"`
+	Attempt         int32                    `json:"attempt"`
+	WorkflowJSON    json.RawMessage          `json:"workflowJson"`
+	NodeJSON        json.RawMessage          `json:"nodeJson"`
+	ErrorJSON       json.RawMessage          `json:"errorJson"`
+	Status          string                   `json:"status"`
+	ReplayedAt      *string                  `json:"replayedAt"`
+	CreatedAt       *string                  `json:"createdAt"`
+	ReplayClaimedAt *string                  `json:"replayClaimedAt"`
+	SuspectVersion  json.RawMessage          `json:"suspectVersion"`
+	Drill           *recoveryDrillProvenance `json:"drill"`
+	DrillOutcome    *recovery.DrillOutcome   `json:"drillOutcome"`
 }
 
 type recoveryDrillProvenance struct {
@@ -211,8 +212,8 @@ func newDeadLetterDetailView(row store.GetDeadLetterRow) DeadLetterDetailView {
 		ID: row.ID, OrgID: row.OrgID, RunID: row.RunID, NodeID: row.NodeID,
 		Attempt: row.Attempt, WorkflowJSON: normalizedRaw(row.WorkflowJson),
 		NodeJSON: normalizedRaw(row.NodeJson), ErrorJSON: normalizedRaw(row.ErrorJson),
-		Status: row.Status, ReplayedAt: timeOrNull(row.ReplayedAt),
-		CreatedAt: timeOrNull(row.CreatedAt), ReplayClaimedAt: timeOrNull(row.ReplayClaimedAt),
+		Status: row.Status, ReplayedAt: nullableTimeValue(row.ReplayedAt),
+		CreatedAt: nullableTimeValue(row.CreatedAt), ReplayClaimedAt: nullableTimeValue(row.ReplayClaimedAt),
 	}
 }
 

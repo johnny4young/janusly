@@ -319,6 +319,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.route(mux, "GET /v1/runs", routeGate{auth.RoleViewer, "runs.read"}, s.listRuns)
 	s.route(mux, "POST /v1/resume", routeGate{auth.RoleEditor, "runs.start"}, s.resumeRun)
 	s.route(mux, "POST /v1/run/cancel", routeGate{auth.RoleEditor, "runs.cancel"}, s.cancelRun)
+	s.mountDLQContractRoutes(mux)
 	s.route(mux, "GET /v1/dlq", routeGate{auth.RoleViewer, "dlq.read"}, s.listDeadLetters)
 	s.route(mux, "POST /runs/redrive", routeGate{auth.RoleEditor, "runs.start"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.runsRedriveCore(r, rc))

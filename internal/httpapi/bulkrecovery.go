@@ -158,11 +158,16 @@ func (s *V1Server) resolveDeadLetterCore(r *http.Request, rc v1Request) opResult
 		return opError(http.StatusBadRequest, "dlq_field_required", "id is required",
 			map[string]any{"field": "id"})
 	}
-	if _, err := store.New(s.pool).MarkDeadLetterResolved(r.Context(), store.MarkDeadLetterResolvedParams{
+	affected, err := store.New(s.pool).MarkDeadLetterResolved(r.Context(), store.MarkDeadLetterResolvedParams{
 		OrgID: rc.orgID, ID: body.ID,
-	}); err != nil {
+	})
+	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
+	if affected == 0 {
+		return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
+	}
+
 	audit.Write(r.Context(), s.pool, rc.authContext, "dlq.resolved", audit.Options{
 		TargetType: "dlq", TargetID: body.ID,
 	})

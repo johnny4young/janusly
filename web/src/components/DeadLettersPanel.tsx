@@ -1,3 +1,4 @@
+import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 /**
  * Dead-letter operations panel — surfaces `dead_letters` rows with replay
  * + resolve actions. Calls `bumpPlatformVersion(DEAD_LETTER_MUTATION_TAGS)` after a successful
@@ -8,7 +9,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
-import { api, downloadFromApi, contractApi } from '../api'
+import { api, downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
@@ -286,7 +287,7 @@ export function DeadLettersPanel({
   const requestedOffList = Boolean(requestedId) && !filtered.some(item => item.id === requestedId)
   const selected = listSelected ?? (requestedId ? offListSelected : filtered[0] ?? null) ?? null
 
-  // Resolve a requested id the current page doesn't contain. `/dlq?id=` is
+  // Resolve a requested id the current page doesn't contain. the entry read is
   // org-scoped and unconstrained by filters or pagination, so it can originate
   // a selection the list never had. A 404 is surfaced, not swallowed: a stale
   // alert link must say "this failure is gone", not quietly show another one.
@@ -298,9 +299,9 @@ export function DeadLettersPanel({
     }
     let cancelled = false
     setRequestedNotFound(false)
-    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(requestedId)}`, undefined)
+    readDeadLetterDetail(requestedId)
       .then((row) => {
-        if (!cancelled) setOffListSelected(row as unknown as DeadLetter)
+        if (!cancelled) setOffListSelected(row)
       })
       .catch(() => {
         if (!cancelled) {
@@ -312,7 +313,7 @@ export function DeadLettersPanel({
   }, [requestedOffList, requestedId])
 
   // List rows are summary projections (no workflowJson / nodeJson). Fetch the
-  // full `/dlq?id=` detail for the selected row so the detail blocks and the
+  // full entry detail for the selected row so the detail blocks and the
   // Recovery dialog get the real snapshots; the summary row is the graceful
   // fallback while loading or on fetch failure.
   const [selectedDetail, setSelectedDetail] = useState<DeadLetter | null>(null)
@@ -327,9 +328,9 @@ export function DeadLettersPanel({
     let cancelled = false
     setSelectedDetail(null)
     setShowSuspectDiff(false)
-    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(selectedRowId)}`, undefined)
+    readDeadLetterDetail(selectedRowId)
       .then((row) => {
-        if (!cancelled) setSelectedDetail(row as unknown as DeadLetter)
+        if (!cancelled) setSelectedDetail(row)
       })
       .catch(() => {
         // Summary row keeps rendering — the detail blocks just stay lighter.
@@ -426,7 +427,7 @@ export function DeadLettersPanel({
     const replayingId = selected.id
     setReplayingIds((current) => new Set(current).add(replayingId))
     try {
-      await runSelectedTriageAction((id) => onReplay(id, selected.createdAt))
+      await runSelectedTriageAction((id) => onReplay(id, selected.createdAt ?? undefined))
     } finally {
       setReplayingIds((current) => {
         const next = new Set(current)

@@ -85,9 +85,10 @@ describe('computeLongestOpenDowntime', () => {
     ], NOW)).toEqual({ createdAt: isoMinutesAgo(240), durationMs: 240 * MIN })
   })
 
-  it('ignores missing, invalid, and future timestamps', () => {
+  it('ignores missing, null, invalid, and future timestamps', () => {
     expect(computeLongestOpenDowntime([
       {},
+      { createdAt: null },
       { createdAt: 'not-a-date' },
       { createdAt: new Date(NOW + MIN).toISOString() },
     ], NOW)).toBeNull()

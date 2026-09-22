@@ -123,6 +123,9 @@ var baseRouteAuthz = map[string]routeGate{
 	"POST /v1/triggers/mcp/ingest":   {auth.RoleEditor, "triggers.ingest"},
 
 	// DLQ + recovery.
+	"GET /v1/dlq/entries/{deadLetterId}":           {auth.RoleViewer, "dlq.read"},
+	"GET /dlq/entries/{deadLetterId}":              {auth.RoleViewer, "dlq.read"},
+	"POST /v1/dlq/resolve":                         {auth.RoleEditor, "recovery.write"},
 	"GET /v1/dlq":                                  {auth.RoleViewer, "dlq.read"},
 	"GET /dlq":                                     {auth.RoleViewer, "dlq.read"},
 	"GET /dlq/counts":                              {auth.RoleViewer, "dlq.read"},

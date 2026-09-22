@@ -111,3 +111,15 @@ Malformed or wrong-run success cannot authorize Apply or discard history. A
 validation run that reaches `timed_out` is now handled as terminal failure.
 This is a vertical contract change, not a universal response-validation layer;
 extensible JSON payloads remain intentionally unconstrained.
+
+### Typed dead-letter evidence
+
+- Dead-letter summary and detail contracts now expose their actual nullable wire
+  metadata, snapshots and drill outcomes. A dedicated versioned entry route
+  shares the legacy detail operation without changing the list shape.
+- Recovery selections validate the returned identity and complete snapshot
+  envelope before enabling actions. Generated drill types replace duplicated
+  browser definitions; null timestamps remain unknown rather than fabricated.
+- Resolving a missing or foreign dead letter now returns an indistinguishable
+  not-found response instead of a false success and audit. Owned resolutions
+  remain acceptance of loss, with the same editor permission gate.

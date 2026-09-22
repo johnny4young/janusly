@@ -1,3 +1,4 @@
+import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 import {
   lazy,
   Suspense,
@@ -27,7 +28,6 @@ import {
   type ActivityFeedItem,
   type ActivityFilter,
 } from '../activity-feed'
-import { contractApi } from '../api'
 import { formatStatusLabel, getNodeLabel } from '../constants'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 import { useVirtualList } from '../hooks/useVirtualList'
@@ -145,7 +145,7 @@ function ActivityRow({
         </span>
         <span className="we-activity-row__status">
           <span className="status-pill" data-status={statusTone}>{displayedStatus}</span>
-          <time dateTime={item.createdAt}>{activityTime(item.createdAt)}</time>
+          <time dateTime={item.createdAt ?? undefined}>{activityTime(item.createdAt ?? undefined)}</time>
         </span>
         <span className="we-activity-row__next">
           {t(`activity.nextAction.${item.nextAction}`)}
@@ -286,9 +286,9 @@ export function ActivityWorkspace({
       return
     }
     const controller = new AbortController()
-    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(selection.id)}`, undefined, { signal: controller.signal })
+    readDeadLetterDetail(selection.id, controller.signal)
       .then(value => {
-        if (!controller.signal.aborted) setOffListRecovery(value as unknown as DeadLetter)
+        if (!controller.signal.aborted) setOffListRecovery(value)
       })
       .catch(() => {
         if (!controller.signal.aborted) setOffListRecovery(null)

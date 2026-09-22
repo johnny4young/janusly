@@ -1,3 +1,4 @@
+import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
@@ -125,6 +126,7 @@ describe('<FailureClustersCard />', () => {
 
   it('falls back to a still-open DLQ member when the representative is stale', async () => {
     const staleDlq = {
+      ...deadLetterWireDefaults,
       id: 'dlq-stale',
       runId: 'run-stale-1234567890',
       nodeId: 'fetch',
@@ -166,7 +168,7 @@ describe('<FailureClustersCard />', () => {
     fireEvent.click(screen.getByRole('button', { name: /Recover this pattern/i }))
 
     expect(await screen.findByText(/Recover fetch on run run-open/i)).toBeInTheDocument()
-    expect(vi.mocked(api).mock.calls.map((call) => call[0])).toContain('/dlq?id=dlq-open')
+    expect(vi.mocked(api).mock.calls.map((call) => call[0])).toContain('/dlq/entries/dlq-open')
   })
 
   it('keeps the cluster success state mounted while refreshed data arrives', async () => {
@@ -181,6 +183,7 @@ describe('<FailureClustersCard />', () => {
       samples: [{ source: 'dead_letter', id: 'dlq-recovery', runId: 'run-recovery-12345678' }],
     }
     const dlq = {
+      ...deadLetterWireDefaults,
       id: 'dlq-recovery',
       runId: 'run-recovery-12345678',
       nodeId: 'fetch',
@@ -220,7 +223,7 @@ describe('<FailureClustersCard />', () => {
         })
       }
       if (path.startsWith('/dlq/cluster-members?')) return { deadLetterIds: ['dlq-recovery', 'dlq-peer'], total: 2, capped: false }
-      if (path === '/dlq?id=dlq-recovery') return dlq
+      if (path === '/dlq/entries/dlq-recovery') return dlq
       if (path === '/ai/patch-workflow') {
         return {
           mode: 'ai',

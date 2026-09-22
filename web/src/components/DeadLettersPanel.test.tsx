@@ -1,3 +1,4 @@
+import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
 import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
@@ -64,6 +65,7 @@ function overlay(id: string, severity: 'p1' | 'p2' | 'p3' | 'p4' = 'p2'): DeadLe
 
 function mockDeadLetter(id: string, overrides: Partial<DeadLetter> = {}): DeadLetter {
   return {
+    ...deadLetterWireDefaults,
     id,
     runId: `run-${id}`,
     nodeId: `node-${id}`,
@@ -241,7 +243,7 @@ describe('<DeadLettersPanel />', () => {
       if (path.startsWith('/dlq/queue')) {
         return { items: [row], nextCursor: null, hasMore: false }
       }
-      if (path === '/dlq?id=detail-gated') return detail
+      if (path === '/dlq/entries/detail-gated') return detail
       return { items: [], clusters: [], runs: [], proposals: [] }
     })
 
@@ -266,6 +268,26 @@ describe('<DeadLettersPanel />', () => {
     await waitFor(() => expect(suggest).toBeEnabled())
   })
 
+  it.each([
+    ['summary only', { id: 'guarded', status: 'open' }],
+    ['wrong row', { ...deadLetterWireDefaults, id: 'another-row' }],
+  ])('does not enable recovery from %s detail', async (_name, response) => {
+    const row = mockDeadLetter('guarded', { workflowJson: undefined, nodeJson: undefined })
+    let release!: (value: unknown) => void
+    const detail = new Promise<unknown>(resolve => { release = resolve })
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return countsFromRows([row])
+      if (path.startsWith('/dlq/queue')) return { items: [row], nextCursor: null, hasMore: false }
+      if (path === '/dlq/entries/guarded') return detail
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    const suggest = await screen.findByRole('button', { name: /suggest fix/i })
+    await act(async () => { release(response); await detail })
+    expect(suggest).toBeDisabled()
+    expect(screen.queryByTestId('recovery-dialog')).not.toBeInTheDocument()
+  })
+
   it('labels a selected recovery drill with its actual recovery path', async () => {
     const row = mockDeadLetter('worker-drill')
     let recovered = false
@@ -273,7 +295,7 @@ describe('<DeadLettersPanel />', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path.startsWith('/dlq/counts')) return countsFromRows([row])
       if (path.startsWith('/dlq/queue')) return { items: [row], nextCursor: null, hasMore: false }
-      if (path === '/dlq?id=worker-drill') {
+      if (path === '/dlq/entries/worker-drill') {
         detailCalls += 1
         return {
           ...row,
@@ -474,7 +496,7 @@ describe('<DeadLettersPanel />', () => {
     // not read as "nothing selected".
     requestRecoveryQueueFocus('ghost')
     vi.mocked(api).mockImplementation(async (path: unknown, options?: unknown) => {
-      if (typeof path === 'string' && path.startsWith('/dlq?id=ghost')) throw new Error('404')
+      if (typeof path === 'string' && path.startsWith('/dlq/entries/ghost')) throw new Error('404')
       return dlqMock([mockDeadLetter('unrelated')])(path as string, options as RequestInit)
     })
 

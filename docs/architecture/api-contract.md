@@ -152,3 +152,27 @@ Public workflow status pages use a 256-bit bearer token at
 response; PostgreSQL stores its SHA-256 digest, so a later admin read can report
 and revoke enablement but cannot reconstruct the public URL. Public payloads are
 aggregate-only and intentionally omit tenant ids, run ids, and error bodies.
+
+## Dead-letter snapshots and resolution
+
+`GET /v1/dlq` remains a bounded summary array (at most 200 rows), with explicit
+nullable ownership metadata and opaque error/comment JSON. It is not a detail
+union. `GET /v1/dlq/entries/{deadLetterId}` returns the full tenant-bound failed
+workflow/node snapshot and bounded drill provenance/outcome. The legacy
+`GET /dlq?id=...` and unversioned entry path share the same core and wire keys.
+Missing or foreign entries are indistinguishable 404 responses. Persisted absent
+timestamps remain null; the browser must not invent recency or downtime.
+
+The browser's shared detail boundary validates identity, lifecycle, required
+snapshot keys and drill projections before enabling recovery; an incomplete or
+wrong-row response cannot become evidence. Extension workflow/node/error JSON is
+not redefined as a closed business schema. The explicit `entries` namespace also
+keeps legacy `/dlq/queue`, `/dlq/counts` and `/dlq/cluster-members` out of the
+versioned-path rewrite.
+
+`POST /v1/dlq/resolve` and its existing unversioned alias require editor-level
+`recovery.write`, accept `{id}`, and return `{ok: true}` only when an owned row
+was updated. Missing/foreign ids return `dlq_not_found` without a success audit.
+This is acceptance of loss, not verified recovery; the linked recovery item
+retains `accepted_loss`. The browser checks the affirmative receipt before
+showing success or refreshing projections.

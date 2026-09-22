@@ -1,3 +1,4 @@
+import { resolveDeadLetterEntry } from '../lib/dead-letter-contract'
 import { useCallback } from 'react'
 import { api, contractApi } from '../api'
 import { requestRecoveryAllClearIfQueueEmpty } from '../components/recovery-all-clear-coordinator'
@@ -370,10 +371,7 @@ export function useRunCommands(
 
   const resolveDeadLetter = useCallback(async (deadLetterId: string) => {
     const result = await runPlatformMutation({
-      request: () => api('/dlq/resolve', {
-        method: 'POST',
-        body: JSON.stringify({ id: deadLetterId }),
-      }),
+      request: () => resolveDeadLetterEntry(deadLetterId),
       failureMessage: t('toasts.deadLetterResolveFailed'),
       successToast: { message: t('toasts.deadLetterResolved'), tone: 'success' },
       onSuccess: async () => {

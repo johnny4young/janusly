@@ -25,7 +25,7 @@ type ActivityFeedBase = {
   key: string
   entityId: string
   runId: string
-  createdAt?: string
+  createdAt?: string | null
   workflowId?: string
   workflowName?: string | null
   category: ActivityCategory
@@ -73,7 +73,7 @@ function recoveryNextAction(deadLetter: DeadLetter): ActivityNextAction {
   return 'reviewResolution'
 }
 
-function timestamp(value: string | undefined): number {
+function timestamp(value: string | null | undefined): number {
   if (!value) return 0
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : 0

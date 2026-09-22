@@ -1,3 +1,4 @@
+import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   Copy,
@@ -8,7 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-import { downloadFromApi, contractApi } from '../api'
+import { downloadFromApi } from '../api'
 import { copyText } from '../clipboard'
 import { formatStatusLabel, getNodeLabel } from '../constants'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
@@ -133,14 +134,14 @@ export function ActivityRecoveryDetail({
     const controller = new AbortController()
     const summaryStatus = deadLetter.status
     setDetail({ id: deadLetter.id, kind: 'loading', summaryStatus, value: null })
-    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(deadLetter.id)}`, undefined, { signal: controller.signal })
+    readDeadLetterDetail(deadLetter.id, controller.signal)
       .then(value => {
         if (!controller.signal.aborted) {
           setDetail({
             id: deadLetter.id,
             kind: 'ready',
             summaryStatus,
-            value: value as unknown as DeadLetter,
+            value: value,
           })
         }
       })
@@ -172,7 +173,7 @@ export function ActivityRecoveryDetail({
     setBusy(kind)
     try {
       const succeeded = kind === 'replay'
-        ? await onReplay(current.id, current.createdAt)
+        ? await onReplay(current.id, current.createdAt ?? undefined)
         : await onResolve(current.id)
       if (succeeded !== false) {
         const status = kind === 'replay' ? 'replayed' : 'resolved'

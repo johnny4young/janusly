@@ -489,7 +489,7 @@ export function computeStreaks(cells: HeatmapCell[]): StreakSummary {
 
 /** Find the oldest valid open failure using the Recovery Center's shared clock. */
 export function computeLongestOpenDowntime(
-  items: ReadonlyArray<{ createdAt?: string }>,
+  items: ReadonlyArray<{ createdAt?: string | null }>,
   nowMs: number | null,
 ): OpenDowntimeSummary | null {
   if (nowMs === null || !Number.isFinite(nowMs)) return null

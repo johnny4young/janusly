@@ -25,7 +25,12 @@ func manifestResponse(t *testing.T, method, path string) contract.Schema {
 
 func resolvedResponseSchema(t *testing.T, path string) *jsonschema.Resolved {
 	t.Helper()
-	raw, err := json.Marshal(manifestResponse(t, "GET", path))
+	return resolvedManifestSchema(t, "GET", path)
+}
+
+func resolvedManifestSchema(t *testing.T, method, path string) *jsonschema.Resolved {
+	t.Helper()
+	raw, err := json.Marshal(manifestResponse(t, method, path))
 	if err != nil {
 		t.Fatal(err)
 	}

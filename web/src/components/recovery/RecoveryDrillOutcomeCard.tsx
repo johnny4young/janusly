@@ -1,23 +1,11 @@
 /** Operator-facing measurement card for a code-authored recovery drill. */
 
+import type { ApiResponses } from '../../lib/api-types.generated'
+
 import { getResolvedLocale, useT } from '../../i18n'
 import { formatDuration } from '../recovery-center/recovery-center-model'
 
-export type RecoveryDrillOutcome = {
-  status: 'awaiting_action' | 'replay_in_progress' | 'recovered' | 'accepted_loss' | 'measurement_incomplete'
-  startedAt: string | null
-  completedAt: string | null
-  elapsedMs: number | null
-  evidence: 'terminal_impact' | 'explicit_resolution' | null
-  attemptCount: number
-  latestDeadLetterId: string
-  chainCapped: boolean
-  recurrence: {
-    status: 'not_applicable' | 'monitoring' | 'clear' | 'recurred'
-    windowEndsAt: string | null
-    recurredAt: string | null
-  }
-}
+export type RecoveryDrillOutcome = NonNullable<ApiResponses['GET /dlq/entries/{deadLetterId}']['drillOutcome']>
 
 const STATUS_TONES = {
   awaiting_action: 'warning',

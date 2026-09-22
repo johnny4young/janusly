@@ -241,27 +241,6 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 			_ = json.NewEncoder(w).Encode(items)
 			return
 		}
-		q := store.New(s.pool)
-		row, err := q.GetDeadLetter(r.Context(), store.GetDeadLetterParams{ID: id, OrgID: rc.orgID})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				writeUnversioned(w, opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil))
-				return
-			}
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		view := newDeadLetterDetailView(row)
-		if run, runErr := q.GetRun(r.Context(), store.GetRunParams{ID: row.RunID, OrgID: rc.orgID}); runErr == nil {
-			view.Drill = parseRecoveryDrillProvenance(run.InputJson)
-			if view.Drill != nil {
-				if outcome, outcomeErr := s.queryDrillOutcome(r.Context(), rc.orgID, row.ID); outcomeErr == nil {
-					view.DrillOutcome = outcome
-				}
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(view)
+		writeUnversioned(w, s.deadLetterDetailCore(r, rc, id))
 	})
 }

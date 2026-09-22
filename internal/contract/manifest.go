@@ -376,7 +376,11 @@ var Routes = []Route{
 		Request:  obj(map[string]any{"runId": str(), "reason": str()}, "runId"),
 		Response: obj(map[string]any{"runId": str(), "status": str()}, "runId", "status")},
 	{Method: "GET", Path: "/v1/dlq", Summary: "Dead-letter list with server-side filters",
-		Response: arr(map[string]any{"type": "object"})},
+		Response: map[string]any{"type": "array", "items": deadLetterSummary, "maxItems": 200}},
+	{Method: "GET", Path: "/v1/dlq/entries/{deadLetterId}", Summary: "Tenant-bound dead-letter snapshot", Response: deadLetterDetail},
+	{Method: "POST", Path: "/v1/dlq/resolve", Summary: "Resolve one dead letter as accepted loss",
+		Request:  obj(map[string]any{"id": map[string]any{"type": "string", "minLength": 1}}, "id"),
+		Response: closedObj(map[string]any{"ok": map[string]any{"const": true}}, "ok")},
 	{Method: "GET", Path: "/v1/dlq/clusters", Summary: "Failure clusters over open dead letters",
 		Response: obj(map[string]any{
 			"clusters":     arr(map[string]any{"type": "object"}),

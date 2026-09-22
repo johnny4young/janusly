@@ -1,3 +1,4 @@
+import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
 /**
  * Real-Chromium regression smoke for the recovery dialog lifecycle.
  * A successful cluster apply schedules a platform refresh; the refreshed
@@ -44,6 +45,7 @@ describe('<FailureClustersCard /> recovery lifecycle (browser smoke)', () => {
       samples: [{ source: 'dead_letter', id: 'dlq-recovery', runId: 'run-recovery-12345678' }],
     }
     const dlq = {
+      ...deadLetterWireDefaults,
       id: 'dlq-recovery',
       runId: 'run-recovery-12345678',
       nodeId: 'fetch',
@@ -83,7 +85,7 @@ describe('<FailureClustersCard /> recovery lifecycle (browser smoke)', () => {
         })
       }
       if (path.startsWith('/dlq/cluster-members?')) return { deadLetterIds: ['dlq-recovery', 'dlq-peer'], total: 2, capped: false }
-      if (path === '/dlq?id=dlq-recovery') return dlq
+      if (path === '/dlq/entries/dlq-recovery') return dlq
       if (path === '/ai/patch-workflow') {
         return {
           mode: 'ai',
