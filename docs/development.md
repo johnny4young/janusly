@@ -30,6 +30,9 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 | Lane | Command | Needs |
 |---|---|---|
 | Go unit (race) | `make test` | nothing |
+| CI classification/gate | `make test-ci` | git, bash, jq; fixture repositories only |
+| Browser/API route parity | `make test-route-parity` | Go, no database; reads frontend sources |
+| Two-instance HA (race) | `make test-ha` | Docker; owns a fresh PostgreSQL 18 project and migrates twice |
 | Go integration | `make test-integration` | `JANUSLY_DATABASE_URL` pointing at a migrated PostgreSQL test role with `CREATEDB`; runs `-p 1` |
 | Web unit (jsdom) | `cd web && pnpm test` | nothing; CSS is not parsed |
 | Web browser (Chromium) | `cd web && pnpm test:browser` | Playwright browsers |
@@ -40,7 +43,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 `make verify` (`scripts/verify-isolated.sh`) creates a fresh PostgreSQL
 compose project, migrates twice (the second run must be a no-op), regenerates
 `schema.sql` and checks it for drift, runs `make generate` drift, lint, vuln,
-Go unit and integration, the web verify (`audit:ci`, lint, typecheck, unit,
+Go unit, integration and two-instance HA, the web verify (`audit:ci`, lint, typecheck, unit,
 scripts, browser, build, `bundle-check`) and the e2e lane, then ends with
 `git diff --exit-code`. Commit first, verify after, and do not touch tracked
 files while it runs.
@@ -65,6 +68,47 @@ database. The Compose test role already has the required `CREATEDB` privilege.
 Any Janusly process on the same database (a soak, `make dev`) claims queued
 nodes: tests that `StartRun` and then `claimBatch` race with it. Seed rows by
 SQL when a test must own a specific node.
+
+## CI selection and required checks
+
+The `CI` workflow runs on pull requests, merge groups and pushes to `main` or
+`develop`, including docs-only changes. Its stable **CI gate** evaluates the
+classified inputs and every relevant lane result. Only an intentionally
+unselected lane may be `skipped`; missing, failed, cancelled or unexpectedly
+skipped results fail the gate. Making this check required is a separate repository
+owner action; changing the workflow does not enable branch protection.
+
+| Changed inputs | Product lanes | Website |
+|---|---|---|
+| `web/` | Frontend, route parity, single-runtime E2E | skipped |
+| Go/API/database | Backend, integration, HA, route parity, E2E | skipped |
+| OpenAPI/contract | Both product sets | skipped |
+| `website/` or website workflows | skipped | npm check/build |
+| Documentation only | skipped; CI gate still runs | skipped |
+| Shared/unknown inputs or missing base | All | npm check/build |
+
+The classifier reads a NUL-delimited complete diff with renames treated as
+removal plus addition, so deleted inputs and unusual filenames retain ownership.
+A failed diff is an error, never an empty change set. `make test-ci` exercises
+path selection and all flag combinations against failure, cancellation and
+unintended-skip results. The separate website workflow is reusable from CI,
+receives no deployment secrets, and never joins `make verify` or product builds.
+Website deployment remains its existing main/manual workflow; Wrangler is an
+exact dev dependency restored with `npm ci`, not a floating `npx` download.
+
+HA has its own PostgreSQL service in CI. Both replica pools are capped at four
+connections on every host, and both worker and campaign loops drain before pool
+cleanup. The ten-minute Go timeout emits goroutine stacks; the larger job budget
+leaves room to upload the HA log. `make test-ha` uses the isolated local harness;
+`test-ha-current-db` is the internal target for callers that already own a
+migrated test database. Product artifacts run only on product-changing pushes
+after CI gate succeeds, not website- or documentation-only pushes.
+
+These choices follow GitHub's guidance on
+[required check skips and dependent jobs](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)
+and Cloudflare's recommendation to
+[install Wrangler locally](https://developers.cloudflare.com/workers/wrangler/install-and-update/).
+Local fixture and lane results do not replace exact-head GitHub Actions results.
 
 ## Lint gates
 

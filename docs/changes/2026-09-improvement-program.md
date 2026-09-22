@@ -84,3 +84,18 @@ activity timestamps. Regression coverage includes failed body reads, malformed
 and cross-run projections, stale request ownership, terminal polling shutdown,
 history pagination, and real Chromium stream failure/cancellation followed by a
 successful retry. The existing production bundle caps remain unchanged.
+
+## Classified CI and bounded HA
+
+Documentation-only changes now emit a stable CI result instead of leaving a
+path-filtered workflow absent. The aggregate gate requires every selected lane
+to succeed and accepts only classifier-authorized skips. Complete, NUL-delimited
+Git diffs account for deletion, rename and shared inputs; errors fail closed.
+Web-only changes run browser/API/proxy parity. Two-instance HA now runs with four
+connections per replica, drains every test loop, and has a dedicated PostgreSQL
+service, timeout diagnostics and an isolated local target. Website PR validation
+uses its own secret-free npm/Astro workflow; the product artifact never builds
+for a website-only push. Wrangler is locked to an exact local dependency.
+The retention countdown regression freezes its clock before mount and fixture
+reads, with explicit millisecond-boundary tests rather than relaxed assertions
+or retry-to-green. Repository protection settings remain owner-controlled.

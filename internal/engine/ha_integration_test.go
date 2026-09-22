@@ -28,12 +28,18 @@ func newHAEngines(t *testing.T) (*Engine, *Engine, *pgxpool.Pool) {
 	if dsn == "" {
 		t.Skip("JANUSLY_DATABASE_URL not set; run through `make test-ha`")
 	}
-	poolA, err := pgxpool.New(context.Background(), dsn)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("pool config: %v", err)
+	}
+	// Keep contention reproducible across laptops and differently sized runners.
+	config.MaxConns, config.MinConns, config.MinIdleConns = 4, 0, 0
+	poolA, err := pgxpool.NewWithConfig(context.Background(), config.Copy())
 	if err != nil {
 		t.Fatalf("pool A: %v", err)
 	}
 	t.Cleanup(poolA.Close)
-	poolB, err := pgxpool.New(context.Background(), dsn)
+	poolB, err := pgxpool.NewWithConfig(context.Background(), config.Copy())
 	if err != nil {
 		t.Fatalf("pool B: %v", err)
 	}
@@ -52,8 +58,16 @@ func newHAEngines(t *testing.T) (*Engine, *Engine, *pgxpool.Pool) {
 			defer close(done)
 			_ = engineRef.RunWorkers(workerCtx, 4, 15*time.Millisecond, dispatcher.Execute, quietLogger())
 		}()
-		go engineRef.RunReplayCampaignPump(workerCtx, 15*time.Millisecond, quietLogger())
-		t.Cleanup(func() { stop(); <-done })
+		pumpDone := make(chan struct{})
+		go func() {
+			defer close(pumpDone)
+			engineRef.RunReplayCampaignPump(workerCtx, 15*time.Millisecond, quietLogger())
+		}()
+		t.Cleanup(func() {
+			stop()
+			<-done
+			<-pumpDone
+		})
 	}
 	return engineA, engineB, poolA
 }
