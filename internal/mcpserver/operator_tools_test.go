@@ -35,6 +35,18 @@ func TestParsePermissionCeilingDefaultsReadOnlyAndRejectsUnknown(t *testing.T) {
 	}
 }
 
+func TestParsePermissionCeilingDoesNotEchoInvalidEntries(t *testing.T) {
+	for _, invalid := range []string{"made.up", "postgres://user:SECRET@db.invalid/app", "SECRET\nforged-log-entry"} {
+		permissions, err := ParsePermissionCeiling("runs.read," + invalid)
+		if err == nil || permissions != nil {
+			t.Fatalf("unknown permission must reject the entire ceiling: %v", err)
+		}
+		if !strings.Contains(err.Error(), "JANUSLY_MCP_PERMISSIONS") || strings.Contains(err.Error(), strings.Split(invalid, "\n")[0]) {
+			t.Fatalf("expected key-only error: %q", err)
+		}
+	}
+}
+
 func TestOperatorBriefGuardAcceptsAnyContributingReadScope(t *testing.T) {
 	for _, permission := range []string{"recovery.read", "runs.read", "dlq.read"} {
 		deps := Deps{

@@ -42,6 +42,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Reject invalid authority before opening pools or starting workers.
+	permissions, err := mcpserver.ParsePermissionCeiling(os.Getenv("JANUSLY_MCP_PERMISSIONS"))
+	if err != nil {
+		return err
+	}
 	// Logs go to stderr — stdout belongs to the MCP transport.
 	logger := boot.NewLogger()
 
@@ -91,10 +96,6 @@ func run() error {
 	org := os.Getenv("JANUSLY_ORG")
 	if org == "" {
 		org = "default"
-	}
-	permissions, err := mcpserver.ParsePermissionCeiling(os.Getenv("JANUSLY_MCP_PERMISSIONS"))
-	if err != nil {
-		return err
 	}
 	tracker := ratelimit.NewTracker(pool, auditWriter)
 	limiter := ratelimit.New(pool, ratelimit.Hooks{

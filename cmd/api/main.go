@@ -144,9 +144,8 @@ func run() error {
 	}
 	logger := boot.NewLogger()
 
-	// Traces: console exporter by default, OTLP/HTTP via OTEL_EXPORTER=otlp,
-	// silent via "none". Shutdown flushes the
-	// batch queue so the last spans are not dropped on SIGTERM.
+	// Tracing exports nothing unless console or OTLP/HTTP is explicitly selected.
+	// Shutdown flushes the batch queue so spans are not dropped on SIGTERM.
 	traceShutdown, err := observability.InitTracing(ctx)
 	if err != nil {
 		return err

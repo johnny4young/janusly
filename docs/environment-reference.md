@@ -71,7 +71,7 @@ key to the host `.env` does not automatically forward it into a container.
 | `JANUSLY_MEMORY_ENABLED` | Process | exact `true`; default false; also needs tenant memory consent | `memory/memory.go` |
 | `JANUSLY_AUTO_HEALING_ENABLED` | Process | exact `true`; default false; also needs tenant auto-healing consent; proposals remain operator-applied | `engine/autohealing.go` |
 | `JANUSLY_CIRCUIT_BREAKER_ENABLED` | Process | enabled unless exact `false`; workflow opt-out and workflow/tenant thresholds remain independent | `recovery/circuitbreaker.go` |
-| `JANUSLY_MCP_PERMISSIONS` | Process | comma/whitespace-separated permission names; omitted → built-in read-only set; unknown entries reject MCP startup | `mcpserver/guard.go` |
+| `JANUSLY_MCP_PERMISSIONS` | Process | comma/whitespace-separated permission names; omitted → built-in read-only set; unknown entries reject MCP startup before database access/workers, without echoing input | `mcpserver/guard.go` |
 | `JANUSLY_ORG` | Process | string; `default`; organization bound to the stdio MCP server | `cmd/mcp/main.go` |
 | `JANUSLY_SSO_CALLBACK_URL` | Process | URL string; empty; required by WorkOS SSO flows; must match provider registration | `httpapi/sso.go` |
 | `JANUSLY_WEB_BASE_URL` | Process | URL string; empty; browser-session secure-cookie fallback and SSO return origin | `httpapi/sso.go; browsersession/browsersession.go` |
@@ -107,7 +107,7 @@ key to the host `.env` does not automatically forward it into a container.
 | `AWS_SECRET_ACCESS_KEY` | Secret | S3 signing key; empty fails S3 credential check | `internal/objectstore/sigv4.go` |
 | `SUPABASE_URL` | Platform | URL string; empty; server identity-provider endpoint | `internal/auth/auth.go` |
 | `WORKOS_CLIENT_ID` | Platform | string; empty; companion to WORKOS_API_KEY | `internal/workos/client.go` |
-| `OTEL_EXPORTER` | Platform | enum; empty/none → no export; console or otlp; unknown rejects initialization; application selector, not SDK standard | `internal/observability/tracing.go` |
+| `OTEL_EXPORTER` | Platform | enum; empty/none → no export; console or otlp; unknown rejects API initialization before database access, without echoing input; application selector, not SDK standard | `internal/observability/tracing.go` |
 | `OTEL_SERVICE_INSTANCE_ID` | Platform | string; empty → HOSTNAME or generated identity; stable instance label | `internal/observability/tracing.go; cmd/api/main.go` |
 | `HOSTNAME` | Platform | platform hostname; used only for instance identity fallback | `cmd/api/main.go`, `observability/tracing.go` |
 | `PATH` | Platform | platform executable search path; the only inherited default environment entry of MCP children | `internal/mcpclient/mcpclient.go` |

@@ -1,22 +1,12 @@
-// Process-global OpenTelemetry trace bootstrap + the span helper the
-// engine wraps node executions with (reference the source contract
-// observability/{otel,tracer,resource,trace-exporter}.ts).
-//
-// Invariants ported:
-//   - Resource carries service.name="janusly" (the runtime's own service
-//     identity — dashboards distinguish it from the contract's
-//     "janusly"), service.namespace="janusly", service.instance.id
-//     (OTEL_SERVICE_INSTANCE_ID → HOSTNAME → os.Hostname()).
-//   - Console export is the local default; OTEL_EXPORTER=otlp uses
-//     OTLP/HTTP with the batch processor and the standard
-//     OTEL_EXPORTER_OTLP_* endpoint variables. OTEL_EXPORTER=none keeps
-//     the no-op global (tests and quiet tooling).
-//   - InitTracing is called ONLY by cmd/api main; library code reaches the
-//     tracer through the global API, so untraced processes pay nothing.
+// Package observability owns API-process OpenTelemetry bootstrap and runtime
+// span helpers. Unset/none exports nothing; console and OTLP/HTTP are opt-in.
+// Instance identity uses OTEL_SERVICE_INSTANCE_ID, HOSTNAME, then os.Hostname.
+// Only cmd/api initializes export; untraced library consumers keep a no-op tracer.
 package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -34,7 +24,7 @@ import (
 // TracerName is the instrumentation-scope name every runtime span uses.
 const TracerName = "janusly"
 
-// serviceResource mirrors the contract's resource.ts attribute set.
+// serviceResource gives every exported span the runtime service identity.
 func serviceResource() *resource.Resource {
 	instance := os.Getenv("OTEL_SERVICE_INSTANCE_ID")
 	if instance == "" {
@@ -71,7 +61,7 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	case "otlp":
 		exporter, err = otlptracehttp.New(ctx)
 	default:
-		return nil, fmt.Errorf("unsupported OTEL_EXPORTER %q (console|otlp|none)", kind)
+		return nil, errors.New("invalid configuration: OTEL_EXPORTER must be console, otlp or none")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("otel exporter: %w", err)

@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -24,9 +25,16 @@ func TestInitTracingNoneIsNoop(t *testing.T) {
 }
 
 func TestInitTracingRejectsUnknownExporter(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER", "jaeger")
-	if _, err := InitTracing(context.Background()); err == nil {
-		t.Fatal("unknown exporter must error")
+	for _, invalid := range []string{"jaeger", "https://user:SECRET@example.invalid/trace", "SECRET\nforged-log-entry"} {
+		t.Setenv("OTEL_EXPORTER", invalid)
+		shutdown, err := InitTracing(context.Background())
+		if err == nil || shutdown != nil {
+			t.Fatalf("unknown exporter must fail without a shutdown callback: %v", err)
+		}
+		message := err.Error()
+		if !strings.Contains(message, "OTEL_EXPORTER") || !strings.Contains(message, "console") || strings.Contains(message, invalid) {
+			t.Fatalf("expected actionable key-only error, got %q", message)
+		}
 	}
 }
 

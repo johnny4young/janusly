@@ -21,7 +21,14 @@ func TestExecutableRejectsInvalidConfigurationBeforeDatabase(t *testing.T) {
 			t.Fatalf("build: %v\n%s", err, out)
 		}
 		for _, environment := range []string{"development", "production"} {
-			for _, key := range []string{"JANUSLY_PERSIST_MAX_BYTES", "JANUSLY_HTTP_TIMEOUT_MS", "JANUSLY_HTTP_MAX_RESPONSE_BYTES", "JANUSLY_HTTP_MAX_REDIRECTS", "JANUSLY_HTTP_STREAM_PREVIEW_BYTES", "JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", "JANUSLY_PORT", "JANUSLY_INTERNAL_HOST", "JANUSLY_REAPER_INTERVAL_MS", "JANUSLY_REAPER_THRESHOLD_MS", "JANUSLY_REAPER_THRESHOLD_FLOOR_MS", "JANUSLY_STALLED_NODE_THRESHOLD_MINUTES"} {
+			keys := []string{"JANUSLY_PERSIST_MAX_BYTES", "JANUSLY_HTTP_TIMEOUT_MS", "JANUSLY_HTTP_MAX_RESPONSE_BYTES", "JANUSLY_HTTP_MAX_REDIRECTS", "JANUSLY_HTTP_STREAM_PREVIEW_BYTES", "JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", "JANUSLY_PORT", "JANUSLY_INTERNAL_HOST", "JANUSLY_REAPER_INTERVAL_MS", "JANUSLY_REAPER_THRESHOLD_MS", "JANUSLY_REAPER_THRESHOLD_FLOOR_MS", "JANUSLY_STALLED_NODE_THRESHOLD_MINUTES"}
+			if target.name == "mcp" {
+				keys = append(keys, "JANUSLY_MCP_PERMISSIONS")
+			} else if environment == "development" {
+				// Production rejects an unsigned test binary before tracing init.
+				keys = append(keys, "OTEL_EXPORTER")
+			}
+			for _, key := range keys {
 				t.Run(target.name+"/"+environment+"/"+key, func(t *testing.T) {
 					childCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 					defer stop()

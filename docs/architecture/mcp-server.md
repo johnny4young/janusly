@@ -21,6 +21,10 @@ secret-scrubbed and truncated. Individual projections remain substantially
 smaller where their contract permits it; the global gate is a backstop, not a
 pagination substitute.
 
+The permission ceiling is validated before database access or background workers
+start. An unknown entry rejects the entire ceiling with a key-only error; invalid
+input is never echoed to logs. Omitted permissions retain the read-only default.
+
 Consent never grants a permission missing from the service-account ceiling.
 Long-running operations return durable run IDs that clients poll; the server
 does not maintain another task store.
