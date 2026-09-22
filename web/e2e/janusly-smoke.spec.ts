@@ -656,7 +656,7 @@ for (const locale of ['en', 'es'] as const) {
     }, { timeout: 30_000 }).toBe('failed')
     await page.reload()
     await expect(health).toContainText(locale === 'en' ? 'Needs attention' : 'Necesita atención')
-    await expect(health.getByLabelText(locale === 'en' ? 'Health score 0 of 100' : 'Puntuación de salud 0 de 100')).toBeVisible()
+    await expect(health.getByLabel(locale === 'en' ? 'Health score 0 of 100' : 'Puntuación de salud 0 de 100')).toBeVisible()
 
     // A failed first read is unavailable, never the same state as zero samples.
     await page.route('**/recovery/home', route => route.abort('failed'))
