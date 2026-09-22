@@ -42,3 +42,19 @@ checkpoints in 73 minutes instead of one every ~25 seconds.
   still request a full refresh. The duplicate destination-level authoring
   preload is removed; shared chunk dependencies can still load authoring code
   before its panel mounts.
+
+## Completion persistence hardening
+
+Automatic recovery ownership no longer acquires another worker-pool connection
+while a completion transaction is holding its locks. Configuration, incident
+writes and system audit receipts use that transaction, with nested savepoints
+preserving the optional failure boundaries. Debounce child insertion and the
+occurrence increment roll back together; a successful audit receipt cannot
+survive a later completion rollback.
+
+Validation includes a single-connection completion regression, real PostgreSQL
+SQL-failure injection, nested savepoint recovery, tenant opt-out, system audit
+identity/redaction, and the five two-instance HA tests with four connections per
+pool. HA passes both without session timeouts and with the worker pool's
+production-equivalent statement, lock and idle-transaction limits. This is
+local engine evidence, not an executable deployment qualification.

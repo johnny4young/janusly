@@ -1,28 +1,17 @@
-// DLQ → recovery_items auto-create hook (reference the source contract
-// recovery/recovery-item-hook.ts): every dead-letter insert opens (or
-// debounce-attaches to) an ownership incident so the queue view carries
-// severity/SLA from the moment of failure — no operator action required.
-//
-// Invariants ported:
-//   - `recovery.autoCreateItems` (default true) gates creation;
-//     `recovery.debounceWindowSeconds` (0 disables; non-zero clamped to
-//     30..3600) groups same-(workflow, signature) storms onto one OPEN
-//     incident: the child row is idempotent on (item, deadLetter) and the
-//     parent counter bumps ONLY when a child was actually inserted.
-//   - Severity default: the workflow's metadata row may declare p1..p4;
-//     otherwise p3. SLA target = created_at + per-severity minutes from
-//     `recovery.slaPolicies` overrides (p1=60, p2=240, p3=1440, p4=10080
-//     built-ins; per-severity range 1..43200).
-//   - The hook NEVER fails the caller — a blip degrades to "no incident",
-//     the contract posture.
+// Dead-letter ownership is optional, but any incident and its successful
+// audit receipt must commit with the completion that produced them.
 package engine
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
@@ -65,22 +54,50 @@ type AutoCreateRecoveryItemInput struct {
 	CreatedBy      string
 }
 
-// autoCreateRecoveryItem runs the hook against the caller's queries handle
-// (tx-bound at the DLQ insert site, so incident and dead letter commit
-// together). Errors degrade silently — telemetry never breaks completion.
-func (e *Engine) autoCreateRecoveryItem(ctx context.Context, q *store.Queries, input AutoCreateRecoveryItemInput) {
-	// ONE config read for the three keys this hook needs. The caller holds
-	// an open completion transaction plus its per-run advisory lock, so the
-	// three separate reads this replaced took three more pool connections
-	// each — precisely during the mass-failure storms this hook exists to
-	// handle, when every worker is in the same state. Deliberately still on
-	// e.pool, not the transaction's connection: a failed config read must
-	// keep degrading silently instead of poisoning the completion tx.
-	config := orgconfig.LoadValues(ctx, e.pool, input.OrgID,
-		"recovery.autoCreateItems", "recovery.debounceWindowSeconds", "recovery.slaPolicies")
-	if enabled, _ := config["recovery.autoCreateItems"].(bool); !enabled {
-		return
+// autoCreateRecoveryItem uses only the completion transaction's connection.
+// Savepoints retain fail-soft configuration, incident and audit boundaries;
+// an unrecoverable transaction error still aborts completion.
+func (e *Engine) autoCreateRecoveryItem(ctx context.Context, q *store.Queries, input AutoCreateRecoveryItemInput) error {
+	tenantRows := map[string]json.RawMessage{}
+	if _, err := q.TrySavepoint(ctx, func(db store.DBTX) error {
+		rows, err := store.New(db).ListOrgConfigRows(ctx, input.OrgID)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			tenantRows[row.Key] = row.ValueJson
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
+	config := make(map[string]any, 3)
+	for _, key := range []string{"recovery.autoCreateItems", "recovery.debounceWindowSeconds", "recovery.slaPolicies"} {
+		config[key], _ = orgconfig.ResolveValue(key, tenantRows, os.LookupEnv)
+	}
+	if enabled, _ := config["recovery.autoCreateItems"].(bool); !enabled {
+		return nil
+	}
+	applied, err := q.TrySavepoint(ctx, func(db store.DBTX) error {
+		return e.createRecoveryItem(ctx, store.New(db), input, config)
+	})
+	if err == nil && !applied {
+		slog.Warn("optional recovery item creation failed")
+	}
+	return err
+}
+
+func recoveryItemAudit(ctx context.Context, q *store.Queries, input AutoCreateRecoveryItemInput, action audit.Action, opts audit.Options) error {
+	applied, err := q.TrySavepoint(ctx, func(db store.DBTX) error {
+		return audit.SystemWriteInTx(ctx, db, input.OrgID, input.CreatedBy, action, opts)
+	})
+	if err == nil && !applied {
+		slog.Warn("optional recovery item audit failed")
+	}
+	return err
+}
+
+func (e *Engine) createRecoveryItem(ctx context.Context, q *store.Queries, input AutoCreateRecoveryItemInput, config map[string]any) error {
 	window, _ := config["recovery.debounceWindowSeconds"].(float64)
 
 	// Failure-storm debounce: attach to a still-open same-signature
@@ -98,40 +115,47 @@ func (e *Engine) autoCreateRecoveryItem(ctx context.Context, q *store.Queries, i
 			// A re-invocation for the SAME row must not attach the row to
 			// the incident it created.
 			if parent.DeadLetterID == input.DeadLetterID {
-				return
+				return nil
 			}
 			inserted, err := q.InsertRecoveryItemChild(ctx, store.InsertRecoveryItemChildParams{
 				ID: e.newID(), OrgID: input.OrgID,
 				RecoveryItemID: parent.ID, DeadLetterID: input.DeadLetterID,
 			})
 			if err != nil || inserted == 0 {
-				return
+				return err
 			}
 			count, err := q.BumpRecoveryItemOccurrence(ctx, store.BumpRecoveryItemOccurrenceParams{
 				OrgID: input.OrgID, ID: parent.ID,
 			})
-			if err == nil {
-				audit.SystemWrite(ctx, e.pool, input.OrgID, input.CreatedBy,
-					"recovery.item.occurrence_attached", audit.Options{
-						TargetType: "recovery-item", TargetID: parent.ID,
-						Metadata: map[string]any{
-							"deadLetterId": input.DeadLetterID, "occurrenceCount": count,
-							"errorSignature": input.ErrorSignature, "workflowId": input.WorkflowID,
-						},
-					})
+			if err != nil {
+				return err
 			}
-			return
+			return recoveryItemAudit(ctx, q, input, "recovery.item.occurrence_attached", audit.Options{
+				TargetType: "recovery-item", TargetID: parent.ID,
+				Metadata: map[string]any{
+					"deadLetterId": input.DeadLetterID, "occurrenceCount": count,
+					"errorSignature": input.ErrorSignature, "workflowId": input.WorkflowID,
+				},
+			})
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
 		}
 	}
 
 	severity := "p3"
 	if input.WorkflowID != "" {
-		if stored, err := q.GetWorkflowSeverityDefault(ctx, store.GetWorkflowSeverityDefaultParams{
+		stored, err := q.GetWorkflowSeverityDefault(ctx, store.GetWorkflowSeverityDefaultParams{
 			OrgID: input.OrgID, WorkflowID: input.WorkflowID,
-		}); err == nil && slaMinutesBySeverity[stored.String] > 0 {
+		})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil && slaMinutesBySeverity[stored.String] > 0 {
 			severity = stored.String
 		}
 	}
+
 	now := time.Now()
 	itemID := e.newID()
 	inserted, err := q.InsertRecoveryItem(ctx, store.InsertRecoveryItemParams{
@@ -143,9 +167,9 @@ func (e *Engine) autoCreateRecoveryItem(ctx context.Context, q *store.Queries, i
 		CreatedBy:      pgtype.Text{String: input.CreatedBy, Valid: input.CreatedBy != ""},
 	})
 	if err != nil || inserted == 0 {
-		return // duplicate (idempotent) or a blip — either way, degrade
+		return err // duplicate is an idempotent no-op; errors roll back the savepoint
 	}
-	audit.SystemWrite(ctx, e.pool, input.OrgID, input.CreatedBy, "recovery.item.created", audit.Options{
+	return recoveryItemAudit(ctx, q, input, "recovery.item.created", audit.Options{
 		TargetType: "recovery-item", TargetID: itemID,
 		Metadata: map[string]any{
 			"deadLetterId": input.DeadLetterID, "severity": severity,

@@ -127,21 +127,25 @@ func WriteAs(ctx context.Context, pool *pgxpool.Pool, orgID, userID string, acti
 // SystemWrite records a system-actor row (no auth context; orgId may be
 // the "system" sentinel) — the degradation/budget/watcher writers' shape.
 func SystemWrite(ctx context.Context, pool *pgxpool.Pool, orgID, actor string, action Action, opts Options) {
-	if opts.Metadata == nil {
-		opts.Metadata = map[string]any{}
-	}
-	// An empty actor stays absent — some reference system writers (the
-	// rate-limiter degradation rows) carry no actor field at all.
-	if actor != "" {
-		opts.Metadata["actor"] = actor
-	}
-	err := insert(ctx, func(ctx context.Context, sql string, args ...any) error {
-		_, execErr := pool.Exec(ctx, sql, args...)
-		return execErr
-	}, orgID, "", action, opts, nil)
+	err := SystemWriteInTx(ctx, pool, orgID, actor, action, opts)
 	if err != nil {
 		slog.Warn("system audit write failed", "action", string(action), "error", err)
 	}
+}
+
+// SystemWriteInTx preserves the system-actor shape on a caller-owned
+// transaction. It returns errors so the caller controls rollback policy.
+func SystemWriteInTx(ctx context.Context, tx TxExecer, orgID, actor string, action Action, opts Options) error {
+	metadata := make(map[string]any, len(opts.Metadata)+1)
+	maps.Copy(metadata, opts.Metadata)
+	if actor != "" {
+		metadata["actor"] = actor
+	}
+	opts.Metadata = metadata
+	return insert(ctx, func(ctx context.Context, sql string, args ...any) error {
+		_, err := tx.Exec(ctx, sql, args...)
+		return err
+	}, orgID, "", action, opts, nil)
 }
 
 // TxAudit is the tx-bound audit function handed to WithAuditTx handlers.

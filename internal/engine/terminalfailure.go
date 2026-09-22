@@ -268,19 +268,18 @@ func (e *Engine) insertDeadLetter(ctx context.Context, q *store.Queries, claim C
 		return nil
 	}
 	// Ownership hook: the incident opens with its dead letter (same tx);
-	// blips degrade to "no incident", never a failed completion.
+	// recoverable blips degrade to "no incident" without poisoning completion.
 	workflowID := ""
 	var wfDoc struct {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(workflowJSON, &wfDoc)
 	workflowID = wfDoc.ID
-	e.autoCreateRecoveryItem(ctx, q, AutoCreateRecoveryItemInput{
+	return e.autoCreateRecoveryItem(ctx, q, AutoCreateRecoveryItemInput{
 		OrgID: run.OrgID, DeadLetterID: deadLetterID, WorkflowID: workflowID,
 		ErrorSignature: deadLetterSignatureFromParts(claim.NodeID, nodeJSON, errorJSON),
 		CreatedBy:      "system",
 	})
-	return nil
 }
 
 // errSkipCommit aborts the transaction without reporting an error to the
