@@ -334,6 +334,8 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await page.getByRole('button', { name: 'Revertir a v1', exact: true }).click()
   const confirmation = page.getByRole('dialog', { name: '¿Revertir a v1?' })
   await expect(confirmation.getByRole('button', { name: 'Cancelar', exact: true })).toBeFocused()
+  await expect(confirmation).toHaveCSS('opacity', '1')
+  await expect(page.locator('.run-input-backdrop')).toHaveCSS('opacity', '1')
   await expectAccessible(page, 'Confirmación de reversión', '[role="dialog"][aria-labelledby="rollback-dialog-title"]')
   const rollbackResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/workflows/rollback' && response.request().method() === 'POST')
   await confirmation.getByRole('button', { name: 'Revertir', exact: true }).click()
