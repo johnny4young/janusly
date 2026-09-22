@@ -125,6 +125,7 @@ qualify-local-selftest:
 	bash scripts/load-soak-local.test.sh
 	bash scripts/assert-clean-source.test.sh
 	bash scripts/oci-railway-local.test.sh
+	bash scripts/process-config.test.sh
 	bash scripts/private-metrics-local.test.sh
 	bash scripts/supply-chain-local.test.sh
 	bash scripts/real-provider-local.test.sh
@@ -166,6 +167,7 @@ verify:
 # migrated a fresh PostgreSQL 18 database. Callers that opt into this target
 # own the lifecycle and schema state of DB_URL.
 verify-current-db:
+	bash scripts/process-config.test.sh
 	$(MAKE) schema COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME)
 	$(MAKE) generate
 	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts || { \

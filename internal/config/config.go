@@ -14,6 +14,8 @@ import (
 
 // Config is the validated process configuration.
 type Config struct {
+	Reaper Reaper
+
 	// Production enables the fail-closed boot posture for authentication,
 	// external integrations, and immutable build provenance.
 	Production bool
@@ -76,21 +78,31 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 		return def
 	}
-	num := func(name string, def, min, max int) int {
+	integer := func(name string, def, min, max int64) int64 {
 		raw := strings.TrimSpace(getenv(name))
 		if raw == "" {
 			return def
 		}
-		v, err := strconv.Atoi(raw)
+		v, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || v < min || v > max {
-			problems = append(problems, fmt.Sprintf("%s must be an integer in [%d, %d], got %q", name, min, max, raw))
+			problems = append(problems, fmt.Sprintf("%s must be an integer in [%d, %d]", name, min, max))
 			return def
 		}
 		return v
 	}
+	num := func(name string, def, min, max int) int {
+		return int(integer(name, int64(def), int64(min), int64(max)))
+	}
 	production := IsProduction(getenv)
+	reaperDefaults := DefaultReaper()
 
 	cfg := Config{
+		Reaper: Reaper{
+			Interval:        time.Duration(integer("JANUSLY_REAPER_INTERVAL_MS", int64(reaperDefaults.Interval/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond,
+			Threshold:       time.Duration(integer("JANUSLY_REAPER_THRESHOLD_MS", int64(reaperDefaults.Threshold/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond,
+			Floor:           time.Duration(integer("JANUSLY_REAPER_THRESHOLD_FLOOR_MS", int64(reaperDefaults.Floor/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond,
+			FloorOverridden: strings.TrimSpace(getenv("JANUSLY_REAPER_THRESHOLD_FLOOR_MS")) != "",
+		},
 		Production:                  production,
 		DatabaseURL:                 str("JANUSLY_DATABASE_URL", defaultDatabaseURL),
 		Port:                        num("JANUSLY_PORT", 3001, 1, 65535),
@@ -106,6 +118,9 @@ func Load(getenv func(string) string) (Config, error) {
 		FeedbackMemoryTaskTimeout: time.Duration(num(
 			"JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS", 15_000, 1000, 300_000,
 		)) * time.Millisecond,
+	}
+	if strings.TrimSpace(getenv("JANUSLY_STALLED_NODE_THRESHOLD_MINUTES")) != "" {
+		problems = append(problems, "JANUSLY_STALLED_NODE_THRESHOLD_MINUTES is unsupported; use JANUSLY_REAPER_THRESHOLD_MS")
 	}
 	if cfg.WorkerPoolSize == 0 {
 		cfg.WorkerPoolSize = cfg.WorkerConcurrency + 2
@@ -126,8 +141,7 @@ func Load(getenv func(string) string) (Config, error) {
 		// private network is IPv6-only (for example Railway); anything else
 		// would silently change which peers can reach pprof and metrics.
 	default:
-		problems = append(problems, fmt.Sprintf(
-			"JANUSLY_INTERNAL_HOST must be 127.0.0.1, 0.0.0.0, ::1, or ::, got %q", cfg.InternalHost))
+		problems = append(problems, "JANUSLY_INTERNAL_HOST must be 127.0.0.1, 0.0.0.0, ::1, or ::")
 	}
 	if len(problems) > 0 {
 		return Config{}, fmt.Errorf("invalid configuration: %s", strings.Join(problems, "; "))

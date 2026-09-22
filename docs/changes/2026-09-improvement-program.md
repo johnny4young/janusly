@@ -135,3 +135,13 @@ extensible JSON payloads remain intentionally unconstrained.
   version pagination cursors. Latest-version absence remains nullable.
 - Removed the duplicate map-based tool catalog projection. JSON editors recognize
   the registry's array, object and unknown kinds and preserve literal quoting.
+
+### Reaper configuration ownership
+
+The periodic stalled-node sweep and scoped recovery drill now share validated,
+constructor-injected process settings, including the stdio entry point. Invalid
+cadence, threshold and floor values fail boot instead of silently falling back;
+duration overflow is rejected. Long production thresholds are no longer shortened
+by a separate drill-only cap. The undocumented minutes-only drill setting is
+rejected with a replacement hint. Core configuration errors identify the setting
+and accepted range without echoing its value; tenant overrides remain dynamic.

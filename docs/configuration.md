@@ -18,16 +18,60 @@ in `org_configs`; secrets never do.
 | `JANUSLY_TRUSTED_PROXY` | `false` | When `true`, per-IP rate limits key on the first `X-Forwarded-For` hop instead of the socket peer. Set it only behind a proxy that overwrites that header; otherwise a client can pick its own bucket. |
 | `JANUSLY_BROWSER_CONNECT_ORIGINS` | empty | Comma-separated explicit loopback HTTP origins added to browser CSP for local identity labs; non-loopback and non-HTTP values are ignored. |
 | `JANUSLY_WORKER_CONCURRENCY` | `8` | Concurrent workflow task limit, range 1–64. |
-| `JANUSLY_API_POOL_SIZE` | `10` | Public-request PostgreSQL pool size. |
-| `JANUSLY_WORKER_POOL_SIZE` | derived | Execution PostgreSQL pool size; `0` derives concurrency plus two. |
+| `JANUSLY_API_POOL_SIZE` | `10` | Public-request PostgreSQL pool size; integer range 1–100. |
+| `JANUSLY_WORKER_POOL_SIZE` | derived | Execution PostgreSQL pool size; integer range 0–100; `0` derives concurrency plus two. |
 | `JANUSLY_POLL_MS` | `250` | Durable-queue fallback poll interval, range 50–5000 ms. |
-| `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Default outbound HTTP timeout; integer range 1..600000 ms. |
+| `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Default outbound HTTP timeout; integer range 1000..600000 ms. |
 | `JANUSLY_FEEDBACK_MEMORY_WORKERS` | `4` | Fixed workers for optional feedback-derived memory commits, range 1–32. |
 | `JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY` | `256` | Waiting-task bound for optional feedback-derived memory, range 1–4096; saturation never rejects durable feedback. |
 | `JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS` | `15000` | Per-task deadline for feedback-derived memory, range 1000–300000 ms. |
 
 `JANUSLY_PORT` and `JANUSLY_INTERNAL_PORT` must differ. There are no alternate
 names for these settings.
+
+## Process reaper settings
+
+These are process-wide integer millisecond settings, not `org_configs` keys.
+Both the HTTP executable and stdio MCP entry point validate them before opening
+a database connection or starting workers. Defaults and overrides are copied into
+the engine at construction; changing environment variables requires a restart.
+The periodic sweep and the scoped recovery drill use that same snapshot.
+
+| Variable | Default | Range | Precedence / meaning |
+| --- | ---: | --- | --- |
+| `JANUSLY_REAPER_INTERVAL_MS` | `60000` | 1–9223372035854 ms | Sweep cadence; no tenant override. |
+| `JANUSLY_REAPER_THRESHOLD_MS` | `3600000` | 1–9223372035854 ms | Requested stall age; effective threshold is the larger of this value and the floor. |
+| `JANUSLY_REAPER_THRESHOLD_FLOOR_MS` | `900000` | 1–9223372035854 ms | Safety floor; an explicit override logs the floor and effective threshold. Lowering it can fail legitimate long-running nodes. |
+
+The upper bound prevents duration overflow and reserves one second for the
+historical drill's age margin; it is not a recommended operating threshold.
+Long thresholds are not silently shortened to a drill-only 24-hour cap.
+`JANUSLY_STALLED_NODE_THRESHOLD_MINUTES` was an undocumented drill-only fallback
+that did not configure the production sweep. It is now rejected at boot with an
+instruction to use `JANUSLY_REAPER_THRESHOLD_MS`, rather than reporting a drill
+policy different from the actual worker policy.
+
+Invalid validated core values fail startup with their variable name and accepted
+range, never the supplied value. Unset or whitespace-only values use the documented
+default. The validated core settings (ports, pools, concurrency, polling, default
+HTTP timeout, feedback workers and reaper) are restart-scoped. This does **not**
+freeze tenant configuration: organization settings continue through their
+existing database → environment → default resolution at runtime.
+
+### Configuration ownership categories
+
+- **Public process:** validated boot values above; the executable owns their
+  lifecycle. Other feature-specific process settings are described below.
+- **Tenant override:** catalogued `org_configs` values and their documented
+  environment fallback; do not capture these in an immutable boot snapshot.
+- **Harness/test:** `JANUSLY_VERIFY_*`, `JANUSLY_E2E_*`, and qualification controls
+  belong to their scripts, not to the product configuration surface. Harnesses
+  may explicitly lower the public reaper floor only in isolated stacks.
+- **Third party/platform:** `PATH`, `HOSTNAME`, `PG*`, and `OTEL_*` retain their
+  library/platform ownership; they are not Janusly business settings.
+- **Secret:** database URLs, provider credentials, token-signing and encryption
+  keys are never included in configuration-validation error values. Their
+  feature-specific checks and rotation rules remain separate from numeric knobs.
 
 ## Production requirements
 

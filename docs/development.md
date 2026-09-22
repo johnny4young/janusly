@@ -144,13 +144,15 @@ upgrade bridges. The whole file sits inside one `-- +goose StatementBegin` /
 goose splits plpgsql bodies at every `;`.
 
 1. Edit the baseline.
-2. Hand-add the same columns to `schema.sql` so `sqlc` and the binary
-   compile (`make generate`).
+2. Generate `schema.sql` from the edited baseline on a fresh, isolated
+   PostgreSQL 18 database: `bash scripts/verify-isolated.sh schema`. Never edit
+   the dump by hand; the harness owns and removes only its disposable project.
 3. Write or change queries in `internal/store/queries/*.sql`; `SELECT *`
    returns the table model struct, an explicit column list returns a
    query-specific row struct.
-4. Regenerate the real dump from a fresh database:
-   `bash scripts/verify-isolated.sh schema` then `make generate` again.
+4. Run `make generate` to regenerate store code and contracts, then update the
+   callers for the generated types. If the baseline changes again, repeat the
+   isolated schema step before regeneration.
 5. Add new required columns to `assertBaseline` in `internal/migrate/migrate.go`.
 6. `make verify` proves fresh migration, idempotent second migration and no
    drift.

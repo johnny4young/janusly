@@ -15,8 +15,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/johnny4young/janusly/internal/observability"
@@ -123,28 +121,16 @@ func (e *Engine) reapStalledCandidate(ctx context.Context, row stalledCandidate,
 // floor protects operators from configuring the reaper to kill legitimately
 // long executions; tests exercise ReapStalledNodes directly with tighter
 // windows.
-func (e *Engine) StartReaper(ctx context.Context, interval, threshold time.Duration, logger *slog.Logger) {
-	// The floor itself is overridable ONLY by explicit env — the
-	// kill-failover harness (and an expert HA operator with short-lived
-	// nodes) needs sub-15m recovery; the override logs loudly so a
-	// misconfigured production deploy is visible in the first minute.
-	thresholdFloor := 15 * time.Minute
-	if raw := os.Getenv("JANUSLY_REAPER_THRESHOLD_FLOOR_MS"); raw != "" {
-		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
-			thresholdFloor = time.Duration(ms) * time.Millisecond
-			logger.Warn("reaper threshold floor overridden by env — nodes running longer than the effective threshold WILL be failed into the DLQ",
-				"floor", thresholdFloor)
-		}
+func (e *Engine) StartReaper(ctx context.Context, logger *slog.Logger) {
+	threshold := e.reaper.EffectiveThreshold()
+	if e.reaper.FloorOverridden {
+		logger.Warn("reaper threshold floor explicitly overridden — nodes running longer than the effective threshold WILL be failed into the DLQ", "floor", e.reaper.Floor, "threshold", threshold)
 	}
-	if threshold < thresholdFloor {
-		threshold = thresholdFloor
-	}
-	if interval <= 0 {
-		interval = time.Minute
-	}
+	ticker := time.NewTicker(e.reaper.Interval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-time.After(interval):
+		case <-ticker.C:
 		case <-ctx.Done():
 			return
 		}

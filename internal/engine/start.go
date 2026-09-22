@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/store"
 
@@ -27,8 +28,9 @@ import (
 
 // Engine owns run lifecycle operations over the shared schema.
 type Engine struct {
-	pool  *pgxpool.Pool
-	newID func() string
+	reaper config.Reaper
+	pool   *pgxpool.Pool
+	newID  func() string
 	// wrapTx lets tests interpose on the transaction's statements to prove
 	// atomicity; production keeps the identity wrapper.
 	wrapTx func(store.DBTX) store.DBTX
@@ -37,15 +39,29 @@ type Engine struct {
 	randFloat func() float64
 }
 
+// Option supplies immutable process settings when an engine is constructed.
+type Option func(*Engine)
+
+// WithReaper installs the process settings validated by config.Load. The value
+// is copied; later environment changes cannot alter a running engine or drill.
+func WithReaper(settings config.Reaper) Option {
+	return func(e *Engine) { e.reaper = settings }
+}
+
 // New builds an Engine over the given pool.
-func New(pool *pgxpool.Pool) *Engine {
-	return &Engine{
+func New(pool *pgxpool.Pool, options ...Option) *Engine {
+	e := &Engine{
+		reaper:    config.DefaultReaper(),
 		pool:      pool,
 		newID:     uuid.NewString,
 		wrapTx:    func(tx store.DBTX) store.DBTX { return tx },
 		now:       time.Now,
 		randFloat: rand.Float64,
 	}
+	for _, option := range options {
+		option(e)
+	}
+	return e
 }
 
 // InputValidationError reports a run-start payload that does not satisfy the

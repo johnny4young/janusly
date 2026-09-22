@@ -149,6 +149,8 @@ jobs:
         with:
           go-version: 1.26.6
           cache: true
+      - name: Process configuration forwarding
+        run: bash scripts/process-config.test.sh
       - run: go run ./cmd/api migrate
       - run: go run ./cmd/api migrate
       - run: go test -race -tags integration -p 1 -count=1 -timeout 20m ./...

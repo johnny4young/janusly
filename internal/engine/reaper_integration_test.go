@@ -3,6 +3,9 @@
 package engine
 
 import (
+	"context"
+
+	"github.com/johnny4young/janusly/internal/config"
 	"strings"
 	"testing"
 	"time"
@@ -72,5 +75,76 @@ func TestReaperLeavesHealthyExecutionAlone(t *testing.T) {
 	_ = pool.QueryRow(ctx, "select status from run_nodes where run_id=$1 and node_id='first'", runID).Scan(&status)
 	if status != "running" {
 		t.Fatalf("healthy execution must survive the sweep, got %s", status)
+	}
+}
+
+func TestConfiguredReaperUsesBootSnapshotAndDrains(t *testing.T) {
+	ctx, pool, _, org := newHarness(t)
+	cfg, err := config.Load(func(key string) string {
+		switch key {
+		case "JANUSLY_REAPER_INTERVAL_MS":
+			return "10"
+		case "JANUSLY_REAPER_THRESHOLD_MS":
+			return "172800000"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := New(pool, WithReaper(cfg.Reaper))
+	old, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, linearDoc)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, linearDoc)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, age := range map[string]int{old: 49, healthy: 2} {
+		if _, err := pool.Exec(ctx, `UPDATE run_nodes SET status='running', started_at=now()-make_interval(hours=>$2) WHERE run_id=$1 AND node_id='first'`, id, age); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A config edit only affects a subsequently constructed process.
+	t.Setenv("JANUSLY_REAPER_THRESHOLD_MS", "1")
+	t.Setenv("JANUSLY_REAPER_THRESHOLD_FLOOR_MS", "1")
+	sweepCtx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); eng.StartReaper(sweepCtx, quietLogger()) }()
+	t.Cleanup(func() {
+		stop()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("reaper did not drain")
+		}
+	})
+	deadline := time.After(5 * time.Second)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var status string
+		if err := pool.QueryRow(ctx, `SELECT status FROM run_nodes WHERE run_id=$1 AND node_id='first'`, old).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status == "failed" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("configured reaper did not fail old claim")
+		case <-ticker.C:
+		}
+	}
+	stop()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reaper did not drain after cancellation")
+	}
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM run_nodes WHERE run_id=$1 AND node_id='first'`, healthy).Scan(&status); err != nil || status != "running" {
+		t.Fatalf("boot threshold was not retained: %s %v", status, err)
 	}
 }

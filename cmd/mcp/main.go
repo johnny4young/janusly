@@ -55,7 +55,7 @@ func run() error {
 		return err
 	}
 
-	eng := engine.New(pool)
+	eng := engine.New(pool, engine.WithReaper(cfg.Reaper))
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
@@ -68,7 +68,7 @@ func run() error {
 		_ = eng.RunWorkers(workerCtx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
 	})
 	background.Go(func() {
-		eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
+		eng.StartReaper(workerCtx, logger)
 	})
 	defer func() { stopWorkers(); background.Wait() }()
 

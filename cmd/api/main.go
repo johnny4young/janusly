@@ -59,15 +59,6 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-func envDurationMs(name string, fallback time.Duration) time.Duration {
-	if raw := os.Getenv(name); raw != "" {
-		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
-			return time.Duration(ms) * time.Millisecond
-		}
-	}
-	return fallback
-}
-
 // requireSigningSecret fails STARTUP when a production deployment has no
 // dedicated token-signing secret. Without it the signer falls back to a
 // constant that ships in the source tree, and the failure only surfaced
@@ -221,10 +212,9 @@ func run() error {
 		"build_verified", identity.Verified, "build_commit", identity.Commit,
 		"build_tree", identity.Tree, "artifact_sha256", identity.ArtifactSHA256)
 
-	// Janusly ships as one binary: the API process also runs the worker
-	// pool. The processes split when scale demands it — the engine already
-	// supports N independent consumers.
-	eng := engine.New(workerPool)
+	// Janusly ships as one binary: public requests and supervised workers
+	// share one lifecycle but use separately bounded database pools.
+	eng := engine.New(workerPool, engine.WithReaper(cfg.Reaper))
 	prometheus.MustRegister(engine.NewQueueDepthCollector(pool))
 	prometheus.MustRegister(engine.NewDeadLetterCollector(pool))
 	prometheus.MustRegister(boot.NewPoolStatsCollector("api", pool))
@@ -285,9 +275,7 @@ func run() error {
 	})
 	// Reaper cadence/threshold are env-tunable for HA deployments.
 	runner.Go(observability.SweepStalledNodeReaper, func(ctx context.Context) {
-		eng.StartReaper(ctx,
-			envDurationMs("JANUSLY_REAPER_INTERVAL_MS", time.Minute),
-			envDurationMs("JANUSLY_REAPER_THRESHOLD_MS", time.Hour), logger)
+		eng.StartReaper(ctx, logger)
 	})
 	defer runner.Shutdown()
 

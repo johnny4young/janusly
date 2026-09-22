@@ -40,3 +40,10 @@ and its late completion loses the compare-and-set, so the real output is
 discarded and the run stays failed. Set node `timeoutMs` below the reaper
 threshold for steps that can legitimately run long, or raise the threshold for
 that deployment.
+
+The reaper cadence, requested threshold and floor are validated once at boot and
+injected into the engine. Scoped stalled-node drills use the identical effective
+threshold, including deployments configured above 24 hours; they cannot infer a
+different policy from a later environment read. Both HTTP and stdio entry points
+use this configuration. See [configuration](../configuration.md#process-reaper-settings)
+for ranges, restart semantics and the explicit floor-override warning.
