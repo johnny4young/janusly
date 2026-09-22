@@ -152,6 +152,18 @@ so an unedited run can bind the exact source version. Confirming discarded edits
 must still match the initiating context and semantic canvas revision; a stale
 confirmation does not overwrite a workflow selected or edited in the meantime.
 
+Rollback confirmation owns a cloned current/target preview and the initiating
+operator, permissions and canvas revision. Cancel receives initial focus, and
+unsaved edits are disclosed before confirmation. Context changes abort local
+ownership, not an already accepted server write. A success receipt must match
+the workflow and source version and identify a newly created version before
+hydration or success feedback; the canvas retains that new immutable identity.
+Success closes the dialog and announces the new version in a toast. Workflow
+commands and rollback share the same canvas ownership token and immutable
+identity parser, rather than maintaining independent copies. Rollback subscribes
+to store changes synchronously: switching away and back within one React update
+still disposes the original request, rather than reviving an old confirmation.
+
 ## Workflow deployment ownership
 
 Rollout controls own their reads, qualification evidence and pending writes for

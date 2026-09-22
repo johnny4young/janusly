@@ -1,3 +1,4 @@
+import type { WorkflowVersionIdentity } from '../store'
 import type {
   WorkflowBriefCompilation,
   WorkflowDefinition,
@@ -133,6 +134,35 @@ export function isWorkflowDefinition(value: unknown): value is WorkflowDefinitio
     && (edge.condition === undefined || isCanonicalNonemptyString(edge.condition))
     && (edge.onError === undefined || typeof edge.onError === 'boolean')
   ))
+}
+
+/** Shared immutable identity boundary for save, latest read and rollback receipts. */
+export function workflowVersionIdentity(
+  value: unknown,
+  expectedWorkflowId: string,
+): WorkflowVersionIdentity | null {
+  if (!isRecord(value)) return null
+  const id = typeof value.versionId === 'string' ? value.versionId : value.id
+  if (value.workflowId !== expectedWorkflowId
+    || typeof id !== 'string' || id.length === 0 || id.length > 256
+    || typeof value.version !== 'number' || !Number.isSafeInteger(value.version) || value.version < 1) {
+    return null
+  }
+  return { id, version: value.version }
+}
+
+export function parseWorkflowRollbackReceipt(
+  value: unknown,
+  workflowId: string,
+  current: WorkflowVersionIdentity,
+  target: WorkflowVersionIdentity,
+): WorkflowVersionIdentity | null {
+  const version = workflowVersionIdentity(value, workflowId)
+  if (!version || !isRecord(value) || value.sourceVersion !== target.version
+    || value.versionId !== version.id || !isCanonicalNonemptyString(version.id)
+    || version.id === target.id || version.id === current.id
+    || version.version <= current.version || version.version > 2147483647) return null
+  return version
 }
 
 export type WorkflowVersionSnapshot = {

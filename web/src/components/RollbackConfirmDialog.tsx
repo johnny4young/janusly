@@ -8,7 +8,7 @@
  * State machine:
  *   - **idle**     — diff visible, primary button "Roll back".
  *   - **rolling-back** — `POST /workflows/rollback` is in flight.
- *   - **done**     — success ribbon with the new version number.
+ *   - **done**     — close and announce the new version in a success toast.
  *   - **error**    — surfaces a transport / 403 / 404 with a Close
  *                   button; primary button hides (no Retry — the
  *                   server-side transaction is forward-only and the
@@ -18,11 +18,13 @@
  * this dialog with the selected target version.
  */
 
-import { useEffect, useState, useRef } from 'react'
-import { useAliveRef } from '../hooks/useAliveRef'
+import { useEffect, useEffectEvent, useState, useRef } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
-import { AlertCircle, CheckCircle2, RotateCcw, X } from 'lucide-react'
+import { RotateCcw, X } from 'lucide-react'
 import { api } from '../api'
+import { parseWorkflowRollbackReceipt } from '../lib/authoring-contract'
+import { ownCanvas } from '../lib/canvas-authority'
+import { sessionCan } from '../identity-context'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { WorkflowDiffView } from './WorkflowDiffView'
@@ -38,7 +40,7 @@ type VersionForRollback = {
 type Step =
   | { kind: 'idle' }
   | { kind: 'rolling-back' }
-  | { kind: 'done'; newVersion: number }
+  | { kind: 'done' }
   | { kind: 'error'; message: string }
 
 type RollbackConfirmDialogProps = {
@@ -48,13 +50,6 @@ type RollbackConfirmDialogProps = {
   onClose: () => void
 }
 
-type RollbackResponse = {
-  workflowId: string
-  versionId: string
-  version: number
-  sourceVersion: number
-}
-
 export function RollbackConfirmDialog({
   workflowId,
   current,
@@ -62,58 +57,61 @@ export function RollbackConfirmDialog({
   onClose,
 }: RollbackConfirmDialogProps) {
   const { t } = useT()
-  const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
-  const hydrateWorkflow = useWorkflowStore((state) => state.hydrateWorkflow)
-  const addToast = useWorkflowStore((state) => state.addToast)
+  const { bumpPlatformVersion, hydrateWorkflow, addToast } = useWorkflowStore.getState()
   const [step, setStep] = useState<Step>({ kind: 'idle' })
-  const primaryRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  // Tracks whether the dialog is still mounted. Set on unmount so an
-  // in-flight rollback that resolves after dismount can't push toasts,
-  // hydrate the canvas, or bump the platform version against a UI the
-  // operator already moved on from.
-  const aliveRef = useAliveRef()
+  const pair = JSON.stringify([workflowId, current.id, current.version, target.id, target.version])
+  const [snapshot] = useState(() => structuredClone({ pair, current, target,
+    dirty: useWorkflowStore.getState().workflowDirty }))
+  const request = useRef<AbortController | null>(null)
+  const stale = pair !== snapshot.pair
+    || !sessionCan(useWorkflowStore.getState().identityContext, 'workflows.write')
+    || (snapshot.target.dagJson.id !== undefined && snapshot.target.dagJson.id !== workflowId)
 
-  // Re-focus the primary action on every step transition that has one.
-  // During `rolling-back` the only footer element is a disabled
-  // "Working…" button without the ref — we deliberately skip focusing
-  // there to avoid moving focus to `document.body`.
-  useEffect(() => {
-    if (step.kind === 'rolling-back') return
-    primaryRef.current?.focus()
-  }, [step.kind])
-
-  const escapeBlocked = step.kind === 'rolling-back'
-  useDialogFocusTrap(dialogRef, { onEscape: escapeBlocked ? undefined : onClose })
-
-  const onBackdropClick = () => {
-    if (step.kind === 'rolling-back') return
+  const invalidate = useEffectEvent(() => {
+    setStep({ kind: 'done' })
     onClose()
-  }
+  })
+  useEffect(() => {
+    if (stale) { invalidate(); return }
+    const controller = ownCanvas(invalidate)
+    request.current = controller
+    return () => controller.abort()
+  }, [stale])
+
+  const busy = step.kind === 'rolling-back'
+  const failed = step.kind === 'error'
+  const dismiss = busy ? undefined : onClose
+  useDialogFocusTrap(dialogRef, { onEscape: dismiss })
 
   const rollback = async () => {
+    const controller = request.current
+    if (stale || !controller || controller.signal.aborted) return
+    request.current = null
     setStep({ kind: 'rolling-back' })
     try {
-      const result = (await api('/workflows/rollback', {
-        method: 'POST',
-        body: JSON.stringify({ workflowId, sourceVersionId: target.id }),
-      })) as RollbackResponse
-      if (!aliveRef.current) return
-      hydrateWorkflow(target.dagJson)
+      const result = await api('/workflows/rollback', { method: 'POST', signal: controller.signal,
+        body: JSON.stringify({ workflowId, sourceVersionId: snapshot.target.id }) })
+      if (controller.signal.aborted) return
+      const version = parseWorkflowRollbackReceipt(result, workflowId, snapshot.current, snapshot.target)
+      if (!version) throw new Error(t('rollback.failed'))
+      // Release the lease before our own synchronous canvas replacement.
+      controller.abort()
+      hydrateWorkflow({ ...snapshot.target.dagJson, id: workflowId }, { version })
       bumpPlatformVersion()
-      addToast(t('rollback.toastSuccess', { target: target.version, newVersion: result.version }), 'success')
-      setStep({ kind: 'done', newVersion: result.version })
+      addToast(t('rollback.toastSuccess', { target: snapshot.target.version, newVersion: version.version }), 'success')
+      setStep({ kind: 'done' })
+      onClose()
     } catch (error) {
-      if (!aliveRef.current) return
-      setStep({
-        kind: 'error',
-        message: error instanceof Error ? error.message : t('rollback.failed'),
-      })
+      if (controller.signal.aborted) return
+      setStep({ kind: 'error', message: error instanceof Error ? error.message : t('rollback.failed') })
     }
   }
 
+  if (stale || step.kind === 'done') return null
+
   return (
-    <div className="run-input-backdrop" onClick={onBackdropClick}>
+    <div className="run-input-backdrop" onClick={dismiss}>
       <div
         ref={dialogRef}
         className="run-input-dialog we-recovery-dialog"
@@ -127,90 +125,48 @@ export function RollbackConfirmDialog({
             <RotateCcw size={18} />
           </span>
           <div className="run-input-dialog__heading">
-            <div className="section-kicker">{t('rollback.kicker')}</div>
             <h2 id="rollback-dialog-title">{t('rollback.title', { version: target.version })}</h2>
             <p className="helper-text">
               {t('rollback.description', { target: target.version, current: current.version })}
             </p>
           </div>
-          <button
-            type="button"
-            className="run-input-dialog__close"
-            onClick={onClose}
-            aria-label={t('rollback.close')}
-            disabled={step.kind === 'rolling-back'}
-          >
+          <Button size="icon" variant="ghost" onClick={onClose} aria-label={t('rollback.close')} disabled={busy}>
             <X size={16} aria-hidden="true" />
-          </button>
+          </Button>
         </header>
 
         <div className="run-input-dialog__body">
-          {step.kind === 'rolling-back' && (
-            <p className="helper-text we-recovery-loading" aria-live="polite">
-              {t('rollback.saving', { version: target.version })}
-            </p>
-          )}
+          {step.kind === 'idle' && snapshot.dirty && <p className="we-recovery-warning">{t('unsavedGuard.body')}</p>}
 
-          {step.kind === 'done' && (
-            <div className="we-recovery-warning" role="status">
-              <CheckCircle2 size={14} aria-hidden="true" />
-              <div>
-                {t('rollback.success', { target: target.version, newVersion: step.newVersion })}
-              </div>
-            </div>
-          )}
 
-          {step.kind === 'error' && (
+          {failed && (
             <div className="we-recovery-error" role="alert">
-              <AlertCircle size={14} aria-hidden="true" />
-              <div>{step.message}</div>
+              {step.message}
             </div>
           )}
 
-          {(step.kind === 'idle' || step.kind === 'rolling-back') && (
+          {!failed && (
             <WorkflowDiffView
-              before={current.dagJson}
-              after={target.dagJson}
+              before={snapshot.current.dagJson}
+              after={snapshot.target.dagJson}
               beforeLabel={t('rollback.beforeLabel', { version: current.version })}
               afterLabel={t('rollback.afterLabel', { version: target.version })}
             />
           )}
         </div>
 
-        <footer className="run-input-dialog__footer">
-          {step.kind === 'idle' && (
-            <>
-              <Button variant="secondary" type="button"  onClick={onClose}>
-                {t('common.cancel')}
-              </Button>
-              <Button variant="primary"
-                type="button"
-                ref={primaryRef}
-
-                onClick={rollback}
-              >
-                <RotateCcw size={14} aria-hidden="true" />
-                <span>{t('rollback.action')}</span>
-              </Button>
-            </>
-          )}
-
-          {step.kind === 'rolling-back' && (
-            <Button loading loadingLabel={t('common.working')}>
-              {t('rollback.action')}
-            </Button>
-          )}
-
-          {(step.kind === 'done' || step.kind === 'error') && (
-            <Button variant="primary"
-              type="button"
-              ref={primaryRef}
-
-              onClick={onClose}
-            >
-              {t('common.close')}
-            </Button>
-          )}
+        <footer className="run-input-dialog__footer" aria-live="polite">
+          {step.kind === 'idle' && <Button autoFocus onClick={onClose}>{t('common.cancel')}</Button>}
+          <Button
+            key={failed ? 'close' : 'submit'}
+            autoFocus={failed}
+            variant={failed ? 'primary' : 'danger'}
+            onClick={failed ? onClose : rollback}
+            loading={busy}
+            loadingLabel={t('common.working')}
+          >
+            {failed ? t('common.close') : t('rollback.action')}
+          </Button>
         </footer>
       </div>
     </div>

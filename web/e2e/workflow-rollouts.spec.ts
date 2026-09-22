@@ -329,6 +329,28 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await expectAccessible(page, 'Retorno automático del canary')
   await captureForeground(spanishPanel, 'web-es-workflow-canary-auto-return-mobile')
 
+  await openWorkflowOperation(page, 'Versiones')
+  await page.getByRole('button', { name: 'Revertir a v1', exact: true }).click()
+  const confirmation = page.getByRole('dialog', { name: '¿Revertir a v1?' })
+  await expect(confirmation.getByRole('button', { name: 'Cancelar', exact: true })).toBeFocused()
+  await expectAccessible(page, 'Confirmación de reversión')
+  const rollbackResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/workflows/rollback' && response.request().method() === 'POST')
+  await confirmation.getByRole('button', { name: 'Revertir', exact: true }).click()
+  const rolled = await rollbackResponse
+  expect(rolled.ok()).toBe(true)
+  expect(rolled.request().postDataJSON()).toEqual({ workflowId, sourceVersionId: savedBaseline.versionId })
+  const receipt = await rolled.json() as { workflowId: string; versionId: string; version: number; sourceVersion: number }
+  expect(receipt).toMatchObject({ workflowId, version: 3, sourceVersion: 1 })
+  await expect(confirmation).toHaveCount(0)
+  const rolledStart = page.waitForRequest(request => new URL(request.url()).pathname === '/start' && request.method() === 'POST')
+  const rolledResult = page.waitForResponse(response => new URL(response.url()).pathname === '/start' && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Ejecutar', exact: true }).click()
+  expect((await rolledStart).postDataJSON()).toMatchObject({ workflowVersionId: receipt.versionId })
+  const started = await rolledResult
+  expect(started.ok()).toBe(true)
+  const { runId: rolledRunId } = await started.json() as { runId: string }
+  expect(await waitForTerminal(request, orgId, rolledRunId)).toBe('succeeded')
+
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(2)
   expect(consoleErrors).toEqual([])
