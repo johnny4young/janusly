@@ -71,3 +71,16 @@ budget includes connection acquisition, and the runtime drains tool pools after
 its workers. Real PostgreSQL race tests cover rotation, physical accounting,
 eviction, cancellation, concurrent admission and shutdown. An executable-level
 SIGTERM test verifies that an active external query completes before pool drain.
+
+## Run-status response integrity
+
+An interrupted successful response body can no longer masquerade as an empty
+object. Body cancellation remains cancellation; unreadable error details do not
+discard an authoritative HTTP error status. Run polling validates the complete
+snapshot before touching summary, nodes, events or pagination, preserving the
+last good projection when a proxy or interrupted response supplies malformed
+content. Nullable persisted metadata is represented honestly, without invented
+activity timestamps. Regression coverage includes failed body reads, malformed
+and cross-run projections, stale request ownership, terminal polling shutdown,
+history pagination, and real Chromium stream failure/cancellation followed by a
+successful retry. The existing production bundle caps remain unchanged.

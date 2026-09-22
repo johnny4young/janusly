@@ -93,7 +93,7 @@ export function buildActivityFeed(
       runId: run.id,
       kind: 'run',
       run,
-      createdAt: run.createdAt,
+      createdAt: run.createdAt ?? undefined,
       workflowId: run.workflowId,
       workflowName: run.workflowName
         ?? (run.workflowId ? workflowNames.get(run.workflowId) : null),

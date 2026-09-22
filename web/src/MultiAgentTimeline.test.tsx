@@ -18,7 +18,7 @@ const events: RunEvent[] = [
 
 describe('<MultiAgentTimeline />', () => {
   it('renders a tone legend above the lanes so the colour coding is discoverable', () => {
-    render(<MultiAgentTimeline events={events} />)
+    render(<MultiAgentTimeline events={events.map(event => ({ ...event, createdAt: null }))} />)
     expect(screen.getByLabelText('What the colors mean')).toBeInTheDocument()
     expect(screen.getByText('Planning')).toBeInTheDocument()
     expect(screen.getByText('Tool call')).toBeInTheDocument()

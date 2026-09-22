@@ -26,7 +26,7 @@ export type RunNode = {
   startedAt?: string | null
   finishedAt?: string | null
 }
-export type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: JsonObject | null; createdAt?: string }
+export type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: JsonObject | null; createdAt?: string | null }
 type WorkflowNodeData = {
   label: string
   type: string
@@ -178,8 +178,8 @@ export type RunSummary = {
     | 'semantic_accepted_loss'
     | null
   semanticViolationCount?: number
-  createdBy?: string
-  createdAt?: string
+  createdBy?: string | null
+  createdAt?: string | null
   /** Full run-start envelope. Present on `/run` and `/status`; omitted from the bounded `/runs` list. */
   inputJson?: JsonObject | null
   /** Correlation id shared by a subworkflow chain. Null on historical root runs that predate trace assignment. */

@@ -38,6 +38,60 @@ describe('api', () => {
     mockSupabaseAccessToken = null
   })
 
+  it('rejects an unreadable successful body instead of returning an empty object', async () => {
+    const response = new Response('unused', { status: 200 })
+    vi.spyOn(response, 'text').mockRejectedValue(new TypeError('connection interrupted'))
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+    await expect(api('/status?runId=body-failure')).rejects.toThrow('unreadable response')
+  })
+
+  it('preserves cancellation while consuming the response body', async () => {
+    const controller = new AbortController()
+    let rejectBody!: (error: unknown) => void
+    const response = new Response('unused', { status: 200 })
+    const read = vi.spyOn(response, 'text').mockImplementation(() => new Promise((_, reject) => { rejectBody = reject }))
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+    const request = api('/status?runId=cancel-body', { signal: controller.signal })
+    const rejected = expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
+    controller.abort()
+    rejectBody(new DOMException('body cancelled', 'AbortError'))
+    await rejected
+  })
+
+  it('retains the HTTP error status when its error body is unreadable', async () => {
+    const response = new Response('unused', { status: 403, headers: { 'x-request-id': 'body-error' } })
+    vi.spyOn(response, 'text').mockRejectedValue(new TypeError('connection interrupted'))
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+    await expect(api('/status?runId=forbidden')).rejects.toMatchObject({ statusCode: 403, requestId: 'body-error' })
+  })
+
+  it.each([200, 204])('keeps genuinely empty HTTP %s bodies compatible', async (status) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status })))
+    await expect(api('/ping')).resolves.toEqual({})
+  })
+
+  it('rejects cancellation even if a body reader resolves after abort', async () => {
+    const controller = new AbortController()
+    const response = new Response('{}', { status: 200 })
+    vi.spyOn(response, 'text').mockImplementation(async () => { controller.abort(); return '{}' })
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+    await expect(api('/ping', { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('localizes an unreadable successful body without leaking transport diagnostics', async () => {
+    changeAppLanguage('es')
+    const response = new Response('unused', { status: 200 })
+    vi.spyOn(response, 'text').mockRejectedValue(new Error('private transport detail'))
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+    await expect(api('/ping')).rejects.toThrow('contenido ilegible')
+  })
+
+  it('continues to reject nonempty invalid success JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{truncated', { status: 200 })))
+    await expect(api('/ping')).rejects.toThrow('unreadable response')
+  })
+
   it('returns /start field validation envelopes so the run input form can map errors', async () => {
     mockJsonResponse(400, { errors: ['$.invoiceId is required'] })
 

@@ -305,7 +305,18 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
   // must throw: treating it as {} would let callers wipe good state with
   // an empty snapshot (e.g. blanking run nodes on a truncated /status).
   // Genuinely empty bodies (204, empty 200) stay {}.
-  const rawText = await res.text().catch(() => '')
+  let rawText = ''
+  try {
+    rawText = await res.text()
+  } catch (error) {
+    if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+      throw new DOMException('Request cancelled', 'AbortError')
+    }
+    if (res.ok) throw new Error(t('api.error.malformedResponse'))
+    // The known non-success HTTP status remains authoritative even when its
+    // optional error detail is unreadable (especially 401/403).
+  }
+  if (options.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
   let rawPayload: unknown = {}
   if (rawText.trim() !== '') {
     try {

@@ -175,7 +175,7 @@ export function MultiAgentTimeline({
         tone: getTone(event),
         payload: event.payload ?? {},
         index,
-        createdAt: event.createdAt,
+        createdAt: event.createdAt ?? undefined,
       }))
   }, [events, i18n.language])
 

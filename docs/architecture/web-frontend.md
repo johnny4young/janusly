@@ -29,6 +29,16 @@ validator only when a reviewed proposal carries recovery policy. The validated
 snapshot is cloned before confirmation and catalog refresh so shared UI state
 cannot change the object copied into the canvas.
 
+Successful HTTP responses with unreadable bodies are errors, not empty success
+objects; cancellation remains `AbortError`. A genuinely empty body remains
+compatible with bodyless endpoints. Non-success responses retain their HTTP
+status even if error details cannot be read. Before polling mutates run state,
+`src/lib/run-status-contract.ts` validates the entire summary, nodes, events and
+pagination projection, including run identity and duplicate row identifiers.
+Malformed snapshots leave the previous projection intact; stale requests are
+discarded before validation. A later valid poll can recover normally, and
+refreshing the latest event page never rewinds already-loaded history.
+
 Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
 They must preserve the same strict-object, bound, default, transform, and
 refinement semantics as the API contract; do not trade validation coverage for
