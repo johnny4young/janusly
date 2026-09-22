@@ -210,3 +210,11 @@ a state that production could never supply. The static parser does not add a par
 lazy request. Its measured cost is 300 bytes beyond the old single-locale
 cap, so that cap moves narrowly from 560 to 560.5 KiB while the 605 KiB total
 artifact cap and route budgets remain unchanged.
+
+The server now projects dead-letter run snapshots back through the canonical
+workflow serializer before composing a provider prompt or returning a fallback.
+This removes run-only `input`, `orgId`, and `createdBy` carriers and makes the
+provider-free fallback satisfy the same strict browser contract as an AI
+proposal. Corrupt stored snapshots fail closed with a typed 422 instead of
+claiming that an unreadable workflow is an applicable suggestion. The executable
+browser journey exercises the real fallback rather than a hand-built substitute.

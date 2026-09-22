@@ -237,7 +237,7 @@ func finalizeAuthoringProposal(
 	bindings := graphBindings
 	if workflow != nil {
 		bindings = authoring.BindProposal(catalog, brief, workflow)
-		canonical, err := canonicalAuthoringWorkflowDocument(workflow)
+		canonical, err := canonicalWorkflowDocument(workflow)
 		if err != nil {
 			parseIssues = append(parseIssues, domain.Issue{
 				Code: domain.CodeInvalidContract, Message: "workflow: canonicalization failed",
@@ -273,7 +273,7 @@ func finalizeAuthoringProposal(
 	bindings, workflow, parseIssues = authoring.BindWorkflowJSON(catalog, guarded)
 	if workflow != nil {
 		bindings = authoring.BindProposal(catalog, brief, workflow)
-		if canonical, err := canonicalAuthoringWorkflowDocument(workflow); err == nil {
+		if canonical, err := canonicalWorkflowDocument(workflow); err == nil {
 			guarded = canonical
 		} else {
 			parseIssues = append(parseIssues, domain.Issue{
@@ -303,13 +303,13 @@ func bindingHasReason(report authoring.BindingReport, reason string) bool {
 	return false
 }
 
-// canonicalAuthoringWorkflowDocument turns the parsed domain workflow back
+// canonicalWorkflowDocument turns the parsed domain workflow back
 // into the exact public DAG contract before any proposal leaves the server.
-// Provider JSON is untrusted even after it parses: the parser deliberately
-// normalizes identifiers and descriptive metadata and strips unknown carrier
-// fields. Returning the original map would let Apply render a different draft
-// from the one capability binding and readiness actually inspected.
-func canonicalAuthoringWorkflowDocument(workflow *domain.Workflow) (map[string]any, error) {
+// Provider JSON and persisted run snapshots remain untrusted after parsing:
+// the parser deliberately normalizes identifiers and descriptive metadata and
+// strips unknown carrier fields. Returning an original map would let a caller
+// render a different draft from the one the domain gate actually inspected.
+func canonicalWorkflowDocument(workflow *domain.Workflow) (map[string]any, error) {
 	raw, err := domain.CanonicalWorkflowDocument(workflow)
 	if err != nil {
 		return nil, err

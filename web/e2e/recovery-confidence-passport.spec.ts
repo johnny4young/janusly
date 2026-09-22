@@ -479,37 +479,10 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const spanishFailure = await waitForNewActivityRecovery(page, selectedBeforeFallbackFailure)
   const spanishDeadLetterId = await spanishFailure.getAttribute('data-dead-letter-id')
   expect(spanishDeadLetterId).toBeTruthy()
-  const spanishDetailResponse = await request.get(
-    `${API_URL}/dlq?id=${encodeURIComponent(spanishDeadLetterId!)}`,
-    { headers },
-  )
-  expect(spanishDetailResponse.ok()).toBe(true)
-  const spanishWorkflow = (await spanishDetailResponse.json() as { workflowJson: unknown }).workflowJson
+  // Drop the AI-success fixture used by the first half of this journey. The
+  // provider-free executable must now prove its own canonical fallback wire
+  // contract, including the exact passport signature for this DLQ row.
   await page.unroute('**/ai/patch-workflow')
-  await page.route('**/ai/patch-workflow', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        mode: 'fallback',
-        suggestedWorkflow: spanishWorkflow,
-        rationale: 'AI unavailable',
-        suggestions: [{
-          workflow: spanishWorkflow,
-          rationale: 'AI unavailable',
-          approachLabel: 'other',
-          confidence: 0,
-          safety: { writeSide: false, approvalRequired: false, approvalPresent: true },
-        }],
-        evidence: [],
-        recoveryPassport: {
-          failureSignature: 'Deterministic demo failure on tool node',
-          priorSameSignatureOutcome: null,
-        },
-        aiError: 'no_llm_configured',
-      }),
-    })
-  })
   await page.getByRole('button', { name: /Sugerir corrección/i }).click()
   await page.getByRole('button', { name: /Generar sugerencia/i }).click()
   const blockedPassport = page.getByTestId('recovery-confidence-passport')

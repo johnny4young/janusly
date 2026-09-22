@@ -11,6 +11,12 @@ before calling the client.
 - Usage recording occurs at the client boundary and cannot fail the call.
 - Generated text is bounded before parsing or persistence.
 - Workflow generation and patching pass `internal/domain` validation.
+- Recovery patch responses and prompts use the canonical parsed workflow DAG,
+  never the dead-letter run snapshot. Run-only input, tenant, and actor carriers
+  are stripped before provider egress and before either AI or deterministic
+  fallback suggestions reach the browser. An invalid stored snapshot returns a
+  closed `ai_workflow_snapshot_invalid` error instead of a nominal fallback the
+  client cannot safely apply.
 - Workflow generation finishes with a deterministic assurance compilation:
   terminal `outputs` form the Intent Contract, and explicit resilience intent
   may add a conservative technical Recovery Contract V1. The compiler never

@@ -85,11 +85,18 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		NodeID: dlq.NodeID, NodeType: nodeTypeOf(dlq.NodeJson),
 	}).Signature
 
-	// Original workflow + failing node; an unparseable snapshot degrades
-	// straight to the deterministic fallback.
-	var workflowDoc map[string]any
-	_ = json.Unmarshal(dlq.WorkflowJson, &workflowDoc)
+	// Parse the run snapshot, then project it back to the public DAG contract.
+	// Dead-letter snapshots also carry run-only input/tenant/actor fields; none
+	// of those belong in a suggested workflow or in the provider prompt.
 	original, _ := domain.Parse(dlq.WorkflowJson)
+	if original == nil {
+		return opError(http.StatusUnprocessableEntity, "ai_workflow_snapshot_invalid",
+			"Recovery workflow snapshot is invalid", nil)
+	}
+	workflowDoc, err := canonicalWorkflowDocument(original)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
 
 	// Evidence side-channel: a deterministic projection of what the prompt
 	// composer sees — attached on BOTH the ai and fallback paths, audited
@@ -130,10 +137,6 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 	if client == nil || !client.Configured() {
 		return fallback("", "", "")
 	}
-	if original == nil {
-		return fallback("original workflow failed strict schema", "", "")
-	}
-
 	// Structural dispatch: every registry-aware write-side node without a
 	// dominating approval receives an approval proposal, never a config patch.
 	// Keeping this limited to http/mcp_tool let built-in integration tools and

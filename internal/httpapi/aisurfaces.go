@@ -104,7 +104,7 @@ func canonicalImprovementWorkflow(raw string, expectedID string) (map[string]any
 	if workflow == nil || workflow.ID != expectedID || workflowContainsUnsafeProviderSecret(workflow) {
 		return nil, false
 	}
-	document, err := canonicalAuthoringWorkflowDocument(workflow)
+	document, err := canonicalWorkflowDocument(workflow)
 	return document, err == nil
 }
 
