@@ -174,10 +174,15 @@ all-clear celebration or promise undo of external effects.
 Home derives health from validated production metrics, not the visible run page.
 An empty completed-run sample is neither healthy nor failed. First-load errors
 are unavailable; retained metrics are explicitly stale during refresh, after
-partial/read failures, or five minutes after the last successful full metrics
-read (checked by the existing minute clock). Impact-only polling does not renew
-that timestamp. Retry calls the invalidator without forwarding a click event.
-Each full snapshot request owns an AbortController and aborts on effect cleanup;
+metrics read failures, or five minutes after the last successful full metrics
+read (checked by the existing minute clock). Missing required queue, semantic
+case or operator-brief evidence (including brief warnings) makes health
+unavailable even when the metrics sample succeeds. Missing queue is not zero.
+Impact-only polling does not renew the metrics timestamp. Full and impact reads
+share request ordering: an older result or failure cannot replace newer impact
+evidence. Brief and queue snapshots are scoped to organization and user.
+Retry calls the invalidator without forwarding a click event.
+Each full, impact and brief request owns an AbortController and aborts on cleanup;
 this also bypasses the API client’s short rejected-GET cache so an immediate
 retry actually requests fresh evidence. The hero withholds scores,
 healthy-history copy and celebrations while evidence is empty or unconfirmed;

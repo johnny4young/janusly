@@ -92,14 +92,14 @@ type IdentitySnapshot<T> = OrgSnapshot<T> & {
 }
 
 type RecoveryQueueOverview = {
+  userId: string
   orgId: string
   openCount: number
   oldestOpen: { createdAt?: string } | null
   observedOpenIds: string[]
 }
 
-type SemanticCasesStatus = 'loading' | 'available' | 'unavailable'
-type OperatorBriefStatus = 'loading' | 'available' | 'unavailable'
+type HomeReadStatus = 'loading' | 'available' | 'unavailable'
 
 const RECOVERY_IMPACT_ACTIVE_POLL_MS = 10_000
 const RECOVERY_IMPACT_IDLE_POLL_MS = 60_000
@@ -126,11 +126,11 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   const [validationSnapshot, setValidationSnapshot] = useState<OrgSnapshot<RecoveryValidationReport | null> | null>(null)
   const [semanticCasesSnapshot, setSemanticCasesSnapshot] = useState<OrgSnapshot<{
     cases: RecoveryCase[]
-    status: SemanticCasesStatus
+    status: HomeReadStatus
   }> | null>(null)
-  const [operatorBriefSnapshot, setOperatorBriefSnapshot] = useState<OrgSnapshot<{
+  const [operatorBriefSnapshot, setOperatorBriefSnapshot] = useState<IdentitySnapshot<{
     brief: OperatorBrief | null
-    status: OperatorBriefStatus
+    status: HomeReadStatus
   }> | null>(null)
   const [ledgerSnapshot, setLedgerSnapshot] = useState<OrgSnapshot<RecoveryLedger | null> | null>(null)
   const [winsSnapshot, setWinsSnapshot] = useState<IdentitySnapshot<OperatorWins | null> | null>(null)
@@ -150,10 +150,10 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     : semanticCasesStatus === 'available'
       ? 'clear'
       : semanticCasesStatus
-  const operatorBrief = operatorBriefSnapshot?.orgId === resolvedOrgId
+  const operatorBrief = operatorBriefSnapshot?.orgId === resolvedOrgId && operatorBriefSnapshot.userId === resolvedUserId
     ? operatorBriefSnapshot.value.brief
     : null
-  const operatorBriefStatus = operatorBriefSnapshot?.orgId === resolvedOrgId
+  const operatorBriefStatus = operatorBriefSnapshot?.orgId === resolvedOrgId && operatorBriefSnapshot.userId === resolvedUserId
     ? operatorBriefSnapshot.value.status
     : 'loading'
   const semanticBlockerRunIds = useMemo(
@@ -169,6 +169,12 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     ? winsSnapshot.value
     : null
   const [queueOverview, setQueueOverview] = useState<RecoveryQueueOverview | null>(null)
+  const [queueStatusSnapshot, setQueueStatusSnapshot] = useState<IdentitySnapshot<HomeReadStatus> | null>(null)
+  const queueStatus = queueStatusSnapshot?.orgId === resolvedOrgId && queueStatusSnapshot.userId === resolvedUserId
+    ? queueStatusSnapshot.value : 'loading'
+  // Full and impact reads overlap. Only the latest requested impact projection
+  // may replace the queue/ledger, including their availability.
+  const impactReadGeneration = useRef(0)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [insightsOpen, setInsightsOpen] = useState(false)
   const [metricsErrorSnapshot, setMetricsErrorSnapshot] = useState<OrgSnapshot<string> | null>(null)
@@ -205,7 +211,9 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     snapshot: RecoveryHomeSnapshot,
     orgId: string,
     userId: string,
+    generation: number,
   ) => {
+    if (generation !== impactReadGeneration.current) return
     const ledgerValue = readRecoveryHomeSection(
       snapshot,
       'ledger',
@@ -222,6 +230,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       decodeRecoveryQueue,
     )
     startTransition(() => {
+      setQueueStatusSnapshot({ orgId, userId, value: queueValue ? 'available' : 'unavailable' })
       setLedgerSnapshot({
         orgId,
         value: ledgerValue,
@@ -234,7 +243,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       if (queueValue) {
         const open = queueValue.counts.open
         setQueueOverview({
-          orgId,
+          orgId, userId,
           openCount: open,
           oldestOpen: queueValue.oldestOpen,
           observedOpenIds: [...observedOpenIdsRef.current],
@@ -248,6 +257,8 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     // Each refresh owns its request: a manual retry must not reuse a rejected
     // promise from the API client's short GET deduplication window.
     const controller = new AbortController()
+    const generation = ++impactReadGeneration.current
+    setQueueStatusSnapshot({ orgId: resolvedOrgId, userId: resolvedUserId, value: 'loading' })
     setMetricsLoading(true)
     setMetricsErrorSnapshot(null)
     setSemanticCasesSnapshot(current => ({
@@ -330,10 +341,13 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
             },
           }))
         }
-        applyImpactSnapshot(snapshot, resolvedOrgId, resolvedUserId)
+        applyImpactSnapshot(snapshot, resolvedOrgId, resolvedUserId, generation)
       })
       .catch((error: unknown) => {
         if (cancelled) return
+        if (generation === impactReadGeneration.current) {
+          setQueueStatusSnapshot({ orgId: resolvedOrgId, userId: resolvedUserId, value: 'unavailable' })
+        }
         setMetricsErrorSnapshot({
           orgId: resolvedOrgId,
           value: error instanceof Error
@@ -344,8 +358,10 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
           setClustersSnapshot({ orgId: resolvedOrgId, value: null })
           setHeatmapSnapshot({ orgId: resolvedOrgId, value: [] })
           setValidationSnapshot({ orgId: resolvedOrgId, value: null })
-          setLedgerSnapshot({ orgId: resolvedOrgId, value: null })
-          setWinsSnapshot({ orgId: resolvedOrgId, userId: resolvedUserId, value: null })
+          if (generation === impactReadGeneration.current) {
+            setLedgerSnapshot({ orgId: resolvedOrgId, value: null })
+            setWinsSnapshot({ orgId: resolvedOrgId, userId: resolvedUserId, value: null })
+          }
         })
         setSemanticCasesSnapshot(current => ({
           orgId: resolvedOrgId,
@@ -364,56 +380,70 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
 
   useEffect(() => {
     let cancelled = false
+    const controller = new AbortController()
     setOperatorBriefSnapshot({
-      orgId: resolvedOrgId,
+      orgId: resolvedOrgId, userId: resolvedUserId,
       value: { brief: null, status: 'loading' },
     })
-    void contractApi('GET /operations/brief', '/operations/brief', undefined)
+    void contractApi('GET /operations/brief', '/operations/brief', undefined, { signal: controller.signal })
       .then((payload) => {
         if (cancelled) return
         const brief = decodeOperatorBrief(payload)
         if (!brief) throw new Error('invalid operator brief')
         setOperatorBriefSnapshot({
-          orgId: resolvedOrgId,
+          orgId: resolvedOrgId, userId: resolvedUserId,
           value: { brief, status: 'available' },
         })
       })
       .catch(() => {
         if (cancelled) return
         setOperatorBriefSnapshot({
-          orgId: resolvedOrgId,
+          orgId: resolvedOrgId, userId: resolvedUserId,
           value: { brief: null, status: 'unavailable' },
         })
       })
-    return () => { cancelled = true }
-  }, [platformVersion, resolvedOrgId])
+    return () => { cancelled = true; controller.abort() }
+  }, [platformVersion, resolvedOrgId, resolvedUserId])
 
   useEffect(() => {
     if (impactPollVersion === 0) return
-    let cancelled = false
-    const { orgId, userId } = identityRef.current
-    void api('/recovery/home?scope=impact')
+    const controller = new AbortController()
+    const generation = ++impactReadGeneration.current
+    const orgId = resolvedOrgId
+    const userId = resolvedUserId
+    void api('/recovery/home?scope=impact', { signal: controller.signal })
       .then((payload) => {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         const snapshot = parseRecoveryHomeSnapshot(payload)
-        if (!snapshot || snapshot.scope !== 'impact') return
-        applyImpactSnapshot(snapshot, orgId, userId)
+        if (!snapshot || snapshot.scope !== 'impact') throw new Error('invalid recovery impact')
+        applyImpactSnapshot(snapshot, orgId, userId, generation)
       })
       .catch(() => {
+        if (!controller.signal.aborted && generation === impactReadGeneration.current) {
+          setQueueStatusSnapshot({ orgId, userId, value: 'unavailable' })
+        }
       })
-    return () => { cancelled = true }
-  }, [applyImpactSnapshot, impactPollVersion])
+    return () => { controller.abort() }
+  }, [applyImpactSnapshot, impactPollVersion, resolvedOrgId, resolvedUserId])
 
   const openDeadLetters = useMemo(
     () => props.deadLetters.filter((dlq) => dlq.status === 'open'),
     [props.deadLetters],
   )
-  const currentQueueOverview = queueOverview?.orgId === resolvedOrgId ? queueOverview : null
+  const currentQueueOverview = queueOverview?.orgId === resolvedOrgId && queueOverview.userId === resolvedUserId ? queueOverview : null
   const unobservedVisibleFailures = currentQueueOverview
     ? openDeadLetters.filter((deadLetter) => !currentQueueOverview.observedOpenIds.includes(deadLetter.id)).length
     : openDeadLetters.length
   const openFailureCount = Math.max(currentQueueOverview?.openCount ?? 0, unobservedVisibleFailures)
-  const recoveryClearEligible = openFailureCount === 0 && semanticOutcomePosture === 'clear'
+  const metricsStatus = homeEvidenceStatus({
+    metrics,
+    loading: metricsLoading || semanticCasesStatus === 'loading' || operatorBriefStatus === 'loading' || queueStatus === 'loading',
+    unavailable: Boolean(metricsError),
+    incomplete: semanticCasesStatus === 'unavailable' || operatorBriefStatus === 'unavailable'
+      || queueStatus === 'unavailable' || (operatorBrief?.warnings.length ?? 0) > 0,
+    ageMs: metricsSnapshot && nowMs !== null ? Math.max(0, nowMs - metricsSnapshot.receivedAt) : 0,
+  })
+  const recoveryClearEligible = metricsStatus === 'available' && openFailureCount === 0 && semanticOutcomePosture === 'clear'
 
   const impactPollMs = openFailureCount > 0
     ? RECOVERY_IMPACT_ACTIVE_POLL_MS
@@ -571,12 +601,6 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
           : t('recoveryCenter.hero.memoryPurgeDue')
     : null
 
-  const metricsStatus = homeEvidenceStatus({
-    metrics,
-    loading: metricsLoading || semanticCasesStatus === 'loading',
-    unavailable: Boolean(metricsError) || semanticCasesStatus === 'unavailable',
-    ageMs: metricsSnapshot && nowMs !== null ? Math.max(0, nowMs - metricsSnapshot.receivedAt) : 0,
-  })
   const healthScore = metricsStatus === 'available' ? readHealthScore(metrics) : null
   const greeting = useMemo(() => buildGreeting({
     hour: currentHour,

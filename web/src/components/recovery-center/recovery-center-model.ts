@@ -589,13 +589,15 @@ export function clusterOwnerLabel(owner: ClusterOwner): string {
 export type HomeEvidenceStatus = 'loading' | 'unavailable' | 'stale' | 'empty' | 'available'
 
 /** A loaded run page is not a historical sample; only validated metrics are. */
-export function homeEvidenceStatus({ metrics, loading, unavailable, ageMs = 0 }: {
+export function homeEvidenceStatus({ metrics, loading, unavailable, incomplete = false, ageMs = 0 }: {
   metrics: RecoveryMetrics | null
   loading: boolean
   unavailable: boolean
+  incomplete?: boolean
   ageMs?: number
 }): HomeEvidenceStatus {
   if (loading || unavailable) return metrics ? 'stale' : loading ? 'loading' : 'unavailable'
+  if (incomplete) return 'unavailable'
   if (!metrics) return 'loading'
   if (ageMs >= 5 * 60_000) return 'stale'
   if (metrics.terminalRuns === 0) return 'empty'

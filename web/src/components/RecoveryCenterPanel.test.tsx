@@ -481,6 +481,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
       windowDays: 30,
     }
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
@@ -524,6 +526,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
       windowDays: 30,
     }
     mockRecoveryApi(async (path: string) => {
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') {
         return {
@@ -571,6 +574,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     let releaseMetrics: ((value: unknown) => void) | undefined
     const pendingMetrics = new Promise((resolve) => { releaseMetrics = resolve })
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return pendingMetrics
@@ -595,6 +600,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     const firstMetrics = new Promise((resolve) => { releaseFirstMetrics = resolve })
     let metricsCalls = 0
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') {
@@ -645,6 +652,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     const secondMetrics = new Promise((resolve) => { releaseSecondMetrics = resolve })
     let metricsCalls = 0
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') {
@@ -674,6 +683,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
   it('keeps a fresh-workspace dismissal session-only', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return { ...baseMetrics, terminalRuns: 0 }
@@ -695,6 +706,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
   it('does not treat a filtered empty run list as a fresh workspace', async () => {
     mockRecoveryApi(async path => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
@@ -710,6 +723,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
   it('renders the welcome hero when no runs / no DLQ / no waiting nodes', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return emptyMetrics
@@ -735,6 +750,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
   it('opens AI Studio when the empty-state Studio CTA is clicked', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return emptyMetrics
@@ -755,6 +772,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
   it('opens Recipes when the empty-state Recipes CTA is clicked', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return emptyMetrics
@@ -891,6 +910,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
   it('keeps priority work above the fold and diagnostics behind one disclosure', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief(
         briefAction({
@@ -938,6 +959,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
   it('opens the exact oldest visible failure from the priority inbox', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief(briefAction({
         id: 'triage_failures', kind: 'routine_triage',
@@ -963,6 +986,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
   it('routes clustered recovery work to the recovery queue', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief(briefAction({
         id: 'recover_cluster', kind: 'failure_cluster', severity: 'medium', params: { count: 3 },
@@ -998,6 +1023,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       createdAt: '2026-07-28T12:00:00.000Z',
     }
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
@@ -1021,6 +1048,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
   it('clicking a metric strip cell routes to the expected detail tab', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
@@ -1055,6 +1084,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       { day: '2026-07-03', seconds: 180 },
     ]
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return { ...baseMetrics, mttrTrend: trend }
@@ -1083,6 +1114,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       createdAt: '2026-07-28T13:00:00.000Z',
     }
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief(briefAction({
         id: 'resolve_approvals', kind: 'run_approval',
@@ -1108,6 +1141,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
   it('renders the Recovery Center-greeting header with the user display name', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
@@ -1142,6 +1177,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       mttrSeconds: 0,
     }))
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
@@ -1204,6 +1241,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
   it('does not invent a clean streak for a workspace without heatmap activity', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
@@ -1336,9 +1375,9 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
     render(<RecoveryCenterPanel {...baseProps} />)
 
     expect(
-      await screen.findByText(/current health has not been confirmed/i),
+      await screen.findByText(/Current health could not be confirmed/i),
     ).toBeVisible()
-    expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Previous data')
+    expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
     expect(screen.getByTestId('recovery-center-greeting').closest('header'))
       .not.toHaveAttribute('data-all-clear')
     expect(screen.queryByTestId('recovery-center-action-review_semantic_cases')).toBeNull()
@@ -1350,8 +1389,10 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
 describe('<RecoveryCenterPanel /> — all-clear moment', () => {
   let recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null as string | null }
 
-  function mockAllClearApis(metrics: RecoveryMetrics = baseMetrics) {
+  function mockAllClearApis(metrics: RecoveryMetrics = baseMetrics, openCount = () => 0) {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: openCount() }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return { ...metrics, downtimeEndedMs: 7_200_000 }
       if (path === '/dlq/clusters') return baseClusters
@@ -1521,7 +1562,8 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
 
   it('buffers terminal evidence when the ledger settles before the queue-empty snapshot', async () => {
     recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }
-    mockAllClearApis()
+    let openCount = 1
+    mockAllClearApis(baseMetrics, () => openCount)
     const failure = {
       id: 'dlq-last', runId: 'run-last', nodeId: 'charge', attempt: 1, status: 'open' as const,
       workflowJson: {}, nodeJson: {}, errorJson: {}, createdAt: new Date().toISOString(),
@@ -1543,6 +1585,8 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     )
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
 
+    openCount = 0
+    act(() => invalidateTags([PLATFORM_TAG]))
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
     await waitFor(
       () => expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(/^All clear$/),
@@ -1581,9 +1625,135 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
   })
 })
 
+describe('Home partial dependencies', () => {
+  function healthyRead(path: string): unknown {
+    if (path === '/operations/brief') return operatorBrief()
+    if (path === '/recovery/metrics') return baseMetrics
+    if (path === '/recovery/cases?limit=50') return { cases: [] }
+    if (path === '/dlq/clusters') return baseClusters
+    if (path === '/dlq/counts') return { open: 0 }
+    if (path.startsWith('/dlq/queue?')) return { items: [] }
+    throw new Error(`unexpected fetch: ${path}`)
+  }
+
+  it('owns the brief request and never renders late priorities from the previous user', async () => {
+    let finishOld: (value: unknown) => void = () => { throw new Error('not requested') }
+    const old = new Promise(resolve => { finishOld = resolve })
+    let briefCalls = 0
+    mockRecoveryApi(async path => {
+      if (path === '/operations/brief') { briefCalls++; if (briefCalls === 1) return old }
+      return healthyRead(path)
+    })
+    const view = render(<RecoveryCenterPanel {...baseProps} />)
+    await waitFor(() => expect(briefCalls).toBe(1))
+    const first = vi.mocked(api).mock.calls.find(([path]) => path === '/operations/brief')?.[1]?.signal
+    expect(first).toBeInstanceOf(AbortSignal)
+    activeUserId = 'another-user'
+    view.rerender(<RecoveryCenterPanel {...baseProps} />)
+    await waitFor(() => expect(briefCalls).toBe(2))
+    await waitFor(() => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track'))
+    expect(first?.aborted).toBe(true)
+    await act(async () => finishOld(operatorBrief(briefAction({ id: 'previous-user-action', kind: 'routine_triage',
+      target: { kind: 'dead_letter', id: 'old-dlq', destination: 'recover' } }))))
+    expect(screen.queryByTestId('recovery-center-action-previous-user-action')).not.toBeInTheDocument()
+    const second = vi.mocked(api).mock.calls.filter(([path]) => path === '/operations/brief')[1][1]?.signal
+    view.unmount()
+    expect(second?.aborted).toBe(true)
+  })
+
+  it('does not replace a newer impact queue with a delayed full snapshot', async () => {
+    vi.useFakeTimers()
+    let finishMetrics: (value: unknown) => void = () => { throw new Error('not requested') }
+    const pending = new Promise(resolve => { finishMetrics = resolve })
+    let queueReads = 0
+    mockRecoveryApi(async path => {
+      if (path === '/recovery/metrics') return pending
+      if (path === '/dlq/counts') return { open: queueReads++ === 0 ? 0 : 2 }
+      return healthyRead(path)
+    })
+    const view = render(<RecoveryCenterPanel {...baseProps} />)
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(queueReads).toBe(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+      expect(queueReads).toBe(2)
+      await act(async () => finishMetrics(baseMetrics))
+      expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Needs attention')
+      expect(screen.getByTestId('recovery-center-greeting').closest('header')).toHaveTextContent('2 runs')
+    } finally { view.unmount(); vi.useRealTimers() }
+  })
+
+  it('retains newer impact evidence when an older full request rejects', async () => {
+    vi.useFakeTimers()
+    let rejectFull: (reason: Error) => void = () => { throw new Error('not requested') }
+    const pending = new Promise((_, reject) => { rejectFull = reject })
+    mockRecoveryApi(async path => {
+      if (path === '/recovery/ledger') return { totalRecovered: 12, downtimeEndedMs: 60_000, sinceIso: null }
+      if (path === '/recovery/my-wins?days=30') return { recovered: 3, windowDays: 30 }
+      return healthyRead(path)
+    })
+    const read = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation((path, options) => path === '/recovery/home' ? pending : read(path, options))
+    const view = render(<RecoveryCenterPanel {...baseProps} />)
+    try {
+      fireEvent.click(screen.getByTestId('home-insights-toggle'))
+      await act(async () => { await vi.dynamicImportSettled(); await vi.advanceTimersByTimeAsync(60_000) })
+      expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('12 failures recovered')
+      await act(async () => rejectFull(new Error('old full request failed')))
+      expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('12 failures recovered')
+      expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
+    } finally { view.unmount(); vi.useRealTimers() }
+  })
+
+  it('marks a failed impact poll incomplete rather than keeping a healthy zero queue', async () => {
+    vi.useFakeTimers()
+    let queueReads = 0
+    mockRecoveryApi(async path => {
+      if (path === '/dlq/counts' && queueReads++ > 0) throw new Error('queue offline')
+      return healthyRead(path)
+    })
+    const view = render(<RecoveryCenterPanel {...baseProps} />)
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track')
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+      expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
+    } finally { view.unmount(); vi.useRealTimers() }
+  })
+
+  it.each(['brief failure', 'brief warning', 'queue failure', 'queue malformed'] as const)(
+    'withholds healthy posture and celebration after %s despite a valid healthy sample', async failure => {
+      mockRecoveryApi(async path => {
+        if (path === '/operations/brief') {
+          if (failure === 'brief failure') throw new Error('brief offline')
+          return { ...operatorBrief(), warnings: failure === 'brief warning' ? ['runs_unavailable'] : [] }
+        }
+        if (path === '/recovery/metrics') return baseMetrics
+        if (path === '/recovery/cases?limit=50') return { cases: [] }
+        if (path === '/dlq/clusters') return baseClusters
+        if (path === '/dlq/counts') {
+          if (failure === 'queue failure') throw new Error('queue offline')
+          return { open: failure === 'queue malformed' ? 'invalid' : 0 }
+        }
+        if (path.startsWith('/dlq/queue?')) return { items: [] }
+        throw new Error(`unexpected fetch: ${path}`)
+      })
+      requestRecoveryAllClear({ downtimeMs: 60_000 })
+      render(<RecoveryCenterPanel {...baseProps} />)
+      await waitFor(() => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete'))
+      expect(screen.queryByLabelText('Health score 87 of 100')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('recovery-center-all-clear-summary')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('recovery-lab-entry')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    },
+  )
+})
+
 describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
   it('owns a new cancellable full-snapshot request on retry and aborts it on unmount', async () => {
     mockRecoveryApi(async path => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
@@ -1623,7 +1793,7 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(0) })
       expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track')
       await act(async () => { await vi.advanceTimersByTimeAsync(300_000) })
-      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home?scope=impact')
+      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home?scope=impact', { signal: expect.any(AbortSignal) })
       expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Previous data')
       expect(screen.queryByLabelText('Health score 87 of 100')).not.toBeInTheDocument()
     } finally { view.unmount(); vi.useRealTimers() }
@@ -1633,6 +1803,8 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
     let failed = false
     let calls = 0
     mockRecoveryApi(async path => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') { calls++; if (failed) throw new Error('offline'); return baseMetrics }
@@ -1657,6 +1829,8 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
 
   it('surfaces a soft warning when /recovery/metrics fails but still renders tiles', async () => {
     mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief(briefAction({
         id: 'triage_failures', kind: 'routine_triage',
