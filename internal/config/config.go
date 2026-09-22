@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/orgconfig"
 )
 
 // DefaultDBToolMaxProcessPools is the external tools' default physical pool budget.
@@ -47,8 +49,6 @@ type Config struct {
 	// PollInterval is the queue's fallback poll cadence when no notification
 	// arrives; LISTEN/NOTIFY remains the primary wake-up signal.
 	PollInterval time.Duration
-	// HTTPTimeout bounds outbound http executor calls.
-	HTTPTimeout time.Duration
 	// FeedbackMemoryWorkers bounds optional feedback-derived memory commits.
 	FeedbackMemoryWorkers int
 	// FeedbackMemoryQueueCapacity bounds accepted tasks waiting for workers;
@@ -121,7 +121,6 @@ func Load(getenv func(string) string) (Config, error) {
 		APIPoolSize:                 num("JANUSLY_API_POOL_SIZE", 10, 1, 100),
 		WorkerPoolSize:              num("JANUSLY_WORKER_POOL_SIZE", 0, 0, 100),
 		PollInterval:                time.Duration(num("JANUSLY_POLL_MS", 250, 50, 5000)) * time.Millisecond,
-		HTTPTimeout:                 time.Duration(num("JANUSLY_HTTP_TIMEOUT_MS", 30_000, 1000, 600_000)) * time.Millisecond,
 		FeedbackMemoryWorkers:       num("JANUSLY_FEEDBACK_MEMORY_WORKERS", 4, 1, 32),
 		FeedbackMemoryQueueCapacity: num("JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY", 256, 1, 4096),
 		FeedbackMemoryTaskTimeout: time.Duration(num(
@@ -152,6 +151,7 @@ func Load(getenv func(string) string) (Config, error) {
 	default:
 		problems = append(problems, "JANUSLY_INTERNAL_HOST must be 127.0.0.1, 0.0.0.0, ::1, or ::")
 	}
+	problems = append(problems, orgconfig.ValidateHTTPEnvironment(getenv)...)
 	if len(problems) > 0 {
 		return Config{}, fmt.Errorf("invalid configuration: %s", strings.Join(problems, "; "))
 	}

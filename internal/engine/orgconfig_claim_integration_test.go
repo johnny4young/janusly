@@ -61,6 +61,23 @@ func TestClaimResolvesOrgConfigFromOneTenantRead(t *testing.T) {
 		t.Fatalf("four lookups on one claim must read the tenant rows once, got %d", got)
 	}
 
+	// A claim keeps its tenant snapshot, but a later claim on the same engine
+	// must observe an operator edit without a process restart.
+	if _, err := pool.Exec(ctx, `UPDATE org_configs SET value_json='75'::jsonb WHERE org_id=$1 AND key='http.timeoutMs'`, org); err != nil {
+		t.Fatal(err)
+	}
+	if bounds := eng.claimHTTPBounds(ctx, claim, noEnv); bounds.TimeoutMs != 1234 {
+		t.Fatalf("in-flight snapshot changed: %+v", bounds)
+	}
+	later := ClaimedNode{RunID: "later", NodeID: "node", OrgID: org}.withSnapshot(&domain.Workflow{}, nil, "", "version")
+	if bounds := eng.claimHTTPBounds(ctx, later, noEnv); bounds.TimeoutMs != 75 {
+		t.Fatalf("later tenant edit frozen: %+v", bounds)
+	}
+	other := ClaimedNode{RunID: "other", NodeID: "node", OrgID: org + "-other"}.withSnapshot(&domain.Workflow{}, nil, "", "version")
+	if bounds := eng.claimHTTPBounds(ctx, other, noEnv); bounds.TimeoutMs != 30000 {
+		t.Fatalf("tenant setting crossed organizations: %+v", bounds)
+	}
+
 	bare := ClaimedNode{RunID: "run", NodeID: "node", OrgID: org}
 	counter.reset()
 	_ = eng.claimConfigNumber(ctx, bare, "runs.humanFormResumeTtlSeconds")

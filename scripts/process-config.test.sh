@@ -34,4 +34,16 @@ for value in 25 1 500 invalid; do
 done
 JANUSLY_DB_TOOL_MAX_PROCESS_POOLS='' render |
   jq -e '.services.janusly.environment.JANUSLY_DB_TOOL_MAX_PROCESS_POOLS == "25"' >/dev/null
+for value in 1 600000 invalid; do
+  JANUSLY_HTTP_TIMEOUT_MS="$value" JANUSLY_HTTP_MAX_RESPONSE_BYTES="$value" \
+  JANUSLY_HTTP_MAX_REDIRECTS="$value" JANUSLY_HTTP_STREAM_PREVIEW_BYTES="$value" render |
+    jq -e --arg value "$value" '.services.janusly.environment |
+      .JANUSLY_HTTP_TIMEOUT_MS == $value and .JANUSLY_HTTP_MAX_RESPONSE_BYTES == $value and
+      .JANUSLY_HTTP_MAX_REDIRECTS == $value and .JANUSLY_HTTP_STREAM_PREVIEW_BYTES == $value' >/dev/null
+done
+JANUSLY_HTTP_TIMEOUT_MS='' JANUSLY_HTTP_MAX_RESPONSE_BYTES='' \
+JANUSLY_HTTP_MAX_REDIRECTS='' JANUSLY_HTTP_STREAM_PREVIEW_BYTES='' render |
+  jq -e '.services.janusly.environment |
+    .JANUSLY_HTTP_TIMEOUT_MS == "30000" and .JANUSLY_HTTP_MAX_RESPONSE_BYTES == "1000000" and
+    .JANUSLY_HTTP_MAX_REDIRECTS == "5" and .JANUSLY_HTTP_STREAM_PREVIEW_BYTES == "65536"' >/dev/null
 printf 'Process configuration forwarding passed\n'

@@ -72,7 +72,7 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 		{"port too high", "JANUSLY_PORT", "70000", "[1, 65535]"},
 		{"concurrency zero", "JANUSLY_WORKER_CONCURRENCY", "0", "[1, 64]"},
 		{"poll below floor", "JANUSLY_POLL_MS", "10", "[50, 5000]"},
-		{"not a number", "JANUSLY_HTTP_TIMEOUT_MS", "soon", "[1000, 600000]"},
+		{"not a number", "JANUSLY_HTTP_TIMEOUT_MS", "soon", "[1, 600000]"},
 		{"feedback workers too high", "JANUSLY_FEEDBACK_MEMORY_WORKERS", "33", "[1, 32]"},
 		{"feedback queue zero", "JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY", "0", "[1, 4096]"},
 		{"feedback timeout too high", "JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS", "300001", "[1000, 300000]"},

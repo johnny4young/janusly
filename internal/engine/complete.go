@@ -97,7 +97,7 @@ func (e *Engine) claimConfigNumber(ctx context.Context, claim ClaimedNode, key s
 // claimHTTPBounds resolves the outbound HTTP bounds for the claim's tenant
 // from the same held rows.
 func (e *Engine) claimHTTPBounds(ctx context.Context, claim ClaimedNode, lookupEnv func(string) (string, bool)) executors.HTTPBounds {
-	return httpBoundsFromTenantRows(e.claimTenantRows(ctx, claim), lookupEnv)
+	return orgconfig.ResolveHTTPBounds(e.claimTenantRows(ctx, claim), lookupEnv)
 }
 
 // replayMode is the run's replay mode from the claim snapshot, or one

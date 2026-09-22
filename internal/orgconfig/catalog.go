@@ -38,6 +38,8 @@ type Definition struct {
 	Max           *float64 `json:"max,omitempty"`
 	AllowEmpty    bool     `json:"allowEmpty,omitempty"`
 	Fractional    bool     `json:"fractional,omitempty"`
+	// RejectFractional preserves strict integer contracts instead of legacy rounding.
+	RejectFractional bool `json:"-"`
 	// Validate runs after the standard normalization pipeline. It is not
 	// serialized into the public catalog.
 	Validate func(any) error `json:"-"`
@@ -66,10 +68,10 @@ var Definitions = []Definition{
 	{Key: "ai.budgetWarnPercent", Category: "ai", Description: "Percent of the monthly budget at which the operator gets a billing.budget.warned audit row + Recovery Center banner.", ValueType: "number", Default: float64(80), EnvKeys: []string{"JANUSLY_AI_BUDGET_WARN_PERCENT"}, Min: new(float64(0)), Max: new(float64(100))},
 	{Key: "ai.budgetExceededPolicy", Category: "ai", Description: "What happens when the monthly budget is exceeded. 'warn' proceeds + audits + toasts; 'block' returns HTTP 402 / mode=fallback.", ValueType: "string", Default: "warn", EnvKeys: []string{"JANUSLY_AI_BUDGET_EXCEEDED_POLICY"}, AllowedValues: []string{"warn", "block"}},
 	{Key: "ai.confidenceCalibrationEnabled", Category: "ai", Description: "Tenant switch for calibrating AI patch-suggestion confidence against observed accept/reject history. Defaults to true: a daily sweep fits a per-approach linear curve from recovery feedback and the recovery dialog shows the calibrated value as primary. Set false to show the model's raw self-rated confidence unchanged (no curve fit, no calibrated number).", ValueType: "boolean", Default: true},
-	{Key: "http.timeoutMs", Category: "http", Description: "Default outbound HTTP timeout budget in milliseconds.", ValueType: "number", Default: float64(httpcontract.DefaultTimeoutMS), EnvKeys: []string{"JANUSLY_HTTP_TIMEOUT_MS"}, Min: new(float64(1)), Max: new(float64(httpcontract.MaxTimeoutMS))},
-	{Key: "http.maxResponseBytes", Category: "http", Description: "Default maximum decoded body size for HTTP nodes and http.request.", ValueType: "number", Default: float64(httpcontract.DefaultMaxResponseBytes), EnvKeys: []string{"JANUSLY_HTTP_MAX_RESPONSE_BYTES"}, Min: new(float64(1)), Max: new(float64(httpcontract.MaxResponseBytes))},
-	{Key: "http.maxRedirects", Category: "http", Description: "Default maximum redirect hops for outbound HTTP.", ValueType: "number", Default: float64(httpcontract.DefaultMaxRedirects), EnvKeys: []string{"JANUSLY_HTTP_MAX_REDIRECTS"}, Min: new(float64(0)), Max: new(float64(httpcontract.MaxRedirects))},
-	{Key: "http.streamPreviewBytes", Category: "http", Description: "How many bytes of a streamed HTTP response body get captured into the persisted node output for audit when `bodyMode: \"stream\"` is set on an `http` node or `http.request` tool. The full response still flows through the byte cap (`http.maxResponseBytes`); only the preview is what survives into `run_nodes.state_json`. Range 1024..1048576 (1 KB..1 MB), default 65536 (64 KB).", ValueType: "number", Default: float64(httpcontract.DefaultStreamPreview), EnvKeys: []string{"JANUSLY_HTTP_STREAM_PREVIEW_BYTES"}, Min: new(float64(httpcontract.MinStreamPreview)), Max: new(float64(httpcontract.MaxStreamPreview))},
+	{Key: "http.timeoutMs", Category: "http", RejectFractional: true, Description: "Default outbound HTTP timeout budget in milliseconds.", ValueType: "number", Default: float64(httpcontract.DefaultTimeoutMS), EnvKeys: []string{"JANUSLY_HTTP_TIMEOUT_MS"}, Min: new(float64(1)), Max: new(float64(httpcontract.MaxTimeoutMS))},
+	{Key: "http.maxResponseBytes", Category: "http", RejectFractional: true, Description: "Default maximum decoded body size for HTTP nodes and http.request.", ValueType: "number", Default: float64(httpcontract.DefaultMaxResponseBytes), EnvKeys: []string{"JANUSLY_HTTP_MAX_RESPONSE_BYTES"}, Min: new(float64(1)), Max: new(float64(httpcontract.MaxResponseBytes))},
+	{Key: "http.maxRedirects", Category: "http", RejectFractional: true, Description: "Default maximum redirect hops for outbound HTTP.", ValueType: "number", Default: float64(httpcontract.DefaultMaxRedirects), EnvKeys: []string{"JANUSLY_HTTP_MAX_REDIRECTS"}, Min: new(float64(0)), Max: new(float64(httpcontract.MaxRedirects))},
+	{Key: "http.streamPreviewBytes", Category: "http", RejectFractional: true, Description: "How many bytes of a streamed HTTP response body get captured into the persisted node output for audit when `bodyMode: \"stream\"` is set on an `http` node or `http.request` tool. The full response still flows through the byte cap (`http.maxResponseBytes`); only the preview is what survives into `run_nodes.state_json`. Range 1024..1048576 (1 KB..1 MB), default 65536 (64 KB).", ValueType: "number", Default: float64(httpcontract.DefaultStreamPreview), EnvKeys: []string{"JANUSLY_HTTP_STREAM_PREVIEW_BYTES"}, Min: new(float64(httpcontract.MinStreamPreview)), Max: new(float64(httpcontract.MaxStreamPreview))},
 	{Key: "email.provider", Category: "email", Description: "Default mailer provider for this tenant. Provider API keys still come from env or secret management.", ValueType: "string", Default: "noop", EnvKeys: []string{"JANUSLY_MAILER_PROVIDER"}, AllowedValues: []string{"resend", "sendgrid", "simulator", "noop"}},
 	{Key: "email.from", Category: "email", Description: "Default sender address for email.send when the workflow input omits from.", ValueType: "string", Default: "onboarding@resend.dev", EnvKeys: []string{"JANUSLY_MAILER_FROM"}},
 	{Key: "email.rateLimitPerMin", Category: "email", Description: "Per-org email.send limit per minute.", ValueType: "number", Default: float64(100), EnvKeys: []string{"JANUSLY_EMAIL_RATE_LIMIT_PER_MIN"}, Min: new(float64(1))},
@@ -169,6 +171,9 @@ func Normalize(def *Definition, value any) (any, error) {
 		typed, ok := value.(float64)
 		if !ok || math.IsNaN(typed) || math.IsInf(typed, 0) {
 			return nil, fmt.Errorf("%s must be a finite number", def.Key)
+		}
+		if def.RejectFractional && math.Trunc(typed) != typed {
+			return nil, fmt.Errorf("%s must be an integer", def.Key)
 		}
 		normalized := typed
 		if !def.Fractional {

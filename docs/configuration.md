@@ -21,13 +21,36 @@ in `org_configs`; secrets never do.
 | `JANUSLY_API_POOL_SIZE` | `10` | Public-request PostgreSQL pool size; integer range 1–100. |
 | `JANUSLY_WORKER_POOL_SIZE` | derived | Execution PostgreSQL pool size; integer range 0–100; `0` derives concurrency plus two. |
 | `JANUSLY_POLL_MS` | `250` | Durable-queue fallback poll interval, range 50–5000 ms. |
-| `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Default outbound HTTP timeout; integer range 1000..600000 ms. |
+| `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Outbound HTTP environment fallback; integer range 1..600000 ms; tenant overrides remain dynamic. |
 | `JANUSLY_FEEDBACK_MEMORY_WORKERS` | `4` | Fixed workers for optional feedback-derived memory commits, range 1–32. |
 | `JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY` | `256` | Waiting-task bound for optional feedback-derived memory, range 1–4096; saturation never rejects durable feedback. |
 | `JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS` | `15000` | Per-task deadline for feedback-derived memory, range 1000–300000 ms. |
 
 `JANUSLY_PORT` and `JANUSLY_INTERNAL_PORT` must differ. There are no alternate
 names for these settings.
+
+## Tenant-adjustable HTTP defaults
+
+These numeric environment values must represent whole numbers. Blank/unset uses
+the catalog default; surrounding whitespace is ignored. Nonblank malformed,
+fractional, non-finite or out-of-range values reject API/MCP startup in every
+mode with key/range-only errors, never the supplied value.
+
+| Environment fallback | Tenant key | Default | Inclusive range |
+| --- | --- | --- | --- |
+| `JANUSLY_HTTP_TIMEOUT_MS` | `http.timeoutMs` | `30000` | 1–600000 ms |
+| `JANUSLY_HTTP_MAX_RESPONSE_BYTES` | `http.maxResponseBytes` | `1000000` | 1–67108864 bytes |
+| `JANUSLY_HTTP_MAX_REDIRECTS` | `http.maxRedirects` | `5` | 0–20 hops; zero disables redirects |
+| `JANUSLY_HTTP_STREAM_PREVIEW_BYTES` | `http.streamPreviewBytes` | `65536` | 1024–1048576 bytes |
+
+Precedence is valid tenant row → environment fallback → catalog default. A
+validated workflow-node override can then replace the effective default but
+cannot exceed platform ceilings. The process validates environment fallbacks
+at boot, not the tenant rows: each execution claim resolves its tenant snapshot
+through the same catalog. Tenant edits affect subsequent claims without a
+restart; deployment environment changes require restarting the process. One
+tenant's setting never becomes another tenant's default. Invalid legacy rows
+fall through, while new fractional HTTP tenant writes are rejected, not rounded.
 
 ## External database tool pool budget
 
@@ -196,9 +219,8 @@ Outbound safety and integration settings include:
 
 Outbound HTTP settings remain bounded even when configured per tenant or per
 workflow node: response bodies are capped at 67,108,864 bytes (64 MiB), redirect
-chains at 20 hops, and timeouts at 600,000 ms. Values outside those ranges fall
-back when read from legacy/environment configuration and are rejected on new
-tenant or workflow writes.
+chains at 20 hops, and timeouts at 600,000 ms. Invalid legacy rows fall back defensively; invalid deployment environment
+settings fail at boot and invalid new tenant/workflow writes are rejected.
 - `JANUSLY_MCP_WRITES_ENABLED` (server-side write tools) and
   `JANUSLY_MCP_CLIENT_WRITES_ENABLED` (`mcp_tool` steps against external
   servers)

@@ -6,6 +6,7 @@ package orgconfig
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 )
 
 // Resolved is one catalog entry with its effective value and provenance.
@@ -83,7 +84,7 @@ func parseEnv(def *Definition, raw string) (any, bool) {
 		}
 		return nil, false
 	case "number":
-		parsed, err := strconv.ParseFloat(raw, 64)
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 		if err != nil {
 			return nil, false
 		}

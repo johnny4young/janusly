@@ -20,7 +20,7 @@ func TestExecutableRejectsInvalidConfigurationBeforeDatabase(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, environment := range []string{"development", "production"} {
-		for _, key := range []string{"JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", "JANUSLY_PORT", "JANUSLY_INTERNAL_HOST", "JANUSLY_REAPER_INTERVAL_MS", "JANUSLY_REAPER_THRESHOLD_MS", "JANUSLY_REAPER_THRESHOLD_FLOOR_MS", "JANUSLY_STALLED_NODE_THRESHOLD_MINUTES"} {
+		for _, key := range []string{"JANUSLY_HTTP_TIMEOUT_MS", "JANUSLY_HTTP_MAX_RESPONSE_BYTES", "JANUSLY_HTTP_MAX_REDIRECTS", "JANUSLY_HTTP_STREAM_PREVIEW_BYTES", "JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", "JANUSLY_PORT", "JANUSLY_INTERNAL_HOST", "JANUSLY_REAPER_INTERVAL_MS", "JANUSLY_REAPER_THRESHOLD_MS", "JANUSLY_REAPER_THRESHOLD_FLOOR_MS", "JANUSLY_STALLED_NODE_THRESHOLD_MINUTES"} {
 			t.Run(environment+"/"+key, func(t *testing.T) {
 				childCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 				defer stop()

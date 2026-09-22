@@ -159,3 +159,17 @@ duration overflow is rejected. Long production thresholds are no longer shortene
 by a separate drill-only cap. The undocumented minutes-only drill setting is
 rejected with a replacement hint. Core configuration errors identify the setting
 and accepted range without echoing its value; tenant overrides remain dynamic.
+
+## Shared HTTP configuration semantics
+
+The engine now resolves HTTP defaults through the same organization catalog as
+the settings API. Removed the duplicated HTTP parser/specification and unused
+process timeout field. Boot validates all four environment fallback bounds;
+the timeout minimum matches the canonical 1 ms floor rather than an unrelated
+1000 ms floor. HTTP fractions are rejected instead of rounded by the catalog,
+while unrelated legacy numeric catalog semantics remain unchanged.
+
+Tenant → environment → default precedence and per-claim tenant snapshots remain
+intact. Compose forwards all four settings; malformed inputs reach redacted boot
+validation instead of silently becoming defaults. Per-node ceilings, SSRF,
+redirect validation and DNS pinning are unchanged.
