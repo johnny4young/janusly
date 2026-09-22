@@ -131,7 +131,7 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		// Drifted data can't compute a next fire — disable loudly rather
 		// than lease-spin forever.
 		_ = q.DisableScheduleEntry(ctx, entry.ID)
-		audit.Write(ctx, e.pool, &auth.Context{OrgID: entry.OrgID, UserID: "system:scheduler"},
+		e.audit.Write(ctx, e.pool, &auth.Context{OrgID: entry.OrgID, UserID: "system:scheduler"},
 			"schedule.entry.disabled", audit.Options{
 				TargetType: "schedule_entry", TargetID: entry.ID,
 				Metadata: map[string]any{"reason": "invalid_cron", "workflowId": entry.WorkflowID},
@@ -164,7 +164,7 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		return false
 	}
 	if owner.Status != "" && owner.Status != "active" {
-		audit.Write(ctx, e.pool, &auth.Context{OrgID: entry.OrgID, UserID: "system:scheduler"},
+		e.audit.Write(ctx, e.pool, &auth.Context{OrgID: entry.OrgID, UserID: "system:scheduler"},
 			"schedule.tick.dropped", audit.Options{
 				TargetType: "workflow", TargetID: entry.WorkflowID,
 				Metadata: map[string]any{

@@ -63,7 +63,7 @@ func TestWriteEnrichesAndRedacts(t *testing.T) {
 		OrgID: org, UserID: "u1", Mode: auth.ModeServiceToken,
 		Source: auth.SourceMcp, ServiceTokenSuffix: "beef",
 	}
-	Write(context.Background(), pool, authCtx, "org.role.created", Options{
+	(Writer{}).Write(context.Background(), pool, authCtx, "org.role.created", Options{
 		TargetType: "org_role", TargetID: "r1",
 		Metadata: map[string]any{
 			"name": "auditor",
@@ -89,7 +89,7 @@ func TestWriteEnrichesAndRedacts(t *testing.T) {
 	}
 
 	// A typo'd action never lands (and never panics — best effort logs).
-	Write(context.Background(), pool, authCtx, "org.role.craeted", Options{})
+	(Writer{}).Write(context.Background(), pool, authCtx, "org.role.craeted", Options{})
 	action, _ = lastRow(t, pool, org)
 	if action != "org.role.created" {
 		t.Fatalf("typo action must not insert: %s", action)
@@ -102,7 +102,7 @@ func TestWithAuditTxAtomicity(t *testing.T) {
 	authCtx := &auth.Context{OrgID: org, UserID: "u1", Mode: auth.ModeDevHeaders, Source: auth.SourceDev}
 
 	// Handler failure AFTER the audit call rolls BOTH writes back.
-	err := WithAuditTx(context.Background(), pool, authCtx, func(tx pgx.Tx, audit TxAudit) error {
+	err := (Writer{}).WithAuditTx(context.Background(), pool, authCtx, func(tx pgx.Tx, audit TxAudit) error {
 		if _, err := tx.Exec(context.Background(),
 			`INSERT INTO org_members (id, org_id, user_id, role) VALUES ($1, $2, 'x', 'viewer')`,
 			org+"-m1", org); err != nil {
@@ -125,7 +125,7 @@ func TestWithAuditTxAtomicity(t *testing.T) {
 
 	// Success commits both, and the tx-bound audit REJECTS a typo loudly
 	// (unlike the best-effort writer): the pairing exists to fail.
-	err = WithAuditTx(context.Background(), pool, authCtx, func(tx pgx.Tx, audit TxAudit) error {
+	err = (Writer{}).WithAuditTx(context.Background(), pool, authCtx, func(tx pgx.Tx, audit TxAudit) error {
 		if _, err := tx.Exec(context.Background(),
 			`INSERT INTO org_members (id, org_id, user_id, role) VALUES ($1, $2, 'y', 'viewer')`,
 			org+"-m2", org); err != nil {
@@ -142,7 +142,7 @@ func TestWithAuditTxAtomicity(t *testing.T) {
 		t.Fatalf("commit must cover both: members=%d audits=%d", members, audits)
 	}
 
-	err = WithAuditTx(context.Background(), pool, authCtx, func(tx pgx.Tx, audit TxAudit) error {
+	err = (Writer{}).WithAuditTx(context.Background(), pool, authCtx, func(tx pgx.Tx, audit TxAudit) error {
 		return audit("member.role.updatted", Options{})
 	})
 	if err == nil {
@@ -158,7 +158,7 @@ func TestWithIdentityAuditTxBindsActorAndDynamicOrganization(t *testing.T) {
 		Mode: auth.ModeSupabase, Source: auth.SourceWeb,
 	}
 
-	err := WithIdentityAuditTx(context.Background(), pool, identity, func(tx pgx.Tx, audit IdentityTxAudit) error {
+	err := (Writer{}).WithIdentityAuditTx(context.Background(), pool, identity, func(tx pgx.Tx, audit IdentityTxAudit) error {
 		if _, err := tx.Exec(context.Background(),
 			`INSERT INTO organizations (id, owner_user_id, name) VALUES ($1, $2, 'Bootstrap Org')`, org, identity.UserID); err != nil {
 			return err
@@ -180,7 +180,7 @@ func TestWithIdentityAuditTxBindsActorAndDynamicOrganization(t *testing.T) {
 		t.Fatalf("provider identity must own actor metadata: %+v", metadata)
 	}
 
-	if err := WithIdentityAuditTx(context.Background(), pool, nil,
+	if err := (Writer{}).WithIdentityAuditTx(context.Background(), pool, nil,
 		func(pgx.Tx, IdentityTxAudit) error { return nil }); err == nil {
 		t.Fatal("nil identity must fail before beginning a transaction")
 	}

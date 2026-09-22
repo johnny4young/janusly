@@ -144,7 +144,7 @@ func (s *V1Server) dismissLinkedRecoveryItem(ctx context.Context, rc v1Request, 
 	if err != nil || moved == 0 {
 		return
 	}
-	audit.Write(ctx, s.pool, rc.authContext, "recovery.item.resolved", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "recovery.item.resolved", audit.Options{
 		TargetType: "recovery-item", TargetID: item.ID,
 		Metadata: map[string]any{"via": "dlq_resolve", "resolutionReason": "accepted_loss"},
 	})
@@ -168,7 +168,7 @@ func (s *V1Server) resolveDeadLetterCore(r *http.Request, rc v1Request) opResult
 		return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
 	}
 
-	audit.Write(r.Context(), s.pool, rc.authContext, "dlq.resolved", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "dlq.resolved", audit.Options{
 		TargetType: "dlq", TargetID: body.ID,
 	})
 	s.dismissLinkedRecoveryItem(r.Context(), rc, body.ID)
@@ -232,7 +232,7 @@ func (s *V1Server) bulkResolveCore(r *http.Request, rc v1Request) opResult {
 			errorsOut = append(errorsOut, map[string]any{"deadLetterId": id, "error": "DLQ entry not found"})
 			continue
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "dlq.resolved", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "dlq.resolved", audit.Options{
 			TargetType: "dlq", TargetID: id, Metadata: map[string]any{"bulk": true},
 		})
 		s.dismissLinkedRecoveryItem(r.Context(), rc, id)
@@ -272,7 +272,7 @@ func (s *V1Server) bulkReplayCore(r *http.Request, rc v1Request) opResult {
 			errorsOut = append(errorsOut, map[string]any{"deadLetterId": id, "error": err.Error()})
 			continue
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
 			TargetType: "dlq", TargetID: id,
 			Metadata: map[string]any{"bulk": true, "sequenceIndex": index, "total": len(ids)},
 		})
@@ -381,7 +381,7 @@ func (s *V1Server) clusterApplyCore(r *http.Request, rc v1Request) opResult {
 			errorsOut = append(errorsOut, map[string]any{"deadLetterId": id, "error": err.Error()})
 			continue
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "recovery.cluster_apply", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "recovery.cluster_apply", audit.Options{
 			TargetType: "dlq", TargetID: id,
 			Metadata: map[string]any{
 				"clusterSignature": body.ClusterSignature,

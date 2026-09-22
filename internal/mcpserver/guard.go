@@ -215,7 +215,7 @@ func (d Deps) auditToolDecision(
 	if d.Pool == nil {
 		return
 	}
-	audit.Write(ctx, d.Pool, d.auditContext(), "mcp.tool.invoked", audit.Options{
+	d.Audit.Write(ctx, d.Pool, d.auditContext(), "mcp.tool.invoked", audit.Options{
 		TargetType: "mcp_tool", TargetID: toolName,
 		Metadata: map[string]any{
 			"permissions": permissions, "write": write, "allowed": allowed,

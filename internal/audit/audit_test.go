@@ -26,7 +26,7 @@ func TestSystemWriteInTxPreservesSystemShapeAndErrors(t *testing.T) {
 		t.Run("actor="+actor, func(t *testing.T) {
 			recorder := &systemAuditRecorder{err: failure}
 			metadata := map[string]any{"token": "sensitive-value"}
-			err := SystemWriteInTx(context.Background(), recorder, "org", actor, "recovery.item.created", Options{
+			err := (Writer{}).SystemWriteInTx(context.Background(), recorder, "org", actor, "recovery.item.created", Options{
 				TargetType: "recovery-item", TargetID: "item", Metadata: metadata,
 			})
 			if !errors.Is(err, failure) {

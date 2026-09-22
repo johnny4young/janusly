@@ -311,7 +311,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		DryRun:                          dryRun,
 		Emit: func(eventType string, payload map[string]any) string {
 			eventAt := d.engine.eventNow()
-			raw := grammar.SafePersistPayload(payload, grammar.PersistOptions{
+			raw := d.engine.persistence.Payload(payload, grammar.PersistOptions{
 				RedactedValues: rendered.RedactedValues,
 			})
 			eventID := d.engine.newID()

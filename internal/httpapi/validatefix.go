@@ -126,7 +126,7 @@ func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "recovery.validation_started", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "recovery.validation_started", audit.Options{
 		TargetType: "dlq", TargetID: body.DeadLetterID,
 		Metadata: map[string]any{"validationRunId": runID},
 	})

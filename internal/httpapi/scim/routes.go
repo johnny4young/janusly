@@ -24,6 +24,7 @@ import (
 
 // Deps are the root package's hooks a SCIM Service needs.
 type Deps struct {
+	Audit  audit.Writer
 	Pool   *pgxpool.Pool
 	NewID  func() string
 	Routes httpkit.Registrar
@@ -31,6 +32,7 @@ type Deps struct {
 
 // Service serves the SCIM directory surface for one API process.
 type Service struct {
+	audit  audit.Writer
 	pool   *pgxpool.Pool
 	newID  func() string
 	routes httpkit.Registrar
@@ -38,7 +40,7 @@ type Service struct {
 
 // Mount registers the SCIM routes into mux through the root registry.
 func Mount(mux *http.ServeMux, deps Deps) {
-	s := &Service{pool: deps.Pool, newID: deps.NewID, routes: deps.Routes}
+	s := &Service{pool: deps.Pool, audit: deps.Audit, newID: deps.NewID, routes: deps.Routes}
 	s.mountRoutes(mux)
 }
 
@@ -245,7 +247,7 @@ func (s *Service) postOrgScimDirectoriesCore(r *http.Request, rc httpkit.Request
 		}
 		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.directory_attached", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.directory_attached", audit.Options{
 		TargetType: "scim_directory", TargetID: row.ID,
 		Metadata: map[string]any{
 			"providerDirectoryId": providerDirectoryID,
@@ -282,7 +284,7 @@ func (s *Service) updateOrgScimDirectoryCore(r *http.Request, rc httpkit.Request
 	if err != nil {
 		return httpkit.Error(http.StatusNotFound, "scim_directory_not_found", "SCIM directory not found", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.directory_updated", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.directory_updated", audit.Options{
 		TargetType: "scim_directory", TargetID: row.ID,
 		Metadata: map[string]any{"defaultRole": *body.DefaultRole},
 	})
@@ -300,7 +302,7 @@ func (s *Service) deleteOrgScimDirectoriesCore(r *http.Request, rc httpkit.Reque
 	if rows == 0 {
 		return httpkit.Error(http.StatusNotFound, "scim_directory_not_found", "SCIM directory not found", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.directory_revoked", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.directory_revoked", audit.Options{
 		TargetType: "scim_directory", TargetID: r.PathValue("id"),
 	})
 	return httpkit.OK(map[string]any{"ok": true})
@@ -408,7 +410,7 @@ func (s *Service) postOrgScimGroupRoleMappingsCore(r *http.Request, rc httpkit.R
 		}
 		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.group_role_mapping_created", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.group_role_mapping_created", audit.Options{
 		TargetType: "scim_group_role_mapping", TargetID: row.ID,
 		Metadata: map[string]any{
 			"providerGroupId": providerGroupID, "role": body.Role, "scimDirectoryId": directory.ID,
@@ -442,7 +444,7 @@ func (s *Service) updateOrgScimGroupRoleMappingCore(r *http.Request, rc httpkit.
 		return httpkit.Error(http.StatusNotFound, "scim_group_role_mapping_not_found",
 			"group role mapping not found", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.group_role_mapping_updated", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.group_role_mapping_updated", audit.Options{
 		TargetType: "scim_group_role_mapping", TargetID: existing.ID,
 		Metadata: map[string]any{
 			"providerGroupId": existing.ProviderGroupID,
@@ -468,7 +470,7 @@ func (s *Service) deleteOrgScimGroupRoleMappingsCore(r *http.Request, rc httpkit
 	}); err != nil {
 		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.group_role_mapping_deleted", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.group_role_mapping_deleted", audit.Options{
 		TargetType: "scim_group_role_mapping", TargetID: existing.ID,
 		Metadata: map[string]any{
 			"providerGroupId": existing.ProviderGroupID, "role": existing.Role,
@@ -492,7 +494,7 @@ func (s *Service) postOrgScimResyncCore(r *http.Request, rc httpkit.Request) htt
 	if err != nil {
 		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.resynced", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "org.scim.resynced", audit.Options{
 		TargetType: "scim_directory", TargetID: directory.ID,
 		Metadata: map[string]any{
 			"membersResynced": result["membersResynced"], "membersChanged": result["membersChanged"],

@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/ai"
+	"github.com/johnny4young/janusly/internal/audit"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {
@@ -69,11 +70,11 @@ func TestBudgetGateLadder(t *testing.T) {
 	// 2. Warn policy at 80%: crossing warns once (deduped), still allowed.
 	seedConfig("ai.budgetMonthlyUsd", "10", "number")
 	seedSpend("s1", 9.0) // 90% of 10
-	result = Gate(ctx, pool, org, "u1", "generate-workflow")
+	result = Gate(ctx, pool, audit.Writer{}, org, "u1", "generate-workflow")
 	if !result.Allowed || !result.WarningThresholdCrossed {
 		t.Fatalf("warn zone must allow + flag: %+v", result)
 	}
-	Gate(ctx, pool, org, "u1", "generate-workflow") // same day: deduped
+	Gate(ctx, pool, audit.Writer{}, org, "u1", "generate-workflow") // same day: deduped
 	if got := countAudit("billing.budget.warned"); got != 1 {
 		t.Fatalf("warn must audit once per window: %d", got)
 	}
@@ -81,13 +82,13 @@ func TestBudgetGateLadder(t *testing.T) {
 	// 3. Block policy: under the limit passes, crossing blocks — and every
 	// block audits (deliberately not deduped).
 	seedConfig("ai.budgetExceededPolicy", `"block"`, "string")
-	result = Gate(ctx, pool, org, "u1", "generate-workflow")
+	result = Gate(ctx, pool, audit.Writer{}, org, "u1", "generate-workflow")
 	if !result.Allowed {
 		t.Fatalf("under the limit must pass: %+v", result)
 	}
 	seedSpend("s2", 1.5) // total 10.5 >= 10
 	for range 2 {
-		result = Gate(ctx, pool, org, "u1", "generate-workflow")
+		result = Gate(ctx, pool, audit.Writer{}, org, "u1", "generate-workflow")
 		if result.Allowed {
 			t.Fatalf("crossed block budget must block: %+v", result)
 		}
@@ -105,7 +106,7 @@ func TestBudgetGateLadder(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	client := ai.New(ai.Config{APIKey: "k", BaseURL: server.URL})
-	generated, aiErr := GuardedGenerateText(ctx, pool, client, "u1", "generate-workflow",
+	generated, aiErr := GuardedGenerateText(ctx, pool, audit.Writer{}, client, "u1", "generate-workflow",
 		ai.GenerateTextInput{Prompt: "hola", Context: ai.CallContext{OrgID: org}})
 	if generated != nil || aiErr == nil || aiErr.Class != "budget_blocked" {
 		t.Fatalf("blocked call must degrade budget_blocked: %+v %v", generated, aiErr)

@@ -40,7 +40,7 @@ import (
 /* ------------------------------ dispatcher -------------------------------- */
 
 func (s *Service) scimAudit(ctx context.Context, orgID string, action audit.Action, targetType, targetID string, metadata map[string]any) {
-	audit.WriteAs(ctx, s.pool, orgID, scimActor, action, audit.Options{
+	s.audit.WriteAs(ctx, s.pool, orgID, scimActor, action, audit.Options{
 		TargetType: targetType, TargetID: targetID, Metadata: metadata,
 	})
 }

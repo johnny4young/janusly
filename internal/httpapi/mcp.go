@@ -124,7 +124,7 @@ func (s *V1Server) createMcpConnectionCore(r *http.Request, rc v1Request) opResu
 	// I/O (child spawn / HTTP) and must never hold a Postgres tx. The
 	// row's status=pending already signals "discovery in progress".
 	discovery := s.mcp.RunDiscovery(ctx, rc.orgID, body.Alias)
-	audit.Write(ctx, s.pool, rc.authContext, "mcp.connection.created", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "mcp.connection.created", audit.Options{
 		TargetType: "mcp_connection", TargetID: id, Metadata: map[string]any{
 			"alias": body.Alias, "transport": body.Transport,
 			"discoveryOk": discovery.OK, "tools": discovery.Tools,
@@ -238,13 +238,13 @@ func (s *V1Server) setMcpToolFlagsCore(r *http.Request, rc v1Request, alias, too
 		if after.Enabled {
 			action = audit.Action("mcp.tool.enabled")
 		}
-		audit.Write(ctx, s.pool, rc.authContext, action, audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, action, audit.Options{
 			TargetType: "mcp_tool", TargetID: before.ID,
 			Metadata: map[string]any{"alias": alias, "toolName": toolName, "writeSide": after.WriteSide},
 		})
 	}
 	if before.RateLimitPerMin != after.RateLimitPerMin {
-		audit.Write(ctx, s.pool, rc.authContext, "mcp.tool.rate_limit_set", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "mcp.tool.rate_limit_set", audit.Options{
 			TargetType: "mcp_tool", TargetID: before.ID,
 			Metadata: map[string]any{
 				"alias": alias, "toolName": toolName,
@@ -253,7 +253,7 @@ func (s *V1Server) setMcpToolFlagsCore(r *http.Request, rc v1Request, alias, too
 		})
 	}
 	if hasExpose && before.ExposeToAi != after.ExposeToAi {
-		audit.Write(ctx, s.pool, rc.authContext, "mcp.tool.expose_to_ai_set", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "mcp.tool.expose_to_ai_set", audit.Options{
 			TargetType: "mcp_tool", TargetID: before.ID,
 			Metadata: map[string]any{"alias": alias, "toolName": toolName, "exposeToAi": after.ExposeToAi},
 		})
@@ -348,7 +348,7 @@ func (s *V1Server) setMcpConnectionEnabledCore(r *http.Request, rc v1Request, al
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "mcp.connection.updated", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "mcp.connection.updated", audit.Options{
 		TargetType: "mcp_connection", TargetID: id,
 		Metadata: map[string]any{"alias": alias, "enabled": *body.Enabled},
 	})
@@ -386,7 +386,7 @@ func (s *V1Server) deleteMcpConnectionCore(r *http.Request, rc v1Request, alias 
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	if err := audit.WriteInTx(ctx, tx, rc.authContext, "mcp.connection.deleted", audit.Options{
+	if err := s.audit.WriteInTx(ctx, tx, rc.authContext, "mcp.connection.deleted", audit.Options{
 		TargetType: "mcp_connection", TargetID: id, Metadata: map[string]any{"alias": alias},
 	}); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
@@ -406,7 +406,7 @@ func (s *V1Server) rediscoverMcpConnectionCore(r *http.Request, rc v1Request, al
 	}
 	// Network I/O, so no surrounding transaction — the same posture as create.
 	discovery := s.mcp.RunDiscovery(r.Context(), rc.orgID, alias)
-	audit.Write(r.Context(), s.pool, rc.authContext, "mcp.connection.rediscovered", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "mcp.connection.rediscovered", audit.Options{
 		TargetType: "mcp_connection", TargetID: alias,
 		Metadata: map[string]any{"alias": alias, "discoveryOk": discovery.OK, "tools": discovery.Tools},
 	})

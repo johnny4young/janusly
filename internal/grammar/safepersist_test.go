@@ -39,24 +39,69 @@ func TestSafePersistPayloadLayers(t *testing.T) {
 	}
 }
 
-func TestSafePersistPayloadEnvOverride(t *testing.T) {
-	t.Setenv("JANUSLY_PERSIST_MAX_BYTES", "100")
-	out := SafePersistPayload(map[string]any{"blob": strings.Repeat("x", 500)}, PersistOptions{})
-	if len(out) > 100 {
-		t.Fatalf("bounded sentinel exceeded configured cap: %d bytes: %s", len(out), out)
+func TestPersisterCapturesIndependentDefaults(t *testing.T) {
+	first, err := NewPersister(100)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var sentinel struct {
-		Truncated bool `json:"__truncated"`
-		MaxBytes  int  `json:"maxBytes"`
+	second, err := NewPersister(300)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := json.Unmarshal(out, &sentinel); err != nil || !sentinel.Truncated || sentinel.MaxBytes != 100 {
-		t.Fatalf("env cap must apply: %s (%v)", out, err)
+	copied := first
+	first = second
+	t.Setenv("JANUSLY_PERSIST_MAX_BYTES", "2")
+	payload := map[string]any{"blob": strings.Repeat("x", 500)}
+	for _, tc := range []struct {
+		policy Persister
+		want   int
+	}{{copied, 100}, {second, 300}, {first, 300}, {Persister{}, 256000}} {
+		out := tc.policy.Payload(payload, PersistOptions{})
+		if tc.policy.MaxBytes() != tc.want || len(out) > tc.want || !json.Valid(out) {
+			t.Fatalf("cap %d: %s", tc.want, out)
+		}
+		if tc.want < 500 && !strings.Contains(string(out), `"__truncated":true`) {
+			t.Fatalf("missing sentinel: %s", out)
+		}
 	}
+	// The pure helper also stays deterministic; process overrides require injection.
+	if out := SafePersistPayload(payload, PersistOptions{}); strings.Contains(string(out), "__truncated") {
+		t.Fatalf("environment affected pure helper: %s", out)
+	}
+}
 
-	// A malformed override falls back to the contract default.
-	t.Setenv("JANUSLY_PERSIST_MAX_BYTES", "not-a-number")
-	if DefaultPersistMaxBytes() != 256_000 {
-		t.Fatalf("malformed env must fall back: %d", DefaultPersistMaxBytes())
+func TestPersisterBoundsAndOverrides(t *testing.T) {
+	for _, cap := range []int{-1, 0, 1} {
+		if _, err := NewPersister(cap); err == nil {
+			t.Fatalf("accepted cap %d", cap)
+		}
+	}
+	for _, cap := range []int{2, 19, 100, 256000} {
+		p, err := NewPersister(cap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := p.Payload(map[string]any{"text": strings.Repeat("é\\\"", 100000)}, PersistOptions{})
+		if len(out) > cap || !json.Valid(out) {
+			t.Fatalf("cap %d returned %d invalid/bounded bytes", cap, len(out))
+		}
+	}
+	p, err := NewPersister(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{"note": "resolved-secret", "authorization": "key-secret", "text": strings.Repeat("x", 500)}
+	for _, cap := range []int{200, PersistUnbounded} {
+		out := p.Payload(payload, PersistOptions{MaxBytes: cap, RedactedValues: []string{"resolved-secret"}})
+		if strings.Contains(string(out), "resolved-secret") || strings.Contains(string(out), "key-secret") {
+			t.Fatalf("secret survived: %s", out)
+		}
+		if cap > 0 && (len(out) > cap || !strings.Contains(string(out), "__truncated")) {
+			t.Fatalf("explicit cap ignored: %s", out)
+		}
+		if cap < 0 && (len(out) < 500 || strings.Contains(string(out), "__truncated")) {
+			t.Fatalf("unbounded override ignored: %s", out)
+		}
 	}
 }
 

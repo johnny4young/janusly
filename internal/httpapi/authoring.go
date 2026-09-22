@@ -328,7 +328,7 @@ func (s *V1Server) auditGuardedAuthoringProposal(r *http.Request, rc v1Request, 
 	if !finalized.ProviderGuarded {
 		return
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "ai.workflow.proposal_guarded", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "ai.workflow.proposal_guarded", audit.Options{
 		TargetType: "ai", TargetID: stringField(finalized.WorkflowDoc, "id"),
 		Metadata: map[string]any{
 			"surface": surface, "catalogVersion": finalized.Bindings.CatalogVersion,

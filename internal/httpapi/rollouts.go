@@ -92,7 +92,7 @@ func (s *V1Server) createRolloutCore(r *http.Request, rc v1Request, workflowID s
 		return opError(http.StatusUnprocessableEntity, "workflow_rollout_invalid",
 			"Workflow versions are not eligible for a rollout", map[string]any{"reason": string(kind)})
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.rollout.started", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.rollout.started", audit.Options{
 		TargetType: "workflow_rollout", TargetID: rollout.ID,
 		Metadata: map[string]any{
 			"workflowId":        workflowID,
@@ -131,7 +131,7 @@ func (s *V1Server) decideRolloutCore(r *http.Request, rc v1Request, workflowID, 
 	if decision == "promote" {
 		auditName = "workflow.rollout.promoted"
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, audit.Action(auditName), audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, audit.Action(auditName), audit.Options{
 		TargetType: "workflow_rollout", TargetID: rollout.ID,
 		Metadata: map[string]any{
 			"workflowId":        workflowID,
@@ -275,7 +275,7 @@ func (s *V1Server) recordQualificationCore(r *http.Request, rc v1Request, workfl
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.recovery_qualification.recorded", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.recovery_qualification.recorded", audit.Options{
 		TargetType: "workflow_recovery_qualification", TargetID: row.ID,
 		Metadata: map[string]any{
 			"workflowId":        workflowID,

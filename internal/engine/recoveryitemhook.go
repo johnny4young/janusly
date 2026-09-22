@@ -87,9 +87,9 @@ func (e *Engine) autoCreateRecoveryItem(ctx context.Context, q *store.Queries, i
 	return err
 }
 
-func recoveryItemAudit(ctx context.Context, q *store.Queries, input AutoCreateRecoveryItemInput, action audit.Action, opts audit.Options) error {
+func (e *Engine) recoveryItemAudit(ctx context.Context, q *store.Queries, input AutoCreateRecoveryItemInput, action audit.Action, opts audit.Options) error {
 	applied, err := q.TrySavepoint(ctx, func(db store.DBTX) error {
-		return audit.SystemWriteInTx(ctx, db, input.OrgID, input.CreatedBy, action, opts)
+		return e.audit.SystemWriteInTx(ctx, db, input.OrgID, input.CreatedBy, action, opts)
 	})
 	if err == nil && !applied {
 		slog.Warn("optional recovery item audit failed")
@@ -130,7 +130,7 @@ func (e *Engine) createRecoveryItem(ctx context.Context, q *store.Queries, input
 			if err != nil {
 				return err
 			}
-			return recoveryItemAudit(ctx, q, input, "recovery.item.occurrence_attached", audit.Options{
+			return e.recoveryItemAudit(ctx, q, input, "recovery.item.occurrence_attached", audit.Options{
 				TargetType: "recovery-item", TargetID: parent.ID,
 				Metadata: map[string]any{
 					"deadLetterId": input.DeadLetterID, "occurrenceCount": count,
@@ -169,7 +169,7 @@ func (e *Engine) createRecoveryItem(ctx context.Context, q *store.Queries, input
 	if err != nil || inserted == 0 {
 		return err // duplicate is an idempotent no-op; errors roll back the savepoint
 	}
-	return recoveryItemAudit(ctx, q, input, "recovery.item.created", audit.Options{
+	return e.recoveryItemAudit(ctx, q, input, "recovery.item.created", audit.Options{
 		TargetType: "recovery-item", TargetID: itemID,
 		Metadata: map[string]any{
 			"deadLetterId": input.DeadLetterID, "severity": severity,

@@ -37,7 +37,7 @@ func init() {
 const campaignSystemActor = "system:replay-campaign"
 
 func (e *Engine) auditCampaignCompleted(ctx context.Context, campaign store.ReplayCampaign) {
-	audit.SystemWrite(ctx, e.pool, campaign.OrgID, campaignSystemActor,
+	e.audit.SystemWrite(ctx, e.pool, campaign.OrgID, campaignSystemActor,
 		"recovery.campaign.completed", audit.Options{
 			TargetType: "replay_campaign", TargetID: campaign.ID,
 			Metadata: map[string]any{
@@ -100,7 +100,7 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 		itemAction = "recovery.campaign.item_failed"
 		itemMetadata["error"] = itemError.String
 	}
-	audit.SystemWrite(ctx, e.pool, campaign.OrgID, campaign.CreatedBy, itemAction, audit.Options{
+	e.audit.SystemWrite(ctx, e.pool, campaign.OrgID, campaign.CreatedBy, itemAction, audit.Options{
 		TargetType: "dlq", TargetID: item.DeadLetterID, Metadata: itemMetadata,
 	})
 	replayed, failed := int32(0), int32(0)

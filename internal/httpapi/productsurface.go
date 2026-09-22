@@ -404,7 +404,7 @@ func (s *V1Server) loadOnboardingState(r *http.Request, rc v1Request) opResult {
 		if changed, err := q.CompleteOnboardingCas(ctx, store.CompleteOnboardingCasParams{
 			OrgID: rc.orgID, UserID: rc.userID,
 		}); err == nil && changed > 0 {
-			audit.Write(ctx, s.pool, rc.authContext, "onboarding.completed", audit.Options{TargetType: "onboarding"})
+			s.audit.Write(ctx, s.pool, rc.authContext, "onboarding.completed", audit.Options{TargetType: "onboarding"})
 		}
 		row, _ = q.GetOnboardingProgress(ctx, store.GetOnboardingProgressParams{
 			OrgID: rc.orgID, UserID: rc.userID,
@@ -585,7 +585,7 @@ func (s *V1Server) postSnippetsCore(r *http.Request, rc v1Request) opResult {
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "snippet.created", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "snippet.created", audit.Options{
 		TargetType: "snippet", TargetID: row.ID,
 		Metadata: map[string]any{"name": row.Name, "category": row.Category, "nodeCount": len(body.Nodes)},
 	})
@@ -623,7 +623,7 @@ func (s *V1Server) updateSnippetCore(r *http.Request, rc v1Request) opResult {
 	if err != nil {
 		return opError(http.StatusNotFound, "snippet_not_found", "Snippet not found", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "snippet.updated", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "snippet.updated", audit.Options{
 		TargetType: "snippet", TargetID: id,
 		Metadata: map[string]any{"name": row.Name, "category": row.Category},
 	})
@@ -640,7 +640,7 @@ func (s *V1Server) deleteSnippetsCore(r *http.Request, rc v1Request) opResult {
 	if err != nil {
 		return opError(http.StatusNotFound, "snippet_not_found", "Snippet not found", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "snippet.deleted", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "snippet.deleted", audit.Options{
 		TargetType: "snippet", TargetID: id,
 		Metadata: map[string]any{"name": row.Name, "category": row.Category},
 	})
@@ -666,7 +666,7 @@ func (s *V1Server) postSnippetsInsertedCore(r *http.Request, rc v1Request) opRes
 	if err := decodeBody(r, &body); err != nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "snippet.inserted", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "snippet.inserted", audit.Options{
 		TargetType: "snippet", TargetID: id,
 		Metadata: map[string]any{
 			"snippetId": id, "builtin": builtin,
@@ -714,7 +714,7 @@ func (s *V1Server) postWorkflowsImportPackCore(r *http.Request, rc v1Request) op
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.pack_imported", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.pack_imported", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
 		Metadata: map[string]any{"packId": pack.ID, "packVersion": pack.Version, "versionId": versionID},
 	})
@@ -770,7 +770,7 @@ func (s *V1Server) postSolutionPacksSampleRunCore(r *http.Request, rc v1Request)
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.sample_run_started", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.sample_run_started", audit.Options{
 		TargetType: "solution_pack", TargetID: pack.ID,
 		Metadata: map[string]any{
 			"packId": pack.ID, "samplePayloadId": sample.ID, "runId": runID,
@@ -869,7 +869,7 @@ func (s *V1Server) postSolutionPacksInjectFailureCore(r *http.Request, rc v1Requ
 	default:
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.failure_injected", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.failure_injected", audit.Options{
 		TargetType: "solution_pack", TargetID: pack.ID,
 		Metadata: map[string]any{
 			"packId": pack.ID, "fixtureId": fixture.ID,
@@ -908,7 +908,7 @@ func (s *V1Server) postOnboardingCore(r *http.Request, rc v1Request) opResult {
 		if changed, err := q.RestartOnboarding(r.Context(), store.RestartOnboardingParams{
 			OrgID: rc.orgID, UserID: rc.userID,
 		}); err == nil && changed > 0 {
-			audit.Write(r.Context(), s.pool, rc.authContext, "onboarding.restarted", audit.Options{TargetType: "onboarding"})
+			s.audit.Write(r.Context(), s.pool, rc.authContext, "onboarding.restarted", audit.Options{TargetType: "onboarding"})
 		}
 	default:
 		status := "active"
@@ -919,7 +919,7 @@ func (s *V1Server) postOnboardingCore(r *http.Request, rc v1Request) opResult {
 		if changed, err := q.SetOnboardingStatus(r.Context(), store.SetOnboardingStatusParams{
 			OrgID: rc.orgID, UserID: rc.userID, Status: status,
 		}); err == nil && changed > 0 {
-			audit.Write(r.Context(), s.pool, rc.authContext, action, audit.Options{TargetType: "onboarding"})
+			s.audit.Write(r.Context(), s.pool, rc.authContext, action, audit.Options{TargetType: "onboarding"})
 		}
 	}
 	return s.loadOnboardingState(r, rc)

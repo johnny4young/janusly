@@ -16,8 +16,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/tools"
 
@@ -29,10 +31,12 @@ import (
 
 // Engine owns run lifecycle operations over the shared schema.
 type Engine struct {
-	dbPools *tools.DBPools
-	reaper  config.Reaper
-	pool    *pgxpool.Pool
-	newID   func() string
+	persistence grammar.Persister
+	audit       audit.Writer
+	dbPools     *tools.DBPools
+	reaper      config.Reaper
+	pool        *pgxpool.Pool
+	newID       func() string
 	// wrapTx lets tests interpose on the transaction's statements to prove
 	// atomicity; production keeps the identity wrapper.
 	wrapTx func(store.DBTX) store.DBTX
@@ -43,6 +47,11 @@ type Engine struct {
 
 // Option supplies immutable process settings when an engine is constructed.
 type Option func(*Engine)
+
+// WithPersistence copies the validated process policy into engine and audit writes.
+func WithPersistence(policy grammar.Persister) Option {
+	return func(e *Engine) { e.persistence = policy; e.audit = audit.NewWriter(policy) }
+}
 
 // WithReaper installs the process settings validated by config.Load. The value
 // is copied; later environment changes cannot alter a running engine or drill.

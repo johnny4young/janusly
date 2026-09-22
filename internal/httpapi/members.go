@@ -126,7 +126,7 @@ func (s *V1Server) inviteMemberCore(r *http.Request, rc v1Request) opResult {
 	}
 	ctx := r.Context()
 	inviteID := s.newID()
-	err = audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+	err = s.audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
 		q := store.New(tx)
 		if err := q.LockInvitationLifecycle(ctx, invitationLifecycleLockKey(rc.orgID, email)); err != nil {
 			return err
@@ -172,7 +172,7 @@ func (s *V1Server) revokeInvitationCore(r *http.Request, rc v1Request, id string
 		return opError(http.StatusBadRequest, "members_invitation_id_required", "invitation id is required", nil)
 	}
 	var revoked int64
-	err := audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+	err := s.audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
 		q := store.New(tx)
 		target, err := q.GetOrgInvitationLockTarget(r.Context(), store.GetOrgInvitationLockTargetParams{
 			ID: id, OrgID: rc.orgID,
@@ -221,7 +221,7 @@ func (s *V1Server) setMemberRoleCore(r *http.Request, rc v1Request) opResult {
 	roleName := strings.TrimSpace(body.Role)
 	if body.UserID == rc.userID {
 		// The lock-out guard: audited with the raw operator intent.
-		audit.Write(r.Context(), s.pool, rc.authContext, "member.self_modification_blocked", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "member.self_modification_blocked", audit.Options{
 			TargetType: "member", TargetID: body.UserID,
 			Metadata: map[string]any{"action": "role_set", "attemptedRole": body.Role},
 		})
@@ -236,7 +236,7 @@ func (s *V1Server) setMemberRoleCore(r *http.Request, rc v1Request) opResult {
 			`role "{{role}}" is not defined for this org`, map[string]any{"role": roleName})
 	}
 	var updated int64
-	err = audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+	err = s.audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
 		q := store.New(tx)
 		ownerUserID, err := q.LockOrganizationOwner(r.Context(), rc.orgID)
 		if err != nil {
@@ -278,14 +278,14 @@ func (s *V1Server) removeMemberCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusBadRequest, "members_user_id_required", "userId is required", nil)
 	}
 	if userID == rc.userID {
-		audit.Write(r.Context(), s.pool, rc.authContext, "member.self_modification_blocked", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "member.self_modification_blocked", audit.Options{
 			TargetType: "member", TargetID: userID,
 			Metadata: map[string]any{"action": "remove"},
 		})
 		return opError(http.StatusBadRequest, "self_membership_modification", "Cannot modify your own membership", nil)
 	}
 	var removed int64
-	err := audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+	err := s.audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
 		q := store.New(tx)
 		ownerUserID, err := q.LockOrganizationOwner(r.Context(), rc.orgID)
 		if err != nil {
@@ -329,7 +329,7 @@ func (s *V1Server) transferOrganizationOwnerCore(r *http.Request, rc v1Request) 
 		return opError(http.StatusBadRequest, "members_user_id_required", "userId is required", nil)
 	}
 	body.UserID = strings.TrimSpace(body.UserID)
-	err := audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+	err := s.audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
 		q := store.New(tx)
 		currentOwner, err := q.LockOrganizationOwner(r.Context(), rc.orgID)
 		if err != nil {

@@ -118,7 +118,7 @@ func (s *V1Server) optionalRecoveryDiagnosisEnrichment(
 					return &ai.AIError{Class: "rate_limit", Message: err.Error(), BeforeEgress: true}
 				}
 			}
-			if gate := aibudget.Gate(ctx, s.pool, rc.orgID, rc.userID, "ai.recovery.diagnosed"); !gate.Allowed {
+			if gate := aibudget.Gate(ctx, s.pool, s.audit, rc.orgID, rc.userID, "ai.recovery.diagnosed"); !gate.Allowed {
 				return &ai.AIError{Class: "budget_blocked", Message: "monthly AI budget exceeded", BeforeEgress: true}
 			}
 			return nil

@@ -14,6 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/johnny4young/janusly/internal/audit"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {
@@ -305,14 +307,14 @@ func TestDegradationAuditsOncePerBucketDay(t *testing.T) {
 		return n
 	}
 
-	replicaA := NewTracker(pool)
+	replicaA := NewTracker(pool, audit.Writer{})
 	replicaA.RecordError(bucket, "org-1", cause)
 	replicaA.RecordError(bucket, "org-2", cause) // same day: in-memory dedupe
 	if got := countRows("rate_limit.degraded"); got != 1 {
 		t.Fatalf("replica A must audit once: %d", got)
 	}
 
-	replicaB := NewTracker(pool) // fresh memory — the multi-replica case
+	replicaB := NewTracker(pool, audit.Writer{}) // fresh memory — the multi-replica case
 	replicaB.RecordError(bucket, "org-3", cause)
 	if got := countRows("rate_limit.degraded"); got != 1 {
 		t.Fatalf("DB dedupe must hold across replicas: %d", got)

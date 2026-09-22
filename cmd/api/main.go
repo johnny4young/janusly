@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/boot"
 	"github.com/johnny4young/janusly/internal/buildinfo"
@@ -218,7 +219,12 @@ func run() error {
 
 	// Janusly ships as one binary: public requests and supervised workers
 	// share one lifecycle but use separately bounded database pools.
-	eng := engine.New(workerPool, engine.WithReaper(cfg.Reaper), engine.WithDBPools(dbPools))
+	persistence, err := grammar.NewPersister(cfg.PersistMaxBytes)
+	if err != nil {
+		return err
+	}
+	auditWriter := audit.NewWriter(persistence)
+	eng := engine.New(workerPool, engine.WithReaper(cfg.Reaper), engine.WithPersistence(persistence), engine.WithDBPools(dbPools))
 	prometheus.MustRegister(engine.NewQueueDepthCollector(pool))
 	prometheus.MustRegister(engine.NewDeadLetterCollector(pool))
 	prometheus.MustRegister(boot.NewPoolStatsCollector("api", pool))
@@ -260,7 +266,7 @@ func run() error {
 		eng.RunRetentionSweep(ctx, time.Hour, engine.RetentionDays(), logger)
 	})
 	runner.Go(observability.SweepUpstreamHealth, func(ctx context.Context) {
-		upstream.RunSweep(ctx, pool, time.Minute, logger)
+		upstream.RunSweep(ctx, pool, auditWriter, time.Minute, logger)
 	})
 	runner.Go(observability.SweepSubworkflowReconciler, func(ctx context.Context) {
 		eng.RunSubworkflowTerminalReconciler(ctx, time.Minute, logger)
@@ -284,6 +290,7 @@ func run() error {
 	defer runner.Shutdown()
 
 	publicAPI, shutdownPublicAPI, err := httpapi.NewV1HandlerWithOptions(eng, pool, httpapi.V1ServerOptions{
+		Audit:                       auditWriter,
 		FeedbackMemoryWorkers:       cfg.FeedbackMemoryWorkers,
 		FeedbackMemoryQueueCapacity: cfg.FeedbackMemoryQueueCapacity,
 		FeedbackMemoryTaskTimeout:   cfg.FeedbackMemoryTaskTimeout,

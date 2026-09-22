@@ -123,7 +123,7 @@ func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "upstream_health.source.created", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "upstream_health.source.created", audit.Options{
 			TargetType: "upstream-health-source", TargetID: row.ID,
 			Metadata: map[string]any{"name": row.Name, "kind": row.Kind},
 		})
@@ -146,7 +146,7 @@ func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusNotFound, "upstream_source_not_found", "source not found", nil))
 			return
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "upstream_health.source.updated", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "upstream_health.source.updated", audit.Options{
 			TargetType: "upstream-health-source", TargetID: row.ID,
 			Metadata: map[string]any{"name": row.Name, "kind": row.Kind},
 		})
@@ -161,7 +161,7 @@ func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusNotFound, "upstream_source_not_found", "source not found", nil))
 			return
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "upstream_health.source.deleted", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "upstream_health.source.deleted", audit.Options{
 			TargetType: "upstream-health-source", TargetID: row.ID,
 			Metadata: map[string]any{"name": row.Name},
 		})
@@ -177,7 +177,7 @@ func (s *V1Server) mountUpstreamHealthRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusNotFound, "upstream_source_not_found", "source not found", nil))
 			return
 		}
-		outcome := upstream.PollOneSource(r.Context(), s.pool, source, upstream.DefaultFetcher)
+		outcome := upstream.PollOneSource(r.Context(), s.pool, s.audit, source, upstream.DefaultFetcher)
 		paused, resumed := outcome.PausedWorkflowIDs, outcome.ResumedWorkflowIDs
 		if paused == nil {
 			paused = []string{}

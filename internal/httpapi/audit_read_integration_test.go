@@ -27,7 +27,7 @@ func TestAuditTrailKeysetRead(t *testing.T) {
 		}
 		target := fmt.Sprintf("seed-%d", i)
 		actor := &auth.Context{OrgID: h.org, UserID: "api-tester", Mode: auth.ModeDevHeaders, Source: auth.SourceDev}
-		audit.Write(t.Context(), pool, actor, audit.Action(action), audit.Options{
+		(audit.Writer{}).Write(t.Context(), pool, actor, audit.Action(action), audit.Options{
 			TargetType: "seed", TargetID: target,
 		})
 		seeded[target] = true

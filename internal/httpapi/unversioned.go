@@ -92,7 +92,7 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.deleted", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.deleted", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,
 			Metadata: map[string]any{"soft": true},
 		})
@@ -147,7 +147,7 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.restored", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.restored", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,
 		})
 		writeUnversioned(w, opOK(map[string]any{"workflowId": workflowID, "ok": true}))

@@ -77,7 +77,7 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 	stateJSON := safePersist(map[string]any{"waiting": metadata}, stateJSONMaxBytes)
 	eventJSON := safePersist(map[string]any{
 		"status": "waiting", "reason": waiting.Reason, "metadata": metadata,
-	}, defaultPersistMaxBytes())
+	}, e.persistence.MaxBytes())
 
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		events.scope(claim.OrgID)
@@ -208,7 +208,7 @@ func (e *Engine) processApprovalTimeout(
 					payload["previousAssignee"] = previousAssignee
 				}
 				events.add(e.newID(), runID, nodeID, "approval.escalated",
-					safePersist(payload, defaultPersistMaxBytes()), escalatedAt)
+					safePersist(payload, e.persistence.MaxBytes()), escalatedAt)
 				applied = true
 				return nil
 			}
@@ -246,7 +246,7 @@ func (e *Engine) processApprovalTimeout(
 		}
 		events.add(e.newID(), runID, nodeID, eventType, safePersist(map[string]any{
 			"deadlineAt": deadlineAt, "onTimeout": policy, "error": errorPayload,
-		}, defaultPersistMaxBytes()), failedAt)
+		}, e.persistence.MaxBytes()), failedAt)
 		statuses, err := e.nodeStatuses(ctx, q, runID)
 		if err != nil {
 			return err
@@ -356,7 +356,7 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 		}
 		eventPayload := json.RawMessage(`{}`)
 		if target.Type == "human_form" || target.Type == "webhook" {
-			eventPayload = safePersist(map[string]any{"output": output}, defaultPersistMaxBytes())
+			eventPayload = safePersist(map[string]any{"output": output}, e.persistence.MaxBytes())
 		}
 		events.add(e.newID(), runID, nodeID, "node.resumed", eventPayload, finishedAt)
 		_, err = e.scheduleDownstream(ctx, q, events, ClaimedNode{RunID: runID, NodeID: nodeID}, finishedAt)

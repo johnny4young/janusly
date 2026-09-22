@@ -121,7 +121,7 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		if aiError != "" {
 			response["aiError"] = aiError
 		}
-		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
 			TargetType: "dlq", TargetID: body.DeadLetterID,
 			Metadata: map[string]any{"mode": "fallback", "evidenceCount": len(evidence)},
 		})
@@ -218,7 +218,7 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		}
 	}
 	top := validated[0]
-	audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
 		TargetType: "dlq", TargetID: body.DeadLetterID,
 		Metadata: map[string]any{"mode": "ai", "suggestions": len(validated), "evidenceCount": len(evidence)},
 	})

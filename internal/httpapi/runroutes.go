@@ -150,7 +150,7 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	if isAdhoc {
 		startAction = "run.started.adhoc"
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, startAction, audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, startAction, audit.Options{
 		TargetType: "run", TargetID: started.RunID,
 		Metadata: map[string]any{
 			"workflowId":        started.Workflow.ID,
@@ -335,7 +335,7 @@ func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "run.resumed", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "run.resumed", audit.Options{
 		TargetType: "run", TargetID: body.RunID,
 		Metadata: map[string]any{"nodeId": body.NodeID},
 	})
@@ -399,7 +399,7 @@ func (s *V1Server) cancelCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "run.cancelled", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "run.cancelled", audit.Options{
 		TargetType: "run", TargetID: body.RunID,
 		Metadata: map[string]any{"reason": reason},
 	})
@@ -462,7 +462,7 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 		}
 		return
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
 		TargetType: "dlq", TargetID: body.DeadLetterID,
 	})
 	writeV1Data(w, rc.id, map[string]any{"redriven": true})
@@ -504,7 +504,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 				return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 			}
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
 			TargetType: "run", TargetID: body.RunID,
 			Metadata: map[string]any{"nodeId": body.NodeID},
 		})
@@ -577,7 +577,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
 		TargetType: "dlq", TargetID: body.DeadLetterID,
 	})
 	return opOK(map[string]any{"ok": true})

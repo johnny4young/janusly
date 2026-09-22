@@ -57,6 +57,7 @@ type bucketState struct {
 // Tracker holds per-process degradation state. One instance per process,
 // shared by every limiter bucket.
 type Tracker struct {
+	audit audit.Writer
 	mu    sync.Mutex
 	state map[string]*bucketState
 	pool  *pgxpool.Pool
@@ -64,8 +65,8 @@ type Tracker struct {
 }
 
 // NewTracker builds the process tracker over the audit pool.
-func NewTracker(pool *pgxpool.Pool) *Tracker {
-	return &Tracker{state: map[string]*bucketState{}, pool: pool, now: time.Now}
+func NewTracker(pool *pgxpool.Pool, writer audit.Writer) *Tracker {
+	return &Tracker{audit: writer, state: map[string]*bucketState{}, pool: pool, now: time.Now}
 }
 
 // SetNow overrides the clock (tests only).
@@ -123,7 +124,7 @@ func (t *Tracker) RecordRecovery(bucket, _ string) {
 	// (and its rate-limit decision path) indefinitely.
 	ctx, cancel := context.WithTimeout(context.Background(), degradationAuditTimeout)
 	defer cancel()
-	audit.SystemWrite(ctx, t.pool, SystemOrgID, "", "rate_limit.recovered", audit.Options{
+	t.audit.SystemWrite(ctx, t.pool, SystemOrgID, "", "rate_limit.recovered", audit.Options{
 		TargetType: "rate_limit_bucket", TargetID: bucket,
 		Metadata: map[string]any{
 			"bucket": bucket, "firstObservedAt": entry.firstObservedAt,
@@ -155,7 +156,7 @@ func (t *Tracker) writeDegradedAudit(bucket, key, message, firstObservedAt, toda
 	if existing > 0 {
 		return
 	}
-	audit.SystemWrite(ctx, t.pool, SystemOrgID, "", "rate_limit.degraded", audit.Options{
+	t.audit.SystemWrite(ctx, t.pool, SystemOrgID, "", "rate_limit.degraded", audit.Options{
 		TargetType: "rate_limit_bucket", TargetID: bucket,
 		Metadata: map[string]any{
 			"bucket": bucket, "firstObservedAt": firstObservedAt,

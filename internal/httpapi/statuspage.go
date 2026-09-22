@@ -83,7 +83,7 @@ func (s *V1Server) mountStatusPageRoutes(mux *http.ServeMux) {
 			return
 		}
 		s.statusPages.forget(workflowID)
-		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.status_page.rotated", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.status_page.rotated", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,
 		})
 		writeUnversioned(w, opOK(statusPageAdminView(token, time.Now().UTC())))
@@ -104,7 +104,7 @@ func (s *V1Server) mountStatusPageRoutes(mux *http.ServeMux) {
 		}
 		s.statusPages.forget(workflowID)
 		if revoked > 0 {
-			audit.Write(r.Context(), s.pool, rc.authContext, "workflow.status_page.revoked", audit.Options{
+			s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.status_page.revoked", audit.Options{
 				TargetType: "workflow", TargetID: workflowID,
 			})
 		}

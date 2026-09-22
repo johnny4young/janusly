@@ -68,7 +68,7 @@ func testExecutableDrainsExternalDatabaseQuery(t *testing.T, mode string) {
 	child.Env = []string{
 		"PATH=" + os.Getenv("PATH"), "JANUSLY_ENV=test", "OTEL_EXPORTER=none",
 		"JANUSLY_DATABASE_URL=" + dsn, "JANUSLY_PORT=" + port, "JANUSLY_INTERNAL_PORT=" + internalPort,
-		"JANUSLY_DB_TOOL_MAX_PROCESS_POOLS=1", "JANUSLY_WORKER_CONCURRENCY=1", "JANUSLY_POLL_MS=50",
+		"JANUSLY_PERSIST_MAX_BYTES=2", "JANUSLY_DB_TOOL_MAX_PROCESS_POOLS=1", "JANUSLY_WORKER_CONCURRENCY=1", "JANUSLY_POLL_MS=50",
 		"JANUSLY_CREDENTIAL_ENV_ALLOWLIST=RUNTIME_DB_DSN", "RUNTIME_DB_DSN=" + externalDSN,
 	}
 	var stdin io.WriteCloser
@@ -150,6 +150,15 @@ func testExecutableDrainsExternalDatabaseQuery(t *testing.T, mode string) {
 	}
 	if status != "succeeded" {
 		t.Fatalf("shutdown lost in-flight query: %s", status)
+	}
+	// The process, not this fixture's engine, completes the node. Both roots
+	// must inject the configured event cap while preserving durable output.
+	var eventPayload string
+	if err := pool.QueryRow(ctx, `SELECT payload::text FROM run_events WHERE run_id=$1 AND type='node.succeeded'`, runID).Scan(&eventPayload); err != nil {
+		t.Fatal(err)
+	}
+	if eventPayload != "{}" {
+		t.Fatalf("%s executable ignored persistence policy: %s", mode, eventPayload)
 	}
 	var remaining int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE application_name = $1`, marker).Scan(&remaining); err != nil {

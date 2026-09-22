@@ -185,7 +185,7 @@ func (s *V1Server) recoveryItemActionCore(r *http.Request, rc v1Request, id, act
 			OrgID: rc.orgID, ID: id, Comment: comment,
 		})
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, audit.Action(auditAction), audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, audit.Action(auditAction), audit.Options{
 		TargetType: "recovery-item", TargetID: id,
 		Metadata: map[string]any{"from": item.Status, "to": toStatus},
 	})
@@ -232,7 +232,7 @@ func (s *V1Server) recoveryItemHandoffCore(r *http.Request, rc v1Request, id str
 	if body.Destination == "webhook" {
 		auditName = "recovery.handoff.slack" // closest catalog action; metadata names the real destination
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, audit.Action(auditName), audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, audit.Action(auditName), audit.Options{
 		TargetType: "recovery-item", TargetID: id,
 		Metadata: map[string]any{"destination": body.Destination, "outcome": row.LastOutcome},
 	})

@@ -28,7 +28,7 @@ func (e *Engine) CancelRun(ctx context.Context, runID string, reason any) error 
 	}
 	cancelledAt := e.eventNow()
 	stateJSON := safePersist(map[string]any{"cancelled": reason}, stateJSONMaxBytes)
-	eventJSON := safePersist(reason, defaultPersistMaxBytes())
+	eventJSON := safePersist(reason, e.persistence.MaxBytes())
 
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {

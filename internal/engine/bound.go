@@ -20,9 +20,6 @@ const (
 	deadLetterErrorMaxBytes     = 64_000
 )
 
-// defaultPersistMaxBytes defers to the chokepoint's env-aware default.
-func defaultPersistMaxBytes() int { return grammar.DefaultPersistMaxBytes() }
-
 // safePersist is the engine's jsonb write gate: sensitive-shaped keys
 // redact, then the result is size-bounded (maxBytes <= 0 = never truncate —
 // dead letters need the exact JSON for replay, but still get key-redacted).

@@ -268,7 +268,7 @@ func (s *V1Server) recordFeedbackCore(r *http.Request, rc v1Request) opResult {
 	}
 
 	evalConsent := body.EvalConsent.Present && body.EvalConsent.Value
-	audit.Write(ctx, s.pool, rc.authContext, "recovery.feedback", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "recovery.feedback", audit.Options{
 		TargetType: "dead_letter", TargetID: body.DeadLetterID,
 		Metadata: map[string]any{
 			"approachLabel": body.ApproachLabel, "suggestionMode": body.SuggestionMode,

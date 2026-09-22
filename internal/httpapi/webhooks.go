@@ -362,7 +362,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 	}
 
 	if created != 0 {
-		audit.Write(ctx, s.pool, in.authContext, "trigger.event.received", audit.Options{
+		s.audit.Write(ctx, s.pool, in.authContext, "trigger.event.received", audit.Options{
 			TargetType: "trigger_event", TargetID: triggerEventID,
 			Metadata: map[string]any{
 				"triggerType": in.triggerType, "workflowId": in.workflowID,
@@ -405,7 +405,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 		if !errors.As(limitErr, &limited) {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
-		audit.Write(ctx, s.pool, in.authContext, "trigger.event.skipped", audit.Options{
+		s.audit.Write(ctx, s.pool, in.authContext, "trigger.event.skipped", audit.Options{
 			TargetType: "trigger_event", TargetID: triggerEventID,
 			Metadata: map[string]any{
 				"triggerType": in.triggerType, "reason": "rate_limited", "ratePerMin": ratePerMin,
@@ -426,7 +426,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 		}); err != nil {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
-		audit.Write(ctx, s.pool, in.authContext, "trigger.event.buffered", audit.Options{
+		s.audit.Write(ctx, s.pool, in.authContext, "trigger.event.buffered", audit.Options{
 			TargetType: "trigger_event", TargetID: triggerEventID,
 			Metadata: map[string]any{
 				"triggerType": in.triggerType, "reason": ownerState.Status,
@@ -475,7 +475,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 		// The event row stays `received` so the relay's retry converges.
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(ctx, s.pool, in.authContext, "trigger.event.started", audit.Options{
+	s.audit.Write(ctx, s.pool, in.authContext, "trigger.event.started", audit.Options{
 		TargetType: "trigger_event", TargetID: triggerEventID,
 		Metadata: map[string]any{
 			"triggerType": in.triggerType, "runId": runID,
@@ -545,7 +545,7 @@ func (s *V1Server) runsRedriveCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "run.redrive", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "run.redrive", audit.Options{
 		TargetType: "run", TargetID: body.RunID,
 		Metadata: map[string]any{"sourceRunId": body.RunID, "nodeId": body.NodeID},
 	})

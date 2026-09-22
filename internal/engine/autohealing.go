@@ -232,7 +232,7 @@ func (e *Engine) promoteValidatedHealingRuns(ctx context.Context) (promoted, rej
 			promoted++
 		} else {
 			rejected++
-			audit.Write(ctx, e.pool, &auth.Context{OrgID: row.OrgID, UserID: "system:auto-healing"},
+			e.audit.Write(ctx, e.pool, &auth.Context{OrgID: row.OrgID, UserID: "system:auto-healing"},
 				"auto_healing.failed", audit.Options{
 					TargetType: "auto_healing_run", TargetID: row.ID,
 					Metadata: map[string]any{"reason": "validation_failed", "runStatus": row.RunStatus},
@@ -293,7 +293,7 @@ func (e *Engine) llmHealingPatch(ctx context.Context, orgID string, row store.Li
 	if client == nil || !client.Configured() {
 		return nil, 0
 	}
-	if gate := aibudget.Gate(ctx, e.pool, orgID, "system:auto-healing", "auto_healing.llm_proposed"); !gate.Allowed {
+	if gate := aibudget.Gate(ctx, e.pool, e.audit, orgID, "system:auto-healing", "auto_healing.llm_proposed"); !gate.Allowed {
 		return nil, 0
 	}
 	if err := ratelimit.New(e.pool, ratelimit.Hooks{}).Enforce(ctx, orgID, ratelimit.Options{

@@ -127,7 +127,7 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 					"Auto-healing row was already resolved", nil))
 				return
 			}
-			audit.Write(r.Context(), s.pool, rc.authContext, "auto_healing.decline.manual", audit.Options{
+			s.audit.Write(r.Context(), s.pool, rc.authContext, "auto_healing.decline.manual", audit.Options{
 				TargetType: "auto_healing_run", TargetID: row.ID,
 				Metadata: map[string]any{"decisionActor": rc.userID},
 			})
@@ -168,7 +168,7 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 		} else {
 			applyError = "dead letter snapshot unavailable"
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "auto_healing.apply.manual", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "auto_healing.apply.manual", audit.Options{
 			TargetType: "auto_healing_run", TargetID: row.ID,
 			Metadata: map[string]any{"decisionActor": rc.userID, "applyError": applyError},
 		})
@@ -179,7 +179,7 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 
 	s.route(mux, "POST /auto-healing/scan", routeGate{auth.RoleAdmin, "autohealing.decide"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		proposed := s.engine.ScanOrgForHealing(r.Context(), rc.orgID)
-		audit.Write(r.Context(), s.pool, rc.authContext, "auto_healing.scan.triggered", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "auto_healing.scan.triggered", audit.Options{
 			Metadata: map[string]any{"proposed": proposed},
 		})
 		writeUnversioned(w, opOK(map[string]any{"ok": true, "proposed": proposed}))

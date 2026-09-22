@@ -46,4 +46,10 @@ JANUSLY_HTTP_MAX_REDIRECTS='' JANUSLY_HTTP_STREAM_PREVIEW_BYTES='' render |
   jq -e '.services.janusly.environment |
     .JANUSLY_HTTP_TIMEOUT_MS == "30000" and .JANUSLY_HTTP_MAX_RESPONSE_BYTES == "1000000" and
     .JANUSLY_HTTP_MAX_REDIRECTS == "5" and .JANUSLY_HTTP_STREAM_PREVIEW_BYTES == "65536"' >/dev/null
+for value in 2 128 256000 9223372036854775807 invalid; do
+  JANUSLY_PERSIST_MAX_BYTES="$value" render |
+    jq -e --arg value "$value" '.services.janusly.environment.JANUSLY_PERSIST_MAX_BYTES == $value' >/dev/null
+done
+JANUSLY_PERSIST_MAX_BYTES='' render |
+  jq -e '.services.janusly.environment.JANUSLY_PERSIST_MAX_BYTES == "256000"' >/dev/null
 printf 'Process configuration forwarding passed\n'

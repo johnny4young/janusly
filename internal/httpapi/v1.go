@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	contractdoc "github.com/johnny4young/janusly/contract"
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/authpolicy"
 	"github.com/johnny4young/janusly/internal/browsersession"
@@ -74,6 +75,7 @@ func readyzHandler(timeout time.Duration, probe readinessProbe) http.HandlerFunc
 
 // V1Server owns the /v1 route surface over one engine and pool.
 type V1Server struct {
+	audit          audit.Writer
 	engine         *engine.Engine
 	pool           *pgxpool.Pool
 	newID          func() string
@@ -91,10 +93,13 @@ type V1Server struct {
 	feedbackMemory *feedbackMemoryPool
 }
 
-// V1ServerOptions describes process-owned feedback-memory work. Validation is
+// V1ServerOptions describes process-owned audit policy and feedback-memory work.
+// Feedback-memory validation is
 // repeated at the HTTP construction boundary so tests and future embedders
 // cannot accidentally bypass the bounded runtime configuration.
 type V1ServerOptions struct {
+	// Audit carries the immutable process serialization policy.
+	Audit                       audit.Writer
 	FeedbackMemoryWorkers       int
 	FeedbackMemoryQueueCapacity int
 	FeedbackMemoryTaskTimeout   time.Duration
@@ -176,16 +181,16 @@ func newV1HandlerWithWorkOS(
 	}
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	server := &V1Server{
-		engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
+		engine: eng, pool: pool, audit: options.Audit, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
 		newID: uuid.NewString, hub: newStreamHub(), workos: client, feedbackMemory: feedbackMemory,
 	}
-	server.authPolicy = authpolicy.New(pool)
+	server.authPolicy = authpolicy.New(pool, options.Audit)
 	server.resolver.SetPolicyEvaluator(func(ctx context.Context, input auth.PolicyInput) bool {
 		return server.authPolicy.Evaluate(ctx, authpolicy.Input{
 			OrgID: input.OrgID, UserID: input.UserID, Email: input.Email, Mode: input.Mode,
 		}).Allowed
 	})
-	server.limiterTracker = ratelimit.NewTracker(pool)
+	server.limiterTracker = ratelimit.NewTracker(pool, options.Audit)
 	server.limiter = ratelimit.New(pool, ratelimit.Hooks{
 		OnError: server.limiterTracker.RecordError, OnSuccess: server.limiterTracker.RecordRecovery,
 	})
@@ -378,7 +383,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.mountRolloutRoutes(mux)
 	s.mountCredentialRoutes(mux)
 	s.mountSlackInteractionRoutes(mux)
-	externalruntime.Mount(mux, externalruntime.Deps{Pool: s.pool, Routes: s})
+	externalruntime.Mount(mux, externalruntime.Deps{Pool: s.pool, Audit: s.audit, Routes: s})
 	s.mountUpstreamHealthRoutes(mux)
 	s.mountAutoHealingRoutes(mux)
 	s.mountProductSurfaceRoutes(mux)
@@ -386,7 +391,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.mountWorkflowMetadataRoutes(mux)
 	s.mountInputPresetRoutes(mux)
 	s.mountEvalRoutes(mux)
-	scim.Mount(mux, scim.Deps{Pool: s.pool, NewID: s.newID, Routes: s})
+	scim.Mount(mux, scim.Deps{Pool: s.pool, Audit: s.audit, NewID: s.newID, Routes: s})
 	s.mountF1SweepRoutes(mux)
 	s.mountRunSearchRoutes(mux)
 	s.mountStatusPageRoutes(mux)

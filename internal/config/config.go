@@ -6,11 +6,13 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 )
 
@@ -22,6 +24,8 @@ const MaxDBToolProcessPools = 500
 
 // Config is the validated process configuration.
 type Config struct {
+	// PersistMaxBytes bounds default event and audit serialization.
+	PersistMaxBytes int
 	// DBToolMaxProcessPools bounds live external tool pools, including retired leases.
 	DBToolMaxProcessPools int
 	Reaper                Reaper
@@ -105,6 +109,7 @@ func Load(getenv func(string) string) (Config, error) {
 	reaperDefaults := DefaultReaper()
 
 	cfg := Config{
+		PersistMaxBytes:       num("JANUSLY_PERSIST_MAX_BYTES", grammar.DefaultPersistMaxBytes, 2, math.MaxInt),
 		DBToolMaxProcessPools: num("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", DefaultDBToolMaxProcessPools, 1, MaxDBToolProcessPools),
 		Reaper: Reaper{
 			Interval:        time.Duration(integer("JANUSLY_REAPER_INTERVAL_MS", int64(reaperDefaults.Interval/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond,
