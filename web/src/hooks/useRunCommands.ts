@@ -1,7 +1,6 @@
 import { resolveDeadLetterEntry } from '../lib/dead-letter-contract'
 import { useCallback } from 'react'
 import { api, contractApi } from '../api'
-import { requestRecoveryAllClearIfQueueEmpty } from '../components/recovery-all-clear-coordinator'
 import { formatStatusLabel } from '../constants'
 import { isRunRequestCurrent } from '../run-transition'
 import { useWorkflowStore } from '../store'
@@ -376,10 +375,8 @@ export function useRunCommands(
       successToast: { message: t('toasts.deadLetterResolved'), tone: 'success' },
       onSuccess: async () => {
         bumpPlatformVersion()
-        await Promise.all([
-          refreshPlatform(),
-          requestRecoveryAllClearIfQueueEmpty(),
-        ])
+        // Closing accepts loss; an empty queue is not verified recovery.
+        await refreshPlatform()
       },
     })
     return result.ok

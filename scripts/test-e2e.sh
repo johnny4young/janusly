@@ -54,7 +54,7 @@ compose() {
   JANUSLY_POSTGRES_HOST_PORT="$postgres_port" \
   ALLOW_PRIVATE_HTTP_TARGETS=true \
   JANUSLY_CREDENTIAL_MASTER_KEY="$e2e_master_key" \
-  ANTHROPIC_API_KEY= \
+  ANTHROPIC_API_KEY='' \
     "$docker_bin" compose -p "$project" "$@"
 }
 
@@ -120,4 +120,4 @@ JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
 E2E_API_URL="$origin" \
 E2E_UPSTREAM_HOST=host.docker.internal \
 E2E_UPSTREAM_BIND=0.0.0.0 \
-  "${playwright[@]}" test e2e/janusly-smoke.spec.ts e2e/text-search.spec.ts --project=chromium
+  "${playwright[@]}" test e2e/janusly-smoke.spec.ts e2e/text-search.spec.ts e2e/operator-velocity.spec.ts --project=chromium

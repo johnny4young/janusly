@@ -126,7 +126,7 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
   await expect(copyButton).toBeVisible()
   const detail = queue.locator('.detail-box')
   await expect(detail.getByRole('button', { name: 'Retry' }).locator('kbd')).toHaveText('R')
-  await expect(detail.getByRole('button', { name: 'Resolve' }).locator('kbd')).toHaveText('⌘/Ctrl ↵')
+  await expect(detail.getByRole('button', { name: 'Close without recovery' }).locator('kbd')).toHaveText('⌘/Ctrl ↵')
   await hideUnrelatedOverlays(page)
   await captureElement(detail, 'web-en-recovery-detail-default')
 
@@ -152,7 +152,9 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
   await expect(secondRow).toBeFocused()
 
   await page.keyboard.press('Control+Enter')
-  await expect(page.getByText('Dead letter resolved')).toBeVisible()
+  await expect(page.getByRole('alertdialog')).toBeVisible()
+  await page.getByTestId('dlq-close-confirm').click()
+  await expect(page.getByText('Failure closed without recovery')).toBeVisible()
   await expect(thirdRow).toBeFocused()
 
   await page.getByRole('button', { name: /command palette/i }).click()
@@ -188,6 +190,14 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
   const spanishToast = page.getByText('Resumen del error copiado')
   await expect(spanishToast).toBeVisible()
   await captureElement(spanishToast.locator('..'), 'web-es-recovery-copy-success')
+
+  await spanishDetail.getByRole('button', { name: 'Cerrar sin recuperar' }).click()
+  const spanishClose = page.getByRole('alertdialog')
+  await expect(spanishClose).toContainText('pérdidas aceptadas')
+  await expect(page.getByTestId('dlq-close-cancel')).toBeFocused()
+  await captureElement(spanishClose, 'web-es-accepted-loss-confirmation')
+  await page.keyboard.press('Escape')
+  await expect(spanishClose).toBeHidden()
 
   await page.getByRole('button', { name: /paleta de comandos/i }).click()
   const spanishPalette = page.getByTestId('command-palette')

@@ -365,7 +365,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
       }
     }
     const runIds: string[] = []
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       const started = await request.post(`${API_URL}/start`, {
         headers: headers(orgId), data: { workflow: failing },
       })
@@ -376,7 +376,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     // The Go /dlq bare array feeds the id lookup (T-143 closed that gap).
     const dlqRes = await request.get(`${API_URL}/dlq`, { headers: headers(orgId) })
     const dlqRows = await dlqRes.json() as Array<{ id: string; runId: string }>
-    expect(dlqRows.length).toBeGreaterThanOrEqual(3)
+    expect(dlqRows.length).toBeGreaterThanOrEqual(6)
     const byRun = new Map(dlqRows.map((row) => [row.runId, row.id]))
 
     // One replay via API opens its ownership incident (badge + drawer).
@@ -431,6 +431,47 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     await page.getByTestId('dlq-bulk-replay-confirm').click()
     await waitStatus(runIds[1], 'succeeded')
     await waitStatus(runIds[2], 'succeeded')
+
+    // Closing is an accepted loss, not a replay. Cancellation sends no mutation;
+    // confirmed single and bulk closure persist while the source runs stay failed.
+    await expect(page.getByTestId('dlq-bulk-bar')).toBeHidden()
+    const singleId = byRun.get(runIds[3])!
+    const singleRow = page.getByTestId(`dlq-row-${singleId}`)
+    await singleRow.click()
+    await singleRow.focus()
+    await page.keyboard.press('Control+Enter')
+    await expect(page.getByRole('alertdialog')).toContainText(singleId)
+    await expect(page.getByTestId('dlq-close-cancel')).toBeFocused()
+    await page.keyboard.press('Escape')
+    const readClosedStatus = async (id: string) => {
+      const response = await request.get(`${API_URL}/v1/dlq/entries/${id}`, { headers: headers(orgId) })
+      const payload = await response.json() as { data: { status: string } }
+      return payload.data.status
+    }
+    expect(await readClosedStatus(singleId)).toBe('open')
+    await singleRow.focus()
+    await page.keyboard.press('Control+Enter')
+    await page.screenshot({ path: test.info().outputPath('accepted-loss-confirmation-en.png') })
+    await page.getByTestId('dlq-close-confirm').click()
+    await expect.poll(() => readClosedStatus(singleId)).toBe('resolved')
+    await waitStatus(runIds[3], 'failed')
+    await expect(page.getByRole('alertdialog')).toBeHidden()
+
+    await page.getByTestId('dlq-select-toggle').click()
+    for (const runId of runIds.slice(4)) {
+      await page.getByTestId(`dlq-select-row-${byRun.get(runId)}`).click()
+    }
+    await page.getByTestId('dlq-bulk-resolve').click()
+    await expect(page.getByRole('alertdialog')).toContainText('Close 2 failures without recovery?')
+    for (const runId of runIds.slice(4)) {
+      await expect(page.getByRole('alertdialog')).toContainText(byRun.get(runId)!)
+    }
+    await page.getByTestId('dlq-close-confirm').click()
+    await expect(page.getByRole('alertdialog')).toBeHidden()
+    for (const runId of runIds.slice(4)) {
+      await expect.poll(() => readClosedStatus(byRun.get(runId)!)).toBe('resolved')
+      await waitStatus(runId, 'failed')
+    }
 
     expect(pageErrors, `page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
   } finally {

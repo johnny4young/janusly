@@ -1,0 +1,9 @@
+.we-dlq-close .run-input-dialog__header { display: block; }
+.we-dlq-close .run-input-dialog__heading { min-width: 0; }
+.we-dlq-close__targets { margin: 0; padding-inline-start: 1.25rem; }
+.we-dlq-close__targets li { padding-block: 0.5rem; overflow-wrap: anywhere; }
+.we-dlq-close__targets strong, .we-dlq-close__targets span { display: block; }
+.we-dlq-close__targets span { color: var(--we-muted); font-size: 0.875rem; }
+.we-dlq-close .run-input-dialog__footer { flex-wrap: wrap; }
+.we-dlq-close .ui-button { white-space: normal; }
+.we-dlq-close .run-input-dialog__header, .we-dlq-close .run-input-dialog__footer { flex-shrink: 0; }

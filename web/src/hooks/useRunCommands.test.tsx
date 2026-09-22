@@ -6,6 +6,8 @@ import { createRunTransitionGuard } from '../run-transition'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import type { AppCommandsOptions } from './app-command-types'
+import { usePlatformMutation } from './usePlatformMutation'
+import { consumeRecoveryAllClear } from '../components/recovery-all-clear-bus'
 import { useRunCommands } from './useRunCommands'
 
 vi.mock('../api', () => {
@@ -146,4 +148,16 @@ describe('useRunCommands status projection boundary', () => {
     expect(useWorkflowStore.getState().eventsCursor).toBe('older')
     expect(useWorkflowStore.getState().eventsHasMore).toBe(true)
   })
+})
+
+
+it('closes a failure without publishing a recovered all-clear handoff', async () => {
+  consumeRecoveryAllClear()
+  vi.mocked(api).mockImplementation(async path => path === '/dlq/resolve' ? { ok: true } : { open: 0 })
+  const { result } = renderHook(() => useRunCommands({
+    ...options(), runPlatformMutation: usePlatformMutation(),
+  }, { validateWorkflow: vi.fn(async () => true) }))
+  await act(async () => { expect(await result.current.resolveDeadLetter('failure-1')).toBe(true) })
+  expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual(['/dlq/resolve'])
+  expect(consumeRecoveryAllClear()).toBeNull()
 })

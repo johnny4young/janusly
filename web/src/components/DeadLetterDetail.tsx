@@ -15,6 +15,7 @@ type DeadLetterDetailProps = {
     selected: DeadLetter | null
     selectedFull: DeadLetter | null
     selectedDetailReady: boolean
+    closing: boolean
     replayingIds: ReadonlySet<string>
     showSuspectDiff: boolean
   }
@@ -49,6 +50,7 @@ export function DeadLetterDetail({
     selectedFull,
     selectedDetailReady,
     replayingIds,
+    closing,
     showSuspectDiff,
   } = selection
   const { canReplay, canResolve, canStartRuns, canUseRecovery } = permissions
@@ -70,7 +72,7 @@ export function DeadLetterDetail({
               <strong>{selected.nodeId}</strong>
             </div>
             <span className="status-pill" data-status={replayingIds.has(selected.id) ? 'running' : selected.status}>
-              {replayingIds.has(selected.id) ? t('dlq.recovering') : formatStatusLabel(selected.status)}
+              {replayingIds.has(selected.id) ? t('dlq.recovering') : (selected.status === 'resolved' ? t('dlq.status.acceptedLoss') : formatStatusLabel(selected.status))}
             </span>
           </div>
 
@@ -81,7 +83,7 @@ export function DeadLetterDetail({
                 variant="primary"
                
                 disabled={
-                  selected.status === 'replayed'
+                  closing || selected.status === 'replayed'
                   || selected.status === 'resolved'
                   || !selectedDetailReady
                 }
@@ -99,7 +101,7 @@ export function DeadLetterDetail({
                 size="sm"
                 className="we-command-with-kbd"
                
-                disabled={selected.status === 'replayed' || replayingIds.has(selected.id)}
+                disabled={closing || selected.status === 'replayed' || replayingIds.has(selected.id)}
                 onClick={() => { void actions.replaySelected() }}
               >
                 <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
@@ -110,7 +112,7 @@ export function DeadLetterDetail({
                 size="sm"
                 className="we-command-with-kbd"
                
-                disabled={selected.status === 'resolved' || replayingIds.has(selected.id)}
+                disabled={closing || selected.status === 'resolved' || replayingIds.has(selected.id)}
                 onClick={() => { void actions.resolveSelected() }}
               >
                 <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>

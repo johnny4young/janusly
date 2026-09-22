@@ -47,7 +47,7 @@ type QueueSelectionState = {
   replayingIds: ReadonlySet<string>
   openRecoveryItem: RecoveryQueueFilters['recoveryItems'][number] | null
   confirmBulkReplay: boolean
-  confirmBulkResolve: boolean
+  closing: boolean
   bulkErrors: BulkDeadLetterError[]
   loadedIds: string[]
   allLoadedSelected: boolean
@@ -68,7 +68,6 @@ type QueueActions = {
   toggleSelectAll: () => void
   toggleSelect: (id: string) => void
   setConfirmBulkReplay: (value: boolean) => void
-  setConfirmBulkResolve: (value: boolean) => void
   bulkReplay: () => Promise<void>
   bulkResolve: () => Promise<void>
   createReplayCampaign: (ids: string[]) => void
@@ -131,7 +130,7 @@ export function DeadLetterQueueView({
     replayingIds,
     openRecoveryItem,
     confirmBulkReplay,
-    confirmBulkResolve,
+    closing,
     bulkErrors,
     loadedIds,
     allLoadedSelected,
@@ -317,6 +316,7 @@ export function DeadLetterQueueView({
                     variant="primary"
                    
                    
+                    disabled={closing}
                     onClick={() => { void actions.bulkReplay() }}
                     data-testid="dlq-bulk-replay-confirm"
                   >
@@ -337,6 +337,7 @@ export function DeadLetterQueueView({
                   variant="primary"
                  
                  
+                  disabled={closing}
                   onClick={() => actions.setConfirmBulkReplay(true)}
                   data-testid="dlq-bulk-replay"
                 >
@@ -348,7 +349,7 @@ export function DeadLetterQueueView({
                   size="sm"
                  
                  
-                  disabled={selectedIds.size < 2}
+                  disabled={closing || selectedIds.size < 2}
                   title={selectedIds.size < 2 ? t('replayCampaign.minimumSelection') : undefined}
                   onClick={() => actions.createReplayCampaign([...selectedIds])}
                   data-testid="dlq-create-replay-campaign"
@@ -356,43 +357,12 @@ export function DeadLetterQueueView({
                   <TimerReset size={12} aria-hidden="true" /> {t('replayCampaign.createCta')}
                 </Button>
               )}
-              {/* Resolve dismisses N open failures without recovery, so it
-                  earns the same inline confirm as replay. */}
-              {canResolve && (confirmBulkResolve ? (
-                <span className="we-list-row__confirm">
-                  <span className="we-list-row__confirm-text">
-                    {t('dlq.bulkResolveConfirm', { count: selectedIds.size })}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                   
-                   
-                    onClick={() => { void actions.bulkResolve() }}
-                    data-testid="dlq-bulk-resolve-confirm"
-                  >
-                    {t('dlq.bulkResolveConfirmCta')}
-                  </Button>
-                  <Button
-                    size="sm"
-                   
-                   
-                    onClick={() => actions.setConfirmBulkResolve(false)}
-                  >
-                    {t('common.cancel')}
-                  </Button>
-                </span>
-              ) : (
-                <Button
-                  size="sm"
-                 
-                 
-                  onClick={() => actions.setConfirmBulkResolve(true)}
-                  data-testid="dlq-bulk-resolve"
-                >
+              {canResolve && (
+                <Button size="sm" variant="danger" disabled={closing}
+                  onClick={() => { void actions.bulkResolve() }} data-testid="dlq-bulk-resolve">
                   {t('dlq.bulkResolveCta')}
                 </Button>
-              ))}
+              )}
             </>
           )}
         </div>
@@ -492,7 +462,7 @@ export function DeadLetterQueueView({
                       data-dead-letter-id={item.id}
                       data-selected={selected?.id === item.id ? 'true' : undefined}
                       tabIndex={selected?.id === item.id ? 0 : -1}
-                      aria-label={`${item.nodeId} — ${isReplaying ? t('dlq.recovering') : formatStatusLabel(item.status)}`}
+                      aria-label={`${item.nodeId} — ${isReplaying ? t('dlq.recovering') : (item.status === 'resolved' ? t('dlq.status.acceptedLoss') : formatStatusLabel(item.status))}`}
                       aria-selected={selectionMode ? selectedIds.has(item.id) : selected?.id === item.id}
                       aria-rowindex={index + 1}
                       onFocus={() => actions.selectRow(item.id)}
@@ -541,7 +511,7 @@ export function DeadLetterQueueView({
                             aria-atomic="true"
                           >
                             {isReplaying && <RefreshCw size={11} className="we-spin" aria-hidden="true" />}
-                            {isReplaying ? t('dlq.recovering') : formatStatusLabel(item.status)}
+                            {isReplaying ? t('dlq.recovering') : (item.status === 'resolved' ? t('dlq.status.acceptedLoss') : formatStatusLabel(item.status))}
                           </span>
                           <RecoveryItemBadge
                             item={recoveryByDeadLetterId.get(item.id) ?? null}
@@ -589,6 +559,7 @@ export function DeadLetterQueueView({
           selected,
           selectedFull,
           selectedDetailReady,
+          closing,
           replayingIds,
           showSuspectDiff,
         }}

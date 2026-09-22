@@ -59,6 +59,10 @@ JANUSLY_DATABASE_URL='postgres://janusly:janusly-local@127.0.0.1:15499/janusly?s
 docker compose -p janusly-w1 down --volumes   # when done — do not leave it running
 ```
 
+The executable browser lane also runs the operator keyboard-triage proof in
+English and Spanish: accepted-loss confirmation, cancellation, focus recovery and
+copy/palette navigation use real seeded failures, not mocked UI mutations.
+
 The executable shutdown integration test builds `cmd/api`, creates and migrates
 its own UUID-named database, and starts the binary with an explicit environment
 without provider credentials. It signals SIGTERM during a real external DB-tool

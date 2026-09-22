@@ -152,3 +152,18 @@ per-chunk stylesheet split, which trades roughly 12 KiB of total gzip (one
 compressed CSS asset per lazy chunk) for 16 KiB less on every cold load. The
 cold path is what the caps protect: `index.css`, `workflow-workspace` and the
 route budgets in `performance/routes.performance.spec.ts` only ratchet down.
+
+## Closing failures without recovery
+
+Individual, bulk and keyboard DLQ closure share an explicit accepted-loss
+confirmation. The dialog snapshots IDs and available workflow/run/step labels;
+polling or a changed selection cannot change the acknowledged request. Cancel is
+the initial focus, Escape cancels before submission, and submission is guarded
+against duplicate activation. While a request is pending, dismissal and competing
+queue actions are disabled. Context/permission changes invalidate pending consent.
+
+A partial bulk response keeps failed rows selected for a new acknowledgement.
+An unconfirmed or failed closure never advances triage or claims recovery. Closing
+uses the existing tenant-scoped API authorization and transition rules; the UI is
+not a substitute for either. Accepted loss does not publish the recovered
+all-clear celebration or promise undo of external effects.
