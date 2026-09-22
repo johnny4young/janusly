@@ -1,8 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
+import { ConfirmProvider } from './ConfirmDialog'
+import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 
 vi.mock('../api', () => {
@@ -79,6 +81,126 @@ describe('<VersionHistoryPanel />', () => {
     setPermissions(['workflows.read', 'workflows.write', 'ai.write'])
   })
 
+  it.each(['workflow', 'organization', 'user', 'refresh'] as const)('discards an older page after %s changes', async change => {
+    let finish: (value: unknown) => void = () => { throw new Error('not requested') }
+    const pending = new Promise(resolve => { finish = resolve })
+    const first = Array.from({ length: 50 }, (_, index) => ({
+      workflowId: 'wf_compare', createdAt: null, id: `version_${60 - index}`, version: 60 - index,
+      dagJson: makeWorkflow(`https://initial.test/${index}`),
+    }))
+    let switched = false
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.includes('beforeVersion=')) return pending
+      const workflowId = new URL(path, 'http://localhost').searchParams.get('workflowId')!
+      return switched ? [{ ...first[0], workflowId, id: 'new-version', version: 80, dagJson: { ...makeWorkflow('https://new.test'), id: workflowId } }] : first
+    })
+    render(<VersionHistoryPanel />)
+    await screen.findByText('v60')
+    fireEvent.click(screen.getByTestId('version-history-load-more'))
+    switched = true
+    act(() => {
+      if (change === 'refresh') invalidateTags([PLATFORM_TAG])
+      else useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'wf_next' }
+        : change === 'organization' ? { orgId: 'next-org' } : { userId: 'next-user' })
+    })
+    if (change === 'workflow' || change === 'refresh') await screen.findByText('v80')
+    await act(async () => finish([{ ...first[0], id: 'late-version', version: 10 }]))
+    expect(screen.queryByText('v10')).not.toBeInTheDocument()
+    expect(await screen.findByText('v80')).toBeInTheDocument()
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
+  it.each(['workflow', 'organization', 'user', 'refresh', 'unmount', 'edit', 'permissions'] as const)('does not hydrate an old confirmation after %s changes', async change => {
+    mockVersionHistoryApi({ wf_compare: [{ workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://old.test') }] })
+    useWorkflowStore.setState({ workflowDirty: true })
+    const view = render(<ConfirmProvider><VersionHistoryPanel /></ConfirmProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: /v1/i }))
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    if (change === 'unmount') view.rerender(<ConfirmProvider><div>Elsewhere</div></ConfirmProvider>)
+    else act(() => {
+      if (change === 'refresh') invalidateTags([PLATFORM_TAG])
+      else if (change === 'permissions') setPermissions(['workflows.read'])
+      else if (change === 'edit') useWorkflowStore.getState().setWorkflowName('New edits')
+      else useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'wf_next' }
+        : change === 'organization' ? { orgId: 'next-org' } : { userId: 'next-user' })
+    })
+    const revision = useWorkflowStore.getState().workflowRevision
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /Discard/i }))
+    await act(async () => {})
+    expect(useWorkflowStore.getState().workflowRevision).toBe(revision)
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
+  it.each(['success', 'failure'] as const)('ignores an older suggestion %s after a newer comparison starts', async outcome => {
+    let finish: (value: unknown) => void = () => { throw new Error('not requested') }
+    let fail: (reason: Error) => void = () => { throw new Error('not requested') }
+    const pending = new Promise((resolve, reject) => { finish = resolve; fail = reject })
+    let posts = 0
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return [3, 2, 1].map(version => ({ workflowId: 'wf_compare', createdAt: null, id: `version_${version}`, version, dagJson: makeWorkflow(`https://v${version}.test`) }))
+      return ++posts === 1 ? pending : { mode: 'fallback', aiError: 'NEW comparison' }
+    })
+    render(<VersionHistoryPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Compare$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /v2/i }))
+    fireEvent.click(screen.getByRole('button', { name: /v1/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Suggest improvement/i }))
+    fireEvent.click(screen.getByRole('button', { name: /v2/i }))
+    fireEvent.click(screen.getByRole('button', { name: /v3/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Suggest improvement/i }))
+    await screen.findByText('NEW comparison')
+    await act(async () => {
+      if (outcome === 'failure') fail(new Error('OLD comparison'))
+      else finish({ mode: 'fallback', aiError: 'OLD comparison' })
+    })
+    expect(screen.getByText('NEW comparison')).toBeInTheDocument()
+    expect(screen.queryByText('OLD comparison')).not.toBeInTheDocument()
+  })
+
+  it('pins the immutable version when hydrating the history canvas', async () => {
+    mockVersionHistoryApi({ wf_compare: [{ workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://old.test') }] })
+    render(<VersionHistoryPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /v1/i }))
+    expect(useWorkflowStore.getState().currentWorkflowVersion).toEqual({ id: 'version_1', version: 1 })
+  })
+
+  it('distinguishes initial loading and failed reads from empty history and retries freshly', async () => {
+    let reject: (reason: Error) => void = () => { throw new Error('not requested') }
+    vi.mocked(api).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+    const view = render(<VersionHistoryPanel />)
+    expect(screen.getByRole('status')).toHaveTextContent('Loading')
+    expect(screen.queryByTestId('version-history-empty')).not.toBeInTheDocument()
+    const firstSignal = vi.mocked(api).mock.calls[0][1]?.signal
+    await act(async () => reject(new Error('offline')))
+    expect(screen.getByRole('alert')).toHaveTextContent('Version history failed to load')
+    expect(screen.queryByTestId('version-history-empty')).not.toBeInTheDocument()
+    vi.mocked(api).mockResolvedValue([])
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await screen.findByTestId('version-history-empty')
+    expect(firstSignal?.aborted).toBe(true)
+    const nextSignal = vi.mocked(api).mock.calls.at(-1)?.[1]?.signal
+    expect(nextSignal).toBeInstanceOf(AbortSignal)
+    expect(nextSignal).not.toBe(firstSignal)
+    view.unmount()
+    expect(nextSignal?.aborted).toBe(true)
+  })
+
+  it('aborts pagination and suppresses its late error after unmount', async () => {
+    let reject: (reason: Error) => void = () => { throw new Error('not requested') }
+    const first = Array.from({ length: 50 }, (_, index) => ({ workflowId: 'wf_compare', createdAt: null, id: `v${60 - index}`, version: 60 - index, dagJson: makeWorkflow('https://test.local') }))
+    vi.mocked(api).mockResolvedValueOnce(first).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+    const view = render(<VersionHistoryPanel />)
+    await screen.findByText('v60')
+    fireEvent.click(screen.getByTestId('version-history-load-more'))
+    const signal = vi.mocked(api).mock.calls.at(-1)?.[1]?.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    view.unmount()
+    expect(signal?.aborted).toBe(true)
+    await act(async () => reject(new Error('late offline')))
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
   it('renders a structural diff after selecting two versions in compare mode', async () => {
     mockVersionHistoryApi({
       wf_compare: [
@@ -118,7 +240,7 @@ describe('<VersionHistoryPanel />', () => {
 
     fireEvent.click(screen.getByTestId('version-history-load-more'))
     await screen.findByText('v8')
-    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'))
+    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     // A short page means the history is exhausted.
     expect(screen.queryByTestId('version-history-load-more')).toBeNull()
   })
@@ -148,7 +270,7 @@ describe('<VersionHistoryPanel />', () => {
     await waitFor(() => expect(retry).toBeEnabled())
     fireEvent.click(retry)
     await screen.findByText('v10')
-    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'))
+    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(screen.queryByTestId('version-history-load-more')).toBeNull()
   })
 
@@ -372,11 +494,11 @@ describe('<VersionHistoryPanel />', () => {
     // Result panel mounts with rationale and chip strip.
     await screen.findByLabelText('AI suggested improvement')
     expect(screen.getByText(/Add retry to handle transient failures/i)).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /Add retry · 80%/i })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /Simplify · 50%/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Add retry · 80%/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Simplify · 50%/i })).toBeInTheDocument()
 
     // Switching to the second chip swaps the rendered rationale.
-    fireEvent.click(screen.getByRole('tab', { name: /Simplify · 50%/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Simplify · 50%/i }))
     expect(screen.getByText(/Or simplify by removing the unused parameter/i)).toBeInTheDocument()
   })
 

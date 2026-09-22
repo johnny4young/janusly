@@ -245,6 +245,17 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await expect(row).toContainText(workflowName)
   await row.click()
   await openWorkspaceSection(page, 'Workflows', 'Build')
+  await openWorkflowOperation(page, 'Versions')
+  await page.getByRole('button', { name: /^v1(?:\s|$)/ }).click()
+  const historyStart = page.waitForRequest(request => new URL(request.url()).pathname === '/start' && request.method() === 'POST')
+  const historyResult = page.waitForResponse(response => new URL(response.url()).pathname === '/start' && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
+  expect((await historyStart).postDataJSON()).toMatchObject({ workflowVersionId: savedBaseline.versionId })
+  const historyResponse = await historyResult
+  expect(historyResponse.ok()).toBe(true)
+  const { runId: historyRunId } = await historyResponse.json() as { runId: string }
+  expect(await waitForTerminal(request, orgId, historyRunId)).toBe('succeeded')
+  await openWorkspaceSection(page, 'Workflows', 'Build')
   await page.route(`**/workflows/${encodeURIComponent(workflowId)}/rollout`, route =>
     route.fulfill({ json: { rollout: {} } }), { times: 1 })
   await openWorkflowOperation(page, 'Deployment')

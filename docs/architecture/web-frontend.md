@@ -140,6 +140,18 @@ store. There is no parallel global refresh counter. When adding a panel,
 declare its tags next to the component; when adding a mutation, pass the tags
 it changes, or leave the call untagged when the blast radius is unclear.
 
+## Version history ownership
+
+History pages and suggestions belong to the current organization, operator,
+saved workflow and effective permissions. Refresh or navigation aborts owned
+work; a new comparison cannot reactivate an older suggestion request. Loading,
+read failure and empty history are distinct, and retry creates a fresh request.
+
+Loading a history row retains its immutable version ID and number in the canvas,
+so an unedited run can bind the exact source version. Confirming discarded edits
+must still match the initiating context and semantic canvas revision; a stale
+confirmation does not overwrite a workflow selected or edited in the meantime.
+
 ## Workflow deployment ownership
 
 Rollout controls own their reads, qualification evidence and pending writes for
