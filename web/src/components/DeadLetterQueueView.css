@@ -91,3 +91,19 @@
   display: inline-block;
   margin-top: 4px;
 }
+
+.we-dlq-totals {
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-block: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.we-dlq-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  align-items: end;
+  gap: 8px 12px;
+}
+
+.we-dlq-search { grid-column: 1 / -1; }

@@ -406,7 +406,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[1])}`)).toBeVisible()
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[2])}`)).toBeVisible()
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[0])}`)).toBeHidden()
-    await page.getByRole('combobox', { name: 'Show' }).selectOption({ label: 'All' })
+    await page.getByRole('combobox', { name: 'Failure status' }).selectOption({ label: 'All' })
     for (const runId of runIds) {
       await expect(page.getByTestId(`dlq-row-${byRun.get(runId)}`)).toBeVisible()
     }

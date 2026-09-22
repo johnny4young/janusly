@@ -42,7 +42,7 @@ vi.mock('../clipboard', () => ({
 const initialState = useWorkflowStore.getState()
 
 // The recovery queue makes TWO fetches: `/dlq/queue?…` (the filtered/paginated
-// list) and `/dlq/counts` (the org-wide mini-grid summary). Default to an empty
+// list) and `/dlq/counts` (the org-wide totals summary summary). Default to an empty
 // page / zero counts and card-safe objects for explicitly expanded automation.
 const defaultApiMock = async (path: string): Promise<unknown> => {
   if (path.startsWith('/dlq/counts')) return { total: 0, open: 0, replayed: 0, resolved: 0 }
@@ -364,7 +364,7 @@ describe('<DeadLettersPanel />', () => {
     // Default status 'open' → server returns only the open row.
     await waitFor(() => expect(screen.getByTestId('dlq-row-open-1')).toBeInTheDocument())
     expect(screen.queryByTestId('dlq-row-replayed-1')).toBeNull()
-    fireEvent.change(screen.getByLabelText(/dlq\.show|show/i), { target: { value: 'replayed' } })
+    fireEvent.change(screen.getByLabelText('Failure status'), { target: { value: 'replayed' } })
     await waitFor(() => {
       expect(lastDlqParams()?.get('status')).toBe('replayed')
       expect(screen.getByTestId('dlq-row-replayed-1')).toBeInTheDocument()
@@ -386,6 +386,28 @@ describe('<DeadLettersPanel />', () => {
       expect(nextDlqCalls).toBeGreaterThan(initialDlqCalls)
     })
     expect(onRefresh).toHaveBeenCalled()
+  })
+
+  it('combines status, owner, severity and search without changing organization totals', async () => {
+    const rows = [
+      mockDeadLetter('match', { nodeId: 'invoice-match', recovery: overlay('match', 'p1') }),
+      mockDeadLetter('other-severity', { nodeId: 'invoice-low', recovery: overlay('low', 'p4') }),
+      mockDeadLetter('other-owner', { nodeId: 'invoice-other', recovery: { ...overlay('other', 'p1'), owner: 'someone-else' } }),
+      mockDeadLetter('other-status', { nodeId: 'invoice-closed', status: 'resolved', recovery: overlay('closed', 'p1') }),
+      mockDeadLetter('other-search', { nodeId: 'shipment', recovery: overlay('shipment', 'p1') }),
+    ]
+    vi.mocked(api).mockImplementation(dlqMock(rows))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-match')
+    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    fireEvent.change(screen.getByLabelText('Recovery severity'), { target: { value: 'p1' } })
+    fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'oldest' } })
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'invoice' } })
+    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(1))
+    expect(screen.getByTestId('dlq-row-match')).toBeInTheDocument()
+    expect(Object.fromEntries(lastDlqParams()!)).toMatchObject({ status: 'open', owner: 'me', severity: 'p1', sort: 'oldest', search: 'invoice' })
+    const totals = screen.getByRole('group', { name: 'Organization totals' })
+    expect([...totals.querySelectorAll('strong')].map(value => value.textContent)).toEqual(['5', '4', '0', '1'])
   })
 
   it('renders Load more when the server reports a next page and appends on click', async () => {
@@ -445,9 +467,9 @@ describe('<DeadLettersPanel />', () => {
     await waitFor(() => expect(container.querySelector('[data-severity="warning"]')).not.toBeNull())
   })
 
-  it('renders the mini-grid from org-wide /dlq/counts, not the loaded page', async () => {
+  it('renders the totals summary from org-wide /dlq/counts, not the loaded page', async () => {
     // The loaded page has 1 open row; the org-wide counts are 120/100/15/5.
-    // The mini-grid must show the org-wide breakdown instead of the filtered
+    // The totals summary must show the org-wide breakdown instead of the filtered
     // page, so paging or filters cannot make the queue-health summary drift.
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path.startsWith('/dlq/counts')) return { total: 120, open: 100, replayed: 15, resolved: 5 }
@@ -456,7 +478,7 @@ describe('<DeadLettersPanel />', () => {
     })
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
-    const values = [...document.querySelectorAll('.mini-grid strong')].map((s) => s.textContent)
+    const values = [...screen.getByRole('group', { name: 'Organization totals' }).querySelectorAll('strong')].map((s) => s.textContent)
     expect(values).toEqual(['120', '100', '15', '5'])
   })
 
@@ -674,7 +696,7 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: 'resolved', ownerScope: 'mine', severityFilter: 'p2' }))
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument())
-    expect((screen.getByLabelText(/dlq\.show|show/i) as HTMLSelectElement).value).toBe('resolved')
+    expect((screen.getByLabelText('Failure status') as HTMLSelectElement).value).toBe('resolved')
     expect(screen.getByTestId('dlq-owner-mine')).toHaveAttribute('aria-pressed', 'true')
     expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('p2')
   })
@@ -695,7 +717,7 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     localStorage.setItem(FILTERS_KEY, 'not-json{')
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument())
-    expect((screen.getByLabelText(/dlq\.show|show/i) as HTMLSelectElement).value).toBe('open')
+    expect((screen.getByLabelText('Failure status') as HTMLSelectElement).value).toBe('open')
     expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
     expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
   })
@@ -704,7 +726,7 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: 'bogus', ownerScope: 'weird', severityFilter: 'p9' }))
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument())
-    expect((screen.getByLabelText(/dlq\.show|show/i) as HTMLSelectElement).value).toBe('open')
+    expect((screen.getByLabelText('Failure status') as HTMLSelectElement).value).toBe('open')
     expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
     expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
   })
@@ -720,7 +742,7 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     try {
       render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
       await waitFor(() => expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument())
-      expect((screen.getByLabelText(/dlq\.show|show/i) as HTMLSelectElement).value).toBe('open')
+      expect((screen.getByLabelText('Failure status') as HTMLSelectElement).value).toBe('open')
       expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
       expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
     } finally {
@@ -1367,6 +1389,6 @@ it('labels closed DLQ rows as accepted loss rather than recovered work', async (
   localStorage.clear()
   vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a', { status: 'resolved' })]))
   render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
-  fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'all' } })
+  fireEvent.change(screen.getByLabelText('Failure status'), { target: { value: 'all' } })
   expect(await screen.findByRole('row', { name: 'node-a — Accepted loss' })).toBeInTheDocument()
 })
