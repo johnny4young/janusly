@@ -672,7 +672,8 @@ for (const locale of ['en', 'es'] as const) {
     await expect(health).toContainText(locale === 'en' ? 'Needs attention' : 'Necesita atención')
     // A successful metrics section cannot conceal missing priorities or queue.
     for (const missing of ['brief', 'queue'] as const) {
-      const path = missing === 'brief' ? '**/operations/brief' : '**/recovery/home'
+      const wirePath = missing === 'brief' ? '/v1/operations/brief' : '/recovery/home'
+      const path = `**${wirePath}`
       await page.route(path, async route => {
         if (missing === 'brief') return route.abort('failed')
         const response = await route.fetch()
@@ -684,7 +685,7 @@ for (const locale of ['en', 'es'] as const) {
       await expect(health).toContainText(locale === 'en' ? 'Status is incomplete' : 'El estado está incompleto')
       await expect(health.getByLabel(locale === 'en' ? 'Health score 0 of 100' : 'Puntuación de salud 0 de 100')).toBeHidden()
       await page.unroute(path)
-      const fresh = page.waitForResponse(response => new URL(response.url()).pathname === (missing === 'brief' ? '/operations/brief' : '/recovery/home')
+      const fresh = page.waitForResponse(response => new URL(response.url()).pathname === wirePath
         && !new URL(response.url()).search)
       await health.getByRole('button', { name: locale === 'en' ? 'Retry' : 'Reintentar', exact: true }).click()
       expect((await fresh).ok()).toBe(true)
