@@ -345,11 +345,14 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   const receipt = await rolled.json() as { workflowId: string; versionId: string; version: number; sourceVersion: number }
   expect(receipt).toMatchObject({ workflowId, version: 3, sourceVersion: 1 })
   await expect(confirmation).toHaveCount(0)
-  const rolledStart = page.waitForRequest(request => new URL(request.url()).pathname === '/start' && request.method() === 'POST')
-  const rolledResult = page.waitForResponse(response => new URL(response.url()).pathname === '/start' && response.request().method() === 'POST')
-  await page.getByRole('button', { name: 'Ejecutar', exact: true }).click()
-  expect((await rolledStart).postDataJSON()).toMatchObject({ workflowVersionId: receipt.versionId })
-  const started = await rolledResult
+  await page.getByRole('button', { name: 'Navegación', exact: true }).click()
+  const run = page.getByRole('button', { name: 'Ejecutar', exact: true })
+  await expect(run).toBeEnabled()
+  const [started] = await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/start' && response.request().method() === 'POST'),
+    run.click(),
+  ])
+  expect(started.request().postDataJSON()).toMatchObject({ workflowVersionId: receipt.versionId })
   expect(started.ok()).toBe(true)
   const { runId: rolledRunId } = await started.json() as { runId: string }
   expect(await waitForTerminal(request, orgId, rolledRunId)).toBe('succeeded')
