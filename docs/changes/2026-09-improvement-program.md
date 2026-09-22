@@ -228,3 +228,11 @@ Activity label, and recovery-case aliases resolve back to Recover. The bilingual
 real-stack journey verifies `#/recover`, reload persistence, contextual labels
 and accessibility. The onboarding entrance now uses motion without opacity so
 its primary action keeps AA contrast throughout the initial task-space render.
+
+Cold route loading is now local to the workspace main or panel slot. The eager
+shell remains mounted while the secondary locale namespace or a lazy route
+chunk loads, using the shared accessible skeleton instead of a full-screen boot
+surface. Namespace, chunk and render failures stop at the owning area and expose
+the existing in-place retry. The production-built navigation journey holds the
+Settings chunk in flight and verifies stable shell chrome, no boot-screen
+replacement, accessibility and recovery after release.

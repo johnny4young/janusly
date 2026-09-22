@@ -146,6 +146,14 @@ Activity / Recover, and a recovery-case route resolves to the same Recover
 context. Reloading or browser navigation must preserve both the route and that
 context; grouping a section never makes its deep link anonymous.
 
+The eager shell owns the core locale catalog. Non-home main and authoring-panel
+slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
+behind an accessible, height-preserving skeleton while the sidebar, top bar and
+status bar remain interactive. The same local boundary contains a rejected
+chunk or render failure and offers an in-place retry; navigation changes reset
+only the failed area. Full-screen boot UI is reserved for application bootstrap,
+not route-level loading.
+
 ## Data invalidation
 
 Panel reads subscribe to the resources they depend on through

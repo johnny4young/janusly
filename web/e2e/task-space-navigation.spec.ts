@@ -146,6 +146,48 @@ test('workflow creation is reachable from the workflow inventory', async ({ page
   expect(pageErrors).toEqual([])
 })
 
+test('a cold settings chunk keeps the workspace shell and offers a local loading state', async ({
+  page,
+}) => {
+  const orgId = `task-space-loading-${Date.now()}`
+  let releaseChunk!: () => void
+  let reportChunkRequest!: () => void
+  const chunkReleased = new Promise<void>((resolve) => { releaseChunk = resolve })
+  const chunkRequested = new Promise<void>((resolve) => { reportChunkRequest = resolve })
+
+  await page.route(/\/assets\/OperationsPage-[^/]+\.js$/, async (route) => {
+    reportChunkRequest()
+    await chunkReleased
+    await route.continue()
+  })
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.addInitScript((activeOrg) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+    window.localStorage.setItem('janusly:locale', 'en')
+    window.localStorage.setItem('janusly:activeTab', 'home')
+    window.localStorage.removeItem('janusly:sidebar:state')
+  }, orgId)
+  await page.goto('/')
+
+  try {
+    await page.locator('.builder-sidebar').getByRole('button', {
+      name: 'Settings',
+      exact: true,
+    }).click()
+    await chunkRequested
+
+    await expect(page.locator('.builder-sidebar')).toBeVisible()
+    await expect(page.locator('.top-bar')).toBeVisible()
+    await expect(page.getByTestId('workspace-content-loading')).toBeVisible()
+    await expect(page.locator('.boot-screen')).toHaveCount(0)
+    await expectAccessible(page, 'cold settings workspace area')
+  } finally {
+    releaseChunk()
+  }
+
+  await expect(page.getByRole('heading', { name: 'Workspace settings' })).toBeVisible()
+})
+
 for (const locale of LOCALES) {
   test(`${locale.locale} exposes four destinations with one approachable activity feed`, async ({
     page,

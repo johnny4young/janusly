@@ -611,6 +611,20 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   width: 100%;
 }
 
+/* Workspace chunks and the secondary locale namespace load inside the stable
+   shell. Reserve the same content measure as contextual panels instead of
+   replacing navigation and status chrome with a full-screen boot surface. */
+.workspace-area-loading {
+  padding: 16px;
+  width: 100%;
+}
+
+.workspace-main > .workspace-area-loading {
+  max-width: var(--we-content-max-width);
+  margin: 0 auto;
+  padding: 32px 48px;
+}
+
 /* Active-run observation keeps the immutable workflow snapshot beside the
    operational panel. It is intentionally a separate React Flow instance from
    the hidden authoring canvas, so inspecting a run cannot disturb editor
@@ -657,7 +671,8 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
    heavy — step it down to 24px so the panels keep useful content width
    on common laptop viewports (1024-1100). */
 @media (max-width: 1100px) {
-  .workspace-main > [data-layout="contextual"] {
+  .workspace-main > [data-layout="contextual"],
+  .workspace-main > .workspace-area-loading {
     padding: 28px 24px;
   }
 }
@@ -666,7 +681,8 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
    sidebar rides above the main area and the contextual wrapper needs
    minimal padding so the content owns the viewport edge to edge. */
 @media (max-width: 760px) {
-  .workspace-main > [data-layout="contextual"] {
+  .workspace-main > [data-layout="contextual"],
+  .workspace-main > .workspace-area-loading {
     padding: 16px;
   }
 
@@ -932,4 +948,3 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .canvas-frame[data-mode="observe"] .react-flow__node {
   cursor: default;
 }
-

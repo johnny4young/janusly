@@ -21,6 +21,7 @@ import { BuilderSidebar } from './components/BuilderSidebar'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { PanelErrorFallback } from './components/PanelErrorFallback'
 import { UserMenu } from './components/UserMenu'
+import { WorkspaceArea, WorkspaceAreaLoading } from './components/WorkspaceArea'
 import { WorkflowHealthBadge } from './components/WorkflowHealthBadge'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
 import type { CommandPaletteProps } from './components/CommandPalette'
@@ -44,7 +45,7 @@ import {
   workspaceSectionForTab,
 } from './workspace-locations'
 import { DOCS_URL } from './docs-link'
-import { I18nNamespaceGate, useT } from './i18n'
+import { useT } from './i18n'
 
 const CanvasWorkspace = lazy(() => import('./components/CanvasWorkspace').then((module) => ({
   default: module.CanvasWorkspace,
@@ -132,11 +133,6 @@ type AppWorkspaceProps = {
   onCloseSnippetMenu: () => void
 }
 
-function WorkingFallback() {
-  const { t } = useT()
-  return <div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>
-}
-
 function WorkspaceContent(props: AppWorkspaceProps) {
   const { t } = useT()
   const {
@@ -167,7 +163,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
       logTag={`workspace:${activeTab}`}
       fallback={({ reset }) => <PanelErrorFallback onRetry={reset} />}
     >
-      <Suspense fallback={<WorkingFallback />}>
+      <Suspense fallback={<WorkspaceAreaLoading />}>
         <RightPanel
           {...props.rightPanel}
           tab={activeTab}
@@ -186,7 +182,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
           logTag="panel:home"
           fallback={({ reset }) => <PanelErrorFallback onRetry={reset} />}
         >
-          <Suspense fallback={<WorkingFallback />}>
+          <Suspense fallback={<WorkspaceAreaLoading />}>
             <RecoveryCenterPanel {...home} />
           </Suspense>
         </ErrorBoundary>
@@ -201,7 +197,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
             data-canvas-visible={visibility.visible ? 'true' : 'false'}
             data-testid="workspace-canvas-wrapper"
           >
-            <Suspense fallback={<WorkingFallback />}>
+            <Suspense fallback={<WorkspaceAreaLoading />}>
               <CanvasWorkspace
                 key={canvas.workflowId}
                 nodes={canvas.nodes}
@@ -221,7 +217,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
         )}
         {visibility.contextualSlot && (
           (activeTab === 'runs' || activeTab === 'reasoning') && observedRun ? (
-            <Suspense fallback={<WorkingFallback />}>
+            <Suspense fallback={<WorkspaceAreaLoading />}>
               <RunObservationWorkspace
                 key={observedRun.id}
                 run={observedRun}
@@ -236,6 +232,23 @@ function WorkspaceContent(props: AppWorkspaceProps) {
       </>
     )
   })()
+
+  const workspaceMain = activeTab === 'home' ? main : (
+    <WorkspaceArea
+      resetKey={`${activeTab}:${canvas.workflowId}`}
+      logTag={`workspace-main:${activeTab}`}
+    >
+      {main}
+    </WorkspaceArea>
+  )
+  const workspacePanel = authoringMode ? (
+    <WorkspaceArea
+      resetKey={`panel:${activeTab}`}
+      logTag={`workspace-panel:${activeTab}`}
+    >
+      {rightPanelElement}
+    </WorkspaceArea>
+  ) : null
 
   const workspace = (
     <Layout
@@ -346,8 +359,8 @@ function WorkspaceContent(props: AppWorkspaceProps) {
           onStart={() => { void props.onStart() }}
         />
       }
-      main={main}
-      panel={authoringMode ? rightPanelElement : null}
+      main={workspaceMain}
+      panel={workspacePanel}
       overlay={
         <Suspense fallback={null}>
           <BudgetBlockedBanner onOpenTab={props.onOpenTab} />
@@ -425,14 +438,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
     />
   )
 
-  if (activeTab === 'home') return workspace
-  return (
-    <Suspense fallback={<div className="boot-screen" role="status"><span>{t('common.working')}</span></div>}>
-      <I18nNamespaceGate namespace="workspace">
-        {workspace}
-      </I18nNamespaceGate>
-    </Suspense>
-  )
+  return workspace
 }
 
 /** Keep a resting stream distinct from a real transport outage. */
