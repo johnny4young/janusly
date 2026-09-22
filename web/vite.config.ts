@@ -98,6 +98,7 @@ export default defineConfig(({ mode }) => ({
           if (
             id.endsWith('/src/lib/recovery-case-contract.ts')
             || id.endsWith('/src/lib/recovery-contract.ts')
+            || id.endsWith('/src/lib/health-delta.ts')
           ) {
             return 'recovery-contract'
           }

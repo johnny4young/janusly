@@ -26,30 +26,12 @@ export function LearningHealthBadge({
   const approach = approachLabelDisplay(approachLabel)
   const row = feedbackHealth.approaches.find((candidate) => candidate.approachLabel === approachLabel)
   const state = row?.state ?? 'not_started'
-  const copy = (() => {
-    switch (state) {
-      case 'active':
-        return {
-          title: t('recoveryDialog.learning.active.title'),
-          body: t('recoveryDialog.learning.active.body', { approach }),
-        }
-      case 'stale':
-        return {
-          title: t('recoveryDialog.learning.stale.title'),
-          body: t('recoveryDialog.learning.stale.body', { approach, days: row?.acceptedFixAgeDays ?? feedbackHealth.windowDays }),
-        }
-      case 'no_accepted_fix':
-        return {
-          title: t('recoveryDialog.learning.noAcceptedFix.title'),
-          body: t('recoveryDialog.learning.noAcceptedFix.body', { approach }),
-        }
-      default:
-        return {
-          title: t('recoveryDialog.learning.notStarted.title'),
-          body: t('recoveryDialog.learning.notStarted.body', { approach }),
-        }
-    }
-  })()
+  const copyKey = state === 'active' || state === 'stale' ? state
+    : state === 'no_accepted_fix' ? 'noAcceptedFix' : 'notStarted'
+  const title = t(`recoveryDialog.learning.${copyKey}.title`)
+  const body = t(`recoveryDialog.learning.${copyKey}.body`, {
+    approach, days: row?.acceptedFixAgeDays ?? feedbackHealth.windowDays,
+  })
 
   return (
     <div
@@ -64,8 +46,8 @@ export function LearningHealthBadge({
         <BrainCircuit size={15} />
       </span>
       <span className="we-recovery-learning-health__copy">
-        <strong>{copy.title}</strong>
-        <span>{copy.body}</span>
+        <strong>{title}</strong>
+        <span>{body}</span>
       </span>
     </div>
   )

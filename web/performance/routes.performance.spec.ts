@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+import { deadLetterWireDefaults } from '../src/test/dead-letter-fixture'
 
 const budgets = JSON.parse(
   await readFile(resolve(import.meta.dirname, '..', 'performance-budgets.json'), 'utf8'),
@@ -182,11 +183,11 @@ async function stubApi(page: Page) {
       }
     } else if (pathname === '/dlq/queue') body = { items: rows, nextCursor: null, hasMore: false }
     else if (pathname === '/dlq/counts') body = { total: 2, open: 2, replayed: 0, resolved: 0 }
-    else if (pathname === '/dlq' && url.searchParams.has('id')) {
-      const id = url.searchParams.get('id') ?? 'perf-a'
+    else if (pathname.startsWith('/dlq/entries/')) {
+      const id = decodeURIComponent(pathname.slice('/dlq/entries/'.length))
       const row = rows.find((candidate) => candidate.id === id) ?? rows[0]
       body = {
-        ...row,
+        ...deadLetterWireDefaults, ...row, orgId: 'default',
         workflowJson: { id: 'workflow-perf', name: row.workflowName, nodes: [{ id: row.nodeId, type: 'noop', config: {} }], edges: [] },
         nodeJson: { id: row.nodeId, type: 'noop', config: {} },
       }
@@ -284,15 +285,22 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   await page.getByTestId('recovery-center-action-cta-triage_failures').click()
   const detail = page.getByTestId('activity-recovery-detail')
   await expect(detail).toContainText('Delivery failed')
+  await captureElement(detail, 'web-en-performance-selected-recovery')
+  // Include the recovery dialog in the existing selected-recovery budget, not
+  // merely the small detail shell. Its owned reads and response guards ship
+  // in this lazy module; loading the shell alone cannot qualify that cost.
+  await detail.getByRole('button', { name: /Suggest fix/i }).click()
+  const recoveryDialog = page.getByRole('dialog')
+  await expect(recoveryDialog.getByRole('button', { name: 'Generate suggestion', exact: true })).toBeVisible()
   const recoveryMeasurement = await measureRoute(page, 'selectedRecovery')
   expect(recoveryMeasurement.resources.some(
     (path) => /ActivityRecoveryDetail-.*\.js$/.test(path),
   )).toBe(true)
-  // Exact-ID inspection intentionally retains the unversioned compatibility
-  // route; collection reads are the calls promoted to the /v1 contract.
-  expect(recoveryMeasurement.resources.some((path) => path === '/dlq')).toBe(true)
+  expect(recoveryMeasurement.resources.some((path) => path === '/v1/dlq/entries/perf-b')).toBe(true)
   expect(recoveryMeasurement.transferredBytes).toBeGreaterThan(0)
-  await captureElement(detail, 'web-en-performance-selected-recovery')
+  expect(recoveryMeasurement.resources.some((path) => /RecoveryDialog-.*\.js$/.test(path))).toBe(true)
+  await captureElement(recoveryDialog, 'web-en-performance-recovery-dialog')
+  await recoveryDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
 
   await page.getByRole('button', { name: /^Activity\b/ }).click()
   const recoveryTools = page.getByTestId('activity-open-recovery-tools')

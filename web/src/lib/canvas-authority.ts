@@ -4,7 +4,7 @@ import { sessionCan } from '../identity-context'
 /** Stable ownership token for async operations that may replace the canvas. */
 export function currentCanvasAuthority(state = useWorkflowStore.getState()): string {
   return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.workflowRevision,
-    sessionCan(state.identityContext, 'workflows.write')])
+    sessionCan(state.identityContext, 'workflows.write'), sessionCan(state.identityContext, 'workflows.read')])
 }
 
 export function canvasAuthorityMatches(expected: string): boolean {

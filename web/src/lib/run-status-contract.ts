@@ -1,6 +1,6 @@
 import type { ApiResponses } from './api-types.generated'
 import type { RunEvent, RunNode, RunSummary } from '../types'
-import { isRecord } from './guards'
+import { isRecord, isNonNegativeSafeInteger as count } from './guards'
 import { isOpenNodeStatus, isOpenRunStatus, isTerminalNodeStatus, isTerminalRunStatus } from './status'
 
 // A validated display projection: extension JSON is narrowed to the object
@@ -15,7 +15,6 @@ const optionalString = (value: unknown) => value === undefined || typeof value =
 const nullableString = (value: unknown) => value === null || optionalString(value)
 const optionalBoolean = (value: unknown) => value === undefined || typeof value === 'boolean'
 const nullableRecord = (value: unknown) => value === undefined || value === null || isRecord(value)
-const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 const optionalCount = (value: unknown) => value === undefined || count(value)
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
 

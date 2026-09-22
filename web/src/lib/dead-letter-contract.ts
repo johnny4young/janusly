@@ -1,7 +1,7 @@
 import { contractApi } from '../api'
 import { t } from '../i18n/runtime'
 import type { ApiResponses } from './api-types.generated'
-import { isRecord } from './guards'
+import { isRecord, isNonNegativeSafeInteger as count } from './guards'
 
 export type DeadLetterDetail = ApiResponses['GET /dlq/entries/{deadLetterId}']
 type Drill = NonNullable<DeadLetterDetail['drill']>
@@ -10,7 +10,6 @@ type Outcome = NonNullable<DeadLetterDetail['drillOutcome']>
 const text = (value: unknown) => typeof value === 'string'
 const nullableText = (value: unknown) => value === null || text(value)
 const nonempty = (value: unknown) => typeof value === 'string' && value.trim() !== ''
-const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 const oneOf = (value: unknown, options: readonly string[]) => typeof value === 'string' && options.includes(value)
 
 function isDrill(value: unknown): value is Drill {

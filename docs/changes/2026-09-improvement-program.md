@@ -173,3 +173,19 @@ Tenant → environment → default precedence and per-claim tenant snapshots rem
 intact. Compose forwards all four settings; malformed inputs reach redacted boot
 validation instead of silently becoming defaults. Per-node ceilings, SSRF,
 redirect validation and DNS pinning are unchanged.
+
+## Recovery comparison ownership
+
+Applied recovery evidence now belongs to one operator, organization, workflow,
+canvas revision and permission scope. Context changes synchronously abort health
+and exact-version reads, clear stale rollback intent and prevent a captured
+before-snapshot from appearing under another workflow. Response projections fail
+closed on invalid counts, scores, deltas, recurrence samples or immutable version
+identity. Rollback remains a separate confirmed action and restores keyboard focus.
+
+The UI counts terminal observations rather than in-flight runs, treats zero
+recurrence as neutral monitoring evidence, and links recurrence through the
+canonical activity route. Shared metric rendering and native progress replace
+duplicated branches and custom progress markup. The pure health-delta guard ships
+with the existing recovery-contract chunk, keeping the original artifact,
+single-locale, route and RecoveryDialog budgets intact without rebaselining.

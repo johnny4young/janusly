@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { parseRoute } from '../lib/route'
 import { useWorkflowStore } from '../store'
 import { RecoveryDeltaCard } from './RecoveryDeltaCard'
 
@@ -59,7 +60,7 @@ const baseDelta = (overrides: Partial<{
   delta: null,
   recentRunsAgainstAfter: { totalRuns: 1, succeeded: 1, failed: 0, running: 0 },
   sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'HTTP 500 on http node' },
-  priorVersion: { version: 1, versionId: 'v0' },
+  priorVersion: { version: 1, versionId: 'v-before' },
   ...overrides,
 })
 
@@ -67,6 +68,7 @@ describe('<RecoveryDeltaCard />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({
+      currentWorkflowId: 'wf-1', workflowRevision: 0,
       session: null,
       userId: 'dev-user',
       orgId: 'default',
@@ -93,6 +95,7 @@ describe('<RecoveryDeltaCard />', () => {
   it('shows the run counter and same-failure pill (gathering state) when hasEnoughData is false', async () => {
     vi.mocked(api).mockResolvedValueOnce(baseDelta({
       hasEnoughData: false,
+      after: { score: 80, status: 'healthy', signals: baseSignals({ totalRuns: 3 }) },
       recentRunsAgainstAfter: { totalRuns: 3, succeeded: 2, failed: 1, running: 0 },
       sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'HTTP 500 on http node' },
     }))
@@ -100,10 +103,10 @@ describe('<RecoveryDeltaCard />', () => {
     render(<RecoveryDeltaCard {...baseProps} />)
 
     await waitFor(() => screen.getByTestId('recovery-delta-counter'))
-    expect(screen.getByText(/Runs against v2: 3/i)).toBeInTheDocument()
+    expect(screen.getByText(/Runs from v2: 3/i)).toBeInTheDocument()
     expect(screen.getByText('2✓ 1✗')).toBeInTheDocument()
-    expect(screen.getByText(/Same failure since Apply: ✓ 0 occurrences/i)).toBeInTheDocument()
-    expect(screen.getByText(/3 of 5 runs collected/i)).toBeInTheDocument()
+    expect(screen.getByText(/Same failure: 0 observed/i)).toBeInTheDocument()
+    expect(screen.getByText(/3 of 5 completed runs/i)).toBeInTheDocument()
     // Health/p95/cost pills do NOT render in gathering state.
     expect(screen.queryByText(/Health improved/i)).not.toBeInTheDocument()
   })
@@ -125,6 +128,24 @@ describe('<RecoveryDeltaCard />', () => {
     // before → after numbers also surface visibly.
     expect(screen.getByText(/81/)).toBeInTheDocument()
     expect(screen.getByText(/85/)).toBeInTheDocument()
+  })
+
+  it.each([
+    { score: 5, latency: -50, cost: -.1, health: 'Health improved 5 points', speed: '50% faster', spend: '$0.100 cheaper per run', tone: 'success' },
+    { score: -5, latency: 100, cost: .2, health: 'Health dropped 5 points', speed: '100% slower', spend: '$0.200 more per run', tone: 'danger' },
+    { score: 0, latency: 0, cost: 0, health: 'Health unchanged', speed: '≈ same speed', spend: '≈ same cost', tone: 'neutral' },
+  ])('preserves all three metric directions: $tone', async ({ score, latency, cost, health, speed, spend, tone }) => {
+    vi.mocked(api).mockResolvedValueOnce(baseDelta({
+      hasEnoughData: true,
+      before: { score: 80, status: 'healthy', signals: baseSignals({ totalRuns: 5, p95LatencyMs: 100, totalCostUsd: 1 }) },
+      after: { score: 80 + score, status: 'healthy', signals: baseSignals({ totalRuns: 5, p95LatencyMs: 100 + latency, totalCostUsd: (0.2 + cost) * 5 }) },
+      delta: { score, p95LatencyMs: latency, costPerRunUsd: cost },
+    }))
+    render(<RecoveryDeltaCard {...baseProps} />)
+    await screen.findByText(health)
+    for (const sentence of [health, speed, spend]) {
+      expect(screen.getByText(sentence).parentElement?.className).toContain(`we-recovery-delta-pill--${tone}`)
+    }
   })
 
   it('hides the cost pill when both sides have zero spend', async () => {
@@ -164,7 +185,7 @@ describe('<RecoveryDeltaCard />', () => {
       delta: { score: -7, p95LatencyMs: null, costPerRunUsd: null },
       before: { score: 85, status: 'healthy', signals: baseSignals({ totalRuns: 10 }) },
       after: { score: 78, status: 'warn', signals: baseSignals({ totalRuns: 5 }) },
-      priorVersion: { version: 1, versionId: 'v0' },
+      priorVersion: { version: 1, versionId: 'v-before' },
     }))
 
     render(<RecoveryDeltaCard {...baseProps} />)
@@ -230,7 +251,7 @@ describe('<RecoveryDeltaCard />', () => {
       delta: { score: -8, p95LatencyMs: null, costPerRunUsd: null },
       after: { score: 73, status: 'warn', signals: baseSignals({ totalRuns: 5 }) },
       before: { score: 81, status: 'healthy', signals: baseSignals({ totalRuns: 8 }) },
-      priorVersion: { version: 1, versionId: 'v0' },
+      priorVersion: { version: 1, versionId: 'v-before' },
     }))
     useWorkflowStore.setState((state) => ({
       identityContext: state.identityContext
@@ -290,4 +311,141 @@ describe('<RecoveryDeltaCard />', () => {
     expect(screen.getByText(/Before Apply/i)).toBeInTheDocument()
     expect(screen.getByText(/Health 84/)).toBeInTheDocument()
   })
+  const regression = () => baseDelta({ hasEnoughData: true,
+    delta: { score: -8, p95LatencyMs: null, costPerRunUsd: null },
+    before: { score: 81, status: 'healthy', signals: baseSignals({ totalRuns: 8 }) },
+    after: { score: 73, status: 'warn', signals: baseSignals({ totalRuns: 5 }) },
+    priorVersion: { version: 1, versionId: 'v-before' },
+  })
+  const versionRows = (path: string) => [{ workflowId: 'wf-1', createdAt: null,
+    id: path.includes('version=2') ? 'v-after' : 'v-before',
+    version: path.includes('version=2') ? 2 : 1,
+    dagJson: { id: 'wf-1', nodes: [], edges: [] },
+  }]
+  const pending = <T,>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(done => { resolve = done })
+    return { promise, resolve }
+  }
+
+  it.each(['orgId', 'userId'] as const)('replaces old health immediately when %s changes', async key => {
+    const next = pending<unknown>()
+    vi.mocked(api).mockResolvedValueOnce(regression()).mockReturnValue(next.promise)
+    render(<RecoveryDeltaCard {...baseProps} />)
+    await screen.findByText(/Health dropped 8 points/i)
+    act(() => useWorkflowStore.setState({ [key]: 'other' }))
+    expect(screen.queryByText(/Health dropped 8 points/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Roll back to/ })).not.toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls[0][1]?.signal?.aborted).toBe(true)
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(2))
+  })
+
+  it('clears old health on workflow/version prop changes', async () => {
+    vi.mocked(api).mockResolvedValueOnce(regression()).mockReturnValue(new Promise(() => {}))
+    const view = render(<RecoveryDeltaCard {...baseProps} />)
+    await screen.findByText(/Health dropped 8 points/i)
+    view.rerender(<RecoveryDeltaCard {...baseProps} workflowId="wf-2" afterVersion={3} />)
+    expect(screen.queryByText(/Health dropped 8 points/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Roll back to/ })).not.toBeInTheDocument()
+  })
+
+  it.each(['actor', 'organization', 'workflow', 'edit', 'permission', 'refresh', 'unmount', 'batched-actor-return'])('discards late rollback versions after %s', async change => {
+    const versions = pending<undefined>()
+    vi.mocked(api).mockImplementation((path) => path.startsWith('/workflows/health/delta')
+      ? Promise.resolve(regression()) : versions.promise.then(() => versionRows(path)))
+    const view = render(<RecoveryDeltaCard {...baseProps} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Roll back to v1/ }))
+    if (change === 'unmount') view.unmount()
+    else await act(async () => {
+      if (change === 'actor' || change === 'batched-actor-return') useWorkflowStore.setState({ userId: 'other' })
+      if (change === 'batched-actor-return') useWorkflowStore.setState({ userId: 'dev-user' })
+      if (change === 'organization') useWorkflowStore.setState({ orgId: 'other' })
+      if (change === 'workflow') useWorkflowStore.setState({ currentWorkflowId: 'wf-2' })
+      if (change === 'edit') useWorkflowStore.setState({ workflowRevision: 1 })
+      if (change === 'permission') useWorkflowStore.setState({ identityContext: null })
+      if (change === 'refresh') useWorkflowStore.getState().bumpPlatformVersion()
+    })
+    if (change === 'refresh') await waitFor(() => expect(vi.mocked(api).mock.calls.filter(([path]) => path.startsWith('/workflows/health/delta'))).toHaveLength(2))
+    await act(async () => { versions.resolve(undefined); await versions.promise })
+    expect(screen.queryByTestId('rollback-dialog')).not.toBeInTheDocument()
+    for (const [,options] of vi.mocked(api).mock.calls.filter(([path]) => path.startsWith('/workflows/versions'))) expect(options?.signal?.aborted).toBe(true)
+  })
+
+  it('keeps a useful rollback error when an exact-version read rejects without a message', async () => {
+    vi.mocked(api).mockResolvedValueOnce(regression()).mockRejectedValue(undefined)
+    render(<RecoveryDeltaCard {...baseProps} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Roll back to v1/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load both versions for rollback.')
+    expect(screen.queryByTestId('rollback-dialog')).not.toBeInTheDocument()
+  })
+
+  it('binds rollback target to the immutable prior version id from health evidence', async () => {
+    vi.mocked(api).mockImplementation(path => Promise.resolve(path.startsWith('/workflows/health/delta')
+      ? regression() : versionRows(path).map(row => ({ ...row, id: 'unrelated-id' }))))
+    render(<RecoveryDeltaCard {...baseProps} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Roll back to v1/ }))
+    await screen.findByRole('alert')
+    expect(screen.queryByTestId('rollback-dialog')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['foreign workflow', { workflowId: 'other' }], ['foreign cutoff', { afterVersion: 99 }],
+    ['negative count', { recentRunsAgainstAfter: { totalRuns: -1, succeeded: 0, failed: 0, running: 0 } }],
+    ['invalid sample gate', { hasEnoughData: true }],
+    ['foreign signature', { sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'other' } }],
+    ['invalid prior version', { priorVersion: { version: 2, versionId: 'v2' } }],
+  ])('rejects %s without rendering health or rollback', async (_name, override) => {
+    vi.mocked(api).mockResolvedValue({ ...baseDelta(), ...override as object })
+    render(<RecoveryDeltaCard {...baseProps} />)
+    await screen.findByRole('alert')
+    expect(screen.queryByTestId('recovery-delta-counter')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('rollback-dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not expose the captured before snapshot after an actor change', () => {
+    vi.mocked(api).mockReturnValue(new Promise(() => {}))
+    render(<RecoveryDeltaCard {...baseProps} preSaveBeforeSnapshot={{ score: 84, status: 'healthy', signals: baseSignals() }} />)
+    expect(screen.getByText(/Health 84/)).toBeInTheDocument()
+    act(() => useWorkflowStore.setState({ userId: 'other' }))
+    expect(screen.queryByText(/Health 84/)).not.toBeInTheDocument()
+  })
+
+  it('drops evidence and stops reading when workflow read permission is revoked', async () => {
+    vi.mocked(api).mockResolvedValue(regression())
+    render(<RecoveryDeltaCard {...baseProps} />)
+    await screen.findByText(/Health dropped 8 points/i)
+    act(() => useWorkflowStore.setState(state => ({ identityContext: state.identityContext && {
+      ...state.identityContext, organizations: state.identityContext.organizations.map(org => ({ ...org, permissions: ['workflows.write'] })),
+    } })))
+    expect(screen.queryByTestId('recovery-delta-counter')).not.toBeInTheDocument()
+    expect(api).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(api).mock.calls[0][1]?.signal?.aborted).toBe(true)
+  })
+
+  it('does not claim the original failure stopped when no runs have completed', async () => {
+    vi.mocked(api).mockResolvedValue(baseDelta({ after: { score: 80, status: 'healthy', signals: baseSignals() },
+      recentRunsAgainstAfter: { totalRuns: 0, succeeded: 0, failed: 0, running: 0 } }))
+    render(<RecoveryDeltaCard {...baseProps} />)
+    const failure = await screen.findByTestId('recovery-delta-same-failure')
+    expect(failure).not.toHaveTextContent('no longer happening')
+    expect(failure).not.toHaveClass('we-recovery-delta-pill--success')
+    expect(failure).toHaveTextContent(/continue monitoring/i)
+  })
+  it('uses completed health samples, not running jobs, for the comparison floor', async () => {
+    vi.mocked(api).mockResolvedValue(baseDelta({ recentRunsAgainstAfter: { totalRuns: 6, succeeded: 1, failed: 0, running: 5 } }))
+    render(<RecoveryDeltaCard {...baseProps} />)
+    await screen.findByTestId('recovery-delta-counter')
+    expect(screen.getByRole('progressbar')).toHaveAttribute('value', '1')
+    expect(screen.getByRole('progressbar')).toHaveAttribute('max', '5')
+  })
+
+  it('links recurring failure evidence through the actual queue route', async () => {
+    vi.mocked(api).mockResolvedValue(baseDelta({ sameFailureSinceApply: {
+      count: 1, sampleDeadLetterIds: ['failure / one'], priorSignature: baseProps.priorFailureSignature,
+    } }))
+    render(<RecoveryDeltaCard {...baseProps} />)
+    const link = await screen.findByRole('link', { name: /View DLQ/i })
+    expect(parseRoute(link.getAttribute('href')!)).toEqual({ tab: 'runs', deadLetterId: 'failure / one' })
+  })
+
 })

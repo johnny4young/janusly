@@ -164,6 +164,28 @@ identity parser, rather than maintaining independent copies. Rollback subscribes
 to store changes synchronously: switching away and back within one React update
 still disposes the original request, rather than reviving an old confirmation.
 
+## Recovery comparison evidence
+
+The applied-recovery delta owns its health read, exact-version preview and
+rollback intent for one operator, organization, canvas revision and permission
+scope. Changing that scope, cutoff, signature or refresh disposes pending work;
+synchronous ownership also handles batched away-and-back context changes. A
+captured before snapshot is not shown under a different context. Revoking read
+access clears the surface and stops its reads.
+
+Health payloads validate the workflow/cutoff, bounded numeric signals, sample
+gate, score delta and recurrence references before display. Counts share the same
+non-negative safe-integer guard as run, list and dead-letter contracts, without
+coercion. Native progress exposes completed samples against the comparison floor.
+Rollback fetches both
+exact versions and binds the prior immutable ID to the health evidence. Cancel
+restores focus to the preview trigger after its asynchronous loading state.
+
+The comparison covers versions **from** the cutoff, not only that version. Its
+sample floor counts terminal health observations, not in-flight jobs. Zero matching
+failures is neutral observed evidence, never proof of a successful repair. Recurring
+failure links use the canonical queue hash route, not an unsupported query key.
+
 ## Workflow deployment ownership
 
 Rollout controls own their reads, qualification evidence and pending writes for

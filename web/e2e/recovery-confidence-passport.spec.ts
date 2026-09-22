@@ -18,7 +18,12 @@ async function captureEvidence(page: Page, name: string) {
 async function captureElement(locator: import('@playwright/test').Locator, name: string) {
   if (!EVIDENCE_DIR) return
   await mkdir(EVIDENCE_DIR, { recursive: true })
-  await locator.screenshot({ path: `${EVIDENCE_DIR}/${name}.png` })
+  // Live health refreshes can replace the same card between locator lookup
+  // and screenshot scroll. Retry the locator itself, not a stale element.
+  await expect(async () => {
+    await expect(locator).toBeVisible()
+    await locator.screenshot({ path: `${EVIDENCE_DIR}/${name}.png` })
+  }).toPass({ timeout: 10_000 })
 }
 
 function installConsoleErrorGuards(page: Page) {
@@ -47,7 +52,10 @@ async function startFailure(
   workflow: WorkflowDocument,
 ): Promise<{ runId: string; deadLetterId: string }> {
   const headers = authHeaders(orgId)
-  const started = await request.post(`${API_URL}/start`, { headers, data: workflow })
+  const started = await request.post(`${API_URL}/start`, {
+    headers,
+    data: { workflow, input: { value: 42 } },
+  })
   if (!started.ok()) {
     throw new Error(`POST /start failed: ${started.status()} ${await started.text()}`)
   }
@@ -121,7 +129,11 @@ test('recovery passport requires sandbox success and a separate apply decision',
     nodes: [{
       id: 'normalize',
       type: 'tool',
-      config: { tool: 'text.uppercase', resultPolicy: 'require_ok', input: {} },
+      config: {
+        tool: 'text.uppercase',
+        resultPolicy: 'require_ok',
+        input: { value: '{{context.input.value}}' },
+      },
     }],
     edges: [],
   }
@@ -136,7 +148,10 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await page.goto('/')
   const homeHero = page.locator('.we-recovery-center-hero')
   await expect(homeHero).toBeVisible()
-  await expect(page.getByTestId('home-priority-clear')).toBeVisible()
+  await expect(page.getByRole('button', {
+    name: 'Open Recovery Center — no pending work',
+    exact: true,
+  })).toBeVisible()
   await captureEvidence(page, '01-home-context-en')
   const saved = await request.post(`${API_URL}/workflows/save`, {
     headers,
@@ -151,9 +166,13 @@ test('recovery passport requires sandbox success and a separate apply decision',
   expect(detailResponse.ok()).toBe(true)
   const detail = await detailResponse.json() as {
     nodeId: string
-    workflowJson: { nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>; [key: string]: unknown }
   }
-  const fixedWorkflow = structuredClone(detail.workflowJson)
+  // The DLQ detail intentionally exposes the run snapshot, including
+  // run-only carriers such as orgId/createdBy/input. The real patch endpoint
+  // returns a canonical workflow document, so keep this stub faithful to that
+  // response contract instead of echoing carriers that /workflows/save must
+  // reject.
+  const fixedWorkflow = structuredClone(failingWorkflow)
   fixedWorkflow.nodes = fixedWorkflow.nodes.map((node) => node.id === detail.nodeId
     ? {
         ...node,
@@ -204,9 +223,33 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(page.getByRole('button', { name: /Apply validated fix/i })).toBeVisible()
   expect(saveRequests, 'sandbox success must not auto-save').toBe(0)
 
+  const applySaveResponsePromise = page.waitForResponse((response) => (
+    new URL(response.url()).pathname === '/workflows/save' && response.request().method() === 'POST'
+  ))
+  const applyReplayResponsePromise = page.waitForResponse((response) => (
+    new URL(response.url()).pathname === '/dlq/replay' && response.request().method() === 'POST'
+  ))
   await page.getByRole('button', { name: /Apply validated fix/i }).click()
+  const applySaveResponse = await applySaveResponsePromise
+  if (!applySaveResponse.ok()) {
+    void applyReplayResponsePromise.catch(() => undefined)
+    throw new Error(`POST /workflows/save during Apply failed: ${applySaveResponse.status()} ${await applySaveResponse.text()}`)
+  }
+  const applyReplayResponse = await applyReplayResponsePromise
+  if (!applyReplayResponse.ok()) {
+    throw new Error(`POST /dlq/replay during Apply failed: ${applyReplayResponse.status()} ${await applyReplayResponse.text()}`)
+  }
   await expect(page.getByText('Patch applied.', { exact: true })).toBeVisible({ timeout: 30_000 })
   expect(saveRequests).toBe(1)
+
+  // Only the model proposal is stubbed above; health evidence comes from the
+  // real executable after the sandbox/save/replay sequence.
+  const deltaCard = page.getByLabel('Recovery delta', { exact: true })
+  await expect(deltaCard.getByTestId('recovery-delta-counter')).toBeVisible()
+  await expect(deltaCard.getByRole('progressbar')).toHaveAccessibleName(/completed runs from v2/)
+  await expect(deltaCard.getByTestId('recovery-delta-same-failure')).toContainText('Same failure: 0 observed')
+  await expect(deltaCard).toContainText('continue monitoring')
+  await captureElement(deltaCard, 'web-en-recovery-delta')
 
   // Promote the proven recovery manually: create a draft, then activate in a
   // separate action. The server re-verifies the structural diff, sandbox run,
@@ -337,6 +380,11 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(spanishUsePending).toContainText('Uso del playbook pendiente de verificación', { timeout: 30_000 })
   await expect(spanishUsePending).toContainText('solo cuando este reintento termine correctamente')
   await captureElement(spanishUsePending, 'web-es-recovery-playbook-use-pending')
+  const spanishDelta = page.getByLabel('Delta de recuperación', { exact: true })
+  await expect(spanishDelta.getByTestId('recovery-delta-counter')).toBeVisible()
+  await expect(spanishDelta.getByRole('progressbar')).toHaveAccessibleName(/ejecuciones terminadas desde v/)
+  await expect(spanishDelta).toContainText('sigue monitoreando')
+  await captureElement(spanishDelta, 'web-es-recovery-delta')
   await expect.poll(async () => {
     const response = await request.get(
       `${API_URL}/run?runId=${encodeURIComponent(spanishFailureDetail.runId)}`,
@@ -366,16 +414,39 @@ test('recovery passport requires sandbox success and a separate apply decision',
 
   // The backend regression transition is covered against real Postgres in
   // integration tests. Here we isolate the terminal browser state so its
-  // explanatory copy and layout are captured deterministically.
+  // explanatory copy and layout are captured deterministically. Preserve the
+  // real /run projection: the browser's response guard rejects partial mocks.
   await page.route('**/run?runId=*', async (route) => {
-    const runId = new URL(route.request().url()).searchParams.get('runId') ?? 'validation-regressed'
+    const source = await route.fetch()
+    if (!source.ok()) {
+      throw new Error(`GET /run during regression fixture failed: ${source.status()} ${await source.text()}`)
+    }
+    const wire = await source.json() as {
+      apiVersion?: string
+      data?: {
+        run: Record<string, unknown>
+        nodes: Array<Record<string, unknown>>
+      }
+      run: Record<string, unknown>
+      nodes: Array<Record<string, unknown>>
+    }
+    // api.ts rewrites GET /run to /v1/run and unwraps its data envelope only
+    // after the browser receives it. A route mock must preserve that wire
+    // envelope while changing the snapshot inside data.
+    const snapshot = wire.apiVersion === 'v1' ? wire.data : wire
+    if (!snapshot?.run || !Array.isArray(snapshot.nodes)) {
+      throw new Error(`Unexpected GET /run projection in regression fixture: ${JSON.stringify(wire).slice(0, 500)}`)
+    }
+    const failedSnapshot = {
+      ...snapshot,
+      run: { ...snapshot.run, status: 'failed' },
+      nodes: snapshot.nodes.map((node) => node.nodeId === 'normalize'
+        ? { ...node, status: 'failed', errorJson: { message: 'La validación volvió a fallar.' } }
+        : node),
+    }
     await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        run: { id: runId, status: 'failed' },
-        nodes: [{ nodeId: 'normalize', status: 'failed', errorJson: { message: 'La validación volvió a fallar.' } }],
-      }),
+      response: source,
+      json: wire.apiVersion === 'v1' ? { ...wire, data: failedSnapshot } : failedSnapshot,
     })
   })
   await page.route('**/recovery/playbooks/*/outcome', async (route) => {

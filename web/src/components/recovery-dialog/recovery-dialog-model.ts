@@ -59,27 +59,12 @@ export function normalizeConsideredAlternatives(value: unknown): ConsideredAlter
 export const CALIBRATION_SUBTITLE_DELTA = 10
 
 export function approachLabelDisplay(label: PatchApproachLabel): string {
-  switch (label) {
-    case 'add_retry': return runtimeT('recoveryDialog.approachLabel.add_retry')
-    case 'raise_timeout': return runtimeT('recoveryDialog.approachLabel.raise_timeout')
-    case 'swap_secret_ref': return runtimeT('recoveryDialog.approachLabel.swap_secret_ref')
-    case 'add_approval': return runtimeT('recoveryDialog.approachLabel.add_approval')
-    case 'fix_url': return runtimeT('recoveryDialog.approachLabel.fix_url')
-    case 'other': return runtimeT('recoveryDialog.approachLabel.other')
-  }
+  return runtimeT(`recoveryDialog.approachLabel.${label}`)
 }
 
 /** Human label for an evidence kind, localized. */
 export function evidenceKindLabel(kind: EvidenceKind): string {
-  switch (kind) {
-    case 'recovery_feedback': return runtimeT('recoveryDialog.evidence.kind.recovery_feedback')
-    case 'memory_entry': return runtimeT('recoveryDialog.evidence.kind.memory_entry')
-    case 'runbook_excerpt': return runtimeT('recoveryDialog.evidence.kind.runbook_excerpt')
-    case 'recent_error': return runtimeT('recoveryDialog.evidence.kind.recent_error')
-    case 'signature_rule': return runtimeT('recoveryDialog.evidence.kind.signature_rule')
-    case 'tool_contract': return runtimeT('recoveryDialog.evidence.kind.tool_contract')
-    case 'recovery_playbook': return runtimeT('recoveryDialog.evidence.kind.recovery_playbook')
-  }
+  return runtimeT(`recoveryDialog.evidence.kind.${kind}`)
 }
 
 export function suggestionTabKey(tab: SuggestionTab): string {

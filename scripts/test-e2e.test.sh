@@ -9,6 +9,11 @@ result=$(JANUSLY_E2E_PROJECT=janusly-e2e-selftest-1 \
   bash "$script" selftest)
 jq -e '.project == "janusly-e2e-selftest-1" and .ports.application == 33001 and .ports.postgres == 35432' \
   <<<"$result" >/dev/null
+jq -e '.specs == [
+  "e2e/janusly-smoke.spec.ts", "e2e/text-search.spec.ts",
+  "e2e/operator-velocity.spec.ts", "e2e/workflow-rollouts.spec.ts",
+  "e2e/recovery-confidence-passport.spec.ts"
+]' <<<"$result" >/dev/null
 
 if JANUSLY_E2E_PROJECT=janusly-e2e bash "$script" selftest >/dev/null 2>&1; then
   echo "historical shared project was accepted" >&2

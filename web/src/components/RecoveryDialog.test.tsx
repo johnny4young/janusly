@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { useWorkflowStore } from '../store'
 import { RecoveryDialog } from './RecoveryDialog'
 import type { DeadLetter } from './DeadLettersPanel'
 
@@ -71,8 +72,16 @@ const inertFallback = (path: string) => {
   return Promise.resolve({ ok: true })
 }
 
+const initialStore = useWorkflowStore.getState()
+
 describe('<RecoveryDialog />', () => {
   beforeEach(() => {
+    useWorkflowStore.setState({ ...initialStore, identityContext: {
+      identity: { userId: 'dev-user', email: null, mode: 'dev-headers', source: 'dev' }, profile: { name: null, email: null },
+      organizations: [{ id: 'default', name: 'Default', plan: null, role: 'editor', roleBase: 'editor',
+        permissions: ['workflows.read', 'workflows.write'], usable: true, developmentFallback: false, isOwner: false }],
+      invitations: [], currentOrganizationId: 'default', selectionRequired: false, needsOrganization: false, truncated: false, invitationsTruncated: false,
+    } }, true)
     vi.mocked(api).mockReset()
     vi.mocked(api).mockImplementation((path: string) => inertFallback(path))
     vi.useRealTimers()
@@ -318,9 +327,9 @@ describe('<RecoveryDialog />', () => {
     await waitFor(() => {
       expect(screen.getByTestId('recovery-delta-counter')).toBeInTheDocument()
     })
-    expect(screen.getAllByText(/Runs against v2/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Runs from v2/i).length).toBeGreaterThan(0)
     expect(screen.getByTestId('recovery-delta-same-failure')).toBeInTheDocument()
-    expect(screen.getAllByText(/of 5 runs collected/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/of 5 completed runs/i).length).toBeGreaterThan(0)
 
     // Operator → system feedback: Apply success writes one row with
     // `accepted: true` so the next patch suggestion for THIS workflow

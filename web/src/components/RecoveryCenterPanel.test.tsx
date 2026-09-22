@@ -1864,7 +1864,9 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
       expect(banner).toBeDefined()
       expect(banner).toHaveTextContent(/Metrics unavailable/i)
     })
-    expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
+    // The summary also waits for the independent brief/cases/queue reads;
+    // the metrics warning alone does not mean those reads have settled.
+    await waitFor(() => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete'))
     expect(screen.getByTestId('recovery-center-action-triage_failures')).toBeInTheDocument()
   })
 })

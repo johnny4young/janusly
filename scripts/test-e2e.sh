@@ -8,6 +8,13 @@ postgres_port=${JANUSLY_E2E_POSTGRES_PORT:-35432}
 pnpm_command=${PNPM:-pnpm --ignore-workspace}
 docker_bin=${JANUSLY_E2E_DOCKER_BIN:-docker}
 attempted=0
+specs=(
+  e2e/janusly-smoke.spec.ts
+  e2e/text-search.spec.ts
+  e2e/operator-velocity.spec.ts
+  e2e/workflow-rollouts.spec.ts
+  e2e/recovery-confidence-passport.spec.ts
+)
 
 usage() {
   cat <<'EOF'
@@ -77,7 +84,7 @@ validate_configuration
 if [[ ${1:-} == selftest ]]; then
   [[ $# == 1 ]] || { usage >&2; die "unexpected arguments"; }
   jq -n --arg project "$project" --argjson appPort "$app_port" --argjson postgresPort "$postgres_port" \
-    '{project:$project,ports:{application:$appPort,postgres:$postgresPort}}'
+    --args '{project:$project,ports:{application:$appPort,postgres:$postgresPort},specs:$ARGS.positional}' "${specs[@]}"
   exit 0
 fi
 [[ $# == 0 ]] || { usage >&2; die "unexpected arguments"; }
@@ -120,4 +127,4 @@ JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
 E2E_API_URL="$origin" \
 E2E_UPSTREAM_HOST=host.docker.internal \
 E2E_UPSTREAM_BIND=0.0.0.0 \
-  "${playwright[@]}" test e2e/janusly-smoke.spec.ts e2e/text-search.spec.ts e2e/operator-velocity.spec.ts e2e/workflow-rollouts.spec.ts --project=chromium
+  "${playwright[@]}" test "${specs[@]}" --project=chromium

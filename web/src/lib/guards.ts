@@ -18,3 +18,8 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
 export function asRecordOrEmpty(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {}
 }
+
+/** An exact non-negative wire count; never coerce strings or round fractions. */
+export function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}

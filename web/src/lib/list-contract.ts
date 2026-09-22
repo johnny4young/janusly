@@ -2,12 +2,11 @@ import { contractApi } from '../api'
 import { t } from '../i18n/runtime'
 import type { ApiResponses } from './api-types.generated'
 import type { RunSummary, SavedWorkflow, Template, ToolSchema, WorkflowDefinition } from '../types'
-import { isRecord } from './guards'
+import { isRecord, isNonNegativeSafeInteger as count } from './guards'
 import { isRunSummary } from './run-status-contract'
 
 const nonempty = (value: unknown) => typeof value === 'string' && value.trim() !== ''
 const nullableText = (value: unknown) => value == null || typeof value === 'string'
-const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string')
 const malformed = () => new Error(t('api.error.malformedResponse'))
 

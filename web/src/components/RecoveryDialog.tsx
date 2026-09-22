@@ -172,29 +172,17 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
             </p>
           )}
 
-          {step.kind === 'review' && selectedSuggestion && (
+          {(step.kind === 'review' || step.kind === 'validated') && selectedSuggestion && (
             <ReviewBody
               suggestion={step.suggestion}
               selected={selectedSuggestion}
-              selectedIndex={safeSelectedIndex}
-              onSelectIndex={setSelectedSuggestionIndex}
+              selectedIndex={step.kind === 'validated' ? step.selectedIndex : safeSelectedIndex}
+              onSelectIndex={step.kind === 'validated' ? () => undefined : setSelectedSuggestionIndex}
               dlq={dlq}
               canApplyPatch={canApplyPatch}
+              sandboxStatus={step.kind === 'validated' ? 'passed' : 'not_run'}
               failureSignature={priorFailureSignature}
-            />
-          )}
-
-          {step.kind === 'validated' && selectedSuggestion && (
-            <ReviewBody
-              suggestion={step.suggestion}
-              selected={selectedSuggestion}
-              selectedIndex={step.selectedIndex}
-              onSelectIndex={() => undefined}
-              dlq={dlq}
-              canApplyPatch={canApplyPatch}
-              sandboxStatus="passed"
-              failureSignature={priorFailureSignature}
-              selectionLocked
+              selectionLocked={step.kind === 'validated'}
             />
           )}
 
@@ -243,16 +231,7 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
           )}
 
           {step.kind === 'applied' && (
-            <AppliedBody
-              runId={step.runId}
-              cluster={step.cluster}
-              appliedWorkflowId={step.appliedWorkflowId}
-              appliedVersion={step.appliedVersion}
-              priorFailureSignature={step.priorFailureSignature ?? null}
-              preSaveBeforeSnapshot={step.preSaveBeforeSnapshot ?? null}
-              playbookPromotionSource={step.playbookPromotionSource}
-              playbookUsePending={step.playbookUsePending}
-            />
+            <AppliedBody {...step} />
           )}
 
           {step.kind === 'error' && (

@@ -228,7 +228,9 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
       },
     ],
     edges: [{ from: 'candidate', to: 'outcome' }],
-    recovery: { contract: semanticRecoveryContract() },
+    // This fixture intentionally fails at least five canary runs. Isolate the
+    // rollout evaluator from the independently tested circuit-breaker policy.
+    recovery: { contract: semanticRecoveryContract(), circuitBreaker: false },
   }
   const savedBaseline = await postJson(request, orgId, '/workflows/save', baseline) as { versionId?: unknown }
   const savedCanary = await postJson(request, orgId, '/workflows/save', canary) as { versionId?: unknown }
@@ -353,7 +355,9 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
     run.click(),
   ])
   expect(started.request().postDataJSON()).toMatchObject({ workflowVersionId: receipt.versionId })
-  expect(started.ok()).toBe(true)
+  if (!started.ok()) {
+    throw new Error(`POST /start after rollback failed: ${started.status()} ${await started.text()}`)
+  }
   const { runId: rolledRunId } = await started.json() as { runId: string }
   expect(await waitForTerminal(request, orgId, rolledRunId)).toBe('succeeded')
 
