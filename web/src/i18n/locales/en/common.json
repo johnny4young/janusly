@@ -3506,7 +3506,6 @@
   "recoveryCenter.greeting.subline.failures_other": "{{count}} runs need recovery.",
   "recoveryCenter.greeting.subline.allClear": "All clear — health is at {{score}}.",
   "recoveryCenter.greeting.subline.stable": "Stable, but health is at {{score}}. Worth a glance.",
-  "recoveryCenter.greeting.subline.clean": "Recovery posture is clean across the last 30 days.",
   "recoveryCenter.greeting.subline.semanticCases_one": "{{count}} business outcome incident needs review.",
   "recoveryCenter.greeting.subline.semanticCases_other": "{{count}} business outcome incidents need review.",
   "recoveryCenter.greeting.subline.semanticUnavailable": "Business outcome posture could not be confirmed. Review the status below.",
@@ -4321,5 +4320,11 @@
   "dlq.close.run": "Run: {{id}}",
   "dlq.close.node": "Step: {{id}}",
   "dlq.close.failed": "Closure could not be confirmed. No recovery is claimed. Review the error before trying again.",
-  "dlq.status.acceptedLoss": "Accepted loss"
+  "dlq.status.acceptedLoss": "Accepted loss",
+  "home.health.empty": "No evidence yet",
+  "home.health.stale": "Previous data — refresh needed",
+  "home.evidence.empty": "No completed runs in this reporting window yet. There is not enough evidence to assess health.",
+  "home.evidence.loading": "Loading evidence before assessing workspace health.",
+  "home.evidence.unavailable": "Current health could not be confirmed. Retry to load the evidence.",
+  "home.evidence.stale": "Showing previous data; current health has not been confirmed. Refresh before making decisions."
 }

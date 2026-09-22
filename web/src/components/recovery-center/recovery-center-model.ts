@@ -349,7 +349,7 @@ export function buildGreeting(args: {
   openFailures: number
   pendingApprovals: number
   healthScore: number | null
-  totalRuns: number
+  evidenceStatus: HomeEvidenceStatus
   semanticOutcomePosture: 'loading' | 'unavailable' | 'attention' | 'clear'
   semanticCaseCount: number
 }): { salutation: string; subline: string } {
@@ -363,7 +363,9 @@ export function buildGreeting(args: {
     ? runtimeT(slotKey, { who: args.displayName })
     : runtimeT(slotKey)
   let subline: string
-  if (args.semanticOutcomePosture === 'attention') {
+  if (args.evidenceStatus !== 'available' && args.evidenceStatus !== 'empty') {
+    subline = runtimeT(`home.evidence.${args.evidenceStatus}`)
+  } else if (args.semanticOutcomePosture === 'attention') {
     subline = runtimeT('recoveryCenter.greeting.subline.semanticCases', {
       count: args.semanticCaseCount,
     })
@@ -371,21 +373,18 @@ export function buildGreeting(args: {
     subline = runtimeT('recoveryCenter.greeting.subline.semanticUnavailable')
   } else if (args.semanticOutcomePosture === 'loading') {
     subline = runtimeT('recoveryCenter.greeting.subline.semanticLoading')
-  } else if (args.totalRuns === 0) {
-    // In an empty workspace the pitch line below the hero carries the
-    // copy work — surface the dynamic recovery posture instead of a
-    // generic welcome (which would duplicate the pitch).
-    subline = runtimeT('recoveryCenter.greeting.subline.clean')
   } else if (args.pendingApprovals > 0) {
     subline = runtimeT('recoveryCenter.greeting.subline.approvals', { count: args.pendingApprovals })
   } else if (args.openFailures > 0) {
     subline = runtimeT('recoveryCenter.greeting.subline.failures', { count: args.openFailures })
+  } else if (args.evidenceStatus === 'empty') {
+    subline = runtimeT('home.evidence.empty')
   } else if (args.healthScore !== null && args.healthScore >= 80) {
     subline = runtimeT('recoveryCenter.greeting.subline.allClear', { score: args.healthScore })
   } else if (args.healthScore !== null) {
     subline = runtimeT('recoveryCenter.greeting.subline.stable', { score: args.healthScore })
   } else {
-    subline = runtimeT('recoveryCenter.greeting.subline.clean')
+    subline = runtimeT('home.evidence.unavailable')
   }
   return { salutation, subline }
 }
@@ -587,8 +586,24 @@ export function clusterOwnerLabel(owner: ClusterOwner): string {
   return runtimeT(`recoveryCenter.cluster.owner.${owner}`)
 }
 
+export type HomeEvidenceStatus = 'loading' | 'unavailable' | 'stale' | 'empty' | 'available'
+
+/** A loaded run page is not a historical sample; only validated metrics are. */
+export function homeEvidenceStatus({ metrics, loading, unavailable, ageMs = 0 }: {
+  metrics: RecoveryMetrics | null
+  loading: boolean
+  unavailable: boolean
+  ageMs?: number
+}): HomeEvidenceStatus {
+  if (loading || unavailable) return metrics ? 'stale' : loading ? 'loading' : 'unavailable'
+  if (!metrics) return 'loading'
+  if (ageMs >= 5 * 60_000) return 'stale'
+  if (metrics.terminalRuns === 0) return 'empty'
+  return readHealthScore(metrics) === null ? 'unavailable' : 'available'
+}
+
 export function readHealthScore(metrics: RecoveryMetrics | null): number | null {
-  if (!metrics) return null
+  if (!metrics || metrics.terminalRuns <= 0) return null
   // We derive an aggregate health score from the metrics envelope. The
   // recovery-metrics route exposes success-rate as 0-100, so it remains the
   // primary signal instead of mixing metrics with incompatible units into an

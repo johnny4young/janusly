@@ -49,6 +49,7 @@ import {
   presentOperatorBrief,
   readDisplayName,
   readHealthScore,
+  homeEvidenceStatus,
   shouldShowOnboarding,
   type ClustersResponse,
   type HeatmapDay,
@@ -119,7 +120,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   const dismissIntroThisSession = useWorkflowStore(
     (state) => state.dismissRecoveryIntroThisSession,
   )
-  const [metricsSnapshot, setMetricsSnapshot] = useState<OrgSnapshot<RecoveryMetrics> | null>(null)
+  const [metricsSnapshot, setMetricsSnapshot] = useState<(OrgSnapshot<RecoveryMetrics> & { receivedAt: number }) | null>(null)
   const [clustersSnapshot, setClustersSnapshot] = useState<OrgSnapshot<ClustersResponse | null> | null>(null)
   const [heatmapSnapshot, setHeatmapSnapshot] = useState<OrgSnapshot<HeatmapDay[]> | null>(null)
   const [validationSnapshot, setValidationSnapshot] = useState<OrgSnapshot<RecoveryValidationReport | null> | null>(null)
@@ -198,15 +199,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     totalRecovered: number
     downtimeMs: number
   } | null>(null)
-  const [persistedIntroDismissed, setPersistedIntroDismissed] = useState<boolean>(() => {
-    try { return localStorage.getItem('janusly:recovery:hideIntro') === 'true' } catch { return false }
-  })
-  const dismissIntro = () => {
-    dismissIntroThisSession()
-    if ((metrics?.terminalRuns ?? 0) <= 0) return
-    setPersistedIntroDismissed(true)
-    try { localStorage.setItem('janusly:recovery:hideIntro', 'true') } catch { /* storage unavailable — session-only dismiss */ }
-  }
+  const dismissIntro = dismissIntroThisSession
 
   const applyImpactSnapshot = useCallback((
     snapshot: RecoveryHomeSnapshot,
@@ -297,7 +290,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
         )
 
         if (metricsValue) {
-          setMetricsSnapshot({ orgId: resolvedOrgId, value: metricsValue })
+          setMetricsSnapshot({ orgId: resolvedOrgId, value: metricsValue, receivedAt: Date.now() })
         } else {
           setMetricsErrorSnapshot({
             orgId: resolvedOrgId,
@@ -575,15 +568,20 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
           : t('recoveryCenter.hero.memoryPurgeDue')
     : null
 
-  const totalRuns = props.runs.length
-  const healthScore = readHealthScore(metrics)
+  const metricsStatus = homeEvidenceStatus({
+    metrics,
+    loading: metricsLoading || semanticCasesStatus === 'loading',
+    unavailable: Boolean(metricsError) || semanticCasesStatus === 'unavailable',
+    ageMs: metricsSnapshot && nowMs !== null ? Math.max(0, nowMs - metricsSnapshot.receivedAt) : 0,
+  })
+  const healthScore = metricsStatus === 'available' ? readHealthScore(metrics) : null
   const greeting = useMemo(() => buildGreeting({
     hour: currentHour,
     displayName: readDisplayName(user),
     openFailures: openFailureCount,
     pendingApprovals: waitingNodes.length,
     healthScore,
-    totalRuns,
+    evidenceStatus: metricsStatus,
     semanticOutcomePosture,
     semanticCaseCount: semanticCases.length,
   }), [
@@ -592,7 +590,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     openFailureCount,
     waitingNodes.length,
     healthScore,
-    totalRuns,
+    metricsStatus,
     semanticOutcomePosture,
     semanticCases.length,
     i18n.language,
@@ -626,25 +624,17 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     props.onOpenTab,
   ])
 
-  const introDismissed = (metrics?.terminalRuns ?? 0) > 0
-    ? persistedIntroDismissed
-    : introDismissedThisSession
-  const showOnboarding = metrics !== null
+  const showOnboarding = metricsStatus === 'empty'
+    && semanticCases.length === 0
+    && recommendedActions.length === 0
+    && operatorBriefStatus === 'available'
+    && operatorBrief?.warnings.length === 0
     && shouldShowOnboarding({
       runs: props.runs.length,
       openFailures: openFailureCount,
       waitingApprovals: waitingNodes.length,
-      dismissed: introDismissed,
+      dismissed: introDismissedThisSession,
     })
-    && totalRuns === 0
-
-  const metricsStatus: 'loading' | 'unavailable' | 'available' = metricsLoading || semanticCasesStatus === 'loading'
-    ? 'loading'
-    : metricsError || semanticCasesStatus === 'unavailable'
-      ? 'unavailable'
-      : metrics
-        ? 'available'
-        : 'loading'
 
   const openMemoryGovernance = useCallback(() => {
     requestOperationsSection('access')

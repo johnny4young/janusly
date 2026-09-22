@@ -3506,7 +3506,6 @@
   "recoveryCenter.greeting.subline.failures_other": "{{count}} ejecuciones necesitan recuperación.",
   "recoveryCenter.greeting.subline.allClear": "Todo en orden — la salud está en {{score}}.",
   "recoveryCenter.greeting.subline.stable": "Estable, pero la salud está en {{score}}. Vale la pena revisarlo.",
-  "recoveryCenter.greeting.subline.clean": "La postura de recuperación está limpia en los últimos 30 días.",
   "recoveryCenter.greeting.subline.semanticCases_one": "{{count}} incidente de resultado de negocio necesita revisión.",
   "recoveryCenter.greeting.subline.semanticCases_other": "{{count}} incidentes de resultado de negocio necesitan revisión.",
   "recoveryCenter.greeting.subline.semanticUnavailable": "No se pudo confirmar la postura de resultados de negocio. Revisa el estado más abajo.",
@@ -4321,5 +4320,11 @@
   "dlq.close.run": "Ejecución: {{id}}",
   "dlq.close.node": "Paso: {{id}}",
   "dlq.close.failed": "No se pudo confirmar el cierre. No se acredita una recuperación. Revisa el error antes de volver a intentarlo.",
-  "dlq.status.acceptedLoss": "Pérdida aceptada"
+  "dlq.status.acceptedLoss": "Pérdida aceptada",
+  "home.health.empty": "Aún sin evidencia",
+  "home.health.stale": "Datos anteriores — actualiza",
+  "home.evidence.empty": "Aún no hay ejecuciones completadas en este periodo. No hay suficiente evidencia para evaluar la salud.",
+  "home.evidence.loading": "Cargando evidencia antes de evaluar la salud del espacio.",
+  "home.evidence.unavailable": "No se pudo confirmar la salud actual. Reintenta para cargar la evidencia.",
+  "home.evidence.stale": "Se muestran datos anteriores; la salud actual no está confirmada. Actualiza antes de tomar decisiones."
 }

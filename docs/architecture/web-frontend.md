@@ -167,3 +167,22 @@ An unconfirmed or failed closure never advances triage or claims recovery. Closi
 uses the existing tenant-scoped API authorization and transition rules; the UI is
 not a substitute for either. Accepted loss does not publish the recovered
 all-clear celebration or promise undo of external effects.
+
+
+### Home evidence states
+
+Home derives health from validated production metrics, not the visible run page.
+An empty completed-run sample is neither healthy nor failed. First-load errors
+are unavailable; retained metrics are explicitly stale during refresh, after
+partial/read failures, or five minutes after the last successful full metrics
+read (checked by the existing minute clock). Impact-only polling does not renew
+that timestamp. Retry requests fresh evidence. The hero withholds scores,
+healthy-history copy and celebrations while evidence is empty or unconfirmed;
+known work remains accessible through the action inbox.
+
+A genuinely empty workspace leads with the existing permission-gated controlled
+drill and workflow creation actions rather than two empty work cards. No drill
+starts on mount; the missing-billing-secret fixture fails before provider egress,
+and its validation evidence stays out of production metrics. The entry is not
+duplicated in Insights, and dismissing it is session-only. Existing workspaces
+with a filtered empty run page keep their operational overview.

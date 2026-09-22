@@ -602,3 +602,69 @@ test('first kilometer against Go: Home cluster CTA lands on an actionable recove
   await expect(passport).not.toContainText('1 occurrence')
   expect(pageErrors).toEqual([])
 })
+
+for (const locale of ['en', 'es'] as const) {
+  test(`Home evidence and provider-free first action against Go in ${locale}`, async ({ page, request }) => {
+    test.setTimeout(90_000)
+    const orgId = `go-home-${locale}-${Date.now()}`
+    await page.addInitScript(({ orgId, locale }) => {
+      localStorage.setItem('janusly:activeOrg', orgId)
+      localStorage.setItem('janusly:locale', locale)
+    }, { orgId, locale })
+    await page.goto('/#/home')
+    const health = page.getByTestId('home-health-summary')
+    await expect(health).toContainText(locale === 'en' ? 'No evidence yet' : 'Aún sin evidencia')
+    await expect(page.getByTestId('recovery-lab-entry')).toBeVisible()
+    await expect(page.getByTestId('home-priority-inbox')).toBeHidden()
+    await expect(page.getByTestId('home-active-work')).toBeHidden()
+    await expect(page.getByTestId('recovery-center-greeting').locator('..')).not.toContainText('Recovery posture is clean')
+    if (locale === 'es') await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: test.info().outputPath(`home-no-evidence-${locale}.png`), animations: 'disabled' })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+    // Real controlled missing-secret drill: no AI key or billing credentials.
+    // UI permission gate and backend authorization remain in the path.
+    const drillResponse = page.waitForResponse(response => response.url().includes('/solution-packs/failed-payment-recovery/inject-failure')
+      && response.request().method() === 'POST')
+    const drill = page.getByTestId('recovery-center-empty-cta-drill')
+    await drill.focus()
+    await page.keyboard.press('Enter')
+    const response = await drillResponse
+    expect(response.ok(), await response.text()).toBe(true)
+    const result = await response.json() as { runId: string; deadLetterId: string }
+    expect(result.runId).toEqual(expect.any(String))
+    const dlqResponse = await request.get(`${API_URL}/v1/dlq/entries/${result.deadLetterId}`, { headers: headers(orgId) })
+    expect(dlqResponse.ok()).toBe(true)
+    const dlq = await dlqResponse.json() as { data: { status: string } }
+    expect(dlq.data.status).toBe('open')
+    await page.goto('/#/home')
+    // Validation evidence never becomes a successful production sample.
+    await expect(health).not.toContainText(locale === 'en' ? 'On track' : 'Todo encaminado')
+    await expect(page.getByTestId('recovery-lab-entry')).toBeHidden()
+    await expect(page.getByTestId('home-priority-inbox')).toBeVisible()
+
+    // The first failed production run is evidence of failure, not an empty sample.
+    const start = await request.post(`${API_URL}/start`, { headers: headers(orgId), data: { workflow: {
+      id: `home-failed-${orgId}`, name: 'Home first failure',
+      nodes: [{ id: 'call', type: 'http', config: { url: 'https://home-evidence.invalid/', timeoutMs: 200, retry: { maxAttempts: 1 } } }], edges: [],
+    } } })
+    expect(start.ok(), await start.text()).toBe(true)
+    const started = await start.json() as { runId: string }
+    await expect.poll(async () => {
+      const response = await request.get(`${API_URL}/v1/status?runId=${started.runId}`, { headers: headers(orgId) })
+      return (await response.json() as { data: { run: { status: string } } }).data.run.status
+    }, { timeout: 30_000 }).toBe('failed')
+    await page.reload()
+    await expect(health).toContainText(locale === 'en' ? 'Needs attention' : 'Necesita atención')
+    await expect(health.getByLabelText(locale === 'en' ? 'Health score 0 of 100' : 'Puntuación de salud 0 de 100')).toBeVisible()
+
+    // A failed first read is unavailable, never the same state as zero samples.
+    await page.route('**/recovery/home', route => route.abort('failed'))
+    await page.reload()
+    await expect(health).toContainText(locale === 'en' ? 'Status is incomplete' : 'El estado está incompleto')
+    await expect(page.getByTestId('recovery-lab-entry')).toBeHidden()
+    await page.unroute('**/recovery/home')
+    await health.getByRole('button', { name: locale === 'en' ? 'Retry' : 'Reintentar', exact: true }).click()
+    await expect(health).not.toContainText(locale === 'en' ? 'Status is incomplete' : 'El estado está incompleto')
+  })
+}
