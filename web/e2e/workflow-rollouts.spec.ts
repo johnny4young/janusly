@@ -245,10 +245,15 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await expect(row).toContainText(workflowName)
   await row.click()
   await openWorkspaceSection(page, 'Workflows', 'Build')
+  await page.route(`**/workflows/${encodeURIComponent(workflowId)}/rollout`, route =>
+    route.fulfill({ json: { rollout: {} } }), { times: 1 })
   await openWorkflowOperation(page, 'Deployment')
 
   const panel = page.getByTestId('workflow-rollout-panel')
   await expect(panel).toContainText('Canary deployment')
+  await expect(panel.getByRole('alert')).toContainText('Deployment state failed to load')
+  await expect(panel.getByRole('button', { name: 'Start canary', exact: true })).toHaveCount(0)
+  await panel.getByRole('button', { name: 'Retry', exact: true }).click()
   await panel.getByLabel('Traffic share').fill('50')
   await panel.getByLabel('Min. outcomes').fill('5')
   await panel.getByLabel('Success floor').fill('80')

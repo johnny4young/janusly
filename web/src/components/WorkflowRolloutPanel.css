@@ -53,7 +53,7 @@
   min-width: 0;
 }
 
-.we-rollout-panel__input-unit input {
+.we-rollout-panel__input-unit[data-unit="true"] input {
   padding-right: 28px;
 }
 

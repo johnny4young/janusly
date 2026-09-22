@@ -120,4 +120,4 @@ JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
 E2E_API_URL="$origin" \
 E2E_UPSTREAM_HOST=host.docker.internal \
 E2E_UPSTREAM_BIND=0.0.0.0 \
-  "${playwright[@]}" test e2e/janusly-smoke.spec.ts e2e/text-search.spec.ts e2e/operator-velocity.spec.ts --project=chromium
+  "${playwright[@]}" test e2e/janusly-smoke.spec.ts e2e/text-search.spec.ts e2e/operator-velocity.spec.ts e2e/workflow-rollouts.spec.ts --project=chromium

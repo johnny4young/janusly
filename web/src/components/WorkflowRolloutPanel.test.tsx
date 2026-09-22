@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { ConfirmProvider } from './ConfirmDialog'
 import { WorkflowRolloutPanel } from './WorkflowRolloutPanel'
 
@@ -86,6 +87,137 @@ describe('<WorkflowRolloutPanel />', () => {
       currentWorkflowSaved: true,
       toasts: [],
     }, true)
+  })
+
+  it('does not keep old version controls when the newly selected workflow fails to load', async () => {
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.includes('workflow-2')) throw new Error('new workflow offline')
+      if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout: null }
+    })
+    render(<WorkflowRolloutPanel />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled())
+    act(() => useWorkflowStore.setState({ currentWorkflowId: 'workflow-2' }))
+    await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
+    expect(screen.queryByRole('button', { name: 'Start canary' })).not.toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.some(([path]) => path.includes('workflow-2/rollout/qualification'))).toBe(false)
+  })
+
+  it.each(['workflow', 'organization', 'user', 'readOnly', 'unmount', 'refresh'] as const)(
+    'does not dispatch an old confirmation after %s changes', async change => {
+      vi.mocked(api).mockImplementation(async path => {
+        if (path.startsWith('/workflows/versions')) return versions
+        if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+        return { rollout: activeRollout() }
+      })
+      const view = render(<ConfirmProvider><WorkflowRolloutPanel /></ConfirmProvider>)
+      fireEvent.click(await screen.findByRole('button', { name: 'Return to baseline' }))
+      if (change === 'refresh') {
+        act(() => invalidateTags([PLATFORM_TAG]))
+        await waitFor(() => expect(vi.mocked(api).mock.calls.filter(([path]) => path.startsWith('/workflows/versions')).length).toBeGreaterThan(1))
+      } else if (change === 'readOnly') view.rerender(<ConfirmProvider><WorkflowRolloutPanel readOnly /></ConfirmProvider>)
+      else if (change === 'unmount') view.rerender(<ConfirmProvider><div>Another destination</div></ConfirmProvider>)
+      else act(() => useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'workflow-2' }
+        : change === 'organization' ? { orgId: 'org-2' } : { userId: 'user-2' }))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
+      await act(async () => {})
+      expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
+    },
+  )
+
+  it('ignores a completed write after the operator switches workflows', async () => {
+    let finish: (value: unknown) => void = () => { throw new Error('not submitted') }
+    const pending = new Promise(resolve => { finish = resolve })
+    vi.mocked(api).mockImplementation(async (path, options) => {
+      if (options?.method === 'POST') return pending
+      if (path.startsWith('/workflows/versions')) return path.includes('workflow-2') ? [] : versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout: null }
+    })
+    render(<WorkflowRolloutPanel />)
+    const start = await screen.findByRole('button', { name: 'Start canary' })
+    await waitFor(() => expect(start).toBeEnabled())
+    fireEvent.click(start)
+    act(() => useWorkflowStore.setState({ currentWorkflowId: 'workflow-2' }))
+    await act(async () => finish({ rollout: activeRollout() }))
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+    expect(screen.queryByTestId('workflow-rollout-status')).not.toBeInTheDocument()
+  })
+
+  it('fails closed for a valid rollout belonging to another workflow', async () => {
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout: activeRollout({ workflowId: 'another-workflow' }) }
+    })
+    render(<WorkflowRolloutPanel />)
+    await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
+    expect(screen.queryByTestId('workflow-rollout-status')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Start canary' })).not.toBeInTheDocument()
+  })
+
+  it.each(['orgId', 'userId'] as const)('refetches the same workflow when %s changes and aborts the previous read owner', async field => {
+    let unavailable = false
+    vi.mocked(api).mockImplementation(async path => {
+      if (unavailable) throw new Error('current context offline')
+      if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout: null }
+    })
+    const view = render(<WorkflowRolloutPanel />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled())
+    const oldSignal = vi.mocked(api).mock.calls.find(([path]) => path.startsWith('/workflows/versions'))?.[1]?.signal
+    unavailable = true
+    act(() => useWorkflowStore.setState({ [field]: 'changed' }))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(oldSignal?.aborted).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Start canary' })).not.toBeInTheDocument()
+    unavailable = false
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled())
+    const newSignal = vi.mocked(api).mock.calls.filter(([path]) => path.startsWith('/workflows/versions')).at(-1)?.[1]?.signal
+    expect(newSignal).toBeInstanceOf(AbortSignal)
+    view.unmount()
+    expect(newSignal?.aborted).toBe(true)
+  })
+
+  it.each([
+    { ...passedQualification(), qualification: { ...passedQualification().qualification, baselineVersionId: 'another-version' } },
+    { required: false, qualification: { status: 'passed' } },
+  ])('cannot start from mismatched or malformed qualification evidence: %j', async qualification => {
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return qualification
+      return { rollout: null }
+    })
+    render(<WorkflowRolloutPanel />)
+    await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
+    expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  it('does not let a late comparison qualify a newly selected baseline', async () => {
+    let finish: (value: unknown) => void = () => { throw new Error('not submitted') }
+    const pending = new Promise(resolve => { finish = resolve })
+    vi.mocked(api).mockImplementation(async (path, options) => {
+      if (path.startsWith('/workflows/versions')) return [{ ...versions[0], id: 'version-3', version: 3 }, ...versions]
+      if (path.includes('/rollout/qualification')) return options?.method === 'POST' ? pending : { required: true, qualification: null }
+      return { rollout: null }
+    })
+    render(<WorkflowRolloutPanel />)
+    const compare = await screen.findByRole('button', { name: 'Run comparison' })
+    await waitFor(() => expect(compare).toBeEnabled())
+    fireEvent.click(compare)
+    const signal = vi.mocked(api).mock.calls.find(([, options]) => options?.method === 'POST')?.[1]?.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    fireEvent.change(screen.getByLabelText('Baseline version'), { target: { value: 'version-1' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Run comparison' })).toBeEnabled())
+    await act(async () => finish(passedQualification({ baselineVersionId: 'version-2', candidateVersionId: 'version-3' })))
+    expect(signal?.aborted).toBe(true)
+    expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
+    expect(screen.getByTestId('workflow-recovery-qualification')).not.toHaveTextContent('Passed')
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
   })
 
   it('does not fetch deployment state for an unsaved draft', () => {
@@ -190,7 +322,8 @@ describe('<WorkflowRolloutPanel />', () => {
 
     render(<WorkflowRolloutPanel />)
 
-    expect(await screen.findByRole('button', { name: 'Start canary' })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Start canary' })).not.toBeInTheDocument()
     expect(screen.queryByTestId('workflow-rollout-status')).not.toBeInTheDocument()
   })
 
@@ -220,6 +353,7 @@ describe('<WorkflowRolloutPanel />', () => {
     const comparison = await screen.findByTestId('workflow-recovery-qualification')
     expect(comparison).toHaveTextContent('Outcome dataset comparison')
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Run comparison' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Run comparison' }))
 
     expect(await screen.findByText('4/4')).toBeInTheDocument()
@@ -264,7 +398,7 @@ describe('<WorkflowRolloutPanel />', () => {
     render(<WorkflowRolloutPanel />)
 
     const comparison = await screen.findByTestId('workflow-recovery-qualification')
-    expect(comparison).toHaveTextContent('Baseline · approved-payment · outcome')
+    await waitFor(() => expect(comparison).toHaveTextContent('Baseline · approved-payment · outcome'))
     expect(comparison).toHaveTextContent('The candidate no longer evaluates this source node.')
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
   })

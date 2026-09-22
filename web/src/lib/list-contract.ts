@@ -75,11 +75,11 @@ export type WorkflowVersionRow = Pick<ApiResponses['GET /workflows/versions'][nu
   dagJson: WorkflowDefinition
 }
 
-export async function readWorkflowVersionPage(workflowId: string, options: { beforeVersion?: number; version?: number; limit?: number } = {}): Promise<WorkflowVersionRow[]> {
+export async function readWorkflowVersionPage(workflowId: string, options: { beforeVersion?: number; version?: number; limit?: number } = {}, signal?: AbortSignal): Promise<WorkflowVersionRow[]> {
   const query = new URLSearchParams({ workflowId })
   for (const [key, value] of Object.entries(options)) if (value !== undefined) query.set(key, String(value))
   const [value, { isWorkflowDefinition }] = await Promise.all([
-    contractApi('GET /workflows/versions', `/workflows/versions?${query}`, undefined), import('./authoring-contract'),
+    contractApi('GET /workflows/versions', `/workflows/versions?${query}`, undefined, signal ? { signal } : undefined), import('./authoring-contract'),
   ])
   if (!Array.isArray(value) || value.length > 200) throw malformed()
   const rows: WorkflowVersionRow[] = []

@@ -62,6 +62,8 @@ docker compose -p janusly-w1 down --volumes   # when done — do not leave it ru
 The executable browser lane also runs the operator keyboard-triage proof in
 English and Spanish: accepted-loss confirmation, cancellation, focus recovery and
 copy/palette navigation use real seeded failures, not mocked UI mutations.
+It also exercises outcome qualification, bounded canary creation and automatic
+baseline return, with English and Spanish deployment views.
 
 The executable shutdown integration test builds `cmd/api`, creates and migrates
 its own UUID-named database, and starts the binary with an explicit environment

@@ -45,6 +45,14 @@ describe('list read boundaries', () => {
     expect(contractApi).toHaveBeenLastCalledWith('GET /workflows', '/workflows', undefined)
   })
 
+  it('forwards version cancellation separately from bounded query options', async () => {
+    respond([])
+    const signal = new AbortController().signal
+    await readWorkflowVersionPage('workflow-a', { limit: 50, beforeVersion: 3 }, signal)
+    expect(contractApi).toHaveBeenLastCalledWith('GET /workflows/versions',
+      '/workflows/versions?workflowId=workflow-a&limit=50&beforeVersion=3', undefined, { signal })
+  })
+
   it('preserves network failures rather than manufacturing empty pages', async () => {
     const error = new Error('unreadable response')
     vi.mocked(contractApi).mockRejectedValue(error)
@@ -79,7 +87,7 @@ describe('list read boundaries', () => {
     expect(await readWorkflowVersionPage(workflow.id, { beforeVersion: 3, limit: 50 })).toEqual([
       { id: version.id, version: 2, dagJson: workflow, createdAt: null },
     ])
-    expect(contractApi).toHaveBeenLastCalledWith('GET /workflows/versions', '/workflows/versions?workflowId=workflow-a&beforeVersion=3&limit=50', undefined)
+    expect(contractApi).toHaveBeenLastCalledWith('GET /workflows/versions', '/workflows/versions?workflowId=workflow-a&beforeVersion=3&limit=50', undefined, undefined)
     await expect(readWorkflowVersionPage(workflow.id, { version: 2 })).resolves.toHaveLength(1)
     await expect(readWorkflowVersionPage(workflow.id, { version: 1 })).rejects.toThrow()
     await expect(readWorkflowVersionPage(workflow.id, { beforeVersion: 2 })).rejects.toThrow()

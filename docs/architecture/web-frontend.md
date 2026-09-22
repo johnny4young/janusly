@@ -140,6 +140,20 @@ store. There is no parallel global refresh counter. When adding a panel,
 declare its tags next to the component; when adding a mutation, pass the tags
 it changes, or leave the call untagged when the blast radius is unclear.
 
+## Workflow deployment ownership
+
+Rollout controls own their reads, qualification evidence and pending writes for
+one organization, operator, saved workflow and permission mode. Changing that
+context remounts the controls and aborts their requests; refresh also invalidates
+pending confirmations. A stale confirmation cannot dispatch even if its dialog
+was already open. Cancellation does not undo a write the server already received;
+the next read is authoritative.
+
+Qualification evidence must match the selected immutable baseline/candidate pair.
+Malformed deployment or qualification payloads fail closed with an inline retry,
+not an empty deployment or permission to start. The numeric controls retain
+native range validation and visible localized labels.
+
 ## Bundle budgets
 
 `performance-budgets.json` is a ratchet, not a target: the total artifact,
