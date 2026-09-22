@@ -139,6 +139,14 @@ parameters, rows, statement count, and timeout. `db.schema.describe` and
 the database, not the lexical classifier, is the final write-prevention
 authority. External pools are bounded per organization and process, use one
 connection each, and are replaced when the credential fingerprint changes.
+Caller leases span connection acquisition through transaction cleanup. Rotation
+retires the old pool immediately from new admission; current callers finish on
+it, and the last caller closes it outside the cache mutex. Retired pools count
+against both physical pool budgets until closed. Same-organization eviction
+selects only idle LRU entries; busy capacity returns `db_pool_exhausted`, never
+cross-tenant eviction or an unbounded wait. The operation deadline also covers
+connection acquisition. Shutdown stops admission and drains all leases after
+the supervised workers stop, before runtime database pools close.
 Validation mode suppresses every write-capable database operation.
 
 `sheet.append` serializes each tenant/object key with a PostgreSQL advisory

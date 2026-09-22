@@ -30,7 +30,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 | Lane | Command | Needs |
 |---|---|---|
 | Go unit (race) | `make test` | nothing |
-| Go integration | `make test-integration` | `JANUSLY_DATABASE_URL` pointing at a migrated PostgreSQL; runs `-p 1` |
+| Go integration | `make test-integration` | `JANUSLY_DATABASE_URL` pointing at a migrated PostgreSQL test role with `CREATEDB`; runs `-p 1` |
 | Web unit (jsdom) | `cd web && pnpm test` | nothing; CSS is not parsed |
 | Web browser (Chromium) | `cd web && pnpm test:browser` | Playwright browsers |
 | Web scripts | `cd web && pnpm test:scripts` | nothing |
@@ -55,6 +55,12 @@ JANUSLY_DATABASE_URL='postgres://janusly:janusly-local@127.0.0.1:15499/janusly?s
   go test -tags integration -p 1 ./internal/engine/ -run 'Diamond|Claim'
 docker compose -p janusly-w1 down --volumes   # when done — do not leave it running
 ```
+
+The executable shutdown integration test builds `cmd/api`, creates and migrates
+its own UUID-named database, and starts the binary with an explicit environment
+without provider credentials. It signals SIGTERM during a real external DB-tool
+query, verifies durable completion and pool drain, and removes only its owned
+database. The Compose test role already has the required `CREATEDB` privilege.
 
 Any Janusly process on the same database (a soak, `make dev`) claims queued
 nodes: tests that `StartRun` and then `claimBatch` race with it. Seed rows by

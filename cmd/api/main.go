@@ -32,6 +32,7 @@ import (
 	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/secretstore"
+	"github.com/johnny4young/janusly/internal/tools"
 	"github.com/johnny4young/janusly/internal/upstream"
 	"github.com/johnny4young/janusly/internal/usage"
 )
@@ -203,6 +204,12 @@ func run() error {
 		return err
 	}
 	defer workerPool.Close()
+	// Registered before the runner: external tool pools drain after workers,
+	// but before the runtime database pools close.
+	defer func() {
+		tools.CloseDbPools()
+		logger.Info("external database pools drained")
+	}()
 	if err := boot.ProbeMigrations(ctx, pool); err != nil {
 		return err
 	}

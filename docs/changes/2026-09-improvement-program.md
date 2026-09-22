@@ -58,3 +58,16 @@ identity/redaction, and the five two-instance HA tests with four connections per
 pool. HA passes both without session timeouts and with the worker pool's
 production-equivalent statement, lock and idle-transaction limits. This is
 local engine evidence, not an executable deployment qualification.
+
+## External database pool ownership
+
+Database tools now lease cached pools for the whole operation. Credential
+rotation retires a pool without blocking other tenants; final lease release
+closes it outside the cache mutex. Retired pools remain counted against the
+five-per-organization and configured process limits. Idle same-tenant LRU
+replacement preserves capacity; all-busy capacity fails with the existing
+`db_pool_exhausted` envelope rather than oversubscribing connections. The query
+budget includes connection acquisition, and the runtime drains tool pools after
+its workers. Real PostgreSQL race tests cover rotation, physical accounting,
+eviction, cancellation, concurrent admission and shutdown. An executable-level
+SIGTERM test verifies that an active external query completes before pool drain.

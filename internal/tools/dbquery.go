@@ -12,36 +12,28 @@
 //     ever echoed (safeDbError redacts postgres:// URLs + secret shapes).
 //   - SQL validation rejects semicolons, comments, DDL/session-control
 //     verbs, verb-class mismatches, and placeholder/param mismatches.
-//   - Pools are keyed org+credential: max five external pools per
-//     org/process, ONE connection each; a rotated DSN (fingerprint
-//     change) swaps the pool.
+//   - Pools are keyed org+credential: five per org and a process cap
+//     (default 25), one connection each. Retired pools count until closed;
+//     caller leases preserve in-flight work during credential rotation.
 //   - Envelopes never throw; write tools carry WriteSide (dry-run skip).
 package tools
 
 import (
-	"errors"
-	"os"
-
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/signature"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 const (
@@ -333,108 +325,6 @@ func validateDbTransactionInput(input map[string]any, options InputValidationOpt
 		}
 	}
 	return nil
-}
-
-/* ------------------------------ pool cache ----------------------------- */
-
-type dbPoolEntry struct {
-	pool        *pgxpool.Pool
-	orgID       string
-	fingerprint string
-	touchedAt   time.Time
-}
-
-var (
-	dbPoolsMu sync.Mutex
-	dbPools   = map[string]*dbPoolEntry{}
-)
-
-// errDbPoolExhausted is the stable never-throw sentinel: at the process
-// cap the tool answers {ok:false, error:"db_pool_exhausted"}.
-var errDbPoolExhausted = errors.New("db_pool_exhausted")
-
-// metricDbToolPools gauges the live external-pool count for dashboards.
-var metricDbToolPools = promauto.NewGauge(prometheus.GaugeOpts{
-	Name: "janusly_db_tool_pools",
-	Help: "Cached external db-tool connection pools in this process.",
-})
-
-// dbMaxProcessPools resolves the PROCESS-wide external-pool cap: env
-// JANUSLY_DB_TOOL_MAX_PROCESS_POOLS (1..500) or the default 25. One
-// noisy tenant can exhaust its own 5-pool budget, never the process.
-func dbMaxProcessPools() int {
-	if raw := os.Getenv("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 500 {
-			return n
-		}
-	}
-	return dbMaxProcessPoolsDefault
-}
-
-// ResetDbPoolsForTests closes and forgets every cached external pool.
-func ResetDbPoolsForTests() {
-	dbPoolsMu.Lock()
-	defer dbPoolsMu.Unlock()
-	for key, entry := range dbPools {
-		entry.pool.Close()
-		delete(dbPools, key)
-	}
-	metricDbToolPools.Set(0)
-}
-
-// getDbPool caches ONE-connection pools per (org, credential), swapping on
-// a DSN fingerprint change and evicting the org's LRU pool past the cap.
-func getDbPool(ctx context.Context, orgID, credentialName, dsn string) (*pgxpool.Pool, error) {
-	key := orgID + "\x00" + credentialName
-	digest := sha256.Sum256([]byte(dsn))
-	fingerprint := hex.EncodeToString(digest[:])
-
-	dbPoolsMu.Lock()
-	defer dbPoolsMu.Unlock()
-	if existing, ok := dbPools[key]; ok {
-		if existing.fingerprint == fingerprint {
-			existing.touchedAt = time.Now()
-			return existing.pool, nil
-		}
-		existing.pool.Close()
-		delete(dbPools, key)
-	}
-	// Evict the org's least-recently-used pool past the cap.
-	var orgKeys []string
-	for candidateKey, entry := range dbPools {
-		if entry.orgID == orgID {
-			orgKeys = append(orgKeys, candidateKey)
-		}
-	}
-	if len(orgKeys) >= dbMaxOrgPools {
-		sort.Slice(orgKeys, func(a, b int) bool {
-			return dbPools[orgKeys[a]].touchedAt.Before(dbPools[orgKeys[b]].touchedAt)
-		})
-		oldest := orgKeys[0]
-		dbPools[oldest].pool.Close()
-		delete(dbPools, oldest)
-	}
-	// Process-wide semaphore over the TOTAL: a net-new pool past
-	// the cap answers the stable exhausted sentinel instead of growing —
-	// deliberately NO cross-org eviction, so one tenant cannot thrash
-	// another tenant's warm pools.
-	if len(dbPools) >= dbMaxProcessPools() {
-		return nil, errDbPoolExhausted
-	}
-
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		return nil, fmt.Errorf("invalid postgres credential value")
-	}
-	config.MaxConns = 1
-	config.ConnConfig.ConnectTimeout = 10 * time.Second
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("could not open external database pool")
-	}
-	dbPools[key] = &dbPoolEntry{pool: pool, orgID: orgID, fingerprint: fingerprint, touchedAt: time.Now()}
-	metricDbToolPools.Set(float64(len(dbPools)))
-	return pool, nil
 }
 
 /* ------------------------------ shaping -------------------------------- */
@@ -810,6 +700,9 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 		return answerError(rejected)
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(plan.timeoutMs)*time.Millisecond)
+	defer cancel()
+
 	rateLimit := dbDefaultRateLimitPerMin
 	if deps.RateLimitPerMin != nil {
 		rateLimit = deps.RateLimitPerMin("db", dbDefaultRateLimitPerMin)
@@ -824,16 +717,18 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 	}
 	// From here on every error may quote the resolved DSN verbatim.
 	safeErr := func(err error) string { return safeDbError(err, dsn) }
-	pool, err := getDbPool(ctx, orgID, credential, dsn)
+	lease, err := getDbPool(ctx, orgID, credential, dsn)
 	if err != nil {
 		return answerError(safeErr(err))
 	}
+
+	defer lease.Release()
 
 	txOptions := pgx.TxOptions{}
 	if plan.readOnly {
 		txOptions.AccessMode = pgx.ReadOnly
 	}
-	tx, err := pool.BeginTx(ctx, txOptions)
+	tx, err := lease.pool.BeginTx(ctx, txOptions)
 	if err != nil {
 		return answerError(safeErr(err))
 	}

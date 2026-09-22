@@ -29,9 +29,9 @@ func TestGlobalDbPoolCap(t *testing.T) {
 
 	// 2 orgs × 5 credentials fill the process cap exactly — the per-org
 	// budget (5) is respected while the global total reaches 10.
-	for org := 0; org < 2; org++ {
-		for cred := 0; cred < 5; cred++ {
-			if _, err := getDbPool(ctx, fmt.Sprintf("cap-org-%d", org), fmt.Sprintf("cred-%d", cred), dsn); err != nil {
+	for org := range 2 {
+		for cred := range 5 {
+			if _, err := getIdleDbPool(ctx, fmt.Sprintf("cap-org-%d", org), fmt.Sprintf("cred-%d", cred), dsn); err != nil {
 				t.Fatalf("org %d cred %d must open below the cap: %v", org, cred, err)
 			}
 		}
@@ -42,7 +42,7 @@ func TestGlobalDbPoolCap(t *testing.T) {
 
 	// A third org's NET-NEW pool hits the semaphore: stable sentinel, no
 	// cross-org eviction (the warm pools survive and keep serving).
-	if _, err := getDbPool(ctx, "cap-org-2", "cred-0", dsn); !errors.Is(err, errDbPoolExhausted) {
+	if _, err := getIdleDbPool(ctx, "cap-org-2", "cred-0", dsn); !errors.Is(err, errDbPoolExhausted) {
 		t.Fatalf("past the cap must answer the exhausted sentinel, got %v", err)
 	}
 	if safeDbError(errDbPoolExhausted) != "db_pool_exhausted" {
@@ -51,13 +51,13 @@ func TestGlobalDbPoolCap(t *testing.T) {
 	if got := testutil.ToFloat64(metricDbToolPools); got != 10 {
 		t.Fatalf("a rejected pool must not move the gauge, got %v", got)
 	}
-	if pool, err := getDbPool(ctx, "cap-org-0", "cred-3", dsn); err != nil || pool == nil {
+	if pool, err := getIdleDbPool(ctx, "cap-org-0", "cred-3", dsn); err != nil || pool == nil {
 		t.Fatalf("warm pools must keep serving at the cap: %v", err)
 	}
 
 	// An org past ITS OWN budget swaps its LRU (net-zero) even at the
 	// process cap — the sixth credential evicts cred-0, total stays 10.
-	if _, err := getDbPool(ctx, "cap-org-0", "cred-5", dsn); err != nil {
+	if _, err := getIdleDbPool(ctx, "cap-org-0", "cred-5", dsn); err != nil {
 		t.Fatalf("per-org LRU swap must succeed at the global cap: %v", err)
 	}
 	if got := testutil.ToFloat64(metricDbToolPools); got != 10 {
@@ -69,7 +69,7 @@ func TestGlobalDbPoolCap(t *testing.T) {
 	if got := testutil.ToFloat64(metricDbToolPools); got != 0 {
 		t.Fatalf("reset must zero the gauge, got %v", got)
 	}
-	if _, err := getDbPool(ctx, "cap-org-2", "cred-0", dsn); err != nil {
+	if _, err := getIdleDbPool(ctx, "cap-org-2", "cred-0", dsn); err != nil {
 		t.Fatalf("capacity must recover after reset: %v", err)
 	}
 }
