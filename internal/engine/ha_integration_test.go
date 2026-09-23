@@ -131,21 +131,38 @@ func TestHACampaignNoDoubleDispatch(t *testing.T) {
 		t.Fatalf("want 10 dead letters, got %d", len(ids))
 	}
 
-	// The campaign at fast pacing; BOTH pumps are already polling.
+	// Publish the campaign and its cohort atomically, as the HTTP creation
+	// path does. Otherwise either pump can complete the visible empty campaign
+	// before autocommit inserts the first item.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin campaign: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	campaignID := fmt.Sprintf("camp-ha-%d", time.Now().UnixNano())
-	if _, err := pool.Exec(ctx, `INSERT INTO replay_campaigns
+	if _, err := tx.Exec(ctx, `INSERT INTO replay_campaigns
 		(id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, created_by, next_dispatch_at, started_at)
 		VALUES ($1, $2, 'ha drain', 'sig', '{}', 40, 'running', 10, 'ha-test', now(), now())`,
 		campaignID, org); err != nil {
 		t.Fatalf("campaign: %v", err)
 	}
+	var visible int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM replay_campaigns WHERE id = $1`, campaignID).Scan(&visible); err != nil {
+		t.Fatalf("check unpublished campaign: %v", err)
+	}
+	if visible != 0 {
+		t.Fatalf("campaign must not be visible before its cohort commits: %d", visible)
+	}
 	for position, id := range ids {
-		if _, err := pool.Exec(ctx, `INSERT INTO replay_campaign_items
+		if _, err := tx.Exec(ctx, `INSERT INTO replay_campaign_items
 			(id, org_id, campaign_id, dead_letter_id, position)
 			VALUES ($1, $2, $3, $4, $5)`,
 			fmt.Sprintf("%s-item-%d", campaignID, position), org, campaignID, id, position); err != nil {
 			t.Fatalf("item: %v", err)
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("publish campaign and cohort: %v", err)
 	}
 
 	deadline := time.Now().Add(90 * time.Second)
