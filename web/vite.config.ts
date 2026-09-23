@@ -7,6 +7,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { minify as minifyWithTerser } from 'terser'
 import { compactI18nCatalogs } from './scripts/compact-i18n-plugin.mjs'
+import { injectBuildStamp } from './scripts/build-stamp'
 import { resolveWebTestWorkerLimit } from './vitest-worker-policy.js'
 
 /**
@@ -26,10 +27,16 @@ function buildId(): string {
   }
 }
 
+const buildStamp = buildId()
+
 const apiRoutePattern = '^/(?:v1|health|auth|ai|workflows|runs|run|start|status|cancel|resume|dlq|validate|org|organizations|members|roles|credentials|mcp|recovery|auto-healing|reports|billing|usage|memory|triggers|webhooks|pagerduty|solution-packs|templates|packs|plugins|snippets|onboarding|users|eval|experiments|causal|system|prompts|audit|scim|upstream|integrations|tools|directories|browser-session|identity|sso|external-runtime|rollouts|alerts|replay)(?:/|$|\\?)'
 
 export default defineConfig(({ mode }) => ({
   plugins: [
+    {
+      name: 'janusly-html-build-stamp',
+      transformIndexHtml(html) { return injectBuildStamp(html, buildStamp) },
+    },
     compactI18nCatalogs({
       canonicalPath: resolve(import.meta.dirname, 'src/i18n/locales/en/common.json'),
     }),
@@ -59,9 +66,6 @@ export default defineConfig(({ mode }) => ({
   ],
   resolve: {
     alias: { '@': resolve(import.meta.dirname, 'src') },
-  },
-  define: {
-    __BUILD_ID__: JSON.stringify(buildId()),
   },
   server: {
     port: 5173,

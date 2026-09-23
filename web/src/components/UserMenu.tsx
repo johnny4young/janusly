@@ -33,6 +33,7 @@ import { AuthProvider } from '../auth'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
+import { readBuildId } from '../lib/build-id'
 import type { OnboardingState } from '@/lib/onboarding'
 import { requestOperationsSection } from './operations-section-bus'
 import {
@@ -329,7 +330,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
               <strong>{currentOrganization?.name ?? orgId ?? 'default'}</strong>
               <small>
                 <span className={`user-menu__env user-menu__env--${env}`}>{envLabel}</span>
-                <span className="user-menu__build">build {__BUILD_ID__}</span>
+                <span className="user-menu__build">build {readBuildId()}</span>
               </small>
             </div>
             {canOpenOperations && <button

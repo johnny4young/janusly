@@ -46,6 +46,7 @@ import {
 } from './workspace-locations'
 import { DOCS_URL } from './docs-link'
 import { useT } from './i18n'
+import { readBuildId } from './lib/build-id'
 
 const CanvasWorkspace = lazy(() => import('./components/CanvasWorkspace').then((module) => ({
   default: module.CanvasWorkspace,
@@ -422,7 +423,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
               </>
             )}
             <span className="bottom-status-bar__item">
-              {header.organizationLabel} · build <span>{__BUILD_ID__}</span>
+              {header.organizationLabel} · build <span>{readBuildId()}</span>
             </span>
             <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
             <button

@@ -8,6 +8,12 @@ bundle with SPA fallback, one-year immutable caching for hashed `/assets/`, and
 `no-cache` for the HTML shell and top-level files. Vite proxies API paths to
 `127.0.0.1:3001` during development.
 
+The operator-visible build stamp is injected into the no-cache HTML root and
+read by the browser from that document. It is not compiled into hashed JS:
+building unchanged frontend source for a new commit must not invalidate every
+asset or make gzip budgets depend on the commit ID. The Go binary's verified
+commit/tree provenance remains the authoritative runtime identity.
+
 The Go browser boundary applies the CORS allowlist and defense-in-depth browser
 headers to API, SPA, and public responses: CSP, frame denial, MIME sniffing
 prevention, a bounded permissions policy, and a referrer policy. New browser
