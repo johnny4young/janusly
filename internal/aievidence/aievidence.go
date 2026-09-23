@@ -112,13 +112,3 @@ func SignatureRuleRow(failureSignature string) Row {
 		Label:   "Failure signature",
 	}
 }
-
-// ToolContractRow builds the tool_contract evidence for a failing tool
-// node from the registry entry the route already resolved.
-func ToolContractRow(toolName, description string, required []string) Row {
-	return Row{
-		Kind: "tool_contract", SourceRef: toolName,
-		Snippet: description + " Required inputs: " + strings.Join(required, ", "),
-		Label:   "Tool contract: " + toolName,
-	}
-}

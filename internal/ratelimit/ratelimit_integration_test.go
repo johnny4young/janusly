@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/store"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {
@@ -73,9 +74,41 @@ func TestEnforceFixedWindow(t *testing.T) {
 		t.Fatalf("next window must reset: %v", err)
 	}
 
-	// Cleanup drops the expired windows once the clock passes them.
-	if _, err := CleanupExpired(ctx, pool); err != nil {
+	// Exercise the same generated query that the engine's retention loop uses.
+	// The expired test windows must disappear while a future one remains.
+	var expiredBefore int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM rate_limit_windows
+		WHERE name=$1 AND key=$2`, opts.Name, key).Scan(&expiredBefore); err != nil {
+		t.Fatalf("count expired windows: %v", err)
+	}
+	if expiredBefore != 2 {
+		t.Fatalf("test windows before cleanup = %d, want 2", expiredBefore)
+	}
+	futureKey := key + "-future"
+	futureStart := time.Now().UTC().Add(time.Hour).Truncate(time.Minute)
+	if _, err := pool.Exec(ctx, `INSERT INTO rate_limit_windows
+		(name, key, window_start, count, expires_at) VALUES ($1, $2, $3, 1, $4)`,
+		opts.Name, futureKey, futureStart, futureStart.Add(time.Minute)); err != nil {
+		t.Fatalf("seed future window: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM rate_limit_windows
+			WHERE name=$1 AND key=$2`, opts.Name, futureKey)
+	})
+	if _, err := store.New(pool).CleanupExpiredRateWindows(ctx); err != nil {
 		t.Fatalf("cleanup: %v", err)
+	}
+	var expiredAfter, futureAfter int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM rate_limit_windows
+		WHERE name=$1 AND key=$2`, opts.Name, key).Scan(&expiredAfter); err != nil {
+		t.Fatalf("count expired windows after cleanup: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM rate_limit_windows
+		WHERE name=$1 AND key=$2`, opts.Name, futureKey).Scan(&futureAfter); err != nil {
+		t.Fatalf("count future window after cleanup: %v", err)
+	}
+	if expiredAfter != 0 || futureAfter != 1 {
+		t.Fatalf("cleanup windows: expired=%d future=%d, want 0 and 1", expiredAfter, futureAfter)
 	}
 }
 

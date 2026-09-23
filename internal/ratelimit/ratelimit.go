@@ -222,12 +222,6 @@ func (l *Limiter) fireSuccess(bucket, key string) {
 	fireHook(func() { l.hooks.OnSuccess(bucket, key) }, l.hooks.OnSuccess == nil)
 }
 
-// CleanupExpired removes windows whose expiry passed; wired to the
-// engine's maintenance cadence so the table never accumulates.
-func CleanupExpired(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
-	return store.New(pool).CleanupExpiredRateWindows(ctx)
-}
-
 // fireHook runs a hook defensively: nil-safe and panic-absorbing.
 func fireHook(run func(), skip bool) {
 	if skip {
