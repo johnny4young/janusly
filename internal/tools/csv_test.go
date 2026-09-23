@@ -7,10 +7,21 @@ import (
 	"testing"
 )
 
+func parseCSVThroughRegistry(t *testing.T, input string, hasHeader bool) []any {
+	t.Helper()
+	result, err := NewRegistry().Execute(context.Background(), "csv.parse", map[string]any{
+		"value": input, "hasHeader": hasHeader,
+	})
+	if err != nil {
+		t.Fatalf("parse CSV through registry: %v", err)
+	}
+	return result["rows"].([]any)
+}
+
 // Grammar cases implements the contract's csv tests: quotes, escapes,
 // embedded newlines, CRLF, BOM, trailing rows.
 func TestParseCsvGrammar(t *testing.T) {
-	rows := ParseCsv("a,b\n1,\"x,y\"\n2,\"say \"\"hi\"\"\"", true).([]any)
+	rows := parseCSVThroughRegistry(t, "a,b\n1,\"x,y\"\n2,\"say \"\"hi\"\"\"", true)
 	if len(rows) != 2 {
 		t.Fatalf("rows: %+v", rows)
 	}
@@ -21,21 +32,24 @@ func TestParseCsvGrammar(t *testing.T) {
 	}
 
 	// Quoted fields may span newlines; CRLF is one terminator; BOM strips.
-	multi := ParseCsv("\uFEFF"+"name,note\r\nada,\"line1\nline2\"\r\n", true).([]any)
+	multi := parseCSVThroughRegistry(t, "\uFEFF"+"name,note\r\nada,\"line1\nline2\"\r\n", true)
 	if multi[0].(map[string]any)["note"] != "line1\nline2" {
 		t.Fatalf("embedded newline: %+v", multi)
 	}
 
 	// No header → arrays; missing trailing newline keeps the last row.
-	raw := ParseCsv("1,2\n3,4", false).([]any)
+	raw := parseCSVThroughRegistry(t, "1,2\n3,4", false)
 	if len(raw) != 2 || !reflect.DeepEqual(raw[1], []any{"3", "4"}) {
 		t.Fatalf("headerless: %+v", raw)
 	}
 
-	// Short rows pad with "" against the header.
-	padded := ParseCsv("a,b,c\n1,2", true).([]any)
-	if padded[0].(map[string]any)["c"] != "" {
-		t.Fatalf("padding: %+v", padded)
+	// The actual tool rejects inconsistent width instead of padding an
+	// apparently valid object with invented empty cells.
+	_, err := NewRegistry().Execute(context.Background(), "csv.parse", map[string]any{
+		"value": "a,b,c\n1,2", "hasHeader": true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "row 2 has 2 columns; expected 3") {
+		t.Fatalf("short CSV row was accepted: %v", err)
 	}
 }
 
@@ -43,7 +57,10 @@ func TestParseCsvGrammar(t *testing.T) {
 // split across chunks and a CRLF split across chunks.
 func TestFeedCsvChunkBoundaries(t *testing.T) {
 	full := "a,b\r\n\"say \"\"hi\"\"\",2\r\n"
-	want := parseCsvRows(full)
+	want, err := parseCsvRowsStrict(full)
+	if err != nil {
+		t.Fatalf("parse expected rows: %v", err)
+	}
 	for cut := 1; cut < len(full); cut++ {
 		state := NewCsvParseState()
 		rows := state.FeedCsvChunk(full[:cut])
@@ -83,7 +100,7 @@ func TestCSVStrictGrammarRejectsAmbiguousInput(t *testing.T) {
 func TestStringifyRoundTripAndValidation(t *testing.T) {
 	rows := []any{map[string]any{"a": "x,y", "b": `q"z`}}
 	csv := StringifyCsv(rows, []string{"a", "b"})
-	back := ParseCsv(csv, true).([]any)
+	back := parseCSVThroughRegistry(t, csv, true)
 	if !reflect.DeepEqual(back[0], rows[0]) {
 		t.Fatalf("round trip: %q → %+v", csv, back)
 	}

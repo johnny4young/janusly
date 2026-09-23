@@ -33,10 +33,15 @@ func TestRenderMarkdownPDF(t *testing.T) {
 }
 
 // Substitution: known placeholders replace, unknown stay VISIBLE.
-func TestSubstituteVariables(t *testing.T) {
-	out := SubstituteVariables("# Invoice {{number}} for {{customer}}", map[string]string{"number": "INV-1"})
-	if out != "# Invoice INV-1 for {{customer}}" {
-		t.Fatalf("substitution: %q", out)
+func TestSubstitutePDFVariablesBounded(t *testing.T) {
+	out, withinLimit := substitutePDFVariablesBounded("# Invoice {{number}} for {{customer}}",
+		map[string]string{"number": "INV-1"}, 128)
+	if !withinLimit || out != "# Invoice INV-1 for {{customer}}" {
+		t.Fatalf("bounded substitution: %q, withinLimit=%v", out, withinLimit)
+	}
+	if _, withinLimit := substitutePDFVariablesBounded("{{number}}",
+		map[string]string{"number": strings.Repeat("x", 129)}, 128); withinLimit {
+		t.Fatal("expanded PDF variable exceeded the byte limit")
 	}
 }
 

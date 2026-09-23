@@ -242,17 +242,11 @@ func parseCsvRowsStrict(input string) ([][]string, error) {
 	return rows, nil
 }
 
+// parseCsvRows is used by sheet.append to decode its existing CSV header.
 func parseCsvRows(input string) [][]string {
 	state := NewCsvParseState()
 	rows := state.FeedCsvChunk(input)
 	return append(rows, state.FinalizeCsvParse()...)
-}
-
-// ParseCsv parses a whole CSV string. With header (default), rows become
-// objects keyed by the header tokens; without, plain string arrays.
-func ParseCsv(input string, hasHeader bool) any {
-	rows := parseCsvRows(input)
-	return shapeCsvRows(rows, hasHeader)
 }
 
 func shapeCsvRows(rows [][]string, hasHeader bool) any {
