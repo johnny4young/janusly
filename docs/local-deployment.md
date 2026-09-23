@@ -148,20 +148,76 @@ switching, or application reconnection. These measurements are not an RTO or
 RPO promise. Operators must agree targets and separately drill all recovery
 domains before claiming production readiness.
 
+### Binary, snapshot, and schema compatibility
+
+The migration policy is **one fresh PostgreSQL 18 baseline**, not incremental
+upgrades of existing databases. `schema.sql` is generated evidence, not an
+upgrade script. A backup manifest records the PostgreSQL major, migration
+version, dump checksum, and SHA-256 of the embedded migration SQL source. The
+restore helper checks the major, dump checksum, schema-source hash and any
+required credential-key fingerprint before restoring, then compares the
+restored migration version with the manifest. Its Git commit/tree fields are
+provenance, **not** a compatibility override.
+
+| Database or snapshot | Candidate binary | Supported operator action |
+| --- | --- | --- |
+| Empty PostgreSQL 18 database | Verified binary built from the current baseline | Apply `janusly migrate`; qualify readiness and a controlled workflow. |
+| PostgreSQL 18 custom dump with matching migration-source SHA-256 and migration version | Same previously qualified binary | Restore to a **new empty** PostgreSQL 18 target, run migration as a no-op, then qualify before traffic cutover. |
+| Matching migration-source SHA-256 but a different commit/tree | New or previous verified binary | The helper permits a local restore, but hash equality alone does not prove application compatibility. Qualify that exact image against a restored isolated copy before cutover or rollback. |
+| Different migration-source SHA-256 or migration version | Any binary | **Unsupported against the existing database.** No automatic upgrade/downgrade bridge exists; do not run a new baseline over persisted data. Decide an explicit data migration or replace from a compatible snapshot with the owner. |
+| Non-PostgreSQL-18 database, nonempty target, invalid dump checksum, or mismatched credential key | Any binary | Restore is refused. Preserve the source and investigate; never use `db-reset` as recovery. |
+
+For an incident, record the last known-good image digest and verified
+commit/tree, the backup manifest and timestamp, credential-key escrow owner,
+Supabase identity recovery owner, and the application's measured business
+impact. Stop new traffic using the platform's approved control and allow the
+Janusly process to drain on SIGTERM before replacing it; do not discard the
+original database or its durable queue. Restore into a new isolated target,
+check the manifest and key through the helper, run the migration command as a
+no-op, and verify `/readyz`, the private metrics path, a tenant-scoped read,
+and one controlled workflow before a separately approved traffic switch.
+If that qualification fails, preserve the original database and do not route
+traffic to the failed target; escalate if the original is also unavailable.
+Do not try to restore over the now-nonempty target. A binary-only rollback is
+valid only with the same qualified schema/snapshot boundary.
+
+The operator must define RPO and RTO for **all three recovery domains**
+(application database, Supabase identities, credential root key), name the
+incident owner and backup retention, and measure a complete platform drill.
+The repository's local drill reports only its explicitly named phases; it
+cannot certify provider backup freshness, traffic switching or production
+reconnection time.
+
 ## Production checklist
 
-1. Set `JANUSLY_ENV=production`.
-2. Provide a PostgreSQL 18 database and apply `janusly migrate` once.
-3. Set `JANUSLY_RESUME_TOKEN_SECRET`.
-4. Configure the credential master key when managed credentials are used.
-5. Configure Supabase or explicitly decide whether development auth headers
-   are acceptable in the environment.
-6. Inject real Git commit/tree build arguments.
-7. Keep port `9464` private; expose port `3001` through TLS termination.
-8. Configure provider-grade backups for PostgreSQL, Supabase identity, and the
-   credential root key; test restoration into an isolated empty target.
-9. Run the image as its built-in non-root user.
-10. Verify `/healthz`, `/readyz`, `/health`, the React shell, and a controlled workflow.
+The root Compose file has local passwords, development defaults, and loopback
+port mappings. It is **not** a production deployment recipe; use a qualified
+immutable image and the platform-specific network/secret controls instead.
+
+1. Build from a clean checkout; verify the executable's exact Git commit/tree
+   provenance and the immutable OCI image digest. Do not substitute placeholder
+   build arguments or treat an unsigned local SBOM as a signed release.
+2. Set `JANUSLY_ENV=production`. Use PostgreSQL 18 with the compatible
+   baseline/snapshot row above; migrate a fresh database before serving.
+3. Configure production Supabase authentication and its browser public values;
+   omit `ALLOW_DEV_AUTH_HEADERS` and `ALLOW_DEV_SSO_BYPASS` for an online
+   service. The explicit dev-header escape hatch exists for isolated tests,
+   not for a public production deployment.
+4. Set high-entropy `JANUSLY_RESUME_TOKEN_SECRET`; escrow
+   `JANUSLY_CREDENTIAL_MASTER_KEY` before storing managed credentials. Keep
+   service-role and provider secrets runtime-only, never in image build args.
+5. Terminate TLS in front of public port `3001`, set `JANUSLY_WEB_BASE_URL`
+   and `API_ALLOWED_ORIGINS` to the final HTTPS origin. Keep `9464` (metrics,
+   build identity, pprof) on a private collector network with no public domain.
+6. Run as the image's built-in non-root user. Configure readiness with
+   `/readyz`, not only process liveness `/healthz`; retain a termination grace
+   period long enough for the supervised workers and accepted optional tasks
+   to drain before closing PostgreSQL pools.
+7. Arrange provider-grade backups and tested restoration for PostgreSQL,
+   Supabase identity and the credential root key. Agree RPO/RTO and perform an
+   isolated complete-platform drill before claiming recoverability.
+8. Qualify `/healthz`, `/readyz`, `/health`, the React shell, auth, private
+   metrics and a controlled workflow on the exact image before traffic cutover.
 
 ## Optional embeddings
 
