@@ -27,6 +27,7 @@ import { FieldStack, FormActions, FormField, SelectControl } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
 import './MembersPanel.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { useAliveRef } from '../hooks/useAliveRef'
 
 const MEMBER_MUTATION_TAGS = ['members', 'roles'] as const
 
@@ -86,7 +87,13 @@ function invitationSentAt(value: string | null | undefined): string | null {
 
 /** Render the members list with invite form + per-row role / remove controls. */
 export function MembersPanel() {
+  const organizationId = useWorkflowStore(state => state.identityContext?.currentOrganizationId ?? '')
+  return <MembersPanelForOrganization key={organizationId} />
+}
+
+function MembersPanelForOrganization() {
   const { t } = useT()
+  const aliveRef = useAliveRef()
   const addToast = useWorkflowStore(state => state.addToast)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const platformVersion = useInvalidationNonce(MEMBER_TAGS)
@@ -116,7 +123,6 @@ export function MembersPanel() {
   const isAdminRole = currentOrganization?.roleBase === 'admin'
   const canManageMembers = isAdminRole && sessionCan(identityContext, 'members.write')
   const canSetRoles = isAdminRole && sessionCan(identityContext, 'members.role_set')
-  const activeOrganizationId = currentOrganization?.id ?? ''
   const canInvite = canManageMembers && emailPattern.test(trimmedEmail) && !pending
   const roleLabel = (name: string) => name === 'viewer' || name === 'editor' || name === 'admin'
     ? t(`userMenu.role.${name}`)
@@ -136,7 +142,7 @@ export function MembersPanel() {
     } finally {
       if (request === membersRequest.current) setMembersLoading(false)
     }
-  }, [activeOrganizationId])
+  }, [])
 
   const loadInvitations = useCallback(async () => {
     const request = ++invitationsRequest.current
@@ -158,7 +164,7 @@ export function MembersPanel() {
     } finally {
       if (request === invitationsRequest.current) setInvitationsLoading(false)
     }
-  }, [activeOrganizationId, canManageMembers])
+  }, [canManageMembers])
 
   useEffect(() => {
     setMembers([])
@@ -189,7 +195,7 @@ export function MembersPanel() {
     return () => {
       cancelled = true
     }
-  }, [activeOrganizationId, platformVersion])
+  }, [platformVersion])
 
   const invite = async () => {
     const trimmed = email.trim()
@@ -204,6 +210,7 @@ export function MembersPanel() {
         method: 'POST',
         body: JSON.stringify({ email: trimmed, role }),
       })
+      if (!aliveRef.current) return
       addToast(t('members.toastInvited', { email: trimmed }), 'success')
       setEmail('')
       // Reset the role to the least-privilege default so the next invite
@@ -212,9 +219,10 @@ export function MembersPanel() {
       bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await Promise.all([load(), loadInvitations()])
     } catch (error) {
+      if (!aliveRef.current) return
       addToast(tApiError(error) || (t('members.inviteFailed')), 'error')
     } finally {
-      setPending(false)
+      if (aliveRef.current) setPending(false)
     }
   }
 
@@ -225,17 +233,19 @@ export function MembersPanel() {
       confirmLabel: t('members.invitations.revoke'),
       tone: 'danger',
     })
-    if (!accepted) return
+    if (!accepted || !aliveRef.current) return
     setRevokingInvitationId(invitation.id)
     try {
       await api(`/members/invitations/${encodeURIComponent(invitation.id)}/revoke`, { method: 'POST' })
+      if (!aliveRef.current) return
       addToast(t('members.invitations.revokeDone', { email: invitation.email }), 'success')
       bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await loadInvitations()
     } catch (error) {
+      if (!aliveRef.current) return
       addToast(tApiError(error) || t('members.invitations.revokeFailed'), 'error')
     } finally {
-      setRevokingInvitationId(null)
+      if (aliveRef.current) setRevokingInvitationId(null)
     }
   }
 
@@ -245,10 +255,12 @@ export function MembersPanel() {
         method: 'POST',
         body: JSON.stringify({ userId, role: nextRole }),
       })
+      if (!aliveRef.current) return
       addToast(t('members.toastRoleUpdated'), 'success')
       bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await load()
     } catch (error) {
+      if (!aliveRef.current) return
       addToast(tApiError(error) || (t('members.updateFailed')), 'error')
     }
   }
@@ -257,10 +269,12 @@ export function MembersPanel() {
     setConfirmRemoveId(null)
     try {
       await api(`/members?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' })
+      if (!aliveRef.current) return
       addToast(t('members.toastRemoved'), 'success')
       bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await load()
     } catch (error) {
+      if (!aliveRef.current) return
       addToast(tApiError(error) || (t('members.removeFailed')), 'error')
     }
   }
@@ -272,6 +286,7 @@ export function MembersPanel() {
         method: 'POST',
         body: JSON.stringify({ userId }),
       })
+      if (!aliveRef.current) return
       if (identityContext?.currentOrganizationId) {
         setIdentityContext({
           ...identityContext,
@@ -286,6 +301,7 @@ export function MembersPanel() {
       bumpPlatformVersion(MEMBER_MUTATION_TAGS)
       await load()
     } catch (error) {
+      if (!aliveRef.current) return
       addToast(tApiError(error) || t('members.transferFailed'), 'error')
     }
   }
