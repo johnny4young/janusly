@@ -340,6 +340,33 @@ describe('<AiStudioPanel />', () => {
     expect(screen.getByLabelText('Business intent')).toHaveValue('Mi intención PagerDuty exacta')
   })
 
+  it('updates AI use-case and readiness copy on locale and health changes', async () => {
+    const { rerender, props } = renderPanel()
+    await screen.findByTestId('capability-catalog-summary')
+    expect(screen.getByText('Prompt to workflow')).toBeInTheDocument()
+    expect(screen.getByText('Starter flow')).toBeInTheDocument()
+    expect(screen.getByText('Local deterministic operation remains available.')).toBeInTheDocument()
+
+    await act(async () => { await changeAppLanguage('es') })
+    expect(screen.getByText('Prompt → workflow')).toBeInTheDocument()
+    expect(screen.getByText('Flujo inicial')).toBeInTheDocument()
+    expect(screen.getByText('La operación local determinista sigue disponible.')).toBeInTheDocument()
+
+    rerender(<AiStudioPanel {...props} health={{
+      enabled: true,
+      model: 'claude-test',
+      timeoutMs: 10_000,
+      maxRetries: 1,
+    }} />)
+    expect(screen.getAllByText('IA lista')).toHaveLength(2)
+    expect(screen.getByText('claude-test es el modelo configurado; esto no verifica una llamada al proveedor.')).toBeInTheDocument()
+
+    await act(async () => { await changeAppLanguage('en') })
+    expect(screen.getByText('Prompt to workflow')).toBeInTheDocument()
+    expect(screen.getAllByText('AI ready')).toHaveLength(2)
+    expect(screen.getByText('claude-test is the configured model; this does not verify a provider call.')).toBeInTheDocument()
+  })
+
   it('distinguishes a guarded provider draft from the zero-call local fallback', async () => {
     const guarded = workflowProposal({ mode: 'fallback', providerGuarded: true })
     guarded.bindings = {
