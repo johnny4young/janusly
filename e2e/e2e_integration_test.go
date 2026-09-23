@@ -73,8 +73,11 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("free port: %v", err)
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	port := l.Addr().(*net.TCPAddr).Port
+	if err := l.Close(); err != nil {
+		t.Fatalf("release free port: %v", err)
+	}
+	return port
 }
 
 type binaryAPI struct {
@@ -127,7 +130,9 @@ func bootBinary(t *testing.T) *binaryAPI {
 	for {
 		res, err := http.Get(api.base + "/healthz")
 		if err == nil {
-			res.Body.Close()
+			if err := res.Body.Close(); err != nil {
+				t.Fatalf("close health response: %v", err)
+			}
 			if res.StatusCode == 200 {
 				return api
 			}
@@ -157,7 +162,11 @@ func (a *binaryAPI) call(t *testing.T, method, path string, body any) (int, map[
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close API response: %v", err)
+		}
+	}()
 	var parsed map[string]any
 	_ = json.NewDecoder(res.Body).Decode(&parsed)
 	return res.StatusCode, parsed
@@ -337,7 +346,11 @@ func TestEngineMetricsExposeOnTheInternalPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scrape: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close metrics response: %v", err)
+		}
+	}()
 	raw, _ := io.ReadAll(res.Body)
 	body := string(raw)
 	for _, series := range []string{
@@ -362,7 +375,11 @@ func TestInternalBuildIdentityMatchesTheFinishedBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get build identity: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close build identity response: %v", err)
+		}
+	}()
 	var identity struct {
 		SchemaVersion  int    `json:"schemaVersion"`
 		Commit         string `json:"commit"`
@@ -394,7 +411,11 @@ func TestMetricsConsistencyNamesAndBindConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scrape: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close consistency metrics response: %v", err)
+		}
+	}()
 	body, _ := io.ReadAll(res.Body)
 	text := string(body)
 	for _, name := range []string{
@@ -416,7 +437,11 @@ func TestMetricsConsistencyNamesAndBindConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("holder: %v", err)
 	}
-	defer holder.Close()
+	t.Cleanup(func() {
+		if err := holder.Close(); err != nil {
+			t.Errorf("close held internal port: %v", err)
+		}
+	})
 	taken := holder.Addr().(*net.TCPAddr).Port
 	conflict := exec.Command(buildBinary(t))
 	conflict.Env = append(os.Environ(),
@@ -460,7 +485,11 @@ func TestAlertsAndDashboardOnlyNameMetricsTheBinaryExposes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scrape: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close metric names response: %v", err)
+		}
+	}()
 	raw, _ := io.ReadAll(res.Body)
 	rawMetrics := string(raw)
 	exposed := map[string]bool{}

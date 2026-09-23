@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sync"
 	"testing"
@@ -117,7 +118,11 @@ func TestMemberLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list members: %v", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			t.Errorf("close members response: %v", err)
+		}
+	}()
 	var members []map[string]any
 	if err := json.NewDecoder(response.Body).Decode(&members); err != nil {
 		t.Fatalf("members must be a bare array: %v", err)
@@ -159,10 +164,10 @@ func TestConcurrentMemberInvitesHaveOneAtomicWinner(t *testing.T) {
 				results <- inviteResult{err: err}
 				return
 			}
-			defer response.Body.Close()
 			var body map[string]any
-			err = json.NewDecoder(response.Body).Decode(&body)
-			results <- inviteResult{status: response.StatusCode, body: body, err: err}
+			decodeErr := json.NewDecoder(response.Body).Decode(&body)
+			closeErr := response.Body.Close()
+			results <- inviteResult{status: response.StatusCode, body: body, err: errors.Join(decodeErr, closeErr)}
 		}()
 	}
 	close(start)

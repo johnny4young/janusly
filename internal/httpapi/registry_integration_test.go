@@ -163,7 +163,11 @@ func TestUnregisteredPatternFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identity probe: %v", err)
 	}
-	defer identityRes.Body.Close()
+	defer func() {
+		if err := identityRes.Body.Close(); err != nil {
+			t.Errorf("close identity probe response: %v", err)
+		}
+	}()
 	identityBody, _ := io.ReadAll(identityRes.Body)
 	if identityRes.StatusCode != 500 || !strings.Contains(string(identityBody), "route_not_registered") {
 		t.Fatalf("unregistered identity pattern must fail closed: %d %s", identityRes.StatusCode, identityBody)

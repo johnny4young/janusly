@@ -13,7 +13,12 @@ import (
 	"time"
 )
 
-func (h *apiHarness) rawGet(t *testing.T, path string) (*http.Response, []byte) {
+type rawHTTPResponse struct {
+	StatusCode int
+	Header     http.Header
+}
+
+func (h *apiHarness) rawGet(t *testing.T, path string) (rawHTTPResponse, []byte) {
 	t.Helper()
 	req, _ := http.NewRequest("GET", h.server.URL+path, nil)
 	req.Header.Set("x-org-id", h.org)
@@ -22,9 +27,12 @@ func (h *apiHarness) rawGet(t *testing.T, path string) (*http.Response, []byte) 
 	if err != nil {
 		t.Fatalf("raw get %s: %v", path, err)
 	}
-	body, _ := io.ReadAll(res.Body)
-	_ = res.Body.Close()
-	return res, body
+	body, readErr := io.ReadAll(res.Body)
+	closeErr := res.Body.Close()
+	if readErr != nil || closeErr != nil {
+		t.Fatalf("raw get %s: read: %v, close: %v", path, readErr, closeErr)
+	}
+	return rawHTTPResponse{StatusCode: res.StatusCode, Header: res.Header.Clone()}, body
 }
 
 // Run-explain + evidence exports: the failed run renders root cause /

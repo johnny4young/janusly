@@ -180,7 +180,11 @@ func TestRecoveryQueueReadModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bare /dlq: %v", err)
 	}
-	defer rawRes.Body.Close()
+	defer func() {
+		if err := rawRes.Body.Close(); err != nil {
+			t.Errorf("close bare DLQ response: %v", err)
+		}
+	}()
 	var array []map[string]any
 	if err := json.NewDecoder(rawRes.Body).Decode(&array); err != nil {
 		t.Fatalf("bare /dlq must be an array: %v", err)

@@ -22,7 +22,9 @@ import (
 
 func slackSign(secret, body string, timestamp int64) string {
 	mac := hmac.New(sha256.New, []byte(secret))
-	fmt.Fprintf(mac, "v0:%d:%s", timestamp, body)
+	if _, err := fmt.Fprintf(mac, "v0:%d:%s", timestamp, body); err != nil {
+		panic(err)
+	}
 	return "v0=" + hex.EncodeToString(mac.Sum(nil))
 }
 
