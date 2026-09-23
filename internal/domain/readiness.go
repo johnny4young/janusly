@@ -487,15 +487,9 @@ type SuggestionSafety struct {
 	ApprovalPresent  bool `json:"approvalPresent"`
 }
 
-// ComputeSuggestionSafety mirrors the contract's recoverySuggestionSafety.
-func ComputeSuggestionSafety(wf *Workflow, nodeID string) SuggestionSafety {
-	return ComputeSuggestionSafetyWithOptions(wf, nodeID, ReadinessOptions{})
-}
-
 // ComputeSuggestionSafetyWithOptions uses the executable registry classifier
-// when the caller has one. The compatibility wrapper above retains the legacy
-// name/suffix fallback for pure callers, but API recovery surfaces must not
-// mislabel a newly registered write tool as read-side.
+// supplied by the caller. API recovery surfaces must not mislabel a newly
+// registered write tool as read-side by using the legacy name fallback.
 func ComputeSuggestionSafetyWithOptions(wf *Workflow, nodeID string, opts ReadinessOptions) SuggestionSafety {
 	if wf == nil {
 		return SuggestionSafety{WriteSide: true, ApprovalRequired: true}
@@ -514,9 +508,6 @@ func ComputeSuggestionSafetyWithOptions(wf *Workflow, nodeID string, opts Readin
 	approvalPresent := !writeSide || hasApprovalAncestor(wf, nodeID, map[string]bool{})
 	return SuggestionSafety{WriteSide: writeSide, ApprovalRequired: writeSide, ApprovalPresent: approvalPresent}
 }
-
-// IsSensitiveActionNode exposes the write-side classifier for dispatch.
-func IsSensitiveActionNode(node Node) bool { return isSensitiveAction(node, ReadinessOptions{}) }
 
 // IsSensitiveActionNodeWithOptions classifies the node with the executable
 // registry seams supplied by the caller. Runtime automation must use this
