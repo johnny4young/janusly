@@ -24,6 +24,7 @@ func TestEverySweepCatalogEntryIsSupervisedAndObserved(t *testing.T) {
 		"SweepStalledNodeReaper":     "../../internal/engine/reaper.go",
 		"SweepSubworkflowReconciler": "../../internal/engine/subworkflow.go",
 		"SweepAutoHealing":           "../../internal/engine/autohealing.go",
+		"SweepCalibration":           "../../internal/engine/calibrationsweep.go",
 		"SweepMemoryConsentPurge":    "../../internal/engine/memorypurge.go",
 		"SweepRunSummaryMemory":      "../../internal/engine/runsummarymemory.go",
 		"SweepUpstreamHealth":        "../../internal/upstream/poller.go",

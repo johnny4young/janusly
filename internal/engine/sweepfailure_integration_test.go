@@ -67,6 +67,7 @@ func TestSweepsReportInfrastructureFailureToTelemetry(t *testing.T) {
 			t.Setenv("JANUSLY_AUTO_HEALING_ENABLED", "true")
 			return eng.SweepAutoHealing(ctx).Err
 		}},
+		{observability.SweepCalibration, func() error { _, err := eng.RunCalibrationSweep(ctx); return err }},
 	}
 	for _, pass := range passes {
 		t.Run(pass.sweep, func(t *testing.T) {

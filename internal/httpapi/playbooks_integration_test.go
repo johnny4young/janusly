@@ -451,8 +451,8 @@ func TestCalibrationLoop(t *testing.T) {
 
 	// The sweep fits and stores one curve for the approach.
 	sweeper := engine.New(pool)
-	if written := sweeper.RunCalibrationSweep(ctx); written < 1 {
-		t.Fatalf("sweep must write a curve: %d", written)
+	if written, err := sweeper.RunCalibrationSweep(ctx); err != nil || written < 1 {
+		t.Fatalf("sweep must write a curve: %d, %v", written, err)
 	}
 	res := h.call("GET", "/recovery/calibrations", nil, "")
 	if res.status != 200 {
@@ -477,7 +477,9 @@ func TestCalibrationLoop(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DELETE FROM confidence_calibrations WHERE org_id = $1`, h.org); err != nil {
 		t.Fatal(err)
 	}
-	_ = sweeper.RunCalibrationSweep(ctx)
+	if _, err := sweeper.RunCalibrationSweep(ctx); err != nil {
+		t.Fatalf("disabled sweep: %v", err)
+	}
 	var remaining int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM confidence_calibrations WHERE org_id = $1`, h.org).Scan(&remaining)
 	if remaining != 0 {

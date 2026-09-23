@@ -93,11 +93,15 @@ this repository sets no numeric promise.
 ## Background loops
 
 **Alerts:** `JanuslyFastSweepStalled`, `JanuslyAutoHealingSweepStalled`,
-`JanuslyHourlySweepStalled`, `JanuslySweepNeverRan`, `JanuslySweepFailing`.
+`JanuslyHourlySweepStalled`, `JanuslyDailySweepStalled`,
+`JanuslySweepNeverRan`, `JanuslySweepFailing`.
 
 - **Detect/diagnose:** Filter by the `instance` and `sweep` alert labels.
   Compare the last successful pass with recent failure increments and process
-  uptime; the never-ran rule waits for the slowest cadence plus margin:
+  uptime; the never-ran rule waits for the hourly cadence plus margin (the
+  daily calibration pass also runs at startup). A missing or stale calibration
+  curve leaves AI patch suggestions at raw model confidence, not a fabricated
+  calibrated score:
 
   ```promql
   time() - janusly_sweep_last_success_timestamp_seconds{job="janusly"}

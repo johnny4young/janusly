@@ -1,7 +1,7 @@
 // Recovery feedback loop: operators label patch suggestions
 // (accept/reject + the model's raw self-rated confidence); the daily
-// sweep fits per-approach calibration curves; the read route exposes the
-// stored curves for the dialog to apply.
+// sweep fits per-approach calibration curves; the patch route applies valid
+// tenant curves before sending suggestions to the dialog.
 package httpapi
 
 import (
@@ -285,7 +285,11 @@ func (s *V1Server) listCalibrationsCore(r *http.Request, rc v1Request) opResult 
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	items := make([]map[string]any, 0, len(rows))
+	now := time.Now().UTC()
 	for _, row := range rows {
+		if activeCalibrationCurve(row, now) == nil {
+			continue
+		}
 		items = append(items, map[string]any{
 			"approachLabel": row.ApproachLabel,
 			"acceptRate":    row.AcceptRate, "sampleSize": row.SampleSize,

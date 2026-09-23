@@ -17,8 +17,9 @@ Important series include:
 - workflow task duration, retry, and failure metrics
 - `janusly_sweep_pass_seconds`,
   `janusly_sweep_last_success_timestamp_seconds`, and
-  `janusly_sweep_failures_total`, labeled from a closed catalog of the nine
-  supervised maintenance loops
+  `janusly_sweep_failures_total`, labeled from a closed catalog of the ten
+  supervised maintenance loops (including the immediate-then-daily confidence
+  calibration fit)
 - `janusly_http_requests_total{pattern,status}` and
   `janusly_http_request_seconds{pattern}`: the RED series of the public
   listener, labeled by the registered route pattern (requests outside the

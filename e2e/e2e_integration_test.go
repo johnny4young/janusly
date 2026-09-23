@@ -490,8 +490,31 @@ func TestAlertsAndDashboardOnlyNameMetricsTheBinaryExposes(t *testing.T) {
 			t.Errorf("close metric names response: %v", err)
 		}
 	}()
-	raw, _ := io.ReadAll(res.Body)
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read metrics: %v", err)
+	}
 	rawMetrics := string(raw)
+	// The confidence fit makes its first observed pass inside the real binary,
+	// not just in a direct engine test or a source-level wiring assertion.
+	calibrationLiveness := `janusly_sweep_last_success_timestamp_seconds{sweep="` + observability.SweepCalibration + `"}`
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(rawMetrics, calibrationLiveness) && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		next, err := http.Get(api.internal + "/metrics")
+		if err != nil {
+			t.Fatalf("rescrape calibration liveness: %v", err)
+		}
+		raw, readErr := io.ReadAll(next.Body)
+		closeErr := next.Body.Close()
+		if readErr != nil || closeErr != nil {
+			t.Fatalf("read/close calibration metrics: %v / %v", readErr, closeErr)
+		}
+		rawMetrics = string(raw)
+	}
+	if !strings.Contains(rawMetrics, calibrationLiveness) {
+		t.Fatal("real executable never reported its startup calibration sweep")
+	}
 	exposed := map[string]bool{}
 	for _, line := range strings.Split(rawMetrics, "\n") {
 		if fields := strings.Fields(line); len(fields) >= 3 && fields[0] == "#" && fields[1] == "TYPE" {

@@ -2,6 +2,7 @@ package observability
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -42,6 +43,7 @@ func TestEveryPrometheusAlertLinksToItsRunbookSection(t *testing.T) {
 		"JanuslyFastSweepStalled":        "background-loops",
 		"JanuslyAutoHealingSweepStalled": "background-loops",
 		"JanuslyHourlySweepStalled":      "background-loops",
+		"JanuslyDailySweepStalled":       "background-loops",
 		"JanuslySweepNeverRan":           "background-loops",
 		"JanuslySweepFailing":            "background-loops",
 		"JanuslyDBPoolStarved":           "database-pools",
@@ -80,4 +82,37 @@ func TestEveryPrometheusAlertLinksToItsRunbookSection(t *testing.T) {
 			t.Errorf("documented alert %q is missing from Prometheus rules", alert)
 		}
 	}
+}
+
+// The never-ran rule counts the whole closed sweep catalog. A static count
+// would page every healthy instance after adding a supervised loop.
+func TestNeverRanRuleMatchesSweepCatalog(t *testing.T) {
+	rules, err := os.ReadFile("../../deploy/observability/prometheus/rules.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Groups []struct {
+			Rules []struct {
+				Alert string `yaml:"alert"`
+				Expr  string `yaml:"expr"`
+			} `yaml:"rules"`
+		} `yaml:"groups"`
+	}
+	if err := yaml.Unmarshal(rules, &config); err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range config.Groups {
+		for _, rule := range group.Rules {
+			if rule.Alert != "JanuslySweepNeverRan" {
+				continue
+			}
+			want := "== " + strconv.Itoa(len(SweepNames()))
+			if !strings.Contains(rule.Expr, want) {
+				t.Fatalf("never-ran rule must count every sweep (%s): %s", want, rule.Expr)
+			}
+			return
+		}
+	}
+	t.Fatal("never-ran rule missing")
 }

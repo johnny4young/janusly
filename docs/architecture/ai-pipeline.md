@@ -17,6 +17,16 @@ before calling the client.
   fallback suggestions reach the browser. An invalid stored snapshot returns a
   closed `ai_workflow_snapshot_invalid` error instead of a nominal fallback the
   client cannot safely apply.
+- Recovery patch confidence is not authority: the model's raw integer
+  percentage remains the feedback signal, while the displayed value and
+  suggestion order use a tenant-scoped per-approach calibration curve only when
+  that tenant enables calibration and a finite, positive-slope fit from at
+  least 20 labeled decisions was refreshed within 48 hours. The supervised
+  fit makes one pass after boot and then daily over a rolling 30-day window;
+  failures report sweep telemetry. Missing, stale, invalid, or unreadable
+  curves leave the raw value unchanged without breaking a valid AI response.
+  A deterministic fallback remains 0 and no calibrated number grants approval
+  or bypasses workflow validation.
 - Workflow generation finishes with a deterministic assurance compilation:
   terminal `outputs` form the Intent Contract, and explicit resilience intent
   may add a conservative technical Recovery Contract V1. The compiler never

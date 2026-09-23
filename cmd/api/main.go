@@ -276,6 +276,9 @@ func run() error {
 	runner.Go(observability.SweepAutoHealing, func(ctx context.Context) {
 		eng.RunAutoHealingSweep(ctx, 5*time.Minute, logger)
 	})
+	runner.Go(observability.SweepCalibration, func(ctx context.Context) {
+		eng.RunCalibrationLoop(ctx, 24*time.Hour, logger)
+	})
 	runner.Go(observability.SweepMemoryConsentPurge, func(ctx context.Context) {
 		eng.RunMemoryConsentPurgeSweep(ctx, time.Hour, logger)
 	})

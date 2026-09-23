@@ -17,6 +17,7 @@ const (
 	SweepStalledNodeReaper     = "stalled-node-reaper"
 	SweepSubworkflowReconciler = "subworkflow-terminal-reconciler"
 	SweepAutoHealing           = "auto-healing"
+	SweepCalibration           = "confidence-calibration"
 	SweepMemoryConsentPurge    = "memory-consent-purge"
 	SweepRunSummaryMemory      = "run-summary-memory"
 	SweepUpstreamHealth        = "upstream-health"
@@ -29,6 +30,7 @@ var sweepNames = [...]string{
 	SweepStalledNodeReaper,
 	SweepSubworkflowReconciler,
 	SweepAutoHealing,
+	SweepCalibration,
 	SweepMemoryConsentPurge,
 	SweepRunSummaryMemory,
 	SweepUpstreamHealth,

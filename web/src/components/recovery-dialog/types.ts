@@ -62,7 +62,7 @@ export type PriorSameSignatureOutcome = {
 
 export type PatchSuggestion = {
   mode: 'ai' | 'fallback' | 'playbook'
-  /** 1-3 alternative patches sorted by confidence desc. The route guarantees length ≥ 1. */
+  /** 1-3 alternative patches sorted by visible calibrated confidence desc. The route guarantees length ≥ 1. */
   suggestions: SuggestionTab[]
   /**
    * "Why this suggestion?" evidence — the context the prompt composer fed

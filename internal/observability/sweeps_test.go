@@ -13,7 +13,7 @@ func TestSweepCatalogIsClosedDistinctAndPreinitialized(t *testing.T) {
 	names := SweepNames()
 	want := []string{
 		SweepRetention, SweepSchedule, SweepStalledNodeReaper,
-		SweepSubworkflowReconciler, SweepAutoHealing,
+		SweepSubworkflowReconciler, SweepAutoHealing, SweepCalibration,
 		SweepMemoryConsentPurge, SweepRunSummaryMemory,
 		SweepUpstreamHealth, SweepReplayCampaignPump,
 	}

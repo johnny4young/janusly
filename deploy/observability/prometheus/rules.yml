@@ -97,21 +97,32 @@ groups:
           description: '{{ $labels.sweep }} has not completed a successful pass in three hours.'
           runbook_url: https://github.com/johnny4young/janusly/blob/main/docs/runbooks/alerts.md#background-loops
 
-      # It is legitimate for an hourly loop to have no success series just
-      # after a deploy. Once uptime exceeds the slowest cadence plus margin,
-      # each scrape target must publish all nine closed-catalog labels. Keep
-      # instance in the vector match so multiple replicas do not false-page.
+      - alert: JanuslyDailySweepStalled
+        expr: |
+          time() - janusly_sweep_last_success_timestamp_seconds{job="janusly",sweep="confidence-calibration"} > 129600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: The daily Janusly confidence-calibration loop stopped completing passes
+          description: Confidence calibration has not completed a successful pass in thirty-six hours; suggestions fall back to raw confidence when the last curve ages out.
+          runbook_url: https://github.com/johnny4young/janusly/blob/main/docs/runbooks/alerts.md#background-loops
+
+      # Hourly loops may not report liveness just after a deploy. The daily
+      # calibration loop makes its first pass at startup; after the hourly
+      # cadence plus margin, all ten closed-catalog labels must be present.
+      # Keep instance in the vector match so replicas do not false-page.
       - alert: JanuslySweepNeverRan
         expr: |
           (time() - process_start_time_seconds{job="janusly"} > 5400)
           unless on(job, instance)
-          count by (job, instance) (janusly_sweep_last_success_timestamp_seconds{job="janusly"}) == 9
+          count by (job, instance) (janusly_sweep_last_success_timestamp_seconds{job="janusly"}) == 10
         for: 15m
         labels:
           severity: critical
         annotations:
           summary: A Janusly background loop never reported a successful pass
-          description: The process has been up long enough for every loop to tick, but fewer than nine supervised loops publish liveness.
+          description: The process has been up long enough for every loop to tick, but fewer than ten supervised loops publish liveness.
           runbook_url: https://github.com/johnny4young/janusly/blob/main/docs/runbooks/alerts.md#background-loops
 
       - alert: JanuslySweepFailing
