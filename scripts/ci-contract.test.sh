@@ -4,6 +4,8 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/janusly-ci-test.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 bash -n "$root/scripts/ci-changes.sh" "$root/scripts/ci-gate.sh"
+tcp_healthchecks=$(grep -Fc -- '--health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U janusly -d janusly"' "$root/.github/workflows/ci.yml" || true)
+[[ "$tcp_healthchecks" == 2 ]] || { printf 'CI PostgreSQL services must probe the final TCP listener\n' >&2; exit 1; }
 git init -q "$tmp/repo"
 cd "$tmp/repo"
 git config user.name 'CI fixture'
