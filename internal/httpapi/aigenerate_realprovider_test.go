@@ -117,6 +117,16 @@ func (c *boundedProductClient) generateForCase(
 	input ai.GenerateTextInput,
 ) (*ai.GenerateTextResult, *ai.AIError) {
 	provider, model := providerModel(input.ModelHint)
+	// The approved budget is for this first-party model at its verified
+	// catalog price. A local price override could make both reservations and
+	// reported cost smaller without changing the provider's actual bill.
+	if provider != "anthropic" || model != ai.DefaultModel {
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification requires the approved Anthropic model", BeforeEgress: true}
+	}
+	priceOverrideKey := "JANUSLY_LLM_PRICE_" + strings.ToUpper(strings.ReplaceAll(ai.DefaultModel, "-", "_"))
+	if _, overridden := os.LookupEnv(priceOverrideKey); overridden {
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification does not accept model price overrides", BeforeEgress: true}
+	}
 	maxOutput := c.defaultMaxOutput
 	if input.MaxOutputUnits > 0 {
 		maxOutput = input.MaxOutputUnits
@@ -319,6 +329,37 @@ func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	}
 	if callBlockedDelegate.calls != 1 {
 		t.Fatalf("global breaker reached delegate %d times", callBlockedDelegate.calls)
+	}
+}
+
+func TestRealProviderQualificationRejectsPriceOverrideAndWrongModelBeforeEgress(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		modelHint string
+		override  string
+	}{
+		{name: "price override", override: "0.000001,0.000001"},
+		{name: "other Anthropic model", modelHint: "anthropic/claude-sonnet-4-5"},
+		{name: "other provider", modelHint: "openai/claude-haiku-4-5-20251001"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if testCase.override != "" {
+				t.Setenv("JANUSLY_LLM_PRICE_CLAUDE_HAIKU_4_5_20251001", testCase.override)
+			}
+			delegate := &qualificationFakeClient{}
+			global := &boundedProductClient{
+				delegate: delegate, maxCalls: realProviderMaxCalls, maxUSD: realProviderDefaultMaxUSD,
+				ledger:           realProviderLedger{path: t.TempDir() + "/ledger.jsonl"},
+				defaultMaxOutput: realProviderOutputUnits,
+			}
+			_, aiErr := global.GenerateText(t.Context(), ai.GenerateTextInput{ModelHint: testCase.modelHint})
+			if aiErr == nil || aiErr.Class != "invalid_request" || delegate.calls != 0 {
+				t.Fatalf("unqualified pricing/model reached delegate: error=%v calls=%d", aiErr, delegate.calls)
+			}
+			if calls, _, _ := global.accounting(); calls != 0 {
+				t.Fatalf("unqualified pricing/model consumed a reservation: calls=%d", calls)
+			}
+		})
 	}
 }
 
