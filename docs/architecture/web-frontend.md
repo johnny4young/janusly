@@ -344,6 +344,10 @@ unavailable even when the metrics sample succeeds. Missing queue is not zero.
 Impact-only polling does not renew the metrics timestamp. Full and impact reads
 share request ordering: an older result or failure cannot replace newer impact
 evidence. Brief and queue snapshots are scoped to organization and user.
+Home publishes semantic blocker run IDs to the shell only when their ordered
+values or subscriber change. Re-rendering a pending snapshot or refreshing the
+same case projection must not repeatedly set the shell's blocker state; an
+organization change still clears blockers that belonged to the previous org.
 Retry calls the invalidator without forwarding a click event.
 Each full, impact and brief request owns an AbortController and aborts on cleanup;
 this also bypasses the API client’s short rejected-GET cache so an immediate

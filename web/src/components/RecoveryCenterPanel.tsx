@@ -69,6 +69,8 @@ import {
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 
 const RECOVERY_CENTER_TAGS = [PLATFORM_TAG, 'recovery', 'runs', 'dlq', 'auto-healing', 'campaigns'] as const
+const EMPTY_HEATMAP: HeatmapDay[] = []
+const EMPTY_SEMANTIC_CASES: RecoveryCase[] = []
 
 export type RecoveryCenterPanelProps = {
   runs: RunSummary[]
@@ -137,11 +139,11 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   const [impactPollVersion, setImpactPollVersion] = useState(0)
   const metrics = metricsSnapshot?.orgId === resolvedOrgId ? metricsSnapshot.value : null
   const clusters = clustersSnapshot?.orgId === resolvedOrgId ? clustersSnapshot.value : null
-  const heatmap = heatmapSnapshot?.orgId === resolvedOrgId ? heatmapSnapshot.value : []
+  const heatmap = heatmapSnapshot?.orgId === resolvedOrgId ? heatmapSnapshot.value : EMPTY_HEATMAP
   const validation = validationSnapshot?.orgId === resolvedOrgId ? validationSnapshot.value : undefined
   const semanticCases = semanticCasesSnapshot?.orgId === resolvedOrgId
     ? semanticCasesSnapshot.value.cases
-    : []
+    : EMPTY_SEMANTIC_CASES
   const semanticCasesStatus = semanticCasesSnapshot?.orgId === resolvedOrgId
     ? semanticCasesSnapshot.value.status
     : 'loading'
@@ -164,6 +166,10 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     )],
     [semanticCases],
   )
+  const publishedSemanticBlockersRef = useRef<{
+    listener: NonNullable<RecoveryCenterPanelProps['onSemanticBlockerRunsChange']>
+    runIds: string[]
+  } | null>(null)
   const ledger = ledgerSnapshot?.orgId === resolvedOrgId ? ledgerSnapshot.value : null
   const operatorWins = winsSnapshot?.orgId === resolvedOrgId && winsSnapshot.userId === resolvedUserId
     ? winsSnapshot.value
@@ -197,7 +203,19 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     setInsightsOpen(false)
   }, [resolvedOrgId, resolvedUserId])
   useEffect(() => {
-    props.onSemanticBlockerRunsChange?.(semanticBlockerRunIds)
+    const listener = props.onSemanticBlockerRunsChange
+    if (!listener) {
+      publishedSemanticBlockersRef.current = null
+      return
+    }
+    const published = publishedSemanticBlockersRef.current
+    if (published?.listener === listener
+      && published.runIds.length === semanticBlockerRunIds.length
+      && published.runIds.every((runId, index) => runId === semanticBlockerRunIds[index])) {
+      return
+    }
+    publishedSemanticBlockersRef.current = { listener, runIds: semanticBlockerRunIds }
+    listener(semanticBlockerRunIds)
   }, [props.onSemanticBlockerRunsChange, semanticBlockerRunIds])
 
   const pendingVerifiedRecoveryRef = useRef<{

@@ -1263,7 +1263,23 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 })
 
 describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
+  it('does not republish empty semantic blockers while the Home snapshot is pending', () => {
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/recovery/home') return new Promise(() => {})
+      return Promise.resolve(null)
+    })
+    const onSemanticBlockerRunsChange = vi.fn()
+    const props = { ...baseProps, onSemanticBlockerRunsChange }
+    const { rerender } = render(<RecoveryCenterPanel {...props} />)
+
+    expect(onSemanticBlockerRunsChange).toHaveBeenCalledExactlyOnceWith([])
+    rerender(<RecoveryCenterPanel {...props} />)
+    rerender(<RecoveryCenterPanel {...props} />)
+    expect(onSemanticBlockerRunsChange).toHaveBeenCalledExactlyOnceWith([])
+  })
+
   it('surfaces semantic work as a priority and opens the exact case', async () => {
+    const onSemanticBlockerRunsChange = vi.fn()
     mockRecoveryApi(async (path: string) => {
       if (path === '/operations/brief') return operatorBrief(briefAction({
         id: 'recovery-case:case-1', kind: 'semantic_case', severity: 'critical',
@@ -1330,9 +1346,14 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
       throw new Error(`unexpected fetch: ${path}`)
     })
 
-    render(<RecoveryCenterPanel {...baseProps} />)
+    const props = { ...baseProps, onSemanticBlockerRunsChange }
+    const { rerender } = render(<RecoveryCenterPanel {...props} />)
 
     const action = await screen.findByTestId('recovery-center-action-recovery-case:case-1')
+    await waitFor(() => expect(onSemanticBlockerRunsChange).toHaveBeenLastCalledWith(['run-1']))
+    const notifications = onSemanticBlockerRunsChange.mock.calls.length
+    rerender(<RecoveryCenterPanel {...props} />)
+    expect(onSemanticBlockerRunsChange).toHaveBeenCalledTimes(notifications)
     expect(action).toHaveTextContent('Diagnose a business outcome incident')
     expect(screen.getByText('A declared workflow outcome did not hold. Review bounded evidence and recovery candidates.')).toBeVisible()
     expect(screen.getByTestId('recovery-center-greeting').closest('header'))
@@ -1343,6 +1364,9 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
       expect.stringContaining('/resolve'),
       expect.anything(),
     )
+    activeOrgId = 'org-b'
+    rerender(<RecoveryCenterPanel {...props} />)
+    expect(onSemanticBlockerRunsChange).toHaveBeenLastCalledWith([])
   })
 
   it.each([
