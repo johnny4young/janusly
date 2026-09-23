@@ -7,12 +7,17 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/janusly-docker-context.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 mkdir -p "$tmp/context/.dev" "$tmp/context/.playwright-cli" \
-  "$tmp/context/.playwright-mcp" "$tmp/context/web/feature/__screenshots__"
+  "$tmp/context/.playwright-mcp" "$tmp/context/web/feature/__screenshots__" \
+  "$tmp/context/website"
 cp "$root/.dockerignore" "$tmp/context/.dockerignore"
 printf 'FROM scratch\nCOPY . /snapshot\n' > "$tmp/context/Dockerfile"
 printf 'public sentinel\n' > "$tmp/context/public.txt"
 printf 'example env\n' > "$tmp/context/.env.example"
 printf 'fake secret\n' > "$tmp/context/.env"
+printf 'fake nested secret\n' > "$tmp/context/web/.env"
+printf 'fake nested secret\n' > "$tmp/context/website/.env.local"
+printf 'fake nested secret\n' > "$tmp/context/web/feature/.env.production"
+printf 'nested public example\n' > "$tmp/context/web/.env.example"
 printf 'fake credential\n' > "$tmp/context/.dev/credential-master-key"
 printf 'fake browser state\n' > "$tmp/context/.playwright-cli/state.json"
 printf 'fake browser state\n' > "$tmp/context/.playwright-mcp/state.json"
@@ -21,7 +26,9 @@ printf 'fake screenshot\n' > "$tmp/context/web/feature/__screenshots__/private.p
 "$docker_bin" buildx build --quiet --output "type=local,dest=$tmp/out" "$tmp/context" >/dev/null
 [[ -f "$tmp/out/snapshot/public.txt" ]] || { echo 'docker-context: public source missing' >&2; exit 1; }
 [[ -f "$tmp/out/snapshot/.env.example" ]] || { echo 'docker-context: public env example missing' >&2; exit 1; }
-for excluded in .env .dev/credential-master-key .playwright-cli/state.json \
+[[ -f "$tmp/out/snapshot/web/.env.example" ]] || { echo 'docker-context: nested public env example missing' >&2; exit 1; }
+for excluded in .env web/.env website/.env.local web/feature/.env.production \
+  .dev/credential-master-key .playwright-cli/state.json \
   .playwright-mcp/state.json web/feature/__screenshots__/private.png; do
   if [[ -e "$tmp/out/snapshot/$excluded" ]]; then
     printf 'docker-context: excluded path entered build context: %s\n' "$excluded" >&2
