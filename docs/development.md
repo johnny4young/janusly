@@ -49,6 +49,11 @@ e2e lane, then ends with
 `git diff --exit-code`. Commit first, verify after, and do not touch tracked
 files while it runs.
 
+The E2E harness labels its image with the exact Git commit and tree only when
+its source checkout is clean. Standalone `make test-e2e` still accepts WIP, but
+uses unverified placeholder labels rather than claiming the last commit built
+the dirty source. Ambient build-label variables cannot override this choice.
+
 A throwaway database for local integration runs, isolated from the dev one:
 
 ```bash

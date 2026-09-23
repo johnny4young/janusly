@@ -8,6 +8,10 @@ postgres_port=${JANUSLY_E2E_POSTGRES_PORT:-35432}
 pnpm_command=${PNPM:-pnpm --ignore-workspace}
 docker_bin=${JANUSLY_E2E_DOCKER_BIN:-docker}
 attempted=0
+zero_commit=0000000000000000000000000000000000000000
+build_commit=$zero_commit
+build_tree=$zero_commit
+build_id=local
 specs=(
   e2e/janusly-smoke.spec.ts
   e2e/text-search.spec.ts
@@ -46,6 +50,16 @@ validate_configuration() {
   [[ "$app_port" != "$postgres_port" ]] || die "application and PostgreSQL ports must differ"
 }
 
+resolve_build_identity() {
+  # E2E may run against WIP, but only a clean checkout can truthfully claim
+  # the current commit/tree. Ignore ambient build labels and source overrides.
+  if JANUSLY_SOURCE_ROOT="$root" bash "$root/scripts/assert-clean-source.sh" >/dev/null 2>&1; then
+    build_commit=$(git -C "$root" rev-parse --verify HEAD)
+    build_tree=$(git -C "$root" rev-parse --verify 'HEAD^{tree}')
+    build_id=$(git -C "$root" rev-parse --short HEAD)
+  fi
+}
+
 # The lane must be hermetic and free: Compose auto-loads the repository
 # .env, so a developer's real ANTHROPIC_API_KEY would otherwise reach the
 # container, spend provider credits, and break the smoke spec that asserts
@@ -62,6 +76,9 @@ compose() {
   ALLOW_PRIVATE_HTTP_TARGETS=true \
   JANUSLY_CREDENTIAL_MASTER_KEY="$e2e_master_key" \
   ANTHROPIC_API_KEY='' \
+  JANUSLY_BUILD_COMMIT="$build_commit" \
+  JANUSLY_BUILD_TREE="$build_tree" \
+  JANUSLY_BUILD_ID="$build_id" \
     "$docker_bin" compose -p "$project" "$@"
 }
 
@@ -81,15 +98,20 @@ project_has_resources() {
 }
 
 validate_configuration
+resolve_build_identity
 if [[ ${1:-} == selftest ]]; then
   [[ $# == 1 ]] || { usage >&2; die "unexpected arguments"; }
   jq -n --arg project "$project" --argjson appPort "$app_port" --argjson postgresPort "$postgres_port" \
-    --args '{project:$project,ports:{application:$appPort,postgres:$postgresPort},specs:$ARGS.positional}' "${specs[@]}"
+    --arg commit "$build_commit" --arg tree "$build_tree" --arg id "$build_id" \
+    --args '{project:$project,ports:{application:$appPort,postgres:$postgresPort},build:{commit:$commit,tree:$tree,id:$id},specs:$ARGS.positional}' "${specs[@]}"
   exit 0
 fi
 [[ $# == 0 ]] || { usage >&2; die "unexpected arguments"; }
 command -v "$docker_bin" >/dev/null 2>&1 || die "docker is required"
 project_has_resources && die "refusing pre-existing resources for project $project"
+if [[ $build_commit == "$zero_commit" ]]; then
+  printf 'test-e2e: source is dirty or unverified; image will not claim the current commit\n' >&2
+fi
 trap cleanup EXIT INT TERM
 attempted=1
 
