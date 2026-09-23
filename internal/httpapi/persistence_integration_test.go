@@ -16,7 +16,7 @@ func TestHTTPAndLeafAuditsShareInjectedPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := DefaultV1ServerOptions()
+	options := defaultV1ServerOptionsForTest()
 	options.Audit = audit.NewWriter(policy)
 	h := newAPIHarnessWithOptions(t, false, options)
 	pool := testPool(t)

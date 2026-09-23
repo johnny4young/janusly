@@ -29,7 +29,7 @@ func TestShutdownJoinsTheUnsupervisedStreamHub(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	options := DefaultV1ServerOptions()
+	options := defaultV1ServerOptionsForTest()
 	options.Logger = quietTestLogger()
 	_, shutdown, err := NewV1HandlerWithOptions(engine.New(pool), pool, options)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestSupervisedStreamHubRunsUnderTheRunnerContext(t *testing.T) {
 	var name atomic.Value
 	loopDone := make(chan struct{})
 	runnerCtx, stopRunner := context.WithCancel(context.Background())
-	options := DefaultV1ServerOptions()
+	options := defaultV1ServerOptionsForTest()
 	options.Logger = quietTestLogger()
 	options.Supervise = func(n string, fn func(ctx context.Context)) {
 		name.Store(n)

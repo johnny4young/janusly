@@ -41,7 +41,7 @@ func newAPIHarnessWithoutWorkers(t *testing.T) *apiHarness {
 }
 
 func newAPIHarnessWithWorkers(t *testing.T, startWorkers bool) *apiHarness {
-	options := DefaultV1ServerOptions()
+	options := defaultV1ServerOptionsForTest()
 	options.Logger = quietTestLogger()
 	return newAPIHarnessWithOptions(t, startWorkers, options)
 }

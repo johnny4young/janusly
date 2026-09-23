@@ -114,45 +114,6 @@ type V1ServerOptions struct {
 	StartRateLimitPerMinute int
 }
 
-// DefaultV1ServerOptions returns the production-safe bounded defaults.
-func DefaultV1ServerOptions() V1ServerOptions {
-	return V1ServerOptions{
-		FeedbackMemoryWorkers:       defaultFeedbackMemoryWorkers,
-		FeedbackMemoryQueueCapacity: defaultFeedbackMemoryQueueCapacity,
-		FeedbackMemoryTaskTimeout:   defaultFeedbackMemoryTaskTimeout,
-		Logger:                      slog.Default(),
-		StartRateLimitPerMinute:     startRateLimitFromEnv(),
-	}
-}
-
-// NewV1Handler mounts the v1 routes plus the operational health surfaces. The stream hub's
-// LISTEN connection lives for the process (the production shape).
-func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
-	handler, _ := NewV1HandlerWithShutdown(eng, pool)
-	return handler
-}
-
-// NewV1HandlerWithShutdown additionally returns a compatibility shutdown func
-// that cancels the stream hub's hijacked LISTEN connection and drains optional
-// feedback-memory work. Test harnesses MUST call it before closing the pool.
-func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Handler, func()) {
-	options := DefaultV1ServerOptions()
-	handler, shutdown, err := newV1HandlerWithWorkOS(eng, pool, workos.NewFromEnv(), options)
-	if err != nil {
-		options.Logger.Error("V1 server construction failed", "reason", "feedback_memory_options")
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-		}), func() {}
-	}
-	return handler, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), feedbackMemoryTaskTimeoutMax)
-		defer cancel()
-		if err := shutdown(ctx); err != nil {
-			options.Logger.Error("V1 server shutdown incomplete", "reason", "feedback_memory_drain")
-		}
-	}
-}
-
 // NewV1HandlerWithOptions builds the production surface with explicitly
 // validated background-work bounds. Shutdown must run before either database
 // pool closes because accepted tasks retain the API pool.

@@ -68,7 +68,7 @@ func TestSsoStartIsRateLimitedPerIP(t *testing.T) {
 // costs one counter bump each.
 func TestStartRunIsRateLimitedPerOrg(t *testing.T) {
 	const perMinute = 5
-	options := DefaultV1ServerOptions()
+	options := defaultV1ServerOptionsForTest()
 	options.StartRateLimitPerMinute = perMinute
 	h := newAPIHarnessWithOptions(t, false, options)
 	for i := 0; i < perMinute; i++ {

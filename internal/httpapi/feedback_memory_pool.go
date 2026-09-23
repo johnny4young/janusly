@@ -14,13 +14,10 @@ import (
 )
 
 const (
-	defaultFeedbackMemoryWorkers       = 4
-	defaultFeedbackMemoryQueueCapacity = 256
-	defaultFeedbackMemoryTaskTimeout   = 15 * time.Second
-	feedbackMemoryWorkersMax           = 32
-	feedbackMemoryQueueCapacityMax     = 4096
-	feedbackMemoryTaskTimeoutMin       = time.Second
-	feedbackMemoryTaskTimeoutMax       = 5 * time.Minute
+	feedbackMemoryWorkersMax       = 32
+	feedbackMemoryQueueCapacityMax = 4096
+	feedbackMemoryTaskTimeoutMin   = time.Second
+	feedbackMemoryTaskTimeoutMax   = 5 * time.Minute
 )
 
 var (
