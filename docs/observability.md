@@ -127,7 +127,9 @@ eligible queue-wait latency, terminal/task failures,
 degraded rate limiting, repeated sweep failures, and sweep liveness grouped by
 cadence. The never-ran rule waits for the slowest hourly loop plus margin and
 counts each scrape instance independently, so startup and multiple replicas do
-not create false pages. Dashboard and alert metric families are checked against
+not create false pages. Every alert links to the
+[operator response runbook](runbooks/alerts.md) for safe diagnosis, mitigation,
+rollback and escalation. Dashboard and alert metric families are checked against
 a scrape from the exact executable by the executable E2E suite.
 
 The local Prometheus sends firing rules to Alertmanager; rules without this hop
