@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -67,10 +68,12 @@ type qualificationReport struct {
 	UsefulCases     int                         `json:"usefulCases"`
 	UsefulMinimum   int                         `json:"usefulMinimum"`
 	Calls           int                         `json:"calls"`
+	LifetimeCalls   int                         `json:"lifetimeCalls"`
 	MaxCalls        int                         `json:"maxCalls"`
 	MaxCallsPerCase int                         `json:"maxCallsPerCase"`
 	Tokens          int                         `json:"tokens"`
 	CostUSD         float64                     `json:"costUsd"`
+	ReservedUSD     float64                     `json:"reservedUsd"`
 	MaxUSD          float64                     `json:"maxUsd"`
 	SDKRetries      int                         `json:"sdkRetries"`
 	Breakers        map[string]bool             `json:"breakers"`
@@ -81,21 +84,24 @@ type recordedProviderCall struct {
 	evidence         qualificationCallEvidence
 }
 
-// boundedProductClient is the process-global billing circuit breaker. Before
-// every external call it reserves a conservative byte-as-token upper bound,
-// so the final call cannot knowingly cross the authorized USD ceiling.
+// boundedProductClient checks both in-process and lifetime call caps. Before
+// every external call it durably reserves a conservative byte-as-token upper
+// bound; uncertain outcomes never refund a reservation automatically.
 type boundedProductClient struct {
 	delegate         ai.Client
+	ledger           realProviderLedger
 	maxCalls         int
 	maxCallsPerCase  int
 	maxUSD           float64
 	defaultMaxOutput int
 
-	mu      sync.Mutex
-	calls   int
-	tokens  int
-	costUSD float64
-	records []recordedProviderCall
+	mu            sync.Mutex
+	calls         int
+	tokens        int
+	costUSD       float64
+	reservedUSD   float64
+	lifetimeCalls int
+	records       []recordedProviderCall
 }
 
 func (c *boundedProductClient) Configured() bool { return c.delegate != nil && c.delegate.Configured() }
@@ -121,23 +127,29 @@ func (c *boundedProductClient) generateForCase(
 	}
 	// UTF-8 byte count is deliberately more conservative than normal token
 	// estimates. The fixed overhead covers provider framing and metadata.
-	projected := ai.ComputeCostUsd(price, ai.Usage{
-		InputTokens:  len([]byte(input.System)) + len([]byte(input.Prompt)) + 512,
-		OutputTokens: maxOutput,
-	})
-	if projected == nil {
-		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification cost projection unavailable"}
-	}
+	// All input might be charged at the cache-write tier, which can exceed
+	// ordinary input pricing. Count every UTF-8 byte as one token plus a
+	// 4096-token framing allowance; unused reserves are not refunded.
+	inputRate := math.Max(price.InputUsdPer1M, math.Max(price.CacheWrite5mUsdPer1M, price.CacheReadUsdPer1M))
+	projectedUSD := (float64(len(input.System)+len(input.Prompt)+4096)*inputRate +
+		float64(maxOutput)*price.OutputUsdPer1M) / 1_000_000
 	c.mu.Lock()
 	if c.calls >= c.maxCalls {
 		c.mu.Unlock()
 		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification call cap reached"}
 	}
-	if c.costUSD+*projected > c.maxUSD {
+	perCaseCap := c.maxCallsPerCase
+	if perCaseCap <= 0 {
+		perCaseCap = realProviderMaxCallsPerCase
+	}
+	totals, err := c.ledger.reserve(caseID, projectedUSD, c.maxUSD, c.maxCalls, perCaseCap)
+	if err != nil {
 		c.mu.Unlock()
-		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification USD breaker reached"}
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification lifetime reservation refused"}
 	}
 	c.calls++
+	c.reservedUSD = float64(totals.ReservedMicros) / 1_000_000
+	c.lifetimeCalls = totals.Calls
 	c.mu.Unlock()
 
 	result, aiErr := c.delegate.GenerateText(ctx, input)
@@ -181,6 +193,12 @@ func (c *boundedProductClient) accounting() (calls, tokens int, cost float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.calls, c.tokens, c.costUSD
+}
+
+func (c *boundedProductClient) reservations() (float64, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.reservedUSD, c.lifetimeCalls
 }
 
 type boundedCaseClient struct {
@@ -241,12 +259,14 @@ func providerModel(hint string) (string, string) {
 
 func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	delegate := &qualificationFakeClient{}
+	ledgerPath := t.TempDir() + "/ledger.jsonl"
 	global := &boundedProductClient{
 		delegate: delegate, maxCalls: realProviderMaxCalls, maxUSD: 1,
+		ledger:           realProviderLedger{path: ledgerPath},
 		defaultMaxOutput: realProviderOutputUnits,
 	}
 	client := &boundedCaseClient{global: global, caseID: "case", category: "authoring"}
-	for attempt := 0; attempt < realProviderMaxCallsPerCase; attempt++ {
+	for attempt := range realProviderMaxCallsPerCase {
 		if _, aiErr := client.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr != nil {
 			t.Fatalf("allowed call %d failed: %v", attempt+1, aiErr)
 		}
@@ -257,10 +277,25 @@ func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	if calls, _, _ := global.accounting(); calls != 2 || delegate.calls != 2 {
 		t.Fatalf("per-case breaker reached provider calls=%d delegate=%d", calls, delegate.calls)
 	}
+	// Two Haiku 4.5 calls reserve 4110 input-byte tokens each at the 5-minute
+	// cache-write rate ($1.25/M), plus 1200 output tokens at $5/M. Each
+	// 11137.5-microUSD projection rounds upward before it is persisted.
+	if reservedUSD, lifetimeCalls := global.reservations(); int64(math.Round(reservedUSD*1_000_000)) != 22_276 || lifetimeCalls != 2 {
+		t.Fatalf("durable cache-tier upper bound missing: reserved=%f lifetimeCalls=%d", reservedUSD, lifetimeCalls)
+	}
+	restartedDelegate := &qualificationFakeClient{}
+	restarted := &boundedProductClient{
+		delegate: restartedDelegate, maxCalls: realProviderMaxCalls, maxCallsPerCase: 2, maxUSD: 1,
+		ledger: realProviderLedger{path: ledgerPath}, defaultMaxOutput: realProviderOutputUnits,
+	}
+	if _, aiErr := (&boundedCaseClient{global: restarted, caseID: "case"}).GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr == nil || restartedDelegate.calls != 0 {
+		t.Fatalf("restart must not regain paid attempts: error=%v delegateCalls=%d", aiErr, restartedDelegate.calls)
+	}
 
 	usdBlockedDelegate := &qualificationFakeClient{}
 	usdBlocked := &boundedProductClient{
 		delegate: usdBlockedDelegate, maxCalls: realProviderMaxCalls, maxUSD: 0.0001,
+		ledger:           realProviderLedger{path: t.TempDir() + "/ledger.jsonl"},
 		defaultMaxOutput: realProviderOutputUnits,
 	}
 	if _, aiErr := usdBlocked.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr == nil || aiErr.Class != "invalid_request" {
@@ -273,6 +308,7 @@ func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	callBlockedDelegate := &qualificationFakeClient{}
 	callBlocked := &boundedProductClient{
 		delegate: callBlockedDelegate, maxCalls: 1, maxUSD: 1,
+		ledger:           realProviderLedger{path: t.TempDir() + "/ledger.jsonl"},
 		defaultMaxOutput: realProviderOutputUnits,
 	}
 	if _, aiErr := callBlocked.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr != nil {
@@ -307,12 +343,17 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 	}
 	maxCalls := qualificationIntegerLimit(t, "JANUSLY_REAL_PROVIDER_MAX_CALLS", realProviderMaxCalls, realProviderCaseCount, realProviderMaxCalls)
 	maxCallsPerCase := qualificationIntegerLimit(t, "JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE", realProviderMaxCallsPerCase, 1, realProviderMaxCallsPerCase)
+	ledgerPath := strings.TrimSpace(os.Getenv("JANUSLY_REAL_PROVIDER_LEDGER"))
+	if ledgerPath == "" {
+		t.Fatal("JANUSLY_REAL_PROVIDER_LEDGER is required before any paid call")
+	}
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableKeepAlives = true
 	providerHTTPClient := &http.Client{Transport: transport}
 	t.Cleanup(transport.CloseIdleConnections)
 	global := &boundedProductClient{
+		ledger: realProviderLedger{path: ledgerPath},
 		delegate: ai.New(ai.Config{
 			APIKey: key, Model: ai.DefaultModel, TimeoutMs: 45_000,
 			MaxRetries: 0, MaxOutputTokens: realProviderOutputUnits, HTTPClient: providerHTTPClient,
@@ -348,6 +389,7 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 		}
 	}
 	report.Calls, report.Tokens, report.CostUSD = global.accounting()
+	report.ReservedUSD, report.LifetimeCalls = global.reservations()
 	rawReport, err := json.Marshal(report)
 	if err != nil {
 		t.Fatalf("encode sanitized real-provider report: %v", err)
@@ -360,7 +402,7 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 			len(report.Cases), report.ValidCases, report.SafeCases, report.UsefulCases, realProviderUsefulMinimum)
 	}
 	if report.Calls < realProviderCaseCount || report.Calls > report.MaxCalls || report.Tokens <= 0 ||
-		report.CostUSD <= 0 || report.CostUSD > maxUSD {
+		report.CostUSD <= 0 || report.CostUSD > maxUSD || report.ReservedUSD > maxUSD {
 		t.Fatalf("real-provider accounting outside envelope: calls=%d tokens=%d cost=%.8f cap=%.2f",
 			report.Calls, report.Tokens, report.CostUSD, maxUSD)
 	}

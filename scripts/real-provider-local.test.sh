@@ -44,6 +44,17 @@ jq -e '.maxCalls == 20 and .maxCallsPerCase == 1 and .maxUsd == 2.9 and .provide
 
 GOCACHE=${GOCACHE:-/private/tmp/janusly-gocache} \
   go test -tags realprovider -count=1 \
-  -run '^TestRealProviderQualificationBreakersProviderFree$' ./internal/httpapi >/dev/null
+  -run '^(TestRealProviderQualificationBreakersProviderFree|TestRealProviderLedger.*)$' ./internal/httpapi >/dev/null
+
+negative_log=$(mktemp "${TMPDIR:-/tmp}/janusly-real-provider-negative.XXXXXX")
+trap 'rm -f -- "$negative_log"' EXIT
+if GOCACHE=${GOCACHE:-/private/tmp/janusly-gocache} \
+  ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 JANUSLY_REAL_PROVIDER_LEDGER='' \
+  go test -tags realprovider -count=1 \
+  -run '^TestWorkflowAssuranceRealAnthropicEvaluation$' ./internal/httpapi >"$negative_log" 2>&1; then
+  echo "real-provider qualification reached a fake provider without a ledger" >&2
+  exit 1
+fi
+grep -q 'JANUSLY_REAL_PROVIDER_LEDGER is required before any paid call' "$negative_log"
 
 echo "real-provider 20-case harness selftest passed without provider calls"

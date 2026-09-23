@@ -178,3 +178,18 @@ without invented graph capabilities or authority escalation, and at least
 model, tokens, latency, cost, repair flag, and result only—never prompts or raw
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.
+
+The paid profile also keeps an append-only, mode-0600 reservation ledger at
+`output/qualification/real-provider-ledger.jsonl` by default. The optional
+`JANUSLY_REAL_PROVIDER_LEDGER` override must be an absolute path and must be
+reused across every attempt charged to the same authorization. Before egress,
+an interprocess file lock serializes a conservative USD reservation and
+lifetime global/per-case call counts. Input is priced as one token per UTF-8
+byte plus a framing allowance at the highest input/cache rate; output is
+reserved at the configured maximum. A timeout, failed response, interrupted
+test, or unknown provider charge **does not refund** its reservation. A corrupt
+ledger fails closed before provider egress. The sanitized summary reports
+measured successful-response cost separately from lifetime reserved USD;
+neither replaces the provider's billing statement. Keep the ledger when
+retrying, changing worktrees, or reviewing a failed run. Do not reset it to
+obtain another USD 3 allowance.
