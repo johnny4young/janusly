@@ -24,6 +24,13 @@ and error boundaries around major workspaces. Accessibility, localization,
 browser behavior, bundle budgets, and zero-console-error E2E are acceptance
 requirements.
 
+Native React `rules-of-hooks` and `exhaustive-deps` are lint errors. Negative
+fixtures prove both rules execute. The stable translator reads a subscribed
+runtime locale outside React; a memo that invokes it indirectly must retain
+locale invalidation, documented locally when the dependency analyzer cannot
+see through that helper. Other missing dependencies are fixed at the hook
+boundary rather than hidden with a broad lint exclusion.
+
 New contract-first surfaces use `contractApi` with operation types generated
 from `contract/openapi.json`. Authoring additionally validates the parsed
 success payload in `web/src/lib/authoring-contract.ts` before a proposal can

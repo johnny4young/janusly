@@ -112,6 +112,9 @@ export function RunHistoryList({
     ? remoteForCurrentFilter.runs
     : hasActiveFilters ? [] : runs
 
+  // Workflow names use the runtime locale for collation; useT subscribes to
+  // locale changes, while getResolvedLocale reads it outside the closure.
+  /* oxlint-disable react/exhaustive-deps -- getResolvedLocale reads the runtime locale */
   const workflowOptions = useMemo(() => {
     const labels = new Map<string, string>()
     for (const workflow of workflows) labels.set(workflow.id, workflow.name)
@@ -122,6 +125,7 @@ export function RunHistoryList({
       a.name.localeCompare(b.name, getResolvedLocale()),
     )
   }, [i18n.language, runs, workflows])
+  /* oxlint-enable react/exhaustive-deps */
   const workflowLabels = useMemo(
     () => new Map(workflowOptions.map(option => [option.id, option.name])),
     [workflowOptions],

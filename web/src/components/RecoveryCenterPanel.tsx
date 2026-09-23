@@ -108,6 +108,7 @@ const RECOVERY_IMPACT_IDLE_POLL_MS = 60_000
 
 function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   const { t, i18n } = useT()
+  const { onOpenRecoveryCase, onOpenRecoveryQueue, onOpenRun, onOpenTab } = props
   const platformVersion = useInvalidationNonce(RECOVERY_CENTER_TAGS)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const { status: memoryConsentStatus } = useMemoryConsentStatus()
@@ -394,7 +395,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       })
 
     return () => { cancelled = true; controller.abort() }
-  }, [applyImpactSnapshot, platformVersion, resolvedOrgId, resolvedUserId])
+  }, [applyImpactSnapshot, platformVersion, resolvedOrgId, resolvedUserId, t])
 
   useEffect(() => {
     let cancelled = false
@@ -620,6 +621,10 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     : null
 
   const healthScore = metricsStatus === 'available' ? readHealthScore(metrics) : null
+  // These helpers translate via the stable runtimeT function, which reads the
+  // current locale outside React. The explicit language key invalidates both
+  // projections when useT observes a locale switch.
+  /* oxlint-disable react/exhaustive-deps -- runtimeT reads locale through the i18n runtime */
   const greeting = useMemo(() => buildGreeting({
     hour: currentHour,
     displayName: readDisplayName(user),
@@ -645,6 +650,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     () => presentOperatorBrief(operatorBrief),
     [operatorBrief, i18n.language],
   )
+  /* oxlint-enable react/exhaustive-deps */
   const allActiveRuns = useMemo(
     () => listActiveRuns(props.runs, props.runs.length),
     [props.runs],
@@ -653,21 +659,16 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   const handleRecommendedAction = useCallback((action: RecommendedAction) => {
     const { target } = action
     if (target.destination === 'recoveryCase') {
-      props.onOpenRecoveryCase(target.id)
+      onOpenRecoveryCase(target.id)
     } else if (target.destination === 'runs') {
-      if (target.runId) void props.onOpenRun(target.runId, 'runs')
-      else props.onOpenTab('runs')
+      if (target.runId) void onOpenRun(target.runId, 'runs')
+      else onOpenTab('runs')
     } else if (target.destination === 'recover') {
-      props.onOpenRecoveryQueue(target.kind === 'dead_letter' ? target.id : undefined)
+      onOpenRecoveryQueue(target.kind === 'dead_letter' ? target.id : undefined)
     } else if (target.destination === 'operations') {
-      props.onOpenTab('operations')
+      onOpenTab('operations')
     }
-  }, [
-    props.onOpenRecoveryCase,
-    props.onOpenRecoveryQueue,
-    props.onOpenRun,
-    props.onOpenTab,
-  ])
+  }, [onOpenRecoveryCase, onOpenRecoveryQueue, onOpenRun, onOpenTab])
 
   const showOnboarding = metricsStatus === 'empty'
     && semanticCases.length === 0
@@ -683,8 +684,8 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
 
   const openMemoryGovernance = useCallback(() => {
     requestOperationsSection('access')
-    props.onOpenTab('operations')
-  }, [props.onOpenTab])
+    onOpenTab('operations')
+  }, [onOpenTab])
 
   return {
     activeRuns, allActiveRuns, allClear, allClearDowntimeOverride, bumpPlatformVersion,

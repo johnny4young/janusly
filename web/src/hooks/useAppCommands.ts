@@ -32,6 +32,7 @@ export function useAppCommands(options: AppCommandsOptions) {
   const canWriteWorkflows = permissions.includes('workflows.write')
 
   const workflowCommands = useWorkflowCommands(options)
+  const { saveWorkflow } = workflowCommands
   const runCommands = useRunCommands(options, {
     validateWorkflow: workflowCommands.validateWorkflow,
   })
@@ -68,8 +69,8 @@ export function useAppCommands(options: AppCommandsOptions) {
   }, [addToast, clearAuth, t])
 
   const fireSave = useCallback(() => {
-    if (canWriteWorkflows) void workflowCommands.saveWorkflow()
-  }, [canWriteWorkflows, workflowCommands.saveWorkflow])
+    if (canWriteWorkflows) void saveWorkflow()
+  }, [canWriteWorkflows, saveWorkflow])
   const fireSignOut = useCallback(() => { void signOut() }, [signOut])
   const openWorkspaceDestination = useCallback((destination: WorkspaceDestination) => {
     const target = resolveWorkspaceDestinationTarget(destination, permissions)

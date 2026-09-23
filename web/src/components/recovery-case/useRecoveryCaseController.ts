@@ -15,7 +15,7 @@ import {
   type RecoveryCaseDetail,
 } from '@/lib/recovery-case-contract'
 import { api, contractApi } from '../../api'
-import { getResolvedLocale, tApiError, useT } from '../../i18n'
+import { tApiError, useT } from '../../i18n'
 import { useWorkflowStore } from '../../store'
 
 const AUTHORING_PROMPT_MAX_RUNES = 4000
@@ -134,7 +134,7 @@ export function useRecoveryCaseController({
   }, [detail?.activeApproval?.expiresAt, loadCase])
 
   const formatter = useMemo(
-    () => new Intl.DateTimeFormat(getResolvedLocale(), {
+    () => new Intl.DateTimeFormat(i18n.resolvedLanguage, {
       dateStyle: 'medium',
       timeStyle: 'short',
     }),

@@ -3146,7 +3146,6 @@
   "rightPanel.reasoning.causal.score": "puntuación {{score}}",
   "rightPanel.reasoning.causal.breakdown": "Costo {{cost}} · Latencia {{latency}} · Calidad {{quality}}",
   "multiAgent.defaultAgent": "agentes",
-  "multiAgent.defaultWorkflow": "flujo",
   "multiAgent.defaultAgentName": "agente",
   "multiAgent.teamStarted": "Equipo iniciado ({{count}})",
   "multiAgent.teamCompleted": "Equipo completado",

@@ -13,6 +13,14 @@ type Props = {
   onBusyChange: (busy: 'handoff' | null) => void
 }
 
+const CREDENTIAL_KIND_FOR_DESTINATION: Record<RecoveryHandoffDestination, string> = {
+  slack: 'slack_webhook',
+  github: 'github_token',
+  webhook: 'webhook_secret',
+  // Linear uses webhook.send, not a Linear-native client in v1.
+  linear: 'webhook_secret',
+}
+
 // Hand the incident to Slack, GitHub, a webhook or Linear, and show the
 // deliveries already made.
 export function RecoveryHandoffSection({ itemId, disabled, onBusyChange }: Props) {
@@ -39,15 +47,6 @@ export function RecoveryHandoffSection({ itemId, disabled, onBusyChange }: Props
     }>
   >([])
 
-  const credentialKindForDestination: Record<RecoveryHandoffDestination, string> = {
-    slack: 'slack_webhook',
-    github: 'github_token',
-    webhook: 'webhook_secret',
-    // Linear shares the webhook_secret kind because the dispatcher uses
-    // webhook.send for Linear (no Linear-native client in v1).
-    linear: 'webhook_secret',
-  }
-
   useEffect(() => {
     let cancelled = false
     Promise.all([
@@ -65,8 +64,8 @@ export function RecoveryHandoffSection({ itemId, disabled, onBusyChange }: Props
   }, [itemId])
 
   const credentialsForDest = useMemo(() => {
-    const wanted = credentialKindForDestination[handoffDest]
-    return credentials.filter((c) => !wanted || c.kind === wanted)
+    const wanted = CREDENTIAL_KIND_FOR_DESTINATION[handoffDest]
+    return credentials.filter((c) => c.kind === wanted)
   }, [credentials, handoffDest])
 
   useEffect(() => {

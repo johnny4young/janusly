@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { changeAppLanguage } from './i18n'
 import type { RunEvent } from './types'
 import { MultiAgentTimeline } from './MultiAgentTimeline'
 
@@ -37,5 +38,17 @@ describe('<MultiAgentTimeline />', () => {
 
     expect(screen.queryByRole('heading', { name: 'Multi-agent timeline' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('What the colors mean')).toBeInTheDocument()
+  })
+
+  it('reprojects cached event labels when the runtime locale changes', async () => {
+    render(<MultiAgentTimeline events={events} />)
+    expect(screen.getByText('Team started (2)')).toBeInTheDocument()
+
+    try {
+      await act(async () => { await changeAppLanguage('es') })
+      expect(screen.getByText('Equipo iniciado (2)')).toBeInTheDocument()
+    } finally {
+      await act(async () => { await changeAppLanguage('en') })
+    }
   })
 })

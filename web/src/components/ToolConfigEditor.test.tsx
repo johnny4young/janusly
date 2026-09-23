@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { initI18n } from '../i18n'
+import { changeAppLanguage, initI18n } from '../i18n'
 import type { JsonObject, ToolSchema } from '../types'
 import { ToolConfigEditor } from './ToolConfigEditor'
 
@@ -45,6 +45,30 @@ const tools: ToolSchema[] = [
 beforeEach(() => initI18n('en'))
 
 describe('<ToolConfigEditor />', () => {
+  it('recomputes purpose search against the current language', async () => {
+    render(
+      <ToolConfigEditor
+        nodeId="action"
+        config={{ tool: 'github.create_issue', input: {} }}
+        tools={tools}
+        onUpdate={vi.fn()}
+      />,
+    )
+
+    const search = screen.getByLabelText('Find a tool')
+    fireEvent.change(search, { target: { value: 'Convert text' } })
+    expect(screen.getByRole('option', { name: 'text.uppercase' })).toBeInTheDocument()
+
+    try {
+      await act(async () => { await changeAppLanguage('es') })
+      expect(screen.queryByRole('option', { name: 'text.uppercase' })).toBeNull()
+      fireEvent.change(search, { target: { value: 'Convierte el texto' } })
+      expect(screen.getByRole('option', { name: 'text.uppercase' })).toBeInTheDocument()
+    } finally {
+      await act(async () => { await changeAppLanguage('en') })
+    }
+  })
+
   it('searches the catalog by localized purpose while preserving the selected tool', () => {
     render(
       <ToolConfigEditor

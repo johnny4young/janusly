@@ -57,10 +57,10 @@ type TimelineItem = {
 function getAgentName(event: RunEvent): string {
   const payload = event.payload ?? {}
   const fallbackTeam = runtimeT('multiAgent.defaultAgent')
-  const fallbackWorkflow = runtimeT('multiAgent.defaultWorkflow')
 
-  if (event.type === 'multi_agent.agent.started') return typeof payload.name === 'string' ? payload.name : fallbackTeam
-  if (event.type === 'multi_agent.agent.completed') return typeof payload.name === 'string' ? payload.name : fallbackTeam
+  if (event.type === 'multi_agent.agent.started' || event.type === 'multi_agent.agent.completed') {
+    return typeof payload.name === 'string' ? payload.name : fallbackTeam
+  }
   if (typeof payload.name === 'string') return payload.name
   if (typeof payload.agent === 'string') return payload.agent
 
@@ -69,8 +69,8 @@ function getAgentName(event: RunEvent): string {
   // consistent with engine-emitted event types.
   if (match) return `agent_${Number(match[1]) + 1}`
 
-  if (event.type.startsWith('multi_agent')) return fallbackTeam
-  return fallbackWorkflow
+  // Projection only calls this for multi_agent events.
+  return fallbackTeam
 }
 
 function getLabel(event: RunEvent): string {
@@ -113,7 +113,7 @@ function getTone(event: RunEvent): Tone {
   // Lifecycle starts get a hue instead of collapsing to gray: tool calls
   // read cyan ("tool call" lane), team/step starts read cobalt ("planning").
   if (event.type.endsWith('.tool.started')) return 'tool'
-  if (event.type.endsWith('.step.started') || event.type.endsWith('.started')) return 'config'
+  if (event.type.endsWith('.started')) return 'config'
   return 'info'
 }
 
@@ -163,6 +163,7 @@ export function MultiAgentTimeline({
 
   // `getAgentName` and `getLabel` call `runtimeT` internally, so include
   // `i18n.language` in the dep array so the memo re-computes on locale switch.
+  /* oxlint-disable react/exhaustive-deps -- runtimeT reads locale through the i18n runtime */
   const items = useMemo<TimelineItem[]>(() => {
     return events
       .filter(event => event.type.startsWith('multi_agent'))
@@ -178,6 +179,7 @@ export function MultiAgentTimeline({
         createdAt: event.createdAt ?? undefined,
       }))
   }, [events, i18n.language])
+  /* oxlint-enable react/exhaustive-deps */
 
   const lanes = useMemo(() => {
     const map = new Map<string, TimelineItem[]>()
