@@ -294,3 +294,13 @@ read and fetches the current detail; a mismatched initial detail is not reused.
 Component regressions cover a late stale response and an initial snapshot from
 the previous status. The bounded summary still protects the visible status
 while the new evidence is loading.
+
+## Controlled AI option disclosure
+
+The AI quick-config editor now recognizes externally added advanced options on
+an already selected node. It opens the disclosure when the configured option
+count increases, resets it on a node change, and does not undo an operator's
+manual collapse when same-node options merely change value or disappear.
+Prompt-source synchronization uses saved-prompt presence rather than a newly
+allocated prompt-reference object. Unit and Chromium tests cover the controlled
+inline/saved transitions and native disclosure behavior without provider calls.

@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../api'
 import { Trans, useT } from '../i18n'
@@ -74,6 +74,7 @@ export function AiConfigEditor({
 }) {
   const { t } = useT()
   const promptRef = readPromptRef(config)
+  const hasSavedPrompt = promptRef !== null
   const responseMode = readResponseMode(config)
   const [promptSource, setPromptSource] = useState<PromptSource>(promptRef ? 'saved' : 'inline')
   const [prompts, setPrompts] = useState<PromptSummary[]>([])
@@ -85,6 +86,7 @@ export function AiConfigEditor({
     promptSource === 'saved' && config.variables !== undefined,
   ].filter(Boolean).length
   const [advancedOpen, setAdvancedOpen] = useState(configuredAdvancedCount > 0)
+  const advancedContextRef = useRef({ nodeId, configuredAdvancedCount })
   const patch = (next: Record<string, unknown>) => onUpdate({ ...config, ...next })
   const replaceKeys = (keys: string[], next: Record<string, unknown>) => {
     const updated: Record<string, unknown> = { ...config }
@@ -98,12 +100,18 @@ export function AiConfigEditor({
   const outputHelperId = `${responseModeId}-helper`
 
   useEffect(() => {
-    setPromptSource(promptRef ? 'saved' : 'inline')
-  }, [nodeId, promptRef?.name])
+    setPromptSource(hasSavedPrompt ? 'saved' : 'inline')
+  }, [nodeId, hasSavedPrompt])
 
   useEffect(() => {
-    setAdvancedOpen(configuredAdvancedCount > 0)
-  }, [nodeId])
+    const previous = advancedContextRef.current
+    if (previous.nodeId !== nodeId) {
+      setAdvancedOpen(configuredAdvancedCount > 0)
+    } else if (configuredAdvancedCount > previous.configuredAdvancedCount) {
+      setAdvancedOpen(true)
+    }
+    advancedContextRef.current = { nodeId, configuredAdvancedCount }
+  }, [nodeId, configuredAdvancedCount])
 
   useEffect(() => {
     if (promptSource !== 'saved') return

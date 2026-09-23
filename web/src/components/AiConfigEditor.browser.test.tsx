@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
@@ -23,6 +23,29 @@ beforeEach(() => {
 })
 
 describe('<AiConfigEditor /> browser smoke', () => {
+  it('reveals a newly configured same-node model without undoing a manual collapse', async () => {
+    const onUpdate = vi.fn()
+    const { rerender } = render(
+      <AiConfigEditor nodeId="classify" config={{ prompt: 'Classify' }} onUpdate={onUpdate} />,
+    )
+    const options = screen.getByTestId('ai-options')
+    expect(options).not.toHaveAttribute('open')
+
+    rerender(<AiConfigEditor nodeId="classify"
+      config={{ prompt: 'Classify', model: 'model-a' }} onUpdate={onUpdate} />)
+    await waitFor(() => expect(options).toHaveAttribute('open'))
+    expect(screen.getByLabelText('Model override')).toHaveValue('model-a')
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Advanced options'))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    expect(options).not.toHaveAttribute('open')
+    rerender(<AiConfigEditor nodeId="classify"
+      config={{ prompt: 'Classify', model: 'model-b' }} onUpdate={onUpdate} />)
+    expect(options).not.toHaveAttribute('open')
+  })
+
   it('keeps primary AI controls aligned and exposes structured output progressively', () => {
     const onUpdate = vi.fn()
     const { rerender } = render(
