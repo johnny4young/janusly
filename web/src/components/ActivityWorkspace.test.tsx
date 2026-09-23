@@ -1,10 +1,16 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 import type { ActivityWorkspaceProps } from './ActivityWorkspace'
 import { ActivityWorkspace } from './ActivityWorkspace'
 import type { DeadLetter } from './DeadLettersPanel'
 import { requestRecoveryQueueFocus } from './recovery-queue-focus-bus'
+
+vi.mock('../lib/dead-letter-contract', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/dead-letter-contract')>()),
+  readDeadLetterDetail: vi.fn(),
+}))
 
 vi.mock('./RunWorkspace', () => ({
   RunWorkspace: ({ runsPanelVariant }: { runsPanelVariant?: string }) => (
@@ -46,6 +52,15 @@ const deadLetter: DeadLetter = {
   errorJson: { message: 'Approval timed out' },
 }
 
+function offListDetail(id: string): Awaited<ReturnType<typeof readDeadLetterDetail>> {
+  return {
+    id, orgId: 'org-1', runId: 'run-failed', nodeId: `node-${id}`,
+    attempt: 1, status: 'open', workflowJson: {}, nodeJson: {}, errorJson: {},
+    createdAt: null, replayedAt: null, replayClaimedAt: null,
+    suspectVersion: null, drill: null, drillOutcome: null,
+  }
+}
+
 function props(
   overrides: Partial<ActivityWorkspaceProps> = {},
 ): ActivityWorkspaceProps {
@@ -82,6 +97,7 @@ describe('<ActivityWorkspace />', () => {
   beforeEach(() => {
     window.sessionStorage.clear()
     for (const handler of Object.values(handlers)) handler.mockClear()
+    vi.mocked(readDeadLetterDetail).mockReset()
   })
 
   it('shows the unified inventory before any run or recovery tools', () => {
@@ -148,5 +164,56 @@ describe('<ActivityWorkspace />', () => {
     expect(screen.getByTestId('activity-row-recovery:dead-letter-1')).toBeVisible()
     expect(screen.getByTestId('activity-row-run:run-waiting')).toBeVisible()
     expect(screen.queryByTestId('activity-row-run:run-live')).not.toBeInTheDocument()
+  })
+
+  it('reads off-list recovery evidence once per selected ID and aborts the previous selection', async () => {
+    vi.mocked(readDeadLetterDetail).mockImplementation(() => new Promise(() => {}))
+    const initial = props({ activeRecoveryId: 'off-list-1' })
+    const view = render(<ActivityWorkspace {...initial} />)
+
+    await waitFor(() => expect(readDeadLetterDetail).toHaveBeenCalledTimes(1))
+    const firstSignal = vi.mocked(readDeadLetterDetail).mock.calls[0]![1]
+    expect(firstSignal?.aborted).toBe(false)
+
+    view.rerender(<ActivityWorkspace {...initial} />)
+    fireEvent.click(screen.getByTestId('activity-filter-failed'))
+    expect(readDeadLetterDetail).toHaveBeenCalledTimes(1)
+    expect(firstSignal?.aborted).toBe(false)
+
+    view.rerender(<ActivityWorkspace {...initial} activeRecoveryId="off-list-2" />)
+    await waitFor(() => expect(readDeadLetterDetail).toHaveBeenCalledTimes(2))
+    expect(firstSignal?.aborted).toBe(true)
+    expect(vi.mocked(readDeadLetterDetail).mock.calls[1]![0]).toBe('off-list-2')
+
+    const secondSignal = vi.mocked(readDeadLetterDetail).mock.calls[1]![1]
+    view.rerender(<ActivityWorkspace {...initial} activeRecoveryId="off-list-2" canReadDeadLetters={false} />)
+    expect(secondSignal?.aborted).toBe(true)
+    expect(readDeadLetterDetail).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not display a previous off-list recovery while a new selection loads', async () => {
+    vi.mocked(readDeadLetterDetail)
+      .mockResolvedValueOnce(offListDetail('off-list-1'))
+      .mockImplementationOnce(() => new Promise(() => {}))
+    const initial = props({ activeRecoveryId: 'off-list-1' })
+    const view = render(<ActivityWorkspace {...initial} />)
+    expect(await screen.findByTestId('recovery-detail-projection')).toHaveTextContent('node-off-list-1')
+
+    view.rerender(<ActivityWorkspace {...initial} canReadDeadLetters={false} />)
+    expect(screen.queryByTestId('recovery-detail-projection')).not.toBeInTheDocument()
+
+    view.rerender(<ActivityWorkspace {...initial} activeRecoveryId="off-list-2" />)
+    expect(screen.queryByTestId('recovery-detail-projection')).not.toBeInTheDocument()
+    expect(screen.getByTestId('activity-detail')).toHaveTextContent('Loading')
+    expect(readDeadLetterDetail).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not read off-list recovery evidence without read permission', () => {
+    render(<ActivityWorkspace {...props({
+      activeRecoveryId: 'off-list-1',
+      canReadDeadLetters: false,
+    })} />)
+
+    expect(readDeadLetterDetail).not.toHaveBeenCalled()
   })
 })
