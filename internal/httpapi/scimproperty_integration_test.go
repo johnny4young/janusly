@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand"
 	"net/http"
 	"os"
@@ -40,6 +41,43 @@ type scimPropEvent struct {
 	Type      string         `json:"event"`
 	CreatedAt string         `json:"created_at"`
 	Data      map[string]any `json:"data"`
+}
+
+func scimPropPayload(directory string, event scimPropEvent) ([]byte, error) {
+	data := make(map[string]any, len(event.Data)+1)
+	maps.Copy(data, event.Data)
+	data["directory_id"] = directory
+	return json.Marshal(map[string]any{
+		"id": event.ID, "event": event.Type, "created_at": event.CreatedAt, "data": data,
+	})
+}
+
+func TestScimPropPayloadKeepsGeneratedEventImmutable(t *testing.T) {
+	event := scimPropEvent{
+		ID: "event-1", Type: "dsync.user.created", CreatedAt: "2026-09-23T00:00:00Z",
+		Data: map[string]any{"id": "user-1", "directory_id": "original"},
+	}
+	payload, err := scimPropPayload("directory-1", event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := event.Data["directory_id"]; got != "original" {
+		t.Fatalf("generated event mutated: directory_id = %v", got)
+	}
+	var decoded struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Data["directory_id"] != "directory-1" || decoded.Data["id"] != "user-1" {
+		t.Fatalf("incorrect webhook payload: %+v", decoded.Data)
+	}
+	if _, err := scimPropPayload("directory-1", scimPropEvent{
+		Data: map[string]any{"unsupported": make(chan int)},
+	}); err == nil {
+		t.Fatal("unencodable event must fail before webhook delivery")
+	}
 }
 
 type scimPropUniverse struct {
@@ -101,26 +139,35 @@ func (p *scimPropHarness) adminCall(org, method, path string, body map[string]an
 	return res.status, res.body
 }
 
-func (p *scimPropHarness) deliver(directory string, event scimPropEvent) map[string]any {
-	event.Data["directory_id"] = directory
-	payload, _ := json.Marshal(map[string]any{
-		"id": event.ID, "event": event.Type, "created_at": event.CreatedAt, "data": event.Data,
-	})
-	req, _ := http.NewRequest("POST", p.h.server.URL+"/webhooks/workos/directory", bytes.NewReader(payload))
+func (p *scimPropHarness) deliver(directory string, event scimPropEvent) {
+	p.t.Helper()
+	payload, err := scimPropPayload(directory, event)
+	if err != nil {
+		p.t.Fatalf("encode webhook event %q: %v", event.ID, err)
+	}
+	req, err := http.NewRequestWithContext(p.t.Context(), http.MethodPost,
+		p.h.server.URL+"/webhooks/workos/directory", bytes.NewReader(payload))
+	if err != nil {
+		p.t.Fatalf("construct webhook event %q: %v", event.ID, err)
+	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("WorkOS-Signature", scim.SignWebhookHeader(p.secret, string(payload), time.Now().UnixMilli()))
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
-		p.t.Fatalf("webhook: %v", err)
+		p.t.Fatalf("deliver webhook event %q: %v", event.ID, err)
 	}
-	defer func() { _ = response.Body.Close() }()
-	raw, _ := io.ReadAll(response.Body)
-	var parsed map[string]any
-	_ = json.Unmarshal(raw, &parsed)
-	if response.StatusCode != 200 {
-		p.t.Fatalf("delivery must 200: %d %s", response.StatusCode, raw)
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			p.t.Errorf("close webhook response for %q: %v", event.ID, err)
+		}
+	}()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		p.t.Fatalf("read webhook response for %q: %v", event.ID, err)
 	}
-	return parsed
+	if response.StatusCode != http.StatusOK {
+		p.t.Fatalf("delivery of %q must return 200: %d %s", event.ID, response.StatusCode, raw)
+	}
 }
 
 func snapshotOrg(t *testing.T, pool *pgxpool.Pool, org string) string {
