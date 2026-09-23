@@ -147,9 +147,11 @@ lanes share one core, one strict decoder, and the `ai.write` gate.
 
 Anthropic model pricing lives once in `internal/ai/pricing.go`. `make generate`
 projects that dated catalog into `web/src/lib/llm-pricing.generated.ts`; the UI
-never maintains an independent hand-copied price table. Unknown models remain
-explicitly unpriced rather than inheriting an optimistic estimate. The real
-provider chokepoint rejects an unpriced model before egress. A catalogued model
+never maintains an independent hand-copied price table. The snapshot date is
+checked against [Anthropic's first-party API pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+Sonnet 5 retains the $2/$10 per-million input/output rate as standard. Unknown
+models remain explicitly unpriced rather than inheriting an optimistic
+estimate. The real provider chokepoint rejects an unpriced model before egress. A catalogued model
 can temporarily override its positive finite `input,output` rates while
 retaining the catalogued cache multipliers. A newly released model absent from
 the catalog must provide all four billable rates explicitly as

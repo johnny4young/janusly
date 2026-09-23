@@ -11,7 +11,7 @@ func TestStaticModelPricesPinsSupportedAnthropicCatalog(t *testing.T) {
 		t.Fatalf("static model price count = %d, want 14", len(prices))
 	}
 	tests := map[string]ModelPrice{
-		"claude-sonnet-5":            {InputUsdPer1M: 3, OutputUsdPer1M: 15, CacheWrite5mUsdPer1M: 3.75, CacheReadUsdPer1M: 0.3},
+		"claude-sonnet-5":            {InputUsdPer1M: 2, OutputUsdPer1M: 10, CacheWrite5mUsdPer1M: 2.5, CacheReadUsdPer1M: 0.2},
 		"claude-opus-5":              {InputUsdPer1M: 5, OutputUsdPer1M: 25, CacheWrite5mUsdPer1M: 6.25, CacheReadUsdPer1M: 0.5},
 		"claude-opus-4-5-20251101":   {InputUsdPer1M: 5, OutputUsdPer1M: 25, CacheWrite5mUsdPer1M: 6.25, CacheReadUsdPer1M: 0.5},
 		"claude-sonnet-4-5-20250929": {InputUsdPer1M: 3, OutputUsdPer1M: 15, CacheWrite5mUsdPer1M: 3.75, CacheReadUsdPer1M: 0.3},
@@ -39,7 +39,7 @@ func TestStaticModelPricesPinsSupportedAnthropicCatalog(t *testing.T) {
 }
 
 func TestGetModelPriceNormalizesAndRejectsNonFiniteOverride(t *testing.T) {
-	if got := GetModelPrice(" CLAUDE-SONNET-5 "); got == nil || got.InputUsdPer1M != 3 || got.OutputUsdPer1M != 15 {
+	if got := GetModelPrice(" CLAUDE-SONNET-5 "); got == nil || got.InputUsdPer1M != 2 || got.OutputUsdPer1M != 10 {
 		t.Fatalf("normalized static lookup = %+v", got)
 	}
 
@@ -55,7 +55,7 @@ func TestGetModelPriceNormalizesAndRejectsNonFiniteOverride(t *testing.T) {
 			t.Setenv(key, invalid)
 			got := GetModelPrice("claude-sonnet-5")
 			if got == nil || math.IsNaN(got.InputUsdPer1M) || math.IsInf(got.OutputUsdPer1M, 0) ||
-				got.InputUsdPer1M != 3 || got.OutputUsdPer1M != 15 {
+				got.InputUsdPer1M != 2 || got.OutputUsdPer1M != 10 {
 				t.Fatalf("invalid override %q must fall back to static price, got %+v", invalid, got)
 			}
 		})
@@ -111,9 +111,9 @@ func TestComputeCostUsdIncludesEveryPromptCacheTokenClass(t *testing.T) {
 		InputTokens: 100, OutputTokens: 50,
 		CacheCreationInputTokens: 200, CachedInputTokens: 300,
 	})
-	// 100×$3 + 200×$3.75 + 300×$0.30 + 50×$15, per million.
-	if cost == nil || math.Abs(*cost-0.00189) > 1e-12 {
-		t.Fatalf("cache-aware cost = %v, want 0.00189", cost)
+	// 100×$2 + 200×$2.50 + 300×$0.20 + 50×$10, per million.
+	if cost == nil || math.Abs(*cost-0.00126) > 1e-12 {
+		t.Fatalf("cache-aware cost = %v, want 0.00126", cost)
 	}
 
 	fable := ComputeCostUsd(GetModelPrice("claude-fable-5-1"), Usage{CachedInputTokens: 1000})

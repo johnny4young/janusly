@@ -29,7 +29,7 @@ type ModelPrice struct {
 // ModelPricingSnapshotDate is the date the static Anthropic price catalog was
 // checked against the vendor's published pricing. Runtime env overrides remain
 // available for changes between source updates.
-const ModelPricingSnapshotDate = "2026-09-03"
+const ModelPricingSnapshotDate = "2026-09-23"
 
 // modelPrices is the completion runtime's single pricing source. Keys are
 // lowercase; cmd/pricing generates the browser copy from this map.
@@ -39,10 +39,9 @@ var modelPrices = map[string]ModelPrice{
 	"claude-sonnet-4-5-20250929": anthropicModelPrice("claude-sonnet-4-5-20250929", 3.0, 15.0),
 	"claude-sonnet-4-5":          anthropicModelPrice("claude-sonnet-4-5", 3.0, 15.0),
 	"claude-sonnet-4-6":          anthropicModelPrice("claude-sonnet-4-6", 3.0, 15.0),
-	// Sonnet 5's introductory $2/$10 rate ended on 2026-08-31. Keep the
-	// catalog on the standard rate that became effective 2026-09-01; an old
-	// promotional price here would systematically under-report real spend.
-	"claude-sonnet-5":          anthropicModelPrice("claude-sonnet-5", 3.0, 15.0),
+	// Anthropic retained Sonnet 5's $2/$10 introductory rate as its standard
+	// rate instead of the previously announced September increase.
+	"claude-sonnet-5":          anthropicModelPrice("claude-sonnet-5", 2.0, 10.0),
 	"claude-opus-4-5-20251101": anthropicModelPrice("claude-opus-4-5-20251101", 5.0, 25.0),
 	"claude-opus-4-5":          anthropicModelPrice("claude-opus-4-5", 5.0, 25.0),
 	"claude-opus-4-6":          anthropicModelPrice("claude-opus-4-6", 5.0, 25.0),

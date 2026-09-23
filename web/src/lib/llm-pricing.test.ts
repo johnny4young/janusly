@@ -10,11 +10,11 @@ import {
 
 describe("llm-pricing", () => {
   it("ships a frozen, non-empty MODEL_PRICES table", () => {
-    expect(MODEL_PRICING_SNAPSHOT_DATE).toBe("2026-09-03");
+    expect(MODEL_PRICING_SNAPSHOT_DATE).toBe("2026-09-23");
     expect(Object.keys(MODEL_PRICES)).toHaveLength(14);
     expect(MODEL_PRICES["claude-haiku-4-5-20251001"]).toBeDefined();
     expect(MODEL_PRICES["claude-sonnet-5"]).toEqual({
-      inputUsdPer1M: 3, outputUsdPer1M: 15,
+      inputUsdPer1M: 2, outputUsdPer1M: 10,
     });
     expect(MODEL_PRICES["claude-fable-5-1"]).toEqual({
       inputUsdPer1M: 10, outputUsdPer1M: 50,
@@ -34,7 +34,7 @@ describe("llm-pricing", () => {
   it("lookupModelPrice returns null for unknown ids", () => {
     expect(lookupModelPrice("does-not-exist")).toBeNull();
     expect(lookupModelPrice(" CLAUDE-SONNET-5 ")).toEqual({
-      inputUsdPer1M: 3, outputUsdPer1M: 15,
+      inputUsdPer1M: 2, outputUsdPer1M: 10,
     });
   });
 
