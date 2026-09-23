@@ -4,6 +4,9 @@
 .codex
 .claude
 .planning
+.dev
+.playwright-cli
+.playwright-mcp
 .DS_Store
 .env
 .env.*
@@ -19,6 +22,7 @@ artifacts
 output
 web/playwright-report
 web/test-results
+web/**/__screenshots__
 web/.vitest-attachments
 web/.design-sync
 web/.ds-sync

@@ -109,6 +109,7 @@ fi
 [[ $# == 0 ]] || { usage >&2; die "unexpected arguments"; }
 command -v "$docker_bin" >/dev/null 2>&1 || die "docker is required"
 project_has_resources && die "refusing pre-existing resources for project $project"
+bash "$root/scripts/docker-context.test.sh"
 if [[ $build_commit == "$zero_commit" ]]; then
   printf 'test-e2e: source is dirty or unverified; image will not claim the current commit\n' >&2
 fi
