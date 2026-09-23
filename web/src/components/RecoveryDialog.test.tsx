@@ -239,6 +239,22 @@ describe('<RecoveryDialog />', () => {
   })
 
   it('runs validate-fix → poll → save → replay in order on Apply', async () => {
+    const deltaFixture = {
+      workflowId: 'wf',
+      afterVersion: 2,
+      windowDays: 1,
+      hasEnoughData: false,
+      before: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
+      after: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 1, totalCostUsd: 0 } },
+      delta: null,
+      recentRunsAgainstAfter: { totalRuns: 1, succeeded: 1, failed: 0, running: 0 },
+      sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'Network timeout on http node' },
+      priorVersion: { version: 1, versionId: 'v0' },
+    }
+    // Post-replay feedback and delta reads can interleave; the delta card also
+    // refetches on platform invalidation. Keep that path stable across both reads.
+    vi.mocked(api).mockImplementation((path: string) => path.startsWith('/workflows/health/delta')
+      ? Promise.resolve(deltaFixture) : inertFallback(path))
     vi.mocked(api)
       .mockResolvedValueOnce(aiSuggestion)
       // /dlq/validate-fix
@@ -252,21 +268,6 @@ describe('<RecoveryDialog />', () => {
       .mockResolvedValueOnce({ workflowId: 'wf', versionId: 'v1', version: 2 })
       // /dlq/replay (production)
       .mockResolvedValueOnce({ runId: 'run-replay-xyz' })
-      // /workflows/health/delta — the delta card fetches this on mount.
-      // Return a "gathering data" shape so the card renders without
-      // depending on the fuller delta-math branches.
-      .mockResolvedValueOnce({
-        workflowId: 'wf',
-        afterVersion: 2,
-        windowDays: 1,
-        hasEnoughData: false,
-        before: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
-        after: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 1, totalCostUsd: 0 } },
-        delta: null,
-        recentRunsAgainstAfter: { totalRuns: 1, succeeded: 1, failed: 0, running: 0 },
-        sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'Network timeout on http node' },
-        priorVersion: { version: 1, versionId: 'v0' },
-      })
 
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
@@ -316,11 +317,10 @@ describe('<RecoveryDialog />', () => {
       expect(url.searchParams.get('priorFailureSignature')).toBe('Network timeout on http node')
     }
     await waitFor(() => {
-      expect(screen.getByTestId('recovery-delta-counter')).toBeInTheDocument()
-    })
-    expect(screen.getAllByText(/Runs from v2/i).length).toBeGreaterThan(0)
-    expect(screen.getByTestId('recovery-delta-same-failure')).toBeInTheDocument()
-    expect(screen.getAllByText(/of 5 completed runs/i).length).toBeGreaterThan(0)
+      expect(screen.getByTestId('recovery-delta-counter')).toHaveTextContent(/Runs from v2/i)
+      expect(screen.getByTestId('recovery-delta-same-failure')).toBeInTheDocument()
+      expect(screen.getAllByText(/of 5 completed runs/i).length).toBeGreaterThan(0)
+    }, { timeout: 5_000 })
 
     // Operator → system feedback: Apply success writes one row with
     // `accepted: true` so the next patch suggestion for THIS workflow

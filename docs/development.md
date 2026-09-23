@@ -129,7 +129,10 @@ Web: `pnpm lint` runs oxlint plus the ratchets in `web/scripts/`: i18n casts,
 CSS class ownership (every class in every stylesheet must have a production
 owner), legacy UI guard, e2e selector presence, raw `/v1` reads (must go
 through `contractApi`), and duplicate runtime guards (`src/lib/guards.ts` is
-the only home). `web/src/modal-contract.test.ts` requires every
+the only home). The native Oxlint `react/rules-of-hooks` rule is an error;
+`web/scripts/react-hooks-lint.test.mjs` proves the repository configuration
+rejects a conditional hook. `react/exhaustive-deps` is diagnostic-only, not a
+current gate. `web/src/modal-contract.test.ts` requires every
 `role="dialog"` file to call `useDialogFocusTrap` in the same file.
 
 Diagnostics that are not gates but drive the refactor backlog:
