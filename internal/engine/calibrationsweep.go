@@ -2,7 +2,7 @@
 // ai.confidenceCalibrationEnabled toggle, default on) and produced
 // labeled feedback in the window, fit one curve per approach from the
 // rolling 30-day accept/reject history and upsert the stored row.
-// Deterministic, bounded (5000 samples per approach, 500 orgs per pass),
+// Deterministic, bounded per page (5000 samples per approach, 500 orgs per page),
 // and abstinent: an approach below the sample floor or with a
 // non-monotonic fit keeps NO new curve (the read side shows raw confidence
 // once any older curve expires).
@@ -13,6 +13,8 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/orgconfig"
@@ -28,31 +30,28 @@ const CalibrationWindowDays = 30
 // instead of advancing liveness on an incomplete sweep.
 func (e *Engine) RunCalibrationSweep(ctx context.Context) (int, error) {
 	q := store.New(e.pool)
-	orgs, err := q.ListOrgsWithFeedback(ctx, CalibrationWindowDays)
-	if err != nil {
-		return 0, err
-	}
 	written := 0
 	var passErr error
-	for _, orgID := range orgs {
-		if err := ctx.Err(); err != nil {
-			return written, errors.Join(passErr, err)
-		}
-		if !orgconfig.LoadBool(ctx, e.pool, orgID, "ai.confidenceCalibrationEnabled") {
-			continue
-		}
-		approaches, err := q.ListCalibratableApproaches(ctx, store.ListCalibratableApproachesParams{
-			OrgID: orgID, WindowDays: CalibrationWindowDays,
+	var afterOrgID pgtype.Text
+	for {
+		orgs, err := q.ListOrgsWithFeedback(ctx, store.ListOrgsWithFeedbackParams{
+			WindowDays: CalibrationWindowDays, AfterOrgID: afterOrgID,
 		})
 		if err != nil {
-			if passErr == nil {
-				passErr = err
-			}
-			continue
+			return written, errors.Join(passErr, err)
 		}
-		for _, approach := range approaches {
-			rows, err := q.ListCalibrationSamples(ctx, store.ListCalibrationSamplesParams{
-				OrgID: orgID, ApproachLabel: approach, WindowDays: CalibrationWindowDays,
+		if len(orgs) == 0 {
+			return written, passErr
+		}
+		for _, orgID := range orgs {
+			if err := ctx.Err(); err != nil {
+				return written, errors.Join(passErr, err)
+			}
+			if !orgconfig.LoadBool(ctx, e.pool, orgID, "ai.confidenceCalibrationEnabled") {
+				continue
+			}
+			approaches, err := q.ListCalibratableApproaches(ctx, store.ListCalibratableApproachesParams{
+				OrgID: orgID, WindowDays: CalibrationWindowDays,
 			})
 			if err != nil {
 				if passErr == nil {
@@ -60,33 +59,44 @@ func (e *Engine) RunCalibrationSweep(ctx context.Context) (int, error) {
 				}
 				continue
 			}
-			samples := make([]recovery.CalibrationSample, 0, len(rows))
-			for _, row := range rows {
-				if !row.RawConfidence.Valid {
+			for _, approach := range approaches {
+				rows, err := q.ListCalibrationSamples(ctx, store.ListCalibrationSamplesParams{
+					OrgID: orgID, ApproachLabel: approach, WindowDays: CalibrationWindowDays,
+				})
+				if err != nil {
+					if passErr == nil {
+						passErr = err
+					}
 					continue
 				}
-				samples = append(samples, recovery.CalibrationSample{
-					RawConfidence: float64(row.RawConfidence.Int32), Accepted: row.Accepted,
-				})
-			}
-			curve := recovery.FitCalibrationCurve(samples)
-			if curve == nil {
-				continue // abstain — never persist a curve that could mislead
-			}
-			if err := q.UpsertConfidenceCalibration(ctx, store.UpsertConfidenceCalibrationParams{
-				ID: e.newID(), OrgID: orgID, ApproachLabel: approach,
-				AcceptRate: float32(curve.AcceptRate), SampleSize: int32(curve.SampleSize),
-				CurveSlope: float32(curve.Slope), CurveIntercept: float32(curve.Intercept),
-			}); err != nil {
-				if passErr == nil {
-					passErr = err
+				samples := make([]recovery.CalibrationSample, 0, len(rows))
+				for _, row := range rows {
+					if !row.RawConfidence.Valid {
+						continue
+					}
+					samples = append(samples, recovery.CalibrationSample{
+						RawConfidence: float64(row.RawConfidence.Int32), Accepted: row.Accepted,
+					})
 				}
-				continue
+				curve := recovery.FitCalibrationCurve(samples)
+				if curve == nil {
+					continue // abstain — never persist a curve that could mislead
+				}
+				if err := q.UpsertConfidenceCalibration(ctx, store.UpsertConfidenceCalibrationParams{
+					ID: e.newID(), OrgID: orgID, ApproachLabel: approach,
+					AcceptRate: float32(curve.AcceptRate), SampleSize: int32(curve.SampleSize),
+					CurveSlope: float32(curve.Slope), CurveIntercept: float32(curve.Intercept),
+				}); err != nil {
+					if passErr == nil {
+						passErr = err
+					}
+					continue
+				}
+				written++
 			}
-			written++
 		}
+		afterOrgID = pgtype.Text{String: orgs[len(orgs)-1], Valid: true}
 	}
-	return written, passErr
 }
 
 // RunCalibrationLoop makes the first pass after startup, then refreshes daily.

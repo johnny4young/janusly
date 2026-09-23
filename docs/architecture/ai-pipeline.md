@@ -23,7 +23,9 @@ before calling the client.
   that tenant enables calibration and a finite, positive-slope fit from at
   least 20 labeled decisions was refreshed within 48 hours. The supervised
   fit makes one pass after boot and then daily over a rolling 30-day window;
-  failures report sweep telemetry. Missing, stale, invalid, or unreadable
+  it walks organizations in stable 500-row keyset pages, so a completed pass
+  does not silently omit tenants beyond the first page. Failures report sweep
+  telemetry. Missing, stale, invalid, or unreadable
   curves leave the raw value unchanged without breaking a valid AI response.
   A deterministic fallback remains 0 and no calibrated number grants approval
   or bypasses workflow validation.

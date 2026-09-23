@@ -1661,11 +1661,19 @@ func (q *Queries) ListOperatorBriefRecoveryCases(ctx context.Context, arg ListOp
 const listOrgsWithFeedback = `-- name: ListOrgsWithFeedback :many
 SELECT DISTINCT org_id FROM recovery_feedback
 WHERE created_at >= now() - make_interval(days => $1::int)
+  AND ($2::text IS NULL
+       OR org_id > $2::text)
+ORDER BY org_id ASC
 LIMIT 500
 `
 
-func (q *Queries) ListOrgsWithFeedback(ctx context.Context, windowDays int32) ([]string, error) {
-	rows, err := q.db.Query(ctx, listOrgsWithFeedback, windowDays)
+type ListOrgsWithFeedbackParams struct {
+	WindowDays int32
+	AfterOrgID pgtype.Text
+}
+
+func (q *Queries) ListOrgsWithFeedback(ctx context.Context, arg ListOrgsWithFeedbackParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listOrgsWithFeedback, arg.WindowDays, arg.AfterOrgID)
 	if err != nil {
 		return nil, err
 	}
