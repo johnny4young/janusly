@@ -8,11 +8,7 @@
 // breaker (no signal is authoritative about "the bug is gone").
 package recovery
 
-import (
-	"os"
-
-	"github.com/johnny4young/janusly/internal/domain"
-)
+import "os"
 
 // CircuitBreakerEnv is the process kill switch. Default: ENABLED.
 const CircuitBreakerEnv = "JANUSLY_CIRCUIT_BREAKER_ENABLED"
@@ -28,28 +24,6 @@ const WorkflowStatusPausedCircuitBreaker = "paused_circuit_breaker"
 // IsCircuitBreakerEnabled reports the env kill switch (default on).
 func IsCircuitBreakerEnabled() bool {
 	return os.Getenv(CircuitBreakerEnv) != "false"
-}
-
-// ResolveCircuitBreakerThreshold resolves the effective threshold, or 0
-// when the breaker is disabled for this workflow. Precedence: explicit
-// workflow opt-out (false) → workflow number → org default → built-in.
-func ResolveCircuitBreakerThreshold(wf *domain.Workflow, orgThreshold float64, enabled bool) int {
-	if !enabled {
-		return 0
-	}
-	if wf != nil && wf.Recovery != nil && len(wf.Recovery.CircuitBreaker) > 0 {
-		threshold, on, problem := domain.ParseCircuitBreakerThreshold(wf.Recovery.CircuitBreaker)
-		if problem == "" {
-			if !on {
-				return 0 // explicit false = this workflow fails loudly on purpose
-			}
-			return threshold
-		}
-	}
-	if orgThreshold >= domain.RecoveryCircuitBreakerMin && orgThreshold <= domain.RecoveryCircuitBreakerMax {
-		return int(orgThreshold)
-	}
-	return DefaultCircuitBreakerThreshold
 }
 
 // ShouldTripCircuitBreaker: the just-persisted failure trips only when an

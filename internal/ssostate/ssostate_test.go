@@ -1,6 +1,7 @@
 package ssostate
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -39,11 +40,11 @@ func TestStateRejectsMissingBindings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Verify(value); !IsInvalid(err) {
+		if _, err := Verify(value); !errors.Is(err, signedtoken.ErrInvalid) {
 			t.Fatalf("missing binding must reject: payload=%+v err=%v", payload, err)
 		}
 	}
-	if _, err := Create("", "n", "https://callback"); !IsInvalid(err) {
+	if _, err := Create("", "n", "https://callback"); !errors.Is(err, signedtoken.ErrInvalid) {
 		t.Fatalf("creation must reject empty binding: %v", err)
 	}
 }

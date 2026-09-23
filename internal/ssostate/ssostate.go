@@ -5,7 +5,6 @@ package ssostate
 
 import (
 	"crypto/subtle"
-	"errors"
 	"net/url"
 	"strconv"
 	"time"
@@ -95,6 +94,3 @@ func Verify(value string) (*signedtoken.Envelope[Payload], error) {
 	}
 	return envelope, nil
 }
-
-// IsInvalid keeps route error mapping independent from token internals.
-func IsInvalid(err error) bool { return errors.Is(err, signedtoken.ErrInvalid) }
