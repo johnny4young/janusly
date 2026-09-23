@@ -3210,7 +3210,7 @@
   "templates.email-reply.name": "Email auto-reply",
   "templates.email-reply.description": "Read inbound email and reply through email.send; set the trigger source and recipient in Inspector.",
   "templates.failed-workflow-recovery.name": "Failed workflow recovery → DLQ → patch → replay",
-  "templates.failed-workflow-recovery.description": "Webhook billing fails because its Bearer secret is unbound and no approval precedes the write. The run enters Recovery Queue; Janusly proposes an approval gate and a swap_secret_ref fix, demonstrating structural and config recovery.",
+  "templates.failed-workflow-recovery.description": "The billing workflow fails on an unbound secret, and readiness flags a missing approval before the write. Recovery Queue shows the failure. Without an AI key, the patch response is unchanged fallback evidence, not an automatic fix; validate a manual repair before replay.",
   "templates.monthly-report-pdf.name": "Monthly metrics report → PDF → email",
   "templates.monthly-report-pdf.description": "A monthly schedule fetches metrics, AI summarizes movers, pdf.generate renders the report, and email.send delivers it.",
   "templates.multi-agent-decision.name": "Multi-agent decision support (debate + arbiter)",

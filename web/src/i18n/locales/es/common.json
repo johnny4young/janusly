@@ -3210,7 +3210,7 @@
   "templates.email-reply.name": "Auto-respuesta por email",
   "templates.email-reply.description": "Lee un email y responde con email.send; configura el trigger y destinatario en el Inspector.",
   "templates.failed-workflow-recovery.name": "Recuperación de workflow fallido → DLQ → parche → replay",
-  "templates.failed-workflow-recovery.description": "El webhook de cobro falla porque el secreto Bearer no está vinculado y falta aprobación antes de escribir. La ejecución entra en Recuperación; Janusly propone una compuerta y swap_secret_ref para mostrar recuperación estructural y de configuración.",
+  "templates.failed-workflow-recovery.description": "El workflow de cobro falla por un secreto sin vincular; readiness también señala que falta aprobación antes de escribir. Recuperación muestra el fallo. Sin clave de IA, la respuesta es evidencia fallback sin parche automático; valida cualquier cambio manual antes del replay.",
   "templates.monthly-report-pdf.name": "Reporte mensual de métricas → PDF → email",
   "templates.monthly-report-pdf.description": "Cada mes obtiene métricas, la IA resume cambios, pdf.generate crea el informe y email.send lo entrega.",
   "templates.multi-agent-decision.name": "Soporte de decisión multi-agente (debate + árbitro)",

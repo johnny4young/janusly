@@ -848,7 +848,7 @@
  {
   "id": "failed-workflow-recovery",
   "name": "Failed workflow recovery → DLQ → patch → replay",
-  "description": "Headline recovery demo. A webhook fires a write-side billing call that is intentionally broken in two ways: no approval gate upstream of the write, and a Bearer token referencing an unbound secret. The run lands in the Recovery Queue; the AI suggests both an upstream approval insertion (structural) and a swap_secret_ref fix (config). One demo, two recovery patterns.",
+  "description": "Intentionally broken billing workflow: an unbound secret fails the charge node, while readiness also flags a missing approval before the write. The run enters Recovery Queue. Without an AI key, the patch response is an unchanged fallback, not an automatic repair; inspect evidence and validate a manual change in an isolated environment.",
   "category": "Operations",
   "requiredCredentials": [],
   "workflow": {
