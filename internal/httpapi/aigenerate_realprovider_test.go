@@ -46,16 +46,18 @@ type qualificationCallEvidence struct {
 }
 
 type qualificationCaseEvidence struct {
-	ID       string                      `json:"id"`
-	Category string                      `json:"category"`
-	Language string                      `json:"language"`
-	Calls    []qualificationCallEvidence `json:"calls"`
-	Valid    bool                        `json:"valid"`
-	Safe     bool                        `json:"safe"`
-	Useful   bool                        `json:"useful"`
-	Repaired bool                        `json:"repaired"`
-	Guarded  bool                        `json:"guarded,omitempty"`
-	Result   string                      `json:"result"`
+	ID                   string                      `json:"id"`
+	Category             string                      `json:"category"`
+	Language             string                      `json:"language"`
+	Calls                []qualificationCallEvidence `json:"calls"`
+	Valid                bool                        `json:"valid"`
+	Safe                 bool                        `json:"safe"`
+	Useful               bool                        `json:"useful"`
+	Repaired             bool                        `json:"repaired"`
+	Guarded              bool                        `json:"guarded,omitempty"`
+	Result               string                      `json:"result"`
+	FailureStage         string                      `json:"failureStage,omitempty"`
+	ValidationIssueCodes []string                    `json:"validationIssueCodes,omitempty"`
 }
 
 type qualificationReport struct {
@@ -379,6 +381,20 @@ func TestRealProviderQualificationRejectsPriceOverrideAndWrongModelBeforeEgress(
 	}
 }
 
+func TestRealProviderAuthoringFailureEvidenceExcludesRawError(t *testing.T) {
+	secret := "sk-ant-not-for-evidence"
+	result := qualificationCaseEvidence{ID: "case", Category: "authoring"}
+	recordAuthoringFailure(&result, generationMeta{
+		failureStage: "candidate_validation", validationIssueCodes: []string{domain.CodeTransformMissingMapping},
+	}, &ai.AIError{Class: "invalid_output", Message: secret})
+	raw, err := json.Marshal(result)
+	if err != nil || strings.Contains(string(raw), secret) ||
+		!strings.Contains(string(raw), `"failureStage":"candidate_validation"`) ||
+		!strings.Contains(string(raw), `"validationIssueCodes":["transform_missing_mapping"]`) {
+		t.Fatalf("authoring failure evidence must contain stage/codes only: %s err=%v", raw, err)
+	}
+}
+
 // TestWorkflowAssuranceRealAnthropicEvaluation runs the exact 20-case corpus
 // against Janusly's production authoring and diagnosis chokepoints. It is
 // absent from ordinary CI and requires explicit paid-provider consent.
@@ -511,6 +527,7 @@ func evaluateRealAuthoringCase(
 	)
 	result.Repaired = meta.attempts > 1 || meta.repairAttempts > 0
 	if aiErr != nil {
+		recordAuthoringFailure(&result, meta, aiErr)
 		result.Result = "generation_" + aiErr.Class
 		return finishQualificationCase(global, result)
 	}
@@ -550,6 +567,20 @@ func evaluateRealAuthoringCase(
 	result.Useful = result.Valid && result.Safe && intentMatched
 	result.Result = qualificationResult(result)
 	return finishQualificationCase(global, result)
+}
+
+// Only internally generated stage labels and validator codes enter evidence;
+// provider output and AIError.Message can contain untrusted or sensitive text.
+func recordAuthoringFailure(result *qualificationCaseEvidence, meta generationMeta, aiErr *ai.AIError) {
+	result.FailureStage = meta.failureStage
+	result.ValidationIssueCodes = append([]string(nil), meta.validationIssueCodes...)
+	if result.FailureStage == "" {
+		if aiErr.BeforeEgress {
+			result.FailureStage = "before_egress"
+		} else {
+			result.FailureStage = "provider_or_transport"
+		}
+	}
 }
 
 func evaluateRealDiagnosisCase(

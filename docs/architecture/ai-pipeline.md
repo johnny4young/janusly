@@ -195,6 +195,8 @@ and at least 18/20 useful under the checked rubric. Evidence records case ID/cat
 model, tokens, latency, cost, repair flag, and result only—never prompts or raw
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.
+Failed authoring cases additionally retain a bounded internal failure stage and
+up to five validator issue codes; they never retain model text or error messages.
 
 The paid profile has **no checkout-local default ledger**. Set
 `JANUSLY_REAL_PROVIDER_LEDGER` explicitly to one durable absolute path outside

@@ -340,6 +340,8 @@ type generationMeta struct {
 	validCandidates       int
 	intentContractAdded   bool
 	recoveryContractAdded bool
+	failureStage          string
+	validationIssueCodes  []string
 }
 
 func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai.Client, prompt, modelHint string, rc v1Request, candidateTarget int, systemData string, rateLimitPerMin int) ([]byte, generationMeta, *ai.AIError) {
@@ -390,6 +392,7 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 			meta.modelCalls++
 		}
 		if result != nil && len(result.Text) > authoringMaxOutputBytes {
+			meta.failureStage = "output_limit"
 			return nil, &ai.AIError{Class: "invalid_output", Message: "model output exceeded the bounded workflow envelope"}
 		}
 		return result, aiErr
@@ -450,6 +453,7 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 		break
 	}
 	if workflowJSON == nil {
+		meta.failureStage = "json_or_reference"
 		return nil, meta, &ai.AIError{Class: "invalid_output", Message: "model output was not a valid workflow JSON object"}
 	}
 
@@ -480,11 +484,16 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 		}
 	}
 	if len(issues) > 0 {
+		meta.failureStage = "candidate_validation"
+		for _, issue := range issues[:min(len(issues), 5)] {
+			meta.validationIssueCodes = append(meta.validationIssueCodes, issue.Code)
+		}
 		return nil, meta, &ai.AIError{Class: "invalid_output",
 			Message: "generated workflow failed validation: " + issueSummary(issues)}
 	}
 	compiled, compilation, err := compileWorkflowAssuranceCandidate(prompt, workflowJSON)
 	if err != nil {
+		meta.failureStage = "assurance_compilation"
 		return nil, meta, &ai.AIError{Class: "invalid_output", Message: err.Error()}
 	}
 	meta.intentContractAdded = compilation.AddedOutputs
