@@ -75,4 +75,13 @@ describe('<RecoveryItemDrawer /> focus management', () => {
     expect(trigger).toHaveFocus()
     trigger.remove()
   })
+
+  it('offers operator-verifiable resolution reasons but not a sandbox replay claim', () => {
+    render(<RecoveryItemDrawer item={makeItem()} onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('ri-action-resolve'))
+
+    const reason = screen.getByRole('combobox', { name: /reason/i })
+    expect(reason).toHaveValue('fixed_by_patch')
+    expect(reason.querySelector('option[value="sandbox_replay_succeeded"]')).toBeNull()
+  })
 })

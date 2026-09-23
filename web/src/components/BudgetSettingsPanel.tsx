@@ -16,7 +16,7 @@
  * Used by `OperationsPage.tsx`.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Coins, Info, Save, ShieldAlert } from "lucide-react";
 import { api } from "../api";
 import { readSavedWorkflowPage } from "../lib/list-contract";
@@ -243,9 +243,7 @@ export function BudgetSettingsPanel() {
     }
   };
 
-  const orgBudgetDisabled = useMemo(() => {
-    return Number(form.monthlyUsd) === 0;
-  }, [form.monthlyUsd]);
+  const orgBudgetDisabled = Number(form.monthlyUsd) === 0;
   const aboutSectionLabel = t("common.aboutSection");
   const budgetIntro = t("budget.intro");
   // Live field validation mirrors the save-handler guards so the operator sees

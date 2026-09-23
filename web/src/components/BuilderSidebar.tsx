@@ -5,7 +5,7 @@
  * discovery belongs to the canvas' single searchable Add step control.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Activity,
   CheckCircle2,
@@ -114,15 +114,11 @@ export function BuilderSidebar({
     return () => { document.documentElement.dataset.sidebarCollapsed = 'false' }
   }, [visuallyCollapsed])
 
-  const filteredDestinations = useMemo(() => {
-    const allowed = WORKSPACE_DESTINATION_DEFINITIONS.filter((destination) =>
-      canOpenWorkspaceDestination(destination.id, permissions))
-    if (!normalizedQuery) return allowed
-    return allowed.filter((destination) =>
-      `${t(destination.labelKey)} ${t(destination.helperKey)}`
-        .toLocaleLowerCase()
-        .includes(normalizedQuery))
-  }, [normalizedQuery, permissions, t])
+  const filteredDestinations = WORKSPACE_DESTINATION_DEFINITIONS.filter((destination) =>
+    canOpenWorkspaceDestination(destination.id, permissions)
+    && (!normalizedQuery || `${t(destination.labelKey)} ${t(destination.helperKey)}`
+      .toLocaleLowerCase()
+      .includes(normalizedQuery)))
 
   const runAction = async (
     kind: 'validate' | 'save' | 'run',

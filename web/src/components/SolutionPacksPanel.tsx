@@ -17,7 +17,7 @@
  * - All copy goes through `useT()`; no raw string literals.
  */
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { AlertTriangle, Bug, Download, KeyRound, Package, Play, Search, ShieldCheck } from 'lucide-react'
 import type { Credential, SolutionPackPublic } from '../types'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
@@ -52,17 +52,16 @@ export function SolutionPacksPanel({
   onQueryChange,
   showSearch = true,
 }: SolutionPacksPanelProps) {
-  const { t, i18n } = useT()
+  const { t } = useT()
   const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
   const [internalQuery, setInternalQuery] = useState('')
   const [selectedDrills, setSelectedDrills] = useState<Record<string, string>>({})
   const query = controlledQuery ?? internalQuery
   const setQuery = onQueryChange ?? setInternalQuery
   const credentialKeys = new Set(credentials.map((c) => `${c.kind}:${c.name}`))
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return packs
-    return packs.filter((pack) => {
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? packs.filter((pack) => {
       const packName = t(`packs.${pack.id}.name`, { defaultValue: pack.name })
       const packDescription = t(`packs.${pack.id}.description`, { defaultValue: pack.description })
       const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category })
@@ -73,7 +72,7 @@ export function SolutionPacksPanel({
       ].join(' ')).join(' ')
       return `${packName} ${packDescription} ${categoryLabel} ${drills}`.toLowerCase().includes(q)
     })
-  }, [packs, query, t, i18n.language])
+    : packs
 
   if (packs.length === 0) {
     const empty = (

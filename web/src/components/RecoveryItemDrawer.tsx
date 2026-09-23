@@ -39,6 +39,10 @@ const EVIDENCE_DELIVER_COPY = {
   successMessage: 'recoveryEvidence.deliver.successMessage',
 }
 
+const OPERATOR_RESOLUTION_REASONS = RECOVERY_ITEM_RESOLUTION_REASONS.filter(
+  reason => reason !== 'sandbox_replay_succeeded',
+)
+
 export type RecoveryItemDrawerData = {
   id: string
   deadLetterId: string
@@ -127,10 +131,6 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
   const canResolve = item.status !== 'resolved'
   const canReopen = item.status === 'resolved'
 
-  const visibleResolutionReasons = useMemo(
-    () => RECOVERY_ITEM_RESOLUTION_REASONS.filter((r) => r !== 'sandbox_replay_succeeded'),
-    [],
-  )
   const escalationTargets = useMemo(
     () => RECOVERY_ITEM_SEVERITIES.filter((s) => isSeverityEscalation(item.severity, s)),
     [item.severity],
@@ -394,7 +394,7 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
               value={resolveReason}
               onChange={(e) => setResolveReason(e.target.value as RecoveryItemResolutionReason)}
             >
-              {visibleResolutionReasons.map((r) => (
+              {OPERATOR_RESOLUTION_REASONS.map((r) => (
                 <option key={r} value={r}>
                   {t(`recoveryItems.resolutionReason.${r}`)}
                 </option>
