@@ -185,10 +185,13 @@ payload limits, and engine-owned recovery candidate authority.
 The opt-in `make qualify-real-provider` profile is deliberately separate from
 ordinary tests. With explicit consent and `ANTHROPIC_API_KEY`, it replays the
 same 20 cases through the production authoring and diagnosis chokepoints. Hard
-breakers allow at most two calls per case, 40 calls globally, USD 3 globally,
-and zero SDK retries. The gate requires 20/20 valid bounded envelopes, 20/20
-without invented graph capabilities or authority escalation, and at least
-18/20 useful under the checked rubric. Evidence records case ID/category,
+breakers allow at most four calls per case in one run (matching the product's
+generation and repair ladder), six calls per case across bounded reruns, 80
+calls across the ledger's lifetime, USD 3 cumulatively, and zero SDK retries.
+The paid corpus caps each provider request at 2,400 output tokens and reserves
+against that actual cap before egress. The gate requires 20/20 valid bounded
+envelopes, 20/20 without invented graph capabilities or authority escalation,
+and at least 18/20 useful under the checked rubric. Evidence records case ID/category,
 model, tokens, latency, cost, repair flag, and result only—never prompts or raw
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.

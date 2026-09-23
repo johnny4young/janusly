@@ -6,8 +6,8 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 evidence_dir=${JANUSLY_REAL_PROVIDER_EVIDENCE_DIR:-$root/output/qualification/$stamp/real_provider}
 ledger_path=${JANUSLY_REAL_PROVIDER_LEDGER:-}
 max_usd=${JANUSLY_REAL_PROVIDER_MAX_USD:-3}
-max_calls=${JANUSLY_REAL_PROVIDER_MAX_CALLS:-40}
-max_calls_per_case=${JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE:-2}
+max_calls=${JANUSLY_REAL_PROVIDER_MAX_CALLS:-80}
+max_calls_per_case=${JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE:-4}
 status=failed
 # A failed or interrupted provider process may have completed a call without
 # reaching the sanitized report line. Unknown is more truthful than zero.
@@ -92,10 +92,10 @@ write_summary() {
 [[ -n ${ANTHROPIC_API_KEY:-} ]] || die 'ANTHROPIC_API_KEY is required'
 is_positive_number_at_most_three "$max_usd" ||
   die 'JANUSLY_REAL_PROVIDER_MAX_USD must be a positive number no greater than 3'
-is_integer_between "$max_calls" 20 40 ||
-  die 'JANUSLY_REAL_PROVIDER_MAX_CALLS must be an integer in 20..40'
-is_integer_between "$max_calls_per_case" 1 2 ||
-  die 'JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE must be 1 or 2'
+is_integer_between "$max_calls" 20 80 ||
+  die 'JANUSLY_REAL_PROVIDER_MAX_CALLS must be an integer in 20..80'
+is_integer_between "$max_calls_per_case" 1 4 ||
+  die 'JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE must be an integer in 1..4'
 [[ "$ledger_path" == /* ]] ||
   die 'set JANUSLY_REAL_PROVIDER_LEDGER to one stable absolute path outside a Git worktree'
 [[ "$ledger_path" != "$root" && "$ledger_path" != "$root/"* ]] ||
@@ -134,8 +134,9 @@ trap write_summary EXIT INT TERM
 
 # Deliberately one process, one 20-case product test, one attempt. Go owns the
 # configured call/USD global and per-case breakers and sets SDK retries to
-# zero; this shell never retries the qualification. Defaults remain the full
-# 40/2 envelope, while an explicitly budgeted follow-up can use 20/1.
+# zero; this shell never retries the qualification. The 80-call lifetime
+# envelope covers one bounded requalification after a failed first profile;
+# the durable USD 3 ledger is never reset between attempts.
 test_status=0
 JANUSLY_REAL_PROVIDER_CONSENT=1 \
 JANUSLY_REAL_PROVIDER_MAX_USD="$max_usd" \

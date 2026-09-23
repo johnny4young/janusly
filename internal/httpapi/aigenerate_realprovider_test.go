@@ -24,12 +24,13 @@ import (
 )
 
 const (
-	realProviderMaxCalls        = 40
-	realProviderMaxCallsPerCase = 2
-	realProviderCaseCount       = 20
-	realProviderUsefulMinimum   = 18
-	realProviderDefaultMaxUSD   = 3.0
-	realProviderOutputUnits     = 1200
+	realProviderMaxCalls             = 80
+	realProviderMaxCallsPerCase      = 4
+	realProviderLifetimeCallsPerCase = 6
+	realProviderCaseCount            = 20
+	realProviderUsefulMinimum        = 18
+	realProviderDefaultMaxUSD        = 3.0
+	realProviderOutputUnits          = 2400
 )
 
 type qualificationCallEvidence struct {
@@ -127,10 +128,14 @@ func (c *boundedProductClient) generateForCase(
 	if _, overridden := os.LookupEnv(priceOverrideKey); overridden {
 		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification does not accept model price overrides", BeforeEgress: true}
 	}
+	// The paid corpus uses a tighter output ceiling than production authoring.
+	// Apply it to the actual provider request before calculating the durable
+	// reservation so the admitted worst case and the request cannot diverge.
 	maxOutput := c.defaultMaxOutput
-	if input.MaxOutputUnits > 0 {
+	if input.MaxOutputUnits > 0 && input.MaxOutputUnits < maxOutput {
 		maxOutput = input.MaxOutputUnits
 	}
+	input.MaxOutputUnits = maxOutput
 	price := ai.GetModelPrice(model)
 	if price == nil {
 		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification requires a known price"}
@@ -148,11 +153,9 @@ func (c *boundedProductClient) generateForCase(
 		c.mu.Unlock()
 		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification call cap reached"}
 	}
-	perCaseCap := c.maxCallsPerCase
-	if perCaseCap <= 0 {
-		perCaseCap = realProviderMaxCallsPerCase
-	}
-	totals, err := c.ledger.reserve(caseID, projectedUSD, c.maxUSD, c.maxCalls, perCaseCap)
+	// The lifetime cap allows one bounded requalification without unlimited
+	// retries; the USD ceiling remains cumulative across all attempts.
+	totals, err := c.ledger.reserve(caseID, projectedUSD, c.maxUSD, c.maxCalls, realProviderLifetimeCallsPerCase)
 	if err != nil {
 		c.mu.Unlock()
 		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification lifetime reservation refused"}
@@ -219,15 +222,17 @@ type boundedCaseClient struct {
 }
 
 type qualificationFakeClient struct {
-	mu    sync.Mutex
-	calls int
+	mu             sync.Mutex
+	calls          int
+	maxOutputUnits int
 }
 
 func (c *qualificationFakeClient) Configured() bool { return true }
 
-func (c *qualificationFakeClient) GenerateText(_ context.Context, _ ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
+func (c *qualificationFakeClient) GenerateText(_ context.Context, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
 	c.mu.Lock()
 	c.calls++
+	c.maxOutputUnits = input.MaxOutputUnits
 	c.mu.Unlock()
 	cost := 0.001
 	return &ai.GenerateTextResult{
@@ -276,30 +281,41 @@ func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 		defaultMaxOutput: realProviderOutputUnits,
 	}
 	client := &boundedCaseClient{global: global, caseID: "case", category: "authoring"}
-	for attempt := range realProviderMaxCallsPerCase {
-		if _, aiErr := client.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr != nil {
+	for attempt := range 4 {
+		if _, aiErr := client.GenerateText(t.Context(), ai.GenerateTextInput{
+			System: "bounded", Prompt: "bounded", MaxOutputUnits: authoringMaxOutputUnits,
+		}); aiErr != nil {
 			t.Fatalf("allowed call %d failed: %v", attempt+1, aiErr)
 		}
 	}
 	if _, aiErr := client.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr == nil || aiErr.Class != "invalid_request" {
-		t.Fatalf("third per-case call must be refused locally: %v", aiErr)
+		t.Fatalf("fifth per-run case call must be refused locally: %v", aiErr)
 	}
-	if calls, _, _ := global.accounting(); calls != 2 || delegate.calls != 2 {
+	if calls, _, _ := global.accounting(); calls != 4 || delegate.calls != 4 {
 		t.Fatalf("per-case breaker reached provider calls=%d delegate=%d", calls, delegate.calls)
 	}
-	// Two Haiku 4.5 calls reserve 4110 input-byte tokens each at the 5-minute
-	// cache-write rate ($1.25/M), plus 1200 output tokens at $5/M. Each
-	// 11137.5-microUSD projection rounds upward before it is persisted.
-	if reservedUSD, lifetimeCalls := global.reservations(); int64(math.Round(reservedUSD*1_000_000)) != 22_276 || lifetimeCalls != 2 {
+	if delegate.maxOutputUnits != realProviderOutputUnits {
+		t.Fatalf("delegate output cap=%d, want %d", delegate.maxOutputUnits, realProviderOutputUnits)
+	}
+	// Four Haiku 4.5 calls reserve 4110 input-byte tokens each at the
+	// 5-minute cache-write rate ($1.25/M), plus 2400 output tokens at $5/M.
+	// Each 17137.5-microUSD projection rounds upward before persistence.
+	if reservedUSD, lifetimeCalls := global.reservations(); int64(math.Round(reservedUSD*1_000_000)) != 68_552 || lifetimeCalls != 4 {
 		t.Fatalf("durable cache-tier upper bound missing: reserved=%f lifetimeCalls=%d", reservedUSD, lifetimeCalls)
 	}
 	restartedDelegate := &qualificationFakeClient{}
 	restarted := &boundedProductClient{
-		delegate: restartedDelegate, maxCalls: realProviderMaxCalls, maxCallsPerCase: 2, maxUSD: 1,
+		delegate: restartedDelegate, maxCalls: realProviderMaxCalls, maxCallsPerCase: 4, maxUSD: 1,
 		ledger: realProviderLedger{path: ledgerPath}, defaultMaxOutput: realProviderOutputUnits,
 	}
-	if _, aiErr := (&boundedCaseClient{global: restarted, caseID: "case"}).GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr == nil || restartedDelegate.calls != 0 {
-		t.Fatalf("restart must not regain paid attempts: error=%v delegateCalls=%d", aiErr, restartedDelegate.calls)
+	replayed := &boundedCaseClient{global: restarted, caseID: "case"}
+	for attempt := range 2 {
+		if _, aiErr := replayed.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr != nil {
+			t.Fatalf("bounded restart attempt %d failed: %v", attempt+1, aiErr)
+		}
+	}
+	if _, aiErr := replayed.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr == nil || restartedDelegate.calls != 2 {
+		t.Fatalf("seventh lifetime case call must remain refused: error=%v delegateCalls=%d", aiErr, restartedDelegate.calls)
 	}
 
 	usdBlockedDelegate := &qualificationFakeClient{}
