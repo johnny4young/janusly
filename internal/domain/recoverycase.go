@@ -43,11 +43,6 @@ var legalRecoveryCaseTransitions = map[string][]string{
 	"abandoned":          {},
 }
 
-// ListLegalRecoveryCaseTransitions returns the closed successor list.
-func ListLegalRecoveryCaseTransitions(state string) []string {
-	return legalRecoveryCaseTransitions[state]
-}
-
 // IsLegalRecoveryCaseTransition reports whether from → to is in the map.
 func IsLegalRecoveryCaseTransition(from, to string) bool {
 	return slices.Contains(legalRecoveryCaseTransitions[from], to)

@@ -45,8 +45,8 @@ func lastRow(t *testing.T, pool *pgxpool.Pool, orgID string) (action string, met
 }
 
 func TestAuditCatalogPinned(t *testing.T) {
-	if CatalogActionCount() != 152 {
-		t.Fatalf("contract catalog must pin at 152, got %d", CatalogActionCount())
+	if got := len(knownActions); got != 152 {
+		t.Fatalf("contract catalog must pin at 152, got %d", got)
 	}
 	if !IsKnown("workflow.saved") || !IsKnown("org.role.created") {
 		t.Fatal("expected reference actions missing")

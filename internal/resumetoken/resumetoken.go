@@ -95,13 +95,3 @@ func Verify(token string, expected Binding) (*Payload, error) {
 	}
 	return &payload, nil
 }
-
-// SignLegacy issues a v1 token WITHOUT expiresAt (test support for the
-// legacy-verifier boundary; production issuance always signs an expiry).
-func SignLegacy(binding Binding, issuedAt int64) (string, error) {
-	payload := Payload{
-		OrgID: binding.OrgID, RunID: binding.RunID, NodeID: binding.NodeID,
-		Purpose: binding.Purpose, IssuedAt: issuedAt,
-	}
-	return tokenhmac.SignJSON(payload)
-}

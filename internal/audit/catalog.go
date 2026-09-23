@@ -225,6 +225,3 @@ func RegisterRuntimeAction(action Action) { runtimeActions[action] = true }
 func IsKnown(action Action) bool {
 	return knownActions[action] || rawAuditActions[action] || runtimeActions[action]
 }
-
-// CatalogActionCount anchors the consistency pin test.
-func CatalogActionCount() int { return len(knownActions) }
