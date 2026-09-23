@@ -103,8 +103,10 @@ export function ActivityRecoveryDetail({
 }: ActivityRecoveryDetailProps) {
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
+  const initialDetailMatches = initialDetail?.id === deadLetter.id
+    && initialDetail.status === deadLetter.status
   const [detail, setDetail] = useState<DetailState>(() =>
-    initialDetail?.id === deadLetter.id
+    initialDetailMatches
       ? {
           id: deadLetter.id,
           kind: 'ready',
@@ -122,7 +124,7 @@ export function ActivityRecoveryDetail({
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (initialDetail?.id === deadLetter.id) {
+    if (initialDetailMatches) {
       setDetail({
         id: deadLetter.id,
         kind: 'ready',
@@ -151,7 +153,7 @@ export function ActivityRecoveryDetail({
         }
       })
     return () => controller.abort()
-  }, [deadLetter.id, initialDetail])
+  }, [deadLetter.id, deadLetter.status, initialDetail, initialDetailMatches])
 
   const current = detail.id === deadLetter.id && detail.kind === 'ready'
     ? mergeActivityRecoveryDetail(deadLetter, detail.value, detail.summaryStatus)

@@ -285,3 +285,12 @@ were corrected, including a real failure-path bug: Node Fetch's
 A script regression asserts the actual HTTP status is preserved when semantic
 fixture creation fails. The typed E2E checks complement, rather than replace,
 real-executable browser tests.
+
+## Recovery evidence status ownership
+
+The Activity recovery detail treats the selected dead-letter status as part of
+its evidence-read identity. A status transition for the same ID aborts the old
+read and fetches the current detail; a mismatched initial detail is not reused.
+Component regressions cover a late stale response and an initial snapshot from
+the previous status. The bounded summary still protects the visible status
+while the new evidence is loading.
