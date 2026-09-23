@@ -111,7 +111,7 @@ export function DeadLettersPanel({
   // request is honoured off-list, a click can't be off-list by construction.
   const [requestedId, setRequestedId] = useState<string | null>(null)
   const [offListSelected, setOffListSelected] = useState<DeadLetter | null>(null)
-  const [requestedNotFound, setRequestedNotFound] = useState(false)
+  const [requestedNotFoundId, setRequestedNotFoundId] = useState<string | null>(null)
   const [pendingKeyboardFocusId, setPendingKeyboardFocusId] = useState<string | null>(null)
   const [pendingTriageFocus, setPendingTriageFocus] = useState<PendingTriageFocus | null>(null)
   const [replayingIds, setReplayingIds] = useState<ReadonlySet<string>>(() => new Set())
@@ -320,11 +320,15 @@ export function DeadLettersPanel({
   // that is off-list is fetched on its own below, and only an UNREQUESTED
   // selection defaults to the first row.
   const listSelected = filtered.find(item => item.id === selectedId) ?? null
+  const requestedRow = requestedId ? filtered.find(item => item.id === requestedId) ?? null : null
   // Off-list is a fact about the REQUESTED id versus the loaded page — not
   // about `selectedId`, which lags a render behind the request and would send
   // an in-list request down the by-id fetch for nothing.
-  const requestedOffList = Boolean(requestedId) && !filtered.some(item => item.id === requestedId)
-  const selected = listSelected ?? (requestedId ? offListSelected : filtered[0] ?? null) ?? null
+  const requestedOffList = Boolean(requestedId) && !requestedRow
+  const selected = requestedId
+    ? requestedRow ?? (offListSelected?.id === requestedId ? offListSelected : null)
+    : listSelected ?? filtered[0] ?? null
+  const requestedNotFound = requestedOffList && requestedNotFoundId === requestedId
 
   // Resolve a requested id the current page doesn't contain. the entry read is
   // org-scoped and unconstrained by filters or pagination, so it can originate
@@ -333,11 +337,12 @@ export function DeadLettersPanel({
   useEffect(() => {
     if (!requestedOffList || !requestedId) {
       setOffListSelected(null)
-      setRequestedNotFound(false)
+      setRequestedNotFoundId(null)
       return
     }
     let cancelled = false
-    setRequestedNotFound(false)
+    setOffListSelected(null)
+    setRequestedNotFoundId(null)
     readDeadLetterDetail(requestedId)
       .then((row) => {
         if (!cancelled) setOffListSelected(row)
@@ -345,7 +350,7 @@ export function DeadLettersPanel({
       .catch(() => {
         if (!cancelled) {
           setOffListSelected(null)
-          setRequestedNotFound(true)
+          setRequestedNotFoundId(requestedId)
         }
       })
     return () => { cancelled = true }
@@ -414,6 +419,8 @@ export function DeadLettersPanel({
   const focusQueueRow = useCallback((index: number) => {
     const next = filtered[index]
     if (!next) return
+    setQueueFocusRequest(null)
+    setRequestedId(null)
     setSelectedId(next.id)
     const row = queueRowRefs.current.get(next.id)
     if (row) {
@@ -578,12 +585,22 @@ export function DeadLettersPanel({
   // scrolling/focusing. No extra fetch is introduced: the handoff consumes the
   // same bounded page the panel already owns.
   useEffect(() => {
+    const adopt = (request: RecoveryQueueFocusRequest) => {
+      setSelectionMode(false)
+      setSelectedIds(new Set())
+      setConfirmBulkReplay(false)
+      setBulkErrors([])
+      setOffListSelected(null)
+      setRequestedNotFoundId(null)
+      setRequestedId(request.deadLetterId ?? null)
+      setQueueFocusRequest(request)
+    }
     const pendingRequest = consumeRecoveryQueueFocus()
-    if (pendingRequest) setQueueFocusRequest(pendingRequest)
+    if (pendingRequest) adopt(pendingRequest)
 
     const onQueueFocus = (event: Event) => {
       const request = consumeRecoveryQueueFocus() ?? parseRecoveryQueueFocusEvent(event)
-      if (request) setQueueFocusRequest(request)
+      if (request) adopt(request)
     }
     window.addEventListener(RECOVERY_QUEUE_FOCUS_EVENT, onQueueFocus)
     return () => window.removeEventListener(RECOVERY_QUEUE_FOCUS_EVENT, onQueueFocus)
@@ -599,7 +616,14 @@ export function DeadLettersPanel({
       setRequestedId(targetId)
       const targetIndex = filtered.findIndex((item) => item.id === targetId)
       const targetRow = queueRowRefs.current.get(targetId)
-      if (!targetRow && targetIndex >= 0 && virtualContainerRef.current) {
+      if (targetIndex < 0) {
+        if (offListSelected?.id === targetId || requestedNotFoundId === targetId) {
+          queueSectionRef.current?.querySelector<HTMLElement>('.detail-box')?.focus({ preventScroll: true })
+          setQueueFocusRequest(null)
+        }
+        return
+      }
+      if (!targetRow && virtualContainerRef.current) {
         scrollToQueueIndex(targetIndex, 'center')
         return
       }
@@ -610,19 +634,14 @@ export function DeadLettersPanel({
         setQueueFocusRequest(null)
         return
       }
-      // Off-list: the detail box renders it via the by-id fetch, so stop here
-      // rather than falling through to the generic queue-heading focus.
-      if (requestedOffList) {
-        setQueueFocusRequest(null)
-        return
-      }
+      return
     }
 
     const queue = queueSectionRef.current
     queue?.scrollIntoView?.({ block: 'start', inline: 'nearest' })
     queue?.focus({ preventScroll: true })
     setQueueFocusRequest(null)
-  }, [closeRequest, filtered, queueFocusRequest, recoveryFilterLoading, scrollToQueueIndex, visibleDeadLetters])
+  }, [closeRequest, filtered, offListSelected, queueFocusRequest, recoveryFilterLoading, requestedNotFoundId, scrollToQueueIndex, virtualContainerRef, visibleDeadLetters])
 
   const exportSelectedRunExplain = async () => {
     if (!selected) return
@@ -676,7 +695,7 @@ export function DeadLettersPanel({
             .filter(id => !replayingIds.has(id))
             .map(id => filtered.find(item => item.id === id) ?? { id }), true),
           createReplayCampaign: setCampaignDeadLetterIds,
-          selectRow: setSelectedId,
+          selectRow: (id) => { setQueueFocusRequest(null); setRequestedId(null); setSelectedId(id) },
           openRecoveryItem: setOpenRecoveryItemId,
           loadMore,
           startRecovery: setRecoveryDeadLetter,

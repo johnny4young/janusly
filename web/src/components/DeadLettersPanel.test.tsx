@@ -526,7 +526,45 @@ describe('<DeadLettersPanel />', () => {
 
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByTestId('dlq-requested-not-found')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('dlq-requested-not-found')).toHaveFocus())
+    expect(screen.getByTestId('recovery-queue')).not.toHaveFocus()
+  })
+
+  it('owns off-list handoffs by requested id and focuses only the matching detail', async () => {
+    let resolveSecond!: (value: unknown) => void
+    const secondDetail = new Promise<unknown>(resolve => { resolveSecond = resolve })
+    vi.mocked(api).mockImplementation(async (path: unknown, options?: unknown) => {
+      if (path === '/dlq/entries/first') return mockDeadLetter('first')
+      if (path === '/dlq/entries/second') return secondDetail
+      return dlqMock([mockDeadLetter('unrelated')])(path as string, options as RequestInit)
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    fireEvent.click(await screen.findByTestId('dlq-row-unrelated'))
+
+    const detailNode = () => document.querySelector('section.detail-box > .split-row strong')?.textContent
+    expect(detailNode()).toBe('node-unrelated')
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    expect(detailNode()).toBeUndefined()
+
+    act(() => requestRecoveryQueueFocus('first'))
+    await waitFor(() => expect(detailNode()).toBe('node-first'))
+    expect(screen.getByTestId('dlq-select-toggle')).toHaveAttribute('aria-pressed', 'false')
+    expect(document.querySelector('section.detail-box')).toHaveFocus()
+    expect(screen.getByTestId('recovery-queue')).not.toHaveFocus()
+
+    act(() => requestRecoveryQueueFocus('second'))
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/dlq/entries/second', expect.anything()))
+    expect(detailNode()).toBeUndefined()
+    await act(async () => resolveSecond(mockDeadLetter('second')))
+    await waitFor(() => expect(detailNode()).toBe('node-second'))
+    expect(document.querySelector('section.detail-box')).toHaveFocus()
+
+    fireEvent.click(screen.getByTestId('dlq-row-unrelated'))
+    await waitFor(() => expect(detailNode()).toBe('node-unrelated'))
+
+    act(() => requestRecoveryQueueFocus())
+    await waitFor(() => expect(screen.getByTestId('recovery-queue')).toHaveFocus())
+    expect(detailNode()).toBe('node-unrelated')
   })
 
   it('uses the live handoff when session storage is unavailable', async () => {

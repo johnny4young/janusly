@@ -76,6 +76,14 @@ duplicates, carries the original id in edge data, and `getWorkflowJson`
 round-trips that original value. Never silently replace a persisted edge id
 with an array index: validation and recovery evidence may refer to it.
 
+Recovery queue handoffs bind selection and focus to the requested dead-letter
+identity, even when that row is outside the current filtered page. An earlier
+clicked row or cached off-list detail must never stand in for a new request.
+The panel waits for the exact detail or an explicit not-found result before
+focusing it; a queue-level handoff focuses the queue heading. A new handoff
+exits bulk selection, while a deliberate row click or keyboard selection
+supersedes a pending handoff.
+
 The versioned DAG's inline `metadata` is a closed descriptive shape
 (`description`, `tags`), not a generic extension bag. Operational metadata uses
 the dedicated workflow-metadata API. Run-snapshot guards validate this shape,

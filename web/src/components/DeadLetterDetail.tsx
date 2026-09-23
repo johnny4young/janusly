@@ -58,14 +58,14 @@ export function DeadLetterDetail({
   return (
     <>
       {requestedNotFound && !selectionMode && (
-        <section className="detail-box" data-testid="dlq-requested-not-found">
+        <section className="detail-box" data-testid="dlq-requested-not-found" tabIndex={-1} aria-label={t('dlq.deepLinkNotFound')}>
           <div className="section-kicker">{t('dlq.selected')}</div>
           <p className="helper-text">{t('dlq.deepLinkNotFound')}</p>
         </section>
       )}
 
       {selected && !selectionMode && (
-        <section className="detail-box">
+        <section className="detail-box" tabIndex={-1} aria-label={t('dlq.selected')}>
           <div className="split-row">
             <div>
               <div className="section-kicker">{t('dlq.selected')}</div>

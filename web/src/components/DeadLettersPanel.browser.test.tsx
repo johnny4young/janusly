@@ -7,6 +7,7 @@ import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
 import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
+import { requestRecoveryQueueFocus } from './recovery-queue-focus-bus'
 
 vi.mock('../api', () => {
   const api = vi.fn()
@@ -97,5 +98,22 @@ describe('Recovery queue layout and focus in Chromium', () => {
     await userEvent.keyboard('j')
     expect(search).toHaveValue('j')
     expect(search).toHaveFocus()
+  })
+
+  it('focuses the exact off-page failure instead of the previously clicked row', async () => {
+    initI18n('en')
+    queueRows = [rows[0]!]
+    mountQueue()
+    await userEvent.click(await screen.findByTestId('dlq-row-invoice'))
+
+    act(() => requestRecoveryQueueFocus('shipment'))
+    await waitFor(() => expect(document.querySelector('section.detail-box > .split-row strong'))
+      .toHaveTextContent(rows[1]!.nodeId))
+    await waitFor(() => expect(document.querySelector('section.detail-box')).toHaveFocus())
+    expect(screen.getByTestId('recovery-queue')).not.toHaveFocus()
+
+    act(() => requestRecoveryQueueFocus('gone'))
+    await waitFor(() => expect(screen.getByTestId('dlq-requested-not-found')).toHaveFocus())
+    expect(document.querySelector('section.detail-box > .split-row strong')).toBeNull()
   })
 })
