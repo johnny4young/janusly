@@ -23,6 +23,12 @@ coverage
 **/coverage
 artifacts
 output
+/admin
+/api
+/artifact
+/loadgen
+/mcp
+/seed
 web/playwright-report
 web/test-results
 web/**/__screenshots__
@@ -30,9 +36,13 @@ web/.vitest-attachments
 web/.design-sync
 web/.ds-sync
 web/ds-bundle
+web/index.d.ts
+web/types
 docs/private
 docs/proposals
 docs/marketing
+docs/PLAN.md
+docs/ROADMAP.md
 deploy/observability/cloud.env
 *.log
 *.profraw
