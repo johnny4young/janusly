@@ -154,7 +154,7 @@ async function captureSurface(
     .filter(violation => violation.impact === 'critical' || violation.impact === 'serious')
     .map(violation => ({
       id: violation.id,
-      impact: violation.impact,
+      impact: violation.impact ?? null,
       nodes: violation.nodes.length,
     }))
   if (phase === 'after') {

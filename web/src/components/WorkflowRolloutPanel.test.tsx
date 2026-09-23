@@ -357,7 +357,7 @@ describe('<WorkflowRolloutPanel />', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Run comparison' }))
 
     expect(await screen.findByText('4/4', {}, { timeout: 5_000 })).toBeInTheDocument()
-    expect(comparison).toHaveTextContent('Passed')
+    await waitFor(() => expect(comparison).toHaveTextContent('Passed'), { timeout: 5_000 })
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: 'Start canary' }))
 

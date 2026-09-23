@@ -46,6 +46,7 @@ test('workspace views can be opened independently', async ({ page }) => {
         level: 'headingLevel' in view ? view.headingLevel : undefined,
       })).toBeVisible()
     } else {
+      if (!view.text) throw new Error(`Missing text assertion for ${view.destination}`)
       const target = view.selector
         ? page.locator(view.selector, { hasText: view.text })
         : page.getByText(view.text, { exact: true })

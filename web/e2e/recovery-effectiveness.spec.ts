@@ -2,7 +2,7 @@
 
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
-import { normalizeErrorSignature } from '../src/lib/error-signature.ts'
+import { normalizeErrorSignature } from '../src/lib/error-signature'
 import { execPostgresSql } from './_helpers/postgres'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001'

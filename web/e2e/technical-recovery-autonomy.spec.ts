@@ -102,8 +102,8 @@ async function seedAutonomyEvidence(orgId: string): Promise<void> {
   const priorDlqs = [0, 1].map((index) => `autonomy-prior-${suffix}-${index}`)
   const now = new Date().toISOString()
   const deadLetterRows = [
-    [eligibleDlq, 'run-eligible', original],
-    [blockedDlq, 'run-blocked', original],
+    [eligibleDlq, 'run-eligible', original] as const,
+    [blockedDlq, 'run-blocked', original] as const,
     ...priorDlqs.map((id, index) => [id, `run-prior-${index}`, original] as const),
   ].map(([id, runId, snapshot]) => `(
     ${sqlLiteral(id)},

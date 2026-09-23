@@ -43,7 +43,7 @@ async function requestJson<T>(
   })
   const text = await response.text()
   if (!response.ok) {
-    throw new Error(`${options.method ?? 'GET'} ${path} returned ${response.status()}: ${text}`)
+    throw new Error(`${options.method ?? 'GET'} ${path} returned ${response.status}: ${text}`)
   }
   return JSON.parse(text) as T
 }

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "e2e/**/*.ts",
+    "performance/**/*.ts",
+    "playwright.config.ts",
+    "playwright.performance.config.ts",
+    "src/vite-env.d.ts"
+  ]
+}

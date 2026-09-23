@@ -273,3 +273,15 @@ shared lazy helpers into `lazy-ui` and recovery-only helpers into `recovery-ui`,
 not by moving them onto the cold path or increasing a cap. The measured build is
 618729/619520 bytes for the complete artifact and 573634/573952 bytes for the
 worst single locale.
+
+## Executable test TypeScript coverage
+
+The web typecheck now includes Playwright E2E and performance sources through a
+separate `tsconfig.e2e.json` project. It uses the same strict compiler settings
+as the app without pulling executable tests into the app build. A temporary
+wrong-type fixture was rejected by this gate. Existing E2E helper type errors
+were corrected, including a real failure-path bug: Node Fetch's
+`Response.status` is a number, unlike Playwright's `APIResponse.status()` method.
+A script regression asserts the actual HTTP status is preserved when semantic
+fixture creation fails. The typed E2E checks complement, rather than replace,
+real-executable browser tests.

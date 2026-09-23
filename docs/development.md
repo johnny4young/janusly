@@ -43,8 +43,9 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 `make verify` (`scripts/verify-isolated.sh`) creates a fresh PostgreSQL
 compose project, migrates twice (the second run must be a no-op), regenerates
 `schema.sql` and checks it for drift, runs `make generate` drift, lint, vuln,
-Go unit, integration and two-instance HA, the web verify (`audit:ci`, lint, typecheck, unit,
-scripts, browser, build, `bundle-check`) and the e2e lane, then ends with
+Go unit, integration and two-instance HA, the web verify (`audit:ci`, lint,
+app/unit/E2E typecheck, unit, scripts, browser, build, `bundle-check`) and the
+e2e lane, then ends with
 `git diff --exit-code`. Commit first, verify after, and do not touch tracked
 files while it runs.
 
