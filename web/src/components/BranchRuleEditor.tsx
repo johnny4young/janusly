@@ -44,32 +44,49 @@ export function BranchRuleEditor({
     () => buildExpressionSuggestions({ nodes, edges, targetNodeId, mode, workflowInputs }),
     [edges, mode, nodes, targetNodeId, workflowInputs],
   )
-  const sourceOptions = useMemo(() => {
+  const sourceOptions = useMemo<ExpressionSuggestion[]>(() => {
     const options = suggestions.filter(isConcreteValueSuggestion)
     return options.length > 0
       ? options
-      : [{ token: 'context.input.value' }]
+      : [{ token: 'context.input.value', kind: 'input' }]
   }, [suggestions])
   const preferredSourceId = mode === 'edge' ? targetNodeId : undefined
-  const resolveAuthoring = (expression: string) => resolveBranchRuleAuthoring(
-    expression,
+  const sourceContextKey = JSON.stringify([
     allowUnconditional,
-    sourceOptions,
     preferredSourceId,
-  )
-  const [authoring, setAuthoring] = useState(() => resolveAuthoring(value))
+    sourceOptions.map(({ token, nodeId, valueType }) => [token, nodeId, valueType]),
+  ])
+  const [authoring, setAuthoring] = useState(() => resolveBranchRuleAuthoring(
+    value, allowUnconditional, sourceOptions, preferredSourceId,
+  ))
   const { mode: selectedMode, draft } = authoring
   const editorMode = selectedMode === 'simple'
     && !sourceOptions.some(source => source.token === draft.left)
     ? 'advanced'
     : selectedMode
   const lastEmitted = useRef(value)
+  const lastObserved = useRef({ value, sourceContextKey })
+  const manuallyAdvanced = useRef(false)
 
   useEffect(() => {
-    if (value === lastEmitted.current) return
-    lastEmitted.current = value
-    setAuthoring(resolveAuthoring(value))
-  }, [value])
+    const valueChanged = value !== lastObserved.current.value
+    const sourceChanged = sourceContextKey !== lastObserved.current.sourceContextKey
+    lastObserved.current = { value, sourceContextKey }
+
+    if (valueChanged) {
+      if (value === lastEmitted.current) return
+      lastEmitted.current = value
+      manuallyAdvanced.current = false
+      setAuthoring(resolveBranchRuleAuthoring(
+        value, allowUnconditional, sourceOptions, preferredSourceId,
+      ))
+      return
+    }
+    if (!sourceChanged || manuallyAdvanced.current || value !== lastEmitted.current) return
+    setAuthoring(resolveBranchRuleAuthoring(
+      value, allowUnconditional, sourceOptions, preferredSourceId,
+    ))
+  }, [allowUnconditional, preferredSourceId, sourceContextKey, sourceOptions, value])
 
   const emit = (expression: string) => {
     lastEmitted.current = expression
@@ -102,16 +119,21 @@ export function BranchRuleEditor({
             onChange={(event) => {
               const nextMode = event.target.value as BranchRuleMode
               if (nextMode === 'always') {
+                manuallyAdvanced.current = false
                 setAuthoring({ mode: nextMode, draft })
                 emit(allowUnconditional ? '' : 'true')
                 return
               }
               if (nextMode === 'simple') {
-                const nextDraft = resolveAuthoring(value).draft
+                manuallyAdvanced.current = false
+                const nextDraft = resolveBranchRuleAuthoring(
+                  value, allowUnconditional, sourceOptions, preferredSourceId,
+                ).draft
                 setAuthoring({ mode: nextMode, draft: nextDraft })
                 emit(formatBranchRuleDraft(nextDraft))
                 return
               }
+              manuallyAdvanced.current = true
               setAuthoring({ mode: nextMode, draft })
             }}
           >
