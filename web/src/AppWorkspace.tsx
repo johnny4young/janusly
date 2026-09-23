@@ -86,6 +86,7 @@ type CanvasModel = {
   onNodeClick: NodeMouseHandler<WorkflowGraphNode>
   onEdgeClick: EdgeMouseHandler<WorkflowGraphEdge>
   onAddNode: (type: string, position?: { x: number; y: number }) => void
+  onOpenAiStudio: () => void
   readOnly: boolean
   workflowId: string
   viewportWorkflowId?: string
@@ -208,6 +209,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
                 onNodeClick={canvas.onNodeClick}
                 onEdgeClick={canvas.onEdgeClick}
                 onAddNode={canvas.onAddNode}
+                onOpenAiStudio={canvas.onOpenAiStudio}
                 readOnly={canvas.readOnly}
                 viewportWorkflowId={canvas.viewportWorkflowId}
                 active={visibility.visible}

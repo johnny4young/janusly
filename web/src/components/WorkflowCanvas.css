@@ -46,6 +46,11 @@
   color: var(--we-ink);
 }
 
+.canvas-empty__action {
+  align-self: center;
+  pointer-events: auto;
+}
+
 /* Fallback shown when the React Flow subtree throws (CanvasErrorBoundary). */
 .canvas-error {
   display: flex;

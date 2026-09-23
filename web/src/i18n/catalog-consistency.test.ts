@@ -47,6 +47,11 @@ describe('i18n consistency', () => {
     expect(enKeys).toEqual(esKeys)
   })
 
+  it('keeps the Spanish product voice in neutral Latin American tuteo', () => {
+    expect(es['app.brandSubtitle']).toBe('Protege tu plano de control')
+    expect(es['rightPanel.templates.empty.cta']).toBe('Genera una con AI Studio')
+  })
+
   it('no key has an empty string as its translation', () => {
     for (const [lng, payload] of [['en', en], ['es', es]] as const) {
       for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {

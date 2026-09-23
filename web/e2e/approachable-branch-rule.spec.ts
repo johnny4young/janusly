@@ -26,6 +26,13 @@ const LOCALES = {
     condition: 'Condition',
     value: 'Compare with',
     branchExpression: 'Branch expression',
+    runOnlyWhen: 'Run only when',
+    advancedJson: 'Advanced JSON',
+    invalidJsonAt: /Invalid JSON at line 2, column \d+\./u,
+    invalidJsonObject: 'Enter a JSON object.',
+    validJson: 'Valid JSON.',
+    defaultRoute: 'default',
+    conditionPrefix: 'if ',
     step: 'Step',
     productionStatus: /^Open authoring problems — Production · (?:Ready|\d+ (?:warning|warnings|blocker|blockers))$/u,
     workflowStatus: /^Workflow · \d+ \/ 100$/u,
@@ -43,6 +50,13 @@ const LOCALES = {
     condition: 'Condición',
     value: 'Comparar con',
     branchExpression: 'Expresión de rama',
+    runOnlyWhen: 'Ejecutar solo cuando',
+    advancedJson: 'JSON avanzado',
+    invalidJsonAt: /JSON inválido en línea 2, columna \d+\./u,
+    invalidJsonObject: 'Introduce un objeto JSON.',
+    validJson: 'JSON válido.',
+    defaultRoute: 'predeterminado',
+    conditionPrefix: 'si ',
     step: 'Paso',
     productionStatus: /^Abrir problemas de autoría — Producción · (?:Lista|\d+ (?:aviso|avisos|bloqueo|bloqueos))$/u,
     workflowStatus: /^Flujo · \d+ \/ 100$/u,
@@ -197,6 +211,9 @@ for (const locale of ['en', 'es'] as const) {
     await openWorkspaceSection(page, copy.workflows, copy.build)
 
     const canvas = page.locator('.canvas-frame[data-mode="author"]')
+    await expect(canvas.locator('.we-edge-label[data-kind="default"]')).toHaveText(copy.defaultRoute)
+    const initialConditionLabel = canvas.locator('.we-edge-label[data-kind="condition"]')
+    await expect(initialConditionLabel).toContainText(`${copy.conditionPrefix}context.gate.output.result === true`)
     await canvas.locator('.react-flow__node[data-id="gate"] .workflow-node').click()
     const nodeInspector = page.getByTestId('inspector-node-gate')
     const nodeEditor = nodeInspector.locator('section.quick-config')
@@ -231,8 +248,26 @@ for (const locale of ['en', 'es'] as const) {
     await capture(page.locator('.app-shell'), `web-${locale}-branch-rule-node`)
 
     await nodeEditor.getByLabel(copy.mode).selectOption('advanced')
-    await expect(nodeEditor.getByLabel(copy.branchExpression))
-      .toHaveValue("context.source.output.priority !== 'low'")
+    const nodeExpression = nodeEditor.getByLabel(copy.branchExpression)
+    await expect(nodeExpression).toHaveValue("context.source.output.priority !== 'low'")
+
+    await nodeInspector.getByText(copy.advancedJson, { exact: true }).click()
+    const advancedJson = nodeInspector.getByLabel(copy.advancedJson, { exact: true })
+    const invalidDraft = '{\n  "expression":,\n}'
+    await advancedJson.fill(invalidDraft)
+    await expect(nodeInspector.locator('#node-config-feedback')).toHaveText(copy.invalidJsonAt)
+    await expect(advancedJson).toHaveValue(invalidDraft)
+    await expect(nodeExpression).toHaveValue("context.source.output.priority !== 'low'")
+
+    await advancedJson.fill('[]')
+    await expect(nodeInspector.locator('#node-config-feedback')).toHaveText(copy.invalidJsonObject)
+    await expect(advancedJson).toHaveValue('[]')
+
+    const validDraft = JSON.stringify({ expression: "context.source.output.priority !== 'low'" }, null, 2)
+    await advancedJson.fill(validDraft)
+    await expect(nodeInspector.locator('#node-config-feedback')).toHaveText(copy.validJson)
+    await advancedJson.blur()
+    await expect(nodeExpression).toHaveValue("context.source.output.priority !== 'low'")
     await capture(page.locator('.app-shell'), `web-${locale}-branch-rule-advanced`)
     await nodeEditor.getByLabel(copy.mode).selectOption('simple')
 
@@ -247,6 +282,22 @@ for (const locale of ['en', 'es'] as const) {
     await expect(edgeEditor.getByLabel(copy.source)).toHaveValue('context.gate.output.result')
     await edgeEditor.getByLabel(copy.condition).selectOption('!==')
     await edgeEditor.getByLabel(copy.value).selectOption('false')
+
+    await edgeEditor.getByLabel(copy.mode).selectOption('advanced')
+    const edgeExpression = edgeEditor.getByLabel(copy.runOnlyWhen)
+    const secret = `sk-proj-${'a'.repeat(24)}`
+    const longCondition = `context.gate.output.result === true && context.gate.output.secret !== "${secret}" && context.gate.output.note === "a deliberately long condition label for truncation"`
+    await edgeExpression.fill(longCondition)
+    const conditionLabel = canvas.locator('.we-edge-label[data-kind="condition"]')
+    await expect(conditionLabel).toContainText('[redacted]')
+    await expect(conditionLabel).not.toContainText(secret)
+    await expect(conditionLabel).toHaveAttribute('title', new RegExp(`^${copy.conditionPrefix}.*\\[redacted\\]`))
+    const labelledEdge = canvas.locator('.we-edge[role="img"][aria-label*="[redacted]"]')
+    await expect(labelledEdge).toBeVisible()
+    await expect(labelledEdge).not.toHaveAttribute('aria-label', new RegExp(secret))
+    expect(await conditionLabel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+    await edgeExpression.fill('context.gate.output.result !== false')
+    await expect(conditionLabel).toContainText('context.gate.output.result !== false')
     await expectNoBlockingAccessibilityViolations(page, `${locale} guided conditional edge`)
     await capture(page.locator('.app-shell'), `web-${locale}-branch-rule-edge`)
 

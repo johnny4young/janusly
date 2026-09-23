@@ -82,7 +82,9 @@ export function RecoveryCenterHero({
   return (
     <header
       className="we-recovery-center-hero we-home-header"
-      role="banner"
+      role="region"
+      aria-labelledby="recovery-center-hero-title"
+      data-testid="recovery-center-hero"
       data-all-clear={effectiveAllClear ? 'true' : undefined}
     >
       {effectiveAllClear && <CelebrationBurst trigger={celebrationTrigger ?? 0} />}
@@ -92,7 +94,7 @@ export function RecoveryCenterHero({
         </div>
         {effectiveAllClear ? (
           <div className="we-recovery-center-hero__all-clear" role="status" aria-live="polite">
-            <h1 className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">
+            <h1 id="recovery-center-hero-title" className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">
               {t('recoveryCenter.hero.allClearTitle')}
             </h1>
             <p className="we-recovery-center-hero__subline" data-testid="recovery-center-all-clear-summary">
@@ -101,7 +103,7 @@ export function RecoveryCenterHero({
           </div>
         ) : (
           <>
-            <h1 className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">{salutation}</h1>
+            <h1 id="recovery-center-hero-title" className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">{salutation}</h1>
             <p className="we-recovery-center-hero__subline">{subline}</p>
             {typeof longestOpenMs === 'number' && longestOpenMs >= 0 && openFailures > 0 && (
               <p

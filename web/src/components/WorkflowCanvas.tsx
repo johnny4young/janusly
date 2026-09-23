@@ -36,6 +36,7 @@ type WorkflowCanvasProps = {
   onNodeClick: NodeMouseHandler<WorkflowGraphNode>
   onEdgeClick: EdgeMouseHandler<WorkflowGraphEdge>
   onAddNode?: (type: string, position?: { x: number; y: number }) => void
+  onOpenAiStudio?: () => void
   /** When present, the canvas restores this workflow's last saved viewport
    *  (zoom + pan) on mount instead of fitting-to-view, and persists user
    *  pan/zoom under it. Omitted (e.g. unsaved drafts, the locked browser
@@ -62,7 +63,7 @@ function acceptsCanvasDrop(target: EventTarget | null): boolean {
 /** Render the workflow editor canvas with React Flow + custom step nodes.
  *  Memoized so it only re-renders when its (stable) graph + handler props
  *  actually change, not on every unrelated store tick from the App root. */
-export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, onAddNode, viewportWorkflowId, mode = 'author', readOnly = false, active = true }: WorkflowCanvasProps) {
+export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, onAddNode, onOpenAiStudio, viewportWorkflowId, mode = 'author', readOnly = false, active = true }: WorkflowCanvasProps) {
   const { t } = useT()
   const confirmDialog = useConfirm()
   const observing = mode === 'observe'
@@ -239,7 +240,9 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
       ref={frameRef}
       className="canvas-frame"
       data-mode={mode}
-      data-testid={observing ? 'run-observation-canvas' : undefined}
+      data-testid={observing ? 'run-observation-canvas' : 'workflow-canvas'}
+      tabIndex={observing ? undefined : -1}
+      aria-label={observing ? undefined : t('canvas.flowMapSummary')}
     >
       <div className="canvas-toolbar" aria-label={t(observing ? 'canvas.runMap' : 'canvas.flowMapSummary')}>
         <div>
@@ -335,6 +338,15 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
           <div className="canvas-empty__card">
             <strong>{t(observing ? 'canvas.runEmpty.title' : 'canvas.empty.title')}</strong>
             <p>{t(observing ? 'canvas.runEmpty.body' : 'canvas.empty.body')}</p>
+            {editing && onOpenAiStudio && (
+              <Button
+                className="canvas-empty__action"
+                variant="primary"
+                onClick={onOpenAiStudio}
+              >
+                {t('canvas.empty.aiAction')}
+              </Button>
+            )}
           </div>
         </div>
       )}

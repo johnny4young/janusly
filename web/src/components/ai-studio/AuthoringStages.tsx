@@ -42,6 +42,7 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
     proposalBuildMs,
     applied,
     applyProposal,
+    onViewCanvas,
     authoringError,
   } = model
   const bindingComplete = Boolean(proposal?.bindings.complete)
@@ -461,12 +462,19 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
           />
         )}
         {applied && (
-          <StatusSummary
-            role="status"
-            tone="success"
-            title={t('aiStudio.apply.applied')}
-            description={t('aiStudio.apply.appliedBody')}
-          />
+          <>
+            <StatusSummary
+              role="status"
+              tone="success"
+              title={t('aiStudio.apply.applied')}
+              description={t('aiStudio.apply.appliedBody')}
+            />
+            <FormActions>
+              <Button variant="secondary" onClick={onViewCanvas}>
+                {t('aiStudio.apply.viewCanvas')}
+              </Button>
+            </FormActions>
+          </>
         )}
         <FormActions>
           <Button

@@ -29,6 +29,7 @@ export function useAiStudioController({
   actionRequest,
   onSuggestWorkflowImprovement,
   onApplyWorkflowImprovement,
+  onViewCanvas,
   onOpenRuns,
   onOpenTemplates,
 }: AiStudioPanelProps) {
@@ -364,6 +365,7 @@ export function useAiStudioController({
     health,
     workflowName,
     onApplyWorkflowImprovement,
+    onViewCanvas,
     onOpenRuns,
     onOpenTemplates,
     starterPrompts,

@@ -124,6 +124,7 @@ function renderPanel(overrides: Partial<AiStudioProps> = {}) {
     actionRequest: null,
     onSuggestWorkflowImprovement: vi.fn(async () => ({ mode: 'fallback' as const, suggestions: [] })),
     onApplyWorkflowImprovement: vi.fn(async () => true),
+    onViewCanvas: vi.fn(),
     onOpenRuns: vi.fn(),
     onOpenTemplates: vi.fn(),
     ...overrides,
@@ -149,7 +150,8 @@ describe('<AiStudioPanel />', () => {
     const onCompileWorkflowBrief = vi.fn(async () => compilation)
     const onProposeWorkflow = vi.fn(async () => workflowProposal())
     const onApplyWorkflowProposal = vi.fn(async () => ({ status: 'applied' as const }))
-    renderPanel({ onCompileWorkflowBrief, onProposeWorkflow, onApplyWorkflowProposal })
+    const onViewCanvas = vi.fn()
+    renderPanel({ onCompileWorkflowBrief, onProposeWorkflow, onApplyWorkflowProposal, onViewCanvas })
 
     await screen.findByTestId('capability-catalog-summary')
     const sourcePrompt = (screen.getByLabelText('Business intent') as HTMLTextAreaElement).value
@@ -167,6 +169,9 @@ describe('<AiStudioPanel />', () => {
     fireEvent.click(screen.getByRole('button', { name: /Apply proposal to draft/i }))
     await waitFor(() => expect(onApplyWorkflowProposal).toHaveBeenCalledOnce())
     expect(screen.getByText('Proposal copied to the draft')).toBeInTheDocument()
+    expect(onViewCanvas).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'View changes in canvas' }))
+    expect(onViewCanvas).toHaveBeenCalledOnce()
   })
 
   it('shows missing exact bindings and prevents Apply', async () => {

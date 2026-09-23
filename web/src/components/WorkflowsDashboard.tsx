@@ -174,7 +174,10 @@ function useWorkflowsDashboardController({
         const tags = Array.isArray(data?.tags) ? (data.tags as string[]) : []
         if (cancelled) return
         setTagOptions(tags)
-        setTagFilters(current => current.filter(tg => tags.includes(tg)))
+        setTagFilters((current) => {
+          const available = current.filter(tag => tags.includes(tag))
+          return available.length === current.length ? current : available
+        })
       } catch {
         if (!cancelled) setTagOptions([])
       }

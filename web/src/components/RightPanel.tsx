@@ -226,6 +226,11 @@ function RightPanelRouter(props: RightPanelProps) {
       actionRequest={authoring.aiActionRequest}
       onSuggestWorkflowImprovement={authoring.onSuggestWorkflowImprovement}
       onApplyWorkflowImprovement={authoring.onApplyWorkflowImprovement}
+      onViewCanvas={() => {
+        const canvas = document.querySelector<HTMLElement>('[data-testid="workflow-canvas"]')
+        canvas?.scrollIntoView({ block: 'nearest' })
+        canvas?.focus({ preventScroll: true })
+      }}
       onOpenRuns={() => navigation.onOpenTab('runs')}
       onOpenTemplates={() => navigation.onOpenTab('templates')}
     />

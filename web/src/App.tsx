@@ -623,6 +623,7 @@ export default function App() {
         onNodeClick: handleNodeClick,
         onEdgeClick: handleEdgeClick,
         onAddNode: addWorkflowNode,
+        onOpenAiStudio: () => openAiAuthoringAction('generate'),
         readOnly: !canWriteWorkflows,
         workflowId: currentWorkflowId ?? 'workflow-canvas',
         viewportWorkflowId: currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined,

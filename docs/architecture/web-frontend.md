@@ -97,7 +97,11 @@ them, and `WorkspaceSectionNav` reuses those importers on hover/focus. The
 `authoring-workspace` group also contains shared dependencies, so its code can
 load before an authoring panel mounts. `lazy()` defers mounting, not necessarily
 transfer; a second destination-level preload effect is unnecessary. First-open
-navigation uses the Suspense fallback if its import is still pending.
+navigation uses the Suspense fallback if its import is still pending. Small helpers
+shared only by lazy list surfaces are coalesced in `lazy-ui`; recovery-only models,
+status primitives and evidence helpers are coalesced in `recovery-ui`. Neither
+group belongs on the cold shell path. This avoids one gzip/import boundary per
+micro-module without merging the independent panel chunks operators navigate to.
 Stylesheets follow the
 chunk that renders them: a rule whose classes are owned only by lazy-loaded
 components lives next to its owner (`<Component>.css`, or `<folder>/<folder>.css`
@@ -169,6 +173,43 @@ inside the card and each fixed-height virtual row keeps status, kind, expiry and
 both mutation actions visible; secondary owner and last-used facts remain on the
 wider inventory. The overview no longer presents a credential-only count as if
 it represented every connection type.
+
+## Canvas authoring clarity
+
+Authoring edges always expose a route kind: default, conditional, or error. A
+conditional badge renders a single-line, CSS-truncated expression while its
+complete scrubbed value remains in the native tooltip and directed accessible
+name. Known credential shapes and control characters are removed before either
+surface is rendered. Error routes retain their separate dashed danger treatment.
+
+Advanced JSON is a draft editor, not a write-through field. It validates 300 ms
+after input, keeps invalid text intact, reports a localized line and column, and
+accepts only JSON objects. A blur updates node configuration only after the draft
+is valid. Successful AI proposal Apply remains an explicit draft mutation; the
+next action scrolls and focuses the already-mounted canvas without changing the
+AI Studio route, so the review context remains available. A blank writable canvas
+has one primary assisted start and keeps Add step as the manual, provider-free
+path. The teaching overlay still passes palette drops through outside its action.
+
+The Home hero is a named region inside workspace main, not a second page banner.
+The authoring canvas is an explicitly named programmatic focus target, JSON
+feedback uses status/alert semantics, and decorative edge badges do not duplicate
+the directed edge announcement. Browser checks cover keyboard focus, serious and
+critical axe findings, overflow and readable text at compact and desktop widths.
+
+Typography deliberately has no remote or bundled font dependency. The existing
+local-preferred sans and mono token stacks fall through to platform system faces;
+`cold-load-polish.test.ts` prevents a remote font dependency and pins those
+fallbacks. This preserves the dense control-plane layout without adding a download
+or a first-render font swap. Spanish product copy uses neutral Latin American
+tuteo. Canonical product terms stay distinct: workflow/flujo, run/ejecución,
+replay/reproducción or reejecución, retry/reintento, and redrive are not treated
+as interchangeable.
+
+Copy/paste semantics and automatic layout remain evidence-gated. This slice does
+not add global keyboard interception, regenerate ids, rewrite persisted positions,
+or introduce a layout library without representative difficult graphs and a
+measured operator need.
 
 ## Data invalidation
 

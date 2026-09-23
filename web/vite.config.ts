@@ -96,6 +96,23 @@ export default defineConfig(({ mode }) => ({
             return 'catalog-es'
           }
           if (
+            id.endsWith('/src/hooks/useAliveRef.ts')
+            || id.endsWith('/src/hooks/useVirtualList.ts')
+            || id.endsWith('/src/url.ts')
+          ) {
+            return 'lazy-ui'
+          }
+          if (
+            id.endsWith('/src/components/ValidationEvidencePill.tsx')
+            || id.endsWith('/src/components/RunStreamChip.tsx')
+            || id.endsWith('/src/components/WorkflowRolloutStatus.tsx')
+            || id.endsWith('/src/components/recovery-dialog/playbook-scorecard.ts')
+            || id.endsWith('/src/lib/recovery-metrics-model.ts')
+            || id.endsWith('/src/lib/recovery-item.ts')
+          ) {
+            return 'recovery-ui'
+          }
+          if (
             id.endsWith('/src/lib/recovery-case-contract.ts')
             || id.endsWith('/src/lib/recovery-contract.ts')
             || id.endsWith('/src/lib/health-delta.ts')

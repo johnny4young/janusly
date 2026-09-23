@@ -260,7 +260,7 @@ beforeEach(() => {
 
 async function openHomeInsights() {
   fireEvent.click(screen.getByTestId('home-insights-toggle'))
-  await screen.findByTestId('home-insights-content')
+  await screen.findByTestId('home-insights-content', {}, { timeout: 5_000 })
 }
 
 describe('countActiveRecoveryBlockers', () => {

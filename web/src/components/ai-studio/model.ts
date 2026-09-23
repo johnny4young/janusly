@@ -51,6 +51,7 @@ export type AiStudioPanelProps = {
   actionRequest: AiAuthoringActionRequest | null
   onSuggestWorkflowImprovement: () => Promise<WorkflowImprovementResult>
   onApplyWorkflowImprovement: (suggestion: WorkflowImprovementSuggestion) => Promise<boolean>
+  onViewCanvas: () => void
   onOpenRuns: () => void
   onOpenTemplates: () => void
 }

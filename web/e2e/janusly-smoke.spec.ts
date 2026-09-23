@@ -248,6 +248,12 @@ test('ai studio against Go: $0 fallback generate, save, run, approve', async ({ 
     .catch(() => false)
   if (replaceConfirmationVisible) await discard.click()
   await expect(page.getByText('Proposal applied to the unsaved draft').first()).toBeVisible()
+  const viewCanvas = page.getByRole('button', { name: 'View changes in canvas', exact: true })
+  await expect(viewCanvas).toBeVisible()
+  await expect(page.locator('.ai-studio-prompt')).toBeVisible()
+  await viewCanvas.click()
+  await expect(page.getByTestId('workflow-canvas')).toBeFocused()
+  await expect(page.locator('.ai-studio-prompt')).toBeVisible()
 
   // The drafted canvas carries the fallback template; save + run it.
   await page.getByRole('button', { name: 'Validate', exact: true }).click()

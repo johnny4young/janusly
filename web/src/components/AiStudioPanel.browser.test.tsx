@@ -109,6 +109,7 @@ function panelProps(overrides: Partial<Parameters<typeof AiStudioPanel>[0]> = {}
     actionRequest: null,
     onSuggestWorkflowImprovement: vi.fn(async () => ({ mode: 'fallback' as const, suggestions: [] })),
     onApplyWorkflowImprovement: vi.fn(async () => true),
+    onViewCanvas: vi.fn(),
     onOpenRuns: vi.fn(),
     onOpenTemplates: vi.fn(),
     ...overrides,

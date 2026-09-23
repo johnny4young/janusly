@@ -250,3 +250,26 @@ areas in English and Spanish, verifies their hashes and focused headings, and
 checks the horizontal rail at 390 CSS pixels without document overflow. The same
 mobile evidence now bounds the Connections primary action inside its card and
 proves both row actions remain inside the fixed-height virtualized inventory.
+
+## Canvas clarity, JSON feedback and authoring handoff
+
+Canvas paths now identify default, conditional and error routes. Conditional
+labels keep the complete scrubbed expression in their tooltip and accessible
+directed name while the visible badge truncates without exposing known secret
+shapes. Advanced JSON validates after a short editing debounce, preserves invalid
+drafts, reports localized line/column guidance, rejects arrays and null, and
+applies only valid objects on blur.
+
+AI Studio no longer leaves Apply as a dead end: its success state offers an
+explicit View changes in canvas action that focuses the mounted canvas without
+leaving the review surface. The blank canvas offers one assisted starting action
+while retaining the manual Add step path and local/provider-free copy. Home's
+embedded hero is a named region rather than a global banner landmark. Spanish UI
+copy now pins neutral Latin American tuteo for the brand line and the canonical
+AI Studio name. The local-preferred system font stacks remain offline-only; no
+font download, auto-layout library or global copy/paste interception was added.
+The required behavior stays inside the existing hard bundle caps by coalescing
+shared lazy helpers into `lazy-ui` and recovery-only helpers into `recovery-ui`,
+not by moving them onto the cold path or increasing a cap. The measured build is
+618729/619520 bytes for the complete artifact and 573634/573952 bytes for the
+worst single locale.

@@ -22,7 +22,12 @@ import { WorkflowEdge } from './WorkflowEdge'
 // React Flow edges normally render inside an SVG owned by `<ReactFlow>`,
 // but for unit purposes we only need the BaseEdge + EdgeLabelRenderer
 // portal to work. Wrap in an SVG so the BaseEdge's `<path>` mounts.
-function renderEdge(overrides: { selected?: boolean; hasCondition?: boolean } = {}) {
+function renderEdge(overrides: {
+  selected?: boolean
+  condition?: string
+  hasCondition?: boolean
+  hasOnError?: boolean
+} = {}) {
   return render(
     <ReactFlowProvider>
       <svg>
@@ -37,7 +42,11 @@ function renderEdge(overrides: { selected?: boolean; hasCondition?: boolean } = 
           sourcePosition={Position.Bottom}
           targetPosition={Position.Top}
           selected={overrides.selected ?? false}
-          data={{ hasCondition: overrides.hasCondition ?? false }}
+          data={{
+            condition: overrides.condition,
+            hasCondition: overrides.hasCondition ?? Boolean(overrides.condition),
+            hasOnError: overrides.hasOnError ?? false,
+          }}
           markerEnd={undefined}
           // EdgeProps fields the BaseEdge doesn't read in this path
           source-x={0}
@@ -93,37 +102,49 @@ describe('<WorkflowEdge />', () => {
     expect(path?.getAttribute('data-selected')).toBe('true')
   })
 
-  it('renders the condition label only when data.hasCondition is true', () => {
-    const { container, rerender } = renderEdge({ hasCondition: false })
-    expect(container.querySelector('.we-edge-label')).toBeNull()
+  it('distinguishes default, conditional, and error routes', () => {
+    const { container, rerender } = renderEdge()
+    expect(screen.getByText('default')).toBeInTheDocument()
+    expect(container.querySelector('.we-edge-label')).toHaveAttribute('data-kind', 'default')
 
-    rerender(
-      <ReactFlowProvider>
-        <svg>
-          <WorkflowEdge
-            id="edge-1"
-            source="a"
-            target="b"
-            sourceX={0}
-            sourceY={0}
-            targetX={100}
-            targetY={100}
-            sourcePosition={Position.Bottom}
-            targetPosition={Position.Top}
-            selected={false}
-            data={{ hasCondition: true }}
-            markerEnd={undefined}
-          />
-        </svg>
-      </ReactFlowProvider>,
+    rerender(<ReactFlowProvider><svg><WorkflowEdge
+      id="edge-1" source="a" target="b" sourceX={0} sourceY={0} targetX={100} targetY={100}
+      sourcePosition={Position.Bottom} targetPosition={Position.Top} selected={false}
+      data={{ condition: 'context.a.output.ok === true', hasCondition: true }} markerEnd={undefined}
+    /></svg></ReactFlowProvider>)
+    expect(screen.getByText('if context.a.output.ok === true')).toBeInTheDocument()
+    expect(container.querySelector('.we-edge-label')).toHaveAttribute('data-kind', 'condition')
+
+    rerender(<ReactFlowProvider><svg><WorkflowEdge
+      id="edge-1" source="a" target="b" sourceX={0} sourceY={0} targetX={100} targetY={100}
+      sourcePosition={Position.Bottom} targetPosition={Position.Top} selected={false}
+      data={{ hasOnError: true }} markerEnd={undefined}
+    /></svg></ReactFlowProvider>)
+    expect(screen.getByText('on error')).toBeInTheDocument()
+    expect(container.querySelector('.we-edge-label')).toHaveAttribute('data-kind', 'error')
+  })
+
+  it('redacts secret-shaped values while exposing the complete safe condition to assistive technology', () => {
+    const secret = `sk-proj-${'a'.repeat(24)}`
+    const condition = `context.fetch.output.token === '${secret}' && context.fetch.output.ok === true`
+    const { container } = renderEdge({ condition })
+
+    expect(container).not.toHaveTextContent(secret)
+    expect(screen.getByText("if context.fetch.output.token === '[redacted]' && context.fetch.output.ok === true"))
+      .toBeInTheDocument()
+    expect(container.querySelector('path.we-edge')).toHaveAttribute(
+      'aria-label',
+      "From a to b: if context.fetch.output.token === '[redacted]' && context.fetch.output.ok === true",
     )
-
-    expect(screen.getByText('condition')).toBeInTheDocument()
+    expect(container.querySelector('.we-edge-label')).toHaveAttribute(
+      'title',
+      "if context.fetch.output.token === '[redacted]' && context.fetch.output.ok === true",
+    )
   })
 
   it('re-resolves the condition label when the locale changes', async () => {
-    renderEdge({ hasCondition: true })
-    expect(screen.getByText('condition')).toBeInTheDocument()
+    renderEdge({ condition: 'context.a.output.ok === true' })
+    expect(screen.getByText('if context.a.output.ok === true')).toBeInTheDocument()
     // Locale changes notify React subscribers; wrap
     // in `act` so the re-render is observable in the next microtask.
     await act(async () => {
@@ -131,7 +152,7 @@ describe('<WorkflowEdge />', () => {
     })
     // Verifies the locale resolution happens INSIDE the component via
     // useT() — a stale closure in a parent memo wouldn't update here.
-    await waitFor(() => expect(screen.getByText('condición')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('si context.a.output.ok === true')).toBeInTheDocument())
     await act(async () => {
       changeAppLanguage('en')
     })

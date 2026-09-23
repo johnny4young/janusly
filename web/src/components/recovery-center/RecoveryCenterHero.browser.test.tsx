@@ -69,17 +69,22 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
   })
 
   it('renders the all-clear summary and animated burst as a focused hero state', () => {
-    render(<RecoveryCenterHero
-      {...baseProps}
-      streak={{ current: 9, longest: 14 }}
-      allClear
-      allClearDowntimeMs={3_660_000}
-      celebrationTrigger={1}
-    />)
+    render(
+      <main>
+        <RecoveryCenterHero
+          {...baseProps}
+          streak={{ current: 9, longest: 14 }}
+          allClear
+          allClearDowntimeMs={3_660_000}
+          celebrationTrigger={1}
+        />
+      </main>,
+    )
 
-    const hero = screen.getByRole('banner')
+    const hero = screen.getByTestId('recovery-center-hero')
     const burst = screen.getByTestId('celebration-burst')
     expect(hero).toHaveAttribute('data-all-clear', 'true')
+    expect(screen.queryByRole('banner')).toBeNull()
     expect(screen.getByTestId('recovery-center-all-clear-summary')).toHaveTextContent(
       '1h 1m of downtime ended this window · 9-day clean streak',
     )
@@ -96,7 +101,7 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
       celebrationTrigger={1}
     />)
 
-    const hero = screen.getByRole('banner')
+    const hero = screen.getByTestId('recovery-center-hero')
     expect(hero).not.toHaveAttribute('data-all-clear')
     expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(
       'Good afternoon, Jane.',

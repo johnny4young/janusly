@@ -92,13 +92,19 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 }
 .we-edge-label {
   position: absolute;
+  max-width: min(18rem, 42vw);
   background: var(--we-surface);
   border: 1px solid var(--we-line);
   border-radius: 4px;
   color: var(--we-text-secondary);
   font-size: 12px;
+  font-family: var(--font-mono);
+  line-height: 1.35;
+  overflow: hidden;
   padding: 2px 6px;
   pointer-events: all;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .we-edge-label[data-selected="true"] {
   border-color: var(--we-primary);
@@ -113,9 +119,13 @@ path.react-flow__edge-path.we-edge[data-on-error="true"] {
 path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
   stroke: var(--we-danger);
 }
-.we-edge-label[data-on-error="true"] {
+.we-edge-label[data-kind="error"] {
   border-color: var(--we-danger);
   color: var(--we-danger);
+}
+
+.we-edge-label[data-kind="default"] {
+  color: var(--we-ink-muted);
 }
 
 .canvas-toolbar__history {
