@@ -75,14 +75,6 @@ func validateFeedbackMemoryPoolOptions(options feedbackMemoryPoolOptions) error 
 	return errors.Join(problems...)
 }
 
-type feedbackMemoryPoolSnapshot struct {
-	accepted int64
-	dropped  int64
-	failed   int64
-	active   int64
-	depth    int64
-}
-
 // feedbackMemoryPool owns a fixed number of workers and the only sender-side
 // close of its queue. The intake lock makes close versus non-blocking enqueue
 // deterministic, while task contexts outlive the request that produced them.
@@ -246,12 +238,5 @@ func (p *feedbackMemoryPool) shutdown(ctx context.Context) error {
 		p.cancel()
 		<-p.done
 		return fmt.Errorf("drain feedback memory pool: %w", ctx.Err())
-	}
-}
-
-func (p *feedbackMemoryPool) snapshot() feedbackMemoryPoolSnapshot {
-	return feedbackMemoryPoolSnapshot{
-		accepted: p.accepted.Load(), dropped: p.dropped.Load(), failed: p.failed.Load(),
-		active: p.active.Load(), depth: p.depth.Load(),
 	}
 }

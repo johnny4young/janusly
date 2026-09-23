@@ -66,18 +66,3 @@ func nodeFailureHandled(wf *domain.Workflow, nodeID string) bool {
 	}
 	return false
 }
-
-// readySuccessors returns, in declaration order, every pending node whose
-// dependencies are satisfied.
-func readySuccessors(wf *domain.Workflow, statuses map[string]string) []string {
-	var ready []string
-	for _, node := range wf.Nodes {
-		if statuses[node.ID] != "pending" {
-			continue
-		}
-		if depsSatisfied(wf, node.ID, statuses) {
-			ready = append(ready, node.ID)
-		}
-	}
-	return ready
-}

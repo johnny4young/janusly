@@ -33,6 +33,21 @@ func testFeedbackMemoryPool(t *testing.T, workers, capacity int, timeout time.Du
 	return pool
 }
 
+type feedbackMemoryPoolSnapshot struct {
+	accepted int64
+	dropped  int64
+	failed   int64
+	active   int64
+	depth    int64
+}
+
+func (p *feedbackMemoryPool) snapshot() feedbackMemoryPoolSnapshot {
+	return feedbackMemoryPoolSnapshot{
+		accepted: p.accepted.Load(), dropped: p.dropped.Load(), failed: p.failed.Load(),
+		active: p.active.Load(), depth: p.depth.Load(),
+	}
+}
+
 func waitFeedbackPool(t *testing.T, pool *feedbackMemoryPool, predicate func(feedbackMemoryPoolSnapshot) bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
