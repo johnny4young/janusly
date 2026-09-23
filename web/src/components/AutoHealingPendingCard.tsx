@@ -185,7 +185,7 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
       }
       setError(err instanceof Error ? err.message : t('autoHealing.error.load'))
     }
-  }, [t])
+  }, [aliveRef, t])
 
   useEffect(() => {
     void load()

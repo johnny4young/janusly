@@ -97,7 +97,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
       }
     })()
     return () => window.cancelAnimationFrame(id)
-  }, [open, selectedNodeId])
+  }, [aliveRef, open, selectedNodeId])
 
   /** Resolve the display name (built-ins use i18n; custom use their stored name). */
   const nameFor = useCallback(

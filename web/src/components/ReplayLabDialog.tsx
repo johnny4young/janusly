@@ -135,7 +135,7 @@ export function ReplayLabDialog({
       cancelled = true
       window.clearInterval(handle)
     }
-  }, [replayingRunId, sourceRunId, bumpPlatformVersion, t])
+  }, [aliveRef, replayingRunId, sourceRunId, bumpPlatformVersion, t])
 
   const startReplay = async () => {
     setStep({ kind: 'starting' })

@@ -83,7 +83,7 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
       if (!aliveRef.current) return
       setStep({ kind: 'error', message: tApiError(error) || (t('credentialRotation.error.generic')) })
     }
-  }, [credentialName, t])
+  }, [aliveRef, credentialName, t])
 
   useEffect(() => {
     void loadPreview()
