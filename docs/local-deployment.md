@@ -120,6 +120,34 @@ the credential root key are separate operator-owned systems and require their
 own provider backup and escrow procedures. Protect the backup directory as
 sensitive data even though managed credential values remain encrypted.
 
+### Isolated local recovery drill
+
+Run the negative guard selftests, then the opt-in positive drill from a checkout
+with Docker, Go, `jq`, `make`, and Python 3:
+
+```bash
+make recovery-local-selftest
+make recovery-local-drill CONFIRM=drill
+```
+
+The drill creates two uniquely named, disposable Compose projects. It migrates
+the source PostgreSQL 18 database twice, writes one non-secret organization
+sentinel, backs it up through the same operator helper, and restores into a
+separate **empty** PostgreSQL 18 database. It verifies the migration version
+and sentinel, proves a second restore is rejected because the target is no
+longer empty, then runs the migration command against the restored target as a
+no-op compatibility check. It removes only those two owned projects, their
+volumes, and its temporary dump, including on failure. Existing projects are
+refused rather than reused or removed.
+
+The JSON result reports the local backup, restore-helper, and target-recovery
+durations in milliseconds. `targetRecovery` spans target startup through the
+post-restore migration check; it does **not** include detection, operator
+decision, provider identity restoration, credential-key retrieval, traffic
+switching, or application reconnection. These measurements are not an RTO or
+RPO promise. Operators must agree targets and separately drill all recovery
+domains before claiming production readiness.
+
 ## Production checklist
 
 1. Set `JANUSLY_ENV=production`.

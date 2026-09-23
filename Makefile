@@ -14,7 +14,7 @@ GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 .PHONY: dev build artifact supply-chain db-up db-down db-reset migrate generate lint test \
 	test-integration test-ha test-ha-current-db test-route-parity test-ci test-e2e test-e2e-full verify verify-current-db vuln frontend-install \
 	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
-	restore-local recovery-local-selftest load-soak-local-selftest \
+	restore-local recovery-local-selftest recovery-local-drill load-soak-local-selftest \
 	qualify-oci-local qualify-private-metrics-local qualify-real-provider qualify-pagerduty
 
 dev: db-up migrate
@@ -153,6 +153,10 @@ qualify-real-provider:
 
 recovery-local-selftest:
 	bash scripts/postgres-local-recovery.test.sh
+	bash scripts/postgres-local-recovery.drill.test.sh
+
+recovery-local-drill:
+	@CONFIRM='$(CONFIRM)' bash scripts/postgres-local-recovery.drill.sh
 
 backup-local:
 	@bash scripts/postgres-local-recovery.sh backup '$(or $(OUTPUT),output/backups/$$(date -u +%Y%m%dT%H%M%SZ))'
@@ -168,6 +172,7 @@ verify:
 # own the lifecycle and schema state of DB_URL.
 verify-current-db:
 	bash scripts/process-config.test.sh
+	$(MAKE) recovery-local-selftest
 	$(MAKE) schema COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME)
 	$(MAKE) generate
 	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts || { \
