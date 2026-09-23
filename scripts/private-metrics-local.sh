@@ -76,7 +76,7 @@ finish() {
 wait_for_postgres() {
   local _
   for _ in $(seq 1 60); do
-    if docker exec "$postgres" pg_isready -U janusly -d janusly >/dev/null 2>&1; then return 0; fi
+    if docker exec "$postgres" pg_isready -h 127.0.0.1 -p 5432 -U janusly -d janusly >/dev/null 2>&1; then return 0; fi
     sleep 1
   done
   return 1

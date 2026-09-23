@@ -17,7 +17,8 @@ services:
       POSTGRES_PASSWORD: janusly-local
       POSTGRES_DB: janusly
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U janusly -d janusly"]
+      # Probe the final TCP listener, not initdb's temporary Unix-socket server.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U janusly -d janusly"]
       interval: 5s
       timeout: 3s
       retries: 20
