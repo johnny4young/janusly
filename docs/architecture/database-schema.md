@@ -7,6 +7,9 @@ Janusly supports PostgreSQL 18 only. The complete fresh-install schema lives in
 The runtime does not upgrade databases created by another schema generation.
 Startup checks schema completeness before opening public listeners. Running
 `janusly migrate` twice is safe.
+Migration and startup schema inspection accept the runtime pgxpool URL but
+strip pool-only options before opening their single-connection SQL handle;
+`pool_max_conns` must not be forwarded to PostgreSQL as a server setting.
 The [binary/snapshot/schema compatibility matrix](../local-deployment.md#binary-snapshot-and-schema-compatibility)
 defines replacement and isolated restore; matching migration-source hashes
 are necessary but do not by themselves qualify a different executable.

@@ -9,7 +9,8 @@ import (
 	"embed"
 	"fmt"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 )
 
@@ -21,11 +22,15 @@ const versionTable = "janusly_schema_version"
 const migrationLockKey int64 = 0x4a616e75736c7947 // "JanuslyG"
 
 func open(databaseURL string) (*sql.DB, error) {
-	db, err := sql.Open("pgx", databaseURL)
+	// Production also uses this URL for pgxpool. Parse its pool-only options
+	// before opening the single-connection migration/inspection handle; passing
+	// them to pgx stdlib would send them to PostgreSQL as unknown GUCs.
+	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
+		// ParseConfig errors may embed the URL, including its password.
+		return nil, fmt.Errorf("invalid database connection settings")
 	}
-	return db, nil
+	return stdlib.OpenDB(*config.ConnConfig), nil
 }
 
 func configure() {
