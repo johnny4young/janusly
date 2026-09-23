@@ -4,7 +4,7 @@ set -Eeuo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 evidence_dir=${JANUSLY_REAL_PROVIDER_EVIDENCE_DIR:-$root/output/qualification/$stamp/real_provider}
-ledger_path=${JANUSLY_REAL_PROVIDER_LEDGER:-$root/output/qualification/real-provider-ledger.jsonl}
+ledger_path=${JANUSLY_REAL_PROVIDER_LEDGER:-}
 max_usd=${JANUSLY_REAL_PROVIDER_MAX_USD:-3}
 max_calls=${JANUSLY_REAL_PROVIDER_MAX_CALLS:-40}
 max_calls_per_case=${JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE:-2}
@@ -96,6 +96,18 @@ is_integer_between "$max_calls" 20 40 ||
   die 'JANUSLY_REAL_PROVIDER_MAX_CALLS must be an integer in 20..40'
 is_integer_between "$max_calls_per_case" 1 2 ||
   die 'JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE must be 1 or 2'
+[[ "$ledger_path" == /* ]] ||
+  die 'set JANUSLY_REAL_PROVIDER_LEDGER to one stable absolute path outside a Git worktree'
+[[ "$ledger_path" != "$root" && "$ledger_path" != "$root/"* ]] ||
+  die 'JANUSLY_REAL_PROVIDER_LEDGER must not be inside the current worktree'
+command -v git >/dev/null 2>&1 || die 'required command is missing: git'
+ledger_parent=$(dirname -- "$ledger_path")
+if [[ -d "$ledger_parent" ]]; then
+  resolved_parent=$(cd -- "$ledger_parent" && pwd -P)
+  if [[ $(git -C "$resolved_parent" rev-parse --is-inside-work-tree 2>/dev/null || true) == true ]]; then
+    die 'JANUSLY_REAL_PROVIDER_LEDGER must be outside every Git worktree'
+  fi
+fi
 
 if [[ ${JANUSLY_REAL_PROVIDER_SELFTEST:-0} == 1 ]]; then
   jq -n --argjson maxUsd "$max_usd" --argjson maxCalls "$max_calls" --argjson maxCallsPerCase "$max_calls_per_case" \
@@ -107,8 +119,12 @@ for command in git go jq sed shasum; do
   command -v "$command" >/dev/null 2>&1 || die "required command is missing: $command"
 done
 bash "$root/scripts/assert-clean-source.sh"
-[[ "$ledger_path" == /* ]] || die 'JANUSLY_REAL_PROVIDER_LEDGER must be an absolute path'
 mkdir -p "$(dirname -- "$ledger_path")"
+ledger_dir=$(cd -- "$(dirname -- "$ledger_path")" && pwd -P)
+if [[ $(git -C "$ledger_dir" rev-parse --is-inside-work-tree 2>/dev/null || true) == true ]]; then
+  die 'JANUSLY_REAL_PROVIDER_LEDGER must be outside every Git worktree'
+fi
+ledger_path=$ledger_dir/$(basename -- "$ledger_path")
 [[ ! -e "$evidence_dir" && ! -L "$evidence_dir" ]] ||
   die "evidence directory already exists: $evidence_dir"
 mkdir -p "$evidence_dir"

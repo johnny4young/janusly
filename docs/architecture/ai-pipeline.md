@@ -193,10 +193,19 @@ model, tokens, latency, cost, repair flag, and result only—never prompts or ra
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.
 
-The paid profile also keeps an append-only, mode-0600 reservation ledger at
-`output/qualification/real-provider-ledger.jsonl` by default. The optional
-`JANUSLY_REAL_PROVIDER_LEDGER` override must be an absolute path and must be
-reused across every attempt charged to the same authorization. Before egress,
+The paid profile has **no checkout-local default ledger**. Set
+`JANUSLY_REAL_PROVIDER_LEDGER` explicitly to one durable absolute path outside
+every Git worktree (for example, a private operator state directory), and
+reuse that exact path across every attempt charged to the same authorization.
+One local choice is
+`$HOME/.local/state/janusly/real-provider-ledger.jsonl`; create its parent
+with mode 0700 and export the absolute path before `make qualify-real-provider`.
+The shell profile rejects missing or relative paths and paths inside a Git
+worktree, including paths reached through a symlink, before provider egress.
+If an earlier profile already created
+reservations under its former checkout-local default, preserve and migrate
+that ledger while no profile is running; never start with an empty ledger as
+another USD 3 allowance. Before egress,
 an interprocess file lock serializes a conservative USD reservation and
 lifetime global/per-case call counts. Input is priced as one token per UTF-8
 byte plus a framing allowance at the highest input/cache rate; output is

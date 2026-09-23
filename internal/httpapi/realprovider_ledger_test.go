@@ -66,6 +66,20 @@ func (l realProviderLedger) reserve(caseID string, projectedUSD, maxUSD float64,
 	if info, statErr := os.Lstat(filepath.Dir(l.path)); statErr != nil || !info.IsDir() {
 		return realProviderLedgerTotals{}, errors.New("qualification ledger parent directory is missing")
 	}
+	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(l.path))
+	if err != nil {
+		return realProviderLedgerTotals{}, errors.New("qualification ledger parent directory cannot be resolved")
+	}
+	for directory := resolvedParent; ; directory = filepath.Dir(directory) {
+		if _, statErr := os.Lstat(filepath.Join(directory, ".git")); statErr == nil {
+			return realProviderLedgerTotals{}, errors.New("qualification ledger must be outside every Git worktree")
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return realProviderLedgerTotals{}, errors.New("qualification ledger worktree boundary cannot be inspected")
+		}
+		if parent := filepath.Dir(directory); parent == directory {
+			break
+		}
+	}
 	for _, path := range []string{l.path, l.path + ".lock"} {
 		if info, statErr := os.Lstat(path); statErr == nil && !info.Mode().IsRegular() {
 			return realProviderLedgerTotals{}, errors.New("qualification ledger or lock is not a regular file")
@@ -287,5 +301,26 @@ func TestRealProviderLedgerFailsClosedOnCorruptionAndMissingPath(t *testing.T) {
 	}
 	if _, err := (realProviderLedger{path: alias}).reserve("new", 0.1, 3, 40, 2); err == nil {
 		t.Fatal("symlinked ledger must fail closed")
+	}
+}
+
+func TestRealProviderLedgerRejectsCheckoutLocalPath(t *testing.T) {
+	checkout := filepath.Join(t.TempDir(), "checkout")
+	inside := filepath.Join(checkout, "output")
+	if err := os.MkdirAll(inside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Managed worktrees use a .git file rather than a .git directory.
+	if err := os.WriteFile(filepath.Join(checkout, ".git"), []byte("gitdir: elsewhere\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(inside, alias); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(inside, "ledger.jsonl"), filepath.Join(alias, "ledger.jsonl")} {
+		if _, err := (realProviderLedger{path: path}).reserve("case", 0.1, 3, 40, 2); err == nil {
+			t.Errorf("checkout-local ledger must fail closed before reservation: %s", path)
+		}
 	}
 }
