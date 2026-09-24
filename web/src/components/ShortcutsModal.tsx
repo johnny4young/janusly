@@ -105,7 +105,7 @@ export function ShortcutsModal({ open, onClose, permissions }: {
             <div className="section-kicker">{t('shortcuts.kicker')}</div>
             <h2>{t('shortcuts.title')}</h2>
           </div>
-          <button type="button" className="we-shortcuts-close" onClick={onClose} aria-label={t('shortcuts.close')}>
+          <button type="button" className="we-shortcuts-close" onClick={onClose} aria-label={t('common.close')}>
             <X size={14} aria-hidden="true" />
           </button>
         </header>

@@ -29,7 +29,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: `pnpm preview --host ${previewUrl.hostname} --port ${previewPort}`,
+    command: `pnpm --ignore-workspace preview --host ${previewUrl.hostname} --port ${previewPort}`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

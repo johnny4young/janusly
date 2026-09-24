@@ -337,7 +337,7 @@ func TestFeedbackMemorySaturationKeepsPrimaryFeedbackAccepted(t *testing.T) {
 	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
 	t.Setenv("OLLAMA_BASE_URL", embeddingServer.URL)
 
-	options := DefaultV1ServerOptions()
+	options := defaultV1ServerOptionsForTest()
 	options.FeedbackMemoryWorkers = 1
 	options.FeedbackMemoryQueueCapacity = 1
 	options.FeedbackMemoryTaskTimeout = 30 * time.Second

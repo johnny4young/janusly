@@ -54,6 +54,11 @@
   white-space: nowrap;
 }
 
+.workspace-section-nav__intro .workspace-section-nav__context {
+  color: var(--we-ink-soft);
+  font-weight: 600;
+}
+
 .workspace-section-nav__rail {
   display: flex;
   flex-wrap: wrap;

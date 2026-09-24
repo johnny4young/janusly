@@ -1155,8 +1155,150 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "attempt": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "createdAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "errorJson": {},
+                              "id": {
+                                "type": "string"
+                              },
+                              "nodeId": {
+                                "type": "string"
+                              },
+                              "nodeType": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "orgId": {
+                                "type": "string"
+                              },
+                              "recovery": {
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "comments": {},
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "lastOccurredAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "metadataWorkflowId": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "occurrenceCount": {
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      },
+                                      "owner": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "resolutionReason": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "severity": {
+                                        "type": "string"
+                                      },
+                                      "slaTargetAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "status": {
+                                        "type": "string"
+                                      },
+                                      "workflowId": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "owner",
+                                      "severity",
+                                      "status",
+                                      "slaTargetAt",
+                                      "resolutionReason",
+                                      "comments",
+                                      "workflowId",
+                                      "metadataWorkflowId",
+                                      "occurrenceCount",
+                                      "lastOccurredAt"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "replayedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "runId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "enum": [
+                                  "open",
+                                  "replayed",
+                                  "resolved"
+                                ]
+                              },
+                              "workflowName": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "orgId",
+                              "runId",
+                              "nodeId",
+                              "attempt",
+                              "status",
+                              "errorJson",
+                              "replayedAt",
+                              "createdAt",
+                              "nodeType",
+                              "workflowName",
+                              "recovery"
+                            ],
                             "type": "object"
                           },
+                          "maxItems": 200,
                           "type": "array"
                         }
                       },
@@ -1239,6 +1381,252 @@
           }
         },
         "summary": "Failure clusters over open dead letters"
+      }
+    },
+    "/dlq/entries/{deadLetterId}": {
+      "get": {
+        "operationId": "get_v1_dlq_entries_deadLetterId",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "attempt": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "createdAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "drill": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "fixtureId": {
+                                      "maxLength": 128,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "const": "solution_pack_drill"
+                                    },
+                                    "packId": {
+                                      "maxLength": 128,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "recoveryPath": {
+                                      "enum": [
+                                        "direct_failure",
+                                        "runtime_failure",
+                                        "stalled_node_reaper"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "packId",
+                                    "fixtureId",
+                                    "recoveryPath"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "drillOutcome": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "attemptCount": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "chainCapped": {
+                                      "type": "boolean"
+                                    },
+                                    "completedAt": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "elapsedMs": {
+                                      "minimum": 0,
+                                      "type": [
+                                        "integer",
+                                        "null"
+                                      ]
+                                    },
+                                    "evidence": {
+                                      "enum": [
+                                        null,
+                                        "terminal_impact",
+                                        "explicit_resolution"
+                                      ]
+                                    },
+                                    "latestDeadLetterId": {
+                                      "type": "string"
+                                    },
+                                    "recurrence": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "recurredAt": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "status": {
+                                          "enum": [
+                                            "not_applicable",
+                                            "monitoring",
+                                            "clear",
+                                            "recurred"
+                                          ]
+                                        },
+                                        "windowEndsAt": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "status",
+                                        "windowEndsAt",
+                                        "recurredAt"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "startedAt": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "status": {
+                                      "enum": [
+                                        "awaiting_action",
+                                        "replay_in_progress",
+                                        "recovered",
+                                        "accepted_loss",
+                                        "measurement_incomplete"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "status",
+                                    "startedAt",
+                                    "completedAt",
+                                    "elapsedMs",
+                                    "evidence",
+                                    "attemptCount",
+                                    "latestDeadLetterId",
+                                    "chainCapped",
+                                    "recurrence"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "errorJson": {},
+                            "id": {
+                              "type": "string"
+                            },
+                            "nodeId": {
+                              "type": "string"
+                            },
+                            "nodeJson": {},
+                            "orgId": {
+                              "type": "string"
+                            },
+                            "replayClaimedAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "replayedAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "runId": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "enum": [
+                                "open",
+                                "replayed",
+                                "resolved"
+                              ]
+                            },
+                            "suspectVersion": {
+                              "type": "null"
+                            },
+                            "workflowJson": {}
+                          },
+                          "required": [
+                            "id",
+                            "orgId",
+                            "runId",
+                            "nodeId",
+                            "attempt",
+                            "status",
+                            "workflowJson",
+                            "nodeJson",
+                            "errorJson",
+                            "replayedAt",
+                            "createdAt",
+                            "replayClaimedAt",
+                            "suspectVersion",
+                            "drill",
+                            "drillOutcome"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Tenant-bound dead-letter snapshot"
       }
     },
     "/dlq/redrive": {
@@ -1371,6 +1759,74 @@
           }
         },
         "summary": "Replay one dead letter (unversioned wire)"
+      }
+    },
+    "/dlq/resolve": {
+      "post": {
+        "operationId": "post_v1_dlq_resolve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "ok": {
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "ok"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Resolve one dead letter as accepted loss"
       }
     },
     "/dlq/validate-fix": {
@@ -3325,11 +3781,53 @@
                     {
                       "properties": {
                         "data": {
+                          "additionalProperties": false,
                           "properties": {
                             "events": {
                               "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "createdAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "holdUntil": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "payload": {},
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "runId",
+                                  "nodeId",
+                                  "type",
+                                  "payload",
+                                  "createdAt",
+                                  "holdUntil"
+                                ],
                                 "type": "object"
                               },
+                              "maxItems": 500,
                               "type": "array"
                             },
                             "eventsCursor": {
@@ -3343,14 +3841,222 @@
                             },
                             "nodes": {
                               "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "attempts": {
+                                    "minimum": 0,
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
+                                  },
+                                  "errorJson": {},
+                                  "finishedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "startedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "stateJson": {},
+                                  "status": {
+                                    "enum": [
+                                      "pending",
+                                      "queued",
+                                      "running",
+                                      "waiting",
+                                      "succeeded",
+                                      "failed",
+                                      "skipped",
+                                      "cancelled"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "runId",
+                                  "nodeId",
+                                  "status",
+                                  "stateJson",
+                                  "errorJson",
+                                  "attempts",
+                                  "startedAt",
+                                  "finishedAt"
+                                ],
                                 "type": "object"
                               },
                               "type": "array"
                             },
                             "run": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "inputJson": {},
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "outcomeStatus": {
+                                  "enum": [
+                                    null,
+                                    "semantic_violation",
+                                    "semantic_quarantined",
+                                    "semantic_recovering",
+                                    "semantic_recovered",
+                                    "semantic_accepted_loss"
+                                  ]
+                                },
+                                "outputJson": {},
+                                "parentLinkKind": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentNodeId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentNotificationAfter": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentRunId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "recoveryPlaybookAppliedRecordedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "recoveryPlaybookValidationRecordedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "replayMode": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "semanticViolationCount": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "created",
+                                    "running",
+                                    "waiting",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "timed_out"
+                                  ],
+                                  "type": "string"
+                                },
+                                "traceId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "validationEvidenceLevel": {
+                                  "enum": [
+                                    null,
+                                    "static",
+                                    "writes_skipped",
+                                    "provider_simulated",
+                                    "live_canary"
+                                  ]
+                                },
+                                "workflowRolloutId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowRolloutVariant": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowVersionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "workflowVersionId",
+                                "workflowRolloutId",
+                                "workflowRolloutVariant",
+                                "status",
+                                "outcomeStatus",
+                                "semanticViolationCount",
+                                "inputJson",
+                                "outputJson",
+                                "parentRunId",
+                                "parentNodeId",
+                                "parentLinkKind",
+                                "parentNotificationAfter",
+                                "recoveryPlaybookAppliedRecordedAt",
+                                "recoveryPlaybookValidationRecordedAt",
+                                "replayMode",
+                                "traceId",
+                                "validationEvidenceLevel",
+                                "createdBy",
+                                "createdAt"
+                              ],
                               "type": "object"
                             }
                           },
+                          "required": [
+                            "run",
+                            "nodes",
+                            "events",
+                            "eventsCursor",
+                            "eventsHasMore"
+                          ],
                           "type": "object"
                         }
                       },
@@ -3522,8 +4228,124 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "createdAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "createdBy": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "hasWaitingNodes": {
+                                "type": "boolean"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "orgId": {
+                                "type": "string"
+                              },
+                              "outcomeStatus": {
+                                "enum": [
+                                  null,
+                                  "semantic_violation",
+                                  "semantic_quarantined",
+                                  "semantic_recovering",
+                                  "semantic_recovered",
+                                  "semantic_accepted_loss"
+                                ]
+                              },
+                              "outputJson": {},
+                              "parentNodeId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "parentRunId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "replayMode": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "semanticViolationCount": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "status": {
+                                "enum": [
+                                  "created",
+                                  "running",
+                                  "waiting",
+                                  "succeeded",
+                                  "failed",
+                                  "cancelled",
+                                  "timed_out"
+                                ],
+                                "type": "string"
+                              },
+                              "traceId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "validationEvidenceLevel": {
+                                "enum": [
+                                  null,
+                                  "static",
+                                  "writes_skipped",
+                                  "provider_simulated",
+                                  "live_canary"
+                                ]
+                              },
+                              "workflowId": {
+                                "type": "string"
+                              },
+                              "workflowName": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "workflowVersionId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "orgId",
+                              "workflowId",
+                              "workflowName",
+                              "workflowVersionId",
+                              "status",
+                              "hasWaitingNodes",
+                              "outcomeStatus",
+                              "semanticViolationCount",
+                              "outputJson",
+                              "parentRunId",
+                              "parentNodeId",
+                              "replayMode",
+                              "traceId",
+                              "validationEvidenceLevel",
+                              "createdBy",
+                              "createdAt"
+                            ],
                             "type": "object"
                           },
+                          "maxItems": 200,
                           "type": "array"
                         }
                       },
@@ -3850,11 +4672,53 @@
                     {
                       "properties": {
                         "data": {
+                          "additionalProperties": false,
                           "properties": {
                             "events": {
                               "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "createdAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "holdUntil": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "payload": {},
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "runId",
+                                  "nodeId",
+                                  "type",
+                                  "payload",
+                                  "createdAt",
+                                  "holdUntil"
+                                ],
                                 "type": "object"
                               },
+                              "maxItems": 500,
                               "type": "array"
                             },
                             "eventsCursor": {
@@ -3868,14 +4732,222 @@
                             },
                             "nodes": {
                               "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "attempts": {
+                                    "minimum": 0,
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
+                                  },
+                                  "errorJson": {},
+                                  "finishedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "startedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "stateJson": {},
+                                  "status": {
+                                    "enum": [
+                                      "pending",
+                                      "queued",
+                                      "running",
+                                      "waiting",
+                                      "succeeded",
+                                      "failed",
+                                      "skipped",
+                                      "cancelled"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "runId",
+                                  "nodeId",
+                                  "status",
+                                  "stateJson",
+                                  "errorJson",
+                                  "attempts",
+                                  "startedAt",
+                                  "finishedAt"
+                                ],
                                 "type": "object"
                               },
                               "type": "array"
                             },
                             "run": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "inputJson": {},
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "outcomeStatus": {
+                                  "enum": [
+                                    null,
+                                    "semantic_violation",
+                                    "semantic_quarantined",
+                                    "semantic_recovering",
+                                    "semantic_recovered",
+                                    "semantic_accepted_loss"
+                                  ]
+                                },
+                                "outputJson": {},
+                                "parentLinkKind": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentNodeId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentNotificationAfter": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parentRunId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "recoveryPlaybookAppliedRecordedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "recoveryPlaybookValidationRecordedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "replayMode": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "semanticViolationCount": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "created",
+                                    "running",
+                                    "waiting",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "timed_out"
+                                  ],
+                                  "type": "string"
+                                },
+                                "traceId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "validationEvidenceLevel": {
+                                  "enum": [
+                                    null,
+                                    "static",
+                                    "writes_skipped",
+                                    "provider_simulated",
+                                    "live_canary"
+                                  ]
+                                },
+                                "workflowRolloutId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowRolloutVariant": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "workflowVersionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "workflowVersionId",
+                                "workflowRolloutId",
+                                "workflowRolloutVariant",
+                                "status",
+                                "outcomeStatus",
+                                "semanticViolationCount",
+                                "inputJson",
+                                "outputJson",
+                                "parentRunId",
+                                "parentNodeId",
+                                "parentLinkKind",
+                                "parentNotificationAfter",
+                                "recoveryPlaybookAppliedRecordedAt",
+                                "recoveryPlaybookValidationRecordedAt",
+                                "replayMode",
+                                "traceId",
+                                "validationEvidenceLevel",
+                                "createdBy",
+                                "createdAt"
+                              ],
                               "type": "object"
                             }
                           },
+                          "required": [
+                            "run",
+                            "nodes",
+                            "events",
+                            "eventsCursor",
+                            "eventsHasMore"
+                          ],
                           "type": "object"
                         }
                       },
@@ -3917,6 +4989,47 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "category": {
+                                "type": "string"
+                              },
+                              "categoryCode": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "descriptionCode": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "nameCode": {
+                                "type": "string"
+                              },
+                              "requiredCredentials": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "workflow": {}
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "description",
+                              "category",
+                              "nameCode",
+                              "descriptionCode",
+                              "categoryCode",
+                              "workflow"
+                            ],
                             "type": "object"
                           },
                           "type": "array"
@@ -3960,6 +5073,73 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "description": {
+                                "type": "string"
+                              },
+                              "inputExample": {
+                                "additionalProperties": {},
+                                "type": "object"
+                              },
+                              "inputFields": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "kind": {
+                                      "enum": [
+                                        "string",
+                                        "number",
+                                        "integer",
+                                        "boolean",
+                                        "json",
+                                        "array",
+                                        "object",
+                                        "unknown"
+                                      ]
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "required": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "name",
+                                    "kind",
+                                    "required"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "optional": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "required": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "writeSide": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "description",
+                              "required",
+                              "writeSide",
+                              "inputFields"
+                            ],
                             "type": "object"
                           },
                           "type": "array"
@@ -4464,8 +5644,89 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "bufferedTriggerCount": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "createdAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "createdBy": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "deletedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "folder": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "lastRunStatus": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "orgId": {
+                                "type": "string"
+                              },
+                              "pausedReason": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "runCount": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "tags": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "orgId",
+                              "name",
+                              "createdBy",
+                              "createdAt",
+                              "lastRunStatus",
+                              "runCount",
+                              "bufferedTriggerCount",
+                              "status",
+                              "pausedReason",
+                              "tags",
+                              "folder",
+                              "deletedAt"
+                            ],
                             "type": "object"
                           },
+                          "maxItems": 200,
                           "type": "array"
                         }
                       },
@@ -4575,9 +5836,55 @@
                     {
                       "properties": {
                         "data": {
-                          "type": [
-                            "object",
-                            "null"
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "createdBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "dagJson": {},
+                                "id": {
+                                  "type": "string"
+                                },
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "sloJson": {},
+                                "upstreamHealthSources": {},
+                                "version": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "workflowId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "orgId",
+                                "workflowId",
+                                "version",
+                                "dagJson",
+                                "sloJson",
+                                "upstreamHealthSources",
+                                "createdBy",
+                                "createdAt"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
                           ]
                         }
                       },
@@ -5064,8 +6371,51 @@
                       "properties": {
                         "data": {
                           "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "createdAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "createdBy": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "dagJson": {},
+                              "id": {
+                                "type": "string"
+                              },
+                              "orgId": {
+                                "type": "string"
+                              },
+                              "sloJson": {},
+                              "upstreamHealthSources": {},
+                              "version": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "workflowId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "orgId",
+                              "workflowId",
+                              "version",
+                              "dagJson",
+                              "sloJson",
+                              "upstreamHealthSources",
+                              "createdBy",
+                              "createdAt"
+                            ],
                             "type": "object"
                           },
+                          "maxItems": 200,
                           "type": "array"
                         }
                       },
@@ -5088,7 +6438,7 @@
             "description": "Error — the v1 error envelope"
           }
         },
-        "summary": "All versions of one workflow"
+        "summary": "Keyset-paginated versions of one workflow"
       }
     },
     "/workflows/versions/{versionId}": {

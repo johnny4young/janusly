@@ -236,7 +236,7 @@ export function SlackInteractionsPanel() {
           onClick={() => showForm ? closeForm() : setShowForm(true)}
         >
           {showForm ? <X size={14} aria-hidden /> : <Plus size={14} aria-hidden />}
-          {t(showForm ? 'slackInteractions.action.cancel' : 'slackInteractions.action.new')}
+          {t(showForm ? 'common.cancel' : 'slackInteractions.action.new')}
         </Button>
       </div>
       <p className="helper-text we-slack-interactions__intro">{t('slackInteractions.intro')}</p>
@@ -398,10 +398,10 @@ export function SlackInteractionsPanel() {
                   <Copy size={13} aria-hidden /> {t('slackInteractions.action.copy')}
                 </Button>
                 <Button variant="ghost" size="sm" type="button"  onClick={() => edit(connection)}>
-                  <Pencil size={13} aria-hidden /> {t('slackInteractions.action.edit')}
+                  <Pencil size={13} aria-hidden /> {t('common.edit')}
                 </Button>
                 <Button variant="ghost" size="sm" type="button"  onClick={() => void remove(connection)}>
-                  <Trash2 size={13} aria-hidden /> {t('slackInteractions.action.delete')}
+                  <Trash2 size={13} aria-hidden /> {t('common.delete')}
                 </Button>
               </div>
             </li>

@@ -147,21 +147,6 @@ var (
 	inputsScopePattern   = regexp.MustCompile(`\binputs(\.|\[)`)
 )
 
-// Validate runs the ported structural checks over an already-parsed
-// workflow. Parse-level problems never reach here: Parse returns its
-// invalid_contract issues instead of a workflow.
-func Validate(wf *Workflow, validExpression ExpressionValidator) ValidationResult {
-	return ValidateWithSemanticFixtures(wf, validExpression, nil)
-}
-
-// ValidateWithSemanticFixtures is Validate plus the bounded-fixture
-// qualification that needs the runtime evaluator (injected so domain
-// stays grammar-free; every product surface passes the real evaluator
-// from internal/recovery, mirroring the contract's single validator).
-func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValidator, replayFixtures SemanticFixtureEvaluator) ValidationResult {
-	return ValidateWithOptions(wf, validExpression, replayFixtures, ValidationOptions{})
-}
-
 // ValidateWithOptions is the fully composed workflow gate. Product surfaces
 // inject the exact executable tool registry; pure domain callers still retain
 // every shape check and required tool-name check without importing runtime.

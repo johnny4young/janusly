@@ -221,6 +221,21 @@ describe('WorkflowCanvas (browser mode)', () => {
     expect(onAddNode).not.toHaveBeenCalled()
   })
 
+  it('offers one explicit assisted starting path while keeping manual authoring available', async () => {
+    const onOpenAiStudio = vi.fn()
+    const { findByRole, getByRole } = mountCanvas({
+      nodes: [],
+      edges: [],
+      onAddNode: vi.fn(),
+      onOpenAiStudio,
+    })
+
+    expect(getByRole('button', { name: 'Add step' })).toBeInTheDocument()
+    const assistedStart = await findByRole('button', { name: 'Describe the outcome' })
+    assistedStart.click()
+    expect(onOpenAiStudio).toHaveBeenCalledOnce()
+  })
+
   it('lets the blank-canvas teaching card pass a first palette drop through to the flow surface', async () => {
     const onAddNode = vi.fn()
     const { findByTestId } = mountCanvas({

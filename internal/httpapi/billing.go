@@ -257,7 +257,7 @@ func (s *V1Server) billingUsageExport(w http.ResponseWriter, r *http.Request, rc
 		}
 		lines = append(lines, strings.Join(row, ","))
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "billing.usage.exported", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "billing.usage.exported", audit.Options{
 		Metadata: map[string]any{
 			"dimensions": strings.Join(dimensions, ","),
 			"rowCount":   len(breakdown), "windowDays": usageWindowDays,
@@ -332,7 +332,7 @@ func (s *V1Server) workflowBudgetCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	after := map[string]any{"monthlyUsd": row.MonthlyUsd, "warnPercent": row.WarnPercent, "policy": row.Policy}
-	audit.Write(ctx, s.pool, rc.authContext, "billing.budget.configured", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "billing.budget.configured", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
 		Metadata: map[string]any{"scope": "workflow", "workflowId": workflowID, "before": before, "after": after},
 	})

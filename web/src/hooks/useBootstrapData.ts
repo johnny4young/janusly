@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
+import { readRunSummaryPage, readSavedWorkflowPage, readTemplateCatalog, readToolCatalog } from '../lib/list-contract'
 import { useWorkflowStore } from '../store'
 import type { ActiveTab, AiHealth, Credential, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema } from '../types'
 
@@ -182,15 +183,15 @@ export function useBootstrapData(
       ? read(permission, path, fallback)
       : Promise.resolve(null)
     const [toolData, templateData, packData, credentialData, runData, deadLetterData, usageData, aiHealthData, workflowsData] = await Promise.allSettled([
-      readCatalog('workflows.read', '/tools', []),
-      readCatalog('workflows.read', '/templates', []),
+      catalogsNeeded ? (allowed.has('workflows.read') ? readToolCatalog() : Promise.resolve([])) : Promise.resolve(null),
+      catalogsNeeded ? (allowed.has('workflows.read') ? readTemplateCatalog() : Promise.resolve([])) : Promise.resolve(null),
       readCatalog('packs.read', '/solution-packs', { packs: [] }),
       readCatalog('credentials.read', '/credentials', []),
-      read('runs.read', '/runs', []),
+      allowed.has('runs.read') ? readRunSummaryPage() : Promise.resolve([]),
       read('dlq.read', '/dlq', []),
       api('/billing/usage'),
       api('/ai/health'),
-      read('workflows.read', '/workflows', []),
+      allowed.has('workflows.read') ? readSavedWorkflowPage() : Promise.resolve([]),
     ])
 
     // A workspace switch may happen while the fan-out is in flight. Never
@@ -201,10 +202,10 @@ export function useBootstrapData(
     ) return
 
     if (toolData.status === 'fulfilled' && toolData.value !== null) {
-      setTools(Array.isArray(toolData.value) ? toolData.value : [])
+      setTools(toolData.value)
     }
     if (templateData.status === 'fulfilled' && templateData.value !== null) {
-      setTemplates(Array.isArray(templateData.value) ? templateData.value : [])
+      setTemplates(templateData.value)
     }
     if (packData.status === 'fulfilled' && packData.value !== null) {
       const packs = (packData.value as { packs?: SolutionPackPublic[] } | null)?.packs
@@ -214,7 +215,7 @@ export function useBootstrapData(
       setCredentials(Array.isArray(credentialData.value) ? credentialData.value : [])
     }
     if (runData.status === 'fulfilled') {
-      const incoming = Array.isArray(runData.value) ? runData.value as RunSummary[] : []
+      const incoming = runData.value
       const newerPatches = [...runPatchesRef.current]
         .filter(([, entry]) => entry.revision > runPatchFloor)
         .map(([runId, entry]) => ({ runId, patch: entry.patch }))
@@ -233,7 +234,7 @@ export function useBootstrapData(
     if (aiHealthData.status === 'fulfilled' && aiHealthData.value && typeof aiHealthData.value === 'object') {
       setAiHealth(aiHealthData.value as AiHealth)
     }
-    if (workflowsData.status === 'fulfilled') setSavedWorkflows(Array.isArray(workflowsData.value) ? workflowsData.value : [])
+    if (workflowsData.status === 'fulfilled') setSavedWorkflows(workflowsData.value)
   }, [])
 
   useEffect(() => {

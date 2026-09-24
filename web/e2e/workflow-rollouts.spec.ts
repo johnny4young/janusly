@@ -167,9 +167,10 @@ async function captureForeground(surface: Locator, name: string): Promise<void> 
   }
 }
 
-async function expectAccessible(page: Page, context: string): Promise<void> {
+async function expectAccessible(page: Page, context: string, selector = '[data-testid="workflow-rollout-panel"]'): Promise<void> {
+  await expect(page.locator(selector)).toBeVisible()
   const results = await new AxeBuilder({ page })
-    .include('[data-testid="workflow-rollout-panel"]')
+    .include(selector)
     .withTags(WCAG_TAGS)
     .analyze()
   const blocking = results.violations
@@ -227,7 +228,9 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
       },
     ],
     edges: [{ from: 'candidate', to: 'outcome' }],
-    recovery: { contract: semanticRecoveryContract() },
+    // This fixture intentionally fails at least five canary runs. Isolate the
+    // rollout evaluator from the independently tested circuit-breaker policy.
+    recovery: { contract: semanticRecoveryContract(), circuitBreaker: false },
   }
   const savedBaseline = await postJson(request, orgId, '/workflows/save', baseline) as { versionId?: unknown }
   const savedCanary = await postJson(request, orgId, '/workflows/save', canary) as { versionId?: unknown }
@@ -245,10 +248,26 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await expect(row).toContainText(workflowName)
   await row.click()
   await openWorkspaceSection(page, 'Workflows', 'Build')
+  await openWorkflowOperation(page, 'Versions')
+  await page.getByRole('button', { name: /^v1(?:\s|$)/ }).click()
+  const historyStart = page.waitForRequest(request => new URL(request.url()).pathname === '/start' && request.method() === 'POST')
+  const historyResult = page.waitForResponse(response => new URL(response.url()).pathname === '/start' && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
+  expect((await historyStart).postDataJSON()).toMatchObject({ workflowVersionId: savedBaseline.versionId })
+  const historyResponse = await historyResult
+  expect(historyResponse.ok()).toBe(true)
+  const { runId: historyRunId } = await historyResponse.json() as { runId: string }
+  expect(await waitForTerminal(request, orgId, historyRunId)).toBe('succeeded')
+  await openWorkspaceSection(page, 'Workflows', 'Build')
+  await page.route(`**/workflows/${encodeURIComponent(workflowId)}/rollout`, route =>
+    route.fulfill({ json: { rollout: {} } }), { times: 1 })
   await openWorkflowOperation(page, 'Deployment')
 
   const panel = page.getByTestId('workflow-rollout-panel')
   await expect(panel).toContainText('Canary deployment')
+  await expect(panel.getByRole('alert')).toContainText('Deployment state failed to load')
+  await expect(panel.getByRole('button', { name: 'Start canary', exact: true })).toHaveCount(0)
+  await panel.getByRole('button', { name: 'Retry', exact: true }).click()
   await panel.getByLabel('Traffic share').fill('50')
   await panel.getByLabel('Min. outcomes').fill('5')
   await panel.getByLabel('Success floor').fill('80')
@@ -312,6 +331,35 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await hideUnrelatedOverlays(page)
   await expectAccessible(page, 'Retorno automático del canary')
   await captureForeground(spanishPanel, 'web-es-workflow-canary-auto-return-mobile')
+
+  await openWorkflowOperation(page, 'Versiones')
+  await page.getByRole('button', { name: 'Revertir a v1', exact: true }).click()
+  const confirmation = page.getByRole('dialog', { name: '¿Revertir a v1?' })
+  await expect(confirmation.getByRole('button', { name: 'Cancelar', exact: true })).toBeFocused()
+  await expect(confirmation).toHaveCSS('opacity', '1')
+  await expect(page.locator('.run-input-backdrop')).toHaveCSS('opacity', '1')
+  await expectAccessible(page, 'Confirmación de reversión', '[role="dialog"][aria-labelledby="rollback-dialog-title"]')
+  const rollbackResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/workflows/rollback' && response.request().method() === 'POST')
+  await confirmation.getByRole('button', { name: 'Revertir', exact: true }).click()
+  const rolled = await rollbackResponse
+  expect(rolled.ok()).toBe(true)
+  expect(rolled.request().postDataJSON()).toEqual({ workflowId, sourceVersionId: savedBaseline.versionId })
+  const receipt = await rolled.json() as { workflowId: string; versionId: string; version: number; sourceVersion: number }
+  expect(receipt).toMatchObject({ workflowId, version: 3, sourceVersion: 1 })
+  await expect(confirmation).toHaveCount(0)
+  await page.getByRole('button', { name: 'Navegación', exact: true }).click()
+  const run = page.getByRole('button', { name: 'Ejecutar', exact: true })
+  await expect(run).toBeEnabled()
+  const [started] = await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/start' && response.request().method() === 'POST'),
+    run.click(),
+  ])
+  expect(started.request().postDataJSON()).toMatchObject({ workflowVersionId: receipt.versionId })
+  if (!started.ok()) {
+    throw new Error(`POST /start after rollback failed: ${started.status()} ${await started.text()}`)
+  }
+  const { runId: rolledRunId } = await started.json() as { runId: string }
+  expect(await waitForTerminal(request, orgId, rolledRunId)).toBe('succeeded')
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(2)

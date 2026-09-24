@@ -154,7 +154,7 @@ export function PlaybookPromotionCard({ source }: { source: RecoveryPlaybookProm
   return (
     <section className="we-recovery-playbook-promotion" data-testid="recovery-playbook-error" role="alert">
       <div><strong>{t('recoveryDialog.playbook.errorTitle')}</strong><p className="helper-text">{state.message}</p></div>
-      <Button variant="secondary" type="button"  onClick={() => setState({ kind: 'form' })}>{t('recoveryDialog.footer.retry')}</Button>
+      <Button variant="secondary" type="button"  onClick={() => setState({ kind: 'form' })}>{t('common.retry')}</Button>
     </section>
   )
 }

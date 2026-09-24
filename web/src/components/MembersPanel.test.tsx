@@ -199,6 +199,46 @@ describe('<MembersPanel /> dynamic role list', () => {
     })
   })
 
+  it('does not restore the old identity after a late ownership transfer result', async () => {
+    let resolveTransfer: ((value: unknown) => void) | undefined
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve([
+        { id: 'm-owner', orgId: 'default', userId: 'admin-user', email: 'owner@example.com', role: 'admin', isOwner: true },
+        { id: 'm-next', orgId: 'default', userId: 'user-1', email: 'next@example.com', role: 'admin', isOwner: false },
+      ])
+      if (path === '/organizations/owner') {
+        return new Promise((resolve) => { resolveTransfer = resolve })
+      }
+      if (path === '/members/invitations') return Promise.resolve({ invitations: [] })
+      if (path === '/org/roles') return Promise.resolve({ roles: [] })
+      return Promise.resolve(null)
+    })
+
+    render(<MembersPanel />)
+    fireEvent.click(await screen.findByLabelText('Transfer ownership to next@example.com'))
+    fireEvent.click(screen.getByTestId('members-transfer-confirm-user-1'))
+    await waitFor(() => expect(resolveTransfer).toBeTypeOf('function'))
+
+    act(() => {
+      useWorkflowStore.setState((state) => ({
+        identityContext: state.identityContext
+          ? {
+              ...state.identityContext,
+              organizations: [
+                ...state.identityContext.organizations,
+                { ...state.identityContext.organizations[0]!, id: 'second', name: 'Second' },
+              ],
+              currentOrganizationId: 'second',
+            }
+          : null,
+      }))
+    })
+
+    await act(async () => { resolveTransfer?.({ ok: true, ownerUserId: 'user-1' }) })
+    expect(useWorkflowStore.getState().identityContext?.currentOrganizationId).toBe('second')
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
   it('resets the invite role to viewer after a successful invite', async () => {
     setupApi({
       roles: {
@@ -418,6 +458,89 @@ describe('<MembersPanel /> dynamic role list', () => {
     })
     expect(screen.queryByText('stale@example.com')).not.toBeInTheDocument()
     expect(screen.getByText('second@example.com')).toBeInTheDocument()
+  })
+
+  it('discards invitation drafts and removal confirmation on organization switch', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/members') {
+        const orgId = useWorkflowStore.getState().identityContext?.currentOrganizationId
+        return [{
+          id: `member-${orgId}`,
+          orgId,
+          userId: 'shared-user',
+          email: orgId === 'second' ? 'second@example.com' : 'default@example.com',
+          role: 'viewer',
+          isOwner: false,
+        }]
+      }
+      if (path === '/members/invitations') return { invitations: [] }
+      if (path === '/org/roles') return { roles: [] }
+      return null
+    })
+
+    render(<MembersPanel />)
+    const removeDefault = await screen.findByLabelText('Remove default@example.com')
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'private@default.example' } })
+    fireEvent.click(removeDefault)
+    expect(screen.getByTestId('members-remove-confirm-shared-user')).toBeInTheDocument()
+
+    act(() => {
+      useWorkflowStore.setState((state) => ({
+        identityContext: state.identityContext
+          ? {
+              ...state.identityContext,
+              organizations: [
+                ...state.identityContext.organizations,
+                { ...state.identityContext.organizations[0]!, id: 'second', name: 'Second' },
+              ],
+              currentOrganizationId: 'second',
+            }
+          : null,
+      }))
+    })
+
+    expect(screen.getByLabelText('Email')).toHaveValue('')
+    expect(await screen.findByLabelText('Remove second@example.com')).toBeInTheDocument()
+    expect(screen.queryByTestId('members-remove-confirm-shared-user')).not.toBeInTheDocument()
+    expect(screen.queryByText('default@example.com')).not.toBeInTheDocument()
+  })
+
+  it('does not publish an old-organization invite result into the new organization', async () => {
+    let resolveInvite: ((value: unknown) => void) | undefined
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/members/invite') {
+        return new Promise((resolve) => { resolveInvite = resolve })
+      }
+      if (path === '/members') return Promise.resolve([])
+      if (path === '/members/invitations') return Promise.resolve({ invitations: [] })
+      if (path === '/org/roles') return Promise.resolve({ roles: [] })
+      return Promise.resolve(null)
+    })
+
+    render(<MembersPanel />)
+    expect(await screen.findByTestId('members-empty')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'private@default.example' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Invite' }))
+    await waitFor(() => expect(resolveInvite).toBeTypeOf('function'))
+
+    act(() => {
+      useWorkflowStore.setState((state) => ({
+        identityContext: state.identityContext
+          ? {
+              ...state.identityContext,
+              organizations: [
+                ...state.identityContext.organizations,
+                { ...state.identityContext.organizations[0]!, id: 'second', name: 'Second' },
+              ],
+              currentOrganizationId: 'second',
+            }
+          : null,
+      }))
+    })
+
+    await act(async () => { resolveInvite?.({ id: 'old-invite', status: 'pending' }) })
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+    expect(screen.getByLabelText('Email')).toHaveValue('')
   })
 
   it('does not carry a stale custom role catalog across organizations', async () => {

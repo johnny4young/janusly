@@ -112,6 +112,55 @@ describe('<BranchRuleEditor />', () => {
     expect(view.props.onChange).not.toHaveBeenCalled()
   })
 
+  it('reprojects an unchanged controlled expression when its source becomes available', () => {
+    const expression = "context.input.priority === 'high'"
+    const view = renderEditor({
+      value: expression,
+      workflowInputs: { type: 'object', properties: { amount: { type: 'number' } } },
+    })
+    expect(screen.getByLabelText('Run rule')).toHaveValue('advanced')
+
+    view.rerender(<BranchRuleEditor {...view.props} workflowInputs={{
+      type: 'object',
+      properties: { priority: { type: 'string' }, amount: { type: 'number' } },
+    }} />)
+
+    expect(screen.getByLabelText('Run rule')).toHaveValue('simple')
+    expect(screen.getByLabelText('Value from')).toHaveValue('context.input.priority')
+    expect(screen.getByLabelText('Compare with')).toHaveValue('high')
+    expect(view.props.onChange).not.toHaveBeenCalled()
+  })
+
+  it('preserves a manually selected advanced mode across source changes', () => {
+    const view = renderEditor()
+    fireEvent.change(screen.getByLabelText('Run rule'), { target: { value: 'advanced' } })
+    expect(screen.getByLabelText('Run rule')).toHaveValue('advanced')
+
+    view.rerender(<BranchRuleEditor {...view.props} workflowInputs={{
+      type: 'object',
+      properties: { priority: { type: 'string' }, region: { type: 'string' } },
+    }} />)
+
+    expect(screen.getByLabelText('Run rule')).toHaveValue('advanced')
+    expect(screen.getByLabelText('Branch expression')).toHaveValue(view.props.value)
+    expect(view.props.onChange).not.toHaveBeenCalled()
+  })
+
+  it('does not roll back a local draft while a controlled update is pending', () => {
+    const view = renderEditor()
+    fireEvent.change(screen.getByLabelText('Compare with'), { target: { value: 'low' } })
+    expect(view.props.onChange).toHaveBeenLastCalledWith("context.input.priority === 'low'")
+
+    view.rerender(<BranchRuleEditor {...view.props} workflowInputs={{
+      type: 'object',
+      properties: { priority: { type: 'string' }, region: { type: 'string' } },
+    }} />)
+
+    expect(screen.getByLabelText('Run rule')).toHaveValue('simple')
+    expect(screen.getByLabelText('Compare with')).toHaveValue('low')
+    expect(view.props.onChange).toHaveBeenCalledTimes(1)
+  })
+
   it('lets an edge remain unconditional or explicitly become a guided rule', () => {
     const { props } = renderEditor({
       value: '',

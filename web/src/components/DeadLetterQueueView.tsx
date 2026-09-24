@@ -47,7 +47,7 @@ type QueueSelectionState = {
   replayingIds: ReadonlySet<string>
   openRecoveryItem: RecoveryQueueFilters['recoveryItems'][number] | null
   confirmBulkReplay: boolean
-  confirmBulkResolve: boolean
+  closing: boolean
   bulkErrors: BulkDeadLetterError[]
   loadedIds: string[]
   allLoadedSelected: boolean
@@ -68,7 +68,6 @@ type QueueActions = {
   toggleSelectAll: () => void
   toggleSelect: (id: string) => void
   setConfirmBulkReplay: (value: boolean) => void
-  setConfirmBulkResolve: (value: boolean) => void
   bulkReplay: () => Promise<void>
   bulkResolve: () => Promise<void>
   createReplayCampaign: (ids: string[]) => void
@@ -131,7 +130,7 @@ export function DeadLetterQueueView({
     replayingIds,
     openRecoveryItem,
     confirmBulkReplay,
-    confirmBulkResolve,
+    closing,
     bulkErrors,
     loadedIds,
     allLoadedSelected,
@@ -172,8 +171,7 @@ export function DeadLetterQueueView({
           {(canReplay || canResolve) && (
             <Button
               size="sm"
-             
-             
+
               aria-pressed={selectionMode}
               onClick={actions.toggleSelectionMode}
               data-testid="dlq-select-toggle"
@@ -181,17 +179,16 @@ export function DeadLetterQueueView({
               {selectionMode ? t('dlq.selectDone') : t('dlq.selectRows')}
             </Button>
           )}
-          <Button size="sm" onClick={actions.refresh}>{t('dlq.refresh')}</Button>
+          <Button size="sm" onClick={actions.refresh}>{t('common.refresh')}</Button>
         </div>
       </div>
 
-      {/* Org-wide queue-health summary from /dlq/counts — NOT the filtered /
-          paginated page, so the breakdown stays honest under any filter. */}
-      <div className="mini-grid">
-        <span><strong>{counts.total}</strong>{t('dlq.statTotal')}</span>
-        <span><strong>{counts.open}</strong>{t('dlq.statOpen')}</span>
-        <span><strong>{counts.replayed}</strong>{t('dlq.statRetried')}</span>
-        <span><strong>{counts.resolved}</strong>{t('dlq.statResolved')}</span>
+      <div className="we-dlq-totals ui-field__hint" role="group" aria-label={t('dlq.organizationTotals')}>
+        <span>{t('dlq.organizationTotals')}</span>
+        {([
+          ['total', 'dlq.statTotal'], ['open', 'dlq.statOpen'],
+          ['replayed', 'dlq.statRetried'], ['resolved', 'dlq.statResolved'],
+        ] as const).map(([key, label]) => <span key={key}><strong>{counts[key]}</strong> {t(label)}</span>)}
       </div>
 
       {dayFilter && (
@@ -209,81 +206,90 @@ export function DeadLetterQueueView({
         </div>
       )}
 
-      <FieldLabel  htmlFor="dlq-search">{t('dlq.search.label')}</FieldLabel>
-      <TextInput
-        id="dlq-search"
-        type="search"
+      <div className="we-dlq-filters">
+        <div className="ui-field we-dlq-search">
+          <FieldLabel htmlFor="dlq-search">{t('dlq.search.label')}</FieldLabel>
+          <TextInput
+            id="dlq-search"
+            type="search"
 
-        value={searchInput}
-        onChange={event => queue.setSearchInput(event.target.value)}
-        placeholder={t('dlq.search.placeholder')}
-        aria-invalid={searchInvalid || undefined}
-        aria-describedby={searchHint ? 'dlq-search-hint' : undefined}
-        aria-errormessage={searchInvalid ? 'dlq-search-hint' : undefined}
-        data-testid="dlq-search"
-      />
-      {searchHint && (
-        <p
-          id="dlq-search-hint"
-          className={searchInvalid ? 'ui-field__error' : 'ui-field__hint'}
-          aria-live="polite"
-          data-testid="dlq-search-hint"
-        >
-          {searchHint}
-        </p>
-      )}
+            value={searchInput}
+            onChange={event => queue.setSearchInput(event.target.value)}
+            placeholder={t('dlq.search.placeholder')}
+            aria-invalid={searchInvalid || undefined}
+            aria-describedby={searchHint ? 'dlq-search-hint' : undefined}
+            aria-errormessage={searchInvalid ? 'dlq-search-hint' : undefined}
+            data-testid="dlq-search"
+          />
+          {searchHint && (
+            <p
+              id="dlq-search-hint"
+              className={searchInvalid ? 'ui-field__error' : 'ui-field__hint'}
+              aria-live="polite"
+              data-testid="dlq-search-hint"
+            >
+              {searchHint}
+            </p>
+          )}
+        </div>
+        <div className="ui-field">
+          <FieldLabel htmlFor="dlq-filter">{t('dlq.show')}</FieldLabel>
+          <SelectControl id="dlq-filter" value={status} onChange={event => queue.setStatus(toStatusFilter(event.target.value))}>
+            {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item])}</option>)}
+          </SelectControl>
+        </div>
+        <div className="ui-field">
+          <div id="dlq-owner-label" className="ui-field__label"><span>{t('dlq.owner.label')}</span></div>
+          <div className="we-seg" role="group" aria-labelledby="dlq-owner-label">
+            <button
+              type="button"
+              aria-pressed={ownerScope === 'all'}
+              onClick={() => queue.setOwnerScope('all')}
+              data-testid="dlq-owner-all"
+            >
+              {t('dlq.owner.all')}
+            </button>
+            <button
+              type="button"
+              aria-pressed={ownerScope === 'mine'}
+              onClick={() => queue.setOwnerScope('mine')}
+              data-testid="dlq-owner-mine"
+            >
+              {t('dlq.owner.mine')}
+            </button>
+          </div>
+        </div>
+        <div className="ui-field">
+          <FieldLabel htmlFor="dlq-severity-filter">{t('dlq.severity.label')}</FieldLabel>
+          <SelectControl
+            id="dlq-severity-filter"
 
-      <FieldLabel  htmlFor="dlq-filter">{t('dlq.show')}</FieldLabel>
-      <SelectControl id="dlq-filter"  value={status} onChange={event => queue.setStatus(toStatusFilter(event.target.value))}>
-        {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item])}</option>)}
-      </SelectControl>
+            value={severityFilter}
+            onChange={event => queue.setSeverityFilter(toSeverityFilter(event.target.value))}
+            data-testid="dlq-severity-filter"
+          >
+            <option value="all">{t('dlq.severity.all')}</option>
+            {SEVERITIES.map(sev => (
+              <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}`)}</option>
+            ))}
+          </SelectControl>
+        </div>
+        <div className="ui-field">
+          <FieldLabel htmlFor="dlq-sort">{t('dlq.sort.label')}</FieldLabel>
+          <SelectControl
+            id="dlq-sort"
 
-      <div id="dlq-owner-label" className="ui-field__label"><span>{t('dlq.owner.label')}</span></div>
-      <div className="we-seg" role="group" aria-labelledby="dlq-owner-label" aria-label={t('dlq.owner.aria')}>
-        <button
-          type="button"
-          aria-pressed={ownerScope === 'all'}
-          onClick={() => queue.setOwnerScope('all')}
-          data-testid="dlq-owner-all"
-        >
-          {t('dlq.owner.all')}
-        </button>
-        <button
-          type="button"
-          aria-pressed={ownerScope === 'mine'}
-          onClick={() => queue.setOwnerScope('mine')}
-          data-testid="dlq-owner-mine"
-        >
-          {t('dlq.owner.mine')}
-        </button>
+            value={sortKey}
+            onChange={event => queue.setSortKey(toSortKey(event.target.value))}
+            data-testid="dlq-sort"
+          >
+            {SORT_KEYS.map(key => (
+              <option key={key} value={key}>{t(SORT_KEY_LABELS[key])}</option>
+            ))}
+          </SelectControl>
+        </div>
       </div>
-
-      <FieldLabel  htmlFor="dlq-severity-filter">{t('dlq.severity.label')}</FieldLabel>
-      <SelectControl
-        id="dlq-severity-filter"
-
-        value={severityFilter}
-        onChange={event => queue.setSeverityFilter(toSeverityFilter(event.target.value))}
-        data-testid="dlq-severity-filter"
-      >
-        <option value="all">{t('dlq.severity.all')}</option>
-        {SEVERITIES.map(sev => (
-          <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}`)}</option>
-        ))}
-      </SelectControl>
-
-      <FieldLabel  htmlFor="dlq-sort">{t('dlq.sort.label')}</FieldLabel>
-      <SelectControl
-        id="dlq-sort"
-
-        value={sortKey}
-        onChange={event => queue.setSortKey(toSortKey(event.target.value))}
-        data-testid="dlq-sort"
-      >
-        {SORT_KEYS.map(key => (
-          <option key={key} value={key}>{t(SORT_KEY_LABELS[key])}</option>
-        ))}
-      </SelectControl>
+      <p className="ui-field__hint" id="dlq-status-help">{t('dlq.statusHelp')}</p>
 
       {/* Bulk-select bar — a Select-all toggle (always, in selection mode) plus
           the count + "Resolve selected" once at least one row is ticked. Reuses
@@ -293,8 +299,7 @@ export function DeadLetterQueueView({
         <div className="we-list-bulk-bar" data-testid="dlq-bulk-bar">
           <Button
             size="sm"
-           
-           
+
             onClick={actions.toggleSelectAll}
             data-testid="dlq-select-all"
           >
@@ -315,8 +320,8 @@ export function DeadLetterQueueView({
                   <Button
                     size="sm"
                     variant="primary"
-                   
-                   
+
+                    disabled={closing}
                     onClick={() => { void actions.bulkReplay() }}
                     data-testid="dlq-bulk-replay-confirm"
                   >
@@ -324,8 +329,7 @@ export function DeadLetterQueueView({
                   </Button>
                   <Button
                     size="sm"
-                   
-                   
+
                     onClick={() => actions.setConfirmBulkReplay(false)}
                   >
                     {t('common.cancel')}
@@ -335,8 +339,8 @@ export function DeadLetterQueueView({
                 <Button
                   size="sm"
                   variant="primary"
-                 
-                 
+
+                  disabled={closing}
                   onClick={() => actions.setConfirmBulkReplay(true)}
                   data-testid="dlq-bulk-replay"
                 >
@@ -346,9 +350,8 @@ export function DeadLetterQueueView({
               {canReplay && (
                 <Button
                   size="sm"
-                 
-                 
-                  disabled={selectedIds.size < 2}
+
+                  disabled={closing || selectedIds.size < 2}
                   title={selectedIds.size < 2 ? t('replayCampaign.minimumSelection') : undefined}
                   onClick={() => actions.createReplayCampaign([...selectedIds])}
                   data-testid="dlq-create-replay-campaign"
@@ -356,43 +359,12 @@ export function DeadLetterQueueView({
                   <TimerReset size={12} aria-hidden="true" /> {t('replayCampaign.createCta')}
                 </Button>
               )}
-              {/* Resolve dismisses N open failures without recovery, so it
-                  earns the same inline confirm as replay. */}
-              {canResolve && (confirmBulkResolve ? (
-                <span className="we-list-row__confirm">
-                  <span className="we-list-row__confirm-text">
-                    {t('dlq.bulkResolveConfirm', { count: selectedIds.size })}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                   
-                   
-                    onClick={() => { void actions.bulkResolve() }}
-                    data-testid="dlq-bulk-resolve-confirm"
-                  >
-                    {t('dlq.bulkResolveConfirmCta')}
-                  </Button>
-                  <Button
-                    size="sm"
-                   
-                   
-                    onClick={() => actions.setConfirmBulkResolve(false)}
-                  >
-                    {t('common.cancel')}
-                  </Button>
-                </span>
-              ) : (
-                <Button
-                  size="sm"
-                 
-                 
-                  onClick={() => actions.setConfirmBulkResolve(true)}
-                  data-testid="dlq-bulk-resolve"
-                >
+              {canResolve && (
+                <Button size="sm" variant="danger" disabled={closing}
+                  onClick={() => { void actions.bulkResolve() }} data-testid="dlq-bulk-resolve">
                   {t('dlq.bulkResolveCta')}
                 </Button>
-              ))}
+              )}
             </>
           )}
         </div>
@@ -470,6 +442,7 @@ export function DeadLetterQueueView({
                 style={{ transform: `translateY(${virtual.startOffset}px)` }}
                 role="grid"
                 aria-labelledby="recovery-queue-heading"
+                aria-describedby="dlq-status-help"
                 aria-multiselectable={selectionMode}
                 aria-rowcount={filtered.length}
               >
@@ -492,7 +465,7 @@ export function DeadLetterQueueView({
                       data-dead-letter-id={item.id}
                       data-selected={selected?.id === item.id ? 'true' : undefined}
                       tabIndex={selected?.id === item.id ? 0 : -1}
-                      aria-label={`${item.nodeId} — ${isReplaying ? t('dlq.recovering') : formatStatusLabel(item.status)}`}
+                      aria-label={`${item.nodeId} — ${isReplaying ? t('dlq.recovering') : (item.status === 'resolved' ? t('dlq.status.acceptedLoss') : formatStatusLabel(item.status))}`}
                       aria-selected={selectionMode ? selectedIds.has(item.id) : selected?.id === item.id}
                       aria-rowindex={index + 1}
                       onFocus={() => actions.selectRow(item.id)}
@@ -541,7 +514,7 @@ export function DeadLetterQueueView({
                             aria-atomic="true"
                           >
                             {isReplaying && <RefreshCw size={11} className="we-spin" aria-hidden="true" />}
-                            {isReplaying ? t('dlq.recovering') : formatStatusLabel(item.status)}
+                            {isReplaying ? t('dlq.recovering') : (item.status === 'resolved' ? t('dlq.status.acceptedLoss') : formatStatusLabel(item.status))}
                           </span>
                           <RecoveryItemBadge
                             item={recoveryByDeadLetterId.get(item.id) ?? null}
@@ -563,13 +536,12 @@ export function DeadLetterQueueView({
             <Button
               size="sm"
               className="we-load-more"
-             
-             
+
               onClick={() => { void actions.loadMore() }}
               disabled={loadingMore}
               data-testid="dlq-load-more"
             >
-              {loadingMore ? t('dlq.loadingMore') : t('dlq.loadMore')}
+              {loadingMore ? t('common.loading') : t('dlq.loadMore')}
             </Button>
           )}
           </>
@@ -589,6 +561,7 @@ export function DeadLetterQueueView({
           selected,
           selectedFull,
           selectedDetailReady,
+          closing,
           replayingIds,
           showSuspectDiff,
         }}

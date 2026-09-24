@@ -178,7 +178,7 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 		for _, row := range rows {
 			examples = append(examples, evalExampleView(row))
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "eval.dataset.exported", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "eval.dataset.exported", audit.Options{
 			TargetType: "eval-dataset", TargetID: dataset.ID,
 			Metadata: map[string]any{"name": dataset.Name, "format": format, "exampleCount": len(examples)},
 		})
@@ -320,7 +320,7 @@ func (s *V1Server) postEvalDatasetsCore(r *http.Request, rc v1Request) opResult 
 	if err := tx.Commit(r.Context()); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "eval.dataset.created", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "eval.dataset.created", audit.Options{
 		TargetType: "eval-dataset", TargetID: datasetID,
 		Metadata: map[string]any{"name": body.Name, "workflowId": body.WorkflowID, "exampleCount": len(eligible)},
 	})
@@ -369,7 +369,7 @@ func (s *V1Server) deleteEvalDatasetsCore(r *http.Request, rc v1Request) opResul
 	if err := tx.Commit(r.Context()); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "eval.dataset.deleted", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "eval.dataset.deleted", audit.Options{
 		TargetType: "eval-dataset", TargetID: id,
 	})
 	return opOK(map[string]any{"ok": true})
@@ -494,7 +494,7 @@ func (s *V1Server) postExperimentsRunCore(r *http.Request, rc v1Request) opResul
 	}
 
 	if client != nil && client.Configured() {
-		gate := aibudget.Gate(ctx, s.pool, rc.orgID, rc.userID, "experiment.run.call")
+		gate := aibudget.Gate(ctx, s.pool, s.audit, rc.orgID, rc.userID, "experiment.run.call")
 		if !gate.Allowed {
 			return opResult{status: http.StatusPaymentRequired, data: map[string]any{
 				"error": "budget_exceeded", "code": "budget_exceeded",
@@ -516,7 +516,7 @@ func (s *V1Server) postExperimentsRunCore(r *http.Request, rc v1Request) opResul
 	}); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(ctx, s.pool, rc.authContext, "experiment.run.started", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "experiment.run.started", audit.Options{
 		TargetType: "experiment", TargetID: experimentID,
 		Metadata: map[string]any{
 			"kind": body.Kind, "scorerKind": body.ScorerKind, "exampleCount": len(examples),
@@ -533,7 +533,7 @@ func (s *V1Server) postExperimentsRunCore(r *http.Request, rc v1Request) opResul
 			}); limitErr != nil {
 				return nil, &ai.AIError{Class: "rate_limit", Message: limitErr.Error(), BeforeEgress: true}
 			}
-			return aibudget.GuardedGenerateText(callCtx, s.pool, client, rc.userID,
+			return aibudget.GuardedGenerateText(callCtx, s.pool, s.audit, client, rc.userID,
 				"experiment.run.call", input)
 		},
 	}
@@ -554,7 +554,7 @@ func (s *V1Server) postExperimentsRunCore(r *http.Request, rc v1Request) opResul
 	if err != nil || updated != 1 {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(finalizeCtx, s.pool, rc.authContext, completionAction, audit.Options{
+	s.audit.Write(finalizeCtx, s.pool, rc.authContext, completionAction, audit.Options{
 		TargetType: "experiment", TargetID: experimentID,
 		Metadata: map[string]any{
 			"recommendation": summary.Recommendation, "scoreDelta": summary.ScoreDelta,
@@ -562,7 +562,7 @@ func (s *V1Server) postExperimentsRunCore(r *http.Request, rc v1Request) opResul
 		},
 	})
 	if completionStatus == "completed" && summary.Recommendation == "promote_candidate" {
-		audit.Write(finalizeCtx, s.pool, rc.authContext, "experiment.run.promotion_suggested", audit.Options{
+		s.audit.Write(finalizeCtx, s.pool, rc.authContext, "experiment.run.promotion_suggested", audit.Options{
 			TargetType: "experiment", TargetID: experimentID,
 			Metadata: map[string]any{"scoreDelta": summary.ScoreDelta},
 		})

@@ -72,7 +72,7 @@ type CatalogEntry struct {
 	Required     []string       `json:"required"`
 	Optional     []string       `json:"optional,omitempty"`
 	InputFields  []Field        `json:"inputFields"`
-	InputExample map[string]any `json:"inputExample,omitempty"`
+	InputExample map[string]any `json:"inputExample,omitzero"`
 	WriteSide    bool           `json:"writeSide"`
 }
 
@@ -142,27 +142,6 @@ func NewRegistry() *Registry {
 		},
 	}
 	return registry
-}
-
-// Catalog is the public listTools() projection, name-sorted for stability.
-func (r *Registry) Catalog() []map[string]any {
-	entries := r.CatalogEntries()
-	out := make([]map[string]any, 0, len(entries))
-	for _, catalogEntry := range entries {
-		projected := map[string]any{
-			"name": catalogEntry.Name, "description": catalogEntry.Description,
-			"required": catalogEntry.Required, "inputFields": catalogEntry.InputFields,
-			"writeSide": catalogEntry.WriteSide,
-		}
-		if len(catalogEntry.Optional) > 0 {
-			projected["optional"] = catalogEntry.Optional
-		}
-		if catalogEntry.InputExample != nil {
-			projected["inputExample"] = catalogEntry.InputExample
-		}
-		out = append(out, projected)
-	}
-	return out
 }
 
 // CatalogEntries returns a name-sorted, copy-owned catalog. Slice and map

@@ -92,7 +92,7 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	if rejection != nil {
 		return *rejection
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.saved", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.saved", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
 		Metadata: map[string]any{"version": committed.Version, "attempts": committed.Attempts},
 	})
@@ -397,7 +397,7 @@ func (s *V1Server) rollbackCore(r *http.Request, rc v1Request) opResult {
 	if rejection != nil {
 		return *rejection
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.rolled_back", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.rolled_back", audit.Options{
 		TargetType: "workflow", TargetID: body.WorkflowID,
 		Metadata: map[string]any{
 			"sourceVersionId": body.SourceVersionID, "sourceVersion": committed.SourceVersion,
@@ -548,7 +548,7 @@ func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID 
 		}
 	}
 	if outcome.Backfilled > 0 || outcome.Failed > 0 {
-		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.trigger_backfill", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.trigger_backfill", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,
 			Metadata: map[string]any{
 				"backfilled": outcome.Backfilled, "failed": outcome.Failed, "remaining": outcome.Remaining,

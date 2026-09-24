@@ -1,8 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
+import { ConfirmProvider } from './ConfirmDialog'
+import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 
 vi.mock('../api', () => {
@@ -30,7 +32,7 @@ function makeWorkflow(url: string): WorkflowDefinition {
 }
 
 function mockVersionHistoryApi(
-  versionsByWorkflow: Record<string, Array<{ id: string; version: number; dagJson: WorkflowDefinition }>>,
+  versionsByWorkflow: Record<string, Array<{ id: string; version: number; workflowId: string; createdAt: null; dagJson: WorkflowDefinition }>>,
 ) {
   vi.mocked(api).mockImplementation(async (path) => {
     if (path.startsWith('/workflows/versions')) {
@@ -79,11 +81,131 @@ describe('<VersionHistoryPanel />', () => {
     setPermissions(['workflows.read', 'workflows.write', 'ai.write'])
   })
 
+  it.each(['workflow', 'organization', 'user', 'refresh'] as const)('discards an older page after %s changes', async change => {
+    let finish: (value: unknown) => void = () => { throw new Error('not requested') }
+    const pending = new Promise(resolve => { finish = resolve })
+    const first = Array.from({ length: 50 }, (_, index) => ({
+      workflowId: 'wf_compare', createdAt: null, id: `version_${60 - index}`, version: 60 - index,
+      dagJson: makeWorkflow(`https://initial.test/${index}`),
+    }))
+    let switched = false
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.includes('beforeVersion=')) return pending
+      const workflowId = new URL(path, 'http://localhost').searchParams.get('workflowId')!
+      return switched ? [{ ...first[0], workflowId, id: 'new-version', version: 80, dagJson: { ...makeWorkflow('https://new.test'), id: workflowId } }] : first
+    })
+    render(<VersionHistoryPanel />)
+    await screen.findByText('v60')
+    fireEvent.click(screen.getByTestId('version-history-load-more'))
+    switched = true
+    act(() => {
+      if (change === 'refresh') invalidateTags([PLATFORM_TAG])
+      else useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'wf_next' }
+        : change === 'organization' ? { orgId: 'next-org' } : { userId: 'next-user' })
+    })
+    if (change === 'workflow' || change === 'refresh') await screen.findByText('v80')
+    await act(async () => finish([{ ...first[0], id: 'late-version', version: 10 }]))
+    expect(screen.queryByText('v10')).not.toBeInTheDocument()
+    expect(await screen.findByText('v80')).toBeInTheDocument()
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
+  it.each(['workflow', 'organization', 'user', 'refresh', 'unmount', 'edit', 'permissions'] as const)('does not hydrate an old confirmation after %s changes', async change => {
+    mockVersionHistoryApi({ wf_compare: [{ workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://old.test') }] })
+    useWorkflowStore.setState({ workflowDirty: true })
+    const view = render(<ConfirmProvider><VersionHistoryPanel /></ConfirmProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: /v1/i }))
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    if (change === 'unmount') view.rerender(<ConfirmProvider><div>Elsewhere</div></ConfirmProvider>)
+    else act(() => {
+      if (change === 'refresh') invalidateTags([PLATFORM_TAG])
+      else if (change === 'permissions') setPermissions(['workflows.read'])
+      else if (change === 'edit') useWorkflowStore.getState().setWorkflowName('New edits')
+      else useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'wf_next' }
+        : change === 'organization' ? { orgId: 'next-org' } : { userId: 'next-user' })
+    })
+    const revision = useWorkflowStore.getState().workflowRevision
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /Discard/i }))
+    await act(async () => {})
+    expect(useWorkflowStore.getState().workflowRevision).toBe(revision)
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
+  it.each(['success', 'failure'] as const)('ignores an older suggestion %s after a newer comparison starts', async outcome => {
+    let finish: (value: unknown) => void = () => { throw new Error('not requested') }
+    let fail: (reason: Error) => void = () => { throw new Error('not requested') }
+    const pending = new Promise((resolve, reject) => { finish = resolve; fail = reject })
+    let posts = 0
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return [3, 2, 1].map(version => ({ workflowId: 'wf_compare', createdAt: null, id: `version_${version}`, version, dagJson: makeWorkflow(`https://v${version}.test`) }))
+      return ++posts === 1 ? pending : { mode: 'fallback', aiError: 'NEW comparison' }
+    })
+    render(<VersionHistoryPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Compare$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /v2/i }))
+    fireEvent.click(screen.getByRole('button', { name: /v1/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Suggest improvement/i }))
+    fireEvent.click(screen.getByRole('button', { name: /v2/i }))
+    fireEvent.click(screen.getByRole('button', { name: /v3/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Suggest improvement/i }))
+    await screen.findByText('NEW comparison')
+    await act(async () => {
+      if (outcome === 'failure') fail(new Error('OLD comparison'))
+      else finish({ mode: 'fallback', aiError: 'OLD comparison' })
+    })
+    expect(screen.getByText('NEW comparison')).toBeInTheDocument()
+    expect(screen.queryByText('OLD comparison')).not.toBeInTheDocument()
+  })
+
+  it('pins the immutable version when hydrating the history canvas', async () => {
+    mockVersionHistoryApi({ wf_compare: [{ workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://old.test') }] })
+    render(<VersionHistoryPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /v1/i }))
+    expect(useWorkflowStore.getState().currentWorkflowVersion).toEqual({ id: 'version_1', version: 1 })
+  })
+
+  it('distinguishes initial loading and failed reads from empty history and retries freshly', async () => {
+    let reject: (reason: Error) => void = () => { throw new Error('not requested') }
+    vi.mocked(api).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+    const view = render(<VersionHistoryPanel />)
+    expect(screen.getByRole('status')).toHaveTextContent('Loading')
+    expect(screen.queryByTestId('version-history-empty')).not.toBeInTheDocument()
+    const firstSignal = vi.mocked(api).mock.calls[0][1]?.signal
+    await act(async () => reject(new Error('offline')))
+    expect(screen.getByRole('alert')).toHaveTextContent('Version history failed to load')
+    expect(screen.queryByTestId('version-history-empty')).not.toBeInTheDocument()
+    vi.mocked(api).mockResolvedValue([])
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await screen.findByTestId('version-history-empty')
+    expect(firstSignal?.aborted).toBe(true)
+    const nextSignal = vi.mocked(api).mock.calls.at(-1)?.[1]?.signal
+    expect(nextSignal).toBeInstanceOf(AbortSignal)
+    expect(nextSignal).not.toBe(firstSignal)
+    view.unmount()
+    expect(nextSignal?.aborted).toBe(true)
+  })
+
+  it('aborts pagination and suppresses its late error after unmount', async () => {
+    let reject: (reason: Error) => void = () => { throw new Error('not requested') }
+    const first = Array.from({ length: 50 }, (_, index) => ({ workflowId: 'wf_compare', createdAt: null, id: `v${60 - index}`, version: 60 - index, dagJson: makeWorkflow('https://test.local') }))
+    vi.mocked(api).mockResolvedValueOnce(first).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+    const view = render(<VersionHistoryPanel />)
+    await screen.findByText('v60')
+    fireEvent.click(screen.getByTestId('version-history-load-more'))
+    const signal = vi.mocked(api).mock.calls.at(-1)?.[1]?.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    view.unmount()
+    expect(signal?.aborted).toBe(true)
+    await act(async () => reject(new Error('late offline')))
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
   it('renders a structural diff after selecting two versions in compare mode', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
       ],
     })
 
@@ -102,7 +224,7 @@ describe('<VersionHistoryPanel />', () => {
   it('loads older versions below the oldest row shown', async () => {
     const page = (from: number, count: number) =>
       Array.from({ length: count }, (_, index) => ({
-        id: `v${from - index}`, version: from - index, dagJson: makeWorkflow(`https://example.test/${from - index}`),
+        workflowId: 'wf_compare', createdAt: null, id: `v${from - index}`, version: from - index, dagJson: makeWorkflow(`https://example.test/${from - index}`),
       }))
     vi.mocked(api).mockImplementation(async (path) => {
       const url = new URL(path, 'http://localhost')
@@ -118,8 +240,37 @@ describe('<VersionHistoryPanel />', () => {
 
     fireEvent.click(screen.getByTestId('version-history-load-more'))
     await screen.findByText('v8')
-    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'))
+    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     // A short page means the history is exhausted.
+    expect(screen.queryByTestId('version-history-load-more')).toBeNull()
+  })
+
+  it('does not hydrate or enable comparison from a malformed version page', async () => {
+    vi.mocked(api).mockResolvedValue([{ workflowId: 'other', createdAt: null, id: 'foreign', version: 2, dagJson: makeWorkflow('https://foreign.test') }])
+    render(<VersionHistoryPanel />)
+    await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
+    expect(screen.queryByRole('button', { name: /v2/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Compare/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Roll back to/i })).toBeNull()
+  })
+
+  it('retains loaded versions and the cursor after rejecting an invalid older page', async () => {
+    const firstPage = Array.from({ length: 50 }, (_, i) => ({ workflowId: 'wf_compare', createdAt: null, id: `v${60 - i}`, version: 60 - i, dagJson: makeWorkflow('https://example.test') }))
+    vi.mocked(api).mockResolvedValueOnce(firstPage).mockResolvedValueOnce([
+      { ...firstPage[0], id: 'bad-cursor', version: 11 },
+    ]).mockResolvedValueOnce([{ ...firstPage[0], id: 'v10', version: 10 }])
+    render(<VersionHistoryPanel />)
+    await screen.findByText('v60')
+    fireEvent.click(screen.getByTestId('version-history-load-more'))
+    await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
+    expect(screen.getByText('v60')).toBeInTheDocument()
+    expect(screen.getByText('v11')).toBeInTheDocument()
+    expect(screen.queryByText('v10')).toBeNull()
+    const retry = screen.getByTestId('version-history-load-more')
+    await waitFor(() => expect(retry).toBeEnabled())
+    fireEvent.click(retry)
+    await screen.findByText('v10')
+    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(screen.queryByTestId('version-history-load-more')).toBeNull()
   })
 
@@ -141,7 +292,7 @@ describe('<VersionHistoryPanel />', () => {
   it('hides the Rollback button when only one version exists', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -154,9 +305,9 @@ describe('<VersionHistoryPanel />', () => {
   it('shows the Rollback button on older versions but not the latest', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -171,8 +322,8 @@ describe('<VersionHistoryPanel />', () => {
   it('hides Rollback buttons for viewers', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
     setPermissions(['workflows.read'], 'viewer', 'viewer')
@@ -188,8 +339,8 @@ describe('<VersionHistoryPanel />', () => {
   it('does not infer write access from an admin-rank custom role', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
     setPermissions(['workflows.read'], 'billing-admin', 'admin')
@@ -203,8 +354,8 @@ describe('<VersionHistoryPanel />', () => {
   it('honors an explicit write grant on a viewer-rank custom role', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
     setPermissions(['workflows.read', 'workflows.write'], 'workflow-operator', 'viewer')
@@ -217,8 +368,8 @@ describe('<VersionHistoryPanel />', () => {
   it('hides Rollback buttons in compare mode (the row checkbox owns the click)', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -230,11 +381,11 @@ describe('<VersionHistoryPanel />', () => {
     expect(screen.queryByRole('button', { name: /Roll back to/i })).not.toBeInTheDocument()
   })
 
-  it('opens the Rollback dialog with current and target labels when Rollback is clicked', async () => {
+  it.each(['refresh', 'workflow', 'organization', 'user', 'permissions'] as const)('owns the exact rollback preview until %s changes', async change => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -246,13 +397,47 @@ describe('<VersionHistoryPanel />', () => {
     expect(screen.getByRole('heading', { name: /Roll back to v1/i })).toBeInTheDocument()
     expect(screen.getByText(/v2 \(current\)/i)).toBeInTheDocument()
     expect(screen.getByText(/v1 \(rolling back to\)/i)).toBeInTheDocument()
+    act(() => {
+      if (change === 'refresh') invalidateTags([PLATFORM_TAG])
+      else if (change === 'permissions') setPermissions(['workflows.read'])
+      else useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'wf_next' }
+        : change === 'organization' ? { orgId: 'next-org' } : { userId: 'next-user' })
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
+  })
+
+  it('previews rollback from the latest version to the clicked row and keeps that pair while older pages load', async () => {
+    const page = (from: number, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        workflowId: 'wf_compare', createdAt: null, id: `version_${from - index}`, version: from - index, dagJson: makeWorkflow(`https://example.test/${from - index}`),
+      }))
+    vi.mocked(api).mockImplementation(async (path) => {
+      const url = new URL(path, 'http://localhost')
+      if (!url.pathname.startsWith('/workflows/versions')) throw new Error(`Unexpected API call: ${path}`)
+      const before = url.searchParams.get('beforeVersion')
+      return before ? page(Number(before) - 1, 3) : page(60, 50)
+    })
+    render(<VersionHistoryPanel />)
+    await screen.findByText('v60')
+
+    fireEvent.click(screen.getByLabelText('Roll back to v12'))
+    expect(screen.getByRole('heading', { name: 'Roll back to v12?' })).toBeInTheDocument()
+    expect(screen.getByText('v60 (current)')).toBeInTheDocument()
+    expect(screen.getByText('v12 (rolling back to)')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('version-history-load-more'))
+    await screen.findByText('v8')
+    expect(screen.getByText('v60 (current)')).toBeInTheDocument()
+    expect(screen.getByText('v12 (rolling back to)')).toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
   })
 
   it('exposes the Suggest improvement button only in compare mode with two versions selected and editor role', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
 
@@ -276,8 +461,8 @@ describe('<VersionHistoryPanel />', () => {
   it('hides the Suggest improvement button for viewers', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
     setPermissions(['workflows.read'], 'viewer', 'viewer')
@@ -323,8 +508,8 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') return aiResponse
@@ -343,11 +528,11 @@ describe('<VersionHistoryPanel />', () => {
     // Result panel mounts with rationale and chip strip.
     await screen.findByLabelText('AI suggested improvement')
     expect(screen.getByText(/Add retry to handle transient failures/i)).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /Add retry · 80%/i })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /Simplify · 50%/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Add retry · 80%/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Simplify · 50%/i })).toBeInTheDocument()
 
     // Switching to the second chip swaps the rendered rationale.
-    fireEvent.click(screen.getByRole('tab', { name: /Simplify · 50%/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Simplify · 50%/i }))
     expect(screen.getByText(/Or simplify by removing the unused parameter/i)).toBeInTheDocument()
   })
 
@@ -355,8 +540,8 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') {
@@ -393,8 +578,8 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') {
@@ -426,9 +611,9 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') {
@@ -471,9 +656,9 @@ describe('<VersionHistoryPanel />', () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path.startsWith('/workflows/versions')) {
         return [
-          { id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+          { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
         ]
       }
       if (path === '/ai/suggest-improvement') {
@@ -517,11 +702,11 @@ describe('<VersionHistoryPanel />', () => {
   it('clears compare state when the active workflow changes', async () => {
     mockVersionHistoryApi({
       wf_compare: [
-        { id: 'old_1', version: 7, dagJson: makeWorkflow('https://old.a') },
-        { id: 'old_2', version: 8, dagJson: makeWorkflow('https://old.b') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'old_1', version: 7, dagJson: makeWorkflow('https://old.a') },
+        { workflowId: 'wf_compare', createdAt: null, id: 'old_2', version: 8, dagJson: makeWorkflow('https://old.b') },
       ],
       wf_new: [
-        { id: 'new_1', version: 1, dagJson: makeWorkflow('https://new.a') },
+        { workflowId: 'wf_new', createdAt: null, id: 'new_1', version: 1, dagJson: { ...makeWorkflow('https://new.a'), id: 'wf_new' } },
       ],
     })
 

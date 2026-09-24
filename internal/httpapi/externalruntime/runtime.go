@@ -683,6 +683,7 @@ func (s *Service) externalRuntimeCallbackHandler(w http.ResponseWriter, r *http.
 
 // Deps are the root package's hooks the external-runtime Service needs.
 type Deps struct {
+	Audit  audit.Writer
 	Pool   *pgxpool.Pool
 	Routes httpkit.Registrar
 }
@@ -690,6 +691,7 @@ type Deps struct {
 // Service serves the external-runtime integration surface: connection
 // CRUD and the signed callback receiver.
 type Service struct {
+	audit  audit.Writer
 	pool   *pgxpool.Pool
 	routes httpkit.Registrar
 }
@@ -697,7 +699,7 @@ type Service struct {
 // Mount registers the external-runtime routes into mux through the root
 // registry.
 func Mount(mux *http.ServeMux, deps Deps) {
-	s := &Service{pool: deps.Pool, routes: deps.Routes}
+	s := &Service{pool: deps.Pool, audit: deps.Audit, routes: deps.Routes}
 	s.mountRoutes(mux)
 }
 
@@ -765,7 +767,7 @@ func (s *Service) postIntegrationsExternalRuntimesCore(r *http.Request, rc httpk
 		}
 		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "external_runtime.connection.created", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "external_runtime.connection.created", audit.Options{
 		TargetType: "external-runtime-connection", TargetID: connection.ID,
 		Metadata: map[string]any{"runtimeKey": connection.RuntimeKey, "enabled": connection.Enabled},
 	})
@@ -795,7 +797,7 @@ func (s *Service) postIntegrationsExternalRuntimes2Core(r *http.Request, rc http
 		}
 		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "external_runtime.connection.updated", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "external_runtime.connection.updated", audit.Options{
 		TargetType: "external-runtime-connection", TargetID: connection.ID,
 		Metadata: map[string]any{
 			"before": map[string]any{"runtimeKey": existing.RuntimeKey, "enabled": existing.Enabled},
@@ -813,7 +815,7 @@ func (s *Service) deleteIntegrationsExternalRuntimesCore(r *http.Request, rc htt
 	if err != nil {
 		return httpkit.Error(http.StatusNotFound, "external_runtime_not_found", "external runtime connection not found", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.Auth, "external_runtime.connection.deleted", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.Auth, "external_runtime.connection.deleted", audit.Options{
 		TargetType: "external-runtime-connection", TargetID: deleted.ID,
 		Metadata: map[string]any{"runtimeKey": deleted.RuntimeKey},
 	})

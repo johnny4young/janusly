@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,9 +25,6 @@ const (
 	runtimeDrillTimeout    = 30 * time.Second
 	runtimeDrillPoll       = 50 * time.Millisecond
 	stallDrillMargin       = time.Second
-	defaultStallThreshold  = time.Hour
-	minStallThreshold      = 15 * time.Minute
-	maxStallThreshold      = 24 * time.Hour
 )
 
 // RecoveryDrillSource is the bounded server-owned provenance persisted with a
@@ -278,35 +274,6 @@ func (e *Engine) RunRuntimeFailureDrill(ctx context.Context, input RecoveryDrill
 	}
 }
 
-func configuredStallThreshold() time.Duration {
-	threshold := defaultStallThreshold
-	if raw := os.Getenv("JANUSLY_REAPER_THRESHOLD_MS"); raw != "" {
-		if milliseconds, err := strconv.ParseInt(raw, 10, 64); err == nil && milliseconds > 0 {
-			threshold = time.Duration(milliseconds) * time.Millisecond
-		}
-	} else if raw := os.Getenv("JANUSLY_STALLED_NODE_THRESHOLD_MINUTES"); raw != "" {
-		if minutes, err := strconv.ParseInt(raw, 10, 64); err == nil && minutes > 0 {
-			threshold = time.Duration(minutes) * time.Minute
-		}
-	}
-	floor := minStallThreshold
-	if raw := os.Getenv("JANUSLY_REAPER_THRESHOLD_FLOOR_MS"); raw != "" {
-		if milliseconds, err := strconv.ParseInt(raw, 10, 64); err == nil && milliseconds > 0 {
-			floor = time.Duration(milliseconds) * time.Millisecond
-		}
-	}
-	if floor > maxStallThreshold {
-		floor = maxStallThreshold
-	}
-	if threshold < floor {
-		threshold = floor
-	}
-	if threshold > maxStallThreshold {
-		threshold = maxStallThreshold
-	}
-	return threshold
-}
-
 // RunStalledNodeDrill seeds one historical running claim and invokes the real
 // reaper through an exact tenant/run selection, never touching unrelated work.
 func (e *Engine) RunStalledNodeDrill(ctx context.Context, input RecoveryDrillInput) (StalledNodeDrillResult, error) {
@@ -324,7 +291,7 @@ func (e *Engine) RunStalledNodeDrill(ctx context.Context, input RecoveryDrillInp
 		return StalledNodeDrillResult{}, fmt.Errorf("recovery drill node %s not found in workflow", input.FailedNodeID)
 	}
 
-	threshold := configuredStallThreshold()
+	threshold := e.reaper.EffectiveThreshold()
 	initiatedAt := e.now().UTC()
 	simulatedStall := threshold + stallDrillMargin
 	stalledAt := initiatedAt.Add(-simulatedStall)

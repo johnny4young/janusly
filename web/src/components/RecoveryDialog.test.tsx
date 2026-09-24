@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { useWorkflowStore } from '../store'
 import { RecoveryDialog } from './RecoveryDialog'
 import type { DeadLetter } from './DeadLettersPanel'
 
@@ -33,6 +34,11 @@ const baseDlq: DeadLetter = {
   },
   nodeJson: { id: 'fetch', type: 'http', config: { url: 'https://x' } },
   errorJson: { message: 'ECONNRESET' },
+}
+
+const currentRecoveryPassport = {
+  failureSignature: 'Network timeout on http node',
+  priorSameSignatureOutcome: null,
 }
 
 const aiSuggestion = {
@@ -71,8 +77,16 @@ const inertFallback = (path: string) => {
   return Promise.resolve({ ok: true })
 }
 
+const initialStore = useWorkflowStore.getState()
+
 describe('<RecoveryDialog />', () => {
   beforeEach(() => {
+    useWorkflowStore.setState({ ...initialStore, identityContext: {
+      identity: { userId: 'dev-user', email: null, mode: 'dev-headers', source: 'dev' }, profile: { name: null, email: null },
+      organizations: [{ id: 'default', name: 'Default', plan: null, role: 'editor', roleBase: 'editor',
+        permissions: ['workflows.read', 'workflows.write'], usable: true, developmentFallback: false, isOwner: false }],
+      invitations: [], currentOrganizationId: 'default', selectionRequired: false, needsOrganization: false, truncated: false, invitationsTruncated: false,
+    } }, true)
     vi.mocked(api).mockReset()
     vi.mocked(api).mockImplementation((path: string) => inertFallback(path))
     vi.useRealTimers()
@@ -94,34 +108,22 @@ describe('<RecoveryDialog />', () => {
     expect(screen.getByRole('button', { name: /Validate in sandbox/i })).toBeInTheDocument()
   })
 
-  it('surfaces stale feedback health for the selected recovery approach', async () => {
+  it('fails closed when the AI patch response is malformed', async () => {
     vi.mocked(api).mockResolvedValueOnce({
-      ...aiSuggestion,
-      suggestions: [{
-        workflow: aiSuggestion.suggestedWorkflow,
-        rationale: aiSuggestion.rationale,
-        approachLabel: 'add_retry',
-        confidence: 76,
-      }],
-      feedbackHealth: {
-        windowDays: 30,
-        approaches: [{
-          approachLabel: 'add_retry',
-          feedbackLastSeen: '2026-07-09T00:00:00.000Z',
-          acceptedFixLastSeen: '2026-05-29T00:00:00.000Z',
-          acceptedFixAgeDays: 42,
-          state: 'stale',
-        }],
-      },
+      mode: 'ai',
+      suggestedWorkflow: aiSuggestion.suggestedWorkflow,
+      rationale: aiSuggestion.rationale,
+      suggestions: [],
+      evidence: [],
+      recoveryPassport: currentRecoveryPassport,
     })
 
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
 
-    const health = await screen.findByTestId('recovery-dialog-learning-health')
-    expect(health).toHaveAttribute('data-state', 'stale')
-    expect(health).toHaveTextContent('Learning paused')
-    expect(health).toHaveTextContent('42 days')
+    await screen.findByText(/unreadable response/i)
+    expect(screen.queryByRole('button', { name: /Validate in sandbox/i })).not.toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.map(([path]) => path)).not.toContain('/dlq/validate-fix')
   })
 
   it('renders the "Why this suggestion?" evidence panel with chips and scrubs secrets at read', async () => {
@@ -177,15 +179,13 @@ describe('<RecoveryDialog />', () => {
           failureSignature: 'Network timeout on http node',
           priorSameSignatureOutcome: {
             status: 'applied',
-            approachLabel: 'add_retry',
-            declineReason: null,
             occurredAt: '2026-07-01T00:00:00.000Z',
           },
         },
       })
       .mockResolvedValueOnce({ runId: 'val-passport' })
       .mockResolvedValueOnce({
-        run: { id: 'val-passport', status: 'succeeded' },
+        events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'val-passport', status: 'succeeded' },
         nodes: [{ nodeId: 'fetch', status: 'succeeded' }],
       })
 
@@ -216,35 +216,58 @@ describe('<RecoveryDialog />', () => {
     expect(vi.mocked(api).mock.calls.map((call) => call[0])).not.toContain('/workflows/save')
   })
 
+  it.each([{}, { run: { id: 'other-run', status: 'succeeded' }, nodes: [], events: [], eventsCursor: null, eventsHasMore: false }])('never authorizes Apply from an invalid validation snapshot: %j', async payload => {
+    vi.mocked(api).mockResolvedValueOnce(aiSuggestion).mockResolvedValueOnce({ runId: 'val-run-safe' }).mockResolvedValueOnce(payload)
+    render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
+    await screen.findByText(/unreadable response/i)
+    expect(screen.queryByRole('button', { name: /Apply validated fix/i })).not.toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.map(([path]) => path)).not.toContain('/workflows/save')
+    expect(vi.mocked(api).mock.calls.map(([path]) => path)).not.toContain('/dlq/replay')
+  })
+
+  it('treats a timed-out validation run as terminal failure, not pending validation', async () => {
+    vi.mocked(api).mockResolvedValueOnce(aiSuggestion).mockResolvedValueOnce({ runId: 'val-run-timeout' }).mockResolvedValueOnce({
+      run: { id: 'val-run-timeout', status: 'timed_out' }, nodes: [], events: [], eventsCursor: null, eventsHasMore: false,
+    })
+    render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
+    expect(await screen.findByRole('button', { name: /Iterate/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Apply validated fix/i })).not.toBeInTheDocument()
+  })
+
   it('runs validate-fix → poll → save → replay in order on Apply', async () => {
+    const deltaFixture = {
+      workflowId: 'wf',
+      afterVersion: 2,
+      windowDays: 1,
+      hasEnoughData: false,
+      before: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
+      after: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 1, totalCostUsd: 0 } },
+      delta: null,
+      recentRunsAgainstAfter: { totalRuns: 1, succeeded: 1, failed: 0, running: 0 },
+      sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'Network timeout on http node' },
+      priorVersion: { version: 1, versionId: 'v0' },
+    }
+    // Post-replay feedback and delta reads can interleave; the delta card also
+    // refetches on platform invalidation. Keep that path stable across both reads.
+    vi.mocked(api).mockImplementation((path: string) => path.startsWith('/workflows/health/delta')
+      ? Promise.resolve(deltaFixture) : inertFallback(path))
     vi.mocked(api)
       .mockResolvedValueOnce(aiSuggestion)
       // /dlq/validate-fix
       .mockResolvedValueOnce({ runId: 'val-run-1' })
       // GET /run?runId=val-run-1 — first poll: validation succeeded
       .mockResolvedValueOnce({
-        run: { id: 'val-run-1', status: 'succeeded' },
+        events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'val-run-1', status: 'succeeded' },
         nodes: [{ nodeId: 'fetch', status: 'succeeded' }],
       })
       // /workflows/save
       .mockResolvedValueOnce({ workflowId: 'wf', versionId: 'v1', version: 2 })
       // /dlq/replay (production)
       .mockResolvedValueOnce({ runId: 'run-replay-xyz' })
-      // /workflows/health/delta — the delta card fetches this on mount.
-      // Return a "gathering data" shape so the card renders without
-      // depending on the fuller delta-math branches.
-      .mockResolvedValueOnce({
-        workflowId: 'wf',
-        afterVersion: 2,
-        windowDays: 1,
-        hasEnoughData: false,
-        before: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
-        after: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 1, totalCostUsd: 0 } },
-        delta: null,
-        recentRunsAgainstAfter: { totalRuns: 1, succeeded: 1, failed: 0, running: 0 },
-        sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'Network timeout on http node' },
-        priorVersion: { version: 1, versionId: 'v0' },
-      })
 
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
@@ -294,11 +317,10 @@ describe('<RecoveryDialog />', () => {
       expect(url.searchParams.get('priorFailureSignature')).toBe('Network timeout on http node')
     }
     await waitFor(() => {
-      expect(screen.getByTestId('recovery-delta-counter')).toBeInTheDocument()
-    })
-    expect(screen.getAllByText(/Runs against v2/i).length).toBeGreaterThan(0)
-    expect(screen.getByTestId('recovery-delta-same-failure')).toBeInTheDocument()
-    expect(screen.getAllByText(/of 5 runs collected/i).length).toBeGreaterThan(0)
+      expect(screen.getByTestId('recovery-delta-counter')).toHaveTextContent(/Runs from v2/i)
+      expect(screen.getByTestId('recovery-delta-same-failure')).toBeInTheDocument()
+      expect(screen.getAllByText(/of 5 completed runs/i).length).toBeGreaterThan(0)
+    }, { timeout: 5_000 })
 
     // Operator → system feedback: Apply success writes one row with
     // `accepted: true` so the next patch suggestion for THIS workflow
@@ -364,7 +386,7 @@ describe('<RecoveryDialog />', () => {
       .mockResolvedValueOnce(aiSuggestion)
       .mockResolvedValueOnce({ runId: 'val-run-iter' })
       .mockResolvedValueOnce({
-        run: { id: 'val-run-iter', status: 'failed' },
+        events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'val-run-iter', status: 'failed' },
         nodes: [{ nodeId: 'fetch', status: 'failed', errorJson: { message: 'still 502 after retry' } }],
       })
       // Iterate calls /ai/patch-workflow again — we don't care what it returns; just resolve.
@@ -398,7 +420,7 @@ describe('<RecoveryDialog />', () => {
       .mockResolvedValueOnce(aiSuggestion)
       .mockResolvedValueOnce({ runId: 'val-run-2' })
       .mockResolvedValueOnce({
-        run: { id: 'val-run-2', status: 'failed' },
+        events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'val-run-2', status: 'failed' },
         nodes: [{ nodeId: 'fetch', status: 'failed', errorJson: { message: 'still 502 after retry' } }],
       })
 
@@ -449,6 +471,7 @@ describe('<RecoveryDialog />', () => {
         edges: [],
       },
       rationale: 'Added retry to handle transient ECONNRESET.',
+      recoveryPassport: currentRecoveryPassport,
       suggestions: [
         {
           workflow: {
@@ -525,7 +548,7 @@ describe('<RecoveryDialog />', () => {
         // /dlq/validate-fix
         .mockResolvedValueOnce({ runId: 'val-run-tabs' })
         // GET /run poll — keep the dialog stuck in validating so we don't fall through to save
-        .mockResolvedValue({ run: { id: 'val-run-tabs', status: 'queued' }, nodes: [] })
+        .mockResolvedValue({ events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'val-run-tabs', status: 'running' }, nodes: [] })
 
       render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
       fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
@@ -601,7 +624,7 @@ describe('<RecoveryDialog />', () => {
         .mockResolvedValueOnce({ runId: 'val-run-tabs-reset' })
         // GET /run — failed
         .mockResolvedValueOnce({
-          run: { id: 'val-run-tabs-reset', status: 'failed' },
+          events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'val-run-tabs-reset', status: 'failed' },
           nodes: [{ nodeId: 'fetch', status: 'failed', errorJson: { message: 'still 502' } }],
         })
         // /recovery/feedback — Iterate captures the rejection BEFORE
@@ -654,7 +677,7 @@ describe('<RecoveryDialog />', () => {
         .mockResolvedValueOnce({ runId: 'val-run-cluster' })
         // GET /run polling — succeeded
         .mockResolvedValueOnce({
-          run: { id: 'val-run-cluster', status: 'succeeded' },
+          events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'val-run-cluster', status: 'succeeded' },
           nodes: [{ nodeId: 'fetch', status: 'succeeded' }],
         })
         // /workflows/save
@@ -795,7 +818,7 @@ describe('<RecoveryDialog />', () => {
         // /dlq/validate-fix
         .mockResolvedValueOnce({ runId: 'val-run-progress' })
         // GET /run poll keeps returning running → the dialog stays in validating
-        .mockResolvedValue({ run: { id: 'val-run-progress', status: 'running' }, nodes: [] })
+        .mockResolvedValue({ events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'val-run-progress', status: 'running' }, nodes: [] })
 
       render(
         <RecoveryDialog
@@ -814,8 +837,8 @@ describe('<RecoveryDialog />', () => {
       // Step 1 (validate) is active while validating; the replay step names the count.
       expect(steps.querySelector('li[data-state="active"]')).toHaveTextContent(/Validate/i)
       expect(steps).toHaveTextContent(/Replay 3 runs/i)
-      // The cluster-aware copy sets the 1-representative expectation.
-      expect(screen.getByText(/representative failure/i)).toBeInTheDocument()
+      // The cluster-aware copy distinguishes one validation from N applies.
+      expect(screen.getByText(/Validating one failure.*3 matching failures/i)).toBeInTheDocument()
     })
   })
 })

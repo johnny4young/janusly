@@ -7,9 +7,10 @@
  */
 
 import { GitBranch } from 'lucide-react'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 
-import { api, contractApi } from '../api'
+import { api } from '../api'
+import { readWorkflowVersionPage } from '../lib/list-contract'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { useConfirm } from './ConfirmDialog'
@@ -48,11 +49,6 @@ type WorkflowRollout = {
   baselineFailed: number
   canarySucceeded: number
   canaryFailed: number
-  rolledBackReason: string | null
-  createdAt: string
-  updatedAt: string
-  endedAt: string | null
-  lastOutcomeAt: string | null
 }
 
 type Draft = {
@@ -73,18 +69,6 @@ function boundedInteger(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER):
   return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
     ? value
     : null
-}
-
-function parseVersions(payload: unknown): VersionRow[] {
-  if (!Array.isArray(payload)) return []
-  const rows: VersionRow[] = []
-  for (const item of payload) {
-    const record = asRecord(item)
-    const id = typeof record?.id === 'string' ? record.id : null
-    const version = boundedInteger(record?.version, 1)
-    if (id && version !== null) rows.push({ id, version })
-  }
-  return rows.sort((left, right) => right.version - left.version)
 }
 
 function parseRollout(payload: unknown): WorkflowRollout | null {
@@ -115,11 +99,6 @@ function parseRollout(payload: unknown): WorkflowRollout | null {
     baselineFailed: values[1]!,
     canarySucceeded: values[2]!,
     canaryFailed: values[3]!,
-    rolledBackReason: typeof row.rolledBackReason === 'string' ? row.rolledBackReason : null,
-    createdAt: row.createdAt as string,
-    updatedAt: row.updatedAt as string,
-    endedAt: typeof row.endedAt === 'string' ? row.endedAt : null,
-    lastOutcomeAt: typeof row.lastOutcomeAt === 'string' ? row.lastOutcomeAt : null,
   }
 }
 
@@ -128,10 +107,23 @@ function successRate(succeeded: number, failed: number): number | null {
   return total === 0 ? null : (succeeded / total) * 100
 }
 
+function rolloutScope(state: ReturnType<typeof useWorkflowStore.getState>): string {
+  return JSON.stringify([state.orgId, state.userId, state.currentWorkflowSaved ? state.currentWorkflowId : null])
+}
+
 export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean } = {}) {
+  const scope = useWorkflowStore(rolloutScope)
+  const workflowId = useWorkflowStore(state => state.currentWorkflowSaved ? state.currentWorkflowId : undefined)
+  return workflowId ? <ScopedRollout key={`${scope}:${readOnly}`} workflowId={workflowId} scope={scope} readOnly={readOnly} /> : null
+}
+
+function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; scope: string; readOnly: boolean }) {
   const { t } = useT()
   const confirm = useConfirm()
-  const workflowId = useWorkflowStore(state => state.currentWorkflowSaved ? state.currentWorkflowId : undefined)
+  const owner = useRef<AbortController | null>(null)
+  const current = useCallback((request: AbortController | null): request is AbortController =>
+    request !== null && !request.signal.aborted && rolloutScope(useWorkflowStore.getState()) === scope, [scope])
+  const rolloutPath = `/workflows/${encodeURIComponent(workflowId)}/rollout`
   const platformVersion = useInvalidationNonce(WORKFLOW_ROLLOUT_TAGS)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const addToast = useWorkflowStore(state => state.addToast)
@@ -139,26 +131,32 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
   const [rollout, setRollout] = useState<WorkflowRollout | null>(null)
   const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT)
   const [qualificationGate, setQualificationGate] = useState<RecoveryQualificationGate | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loadState, setLoadState] = useState<'loading' | 'error' | 'ready'>('loading')
+  const loading = loadState === 'loading'
+  const loadError = loadState === 'error'
+  const [retry, setRetry] = useState(0)
   const [mutating, setMutating] = useState(false)
 
   useEffect(() => {
-    if (!workflowId) {
-      setVersions([])
-      setRollout(null)
-      setQualificationGate(null)
-      return
-    }
-    let cancelled = false
-    setLoading(true)
+    const request = new AbortController()
+    owner.current = request
+    setVersions([])
+    setRollout(null)
+    setQualificationGate(null)
+    setMutating(false)
+    setLoadState('loading')
     Promise.all([
-      contractApi('GET /workflows/versions', `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}`, undefined),
-      api(`/workflows/${encodeURIComponent(workflowId)}/rollout`),
+      readWorkflowVersionPage(workflowId, {}, request.signal),
+      api(rolloutPath, { signal: request.signal }),
     ]).then(([versionsPayload, rolloutPayload]) => {
-      if (cancelled) return
-      const nextVersions = parseVersions(versionsPayload)
+      if (!current(request)) return
+      const nextRollout = parseRollout(rolloutPayload)
+      if ((!nextRollout && asRecord(rolloutPayload)?.rollout !== null)
+        || (nextRollout && nextRollout.workflowId !== workflowId)) throw new Error(t('workflowRollout.invalidResponse'))
+      const nextVersions = [...versionsPayload].sort((left, right) => right.version - left.version)
+      setLoadState('ready')
       setVersions(nextVersions)
-      setRollout(parseRollout(rolloutPayload))
+      setRollout(nextRollout)
       setDraft(current => ({
         ...current,
         baselineVersionId: nextVersions.some(version => version.id === current.baselineVersionId)
@@ -166,12 +164,12 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
           : (nextVersions[1]?.id ?? ''),
       }))
     }).catch(error => {
-      if (!cancelled) addToast(tApiError(error) || t('workflowRollout.loadFailed'), 'error')
-    }).finally(() => {
-      if (!cancelled) setLoading(false)
+      if (!current(request)) return
+      setLoadState('error')
+      addToast(tApiError(error) || t('workflowRollout.loadFailed'), 'error')
     })
-    return () => { cancelled = true }
-  }, [addToast, platformVersion, t, workflowId])
+    return () => { request.abort() }
+  }, [addToast, current, platformVersion, retry, rolloutPath, t, workflowId])
 
   const latest = versions[0]
   const baseline = versions.find(version => version.id === rollout?.baselineVersionId)
@@ -187,60 +185,49 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
     ? successRate(rollout.canarySucceeded, rollout.canaryFailed)
     : null
 
-  useEffect(() => {
-    setQualificationGate(null)
-  }, [qualificationBaselineVersionId, qualificationCandidateVersionId])
+  const canStart = !readOnly && !loading && !loadError && !mutating && Boolean(latest && draft.baselineVersionId
+    && qualificationGate && !qualificationGate.loading
+    && qualificationGate.baselineVersionId === draft.baselineVersionId && qualificationGate.candidateVersionId === latest.id
+    && (!qualificationGate.required || qualificationGate.status === 'passed'))
 
-  if (!workflowId) return null
-
-  const createRollout = async () => {
-    if (!latest || !draft.baselineVersionId) return
+  const mutate = async (request: AbortController, path: string, body: object, success: string,
+    accepts: (value: WorkflowRollout) => boolean) => {
     setMutating(true)
     try {
-      const payload = await api(`/workflows/${encodeURIComponent(workflowId)}/rollout`, {
-        method: 'POST',
-        body: JSON.stringify({
-          ...draft,
-          canaryVersionId: latest.id,
-        }),
-      })
-      const created = parseRollout(payload)
-      if (!created) throw new Error(t('workflowRollout.invalidResponse'))
-      setRollout(created)
-      addToast(t('workflowRollout.started'), 'success')
+      const payload = await api(path, { method: 'POST', signal: request.signal, body: JSON.stringify(body) })
+      if (!current(request)) return
+      const updated = parseRollout(payload)
+      if (!updated || updated.workflowId !== workflowId || !accepts(updated)) throw new Error(t('workflowRollout.invalidResponse'))
+      setRollout(updated)
+      addToast(t(success), 'success')
       bumpPlatformVersion(WORKFLOW_ROLLOUT_MUTATION_TAGS)
     } catch (error) {
-      addToast(tApiError(error) || (error instanceof Error ? error.message : t('workflowRollout.startFailed')), 'error')
+      if (current(request)) addToast(tApiError(error) || t('workflowRollout.decisionFailed'), 'error')
     } finally {
-      setMutating(false)
+      if (current(request)) setMutating(false)
     }
   }
 
+  const createRollout = async () => {
+    const request = owner.current
+    if (!current(request) || !canStart || !latest) return
+    await mutate(request, rolloutPath,
+      { ...draft, canaryVersionId: latest.id }, 'workflowRollout.started',
+      value => value.baselineVersionId === draft.baselineVersionId && value.canaryVersionId === latest.id)
+  }
+
   const decide = async (decision: 'promote' | 'rollback') => {
-    if (!rollout) return
+    const request = owner.current
+    if (!current(request) || readOnly || loading || loadError || mutating || !rollout || rollout.status !== 'active') return
     const accepted = await confirm({
       title: t(decision === 'promote' ? 'workflowRollout.promoteTitle' : 'workflowRollout.rollbackTitle'),
       body: t(decision === 'promote' ? 'workflowRollout.promoteConfirm' : 'workflowRollout.rollbackConfirm'),
       confirmLabel: t(decision === 'promote' ? 'workflowRollout.promote' : 'workflowRollout.rollback'),
       tone: decision === 'rollback' ? 'danger' : 'default',
     })
-    if (!accepted) return
-    setMutating(true)
-    try {
-      const payload = await api(
-        `/workflows/${encodeURIComponent(workflowId)}/rollout/${encodeURIComponent(rollout.id)}/${decision}`,
-        { method: 'POST', body: JSON.stringify({}) },
-      )
-      const updated = parseRollout(payload)
-      if (!updated) throw new Error(t('workflowRollout.invalidResponse'))
-      setRollout(updated)
-      addToast(t(decision === 'promote' ? 'workflowRollout.promoted' : 'workflowRollout.rolledBack'), 'success')
-      bumpPlatformVersion(WORKFLOW_ROLLOUT_MUTATION_TAGS)
-    } catch (error) {
-      addToast(tApiError(error) || (error instanceof Error ? error.message : t('workflowRollout.decisionFailed')), 'error')
-    } finally {
-      setMutating(false)
-    }
+    if (!accepted || !current(request)) return
+    await mutate(request, `${rolloutPath}/${encodeURIComponent(rollout.id)}/${decision}`,
+      {}, decision === 'promote' ? 'workflowRollout.promoted' : 'workflowRollout.rolledBack', value => value.id === rollout.id)
   }
 
   return (
@@ -279,7 +266,10 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
         </Suspense>
       )}
 
-      {!loading && versions.length < 2 && (
+      {loadError && <div role="alert"><p>{t('workflowRollout.loadFailed')}</p>
+        <Button onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</Button></div>}
+
+      {!loading && !loadError && versions.length < 2 && (
         <p className="we-rollout-panel__empty">{t('workflowRollout.needsVersions')}</p>
       )}
 
@@ -289,6 +279,7 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
         && qualificationCandidateVersionId && (
         <Suspense fallback={<p className="helper-text" role="status">{t('workflowRollout.qualification.loading')}</p>}>
           <WorkflowRecoveryQualification
+            key={`${platformVersion}:${retry}:${qualificationBaselineVersionId}:${qualificationCandidateVersionId}`}
             workflowId={workflowId}
             baselineVersionId={qualificationBaselineVersionId}
             candidateVersionId={qualificationCandidateVersionId}
@@ -323,51 +314,28 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
             </div>
           </div>
           <div className="we-rollout-panel__fields">
-            <FormField id="workflow-rollout-traffic" label={t('workflowRollout.traffic')}>
-              {(controlProps) => (
-                <span className="we-rollout-panel__input-unit">
-                  <input
-                    {...controlProps}
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={draft.trafficPercent}
-                    disabled={mutating}
-                    onChange={event => setDraft({ ...draft, trafficPercent: Number(event.target.value) })}
-                  />
-                  <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
-                </span>
-              )}
-            </FormField>
-            <FormField id="workflow-rollout-minimum-outcomes" label={t('workflowRollout.sample')}>
-              {(controlProps) => (
-                <input
-                  {...controlProps}
-                  type="number"
-                  min={5}
-                  max={100}
-                  value={draft.minimumSampleSize}
-                  disabled={mutating}
-                  onChange={event => setDraft({ ...draft, minimumSampleSize: Number(event.target.value) })}
-                />
-              )}
-            </FormField>
-            <FormField id="workflow-rollout-success-floor" label={t('workflowRollout.successRate')}>
-              {(controlProps) => (
-                <span className="we-rollout-panel__input-unit">
-                  <input
-                    {...controlProps}
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={draft.minimumSuccessRatePercent}
-                    disabled={mutating}
-                    onChange={event => setDraft({ ...draft, minimumSuccessRatePercent: Number(event.target.value) })}
-                  />
-                  <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
-                </span>
-              )}
-            </FormField>
+            {([
+              ['trafficPercent', 'traffic', 1, 50],
+              ['minimumSampleSize', 'sample', 5, 100],
+              ['minimumSuccessRatePercent', 'successRate', 1, 100],
+            ] as const).map(([field, label, min, max]) => (
+              <FormField key={field} label={t(`workflowRollout.${label}`)}>
+                {controlProps => (
+                  <span className="we-rollout-panel__input-unit" data-unit={field !== 'minimumSampleSize'}>
+                    <input
+                      {...controlProps}
+                      type="number"
+                      min={min}
+                      max={max}
+                      value={draft[field]}
+                      disabled={mutating}
+                      onChange={event => setDraft({ ...draft, [field]: Number(event.target.value) })}
+                    />
+                    {field !== 'minimumSampleSize' && <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>}
+                  </span>
+                )}
+              </FormField>
+            ))}
           </div>
           <p className="helper-text">{t('workflowRollout.guardrailHint')}</p>
           {qualificationGate?.required && qualificationGate.status !== 'passed' && (
@@ -378,13 +346,7 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
           <Button variant="primary"
             type="submit"
 
-            disabled={
-              mutating
-              || !draft.baselineVersionId
-              || qualificationGate === null
-              || qualificationGate.loading
-              || (qualificationGate.required && qualificationGate.status !== 'passed')
-            }
+            disabled={!canStart}
           >
             {mutating ? t('workflowRollout.starting') : t('workflowRollout.start')}
           </Button>

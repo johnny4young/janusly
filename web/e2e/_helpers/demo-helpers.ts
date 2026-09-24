@@ -33,7 +33,7 @@ function devHeaders(orgId = ORG_ID): Record<string, string> {
   };
 }
 
-async function apiGet(request: APIRequestContext, path: string, orgId = ORG_ID): Promise<Json> {
+async function apiGet(request: APIRequestContext, path: string, orgId = ORG_ID): Promise<unknown> {
   const response = await request.get(`${API_URL}${path}`, { headers: devHeaders(orgId) });
   if (!response.ok()) {
     throw new Error(`GET ${path} failed: ${response.status()} ${await response.text()}`);

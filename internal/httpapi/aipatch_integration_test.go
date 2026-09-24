@@ -3,11 +3,15 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync/atomic"
 	"testing"
+
+	"github.com/johnny4young/janusly/internal/domain"
 )
 
 // The patch ladder: $0 fallback with the full contract shape, a valid
@@ -53,6 +57,35 @@ func TestPatchWorkflowLadder(t *testing.T) {
 	if passport["failureSignature"] == "" {
 		t.Fatalf("passport must carry the signature: %+v", passport)
 	}
+	assertCanonicalWorkflow := func(label string, raw any) {
+		t.Helper()
+		document, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("%s must be a workflow object: %T", label, raw)
+		}
+		for _, carrier := range []string{"input", "orgId", "createdBy"} {
+			if _, present := document[carrier]; present {
+				t.Fatalf("%s leaked run-only carrier %q: %+v", label, carrier, document)
+			}
+		}
+		encoded, err := json.Marshal(document)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", label, err)
+		}
+		parsed, issues := domain.Parse(encoded)
+		if len(issues) > 0 || parsed == nil {
+			t.Fatalf("%s must parse as a public workflow: %+v", label, issues)
+		}
+		canonical, err := canonicalWorkflowDocument(parsed)
+		if err != nil {
+			t.Fatalf("canonicalize %s: %v", label, err)
+		}
+		if !reflect.DeepEqual(document, canonical) {
+			t.Fatalf("%s must equal its canonical public projection\n got: %+v\nwant: %+v", label, document, canonical)
+		}
+	}
+	assertCanonicalWorkflow("suggestedWorkflow", fallback.body["suggestedWorkflow"])
+	assertCanonicalWorkflow("suggestions[0].workflow", first["workflow"])
 
 	// Simulated provider: reply 1 = one VALID config patch with 3
 	// alternatives (one secret-laden) + one INVALID patch (broken config
@@ -130,5 +163,31 @@ func TestPatchWorkflowLadder(t *testing.T) {
 	}
 	if fbEvidence := fallback.body["evidence"].([]any); len(fbEvidence) == 0 {
 		t.Fatal("evidence must attach on the fallback path too")
+	}
+}
+
+func TestPatchWorkflowRejectsInvalidStoredSnapshot(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	runID := "run-invalid-patch-" + h.org
+	deadLetterID := "dl-invalid-patch-" + h.org
+	if _, err := pool.Exec(t.Context(), `INSERT INTO runs
+		(id, org_id, workflow_version_id, status, input_json)
+		VALUES ($1, $2, 'wf-invalid-patch', 'failed', '{}')`, runID, h.org); err != nil {
+		t.Fatalf("seed invalid snapshot run: %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO dead_letters
+		(id, org_id, run_id, node_id, workflow_json, node_json, error_json)
+		VALUES ($1, $2, $3, 'call',
+		        '{"dslVersion":"1.0","nodes":"invalid","edges":[]}',
+		        '{"id":"call","type":"http","config":{}}',
+		        '{"message":"HTTP 500"}')`, deadLetterID, h.org, runID); err != nil {
+		t.Fatalf("seed invalid snapshot dead letter: %v", err)
+	}
+
+	res := h.call("POST", "/ai/patch-workflow", map[string]any{"deadLetterId": deadLetterID}, "")
+	if res.status != http.StatusUnprocessableEntity || res.body["code"] != "ai_workflow_snapshot_invalid" {
+		t.Fatalf("invalid stored workflow must fail closed: %d %+v", res.status, res.body)
 	}
 }

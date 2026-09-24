@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/boot"
 	"github.com/johnny4young/janusly/internal/buildinfo"
@@ -32,6 +33,7 @@ import (
 	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/secretstore"
+	"github.com/johnny4young/janusly/internal/tools"
 	"github.com/johnny4young/janusly/internal/upstream"
 	"github.com/johnny4young/janusly/internal/usage"
 )
@@ -56,15 +58,6 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 		// A process-wide WriteTimeout would terminate long-lived run SSE
 		// streams. Non-streaming handlers own bounded contexts instead.
 	}
-}
-
-func envDurationMs(name string, fallback time.Duration) time.Duration {
-	if raw := os.Getenv(name); raw != "" {
-		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
-			return time.Duration(ms) * time.Millisecond
-		}
-	}
-	return fallback
 }
 
 // requireSigningSecret fails STARTUP when a production deployment has no
@@ -151,9 +144,8 @@ func run() error {
 	}
 	logger := boot.NewLogger()
 
-	// Traces: console exporter by default, OTLP/HTTP via OTEL_EXPORTER=otlp,
-	// silent via "none". Shutdown flushes the
-	// batch queue so the last spans are not dropped on SIGTERM.
+	// Tracing exports nothing unless console or OTLP/HTTP is explicitly selected.
+	// Shutdown flushes the batch queue so spans are not dropped on SIGTERM.
 	traceShutdown, err := observability.InitTracing(ctx)
 	if err != nil {
 		return err
@@ -203,6 +195,16 @@ func run() error {
 		return err
 	}
 	defer workerPool.Close()
+	dbPools, err := tools.NewDBPools(cfg.DBToolMaxProcessPools)
+	if err != nil {
+		return err
+	}
+	// Registered before the runner: external tool pools drain after workers,
+	// but before the runtime database pools close.
+	defer func() {
+		dbPools.Close()
+		logger.Info("external database pools drained")
+	}()
 	if err := boot.ProbeMigrations(ctx, pool); err != nil {
 		return err
 	}
@@ -214,10 +216,14 @@ func run() error {
 		"build_verified", identity.Verified, "build_commit", identity.Commit,
 		"build_tree", identity.Tree, "artifact_sha256", identity.ArtifactSHA256)
 
-	// Janusly ships as one binary: the API process also runs the worker
-	// pool. The processes split when scale demands it — the engine already
-	// supports N independent consumers.
-	eng := engine.New(workerPool)
+	// Janusly ships as one binary: public requests and supervised workers
+	// share one lifecycle but use separately bounded database pools.
+	persistence, err := grammar.NewPersister(cfg.PersistMaxBytes)
+	if err != nil {
+		return err
+	}
+	auditWriter := audit.NewWriter(persistence)
+	eng := engine.New(workerPool, engine.WithReaper(cfg.Reaper), engine.WithPersistence(persistence), engine.WithDBPools(dbPools))
 	prometheus.MustRegister(engine.NewQueueDepthCollector(pool))
 	prometheus.MustRegister(engine.NewDeadLetterCollector(pool))
 	prometheus.MustRegister(boot.NewPoolStatsCollector("api", pool))
@@ -259,7 +265,7 @@ func run() error {
 		eng.RunRetentionSweep(ctx, time.Hour, engine.RetentionDays(), logger)
 	})
 	runner.Go(observability.SweepUpstreamHealth, func(ctx context.Context) {
-		upstream.RunSweep(ctx, pool, time.Minute, logger)
+		upstream.RunSweep(ctx, pool, auditWriter, time.Minute, logger)
 	})
 	runner.Go(observability.SweepSubworkflowReconciler, func(ctx context.Context) {
 		eng.RunSubworkflowTerminalReconciler(ctx, time.Minute, logger)
@@ -270,6 +276,9 @@ func run() error {
 	runner.Go(observability.SweepAutoHealing, func(ctx context.Context) {
 		eng.RunAutoHealingSweep(ctx, 5*time.Minute, logger)
 	})
+	runner.Go(observability.SweepCalibration, func(ctx context.Context) {
+		eng.RunCalibrationLoop(ctx, 24*time.Hour, logger)
+	})
 	runner.Go(observability.SweepMemoryConsentPurge, func(ctx context.Context) {
 		eng.RunMemoryConsentPurgeSweep(ctx, time.Hour, logger)
 	})
@@ -278,13 +287,12 @@ func run() error {
 	})
 	// Reaper cadence/threshold are env-tunable for HA deployments.
 	runner.Go(observability.SweepStalledNodeReaper, func(ctx context.Context) {
-		eng.StartReaper(ctx,
-			envDurationMs("JANUSLY_REAPER_INTERVAL_MS", time.Minute),
-			envDurationMs("JANUSLY_REAPER_THRESHOLD_MS", time.Hour), logger)
+		eng.StartReaper(ctx, logger)
 	})
 	defer runner.Shutdown()
 
 	publicAPI, shutdownPublicAPI, err := httpapi.NewV1HandlerWithOptions(eng, pool, httpapi.V1ServerOptions{
+		Audit:                       auditWriter,
 		FeedbackMemoryWorkers:       cfg.FeedbackMemoryWorkers,
 		FeedbackMemoryQueueCapacity: cfg.FeedbackMemoryQueueCapacity,
 		FeedbackMemoryTaskTimeout:   cfg.FeedbackMemoryTaskTimeout,

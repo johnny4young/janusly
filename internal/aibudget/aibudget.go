@@ -139,10 +139,10 @@ func CheckScoped(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID stri
 // block audits billing.budget.exceeded (deliberately not deduped — each
 // block is a real event), a crossed warning audits billing.budget.warned
 // at most once per 24h per scope.
-func Gate(ctx context.Context, pool *pgxpool.Pool, orgID, userID, action string) CheckResult {
+func Gate(ctx context.Context, pool *pgxpool.Pool, writer audit.Writer, orgID, userID, action string) CheckResult {
 	result := Check(ctx, pool, orgID)
 	if !result.Allowed {
-		audit.WriteAs(ctx, pool, orgID, userID, "billing.budget.exceeded", audit.Options{
+		writer.WriteAs(ctx, pool, orgID, userID, "billing.budget.exceeded", audit.Options{
 			TargetType: "ai", Metadata: map[string]any{
 				"scope": result.ResolvedScope, "exceededAt": result.ExceededAt,
 				"monthlyUsdSpent": result.MonthlyUsdSpent, "monthlyUsdLimit": result.MonthlyUsdLimit,
@@ -157,7 +157,7 @@ func Gate(ctx context.Context, pool *pgxpool.Pool, orgID, userID, action string)
 			WHERE org_id = $1 AND action = 'billing.budget.warned' AND created_at >= $2`,
 			orgID, time.Now().UTC().Add(-warnDedupWindow)).Scan(&recent)
 		if err == nil && recent == 0 {
-			audit.WriteAs(ctx, pool, orgID, userID, "billing.budget.warned", audit.Options{
+			writer.WriteAs(ctx, pool, orgID, userID, "billing.budget.warned", audit.Options{
 				TargetType: "ai", Metadata: map[string]any{
 					"scope": result.ResolvedScope, "monthlyUsdSpent": result.MonthlyUsdSpent,
 					"monthlyUsdLimit": result.MonthlyUsdLimit, "warningPercent": result.WarningPercent,
@@ -173,9 +173,9 @@ func Gate(ctx context.Context, pool *pgxpool.Pool, orgID, userID, action string)
 // the gate runs FIRST, and a blocked call never touches the SDK — it
 // degrades straight to the fallback contract with aiError
 // "budget_blocked".
-func GuardedGenerateText(ctx context.Context, pool *pgxpool.Pool, client ai.Client,
+func GuardedGenerateText(ctx context.Context, pool *pgxpool.Pool, writer audit.Writer, client ai.Client,
 	userID, action string, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
-	gate := Gate(ctx, pool, input.Context.OrgID, userID, action)
+	gate := Gate(ctx, pool, writer, input.Context.OrgID, userID, action)
 	if !gate.Allowed {
 		return nil, &ai.AIError{Class: "budget_blocked", Message: "monthly AI budget exceeded", BeforeEgress: true}
 	}

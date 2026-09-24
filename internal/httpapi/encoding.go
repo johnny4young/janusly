@@ -131,7 +131,7 @@ func timeOrNull(t *time.Time) any { return httpkit.TimeOrNull(t) }
 
 func textOrNull(t pgtype.Text) any { return httpkit.TextOrNull(t) }
 
-func textOrNullString(t any) any {
+func textOrNullString(t any) *string {
 	switch v := t.(type) {
 	case string:
 		// The list queries COALESCE a truly-absent aggregate to "" (sqlc
@@ -139,14 +139,14 @@ func textOrNullString(t any) any {
 		if v == "" {
 			return nil
 		}
-		return v
+		return &v
 	case *string:
 		if v == nil {
 			return nil
 		}
-		return *v
+		return v
 	case pgtype.Text:
-		return textOrNull(v)
+		return nullableTextValue(v)
 	default:
 		return nil
 	}

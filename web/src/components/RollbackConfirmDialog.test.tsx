@@ -1,5 +1,6 @@
+import { StrictMode } from 'react'
 import { useInvalidationNonce } from '../lib/query-cache'
-import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
@@ -40,7 +41,14 @@ describe('<RollbackConfirmDialog />', () => {
     // test so the 100ms debounce can't bleed across cases.
     __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
+    useWorkflowStore.setState({ ...initialState, currentWorkflowId: 'wf_rollback', toasts: [], identityContext: {
+      identity: { userId: 'dev-user', email: null, mode: 'dev-headers', source: 'dev' },
+      profile: { name: null, email: null },
+      organizations: [{ id: 'default', name: 'Default', plan: null, role: 'editor', roleBase: 'editor',
+        permissions: ['workflows.read', 'workflows.write'], usable: true, developmentFallback: false, isOwner: false }],
+      invitations: [], currentOrganizationId: 'default', selectionRequired: false, needsOrganization: false,
+      truncated: false, invitationsTruncated: false,
+    } }, true)
   })
 
   it('renders the diff (current → target) and the Roll back primary button at idle', () => {
@@ -61,7 +69,8 @@ describe('<RollbackConfirmDialog />', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
 
     await waitFor(() => {
-      expect(screen.getByText(/Rolled back to v3 as v6/i)).toBeInTheDocument()
+      expect(onClose).toHaveBeenCalled()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
 
     expect(vi.mocked(api)).toHaveBeenCalledWith('/workflows/rollback', expect.objectContaining({
@@ -77,6 +86,7 @@ describe('<RollbackConfirmDialog />', () => {
     expect(state.toasts.some((toast) => /Rolled back to v3 as v6/i.test(toast.message) && toast.tone === 'success')).toBe(true)
     // hydrateWorkflow swaps currentWorkflowId to the rolled-back DAG's id
     expect(state.currentWorkflowId).toBe('wf_rollback')
+    expect(state.currentWorkflowVersion).toEqual({ id: 'v6', version: 6 })
   })
 
   it('shows an inline error and no canvas hydrate when the rollback request fails (e.g. 403/404)', async () => {
@@ -103,4 +113,113 @@ describe('<RollbackConfirmDialog />', () => {
     expect(onClose).toHaveBeenCalled()
     expect(vi.mocked(api)).not.toHaveBeenCalled()
   })
+  it.each(['organization', 'user', 'workflow', 'edit', 'permissions', 'props', 'unmount'] as const)('discards a completed rollback after %s changes', async change => {
+    let finish: (value: unknown) => void = () => { throw new Error('not started') }
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const onClose = vi.fn()
+    const view = render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
+    const signal = vi.mocked(api).mock.calls[0][1]?.signal
+    if (change === 'unmount') view.unmount()
+    else if (change === 'props') view.rerender(<RollbackConfirmDialog workflowId="wf_other" current={current} target={target} onClose={onClose} />)
+    else act(() => {
+      if (change === 'edit') useWorkflowStore.getState().setWorkflowName('New edits')
+      else if (change === 'permissions') useWorkflowStore.setState({ identityContext: null })
+      else useWorkflowStore.setState(change === 'organization' ? { orgId: 'other' }
+        : change === 'user' ? { userId: 'other' } : { currentWorkflowId: 'other' })
+    })
+    const revision = useWorkflowStore.getState().workflowRevision
+    await act(async () => finish({ workflowId: 'wf_rollback', versionId: 'v6', version: 6, sourceVersion: 3 }))
+    expect(useWorkflowStore.getState().workflowRevision).toBe(revision)
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal?.aborted).toBe(true)
+  })
+
+  it.each([
+    null, {}, { workflowId: 'other' }, { sourceVersion: 2 }, { versionId: '' },
+    { versionId: 'version_3' }, { versionId: 'version_5' }, { versionId: ' x ' }, { versionId: 'x'.repeat(257) }, { version: 5 }, { version: 6.5 }, { version: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects malformed or foreign rollback success %j', async patch => {
+    vi.mocked(api).mockResolvedValueOnce(patch === null || Object.keys(patch).length === 0 ? patch
+      : { workflowId: 'wf_rollback', versionId: 'v6', version: 6, sourceVersion: 3, ...patch })
+    render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={vi.fn()} />)
+    const revision = useWorkflowStore.getState().workflowRevision
+    fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
+    await screen.findByRole('alert')
+    expect(useWorkflowStore.getState().workflowRevision).toBe(revision)
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('does not offer rollback without a write grant', () => {
+    useWorkflowStore.setState({ identityContext: null })
+    render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /^Roll back$/i })).not.toBeInTheDocument()
+    expect(vi.mocked(api)).not.toHaveBeenCalled()
+  })
+
+  it('warns about unsaved edits and focuses Cancel rather than rollback', () => {
+    useWorkflowStore.setState({ workflowDirty: true })
+    render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={vi.fn()} />)
+    expect(screen.getByText(/Replacing it discards them/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
+  })
+
+  it('dispatches only once even before React renders the busy state', async () => {
+    vi.mocked(api).mockImplementation(() => new Promise(() => {}))
+    render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={vi.fn()} />)
+    const action = screen.getByRole('button', { name: /^Roll back$/i })
+    act(() => { action.click(); action.click() })
+    expect(vi.mocked(api)).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps its reviewed target immutable while the caller changes its object', async () => {
+    const mutable = structuredClone(target)
+    let finish: (value: unknown) => void = () => { throw new Error('not started') }
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={mutable} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
+    mutable.dagJson.name = 'Unreviewed mutation'
+    await act(async () => finish({ workflowId: 'wf_rollback', versionId: 'v6', version: 6, sourceVersion: 3 }))
+    expect(useWorkflowStore.getState().currentWorkflowName).toBe('Rollback workflow')
+  })
+
+  it('suppresses a late rejection after a new operator arrives', async () => {
+    let fail: (reason: Error) => void = () => { throw new Error('not started') }
+    vi.mocked(api).mockImplementation(() => new Promise((_, reject) => { fail = reject }))
+    render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
+    act(() => useWorkflowStore.setState({ userId: 'other' }))
+    await act(async () => fail(new Error('old operator error')))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('rejects stale intent even before the subscriber render', () => {
+    render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={vi.fn()} />)
+    const action = screen.getByRole('button', { name: /^Roll back$/i })
+    act(() => { useWorkflowStore.setState({ orgId: 'other' }); action.click() })
+    expect(vi.mocked(api)).not.toHaveBeenCalled()
+  })
+
+  it('retains a live request owner after Strict Mode effect replay', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ workflowId: 'wf_rollback', versionId: 'v6', version: 6, sourceVersion: 3 })
+    render(<StrictMode><RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={vi.fn()} /></StrictMode>)
+    fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
+    await waitFor(() => expect(useWorkflowStore.getState().currentWorkflowVersion).toEqual({ id: 'v6', version: 6 }))
+    expect(vi.mocked(api)).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not revive an old request when the operator changes away and back in one update', async () => {
+    let finish: (value: unknown) => void = () => { throw new Error('not started') }
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
+    const original = useWorkflowStore.getState().userId
+    const revision = useWorkflowStore.getState().workflowRevision
+    act(() => { useWorkflowStore.setState({ userId: 'other' }); useWorkflowStore.setState({ userId: original }) })
+    await act(async () => finish({ workflowId: 'wf_rollback', versionId: 'v6', version: 6, sourceVersion: 3 }))
+    expect(useWorkflowStore.getState().workflowRevision).toBe(revision)
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
 })

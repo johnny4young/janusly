@@ -1,3 +1,4 @@
+import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   Copy,
@@ -8,7 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-import { downloadFromApi, contractApi } from '../api'
+import { downloadFromApi } from '../api'
 import { copyText } from '../clipboard'
 import { formatStatusLabel, getNodeLabel } from '../constants'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
@@ -102,8 +103,10 @@ export function ActivityRecoveryDetail({
 }: ActivityRecoveryDetailProps) {
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
+  const initialDetailMatches = initialDetail?.id === deadLetter.id
+    && initialDetail.status === deadLetter.status
   const [detail, setDetail] = useState<DetailState>(() =>
-    initialDetail?.id === deadLetter.id
+    initialDetailMatches
       ? {
           id: deadLetter.id,
           kind: 'ready',
@@ -121,7 +124,7 @@ export function ActivityRecoveryDetail({
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (initialDetail?.id === deadLetter.id) {
+    if (initialDetailMatches) {
       setDetail({
         id: deadLetter.id,
         kind: 'ready',
@@ -133,14 +136,14 @@ export function ActivityRecoveryDetail({
     const controller = new AbortController()
     const summaryStatus = deadLetter.status
     setDetail({ id: deadLetter.id, kind: 'loading', summaryStatus, value: null })
-    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(deadLetter.id)}`, undefined, { signal: controller.signal })
+    readDeadLetterDetail(deadLetter.id, controller.signal)
       .then(value => {
         if (!controller.signal.aborted) {
           setDetail({
             id: deadLetter.id,
             kind: 'ready',
             summaryStatus,
-            value: value as unknown as DeadLetter,
+            value: value,
           })
         }
       })
@@ -150,7 +153,7 @@ export function ActivityRecoveryDetail({
         }
       })
     return () => controller.abort()
-  }, [deadLetter.id, initialDetail])
+  }, [deadLetter.id, deadLetter.status, initialDetail, initialDetailMatches])
 
   const current = detail.id === deadLetter.id && detail.kind === 'ready'
     ? mergeActivityRecoveryDetail(deadLetter, detail.value, detail.summaryStatus)
@@ -172,7 +175,7 @@ export function ActivityRecoveryDetail({
     setBusy(kind)
     try {
       const succeeded = kind === 'replay'
-        ? await onReplay(current.id, current.createdAt)
+        ? await onReplay(current.id, current.createdAt ?? undefined)
         : await onResolve(current.id)
       if (succeeded !== false) {
         const status = kind === 'replay' ? 'replayed' : 'resolved'
@@ -228,7 +231,7 @@ export function ActivityRecoveryDetail({
             onClick={() => { void runMutation('replay') }}
           >
             <RefreshCcw size={12} aria-hidden="true" />
-            {t('dlq.action.retry')}
+            {t('common.retry')}
           </Button>
         )}
         {canResolve && (

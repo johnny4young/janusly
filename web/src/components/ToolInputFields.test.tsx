@@ -25,6 +25,13 @@ const tool: ToolSchema = {
 beforeEach(() => initI18n('en'))
 
 describe('<ToolInputFields />', () => {
+  it.each(['array', 'object', 'unknown'] as const)('renders the runtime %s kind as a JSON editor', kind => {
+    render(<ToolInputFields scope="runtime" tool={{ ...tool, inputFields: [{ name: 'payload', kind, required: true }] }} input={{ payload: { ready: true } }} onChange={() => {}} />)
+    const editor = screen.getByLabelText(/^Payload/)
+    expect(editor.tagName).toBe('TEXTAREA')
+    expect(editor).toHaveValue('{\n  "ready": true\n}')
+  })
+
   it('authors typed values while preserving unknown advanced fields', () => {
     function Harness() {
       const [input, setInput] = useState<JsonObject>({

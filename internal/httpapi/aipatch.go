@@ -7,11 +7,10 @@
 // free-JSON suggestions → each one APPLIED and validated through the real
 // domain gate (an invalid patch never reaches the wire) → the contract
 // response shape with 0-2 scrubbed consideredAlternatives kept INSIDE the
-// suggestion, never in the deterministic evidence block. Every failure
-// degrades to the full-shape deterministic fallback (the original
-// workflow, confidence 0). Deferred with their subsystems: confidence
-// calibration (calibrated mirrors raw — the disabled behavior), memory
-// hints, past-feedback enrichment, locale.
+// suggestion, never in the deterministic evidence block. Fresh, tenant-scoped
+// calibration affects display/ranking only; raw confidence remains feedback.
+// Every failure degrades to the full-shape deterministic fallback (the original
+// workflow, confidence 0). Deferred: memory hints, past-feedback enrichment.
 package httpapi
 
 import (
@@ -85,11 +84,18 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		NodeID: dlq.NodeID, NodeType: nodeTypeOf(dlq.NodeJson),
 	}).Signature
 
-	// Original workflow + failing node; an unparseable snapshot degrades
-	// straight to the deterministic fallback.
-	var workflowDoc map[string]any
-	_ = json.Unmarshal(dlq.WorkflowJson, &workflowDoc)
+	// Parse the run snapshot, then project it back to the public DAG contract.
+	// Dead-letter snapshots also carry run-only input/tenant/actor fields; none
+	// of those belong in a suggested workflow or in the provider prompt.
 	original, _ := domain.Parse(dlq.WorkflowJson)
+	if original == nil {
+		return opError(http.StatusUnprocessableEntity, "ai_workflow_snapshot_invalid",
+			"Recovery workflow snapshot is invalid", nil)
+	}
+	workflowDoc, err := canonicalWorkflowDocument(original)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
 
 	// Evidence side-channel: a deterministic projection of what the prompt
 	// composer sees — attached on BOTH the ai and fallback paths, audited
@@ -121,7 +127,7 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		if aiError != "" {
 			response["aiError"] = aiError
 		}
-		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
 			TargetType: "dlq", TargetID: body.DeadLetterID,
 			Metadata: map[string]any{"mode": "fallback", "evidenceCount": len(evidence)},
 		})
@@ -130,10 +136,6 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 	if client == nil || !client.Configured() {
 		return fallback("", "", "")
 	}
-	if original == nil {
-		return fallback("original workflow failed strict schema", "", "")
-	}
-
 	// Structural dispatch: every registry-aware write-side node without a
 	// dominating approval receives an approval proposal, never a config patch.
 	// Keeping this limited to http/mcp_tool let built-in integration tools and
@@ -171,6 +173,7 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 	}
 	envelope, _ := parsed.(map[string]any)
 	rawSuggestions, _ := envelope["suggestions"].([]any)
+	curves := s.patchCalibrationCurves(ctx, rc.orgID)
 
 	validated := make([]map[string]any, 0, len(rawSuggestions))
 	for _, rawItem := range rawSuggestions {
@@ -198,12 +201,12 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		var mergedDoc map[string]any
 		_ = json.Unmarshal(mergedJSON, &mergedDoc)
 		confidence := confidencePercentField(item, "confidence")
+		approachLabel := normalizedPatchApproachLabel(item, useStructural)
 		validated = append(validated, map[string]any{
 			"workflow": mergedDoc, "rationale": oneLine(stringField(item, "rationale"), 1200),
-			"approachLabel": normalizedPatchApproachLabel(item, useStructural),
-			"confidence":    confidence,
-			// Calibration disabled in the runtime: calibrated mirrors raw.
-			"calibratedConfidence":   confidence,
+			"approachLabel":          approachLabel,
+			"confidence":             confidence,
+			"calibratedConfidence":   calibratedPatchConfidence(confidence, curves[approachLabel]),
 			"safety":                 domain.ComputeSuggestionSafetyWithOptions(merged, dlq.NodeID, s.readinessOptions()),
 			"consideredAlternatives": sanitizeConsideredAlternatives(item["consideredAlternatives"]),
 		})
@@ -211,14 +214,14 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 	if len(validated) == 0 {
 		return fallback("no_valid_suggestions", result.Model, result.Provider)
 	}
-	// Rank: highest confidence first (stable).
+	// Rank by the confidence the operator sees, preserving provider order on ties.
 	for i := 1; i < len(validated); i++ {
-		for j := i; j > 0 && validated[j]["confidence"].(float64) > validated[j-1]["confidence"].(float64); j-- {
+		for j := i; j > 0 && validated[j]["calibratedConfidence"].(float64) > validated[j-1]["calibratedConfidence"].(float64); j-- {
 			validated[j], validated[j-1] = validated[j-1], validated[j]
 		}
 	}
 	top := validated[0]
-	audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
 		TargetType: "dlq", TargetID: body.DeadLetterID,
 		Metadata: map[string]any{"mode": "ai", "suggestions": len(validated), "evidenceCount": len(evidence)},
 	})

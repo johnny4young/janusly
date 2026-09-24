@@ -13,12 +13,13 @@ attempted=0
 
 usage() {
   cat <<'EOF'
-usage: scripts/verify-isolated.sh [selftest|schema]
+usage: scripts/verify-isolated.sh [selftest|schema|ha]
 
 Runs the repository acceptance gates against a fresh PostgreSQL 18 Compose
 project. The harness never reuses or removes the ordinary janusly project.
 `schema` migrates the fresh database and regenerates schema.sql from it,
 then stops; that is the one supported way to refresh schema.sql.
+`ha` runs only the two-instance HA lane on this fresh database.
 
 Environment:
   JANUSLY_VERIFY_PROJECT        owned project name (janusly-verify-* only)
@@ -121,7 +122,7 @@ main() {
   fi
   local mode=${1:-verify}
   case $mode in
-    verify | schema) ;;
+    verify | schema | ha) ;;
     *) usage >&2; die "unexpected arguments" ;;
   esac
   [[ $# -le 1 ]] || { usage >&2; die "unexpected arguments"; }
@@ -135,6 +136,10 @@ main() {
   "$make_bin" -C "$root" migrate DB_URL="$database_url"
   if [[ $mode == schema ]]; then
     "$make_bin" -C "$root" schema COMPOSE_PROJECT_NAME="$project"
+    return
+  fi
+  if [[ $mode == ha ]]; then
+    "$make_bin" -C "$root" test-ha-current-db DB_URL="$database_url"
     return
   fi
   "$make_bin" -C "$root" verify-current-db DB_URL="$database_url" COMPOSE_PROJECT_NAME="$project"

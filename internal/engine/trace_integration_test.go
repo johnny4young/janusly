@@ -85,7 +85,7 @@ func TestNodeExecutionEmitsSpans(t *testing.T) {
 	for _, span := range recorder.Ended() {
 		attrs := map[string]string{}
 		for _, attr := range span.Attributes() {
-			attrs[string(attr.Key)] = attr.Value.Emit()
+			attrs[string(attr.Key)] = attr.Value.String()
 		}
 		if span.Name() == "run.start" && attrs["janusly.run_id"] == runID {
 			sawStart = true

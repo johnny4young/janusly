@@ -48,9 +48,14 @@ func TestWorkflowRolloutAssignment(t *testing.T) {
 	v3 := saveVersion("three")
 
 	// The bucket is a pure deterministic function of (rolloutId, key).
-	if engine.WorkflowRolloutBucket("r-1", "k-1") != engine.WorkflowRolloutBucket("r-1", "k-1") ||
-		engine.WorkflowRolloutBucket("r-1", "k-1") < 0 || engine.WorkflowRolloutBucket("r-1", "k-1") > 99 {
-		t.Fatalf("bucket determinism")
+	bucket := engine.WorkflowRolloutBucket("r-1", "k-1")
+	if bucket < 0 || bucket > 99 {
+		t.Fatalf("bucket out of range: %d", bucket)
+	}
+	for range 3 {
+		if repeat := engine.WorkflowRolloutBucket("r-1", "k-1"); repeat != bucket {
+			t.Fatalf("bucket changed across calls: %d != %d", repeat, bucket)
+		}
 	}
 
 	createBody := func(baseline, canary string, traffic int) map[string]any {

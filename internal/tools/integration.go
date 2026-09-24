@@ -34,6 +34,8 @@ import (
 
 // IntegrationDeps are the engine-built runtime seams.
 type IntegrationDeps struct {
+	// DBPools is the runtime-owned external pool budget; nil disables db tools.
+	DBPools *DBPools
 	// Gate runs credential lookup (org-scoped, by kind+name), secret
 	// resolution, and the org+credential rate limit. Returns the secret
 	// or a generic error message.

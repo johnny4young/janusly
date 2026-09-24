@@ -5,7 +5,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -103,7 +102,9 @@ func TestHumanFormResumeLoop(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if !(statuses[0] == 200 && statuses[1] == 409) && !(statuses[0] == 409 && statuses[1] == 200) {
+	validPair := statuses[0] == 200 && statuses[1] == 409 ||
+		statuses[0] == 409 && statuses[1] == 200
+	if !validPair {
 		t.Fatalf("race must yield exactly one winner: %v", statuses)
 	}
 
@@ -180,6 +181,6 @@ func waitFormToken(t *testing.T, pool *pgxpool.Pool, ctx context.Context, runID,
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatal(fmt.Sprintf("form node never paused with a token (run %s)", runID))
+	t.Fatalf("form node never paused with a token (run %s)", runID)
 	return ""
 }

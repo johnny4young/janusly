@@ -17,6 +17,10 @@ vi.mock('../api', () => {
   }
 })
 
+function statusResponse(value: unknown) {
+  return { nodes: [], events: [], eventsCursor: null, eventsHasMore: false, ...value as Record<string, unknown> }
+}
+
 function Harness({
   runId,
   onTerminal = vi.fn(),
@@ -46,7 +50,7 @@ describe('useRunPolling request ownership', () => {
   it('drops a late status response after the operator switches runs', async () => {
     const onTerminal = vi.fn()
     let resolveStatus!: (value: unknown) => void
-    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = resolve }))
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = value => resolve(statusResponse(value)) }))
     useWorkflowStore.setState({ runId: 'run-a' })
 
     render(<Harness runId="run-a" onTerminal={onTerminal} />)
@@ -73,7 +77,7 @@ describe('useRunPolling request ownership', () => {
   it('drops a same-id terminal response after the ownership generation changes', async () => {
     const onTerminal = vi.fn()
     let resolveStatus!: (value: unknown) => void
-    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = resolve }))
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = value => resolve(statusResponse(value)) }))
     useWorkflowStore.setState({ runId: 'run-a' })
 
     render(<Harness runId="run-a" onTerminal={onTerminal} />)
@@ -118,7 +122,7 @@ describe('useRunPolling request ownership', () => {
     vi.useFakeTimers()
     try {
       let resolveStatus!: (value: unknown) => void
-      vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = resolve }))
+      vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = value => resolve(statusResponse(value)) }))
       useWorkflowStore.setState({ runId: 'run-a' })
 
       render(<Harness runId="run-a" />)
@@ -140,7 +144,7 @@ describe('useRunPolling request ownership', () => {
 
   it('keeps the newest status response when a manual refresh overlaps polling', async () => {
     const resolvers: Array<(value: unknown) => void> = []
-    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolvers.push(resolve) }))
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolvers.push(value => resolve(statusResponse(value))) }))
     useWorkflowStore.setState({ runId: 'run-a' })
     let loadStatus!: (id: string) => Promise<unknown>
 
@@ -173,7 +177,7 @@ describe('useRunPolling request ownership', () => {
 
   it('reserves summary ownership before awaiting the status response', async () => {
     let resolveStatus!: (value: unknown) => void
-    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = resolve }))
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = value => resolve(statusResponse(value)) }))
     useWorkflowStore.setState({ runId: 'run-a' })
     const commit = vi.fn(() => true)
     const beginRunSummaryUpdate = vi.fn(() => commit)
@@ -192,4 +196,51 @@ describe('useRunPolling request ownership', () => {
     })
     expect(commit).toHaveBeenCalledWith({ id: 'run-a', status: 'running' })
   })
+})
+
+
+describe('useRunPolling snapshot integrity', () => {
+  it.each([{}, { run: { id: 'run-a', status: 'failed' }, nodes: [{}], events: [], eventsCursor: null, eventsHasMore: false }])('rejects a corrupt snapshot without overwriting the last valid projection: %j', async payload => {
+    vi.mocked(api).mockResolvedValue(payload)
+    const nodes = [{ nodeId: 'kept', status: 'running' }]
+    const events = [{ id: 'kept-event', type: 'node.running' }]
+    useWorkflowStore.setState({ runId: 'run-a', runNodes: nodes, events, eventsCursor: 'older', eventsHasMore: true })
+    let loadStatus!: (id: string) => Promise<unknown>
+    const commit = vi.fn(() => true)
+    render(<Harness runId={null} captureLoadStatus={load => { loadStatus = load }} beginRunSummaryUpdate={() => commit} />)
+    await act(async () => {
+      await expect(loadStatus('run-a')).rejects.toThrow('unreadable response')
+    })
+    expect(useWorkflowStore.getState().runNodes).toEqual(nodes)
+    expect(useWorkflowStore.getState().events).toEqual(events)
+    expect(useWorkflowStore.getState().eventsCursor).toBe('older')
+    expect(useWorkflowStore.getState().eventsHasMore).toBe(true)
+    expect(commit).not.toHaveBeenCalled()
+  })
+})
+
+
+it('preserves an older history cursor when the latest page still has more events', async () => {
+  const latest = { id: 'latest', type: 'node.running' }
+  useWorkflowStore.setState({ runId: 'run-a', events: [{ id: 'older', type: 'node.queued' }, latest], eventsCursor: 'older-cursor', eventsHasMore: true })
+  vi.mocked(api).mockResolvedValue({ run: { id: 'run-a', status: 'running' }, nodes: [], events: [latest], eventsCursor: 'latest-cursor', eventsHasMore: true })
+  let loadStatus!: (id: string) => Promise<unknown>
+  render(<Harness runId={null} captureLoadStatus={load => { loadStatus = load }} />)
+  await act(async () => { await loadStatus('run-a') })
+  expect(useWorkflowStore.getState().events).toHaveLength(2)
+  expect(useWorkflowStore.getState().eventsCursor).toBe('older-cursor')
+})
+
+it('stops polling and signals terminal completion only after a valid terminal snapshot', async () => {
+  vi.useFakeTimers()
+  try {
+    const terminal = vi.fn()
+    useWorkflowStore.setState({ runId: 'run-a' })
+    vi.mocked(api).mockResolvedValue(statusResponse({ run: { id: 'run-a', status: 'succeeded' } }))
+    render(<Harness runId="run-a" onTerminal={terminal} />)
+    await act(async () => undefined)
+    await act(async () => { vi.advanceTimersByTime(4500) })
+    expect(terminal).toHaveBeenCalledOnce()
+    expect(api).toHaveBeenCalledOnce()
+  } finally { vi.useRealTimers() }
 })

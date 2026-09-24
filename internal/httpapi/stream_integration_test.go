@@ -53,6 +53,8 @@ func readFrames(t *testing.T, conn *sseConn, until func([]sseFrame) bool, timeou
 		select {
 		case line := <-conn.lines:
 			line = strings.TrimRight(line, "\n")
+			// Unknown fields, including retry hints and heartbeat comments,
+			// do not contribute to an event frame.
 			switch {
 			case line == "":
 				if current.event != "" || current.data != "" {
@@ -65,8 +67,6 @@ func readFrames(t *testing.T, conn *sseConn, until func([]sseFrame) bool, timeou
 				current.event = strings.TrimPrefix(line, "event: ")
 			case strings.HasPrefix(line, "data: "):
 				current.data = strings.TrimPrefix(line, "data: ")
-			case strings.HasPrefix(line, "retry: "), strings.HasPrefix(line, ": "):
-				// handshake / heartbeat lines — not frames
 			}
 		case err := <-conn.errs:
 			t.Fatalf("stream read: %v (frames so far: %d)", err, len(frames))

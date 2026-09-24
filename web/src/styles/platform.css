@@ -954,10 +954,6 @@
   margin: 0;
 }
 
-.we-connection-row__actions .small-command {
-  width: 100%;
-}
-
 .we-connection-dialog .ui-field__label {
   margin-top: 0;
 }
@@ -974,17 +970,17 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .we-connection-row {
+  .we-connections-inventory .we-connection-row {
     gap: 10px;
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .we-connection-row__facts {
+  .we-connections-inventory .we-connection-row__facts {
     grid-column: 1 / -1;
     grid-row: 2;
   }
 
-  .we-connection-row__actions {
+  .we-connections-inventory .we-connection-row__actions {
     flex-direction: row;
     grid-column: 2;
     grid-row: 1;
@@ -992,6 +988,11 @@
 }
 
 @media (max-width: 620px) {
+  .we-connections-inventory .we-card__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .we-settings-index__grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1003,37 +1004,35 @@
   .we-connections-inventory .we-card__header .ui-button,
   .we-connections-inventory__type-filter,
   .we-connections-inventory__type-filter select {
+    box-sizing: border-box;
     max-width: none;
     width: 100%;
   }
 
-  .we-connection-row {
+  .we-connections-inventory .we-connection-row {
     align-content: center;
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .we-connection-row__identity {
+  .we-connections-inventory .we-connection-row__identity {
     align-items: center;
     display: flex;
     justify-content: space-between;
   }
 
-  .we-connection-row__facts {
+  .we-connections-inventory .we-connection-row__facts {
     grid-column: auto;
     grid-row: auto;
   }
 
-  .we-connection-row__actions {
+  .we-connections-inventory .we-connection-row__actions {
     flex-direction: row;
     grid-column: auto;
     grid-row: auto;
   }
 
-  .we-connections-inventory__row-slot {
-    height: 166px;
-  }
-
-  .we-connection-row__facts div:nth-child(4) {
+  .we-connections-inventory .we-connection-row__facts div:nth-child(2),
+  .we-connections-inventory .we-connection-row__facts div:nth-child(4) {
     display: none;
   }
 }
@@ -3605,8 +3604,11 @@ button.we-authoring-problems__row:focus-visible {
 }
 
 @keyframes onboarding-banner-in {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  /* Keep copy fully opaque throughout the entrance. Fading the whole banner
+     blends primary-button text into the page and creates a transient WCAG AA
+     contrast failure while the initial task space is becoming interactive. */
+  from { transform: translateY(-8px); }
+  to { transform: translateY(0); }
 }
 
 @media (max-width: 760px) {
@@ -3688,4 +3690,3 @@ button.we-authoring-problems__row:focus-visible {
 
 /* --- C7 forms: inline validation message + described role radio-cards --- */
 .helper-text--error { color: var(--we-danger-text); display: inline-flex; align-items: center; gap: 5px; }
-

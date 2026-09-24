@@ -21,7 +21,9 @@ import (
 
 func externalRuntimeSign(secret, body string, timestamp int64) string {
 	mac := hmac.New(sha256.New, []byte(secret))
-	fmt.Fprintf(mac, "%d.%s", timestamp, body)
+	if _, err := fmt.Fprintf(mac, "%d.%s", timestamp, body); err != nil {
+		panic(err)
+	}
 	return fmt.Sprintf("t=%d,v1=%s", timestamp, hex.EncodeToString(mac.Sum(nil)))
 }
 
@@ -76,7 +78,11 @@ func TestExternalRuntimeShadowIngestion(t *testing.T) {
 		if err != nil {
 			t.Fatalf("callback: %v", err)
 		}
-		defer response.Body.Close()
+		defer func() {
+			if err := response.Body.Close(); err != nil {
+				t.Errorf("close callback response: %v", err)
+			}
+		}()
 		raw, _ := io.ReadAll(response.Body)
 		var parsed map[string]any
 		_ = json.Unmarshal(raw, &parsed)

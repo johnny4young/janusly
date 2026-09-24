@@ -563,6 +563,9 @@ SELECT * FROM confidence_calibrations WHERE org_id = $1 ORDER BY approach_label;
 -- name: ListOrgsWithFeedback :many
 SELECT DISTINCT org_id FROM recovery_feedback
 WHERE created_at >= now() - make_interval(days => sqlc.arg(window_days)::int)
+  AND (sqlc.narg(after_org_id)::text IS NULL
+       OR org_id > sqlc.narg(after_org_id)::text)
+ORDER BY org_id ASC
 LIMIT 500;
 
 -- name: ListRecoveryItems :many

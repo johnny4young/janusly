@@ -235,7 +235,7 @@ func (e *Engine) AdvanceRecoveryCase(ctx context.Context, input AdvanceRecoveryC
 		current = moved
 		revision = moved.Revision
 	}
-	if err := audit.WriteInTx(ctx, wrapped, input.Auth, input.AuditAction, audit.Options{
+	if err := e.audit.WriteInTx(ctx, wrapped, input.Auth, input.AuditAction, audit.Options{
 		TargetType: "recovery_case", TargetID: input.CaseID,
 		Metadata: map[string]any{
 			"from":        input.Steps[0].From,
@@ -346,7 +346,7 @@ func (e *Engine) ApproveRecoveryCandidate(ctx context.Context, input ApproveReco
 	if err != nil {
 		return store.RecoveryApprovalGrant{}, fmt.Errorf("insert recovery approval: %w", err)
 	}
-	if err := audit.WriteInTx(ctx, wrapped, input.Auth, audit.Action("recovery.case.approved"), audit.Options{
+	if err := e.audit.WriteInTx(ctx, wrapped, input.Auth, audit.Action("recovery.case.approved"), audit.Options{
 		TargetType: "recovery_case", TargetID: input.CaseID,
 		Metadata: map[string]any{
 			"candidateArtifactId":  candidate.ID,

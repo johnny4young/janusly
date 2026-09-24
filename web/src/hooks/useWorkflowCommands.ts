@@ -1,3 +1,4 @@
+import { currentCanvasAuthority, canvasAuthorityMatches } from '../lib/canvas-authority'
 import { useCallback } from 'react'
 import { api, contractApi } from '../api'
 import { useConfirm } from '../components/ConfirmDialog'
@@ -48,44 +49,6 @@ type ReviewWorkflowResponse = {
   aiError?: string
 }
 
-type CanvasAuthority = {
-  workflowId: string | null
-  revision: number
-  orgId: string | null
-  userId: string | null
-}
-
-function workflowVersionIdentity(
-  value: { workflowId?: unknown; versionId?: unknown; id?: unknown; version?: unknown },
-  expectedWorkflowId: string,
-): WorkflowVersionIdentity | null {
-  const id = typeof value.versionId === 'string' ? value.versionId : value.id
-  if (value.workflowId !== expectedWorkflowId
-    || typeof id !== 'string' || id.length === 0 || id.length > 256
-    || typeof value.version !== 'number' || !Number.isSafeInteger(value.version) || value.version < 1) {
-    return null
-  }
-  return { id, version: value.version }
-}
-
-function currentCanvasAuthority(): CanvasAuthority {
-  const current = useWorkflowStore.getState()
-  return {
-    workflowId: current.currentWorkflowId,
-    revision: current.workflowRevision,
-    orgId: current.orgId,
-    userId: current.userId,
-  }
-}
-
-function canvasAuthorityMatches(expected: CanvasAuthority): boolean {
-  const current = currentCanvasAuthority()
-  return current.workflowId === expected.workflowId
-    && current.revision === expected.revision
-    && current.orgId === expected.orgId
-    && current.userId === expected.userId
-}
-
 export function useWorkflowCommands(options: AppCommandsOptions) {
   const {
     store,
@@ -119,7 +82,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     })
   }, [confirm, t])
 
-  const prepareCanvasReplacement = useCallback(async (): Promise<CanvasAuthority | null> => {
+  const prepareCanvasReplacement = useCallback(async (): Promise<string | null> => {
     const expected = currentCanvasAuthority()
     if (!await confirmReplaceCanvas()) return null
     if (!canvasAuthorityMatches(expected)) {
@@ -200,10 +163,10 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     try {
       const workflow = getWorkflowJson()
       const authorityAtSave = currentCanvasAuthority()
-      const result = await api('/workflows/save', {
-        method: 'POST',
-        body: JSON.stringify(workflow),
-      }) as { workflowId?: unknown; versionId?: unknown; version?: unknown }
+      const [result, { workflowVersionIdentity }] = await Promise.all([
+        api('/workflows/save', { method: 'POST', body: JSON.stringify(workflow) }),
+        import('../lib/authoring-contract'),
+      ])
       const committedVersion = workflowVersionIdentity(result, workflow.id ?? '')
       if (!committedVersion) throw new Error(t('apiErrors.workflows_version_malformed'))
       if (canvasAuthorityMatches(authorityAtSave)) {
@@ -230,20 +193,15 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     const authority = await prepareCanvasReplacement()
     if (!authority) return false
     try {
-      const [data, { isWorkflowDefinition }] = await Promise.all([
-        contractApi('GET /workflows/latest', `/workflows/latest?workflowId=${encodeURIComponent(id)}`, undefined) as unknown as Promise<{
-          id?: unknown
-          workflowId?: unknown
-          dagJson?: unknown
-          version?: unknown
-        }>,
+      const [data, { isWorkflowDefinition, workflowVersionIdentity }] = await Promise.all([
+        contractApi('GET /workflows/latest', `/workflows/latest?workflowId=${encodeURIComponent(id)}`, undefined),
         loadAuthoringContract(),
       ])
       if (!canvasAuthorityMatches(authority)) {
         addToast(t('toasts.workflowOpenFailed'), 'info')
         return false
       }
-      if (!isWorkflowDefinition(data.dagJson) || data.dagJson.id !== id
+      if (!data || !isWorkflowDefinition(data.dagJson) || data.dagJson.id !== id
         || !workflowVersionIdentity(data, id)) {
         throw new Error(t('apiErrors.workflows_version_malformed'))
       }

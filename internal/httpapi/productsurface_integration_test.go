@@ -348,7 +348,6 @@ func TestSolutionPackSelectedStalledDrill(t *testing.T) {
 	h := newAPIHarness(t)
 	pool := testPool(t)
 	ctx := t.Context()
-	t.Setenv("JANUSLY_REAPER_THRESHOLD_MS", "900000")
 
 	before := 0
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE org_id=$1`, h.org).Scan(&before)
@@ -373,7 +372,7 @@ func TestSolutionPackSelectedStalledDrill(t *testing.T) {
 		t.Fatalf("selected stalled drill: %d %+v", res.status, res.body)
 	}
 	evidence := res.body["evidence"].(map[string]any)
-	if evidence["thresholdMinutes"] != float64(15) ||
+	if evidence["thresholdMinutes"] != float64(60) ||
 		evidence["scanned"] != float64(1) || evidence["reaped"] != float64(1) ||
 		evidence["deadLettered"] != float64(1) {
 		t.Fatalf("stalled evidence: %+v", evidence)

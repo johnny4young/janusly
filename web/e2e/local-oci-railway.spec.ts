@@ -80,7 +80,9 @@ test('production OCI works without Anthropic and explains local mode in both loc
   await expect(hero).toContainText('Local mode is active')
   await expect(hero).toContainText('Set ANTHROPIC_API_KEY for the Janusly process')
   await expect(page.getByText('Anthropic key configured')).toBeVisible()
-  await page.locator('.ai-studio-prompt').fill('Create a flow with human approval before writing')
+  await page.locator('.ai-studio-prompt').fill(
+    'Start a manual workflow that only coordinates internal work, does not modify external systems, and requires human approval before continuing.',
+  )
   const englishProposal = await buildWorkflowProposal(page)
   await expect(
     englishProposal.getByRole('status').filter({ hasText: 'Deterministic local proposal' }),
@@ -96,7 +98,9 @@ test('production OCI works without Anthropic and explains local mode in both loc
   await expect(hero).toContainText('Modo local activo')
   await expect(hero).toContainText('Configura ANTHROPIC_API_KEY para el proceso Janusly')
   await expect(page.getByText('Clave de Anthropic configurada')).toBeVisible()
-  await page.locator('.ai-studio-prompt').fill('Crea un flujo con aprobación humana antes de escribir')
+  await page.locator('.ai-studio-prompt').fill(
+    'Inicia manualmente un flujo que sólo coordine trabajo interno, sin modificar sistemas externos, y requiera aprobación humana antes de continuar.',
+  )
   const spanishProposal = await buildWorkflowProposal(page, 'es')
   await expect(
     spanishProposal.getByRole('status').filter({ hasText: 'Propuesta local determinista' }),

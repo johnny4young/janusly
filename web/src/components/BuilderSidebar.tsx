@@ -5,7 +5,7 @@
  * discovery belongs to the canvas' single searchable Add step control.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Activity,
   CheckCircle2,
@@ -114,15 +114,11 @@ export function BuilderSidebar({
     return () => { document.documentElement.dataset.sidebarCollapsed = 'false' }
   }, [visuallyCollapsed])
 
-  const filteredDestinations = useMemo(() => {
-    const allowed = WORKSPACE_DESTINATION_DEFINITIONS.filter((destination) =>
-      canOpenWorkspaceDestination(destination.id, permissions))
-    if (!normalizedQuery) return allowed
-    return allowed.filter((destination) =>
-      `${t(destination.labelKey)} ${t(destination.helperKey)}`
-        .toLocaleLowerCase()
-        .includes(normalizedQuery))
-  }, [normalizedQuery, permissions, t])
+  const filteredDestinations = WORKSPACE_DESTINATION_DEFINITIONS.filter((destination) =>
+    canOpenWorkspaceDestination(destination.id, permissions)
+    && (!normalizedQuery || `${t(destination.labelKey)} ${t(destination.helperKey)}`
+      .toLocaleLowerCase()
+      .includes(normalizedQuery)))
 
   const runAction = async (
     kind: 'validate' | 'save' | 'run',
@@ -215,8 +211,8 @@ export function BuilderSidebar({
               onClick={() => { void runAction('save', onSave) }}
               disabled={busyAction !== null || !permissions.includes('workflows.write')}
               aria-busy={busyAction === 'save'}
-              title={t('sidebar.action.save')}
-              aria-label={t('sidebar.action.save')}
+              title={t('common.save')}
+              aria-label={t('common.save')}
             >
               {busyAction === 'save'
                 ? <Loader2 size={13} className="we-spin" aria-hidden="true" />

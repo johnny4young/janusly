@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { changeAppLanguage } from '../i18n'
 import { useWorkflowStore } from '../store'
-import { OperationsPage, requestOperationsSection } from './OperationsPage'
+import { OperationsPage } from './OperationsPage'
+import { requestOperationsSection } from './operations-section-bus'
 
 vi.mock('../api', async (importOriginal) => {
   // The real module keeps ApiError and its status helpers; only the transport is doubled.
@@ -45,6 +46,9 @@ vi.mock('./PermissionGrantsPanel', () => ({
 }))
 vi.mock('./MemoryGovernancePanel', () => ({
   MemoryGovernancePanel: () => <section data-testid="stub-MemoryGovernancePanel">Memory</section>,
+}))
+vi.mock('./AuditLogPanel', () => ({
+  AuditLogPanel: () => <section data-testid="stub-AuditLogPanel">Audit</section>,
 }))
 vi.mock('./AlertPoliciesPanel', () => ({
   AlertPoliciesPanel: () => <section data-testid="stub-AlertPoliciesPanel">AlertPolicies</section>,
@@ -134,8 +138,11 @@ describe('<OperationsPage />', () => {
     await screen.findByTestId('settings-index-reliability')
     expect(screen.getByTestId('operations-rail-tab-overview')).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('heading', { name: 'Workspace settings' })).toBeInTheDocument()
+    expect(screen.getByTestId('settings-index-organization')).toHaveTextContent('Organization')
     expect(screen.getByTestId('settings-index-integrations')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-index-integrations')).toHaveTextContent('Connections')
     expect(screen.getByTestId('settings-index-ai')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-index-ai')).toHaveTextContent('AI configuration')
     expect(screen.getByTestId('settings-index-ai')).toHaveTextContent('Health unavailable')
     // Focused settings panels stay dormant until their area is opened.
     expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()
@@ -503,16 +510,45 @@ describe('<OperationsPage />', () => {
       '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
     })
 
-    render(<OperationsPage connectionCount={3} onOpenTab={onOpenTab} />)
+    render(<OperationsPage onOpenTab={onOpenTab} />)
 
-    const search = await screen.findByLabelText('Find provider, credential, member, alert, queue…')
+    const search = await screen.findByLabelText('Search settings…')
     fireEvent.change(search, { target: { value: 'queue' } })
     expect(screen.getByTestId('settings-index-infrastructure')).toBeInTheDocument()
     expect(screen.queryByTestId('settings-index-reliability')).toBeNull()
 
     fireEvent.change(search, { target: { value: '' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open Connections' }))
     expect(onOpenTab).toHaveBeenCalledWith('credentials')
+  })
+
+  it('separates organization policy from access and names each focused area', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPage />)
+
+    fireEvent.click(await screen.findByTestId('settings-index-organization'))
+    expect(screen.getByRole('heading', { name: 'Organization' })).toBeInTheDocument()
+    expect(await screen.findByTestId('stub-MemoryGovernancePanel')).toBeInTheDocument()
+    expect(screen.getByTestId('stub-AuditLogPanel')).toBeInTheDocument()
+    expect(screen.queryByTestId('stub-AuthPolicySettingsPanel')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('operations-rail-tab-access'))
+    expect(screen.getByRole('heading', { name: 'Access' })).toBeInTheDocument()
+    expect(await screen.findByTestId('stub-AuthPolicySettingsPanel')).toBeInTheDocument()
+    expect(screen.getByTestId('stub-ScimDirectorySettingsPanel')).toBeInTheDocument()
+    expect(screen.getByTestId('stub-PermissionGrantsPanel')).toBeInTheDocument()
+    expect(screen.queryByTestId('stub-MemoryGovernancePanel')).toBeNull()
+    expect(screen.queryByTestId('stub-AuditLogPanel')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('operations-rail-tab-integrations'))
+    expect(screen.getByRole('heading', { name: 'Connections' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('operations-rail-tab-ai'))
+    expect(screen.getByRole('heading', { name: 'AI configuration' })).toBeInTheDocument()
   })
 
   it('keeps an area visible when any contained capability is granted', async () => {
@@ -541,7 +577,7 @@ describe('<OperationsPage />', () => {
     expect(screen.queryByText(/Recovery metrics are temporarily unavailable/)).toBeNull()
   })
 
-  it('routes credential readers from Integrations to the canonical Connections inventory', async () => {
+  it('routes credential readers from Connections to the canonical inventory', async () => {
     const onOpenTab = vi.fn()
     stubApiByPath({
       '/recovery/metrics': healthyMetrics,
@@ -556,11 +592,11 @@ describe('<OperationsPage />', () => {
     )
 
     fireEvent.click(await screen.findByTestId('settings-index-integrations'))
-    fireEvent.click(await screen.findByRole('button', { name: 'Connections' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Connections' }))
     expect(onOpenTab).toHaveBeenCalledWith('credentials')
   })
 
-  it('keeps write-only integration and recovery-governance sections reachable', async () => {
+  it('keeps write-only connection and recovery-governance sections reachable', async () => {
     stubApiByPath({
       '/recovery/metrics': healthyMetrics,
       '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
@@ -574,7 +610,7 @@ describe('<OperationsPage />', () => {
     expect(await screen.findByTestId('stub-SlackInteractionsPanel')).toBeInTheDocument()
 
     rerender(<OperationsPage permissions={['recovery.read']} />)
-    fireEvent.click(await screen.findByTestId('operations-rail-tab-access'))
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-organization'))
     expect(await screen.findByTestId('stub-MemoryGovernancePanel')).toBeInTheDocument()
   })
 
@@ -601,7 +637,7 @@ describe('<OperationsPage />', () => {
     })
 
     render(<OperationsPage permissions={['recovery.read']} />)
-    await screen.findByTestId('settings-index-access')
+    await screen.findByTestId('settings-index-organization')
 
     act(() => requestOperationsSection('integrations'))
 

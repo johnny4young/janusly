@@ -26,6 +26,19 @@ func TestEmbeddedMigrationIsSingleFreshBaseline(t *testing.T) {
 	}
 }
 
+func TestPoolOptionsAreParsedWithoutExposingDatabaseSecrets(t *testing.T) {
+	db, err := open("postgres://janusly:secret-sentinel@localhost/janusly?sslmode=disable&pool_max_conns=4")
+	if err != nil {
+		t.Fatalf("valid pool option: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	_, err = open("postgres://janusly:secret-sentinel@localhost/janusly?sslmode=disable&pool_max_conns=invalid")
+	if err == nil || strings.Contains(err.Error(), "secret-sentinel") {
+		t.Fatalf("invalid pool option must fail without exposing the URL: %v", err)
+	}
+}
+
 func TestBaselineContainsCurrentRuntimeObjectsOnly(t *testing.T) {
 	raw, err := fs.ReadFile(migrations, "sql/00001_baseline.sql")
 	if err != nil {

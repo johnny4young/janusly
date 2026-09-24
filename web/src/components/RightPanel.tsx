@@ -20,7 +20,7 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useState } from 'react'
 import { Activity, Boxes, Database, FlaskConical, Layers3, Plug, Users, Workflow } from 'lucide-react'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
@@ -226,6 +226,11 @@ function RightPanelRouter(props: RightPanelProps) {
       actionRequest={authoring.aiActionRequest}
       onSuggestWorkflowImprovement={authoring.onSuggestWorkflowImprovement}
       onApplyWorkflowImprovement={authoring.onApplyWorkflowImprovement}
+      onViewCanvas={() => {
+        const canvas = document.querySelector<HTMLElement>('[data-testid="workflow-canvas"]')
+        canvas?.scrollIntoView({ block: 'nearest' })
+        canvas?.focus({ preventScroll: true })
+      }}
       onOpenRuns={() => navigation.onOpenTab('runs')}
       onOpenTemplates={() => navigation.onOpenTab('templates')}
     />
@@ -247,7 +252,6 @@ function RightPanelRouter(props: RightPanelProps) {
   if (props.tab === 'operations') return (
     <OperationsPage
       permissions={props.permissions}
-      connectionCount={catalog.credentials.length}
       aiHealth={authoring.aiHealth}
       onOpenTab={navigation.onOpenTab}
     />
@@ -375,19 +379,15 @@ export function TemplatesPanel({
   canUse?: boolean
   canInstallPacks?: boolean
 }) {
-  const { t, i18n } = useT()
+  const { t } = useT()
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   const [query, setQuery] = useState('')
-  // `tTemplate*` read the active locale via the runtime translator (not the
-  // closure `t`), so include `i18n.language` so the filter re-runs on a locale
-  // switch — mirroring the MultiAgentTimeline memo.
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return templates
-    return templates.filter(template =>
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? templates.filter(template =>
       `${tTemplateName(template)} ${tTemplateDescription(template)} ${tTemplateCategory(template)}`.toLowerCase().includes(q),
     )
-  }, [templates, query, i18n.language])
+    : templates
 
   return (
     <PanelChrome title={t('rightPanel.templates.title')} description={t('rightPanel.templates.description')} icon={<Workflow size={18} />}>

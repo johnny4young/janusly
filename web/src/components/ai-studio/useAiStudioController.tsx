@@ -29,16 +29,21 @@ export function useAiStudioController({
   actionRequest,
   onSuggestWorkflowImprovement,
   onApplyWorkflowImprovement,
+  onViewCanvas,
   onOpenRuns,
   onOpenTemplates,
 }: AiStudioPanelProps) {
   const { t, i18n } = useT()
   const locale = i18n.resolvedLanguage
+  // t is reference-stable but reads the mutable runtime locale. Keep locale
+  // as an explicit invalidation key so untouched starter text can be relocalized.
+  /* oxlint-disable react/exhaustive-deps -- stable translator reads the runtime locale */
   const starterPrompts = useMemo(() => [
     t('aiStudio.starter1'),
     t('aiStudio.starter2'),
     t('aiStudio.starter3'),
   ], [locale, t])
+  /* oxlint-enable react/exhaustive-deps */
   const primaryStarterPrompt = starterPrompts[0]
 
   const [prompt, setPrompt] = useState(primaryStarterPrompt)
@@ -364,6 +369,7 @@ export function useAiStudioController({
     health,
     workflowName,
     onApplyWorkflowImprovement,
+    onViewCanvas,
     onOpenRuns,
     onOpenTemplates,
     starterPrompts,

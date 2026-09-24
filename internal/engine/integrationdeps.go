@@ -105,6 +105,7 @@ func toUpperSnake(family string) string {
 func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.IntegrationDeps {
 	limiter := ratelimit.New(e.pool, ratelimit.Hooks{})
 	return &tools.IntegrationDeps{
+		DBPools: e.dbPools,
 		Gate: func(ctx context.Context, tool, credentialKind, credentialName string, rateLimitPerMin int) (string, string) {
 			q := store.New(e.pool)
 			credential, err := q.GetCredentialByName(ctx, store.GetCredentialByNameParams{

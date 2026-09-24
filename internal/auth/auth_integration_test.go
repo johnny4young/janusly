@@ -166,9 +166,6 @@ func TestSupabaseSingleMembershipDefaults(t *testing.T) {
 		t.Fatalf("pool: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	sb := fakeSupabase(t)
-	rv := NewResolver(pool, Config{SupabaseURL: sb.URL, SupabaseKey: "anon-key"})
-
 	org := fmt.Sprintf("org-sbsingle-%d", time.Now().UnixNano())
 	userID := fmt.Sprintf("uuid-solo-%d", time.Now().UnixNano())
 	// A dedicated fake user so this test owns exactly one membership.
@@ -181,7 +178,7 @@ func TestSupabaseSingleMembershipDefaults(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	t.Cleanup(sbSolo.Close)
-	rv = NewResolver(pool, Config{SupabaseURL: sbSolo.URL, SupabaseKey: "anon-key"})
+	rv := NewResolver(pool, Config{SupabaseURL: sbSolo.URL, SupabaseKey: "anon-key"})
 	_ = store.New(pool)
 	seedMember(t, pool, org, userID, "solo@example.com", "editor")
 

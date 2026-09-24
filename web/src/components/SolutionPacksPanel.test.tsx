@@ -1,7 +1,8 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Credential, SolutionPackPublic } from '../types'
+import { changeRuntimeLocale } from '../i18n'
 import { SolutionPacksPanel } from './SolutionPacksPanel'
 
 const PACK: SolutionPackPublic = {
@@ -108,6 +109,25 @@ describe('<SolutionPacksPanel />', () => {
     expect(screen.getByText('No packs match')).toBeInTheDocument()
     expect(screen.queryByText('ops_slack')).not.toBeInTheDocument()
     expect(screen.getByTestId('empty-state-cta')).toHaveTextContent('Clear filter')
+  })
+
+  it('reprojects a pack search when the active language changes', async () => {
+    await changeRuntimeLocale('en')
+    renderPanel([])
+    const input = screen.getByPlaceholderText('Search packs…')
+    fireEvent.change(input, { target: { value: 'classify' } })
+    expect(screen.getByTestId('solution-pack-incident-triage')).toBeInTheDocument()
+
+    try {
+      await act(() => changeRuntimeLocale('es'))
+      expect(input).toHaveValue('classify')
+      expect(screen.getByText('Ningún pack coincide')).toBeInTheDocument()
+
+      fireEvent.change(input, { target: { value: 'clasifica' } })
+      expect(screen.getByTestId('solution-pack-incident-triage')).toBeInTheDocument()
+    } finally {
+      await act(() => changeRuntimeLocale('en'))
+    }
   })
 
   it('shows an explore-templates CTA when the catalog is empty', () => {

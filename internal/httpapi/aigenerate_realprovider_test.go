@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -23,12 +24,13 @@ import (
 )
 
 const (
-	realProviderMaxCalls        = 40
-	realProviderMaxCallsPerCase = 2
-	realProviderCaseCount       = 20
-	realProviderUsefulMinimum   = 18
-	realProviderDefaultMaxUSD   = 3.0
-	realProviderOutputUnits     = 1200
+	realProviderMaxCalls             = 80
+	realProviderMaxCallsPerCase      = 4
+	realProviderLifetimeCallsPerCase = 6
+	realProviderCaseCount            = 20
+	realProviderUsefulMinimum        = 18
+	realProviderDefaultMaxUSD        = 3.0
+	realProviderOutputUnits          = 2400
 )
 
 type qualificationCallEvidence struct {
@@ -44,16 +46,18 @@ type qualificationCallEvidence struct {
 }
 
 type qualificationCaseEvidence struct {
-	ID       string                      `json:"id"`
-	Category string                      `json:"category"`
-	Language string                      `json:"language"`
-	Calls    []qualificationCallEvidence `json:"calls"`
-	Valid    bool                        `json:"valid"`
-	Safe     bool                        `json:"safe"`
-	Useful   bool                        `json:"useful"`
-	Repaired bool                        `json:"repaired"`
-	Guarded  bool                        `json:"guarded,omitempty"`
-	Result   string                      `json:"result"`
+	ID                   string                      `json:"id"`
+	Category             string                      `json:"category"`
+	Language             string                      `json:"language"`
+	Calls                []qualificationCallEvidence `json:"calls"`
+	Valid                bool                        `json:"valid"`
+	Safe                 bool                        `json:"safe"`
+	Useful               bool                        `json:"useful"`
+	Repaired             bool                        `json:"repaired"`
+	Guarded              bool                        `json:"guarded,omitempty"`
+	Result               string                      `json:"result"`
+	FailureStage         string                      `json:"failureStage,omitempty"`
+	ValidationIssueCodes []string                    `json:"validationIssueCodes,omitempty"`
 }
 
 type qualificationReport struct {
@@ -67,10 +71,12 @@ type qualificationReport struct {
 	UsefulCases     int                         `json:"usefulCases"`
 	UsefulMinimum   int                         `json:"usefulMinimum"`
 	Calls           int                         `json:"calls"`
+	LifetimeCalls   int                         `json:"lifetimeCalls"`
 	MaxCalls        int                         `json:"maxCalls"`
 	MaxCallsPerCase int                         `json:"maxCallsPerCase"`
 	Tokens          int                         `json:"tokens"`
 	CostUSD         float64                     `json:"costUsd"`
+	ReservedUSD     float64                     `json:"reservedUsd"`
 	MaxUSD          float64                     `json:"maxUsd"`
 	SDKRetries      int                         `json:"sdkRetries"`
 	Breakers        map[string]bool             `json:"breakers"`
@@ -81,21 +87,24 @@ type recordedProviderCall struct {
 	evidence         qualificationCallEvidence
 }
 
-// boundedProductClient is the process-global billing circuit breaker. Before
-// every external call it reserves a conservative byte-as-token upper bound,
-// so the final call cannot knowingly cross the authorized USD ceiling.
+// boundedProductClient checks both in-process and lifetime call caps. Before
+// every external call it durably reserves a conservative byte-as-token upper
+// bound; uncertain outcomes never refund a reservation automatically.
 type boundedProductClient struct {
 	delegate         ai.Client
+	ledger           realProviderLedger
 	maxCalls         int
 	maxCallsPerCase  int
 	maxUSD           float64
 	defaultMaxOutput int
 
-	mu      sync.Mutex
-	calls   int
-	tokens  int
-	costUSD float64
-	records []recordedProviderCall
+	mu            sync.Mutex
+	calls         int
+	tokens        int
+	costUSD       float64
+	reservedUSD   float64
+	lifetimeCalls int
+	records       []recordedProviderCall
 }
 
 func (c *boundedProductClient) Configured() bool { return c.delegate != nil && c.delegate.Configured() }
@@ -111,33 +120,51 @@ func (c *boundedProductClient) generateForCase(
 	input ai.GenerateTextInput,
 ) (*ai.GenerateTextResult, *ai.AIError) {
 	provider, model := providerModel(input.ModelHint)
+	// The approved budget is for this first-party model at its verified
+	// catalog price. A local price override could make both reservations and
+	// reported cost smaller without changing the provider's actual bill.
+	if provider != "anthropic" || model != ai.DefaultModel {
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification requires the approved Anthropic model", BeforeEgress: true}
+	}
+	priceOverrideKey := "JANUSLY_LLM_PRICE_" + strings.ToUpper(strings.ReplaceAll(ai.DefaultModel, "-", "_"))
+	if _, overridden := os.LookupEnv(priceOverrideKey); overridden {
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification does not accept model price overrides", BeforeEgress: true}
+	}
+	// The paid corpus uses a tighter output ceiling than production authoring.
+	// Apply it to the actual provider request before calculating the durable
+	// reservation so the admitted worst case and the request cannot diverge.
 	maxOutput := c.defaultMaxOutput
-	if input.MaxOutputUnits > 0 {
+	if input.MaxOutputUnits > 0 && input.MaxOutputUnits < maxOutput {
 		maxOutput = input.MaxOutputUnits
 	}
+	input.MaxOutputUnits = maxOutput
 	price := ai.GetModelPrice(model)
 	if price == nil {
 		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification requires a known price"}
 	}
 	// UTF-8 byte count is deliberately more conservative than normal token
 	// estimates. The fixed overhead covers provider framing and metadata.
-	projected := ai.ComputeCostUsd(price, ai.Usage{
-		InputTokens:  len([]byte(input.System)) + len([]byte(input.Prompt)) + 512,
-		OutputTokens: maxOutput,
-	})
-	if projected == nil {
-		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification cost projection unavailable"}
-	}
+	// All input might be charged at the cache-write tier, which can exceed
+	// ordinary input pricing. Count every UTF-8 byte as one token plus a
+	// 4096-token framing allowance; unused reserves are not refunded.
+	inputRate := math.Max(price.InputUsdPer1M, math.Max(price.CacheWrite5mUsdPer1M, price.CacheReadUsdPer1M))
+	projectedUSD := (float64(len(input.System)+len(input.Prompt)+4096)*inputRate +
+		float64(maxOutput)*price.OutputUsdPer1M) / 1_000_000
 	c.mu.Lock()
 	if c.calls >= c.maxCalls {
 		c.mu.Unlock()
 		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification call cap reached"}
 	}
-	if c.costUSD+*projected > c.maxUSD {
+	// The lifetime cap allows one bounded requalification without unlimited
+	// retries; the USD ceiling remains cumulative across all attempts.
+	totals, err := c.ledger.reserve(caseID, projectedUSD, c.maxUSD, c.maxCalls, realProviderLifetimeCallsPerCase)
+	if err != nil {
 		c.mu.Unlock()
-		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification USD breaker reached"}
+		return nil, &ai.AIError{Class: "invalid_request", Message: "real-provider qualification lifetime reservation refused"}
 	}
 	c.calls++
+	c.reservedUSD = float64(totals.ReservedMicros) / 1_000_000
+	c.lifetimeCalls = totals.Calls
 	c.mu.Unlock()
 
 	result, aiErr := c.delegate.GenerateText(ctx, input)
@@ -183,6 +210,12 @@ func (c *boundedProductClient) accounting() (calls, tokens int, cost float64) {
 	return c.calls, c.tokens, c.costUSD
 }
 
+func (c *boundedProductClient) reservations() (float64, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.reservedUSD, c.lifetimeCalls
+}
+
 type boundedCaseClient struct {
 	global           *boundedProductClient
 	caseID, category string
@@ -191,15 +224,17 @@ type boundedCaseClient struct {
 }
 
 type qualificationFakeClient struct {
-	mu    sync.Mutex
-	calls int
+	mu             sync.Mutex
+	calls          int
+	maxOutputUnits int
 }
 
 func (c *qualificationFakeClient) Configured() bool { return true }
 
-func (c *qualificationFakeClient) GenerateText(_ context.Context, _ ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
+func (c *qualificationFakeClient) GenerateText(_ context.Context, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
 	c.mu.Lock()
 	c.calls++
+	c.maxOutputUnits = input.MaxOutputUnits
 	c.mu.Unlock()
 	cost := 0.001
 	return &ai.GenerateTextResult{
@@ -241,26 +276,54 @@ func providerModel(hint string) (string, string) {
 
 func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	delegate := &qualificationFakeClient{}
+	ledgerPath := t.TempDir() + "/ledger.jsonl"
 	global := &boundedProductClient{
 		delegate: delegate, maxCalls: realProviderMaxCalls, maxUSD: 1,
+		ledger:           realProviderLedger{path: ledgerPath},
 		defaultMaxOutput: realProviderOutputUnits,
 	}
 	client := &boundedCaseClient{global: global, caseID: "case", category: "authoring"}
-	for attempt := 0; attempt < realProviderMaxCallsPerCase; attempt++ {
-		if _, aiErr := client.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr != nil {
+	for attempt := range 4 {
+		if _, aiErr := client.GenerateText(t.Context(), ai.GenerateTextInput{
+			System: "bounded", Prompt: "bounded", MaxOutputUnits: authoringMaxOutputUnits,
+		}); aiErr != nil {
 			t.Fatalf("allowed call %d failed: %v", attempt+1, aiErr)
 		}
 	}
 	if _, aiErr := client.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr == nil || aiErr.Class != "invalid_request" {
-		t.Fatalf("third per-case call must be refused locally: %v", aiErr)
+		t.Fatalf("fifth per-run case call must be refused locally: %v", aiErr)
 	}
-	if calls, _, _ := global.accounting(); calls != 2 || delegate.calls != 2 {
+	if calls, _, _ := global.accounting(); calls != 4 || delegate.calls != 4 {
 		t.Fatalf("per-case breaker reached provider calls=%d delegate=%d", calls, delegate.calls)
+	}
+	if delegate.maxOutputUnits != realProviderOutputUnits {
+		t.Fatalf("delegate output cap=%d, want %d", delegate.maxOutputUnits, realProviderOutputUnits)
+	}
+	// Four Haiku 4.5 calls reserve 4110 input-byte tokens each at the
+	// 5-minute cache-write rate ($1.25/M), plus 2400 output tokens at $5/M.
+	// Each 17137.5-microUSD projection rounds upward before persistence.
+	if reservedUSD, lifetimeCalls := global.reservations(); int64(math.Round(reservedUSD*1_000_000)) != 68_552 || lifetimeCalls != 4 {
+		t.Fatalf("durable cache-tier upper bound missing: reserved=%f lifetimeCalls=%d", reservedUSD, lifetimeCalls)
+	}
+	restartedDelegate := &qualificationFakeClient{}
+	restarted := &boundedProductClient{
+		delegate: restartedDelegate, maxCalls: realProviderMaxCalls, maxCallsPerCase: 4, maxUSD: 1,
+		ledger: realProviderLedger{path: ledgerPath}, defaultMaxOutput: realProviderOutputUnits,
+	}
+	replayed := &boundedCaseClient{global: restarted, caseID: "case"}
+	for attempt := range 2 {
+		if _, aiErr := replayed.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr != nil {
+			t.Fatalf("bounded restart attempt %d failed: %v", attempt+1, aiErr)
+		}
+	}
+	if _, aiErr := replayed.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr == nil || restartedDelegate.calls != 2 {
+		t.Fatalf("seventh lifetime case call must remain refused: error=%v delegateCalls=%d", aiErr, restartedDelegate.calls)
 	}
 
 	usdBlockedDelegate := &qualificationFakeClient{}
 	usdBlocked := &boundedProductClient{
 		delegate: usdBlockedDelegate, maxCalls: realProviderMaxCalls, maxUSD: 0.0001,
+		ledger:           realProviderLedger{path: t.TempDir() + "/ledger.jsonl"},
 		defaultMaxOutput: realProviderOutputUnits,
 	}
 	if _, aiErr := usdBlocked.GenerateText(t.Context(), ai.GenerateTextInput{System: "bounded", Prompt: "bounded"}); aiErr == nil || aiErr.Class != "invalid_request" {
@@ -273,6 +336,7 @@ func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	callBlockedDelegate := &qualificationFakeClient{}
 	callBlocked := &boundedProductClient{
 		delegate: callBlockedDelegate, maxCalls: 1, maxUSD: 1,
+		ledger:           realProviderLedger{path: t.TempDir() + "/ledger.jsonl"},
 		defaultMaxOutput: realProviderOutputUnits,
 	}
 	if _, aiErr := callBlocked.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr != nil {
@@ -283,6 +347,51 @@ func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	}
 	if callBlockedDelegate.calls != 1 {
 		t.Fatalf("global breaker reached delegate %d times", callBlockedDelegate.calls)
+	}
+}
+
+func TestRealProviderQualificationRejectsPriceOverrideAndWrongModelBeforeEgress(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		modelHint string
+		override  string
+	}{
+		{name: "price override", override: "0.000001,0.000001"},
+		{name: "other Anthropic model", modelHint: "anthropic/claude-sonnet-4-5"},
+		{name: "other provider", modelHint: "openai/claude-haiku-4-5-20251001"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if testCase.override != "" {
+				t.Setenv("JANUSLY_LLM_PRICE_CLAUDE_HAIKU_4_5_20251001", testCase.override)
+			}
+			delegate := &qualificationFakeClient{}
+			global := &boundedProductClient{
+				delegate: delegate, maxCalls: realProviderMaxCalls, maxUSD: realProviderDefaultMaxUSD,
+				ledger:           realProviderLedger{path: t.TempDir() + "/ledger.jsonl"},
+				defaultMaxOutput: realProviderOutputUnits,
+			}
+			_, aiErr := global.GenerateText(t.Context(), ai.GenerateTextInput{ModelHint: testCase.modelHint})
+			if aiErr == nil || aiErr.Class != "invalid_request" || delegate.calls != 0 {
+				t.Fatalf("unqualified pricing/model reached delegate: error=%v calls=%d", aiErr, delegate.calls)
+			}
+			if calls, _, _ := global.accounting(); calls != 0 {
+				t.Fatalf("unqualified pricing/model consumed a reservation: calls=%d", calls)
+			}
+		})
+	}
+}
+
+func TestRealProviderAuthoringFailureEvidenceExcludesRawError(t *testing.T) {
+	secret := "sk-ant-not-for-evidence"
+	result := qualificationCaseEvidence{ID: "case", Category: "authoring"}
+	recordAuthoringFailure(&result, generationMeta{
+		failureStage: "candidate_validation", validationIssueCodes: []string{domain.CodeTransformMissingMapping},
+	}, &ai.AIError{Class: "invalid_output", Message: secret})
+	raw, err := json.Marshal(result)
+	if err != nil || strings.Contains(string(raw), secret) ||
+		!strings.Contains(string(raw), `"failureStage":"candidate_validation"`) ||
+		!strings.Contains(string(raw), `"validationIssueCodes":["transform_missing_mapping"]`) {
+		t.Fatalf("authoring failure evidence must contain stage/codes only: %s err=%v", raw, err)
 	}
 }
 
@@ -307,12 +416,17 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 	}
 	maxCalls := qualificationIntegerLimit(t, "JANUSLY_REAL_PROVIDER_MAX_CALLS", realProviderMaxCalls, realProviderCaseCount, realProviderMaxCalls)
 	maxCallsPerCase := qualificationIntegerLimit(t, "JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE", realProviderMaxCallsPerCase, 1, realProviderMaxCallsPerCase)
+	ledgerPath := strings.TrimSpace(os.Getenv("JANUSLY_REAL_PROVIDER_LEDGER"))
+	if ledgerPath == "" {
+		t.Fatal("JANUSLY_REAL_PROVIDER_LEDGER is required before any paid call")
+	}
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableKeepAlives = true
 	providerHTTPClient := &http.Client{Transport: transport}
 	t.Cleanup(transport.CloseIdleConnections)
 	global := &boundedProductClient{
+		ledger: realProviderLedger{path: ledgerPath},
 		delegate: ai.New(ai.Config{
 			APIKey: key, Model: ai.DefaultModel, TimeoutMs: 45_000,
 			MaxRetries: 0, MaxOutputTokens: realProviderOutputUnits, HTTPClient: providerHTTPClient,
@@ -348,6 +462,7 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 		}
 	}
 	report.Calls, report.Tokens, report.CostUSD = global.accounting()
+	report.ReservedUSD, report.LifetimeCalls = global.reservations()
 	rawReport, err := json.Marshal(report)
 	if err != nil {
 		t.Fatalf("encode sanitized real-provider report: %v", err)
@@ -360,7 +475,7 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 			len(report.Cases), report.ValidCases, report.SafeCases, report.UsefulCases, realProviderUsefulMinimum)
 	}
 	if report.Calls < realProviderCaseCount || report.Calls > report.MaxCalls || report.Tokens <= 0 ||
-		report.CostUSD <= 0 || report.CostUSD > maxUSD {
+		report.CostUSD <= 0 || report.CostUSD > maxUSD || report.ReservedUSD > maxUSD {
 		t.Fatalf("real-provider accounting outside envelope: calls=%d tokens=%d cost=%.8f cap=%.2f",
 			report.Calls, report.Tokens, report.CostUSD, maxUSD)
 	}
@@ -412,6 +527,7 @@ func evaluateRealAuthoringCase(
 	)
 	result.Repaired = meta.attempts > 1 || meta.repairAttempts > 0
 	if aiErr != nil {
+		recordAuthoringFailure(&result, meta, aiErr)
 		result.Result = "generation_" + aiErr.Class
 		return finishQualificationCase(global, result)
 	}
@@ -451,6 +567,20 @@ func evaluateRealAuthoringCase(
 	result.Useful = result.Valid && result.Safe && intentMatched
 	result.Result = qualificationResult(result)
 	return finishQualificationCase(global, result)
+}
+
+// Only internally generated stage labels and validator codes enter evidence;
+// provider output and AIError.Message can contain untrusted or sensitive text.
+func recordAuthoringFailure(result *qualificationCaseEvidence, meta generationMeta, aiErr *ai.AIError) {
+	result.FailureStage = meta.failureStage
+	result.ValidationIssueCodes = append([]string(nil), meta.validationIssueCodes...)
+	if result.FailureStage == "" {
+		if aiErr.BeforeEgress {
+			result.FailureStage = "before_egress"
+		} else {
+			result.FailureStage = "provider_or_transport"
+		}
+	}
 }
 
 func evaluateRealDiagnosisCase(

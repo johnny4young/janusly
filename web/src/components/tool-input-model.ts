@@ -13,10 +13,14 @@ export function isToolInputObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+export function isJsonToolInputKind(kind: ToolInputFieldSchema['kind']): boolean {
+  return kind === 'json' || kind === 'array' || kind === 'object' || kind === 'unknown'
+}
+
 export function formatToolInputDraft(value: unknown, kind: ToolInputFieldSchema['kind']): string {
   if (value === undefined) return ''
-  if (typeof value === 'string' && (kind !== 'json' || COMPLETE_TEMPLATE.test(value))) return value
-  if (kind !== 'json' && (typeof value === 'number' || typeof value === 'boolean')) {
+  if (typeof value === 'string' && (!isJsonToolInputKind(kind) || COMPLETE_TEMPLATE.test(value))) return value
+  if (!isJsonToolInputKind(kind) && (typeof value === 'number' || typeof value === 'boolean')) {
     return String(value)
   }
   return JSON.stringify(value, null, 2)

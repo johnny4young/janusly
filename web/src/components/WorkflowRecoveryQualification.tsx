@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { api } from '../api'
 import { tApiError, useT } from '../i18n'
@@ -8,18 +8,13 @@ import { asRecord } from '../lib/guards'
 import './WorkflowRecoveryQualification.css'
 
 export type RecoveryQualification = {
-  id: string
   baselineVersionId: string
   candidateVersionId: string
-  datasetVersion: string
-  datasetDigest: string
   mode: 'bootstrap' | 'compare'
   status: 'passed' | 'failed'
-  createdAt: string
   summary: {
     candidateAssertionCount: number
     passedCandidateAssertions: number
-    failedCandidateAssertions: number
     regressionCount: number
     coverageFailureCount: number
     failures: Array<{
@@ -42,6 +37,8 @@ export type RecoveryQualificationState = {
 }
 
 export type RecoveryQualificationGate = {
+  baselineVersionId: string
+  candidateVersionId: string
   loading: boolean
   required: boolean
   status: RecoveryQualification['status'] | null
@@ -53,7 +50,7 @@ function boundedInteger(value: unknown, min = 0): number | null {
     : null
 }
 
-function parseRecoveryQualification(payload: unknown): RecoveryQualificationState | null {
+function parseRecoveryQualification(payload: unknown, baselineVersionId: string, candidateVersionId: string): RecoveryQualificationState | null {
   const envelope = asRecord(payload)
   if (typeof envelope?.required !== 'boolean') return null
   if (envelope.qualification === null) {
@@ -61,12 +58,12 @@ function parseRecoveryQualification(payload: unknown): RecoveryQualificationStat
   }
   const row = asRecord(envelope.qualification)
   const summary = asRecord(row?.summary)
-  if (!row || !summary) return { required: envelope.required, qualification: null }
-  if (row.status !== 'passed' && row.status !== 'failed') return { required: envelope.required, qualification: null }
-  if (row.mode !== 'bootstrap' && row.mode !== 'compare') return { required: envelope.required, qualification: null }
+  if (!row || !summary || row.baselineVersionId !== baselineVersionId || row.candidateVersionId !== candidateVersionId) return null
+  if (row.status !== 'passed' && row.status !== 'failed') return null
+  if (row.mode !== 'bootstrap' && row.mode !== 'compare') return null
   const strings = ['id', 'baselineVersionId', 'candidateVersionId', 'datasetVersion', 'datasetDigest', 'createdAt'] as const
   if (strings.some(key => typeof row[key] !== 'string' || row[key].length === 0)) {
-    return { required: envelope.required, qualification: null }
+    return null
   }
   const summaryKeys = [
     'candidateAssertionCount',
@@ -81,12 +78,12 @@ function parseRecoveryQualification(payload: unknown): RecoveryQualificationStat
     || !Array.isArray(summary.failures)
     || typeof summary.failuresTruncated !== 'boolean'
   ) {
-    return { required: envelope.required, qualification: null }
+    return null
   }
   const failures: RecoveryQualification['summary']['failures'] = []
   for (const item of summary.failures) {
     const failure = asRecord(item)
-    if (!failure) return { required: envelope.required, qualification: null }
+    if (!failure) return null
     const dataset = failure.dataset
     const reason = failure.reason
     if (
@@ -100,7 +97,7 @@ function parseRecoveryQualification(payload: unknown): RecoveryQualificationStat
       || typeof failure.fixtureId !== 'string'
       || typeof failure.sourceNodeId !== 'string'
     ) {
-      return { required: envelope.required, qualification: null }
+      return null
     }
     failures.push({
       dataset,
@@ -112,18 +109,13 @@ function parseRecoveryQualification(payload: unknown): RecoveryQualificationStat
   return {
     required: envelope.required,
     qualification: {
-      id: row.id as string,
       baselineVersionId: row.baselineVersionId as string,
       candidateVersionId: row.candidateVersionId as string,
-      datasetVersion: row.datasetVersion as string,
-      datasetDigest: row.datasetDigest as string,
       mode: row.mode,
       status: row.status,
-      createdAt: row.createdAt as string,
       summary: {
         candidateAssertionCount: values[0]!,
         passedCandidateAssertions: values[1]!,
-        failedCandidateAssertions: values[2]!,
         regressionCount: values[3]!,
         coverageFailureCount: values[4]!,
         failures,
@@ -149,45 +141,48 @@ export function WorkflowRecoveryQualification({
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
   const [state, setState] = useState<RecoveryQualificationState | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [retry, setRetry] = useState(0)
   const [qualifying, setQualifying] = useState(false)
+  const owner = useRef<AbortController | null>(null)
+  const qualificationPath = `/workflows/${encodeURIComponent(workflowId)}/rollout/qualification`
   const qualification = state?.qualification
+  const loading = state === null && !loadError
 
   useEffect(() => {
-    let cancelled = false
     const abortController = new AbortController()
+    owner.current = abortController
     setState(null)
-    setLoading(true)
-    onGateChange({ loading: true, required: true, status: null })
+    setLoadError(false)
+    setQualifying(false)
+    onGateChange({ baselineVersionId, candidateVersionId, loading: true, required: true, status: null })
     const query = new URLSearchParams({
       baselineVersionId,
       candidateVersionId,
     })
     api(
-      `/workflows/${encodeURIComponent(workflowId)}/rollout/qualification?${query.toString()}`,
+      `${qualificationPath}?${query.toString()}`,
       { signal: abortController.signal },
     )
       .then(payload => {
-        if (cancelled) return
-        const parsed = parseRecoveryQualification(payload)
+        if (abortController.signal.aborted) return
+        const parsed = parseRecoveryQualification(payload, baselineVersionId, candidateVersionId)
         if (!parsed) throw new Error(t('workflowRollout.qualification.invalidResponse'))
         setState(parsed)
         onGateChange({
+          baselineVersionId, candidateVersionId,
           loading: false,
           required: parsed.required,
           status: parsed.qualification?.status ?? null,
         })
       })
       .catch(error => {
-        if (cancelled) return
+        if (abortController.signal.aborted) return
+        setLoadError(true)
         onGateChange(null)
         addToast(tApiError(error) || t('workflowRollout.qualification.loadFailed'), 'error')
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
     return () => {
-      cancelled = true
       abortController.abort()
     }
   }, [
@@ -195,24 +190,30 @@ export function WorkflowRecoveryQualification({
     baselineVersionId,
     candidateVersionId,
     onGateChange,
+    readOnly,
+    retry,
     t,
-    workflowId,
+    qualificationPath,
   ])
 
   const runQualification = async () => {
+    const request = owner.current
+    if (!request || request.signal.aborted || readOnly || loading || qualifying) return
     setQualifying(true)
     try {
-      const payload = await api(`/workflows/${encodeURIComponent(workflowId)}/rollout/qualification`, {
-        method: 'POST',
+      const payload = await api(qualificationPath, {
+        method: 'POST', signal: request.signal,
         body: JSON.stringify({
           baselineVersionId,
           candidateVersionId,
         }),
       })
-      const parsed = parseRecoveryQualification(payload)
+      if (request.signal.aborted) return
+      const parsed = parseRecoveryQualification(payload, baselineVersionId, candidateVersionId)
       if (!parsed?.qualification) throw new Error(t('workflowRollout.qualification.invalidResponse'))
       setState(parsed)
       onGateChange({
+        baselineVersionId, candidateVersionId,
         loading: false,
         required: parsed.required,
         status: parsed.qualification.status,
@@ -224,12 +225,14 @@ export function WorkflowRecoveryQualification({
         parsed.qualification.status === 'passed' ? 'success' : 'error',
       )
     } catch (error) {
-      addToast(tApiError(error) || t('workflowRollout.qualification.runFailed'), 'error')
+      if (!request.signal.aborted) addToast(tApiError(error) || t('workflowRollout.qualification.runFailed'), 'error')
     } finally {
-      setQualifying(false)
+      if (!request.signal.aborted) setQualifying(false)
     }
   }
 
+  if (loadError) return <div role="alert"><p>{t('workflowRollout.qualification.loadFailed')}</p>
+    <Button onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</Button></div>
   if (!loading && !state?.required) return null
 
   return (
@@ -259,21 +262,13 @@ export function WorkflowRecoveryQualification({
       </p>
       {qualification && (
         <div className="we-rollout-panel__qualification-metrics">
-          <div>
-            <span>{t('workflowRollout.qualification.assertions')}</span>
-            <strong>
-              {qualification.summary.passedCandidateAssertions}
-              /{qualification.summary.candidateAssertionCount}
-            </strong>
-          </div>
-          <div>
-            <span>{t('workflowRollout.qualification.regressions')}</span>
-            <strong>{qualification.summary.regressionCount}</strong>
-          </div>
-          <div>
-            <span>{t('workflowRollout.qualification.coverage')}</span>
-            <strong>{qualification.summary.coverageFailureCount}</strong>
-          </div>
+          {([
+            ['assertions', `${qualification.summary.passedCandidateAssertions}/${qualification.summary.candidateAssertionCount}`],
+            ['regressions', qualification.summary.regressionCount],
+            ['coverage', qualification.summary.coverageFailureCount],
+          ] as const).map(([label, value]) => <div key={label}>
+            <span>{t(`workflowRollout.qualification.${label}`)}</span><strong>{value}</strong>
+          </div>)}
         </div>
       )}
       {qualification?.status === 'failed' && qualification.summary.failures.length > 0 && (

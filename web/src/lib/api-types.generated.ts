@@ -19,6 +19,8 @@ export interface ApiRequests {
   "GET /dlq": undefined
   /** Failure clusters over open dead letters */
   "GET /dlq/clusters": undefined
+  /** Tenant-bound dead-letter snapshot */
+  "GET /dlq/entries/{deadLetterId}": undefined
   /** Tenant memory consent and purge posture */
   "GET /memory/consent-status": undefined
   /** Bounded deterministic Operator Brief shared by UI and MCP */
@@ -55,7 +57,7 @@ export interface ApiRequests {
   "GET /workflows/latest": undefined
   /** Validate a cron expression and preview its next fires */
   "GET /workflows/schedule-preview": undefined
-  /** All versions of one workflow */
+  /** Keyset-paginated versions of one workflow */
   "GET /workflows/versions": undefined
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": undefined
@@ -104,6 +106,10 @@ export interface ApiRequests {
   /** Replay one dead letter (unversioned wire) */
   "POST /dlq/replay": {
     "deadLetterId": string
+  }
+  /** Resolve one dead letter as accepted loss */
+  "POST /dlq/resolve": {
+    "id": string
   }
   /** Start a write-suppressed validation replay for a proposed fix */
   "POST /dlq/validate-fix": {
@@ -348,12 +354,74 @@ export interface ApiResponses {
     "warnings": string[]
   }
   /** Dead-letter list with server-side filters */
-  "GET /dlq": Record<string, unknown>[]
+  "GET /dlq": ({
+    "attempt": number
+    "createdAt": string | null
+    "errorJson": unknown
+    "id": string
+    "nodeId": string
+    "nodeType": string | null
+    "orgId": string
+    "recovery": {
+      "comments": unknown
+      "id": string
+      "lastOccurredAt": string | null
+      "metadataWorkflowId": string | null
+      "occurrenceCount": number
+      "owner": string | null
+      "resolutionReason": string | null
+      "severity": string
+      "slaTargetAt": string | null
+      "status": string
+      "workflowId": string | null
+    } | null
+    "replayedAt": string | null
+    "runId": string
+    "status": "open" | "replayed" | "resolved"
+    "workflowName": string | null
+  })[]
   /** Failure clusters over open dead letters */
   "GET /dlq/clusters": {
     "clusters": Record<string, unknown>[]
     "totalSamples": number
     "windowDays": number
+  }
+  /** Tenant-bound dead-letter snapshot */
+  "GET /dlq/entries/{deadLetterId}": {
+    "attempt": number
+    "createdAt": string | null
+    "drill": {
+      "fixtureId": string
+      "kind": "solution_pack_drill"
+      "packId": string
+      "recoveryPath": "direct_failure" | "runtime_failure" | "stalled_node_reaper"
+    } | null
+    "drillOutcome": {
+      "attemptCount": number
+      "chainCapped": boolean
+      "completedAt": string | null
+      "elapsedMs": number | null
+      "evidence": null | "terminal_impact" | "explicit_resolution"
+      "latestDeadLetterId": string
+      "recurrence": {
+        "recurredAt": string | null
+        "status": "not_applicable" | "monitoring" | "clear" | "recurred"
+        "windowEndsAt": string | null
+      }
+      "startedAt": string | null
+      "status": "awaiting_action" | "replay_in_progress" | "recovered" | "accepted_loss" | "measurement_incomplete"
+    } | null
+    "errorJson": unknown
+    "id": string
+    "nodeId": string
+    "nodeJson": unknown
+    "orgId": string
+    "replayClaimedAt": string | null
+    "replayedAt": string | null
+    "runId": string
+    "status": "open" | "replayed" | "resolved"
+    "suspectVersion": null
+    "workflowJson": unknown
   }
   /** Tenant memory consent and purge posture */
   "GET /memory/consent-status": {
@@ -558,11 +626,51 @@ export interface ApiResponses {
   }
   /** One run with nodes and paginated events */
   "GET /run": {
-    "events"?: Record<string, unknown>[]
-    "eventsCursor"?: string | null
-    "eventsHasMore"?: boolean
-    "nodes"?: Record<string, unknown>[]
-    "run"?: Record<string, unknown>
+    "events": ({
+      "createdAt": string | null
+      "holdUntil": string | null
+      "id": string
+      "nodeId": string | null
+      "payload": unknown
+      "runId": string
+      "type": string
+    })[]
+    "eventsCursor": string | null
+    "eventsHasMore": boolean
+    "nodes": ({
+      "attempts": number | null
+      "errorJson": unknown
+      "finishedAt": string | null
+      "id": string
+      "nodeId": string
+      "runId": string
+      "startedAt": string | null
+      "stateJson": unknown
+      "status": "pending" | "queued" | "running" | "waiting" | "succeeded" | "failed" | "skipped" | "cancelled"
+    })[]
+    "run": {
+      "createdAt": string | null
+      "createdBy": string | null
+      "id": string
+      "inputJson": unknown
+      "orgId": string
+      "outcomeStatus": null | "semantic_violation" | "semantic_quarantined" | "semantic_recovering" | "semantic_recovered" | "semantic_accepted_loss"
+      "outputJson": unknown
+      "parentLinkKind": string | null
+      "parentNodeId": string | null
+      "parentNotificationAfter": string | null
+      "parentRunId": string | null
+      "recoveryPlaybookAppliedRecordedAt": string | null
+      "recoveryPlaybookValidationRecordedAt": string | null
+      "replayMode": string | null
+      "semanticViolationCount": number
+      "status": "created" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "timed_out"
+      "traceId": string | null
+      "validationEvidenceLevel": null | "static" | "writes_skipped" | "provider_simulated" | "live_canary"
+      "workflowRolloutId": string | null
+      "workflowRolloutVariant": string | null
+      "workflowVersionId": string
+    }
   }
   /** Bounded per-run AI and memory usage */
   "GET /run/usage": {
@@ -573,7 +681,25 @@ export interface ApiResponses {
     "truncated"?: boolean
   }
   /** Keyset-paginated run list */
-  "GET /runs": Record<string, unknown>[]
+  "GET /runs": ({
+    "createdAt": string | null
+    "createdBy": string | null
+    "hasWaitingNodes": boolean
+    "id": string
+    "orgId": string
+    "outcomeStatus": null | "semantic_violation" | "semantic_quarantined" | "semantic_recovering" | "semantic_recovered" | "semantic_accepted_loss"
+    "outputJson": unknown
+    "parentNodeId": string | null
+    "parentRunId": string | null
+    "replayMode": string | null
+    "semanticViolationCount": number
+    "status": "created" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "timed_out"
+    "traceId": string | null
+    "validationEvidenceLevel": null | "static" | "writes_skipped" | "provider_simulated" | "live_canary"
+    "workflowId": string
+    "workflowName": string | null
+    "workflowVersionId": string
+  })[]
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": {
     "enabled": boolean
@@ -581,18 +707,94 @@ export interface ApiResponses {
   }
   /** Alias of /v1/run */
   "GET /status": {
-    "events"?: Record<string, unknown>[]
-    "eventsCursor"?: string | null
-    "eventsHasMore"?: boolean
-    "nodes"?: Record<string, unknown>[]
-    "run"?: Record<string, unknown>
+    "events": ({
+      "createdAt": string | null
+      "holdUntil": string | null
+      "id": string
+      "nodeId": string | null
+      "payload": unknown
+      "runId": string
+      "type": string
+    })[]
+    "eventsCursor": string | null
+    "eventsHasMore": boolean
+    "nodes": ({
+      "attempts": number | null
+      "errorJson": unknown
+      "finishedAt": string | null
+      "id": string
+      "nodeId": string
+      "runId": string
+      "startedAt": string | null
+      "stateJson": unknown
+      "status": "pending" | "queued" | "running" | "waiting" | "succeeded" | "failed" | "skipped" | "cancelled"
+    })[]
+    "run": {
+      "createdAt": string | null
+      "createdBy": string | null
+      "id": string
+      "inputJson": unknown
+      "orgId": string
+      "outcomeStatus": null | "semantic_violation" | "semantic_quarantined" | "semantic_recovering" | "semantic_recovered" | "semantic_accepted_loss"
+      "outputJson": unknown
+      "parentLinkKind": string | null
+      "parentNodeId": string | null
+      "parentNotificationAfter": string | null
+      "parentRunId": string | null
+      "recoveryPlaybookAppliedRecordedAt": string | null
+      "recoveryPlaybookValidationRecordedAt": string | null
+      "replayMode": string | null
+      "semanticViolationCount": number
+      "status": "created" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "timed_out"
+      "traceId": string | null
+      "validationEvidenceLevel": null | "static" | "writes_skipped" | "provider_simulated" | "live_canary"
+      "workflowRolloutId": string | null
+      "workflowRolloutVariant": string | null
+      "workflowVersionId": string
+    }
   }
   /** Built-in workflow authoring templates */
-  "GET /templates": Record<string, unknown>[]
+  "GET /templates": {
+    "category": string
+    "categoryCode": string
+    "description": string
+    "descriptionCode": string
+    "id": string
+    "name": string
+    "nameCode": string
+    "requiredCredentials"?: string[]
+    "workflow": unknown
+  }[]
   /** The AI Studio tool catalog */
-  "GET /tools": Record<string, unknown>[]
+  "GET /tools": ({
+    "description": string
+    "inputExample"?: Record<string, unknown>
+    "inputFields": ({
+      "kind": "string" | "number" | "integer" | "boolean" | "json" | "array" | "object" | "unknown"
+      "name": string
+      "required": boolean
+    })[]
+    "name": string
+    "optional"?: string[]
+    "required": string[]
+    "writeSide": boolean
+  })[]
   /** Keyset-paginated workflow list */
-  "GET /workflows": Record<string, unknown>[]
+  "GET /workflows": ({
+    "bufferedTriggerCount": number
+    "createdAt": string | null
+    "createdBy": string | null
+    "deletedAt": string | null
+    "folder": string | null
+    "id": string
+    "lastRunStatus": string | null
+    "name": string
+    "orgId": string
+    "pausedReason": string | null
+    "runCount": number
+    "status": string
+    "tags": string[]
+  })[]
   /** Workflow assurance health score */
   "GET /workflows/health": {
     "breakdown": Record<string, Record<string, unknown>>
@@ -602,14 +804,34 @@ export interface ApiResponses {
     "status": string
   }
   /** Latest version of one workflow (nullable) */
-  "GET /workflows/latest": Record<string, unknown> | null
+  "GET /workflows/latest": {
+    "createdAt": string | null
+    "createdBy": string | null
+    "dagJson": unknown
+    "id": string
+    "orgId": string
+    "sloJson": unknown
+    "upstreamHealthSources": unknown
+    "version": number
+    "workflowId": string
+  } | null
   /** Validate a cron expression and preview its next fires */
   "GET /workflows/schedule-preview": {
     "nextFires"?: string[]
     "valid"?: boolean
   }
-  /** All versions of one workflow */
-  "GET /workflows/versions": Record<string, unknown>[]
+  /** Keyset-paginated versions of one workflow */
+  "GET /workflows/versions": ({
+    "createdAt": string | null
+    "createdBy": string | null
+    "dagJson": unknown
+    "id": string
+    "orgId": string
+    "sloJson": unknown
+    "upstreamHealthSources": unknown
+    "version": number
+    "workflowId": string
+  })[]
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": {
     "dagJson": {
@@ -764,6 +986,10 @@ export interface ApiResponses {
   /** Replay one dead letter (unversioned wire) */
   "POST /dlq/replay": {
     "ok": boolean
+  }
+  /** Resolve one dead letter as accepted loss */
+  "POST /dlq/resolve": {
+    "ok": true
   }
   /** Start a write-suppressed validation replay for a proposed fix */
   "POST /dlq/validate-fix": {
@@ -977,6 +1203,8 @@ export interface ApiSuccessStatuses {
   "GET /dlq": 200
   /** Failure clusters over open dead letters */
   "GET /dlq/clusters": 200
+  /** Tenant-bound dead-letter snapshot */
+  "GET /dlq/entries/{deadLetterId}": 200
   /** Tenant memory consent and purge posture */
   "GET /memory/consent-status": 200
   /** Bounded deterministic Operator Brief shared by UI and MCP */
@@ -1013,7 +1241,7 @@ export interface ApiSuccessStatuses {
   "GET /workflows/latest": 200
   /** Validate a cron expression and preview its next fires */
   "GET /workflows/schedule-preview": 200
-  /** All versions of one workflow */
+  /** Keyset-paginated versions of one workflow */
   "GET /workflows/versions": 200
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": 200
@@ -1025,6 +1253,8 @@ export interface ApiSuccessStatuses {
   "POST /dlq/redrive": 200
   /** Replay one dead letter (unversioned wire) */
   "POST /dlq/replay": 200
+  /** Resolve one dead letter as accepted loss */
+  "POST /dlq/resolve": 200
   /** Start a write-suppressed validation replay for a proposed fix */
   "POST /dlq/validate-fix": 200
   /** Apply an approved immutable recovery candidate */

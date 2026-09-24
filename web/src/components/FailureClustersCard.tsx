@@ -17,6 +17,8 @@
  * Loaded by `RecoveryAutomationDisclosure.tsx` after explicit expansion.
  */
 
+import { readDeadLetterDetail } from '../lib/dead-letter-contract'
+
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
 import { api, contractApi } from '../api'
@@ -116,7 +118,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
           total: number
           capped: boolean
         }>,
-        contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(representative.id)}`, undefined) as unknown as Promise<DeadLetter>,
+        readDeadLetterDetail(representative.id),
       ])
       let selectedDlq = dlqResp
       if (!membersResp.deadLetterIds.includes(representative.id)) {
@@ -129,7 +131,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
           setRecovery({ kind: 'error', signature: cluster.signature, message: t('clusters.noOpenMembers') })
           return
         }
-        selectedDlq = await contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(fallback)}`, undefined) as unknown as DeadLetter
+        selectedDlq = await readDeadLetterDetail(fallback)
       }
       setRecovery({
         kind: 'open',

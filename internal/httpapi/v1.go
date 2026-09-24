@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	contractdoc "github.com/johnny4young/janusly/contract"
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/authpolicy"
 	"github.com/johnny4young/janusly/internal/browsersession"
@@ -74,6 +75,7 @@ func readyzHandler(timeout time.Duration, probe readinessProbe) http.HandlerFunc
 
 // V1Server owns the /v1 route surface over one engine and pool.
 type V1Server struct {
+	audit          audit.Writer
 	engine         *engine.Engine
 	pool           *pgxpool.Pool
 	newID          func() string
@@ -91,10 +93,13 @@ type V1Server struct {
 	feedbackMemory *feedbackMemoryPool
 }
 
-// V1ServerOptions describes process-owned feedback-memory work. Validation is
+// V1ServerOptions describes process-owned audit policy and feedback-memory work.
+// Feedback-memory validation is
 // repeated at the HTTP construction boundary so tests and future embedders
 // cannot accidentally bypass the bounded runtime configuration.
 type V1ServerOptions struct {
+	// Audit carries the immutable process serialization policy.
+	Audit                       audit.Writer
 	FeedbackMemoryWorkers       int
 	FeedbackMemoryQueueCapacity int
 	FeedbackMemoryTaskTimeout   time.Duration
@@ -107,45 +112,6 @@ type V1ServerOptions struct {
 	// StartRateLimitPerMinute bounds POST /v1/start per organization; 0
 	// resolves JANUSLY_START_RATE_LIMIT_PER_MIN or the default.
 	StartRateLimitPerMinute int
-}
-
-// DefaultV1ServerOptions returns the production-safe bounded defaults.
-func DefaultV1ServerOptions() V1ServerOptions {
-	return V1ServerOptions{
-		FeedbackMemoryWorkers:       defaultFeedbackMemoryWorkers,
-		FeedbackMemoryQueueCapacity: defaultFeedbackMemoryQueueCapacity,
-		FeedbackMemoryTaskTimeout:   defaultFeedbackMemoryTaskTimeout,
-		Logger:                      slog.Default(),
-		StartRateLimitPerMinute:     startRateLimitFromEnv(),
-	}
-}
-
-// NewV1Handler mounts the v1 routes plus the operational health surfaces. The stream hub's
-// LISTEN connection lives for the process (the production shape).
-func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
-	handler, _ := NewV1HandlerWithShutdown(eng, pool)
-	return handler
-}
-
-// NewV1HandlerWithShutdown additionally returns a compatibility shutdown func
-// that cancels the stream hub's hijacked LISTEN connection and drains optional
-// feedback-memory work. Test harnesses MUST call it before closing the pool.
-func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Handler, func()) {
-	options := DefaultV1ServerOptions()
-	handler, shutdown, err := newV1HandlerWithWorkOS(eng, pool, workos.NewFromEnv(), options)
-	if err != nil {
-		options.Logger.Error("V1 server construction failed", "reason", "feedback_memory_options")
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-		}), func() {}
-	}
-	return handler, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), feedbackMemoryTaskTimeoutMax)
-		defer cancel()
-		if err := shutdown(ctx); err != nil {
-			options.Logger.Error("V1 server shutdown incomplete", "reason", "feedback_memory_drain")
-		}
-	}
 }
 
 // NewV1HandlerWithOptions builds the production surface with explicitly
@@ -176,16 +142,16 @@ func newV1HandlerWithWorkOS(
 	}
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	server := &V1Server{
-		engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
+		engine: eng, pool: pool, audit: options.Audit, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
 		newID: uuid.NewString, hub: newStreamHub(), workos: client, feedbackMemory: feedbackMemory,
 	}
-	server.authPolicy = authpolicy.New(pool)
+	server.authPolicy = authpolicy.New(pool, options.Audit)
 	server.resolver.SetPolicyEvaluator(func(ctx context.Context, input auth.PolicyInput) bool {
 		return server.authPolicy.Evaluate(ctx, authpolicy.Input{
 			OrgID: input.OrgID, UserID: input.UserID, Email: input.Email, Mode: input.Mode,
 		}).Allowed
 	})
-	server.limiterTracker = ratelimit.NewTracker(pool)
+	server.limiterTracker = ratelimit.NewTracker(pool, options.Audit)
 	server.limiter = ratelimit.New(pool, ratelimit.Hooks{
 		OnError: server.limiterTracker.RecordError, OnSuccess: server.limiterTracker.RecordRecovery,
 	})
@@ -319,6 +285,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.route(mux, "GET /v1/runs", routeGate{auth.RoleViewer, "runs.read"}, s.listRuns)
 	s.route(mux, "POST /v1/resume", routeGate{auth.RoleEditor, "runs.start"}, s.resumeRun)
 	s.route(mux, "POST /v1/run/cancel", routeGate{auth.RoleEditor, "runs.cancel"}, s.cancelRun)
+	s.mountDLQContractRoutes(mux)
 	s.route(mux, "GET /v1/dlq", routeGate{auth.RoleViewer, "dlq.read"}, s.listDeadLetters)
 	s.route(mux, "POST /runs/redrive", routeGate{auth.RoleEditor, "runs.start"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.runsRedriveCore(r, rc))
@@ -344,11 +311,11 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/context", s.identity(s.authContext))
 	// The AI Studio's tool catalog; the web calls it through /v1.
 	mux.HandleFunc("GET /v1/tools", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeV1Data(w, rc.id, executors.SharedToolRegistry().Catalog())
+		writeV1Data(w, rc.id, executors.SharedToolRegistry().CatalogEntries())
 	}))
 	mux.HandleFunc("GET /tools", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(executors.SharedToolRegistry().Catalog())
+		_ = json.NewEncoder(w).Encode(executors.SharedToolRegistry().CatalogEntries())
 	}))
 	s.unversionedRoutes(mux)
 	s.mountCampaignRoutes(mux)
@@ -377,7 +344,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.mountRolloutRoutes(mux)
 	s.mountCredentialRoutes(mux)
 	s.mountSlackInteractionRoutes(mux)
-	externalruntime.Mount(mux, externalruntime.Deps{Pool: s.pool, Routes: s})
+	externalruntime.Mount(mux, externalruntime.Deps{Pool: s.pool, Audit: s.audit, Routes: s})
 	s.mountUpstreamHealthRoutes(mux)
 	s.mountAutoHealingRoutes(mux)
 	s.mountProductSurfaceRoutes(mux)
@@ -385,7 +352,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.mountWorkflowMetadataRoutes(mux)
 	s.mountInputPresetRoutes(mux)
 	s.mountEvalRoutes(mux)
-	scim.Mount(mux, scim.Deps{Pool: s.pool, NewID: s.newID, Routes: s})
+	scim.Mount(mux, scim.Deps{Pool: s.pool, Audit: s.audit, NewID: s.newID, Routes: s})
 	s.mountF1SweepRoutes(mux)
 	s.mountRunSearchRoutes(mux)
 	s.mountStatusPageRoutes(mux)

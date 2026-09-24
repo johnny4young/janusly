@@ -16,6 +16,20 @@ that drove it lists every finding by id (S/C/P/D/O/B/FB/F/FA/FR/FT/R/A/T).
 | 6 — quality sweep | `e6b94d8d`.. | `unparam` in the lint gate with its fourteen findings fixed; every gated route through `s.route`; the workflow validator dispatches by node type (complexity 256 → 53), the parser decodes nodes and edges in their own functions (118 → 51), and the database tool, recovery contract validator, semantic contract validator, workflow binder, proposal binder, for-each loop, ai node, email tool and AI review sanitizer are each split into named steps (every function under 55, most under 30); 55 unused web exports removed; the duplicated blocks jscpd found folded; five modal dialogs close on Escape through `useDialogFocusTrap({ onEscape })` and seven components share `useAliveRef`; `AuthoringPanel` renders one `InspectorPanel`; `docs/development.md` written. |
 | 7 — frontend refactor (2026-09-05/06) | `27ec80ab`, `eb0af008`, `1f37b00b`, `254a2656`, `da72b2c0` | Every lazy panel ships its own stylesheet (46 component-adjacent sheets; eager `index.css` 41.3 → 25.4 KiB gzip, new 27 KiB cap); AI Studio and the Inspector load lazily from `panel-loaders.ts` with hover/focus/destination preload and a pinned `authoring-workspace` chunk (eager `workflow-workspace` 43.4 → 14.1 KiB, cap 16); the tagged data layer replaces the `platformVersion` broadcast as the default (typed `ResourceTag`, `bumpPlatformVersion(tags)`, 26 subscribers, 18 same-domain mutation sites); `Button` is the only action button (136 legacy `small-command`/`icon-button` sites, pressed-state styling, loading states on the login, rollback and workspace forms). Budgets re-based around the cold path: artifact 605, single-locale 560, eager CSS 27, workflow-workspace 16. |
 
+## Explicit external database pool ownership
+
+- API and MCP share one validated immutable external pool budget across their
+  producers and drain it before control-plane pools close. Removed the global
+  cache/reset hook and per-acquisition environment parsing.
+- Documented the default 25/range 1–500 process-only setting, restart semantics,
+  fail-closed boot validation and Compose passthrough. Leases, tenant caps,
+  physical one-connection pools and retirement accounting remain unchanged.
+- Added independent-owner/metric, missing-owner, boot boundary and configuration
+  snapshot tests; existing race/rotation/cancellation and executable drain
+  regressions now use explicit owners. Real API SIGTERM and MCP stdio EOF
+  tests check durable completion of an active query and zero remaining external
+  sessions after teardown.
+
 ## Measured results
 
 Load qualification, 20-minute measured phases, p95 / p99 ms:
@@ -42,3 +56,251 @@ checkpoints in 73 minutes instead of one every ~25 seconds.
   still request a full refresh. The duplicate destination-level authoring
   preload is removed; shared chunk dependencies can still load authoring code
   before its panel mounts.
+
+## Completion persistence hardening
+
+Automatic recovery ownership no longer acquires another worker-pool connection
+while a completion transaction is holding its locks. Configuration, incident
+writes and system audit receipts use that transaction, with nested savepoints
+preserving the optional failure boundaries. Debounce child insertion and the
+occurrence increment roll back together; a successful audit receipt cannot
+survive a later completion rollback.
+
+Validation includes a single-connection completion regression, real PostgreSQL
+SQL-failure injection, nested savepoint recovery, tenant opt-out, system audit
+identity/redaction, and the five two-instance HA tests with four connections per
+pool. HA passes both without session timeouts and with the worker pool's
+production-equivalent statement, lock and idle-transaction limits. This is
+local engine evidence, not an executable deployment qualification.
+
+## External database pool ownership
+
+Database tools now lease cached pools for the whole operation. Credential
+rotation retires a pool without blocking other tenants; final lease release
+closes it outside the cache mutex. Retired pools remain counted against the
+five-per-organization and configured process limits. Idle same-tenant LRU
+replacement preserves capacity; all-busy capacity fails with the existing
+`db_pool_exhausted` envelope rather than oversubscribing connections. The query
+budget includes connection acquisition, and the runtime drains tool pools after
+its workers. Real PostgreSQL race tests cover rotation, physical accounting,
+eviction, cancellation, concurrent admission and shutdown. An executable-level
+SIGTERM test verifies that an active external query completes before pool drain.
+
+## Run-status response integrity
+
+An interrupted successful response body can no longer masquerade as an empty
+object. Body cancellation remains cancellation; unreadable error details do not
+discard an authoritative HTTP error status. Run polling validates the complete
+snapshot before touching summary, nodes, events or pagination, preserving the
+last good projection when a proxy or interrupted response supplies malformed
+content. Nullable persisted metadata is represented honestly, without invented
+activity timestamps. Regression coverage includes failed body reads, malformed
+and cross-run projections, stale request ownership, terminal polling shutdown,
+history pagination, and real Chromium stream failure/cancellation followed by a
+successful retry. The existing production bundle caps remain unchanged.
+
+## Classified CI and bounded HA
+
+Documentation-only changes now emit a stable CI result instead of leaving a
+path-filtered workflow absent. The aggregate gate requires every selected lane
+to succeed and accepts only classifier-authorized skips. Complete, NUL-delimited
+Git diffs account for deletion, rename and shared inputs; errors fail closed.
+Web-only changes run browser/API/proxy parity. Two-instance HA now runs with four
+connections per replica, drains every test loop, and has a dedicated PostgreSQL
+service, timeout diagnostics and an isolated local target. Website PR validation
+uses its own secret-free npm/Astro workflow; the product artifact never builds
+for a website-only push. Wrangler is locked to an exact local dependency.
+The retention countdown regression freezes its clock before mount and fixture
+reads, with explicit millisecond-boundary tests rather than relaxed assertions
+or retry-to-green. Repository protection settings remain owner-controlled.
+
+## Typed run snapshots
+
+Run/status now declare the full required response schema and serialize typed Go
+snapshot, node and event views. Nullable metadata and millisecond timestamps keep
+the established wire, with schema conformance checks against real responses.
+Generated browser types replace generic run/node/event records; history, Replay
+Lab and recovery validation reuse the snapshot guard instead of double casts.
+Malformed or wrong-run success cannot authorize Apply or discard history. A
+validation run that reaches `timed_out` is now handled as terminal failure.
+This is a vertical contract change, not a universal response-validation layer;
+extensible JSON payloads remain intentionally unconstrained.
+
+### Typed dead-letter evidence
+
+- Dead-letter summary and detail contracts now expose their actual nullable wire
+  metadata, snapshots and drill outcomes. A dedicated versioned entry route
+  shares the legacy detail operation without changing the list shape.
+- Recovery selections validate the returned identity and complete snapshot
+  envelope before enabling actions. Generated drill types replace duplicated
+  browser definitions; null timestamps remain unknown rather than fabricated.
+- Resolving a missing or foreign dead letter now returns an indistinguishable
+  not-found response instead of a false success and audit. Owned resolutions
+  remain acceptance of loss, with the same editor permission gate.
+
+### List contract and catalog compatibility
+
+- Explicit run, workflow, version, template and tool list contracts now generate
+  their browser wire types from the route manifest. Actual typed views, embedded
+  templates, tool registry and versioned/legacy HTTP responses are checked against
+  those schemas.
+- Shared page readers reject malformed or duplicate projections before updating
+  lists or enabling version actions; failed refreshes retain existing data and
+  version pagination cursors. Latest-version absence remains nullable.
+- Removed the duplicate map-based tool catalog projection. JSON editors recognize
+  the registry's array, object and unknown kinds and preserve literal quoting.
+
+### Reaper configuration ownership
+
+The periodic stalled-node sweep and scoped recovery drill now share validated,
+constructor-injected process settings, including the stdio entry point. Invalid
+cadence, threshold and floor values fail boot instead of silently falling back;
+duration overflow is rejected. Long production thresholds are no longer shortened
+by a separate drill-only cap. The undocumented minutes-only drill setting is
+rejected with a replacement hint. Core configuration errors identify the setting
+and accepted range without echoing its value; tenant overrides remain dynamic.
+
+## Shared HTTP configuration semantics
+
+The engine now resolves HTTP defaults through the same organization catalog as
+the settings API. Removed the duplicated HTTP parser/specification and unused
+process timeout field. Boot validates all four environment fallback bounds;
+the timeout minimum matches the canonical 1 ms floor rather than an unrelated
+1000 ms floor. HTTP fractions are rejected instead of rounded by the catalog,
+while unrelated legacy numeric catalog semantics remain unchanged.
+
+Tenant → environment → default precedence and per-claim tenant snapshots remain
+intact. Compose forwards all four settings; malformed inputs reach redacted boot
+validation instead of silently becoming defaults. Per-node ceilings, SSRF,
+redirect validation and DNS pinning are unchanged.
+
+## Recovery comparison ownership
+
+Applied recovery evidence now belongs to one operator, organization, workflow,
+canvas revision and permission scope. Context changes synchronously abort health
+and exact-version reads, clear stale rollback intent and prevent a captured
+before-snapshot from appearing under another workflow. Response projections fail
+closed on invalid counts, scores, deltas, recurrence samples or immutable version
+identity. Rollback remains a separate confirmed action and restores keyboard focus.
+
+The UI counts terminal observations rather than in-flight runs, treats zero
+recurrence as neutral monitoring evidence, and links recurrence through the
+canonical activity route. Shared metric rendering and native progress replace
+duplicated branches and custom progress markup. The pure health-delta guard ships
+with the existing recovery-contract chunk, keeping the original artifact,
+single-locale, route and RecoveryDialog budgets intact without rebaselining.
+
+
+## Recovery AI response integrity
+
+Recovery patch and explicit playbook-use payloads now pass a dedicated runtime
+parser before they can enter the dialog state machine. Current envelopes require
+a non-empty bounded suggestion set and a passport matching the locally derived
+failure signature. Explicit foreign workflow IDs, stale playbook identities,
+invalid confidence or safety fields, malformed evidence and obsolete unwired
+feedback-health projections fail closed with the existing retryable malformed-
+response message. Only envelopes with no `suggestions` property retain the
+bounded legacy single-suggestion projection.
+
+The parser canonicalizes the first validated suggestion, re-scrubs evidence at
+the HTTP boundary and projects only metadata the UI consumes. The fixture-only
+Learning Health badge, its styles, translations and browser test were removed:
+no current Go route produced `feedbackHealth`, so the surface could communicate
+a state that production could never supply. The static parser does not add a parser-only
+lazy request. Its measured cost is 300 bytes beyond the old single-locale
+cap, so that cap moves narrowly from 560 to 560.5 KiB while the 605 KiB total
+artifact cap and route budgets remain unchanged.
+
+The server now projects dead-letter run snapshots back through the canonical
+workflow serializer before composing a provider prompt or returning a fallback.
+This removes run-only `input`, `orgId`, and `createdBy` carriers and makes the
+provider-free fallback satisfy the same strict browser contract as an AI
+proposal. Corrupt stored snapshots fail closed with a typed 422 instead of
+claiming that an unreadable workflow is an applicable suggestion. The executable
+browser journey exercises the real fallback rather than a hand-built substitute.
+
+## Task-space navigation context
+
+The workspace keeps four primary destinations while exposing the exact routed
+section in both the top breadcrumb and the contextual rail introduction. Hidden
+compact-rail entries such as Recover no longer collapse to an ambiguous
+Activity label, and recovery-case aliases resolve back to Recover. The bilingual
+real-stack journey verifies `#/recover`, reload persistence, contextual labels
+and accessibility. The onboarding entrance now uses motion without opacity so
+its primary action keeps AA contrast throughout the initial task-space render.
+
+Cold route loading is now local to the workspace main or panel slot. The eager
+shell remains mounted while the secondary locale namespace or a lazy route
+chunk loads, using the shared accessible skeleton instead of a full-screen boot
+surface. Namespace, chunk and render failures stop at the owning area and expose
+the existing in-place retry. The production-built navigation journey holds the
+Settings chunk in flight and verifies stable shell chrome, no boot-screen
+replacement, accessibility and recovery after release.
+
+Settings now separates Organization, Access, Connections and AI configuration
+with stable bilingual labels and focused headings, while keeping operational
+Reliability, Usage and Infrastructure areas. Memory governance and audit history
+move out of Access into Organization; auth, SSO, SCIM, membership roles and grants
+remain under Access. The user-facing Connections name covers credentials, Slack,
+MCP and external runtimes without breaking the existing `operations/integrations`
+deep link. Its canonical inventory remains list-first with an explicit add dialog,
+and the overview no longer shows the narrower credential count as a total for the
+whole area. The real-stack task-space journey traverses the four configuration
+areas in English and Spanish, verifies their hashes and focused headings, and
+checks the horizontal rail at 390 CSS pixels without document overflow. The same
+mobile evidence now bounds the Connections primary action inside its card and
+proves both row actions remain inside the fixed-height virtualized inventory.
+
+## Canvas clarity, JSON feedback and authoring handoff
+
+Canvas paths now identify default, conditional and error routes. Conditional
+labels keep the complete scrubbed expression in their tooltip and accessible
+directed name while the visible badge truncates without exposing known secret
+shapes. Advanced JSON validates after a short editing debounce, preserves invalid
+drafts, reports localized line/column guidance, rejects arrays and null, and
+applies only valid objects on blur.
+
+AI Studio no longer leaves Apply as a dead end: its success state offers an
+explicit View changes in canvas action that focuses the mounted canvas without
+leaving the review surface. The blank canvas offers one assisted starting action
+while retaining the manual Add step path and local/provider-free copy. Home's
+embedded hero is a named region rather than a global banner landmark. Spanish UI
+copy now pins neutral Latin American tuteo for the brand line and the canonical
+AI Studio name. The local-preferred system font stacks remain offline-only; no
+font download, auto-layout library or global copy/paste interception was added.
+The required behavior stays inside the existing hard bundle caps by coalescing
+shared lazy helpers into `lazy-ui` and recovery-only helpers into `recovery-ui`,
+not by moving them onto the cold path or increasing a cap. The measured build is
+618729/619520 bytes for the complete artifact and 573634/573952 bytes for the
+worst single locale.
+
+## Executable test TypeScript coverage
+
+The web typecheck now includes Playwright E2E and performance sources through a
+separate `tsconfig.e2e.json` project. It uses the same strict compiler settings
+as the app without pulling executable tests into the app build. A temporary
+wrong-type fixture was rejected by this gate. Existing E2E helper type errors
+were corrected, including a real failure-path bug: Node Fetch's
+`Response.status` is a number, unlike Playwright's `APIResponse.status()` method.
+A script regression asserts the actual HTTP status is preserved when semantic
+fixture creation fails. The typed E2E checks complement, rather than replace,
+real-executable browser tests.
+
+## Recovery evidence status ownership
+
+The Activity recovery detail treats the selected dead-letter status as part of
+its evidence-read identity. A status transition for the same ID aborts the old
+read and fetches the current detail; a mismatched initial detail is not reused.
+Component regressions cover a late stale response and an initial snapshot from
+the previous status. The bounded summary still protects the visible status
+while the new evidence is loading.
+
+## Controlled AI option disclosure
+
+The AI quick-config editor now recognizes externally added advanced options on
+an already selected node. It opens the disclosure when the configured option
+count increases, resets it on a node change, and does not undo an operator's
+manual collapse when same-node options merely change value or disappear.
+Prompt-source synchronization uses saved-prompt presence rather than a newly
+allocated prompt-reference object. Unit and Chromium tests cover the controlled
+inline/saved transitions and native disclosure behavior without provider calls.

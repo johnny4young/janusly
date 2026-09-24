@@ -12,6 +12,7 @@
  */
 
 import type { Edge, Node } from '@xyflow/react'
+import type { ApiResponses } from './lib/api-types.generated'
 import type { WorkflowRecovery } from './lib/recovery-contract'
 
 export type JsonObject = Record<string, unknown>
@@ -26,7 +27,7 @@ export type RunNode = {
   startedAt?: string | null
   finishedAt?: string | null
 }
-export type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: JsonObject | null; createdAt?: string }
+export type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: JsonObject | null; createdAt?: string | null }
 type WorkflowNodeData = {
   label: string
   type: string
@@ -63,7 +64,7 @@ export type ReviewFindings = {
 }
 export type ToolInputFieldSchema = {
   name: string
-  kind: 'string' | 'number' | 'integer' | 'boolean' | 'json'
+  kind: ApiResponses['GET /tools'][number]['inputFields'][number]['kind']
   required: boolean
   options?: string[]
 }
@@ -151,7 +152,7 @@ export type SolutionPackPublic = {
  * `lastRunStatus`, which is the outcome of its most recent run. A paused
  * workflow refuses new runs, so the list must say so.
  */
-export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; bufferedTriggerCount?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
+export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string | null; createdAt?: string | null; updatedAt?: string | null; lastRunStatus?: string | null; runCount?: number; bufferedTriggerCount?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
 export type ValidationEvidenceLevel =
   | 'static'
   | 'writes_skipped'
@@ -178,8 +179,8 @@ export type RunSummary = {
     | 'semantic_accepted_loss'
     | null
   semanticViolationCount?: number
-  createdBy?: string
-  createdAt?: string
+  createdBy?: string | null
+  createdAt?: string | null
   /** Full run-start envelope. Present on `/run` and `/status`; omitted from the bounded `/runs` list. */
   inputJson?: JsonObject | null
   /** Correlation id shared by a subworkflow chain. Null on historical root runs that predate trace assignment. */

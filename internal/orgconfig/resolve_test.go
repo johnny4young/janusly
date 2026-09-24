@@ -125,3 +125,36 @@ func TestResolutionNormalizesEnvironmentValues(t *testing.T) {
 		t.Fatalf("invalid embedding URL env must fall through: %v %q", value, source)
 	}
 }
+
+// Empty is an intentional override, not an instruction to inherit. In
+// particular, an organization can revoke stdio commands allowed by the host.
+func TestExplicitEmptyTenantStringOverridesEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		key, envKey, fallback string
+	}{
+		{"mcp.clientCommandAllowlist", "JANUSLY_MCP_ALLOWED_COMMANDS", "node,uvx"},
+		{"memory.embeddingModel", "JANUSLY_EMBEDDING_MODEL", "custom-model"},
+		{"memory.embeddingBaseUrl", "OLLAMA_BASE_URL", "https://embeddings.example"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			lookup := func(key string) (string, bool) { return tc.fallback, key == tc.envKey }
+			for _, state := range []struct {
+				name          string
+				rows          map[string]json.RawMessage
+				value, source string
+			}{
+				{"absent", nil, tc.fallback, "env"},
+				{"empty", map[string]json.RawMessage{tc.key: json.RawMessage(`""`)}, "", "tenant"},
+				{"whitespace", map[string]json.RawMessage{tc.key: json.RawMessage(`"  "`)}, "", "tenant"},
+				{"invalid", map[string]json.RawMessage{tc.key: json.RawMessage(`false`)}, tc.fallback, "env"},
+			} {
+				t.Run(state.name, func(t *testing.T) {
+					value, source := ResolveValue(tc.key, state.rows, lookup)
+					if value != state.value || source != state.source {
+						t.Fatalf("resolved (%v, %s), want (%v, %s)", value, source, state.value, state.source)
+					}
+				})
+			}
+		})
+	}
+}

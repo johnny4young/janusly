@@ -1,3 +1,4 @@
+import type { ApiResponses } from '../lib/api-types.generated'
 import type { WorkflowDefinition } from '../types'
 import type { RecoveryDrillOutcome } from './recovery/RecoveryDrillOutcomeCard'
 
@@ -29,12 +30,7 @@ export type SuspectVersionInfo = {
 }
 
 /** Bounded provenance for a code-authored recovery drill. */
-export type RecoveryDrillProvenance = {
-  kind: 'solution_pack_drill'
-  packId: string
-  fixtureId: string
-  recoveryPath: 'direct_failure' | 'runtime_failure' | 'stalled_node_reaper'
-}
+export type RecoveryDrillProvenance = NonNullable<ApiResponses['GET /dlq/entries/{deadLetterId}']['drill']>
 
 /** Web projection of one dead-letter row. List reads omit snapshot fields. */
 export type DeadLetter = {
@@ -48,8 +44,8 @@ export type DeadLetter = {
   errorJson: unknown
   nodeType?: string | null
   workflowName?: string | null
-  createdAt?: string
-  replayedAt?: string
+  createdAt?: string | null
+  replayedAt?: string | null
   recovery?: DeadLetterRecovery | null
   suspectVersion?: SuspectVersionInfo | null
   drill?: RecoveryDrillProvenance | null

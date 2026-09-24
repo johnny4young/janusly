@@ -383,7 +383,7 @@ func (e *Engine) applySemanticResolution(
 			"decision": decision, "resumed": resumed,
 			"candidateArtifactId":  target.candidateArtifact.ID,
 			"validationArtifactId": target.validationArtifact.ID,
-		}, defaultPersistMaxBytes()), resolvedAt)
+		}, e.persistence.MaxBytes()), resolvedAt)
 	if resumed {
 		// Go's durable queue is PostgreSQL itself: the ordinary readiness scan
 		// queues every now-ready successor in this same transaction. QueueRunNode
@@ -394,7 +394,7 @@ func (e *Engine) applySemanticResolution(
 		}
 	}
 
-	if err := audit.WriteInTx(ctx, wrapped, input.Auth, audit.Action("recovery.semantic_resolved"), audit.Options{
+	if err := e.audit.WriteInTx(ctx, wrapped, input.Auth, audit.Action("recovery.semantic_resolved"), audit.Options{
 		TargetType: "recovery_case", TargetID: input.CaseID,
 		Metadata: map[string]any{
 			"runId": snapshot.RunID, "sourceNodeId": snapshot.SourceNodeID,

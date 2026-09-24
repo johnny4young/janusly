@@ -21,6 +21,8 @@
     "eqeqeq": ["error", "always", { "null": "ignore" }],
     "no-unneeded-ternary": "error",
     "react/jsx-no-useless-fragment": "error",
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "error",
     "typescript/no-invalid-void-type": "error",
     "unicorn/no-thenable": "error",
     "unicorn/no-useless-switch-case": "error",

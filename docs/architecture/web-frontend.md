@@ -8,6 +8,12 @@ bundle with SPA fallback, one-year immutable caching for hashed `/assets/`, and
 `no-cache` for the HTML shell and top-level files. Vite proxies API paths to
 `127.0.0.1:3001` during development.
 
+The operator-visible build stamp is injected into the no-cache HTML root and
+read by the browser from that document. It is not compiled into hashed JS:
+building unchanged frontend source for a new commit must not invalidate every
+asset or make gzip budgets depend on the commit ID. The Go binary's verified
+commit/tree provenance remains the authoritative runtime identity.
+
 The Go browser boundary applies the CORS allowlist and defense-in-depth browser
 headers to API, SPA, and public responses: CSP, frame denial, MIME sniffing
 prevention, a bounded permissions policy, and a referrer policy. New browser
@@ -17,6 +23,13 @@ The application has one i18n boundary under `web/src/i18n`, one workflow store,
 and error boundaries around major workspaces. Accessibility, localization,
 browser behavior, bundle budgets, and zero-console-error E2E are acceptance
 requirements.
+
+Native React `rules-of-hooks` and `exhaustive-deps` are lint errors. Negative
+fixtures prove both rules execute. The stable translator reads a subscribed
+runtime locale outside React; a memo that invokes it indirectly must retain
+locale invalidation, documented locally when the dependency analyzer cannot
+see through that helper. Other missing dependencies are fixed at the hook
+boundary rather than hidden with a broad lint exclusion.
 
 New contract-first surfaces use `contractApi` with operation types generated
 from `contract/openapi.json`. Authoring additionally validates the parsed
@@ -28,6 +41,29 @@ exact workflow snapshot, dynamically loading the full strict Recovery Contract
 validator only when a reviewed proposal carries recovery policy. The validated
 snapshot is cloned before confirmation and catalog refresh so shared UI state
 cannot change the object copied into the canvas.
+
+Successful HTTP responses with unreadable bodies are errors, not empty success
+objects; cancellation remains `AbortError`. A genuinely empty body remains
+compatible with bodyless endpoints. Non-success responses retain their HTTP
+status even if error details cannot be read. Before polling mutates run state,
+`src/lib/run-status-contract.ts` validates the entire summary, nodes, events and
+pagination projection, including run identity and duplicate row identifiers.
+Malformed snapshots leave the previous projection intact; stale requests are
+discarded before validation. A later valid poll can recover normally, and
+refreshing the latest event page never rewinds already-loaded history.
+
+Recovery AI patch and explicit playbook-use responses cross the dedicated
+untrusted-response boundary in `web/src/lib/recovery-patch-contract.ts` before
+entering dialog state. A current envelope (one with `suggestions`) must contain
+one to three bounded workflow proposals and a recovery passport whose failure
+signature matches the locally derived incident. Persisted workflow identity is
+added only when absent; an explicit foreign identity is rejected rather than
+rewritten. Playbook responses must also match the requested active playbook,
+workflow and signature. Evidence is bounded and re-scrubbed once at this HTTP
+boundary, and the React views consume only the projected read model. The legacy
+projection exists only for envelopes with no `suggestions` property; a present
+empty or malformed list fails closed. Do not add UI for response fields that no
+current server route produces.
 
 Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
 They must preserve the same strict-object, bound, default, transform, and
@@ -46,6 +82,14 @@ identity. `workflowToGraph` uses a unique local id even for malformed historical
 duplicates, carries the original id in edge data, and `getWorkflowJson`
 round-trips that original value. Never silently replace a persisted edge id
 with an array index: validation and recovery evidence may refer to it.
+
+Recovery queue handoffs bind selection and focus to the requested dead-letter
+identity, even when that row is outside the current filtered page. An earlier
+clicked row or cached off-list detail must never stand in for a new request.
+The panel waits for the exact detail or an explicit not-found result before
+focusing it; a queue-level handoff focuses the queue heading. A new handoff
+exits bulk selection, while a deliberate row click or keyboard selection
+supersedes a pending handoff.
 
 The versioned DAG's inline `metadata` is a closed descriptive shape
 (`description`, `tags`), not a generic extension bag. Operational metadata uses
@@ -74,7 +118,11 @@ them, and `WorkspaceSectionNav` reuses those importers on hover/focus. The
 `authoring-workspace` group also contains shared dependencies, so its code can
 load before an authoring panel mounts. `lazy()` defers mounting, not necessarily
 transfer; a second destination-level preload effect is unnecessary. First-open
-navigation uses the Suspense fallback if its import is still pending.
+navigation uses the Suspense fallback if its import is still pending. Small helpers
+shared only by lazy list surfaces are coalesced in `lazy-ui`; recovery-only models,
+status primitives and evidence helpers are coalesced in `recovery-ui`. Neither
+group belongs on the cold shell path. This avoids one gzip/import boundary per
+micro-module without merging the independent panel chunks operators navigate to.
 Stylesheets follow the
 chunk that renders them: a rule whose classes are owned only by lazy-loaded
 components lives next to its owner (`<Component>.css`, or `<folder>/<folder>.css`
@@ -85,8 +133,13 @@ gzip (2026-09). When adding styles for a lazy panel, put them in its adjacent
 sheet; `scripts/check-css-classes.mjs` still requires every class to have a
 production owner wherever the sheet lives. `RightPanel` and `AppWorkspace` are memoized, and the shell's derived counts
 are memoized on their inputs, because the shell renders on every store tick.
-Dialogs get Escape from `useDialogFocusTrap`'s `onEscape` option rather than
-their own keydown effects.
+Dialogs normally get Escape from `useDialogFocusTrap`'s `onEscape` option.
+Recovery keeps its state-specific Escape guard so in-flight saves and rejection
+feedback cannot be bypassed. It retains focus on its dialog root when an
+asynchronous step replaces the active button; Tab and Shift+Tab stay within the
+modal, including busy steps with no enabled controls. The initial Generate
+action may receive focus, but the validated Apply action never gains focus
+automatically after a sandbox response.
 Every product action is the `Button` primitive (`components/ui/Button.tsx`):
 `size="sm"` for inline row and toolbar actions, `variant="primary"` for the
 one action a surface leads with, `variant="danger"` for destructive ones,
@@ -114,6 +167,76 @@ for consumers already mounted; the DOM-focus buses (authoring problems,
 resilience) stay events because they are not navigation. `?deadLetterId=`
 from alert notifications remains a supported alias of the dlq route.
 
+The shell presents four stable top-level task spaces: Home, Workflows,
+Activity and Settings. A routed section remains visible as location context
+even when it is intentionally omitted from the compact section rail: the top
+bar renders destination then section, and the rail introduction names the
+exact section with its own helper copy. For example, `#/recover` reads as
+Activity / Recover, and a recovery-case route resolves to the same Recover
+context. Reloading or browser navigation must preserve both the route and that
+context; grouping a section never makes its deep link anonymous.
+
+The eager shell owns the core locale catalog. Non-home main and authoring-panel
+slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
+behind an accessible, height-preserving skeleton while the sidebar, top bar and
+status bar remain interactive. The same local boundary contains a rejected
+chunk or render failure and offers an in-place retry; navigation changes reset
+only the failed area. Full-screen boot UI is reserved for application bootstrap,
+not route-level loading.
+
+Settings keeps one workspace destination and a permission-aware focused-area
+rail. The configuration-first order is Organization, Access, Connections and
+AI configuration, followed by Reliability, Usage and Infrastructure. Organization
+owns workspace-wide data governance and audit history; Access owns membership,
+roles, authentication, SSO and SCIM. Connections is the stable user-facing name
+for credentials and external services, while the existing `integrations` route
+identifier remains compatible with saved deep links. The canonical Connections
+inventory stays list-first with a separate add dialog; Settings links to it
+rather than duplicating the secret form. Focused areas expose their own heading,
+persist in the hash, remain horizontally reachable on narrow screens and mount
+only their active cards. On narrow Connections views, the primary action stacks
+inside the card and each fixed-height virtual row keeps status, kind, expiry and
+both mutation actions visible; secondary owner and last-used facts remain on the
+wider inventory. The overview no longer presents a credential-only count as if
+it represented every connection type.
+
+## Canvas authoring clarity
+
+Authoring edges always expose a route kind: default, conditional, or error. A
+conditional badge renders a single-line, CSS-truncated expression while its
+complete scrubbed value remains in the native tooltip and directed accessible
+name. Known credential shapes and control characters are removed before either
+surface is rendered. Error routes retain their separate dashed danger treatment.
+
+Advanced JSON is a draft editor, not a write-through field. It validates 300 ms
+after input, keeps invalid text intact, reports a localized line and column, and
+accepts only JSON objects. A blur updates node configuration only after the draft
+is valid. Successful AI proposal Apply remains an explicit draft mutation; the
+next action scrolls and focuses the already-mounted canvas without changing the
+AI Studio route, so the review context remains available. A blank writable canvas
+has one primary assisted start and keeps Add step as the manual, provider-free
+path. The teaching overlay still passes palette drops through outside its action.
+
+The Home hero is a named region inside workspace main, not a second page banner.
+The authoring canvas is an explicitly named programmatic focus target, JSON
+feedback uses status/alert semantics, and decorative edge badges do not duplicate
+the directed edge announcement. Browser checks cover keyboard focus, serious and
+critical axe findings, overflow and readable text at compact and desktop widths.
+
+Typography deliberately has no remote or bundled font dependency. The existing
+local-preferred sans and mono token stacks fall through to platform system faces;
+`cold-load-polish.test.ts` prevents a remote font dependency and pins those
+fallbacks. This preserves the dense control-plane layout without adding a download
+or a first-render font swap. Spanish product copy uses neutral Latin American
+tuteo. Canonical product terms stay distinct: workflow/flujo, run/ejecución,
+replay/reproducción or reejecución, retry/reintento, and redrive are not treated
+as interchangeable.
+
+Copy/paste semantics and automatic layout remain evidence-gated. This slice does
+not add global keyboard interception, regenerate ids, rewrite persisted positions,
+or introduce a layout library without representative difficult graphs and a
+measured operator need.
+
 ## Data invalidation
 
 Panel reads subscribe to the resources they depend on through
@@ -130,15 +253,139 @@ store. There is no parallel global refresh counter. When adding a panel,
 declare its tags next to the component; when adding a mutation, pass the tags
 it changes, or leave the call untagged when the blast radius is unclear.
 
+## Version history ownership
+
+History pages and suggestions belong to the current organization, operator,
+saved workflow and effective permissions. Refresh or navigation aborts owned
+work; a new comparison cannot reactivate an older suggestion request. Loading,
+read failure and empty history are distinct, and retry creates a fresh request.
+
+Loading a history row retains its immutable version ID and number in the canvas,
+so an unedited run can bind the exact source version. Confirming discarded edits
+must still match the initiating context and semantic canvas revision; a stale
+confirmation does not overwrite a workflow selected or edited in the meantime.
+
+Rollback confirmation owns a cloned current/target preview and the initiating
+operator, permissions and canvas revision. Cancel receives initial focus, and
+unsaved edits are disclosed before confirmation. Context changes abort local
+ownership, not an already accepted server write. A success receipt must match
+the workflow and source version and identify a newly created version before
+hydration or success feedback; the canvas retains that new immutable identity.
+Success closes the dialog and announces the new version in a toast. Workflow
+commands and rollback share the same canvas ownership token and immutable
+identity parser, rather than maintaining independent copies. Rollback subscribes
+to store changes synchronously: switching away and back within one React update
+still disposes the original request, rather than reviving an old confirmation.
+
+## Recovery comparison evidence
+
+The applied-recovery delta owns its health read, exact-version preview and
+rollback intent for one operator, organization, canvas revision and permission
+scope. Changing that scope, cutoff, signature or refresh disposes pending work;
+synchronous ownership also handles batched away-and-back context changes. A
+captured before snapshot is not shown under a different context. Revoking read
+access clears the surface and stops its reads.
+
+Health payloads validate the workflow/cutoff, bounded numeric signals, sample
+gate, score delta and recurrence references before display. Counts share the same
+non-negative safe-integer guard as run, list and dead-letter contracts, without
+coercion. Native progress exposes completed samples against the comparison floor.
+Rollback fetches both
+exact versions and binds the prior immutable ID to the health evidence. Cancel
+restores focus to the preview trigger after its asynchronous loading state.
+
+The comparison covers versions **from** the cutoff, not only that version. Its
+sample floor counts terminal health observations, not in-flight jobs. Zero matching
+failures is neutral observed evidence, never proof of a successful repair. Recurring
+failure links use the canonical queue hash route, not an unsupported query key.
+
+## Workflow deployment ownership
+
+Rollout controls own their reads, qualification evidence and pending writes for
+one organization, operator, saved workflow and permission mode. Changing that
+context remounts the controls and aborts their requests; refresh also invalidates
+pending confirmations. A stale confirmation cannot dispatch even if its dialog
+was already open. Cancellation does not undo a write the server already received;
+the next read is authoritative.
+
+Qualification evidence must match the selected immutable baseline/candidate pair.
+Malformed deployment or qualification payloads fail closed with an inline retry,
+not an empty deployment or permission to start. The numeric controls retain
+native range validation and visible localized labels.
+
 ## Bundle budgets
 
 `performance-budgets.json` is a ratchet, not a target: the total artifact,
 the worst single-locale artifact, the eager `index.css` stylesheet and the
 eager `workflow-workspace` chunk are capped, and every other chunk may grow at
-most 10 % over its recorded baseline. The caps moved twice in 2026-09: by the
-measured cost of the controller/view splits and the hash router (about
-1.5 KiB of gzip for the object keys a model boundary needs), and by the
-per-chunk stylesheet split, which trades roughly 12 KiB of total gzip (one
-compressed CSS asset per lazy chunk) for 16 KiB less on every cold load. The
-cold path is what the caps protect: `index.css`, `workflow-workspace` and the
+most 10 % over its recorded baseline. The caps moved through three reviewed measurements in 2026-09: the measured
+cost of the controller/view splits and hash router (about 1.5 KiB of gzip for
+the object keys a model boundary needs), the per-chunk stylesheet split
+(roughly 12 KiB of total gzip in exchange for 16 KiB less on every cold load),
+and a 0.5 KiB single-locale allowance for the fail-closed RecoveryDialog AI
+response parser. The complete-artifact cap remained 605 KiB for that security
+change; the parser stays in the existing lazy dialog rather than adding a
+network request. The cold path is what the caps protect: `index.css`, `workflow-workspace` and the
 route budgets in `performance/routes.performance.spec.ts` only ratchet down.
+
+## Closing failures without recovery
+
+Individual, bulk and keyboard DLQ closure share an explicit accepted-loss
+confirmation. The dialog snapshots IDs and available workflow/run/step labels;
+polling or a changed selection cannot change the acknowledged request. Cancel is
+the initial focus, Escape cancels before submission, and submission is guarded
+against duplicate activation. While a request is pending, dismissal and competing
+queue actions are disabled. Context/permission changes invalidate pending consent.
+
+A partial bulk response keeps failed rows selected for a new acknowledgement.
+An unconfirmed or failed closure never advances triage or claims recovery. Closing
+uses the existing tenant-scoped API authorization and transition rules; the UI is
+not a substitute for either. Accepted loss does not publish the recovered
+all-clear celebration or promise undo of external effects.
+
+
+### Home evidence states
+
+Home derives health from validated production metrics, not the visible run page.
+An empty completed-run sample is neither healthy nor failed. First-load errors
+are unavailable; retained metrics are explicitly stale during refresh, after
+metrics read failures, or five minutes after the last successful full metrics
+read (checked by the existing minute clock). Missing required queue, semantic
+case or operator-brief evidence (including brief warnings) makes health
+unavailable even when the metrics sample succeeds. Missing queue is not zero.
+Impact-only polling does not renew the metrics timestamp. Full and impact reads
+share request ordering: an older result or failure cannot replace newer impact
+evidence. Brief and queue snapshots are scoped to organization and user.
+Home publishes semantic blocker run IDs to the shell only when their ordered
+values or subscriber change. Re-rendering a pending snapshot or refreshing the
+same case projection must not repeatedly set the shell's blocker state; an
+organization change still clears blockers that belonged to the previous org.
+Retry calls the invalidator without forwarding a click event.
+Each full, impact and brief request owns an AbortController and aborts on cleanup;
+this also bypasses the API client’s short rejected-GET cache so an immediate
+retry actually requests fresh evidence. The hero withholds scores,
+healthy-history copy and celebrations while evidence is empty or unconfirmed;
+known work remains accessible through the action inbox.
+
+A genuinely empty workspace leads with the existing permission-gated controlled
+drill and workflow creation actions rather than two empty work cards. No drill
+starts on mount; the missing-billing-secret fixture fails before provider egress,
+and its validation evidence stays out of production metrics. The entry is not
+duplicated in Insights, and dismissing it is session-only. Existing workspaces
+with a filtered empty run page keep their operational overview.
+
+
+### Recovery queue hierarchy
+
+The queue leads with compact organization-wide totals and visibly grouped search,
+failure-status, recovery-owner, recovery-severity and sort controls. Totals never
+represent the filtered or paginated result; failure status is distinct from the
+linked recovery item's progress. Filters keep their existing combined server
+query and persistence semantics. Refresh may reorder rows without moving focus
+or clearing the selected failure or bulk selection.
+
+Rows retain the fixed 54px height required by virtualization. Controls reflow
+without hiding actions at narrow widths; full failure details remain available
+below the list. Chromium checks cover long identifiers, English/Spanish labels,
+keyboard filter traversal and 390/640/1280 CSS-pixel widths. The 640px case is a
+200%-zoom layout proxy, not a screen-reader or physical browser-zoom certificate.

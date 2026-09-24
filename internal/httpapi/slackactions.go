@@ -219,7 +219,7 @@ func (s *V1Server) slackCallbackHandler(w http.ResponseWriter, r *http.Request) 
 	rejected := func(reason string, metadata map[string]any) {
 		payload := map[string]any{"reason": reason}
 		maps.Copy(payload, metadata)
-		audit.Write(r.Context(), s.pool, &auth.Context{OrgID: connection.OrgID, UserID: "slack:interaction"},
+		s.audit.Write(r.Context(), s.pool, &auth.Context{OrgID: connection.OrgID, UserID: "slack:interaction"},
 			"slack.interaction.rejected", audit.Options{
 				TargetType: "slack-interaction", TargetID: connection.ID, Metadata: payload,
 			})
@@ -274,7 +274,7 @@ func (s *V1Server) slackCallbackHandler(w http.ResponseWriter, r *http.Request) 
 		},
 	}
 	if interaction.ActionID == slackActionOpen {
-		audit.Write(r.Context(), s.pool, actor, "slack.interaction.opened", audit.Options{
+		s.audit.Write(r.Context(), s.pool, actor, "slack.interaction.opened", audit.Options{
 			TargetType: "recovery-item", TargetID: interaction.Value, Metadata: slackMetadata,
 		})
 		writeUnversioned(w, opOK(map[string]any{"ok": true}))
@@ -401,7 +401,7 @@ func (s *V1Server) mountSlackInteractionRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusConflict, "slack_interaction_conflict", "connection name or team already exists", nil))
 			return
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "slack.interaction.created", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "slack.interaction.created", audit.Options{
 			TargetType: "slack-interaction", TargetID: id, Metadata: map[string]any{"teamId": teamID},
 		})
 		row, _ := store.New(s.pool).GetSlackInteractionConnection(r.Context(), store.GetSlackInteractionConnectionParams{OrgID: rc.orgID, ID: id})
@@ -426,7 +426,7 @@ func (s *V1Server) mountSlackInteractionRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusNotFound, "slack_interaction_not_found", "interaction connection not found", nil))
 			return
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "slack.interaction.updated", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "slack.interaction.updated", audit.Options{
 			TargetType: "slack-interaction", TargetID: id,
 		})
 		row, _ := store.New(s.pool).GetSlackInteractionConnection(r.Context(), store.GetSlackInteractionConnectionParams{OrgID: rc.orgID, ID: id})
@@ -441,7 +441,7 @@ func (s *V1Server) mountSlackInteractionRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusNotFound, "slack_interaction_not_found", "interaction connection not found", nil))
 			return
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "slack.interaction.deleted", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "slack.interaction.deleted", audit.Options{
 			TargetType: "slack-interaction", TargetID: id,
 		})
 		writeUnversioned(w, opOK(map[string]any{"ok": true}))

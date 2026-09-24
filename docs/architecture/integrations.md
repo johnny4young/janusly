@@ -4,6 +4,13 @@ Integration tools are registered in `internal/tools` with input/output schemas,
 static write capability, and bounded execution. Workflow dispatch goes through
 `internal/executors`.
 
+External database tools receive one runtime-owned pool budget through their
+engine dependencies. API and MCP construct it with the validated boot-time
+limit and close it after producers stop; neither a registry nor an engine
+creates a hidden global cache. Leases span the entire operation and transaction
+rollback, retired pools retain their capacity until drained, and shutdown never
+closes another runtime's pools. See [configuration](../configuration.md#external-database-tool-pool-budget).
+
 Credentials are organization-scoped. Managed values are envelope-encrypted in
 PostgreSQL with an external root key. Environment-backed references are limited
 by reserved namespaces and an operator allowlist. API payloads never return
@@ -139,6 +146,14 @@ parameters, rows, statement count, and timeout. `db.schema.describe` and
 the database, not the lexical classifier, is the final write-prevention
 authority. External pools are bounded per organization and process, use one
 connection each, and are replaced when the credential fingerprint changes.
+Caller leases span connection acquisition through transaction cleanup. Rotation
+retires the old pool immediately from new admission; current callers finish on
+it, and the last caller closes it outside the cache mutex. Retired pools count
+against both physical pool budgets until closed. Same-organization eviction
+selects only idle LRU entries; busy capacity returns `db_pool_exhausted`, never
+cross-tenant eviction or an unbounded wait. The operation deadline also covers
+connection acquisition. Shutdown stops admission and drains all leases after
+the supervised workers stop, before runtime database pools close.
 Validation mode suppresses every write-capable database operation.
 
 `sheet.append` serializes each tenant/object key with a PostgreSQL advisory

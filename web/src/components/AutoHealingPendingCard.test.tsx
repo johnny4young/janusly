@@ -82,6 +82,16 @@ beforeEach(() => {
 })
 
 describe('<AutoHealingPendingCard />', () => {
+  it('does not refetch pending decisions for an unrelated prop rerender', async () => {
+    const view = render(<AutoHealingPendingCard />)
+    expect(await screen.findByText('External writes skipped')).toBeInTheDocument()
+    expect(api).toHaveBeenCalledTimes(1)
+
+    view.rerender(<AutoHealingPendingCard canDecide={false} />)
+    expect(screen.getByText('External writes skipped')).toBeInTheDocument()
+    expect(api).toHaveBeenCalledTimes(1)
+  })
+
   it('requires explicit acknowledgement when external writes were skipped', async () => {
     render(<AutoHealingPendingCard />)
 

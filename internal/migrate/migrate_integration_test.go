@@ -146,6 +146,30 @@ func TestFreshMigrationIsIdempotentAndComplete(t *testing.T) {
 	}
 }
 
+func TestMigrationAndReadinessAcceptPoolConnectionOptions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	dsn := createMigrationTestDatabase(t)
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse isolated database URL: %v", err)
+	}
+	query := parsed.Query()
+	query.Set("pool_max_conns", "4")
+	parsed.RawQuery = query.Encode()
+	poolURL := parsed.String()
+
+	if err := Up(ctx, poolURL); err != nil {
+		t.Fatalf("migrate with pool option: %v", err)
+	}
+	if err := Up(ctx, poolURL); err != nil {
+		t.Fatalf("second migration with pool option: %v", err)
+	}
+	if err := AssertMigrated(ctx, poolURL); err != nil {
+		t.Fatalf("readiness with pool option: %v", err)
+	}
+}
+
 func TestExistingSchemaIsNotUpgraded(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()

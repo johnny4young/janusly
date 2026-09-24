@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -166,8 +167,23 @@ func TestAuthoringRejectsOversizedOutputWithoutBlindRetry(t *testing.T) {
 	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
 		t.Context(), client, "one noop", "", v1Request{}, 1, "", 0,
 	)
-	if raw != nil || aiErr == nil || aiErr.Class != "invalid_output" || client.calls != 1 || meta.modelCalls != 1 {
+	if raw != nil || aiErr == nil || aiErr.Class != "invalid_output" || client.calls != 1 ||
+		meta.modelCalls != 1 || meta.failureStage != "output_limit" {
 		t.Fatalf("oversized output must stop after one provider call: raw=%s meta=%+v err=%v calls=%d",
+			raw, meta, aiErr, client.calls)
+	}
+}
+
+func TestAuthoringFailureMetaKeepsOnlyValidatorCodes(t *testing.T) {
+	broken := `{"dslVersion":"1.0","id":"broken","name":"Broken","nodes":[{"id":"shape","type":"transform","config":{"mapping":{}}}],"edges":[]}`
+	client := &scriptedAuthoringClient{replies: []string{broken}}
+	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		t.Context(), client, "Shape an operator result", "", v1Request{}, 1, "", 0,
+	)
+	if raw != nil || aiErr == nil || aiErr.Class != "invalid_output" || client.calls != 3 ||
+		meta.failureStage != "candidate_validation" ||
+		!slices.Equal(meta.validationIssueCodes, []string{domain.CodeTransformMissingMapping}) {
+		t.Fatalf("validation failure telemetry must carry only codes: raw=%s meta=%+v err=%v calls=%d",
 			raw, meta, aiErr, client.calls)
 	}
 }
@@ -205,11 +221,39 @@ func TestAuthoringProviderPromptScrubsLiteralSecretsAndPreservesReferences(t *te
 func TestAuthoringNeverAcceptsAWorkflowThatDropsOperatorReferences(t *testing.T) {
 	omitted := `{"dslVersion":"1.0","id":"omitted","name":"Omitted","nodes":[{"id":"done","type":"noop","config":{}}],"edges":[]}`
 	client := &scriptedAuthoringClient{replies: []string{omitted, omitted}}
-	raw, _, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
 		t.Context(), client, "Read {{ secret.BILLING_TOKEN }} and each {{item.id}} at {{index}}", "", v1Request{}, 1, "", 0,
 	)
-	if raw != nil || aiErr == nil || aiErr.Class != "invalid_output" || client.calls != freeJsonMaxAttempts {
+	if raw != nil || aiErr == nil || aiErr.Class != "invalid_output" ||
+		client.calls != freeJsonMaxAttempts || meta.failureStage != "json_or_reference" ||
+		len(meta.validationIssueCodes) != 0 {
 		t.Fatalf("final omission must fail closed: raw=%s err=%v calls=%d", raw, aiErr, client.calls)
+	}
+}
+
+func TestFallbackAuditCarriesCandidateValidationDiagnostics(t *testing.T) {
+	duplicate := `{"dslVersion":"1.0","id":"dup","name":"Dup","nodes":[{"id":"a","type":"noop","config":{}},{"id":"a","type":"noop","config":{}}],"edges":[]}`
+	client := &scriptedAuthoringClient{replies: []string{duplicate}}
+	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		t.Context(), client, "two noops", "", v1Request{}, 1, "", 0,
+	)
+	if raw != nil || aiErr == nil || meta.failureStage != "candidate_validation" {
+		t.Fatalf("persistently invalid candidate must fail validation: raw=%s meta=%+v err=%v", raw, meta, aiErr)
+	}
+	metadata := fallbackGenerationAuditMetadata(meta, aiErr, assuranceCompilation{})
+	codes, _ := metadata["validationIssueCodes"].([]string)
+	if metadata["failureStage"] != "candidate_validation" || !slices.Contains(codes, domain.CodeDuplicateNodeID) ||
+		len(codes) > 5 || metadata["repairAttempts"] != maxRepairAttempts {
+		t.Fatalf("fallback audit lacks validation diagnostics: %+v", metadata)
+	}
+
+	providerErr := &ai.AIError{Class: "rate_limit", Message: "simulated"}
+	bare := fallbackGenerationAuditMetadata(generationMeta{}, providerErr, assuranceCompilation{})
+	if _, ok := bare["failureStage"]; ok {
+		t.Fatalf("provider failures must not claim a generation stage: %+v", bare)
+	}
+	if _, ok := bare["validationIssueCodes"]; ok {
+		t.Fatalf("provider failures must not carry issue codes: %+v", bare)
 	}
 }
 

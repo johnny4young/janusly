@@ -18,11 +18,11 @@ func TestRecoveryCaseLadder(t *testing.T) {
 			t.Fatalf("canonical step must be legal: %s -> %s", path[i], path[i+1])
 		}
 	}
-	if got := ListLegalRecoveryCaseTransitions("verified_recovered"); len(got) != 0 {
+	if got := legalRecoveryCaseTransitions["verified_recovered"]; len(got) != 0 {
 		t.Fatalf("terminal must have no successors: %v", got)
 	}
 	for _, terminal := range []string{"recurred", "accepted_loss", "abandoned"} {
-		if got := ListLegalRecoveryCaseTransitions(terminal); len(got) != 0 {
+		if got := legalRecoveryCaseTransitions[terminal]; len(got) != 0 {
 			t.Fatalf("%s must be terminal: %v", terminal, got)
 		}
 	}

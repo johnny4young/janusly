@@ -29,6 +29,10 @@ const LOCALES = [
     runs: 'Runs',
     workspace: 'Workspace',
     operationsHeading: 'Workspace settings',
+    organization: 'Organization',
+    access: 'Access',
+    connections: 'Connections',
+    aiConfiguration: 'AI configuration',
     automation: 'Automation and patterns',
     primaryGroup: 'Workspace',
     homeKicker: 'Home',
@@ -47,6 +51,10 @@ const LOCALES = [
     runs: 'Ejecuciones',
     workspace: 'Espacio de trabajo',
     operationsHeading: 'Configuración del espacio',
+    organization: 'Organización',
+    access: 'Acceso',
+    connections: 'Conexiones',
+    aiConfiguration: 'Configuración de IA',
     automation: 'Automatización y patrones',
     primaryGroup: 'Principal',
     homeKicker: 'Inicio',
@@ -146,6 +154,48 @@ test('workflow creation is reachable from the workflow inventory', async ({ page
   expect(pageErrors).toEqual([])
 })
 
+test('a cold settings chunk keeps the workspace shell and offers a local loading state', async ({
+  page,
+}) => {
+  const orgId = `task-space-loading-${Date.now()}`
+  let releaseChunk!: () => void
+  let reportChunkRequest!: () => void
+  const chunkReleased = new Promise<void>((resolve) => { releaseChunk = resolve })
+  const chunkRequested = new Promise<void>((resolve) => { reportChunkRequest = resolve })
+
+  await page.route(/\/assets\/OperationsPage-[^/]+\.js$/, async (route) => {
+    reportChunkRequest()
+    await chunkReleased
+    await route.continue()
+  })
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.addInitScript((activeOrg) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+    window.localStorage.setItem('janusly:locale', 'en')
+    window.localStorage.setItem('janusly:activeTab', 'home')
+    window.localStorage.removeItem('janusly:sidebar:state')
+  }, orgId)
+  await page.goto('/')
+
+  try {
+    await page.locator('.builder-sidebar').getByRole('button', {
+      name: 'Settings',
+      exact: true,
+    }).click()
+    await chunkRequested
+
+    await expect(page.locator('.builder-sidebar')).toBeVisible()
+    await expect(page.locator('.top-bar')).toBeVisible()
+    await expect(page.getByTestId('workspace-content-loading')).toBeVisible()
+    await expect(page.locator('.boot-screen')).toHaveCount(0)
+    await expectAccessible(page, 'cold settings workspace area')
+  } finally {
+    releaseChunk()
+  }
+
+  await expect(page.getByRole('heading', { name: 'Workspace settings' })).toBeVisible()
+})
+
 for (const locale of LOCALES) {
   test(`${locale.locale} exposes four destinations with one approachable activity feed`, async ({
     page,
@@ -210,14 +260,6 @@ for (const locale of LOCALES) {
     await expectReadablePrimaryText(page.locator(
       '.we-recovery-center-hero__copy, .we-home-workspace button, .we-home-workspace p',
     ))
-    await expect(page.getByTestId('home-priority-inbox').getByRole('button', {
-      name: locale.activity,
-      exact: true,
-    })).toBeVisible()
-    await expect(page.getByTestId('home-active-work').getByRole('button', {
-      name: locale.activity,
-      exact: true,
-    })).toBeVisible()
     await expectAccessible(page, `${locale.locale} Home task space`)
     await capture(
       shell,
@@ -244,6 +286,15 @@ for (const locale of LOCALES) {
       name: locale.recover,
       exact: true,
     })).toBeVisible()
+    await expect(page).toHaveURL(/#\/recover$/)
+    await expect(page.locator('.top-bar-breadcrumb')).toContainText(locale.activity)
+    await expect(page.locator('.top-bar-breadcrumb')).toContainText(locale.recover)
+    await expect(sectionNav.getByTestId('workspace-section-context'))
+      .toHaveText(locale.recover)
+    await page.reload()
+    await expect(page).toHaveURL(/#\/recover$/)
+    await expect(page.getByTestId('workspace-section-nav')
+      .getByTestId('workspace-section-context')).toHaveText(locale.recover)
     await expect(page.getByTestId('recovery-queue')).toBeVisible()
     const recoveryQueueBox = await page.getByTestId('recovery-queue').boundingBox()
     const recoveryAutomation = page.getByTestId('recovery-automation')
@@ -322,6 +373,31 @@ for (const locale of LOCALES) {
       name: locale.operationsHeading,
       exact: true,
     })).toBeVisible()
+    const settingsRail = page.getByTestId('operations-rail')
+    for (const [section, label] of [
+      ['organization', locale.organization],
+      ['access', locale.access],
+      ['integrations', locale.connections],
+      ['ai', locale.aiConfiguration],
+    ] as const) {
+      const tab = settingsRail.getByTestId(`operations-rail-tab-${section}`)
+      await expect(tab).toHaveText(label)
+      await tab.click()
+      await expect(tab).toHaveAttribute('aria-current', 'page')
+      await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
+      await expect(page).toHaveURL(new RegExp(`#\\/operations\\/${section}$`))
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(settingsRail).toBeVisible()
+    expect(await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    )).toBeLessThanOrEqual(2)
+    await expectAccessible(page, `${locale.locale} Settings focused areas on mobile`)
+    await capture(
+      shell,
+      `web-${locale.locale}-settings-focused-mobile`,
+    )
+    await page.setViewportSize({ width: 1280, height: 720 })
     await expectAccessible(page, `${locale.locale} Settings task space`)
     await capture(
       shell,

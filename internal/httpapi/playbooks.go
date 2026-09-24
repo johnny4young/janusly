@@ -275,7 +275,7 @@ func (s *V1Server) createPlaybookCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if created {
-		audit.Write(ctx, s.pool, rc.authContext, "recovery.playbook.created", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "recovery.playbook.created", audit.Options{
 			TargetType: "recovery_playbook", TargetID: playbook.ID,
 			Metadata: map[string]any{
 				"deadLetterId": item.ID, "workflowId": workflowID, "signature": failureSignature,
@@ -315,7 +315,7 @@ func (s *V1Server) usePlaybookCore(r *http.Request, rc v1Request, id string) opR
 	if workflow == nil {
 		return opError(http.StatusUnprocessableEntity, "recovery_playbook_source_invalid", "Recovery Playbook source workflow is invalid", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "recovery.playbook.used", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "recovery.playbook.used", audit.Options{
 		TargetType: "recovery_playbook", TargetID: playbook.ID,
 		Metadata: map[string]any{
 			"deadLetterId": body.DeadLetterID, "workflowId": workflowID,
@@ -432,7 +432,7 @@ func (s *V1Server) playbookLifecycleCore(r *http.Request, rc v1Request, id, acti
 				return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 			}
 		}
-		audit.Write(r.Context(), s.pool, rc.authContext, "recovery.playbook.activated", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "recovery.playbook.activated", audit.Options{
 			TargetType: "recovery_playbook", TargetID: id,
 			Metadata: map[string]any{"version": playbook.Version, "signature": playbook.Signature},
 		})
@@ -453,7 +453,7 @@ func (s *V1Server) playbookLifecycleCore(r *http.Request, rc v1Request, id, acti
 			return opError(http.StatusNotFound, "recovery_playbook_not_found", "Recovery Playbook not found", nil)
 		}
 		if retired > 0 {
-			audit.Write(r.Context(), s.pool, rc.authContext, "recovery.playbook.retired", audit.Options{
+			s.audit.Write(r.Context(), s.pool, rc.authContext, "recovery.playbook.retired", audit.Options{
 				TargetType: "recovery_playbook", TargetID: id,
 				Metadata: map[string]any{"version": playbook.Version, "signature": playbook.Signature},
 			})

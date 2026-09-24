@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 
 type Locale = 'en' | 'es'
 type JsonObject = Record<string, unknown>
@@ -19,7 +19,9 @@ const labels = {
 export async function buildWorkflowProposal(page: Page, locale: Locale = 'en') {
   await page.getByRole('button', { name: labels[locale].compile, exact: true }).click()
   await page.getByTestId('intent-brief').waitFor({ state: 'visible' })
-  await page.getByRole('button', { name: labels[locale].build, exact: true }).click()
+  const build = page.getByRole('button', { name: labels[locale].build, exact: true })
+  await expect(build).toBeEnabled()
+  await build.click()
   const proposal = page.getByTestId('workflow-proposal')
   await proposal.waitFor({ state: 'visible' })
   return proposal

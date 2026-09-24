@@ -27,16 +27,9 @@ import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { isRunRequestCurrent } from '../run-transition'
 import { isTerminalRunStatus } from '@/lib/status'
-import type { RunEvent, RunNode, RunSummary } from '../types'
+import type { RunSummary } from '../types'
+import { parseRunStatusSnapshot, type RunStatusSnapshot } from '../lib/run-status-contract'
 import type { RunSummaryUpdateStarter } from './useBootstrapData'
-
-type RunResponse = {
-  run?: RunSummary
-  nodes?: RunNode[]
-  events?: RunEvent[]
-  eventsCursor?: string | null
-  eventsHasMore?: boolean
-}
 
 /** The poll machinery surface returned to the shell. `loadStatus` is shared
  *  with the shell's run-action handlers (approve / resume / replay / cancel),
@@ -47,7 +40,7 @@ export type RunPolling = {
 
 export type RunStatusLoadResult =
   | { discarded: true }
-  | { discarded: false; status: RunResponse }
+  | { discarded: false; status: RunStatusSnapshot }
 
 export type RunSummaryPatcher = (runId: string, patch: Partial<RunSummary>) => void
 
@@ -81,9 +74,9 @@ export function useRunPolling(
       requestId === requestSequence.current
       && isRunRequestCurrent(context, useWorkflowStore.getState())
     )
-    let status: RunResponse
+    let payload: unknown
     try {
-      status = await contractApi('GET /status', `/status?runId=${encodeURIComponent(id)}`, undefined) as unknown as RunResponse
+      payload = await contractApi('GET /status', `/status?runId=${encodeURIComponent(id)}`, undefined)
     } catch (error) {
       if (!isCurrentRequest()) return { discarded: true }
       throw error
@@ -92,24 +85,24 @@ export function useRunPolling(
     // The generation also prevents a same-id response from an older auth or
     // workflow owner from overwriting the current projection.
     if (!isCurrentRequest()) return { discarded: true }
-    if (status.run) commitRunSummary?.(status.run)
-    setRunNodes(status.nodes ?? [])
-    const statusEvents = status.events ?? []
+    const status = parseRunStatusSnapshot(payload, id)
+    if (!status) throw new Error(t('api.error.malformedResponse'))
+    commitRunSummary?.(status.run)
+    setRunNodes(status.nodes)
+    const statusEvents = status.events
     addEvents(statusEvents)
     // /status always describes the latest page. Once the user has loaded older
     // pages, preserving the existing cursor prevents polling from rewinding the
     // "Load older events" button back to the first page of history.
-    if (typeof status.eventsHasMore === 'boolean') {
-      const state = useWorkflowStore.getState()
-      const hasLoadedBeyondLatestPage = state.events.length > statusEvents.length
-      if (!status.eventsHasMore) {
-        setEventsPagination(null, false)
-      } else if (!state.eventsCursor && !hasLoadedBeyondLatestPage) {
-        setEventsPagination(status.eventsCursor ?? null, true)
-      }
+    const state = useWorkflowStore.getState()
+    const hasLoadedBeyondLatestPage = state.events.length > statusEvents.length
+    if (!status.eventsHasMore) {
+      setEventsPagination(null, false)
+    } else if (!state.eventsCursor && !hasLoadedBeyondLatestPage) {
+      setEventsPagination(status.eventsCursor, true)
     }
     return { discarded: false, status }
-  }, [addEvents, beginRunSummaryUpdate, setEventsPagination, setRunNodes])
+  }, [addEvents, beginRunSummaryUpdate, setEventsPagination, setRunNodes, t])
 
   // Polling fallback. The original 1.5s `/status` loop loads the initial
   // timeline and stays as the safety net. Its tick is a no-op while SSE is the

@@ -80,7 +80,7 @@ func (s *V1Server) createPromptCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(ctx, s.pool, rc.authContext, "prompt.created", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "prompt.created", audit.Options{
 		TargetType: "prompt", TargetID: id, Metadata: map[string]any{"name": body.Name},
 	})
 	created, err := q.GetPromptByName(ctx, store.GetPromptByNameParams{OrgID: rc.orgID, Name: body.Name})
@@ -152,7 +152,7 @@ func (s *V1Server) createPromptVersionCore(r *http.Request, rc v1Request, name s
 		if err != nil {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
-		audit.Write(ctx, s.pool, rc.authContext, "prompt.version_created", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "prompt.version_created", audit.Options{
 			TargetType: "prompt_version", TargetID: id,
 			Metadata: map[string]any{"name": prompt.Name, "version": next, "promptId": prompt.ID},
 		})
@@ -191,7 +191,7 @@ func (s *V1Server) pinPromptVersionCore(r *http.Request, rc v1Request, name stri
 	}); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(ctx, s.pool, rc.authContext, "prompt.version_pinned", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "prompt.version_pinned", audit.Options{
 		TargetType: "prompt", TargetID: prompt.ID,
 		Metadata: map[string]any{"name": prompt.Name, "version": version, "versionId": target.ID},
 	})

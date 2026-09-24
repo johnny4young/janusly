@@ -104,7 +104,11 @@ describe('<RightPanel /> credentials', () => {
   it('keeps creation focused and offers postgres for external DB tools', async () => {
     render(<RightPanel {...props()} />)
 
-    const createActions = await screen.findAllByRole('button', { name: 'Add connection' })
+    const createActions = await screen.findAllByRole(
+      'button',
+      { name: 'Add connection' },
+      { timeout: 5_000 },
+    )
     fireEvent.click(createActions[0]!)
     const kind = await screen.findByLabelText('Connection kind')
     expect(within(kind).getByRole('option', { name: 'postgres' })).toBeInTheDocument()
@@ -126,6 +130,8 @@ describe('<RightPanel /> recovery task space', () => {
     expect(sectionNav).toHaveAttribute('data-destination', 'activity')
     expect(within(sectionNav).queryByRole('button')).not.toBeInTheDocument()
     expect(within(sectionNav).getByText('Activity')).toBeVisible()
+    expect(within(sectionNav).getByTestId('workspace-section-context'))
+      .toHaveTextContent('Recover')
   })
 
   it('filters contextual sections with the same effective permissions as global navigation', () => {

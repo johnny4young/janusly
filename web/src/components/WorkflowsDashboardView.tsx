@@ -174,8 +174,8 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
               <><Trash size={14} aria-hidden="true" /> {t('workflowsDashboard.trashToggleToTrash')}</>
             )}
           </Button>
-          <Button size="sm" onClick={load} disabled={loading} aria-label={t('workflowsDashboard.refresh')}>
-            <RefreshCw size={14} aria-hidden="true" /> {loading ? t('workflowsDashboard.loading') : t('workflowsDashboard.refresh')}
+          <Button size="sm" onClick={load} disabled={loading} aria-label={t('common.refresh')}>
+            <RefreshCw size={14} aria-hidden="true" /> {loading ? t('common.loading') : t('common.refresh')}
           </Button>
         </div>
       </div>
@@ -362,7 +362,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
       {/* Initial load (active or trash) — skeleton rows instead of a blank gap
           until the first page arrives. */}
       {loading && workflows.length === 0 && (
-        <LoadingSkeleton rows={5} label={t('workflowsDashboard.loading')} />
+        <LoadingSkeleton rows={5} label={t('common.loading')} />
       )}
 
       {loadError && workflows.length === 0 && !loading && (
@@ -510,20 +510,20 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
                         data-testid={`workflows-renamefolder-input-${group.key}`}
                       />
                       <Button size="sm" onClick={event => { event.preventDefault(); event.stopPropagation(); void renameFolder(group.key, renameDraft) }} data-testid={`workflows-renamefolder-save-${group.key}`}>
-                        {t('workflowsDashboard.saveRename')}
+                        {t('common.save')}
                       </Button>
                       <Button size="sm" onClick={event => { event.preventDefault(); event.stopPropagation(); setRenamingFolder(null) }}>
-                        {t('workflowsDashboard.cancelAction')}
+                        {t('common.cancel')}
                       </Button>
                     </span>
                   ) : confirmDeleteFolder === group.key ? (
                     <span className="we-list-folder__confirm" onClick={event => { event.preventDefault(); event.stopPropagation() }}>
                       <span className="we-list-folder__confirm-text">{t('workflowsDashboard.deleteFolderConfirm', { folder: group.key, count: group.items.length })}</span>
                       <Button size="sm" variant="danger" onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteFolder(group.key) }} data-testid={`workflows-deletefolder-confirm-${group.key}`}>
-                        {t('workflowsDashboard.confirmDeleteCta')}
+                        {t('common.delete')}
                       </Button>
                       <Button size="sm" onClick={event => { event.preventDefault(); event.stopPropagation(); setConfirmDeleteFolder(null) }}>
-                        {t('workflowsDashboard.cancelAction')}
+                        {t('common.cancel')}
                       </Button>
                     </span>
                   ) : (
@@ -613,7 +613,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
                 {t('workflowsDashboard.saveNewFolder')}
               </Button>
               <Button size="sm" onClick={cancelNewFolder}>
-                {t('workflowsDashboard.cancelAction')}
+                {t('common.cancel')}
               </Button>
             </div>
           ) : draggingId ? (
@@ -656,7 +656,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
           disabled={loadingMore}
           data-testid="workflows-load-more"
         >
-          {loadingMore ? t('workflowsDashboard.loading') : t('workflowsDashboard.loadMore')}
+          {loadingMore ? t('common.loading') : t('workflowsDashboard.loadMore')}
         </Button>
       )}
     </div>

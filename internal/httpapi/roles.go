@@ -149,7 +149,7 @@ func (s *V1Server) createRoleCore(r *http.Request, rc v1Request) opResult {
 	if len(description) > 240 {
 		description = description[:240]
 	}
-	err := audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+	err := s.audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
 		if err := store.New(tx).InsertOrgRole(ctx, store.InsertOrgRoleParams{
 			ID: roleID, OrgID: rc.orgID, Name: name, InheritsFrom: inheritsFrom,
 			Description: pgtype.Text{String: description, Valid: description != ""},
@@ -238,7 +238,7 @@ func (s *V1Server) updateRoleCore(r *http.Request, rc v1Request, rawName string)
 		action = "org.permissions.override_set"
 	}
 	var savedID string
-	err = audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+	err = s.audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
 		q := store.New(tx)
 		if !exists {
 			// First override of a built-in: create the row; built-ins
@@ -333,7 +333,7 @@ func (s *V1Server) deleteRoleCore(r *http.Request, rc v1Request, rawName string)
 
 	if auth.IsBuiltinRole(name) {
 		// Deleting a built-in's row REVERTS the override.
-		err := audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		err := s.audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
 			if _, err := store.New(tx).DeleteOrgRole(ctx, store.DeleteOrgRoleParams{OrgID: rc.orgID, Name: name}); err != nil {
 				return err
 			}
@@ -361,7 +361,7 @@ func (s *V1Server) deleteRoleCore(r *http.Request, rc v1Request, rawName string)
 				"params": map[string]any{"membersAffected": membersAffected}, "membersAffected": membersAffected,
 			}}
 	}
-	err = audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+	err = s.audit.WithAuditTx(ctx, s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
 		if _, err := store.New(tx).DeleteOrgRole(ctx, store.DeleteOrgRoleParams{OrgID: rc.orgID, Name: name}); err != nil {
 			return err
 		}

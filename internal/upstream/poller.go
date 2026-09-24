@@ -76,7 +76,7 @@ func systemActor(orgID string) *auth.Context {
 
 // PollOneSource: fetch → parse → record → pause/resume tagged workflows.
 // NEVER returns an error for feed problems — those are fail-open results.
-func PollOneSource(ctx context.Context, pool *pgxpool.Pool, source store.UpstreamHealthSource, fetch Fetcher) PollOutcome {
+func PollOneSource(ctx context.Context, pool *pgxpool.Pool, writer audit.Writer, source store.UpstreamHealthSource, fetch Fetcher) PollOutcome {
 	q := store.New(pool)
 	expected := ExpectedComponents(source.ExpectedComponents)
 
@@ -127,7 +127,7 @@ func PollOneSource(ctx context.Context, pool *pgxpool.Pool, source store.Upstrea
 			return PollOutcome{Parse: parse}
 		}
 		for _, workflowID := range paused {
-			audit.Write(ctx, pool, systemActor(source.OrgID), "workflow.paused.upstream", audit.Options{
+			writer.Write(ctx, pool, systemActor(source.OrgID), "workflow.paused.upstream", audit.Options{
 				TargetType: "workflow", TargetID: workflowID,
 				Metadata: map[string]any{
 					"sourceName": source.Name, "sourceKind": source.Kind,
@@ -145,7 +145,7 @@ func PollOneSource(ctx context.Context, pool *pgxpool.Pool, source store.Upstrea
 		return PollOutcome{Parse: parse}
 	}
 	for _, workflowID := range resumed {
-		audit.Write(ctx, pool, systemActor(source.OrgID), "workflow.resumed.upstream", audit.Options{
+		writer.Write(ctx, pool, systemActor(source.OrgID), "workflow.resumed.upstream", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,
 			Metadata: map[string]any{
 				"sourceName": source.Name, "sourceKind": source.Kind, "status": parse.Status,
@@ -176,7 +176,7 @@ const upstreamSweepLimit = 200
 
 // Sweep polls every enabled + due source; one bad source never stalls the
 // rest.
-func Sweep(ctx context.Context, pool *pgxpool.Pool, fetch Fetcher, logger *slog.Logger) error {
+func Sweep(ctx context.Context, pool *pgxpool.Pool, writer audit.Writer, fetch Fetcher, logger *slog.Logger) error {
 	// Claiming stamps the clock, so a concurrent replica's sweep no longer
 	// sees these sources as due: one probe per interval, not one per
 	// replica, against third-party status pages that rate-limit.
@@ -188,14 +188,14 @@ func Sweep(ctx context.Context, pool *pgxpool.Pool, fetch Fetcher, logger *slog.
 		return err
 	}
 	for _, source := range sources {
-		PollOneSource(ctx, pool, source, fetch)
+		PollOneSource(ctx, pool, writer, source, fetch)
 	}
 	return nil
 }
 
 // RunSweep loops the sweep on an interval until the context ends (wired
 // from the API binary next to the retention sweep).
-func RunSweep(ctx context.Context, pool *pgxpool.Pool, every time.Duration, logger *slog.Logger) {
+func RunSweep(ctx context.Context, pool *pgxpool.Pool, writer audit.Writer, every time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
@@ -205,7 +205,7 @@ func RunSweep(ctx context.Context, pool *pgxpool.Pool, every time.Duration, logg
 		case <-ticker.C:
 		}
 		started := time.Now()
-		err := Sweep(ctx, pool, DefaultFetcher, logger)
+		err := Sweep(ctx, pool, writer, DefaultFetcher, logger)
 		observability.ObserveSweepPass(observability.SweepUpstreamHealth, started, err)
 	}
 }

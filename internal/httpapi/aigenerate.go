@@ -215,7 +215,7 @@ func (s *V1Server) generateWorkflowFromPrompt(
 		NewID: s.newID, Catalog: &catalog, Brief: &brief,
 	}); recognized {
 		if recipeErr != nil {
-			audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
+			s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 				TargetType: "ai", Metadata: map[string]any{
 					"mode": "error", "generationMode": "deterministic_recipe",
 					"recipe": "pagerduty_on_call", "error": "workflow id generation failed",
@@ -230,7 +230,7 @@ func (s *V1Server) generateWorkflowFromPrompt(
 		}
 		var document map[string]any
 		_ = json.Unmarshal(compiled, &document)
-		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 			TargetType: "ai", TargetID: templateID(document), Metadata: map[string]any{
 				"mode": "fallback", "generationMode": "deterministic_recipe", "recipe": "pagerduty_on_call",
 				"intentContractAdded": compilation.AddedOutputs, "recoveryContractAdded": compilation.AddedRecoveryContract,
@@ -245,7 +245,7 @@ func (s *V1Server) generateWorkflowFromPrompt(
 	// gates are egress controls, not kill switches for this deterministic path.
 	if client == nil || !client.Configured() {
 		fallback, compilation := compiledFallbackForPrompt(prompt)
-		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 			TargetType: "ai", TargetID: templateID(fallback),
 			Metadata: map[string]any{
 				"mode": "fallback", "error": "AI provider not configured", "generationMode": "free_json",
@@ -255,7 +255,7 @@ func (s *V1Server) generateWorkflowFromPrompt(
 		return opOK(withMode(fallback, "fallback", ""))
 	}
 
-	gate := aibudget.Gate(ctx, s.pool, rc.orgID, rc.userID, "ai.workflow.generated")
+	gate := aibudget.Gate(ctx, s.pool, s.audit, rc.orgID, rc.userID, "ai.workflow.generated")
 	if !gate.Allowed {
 		return budgetExceededResult(gate)
 	}
@@ -266,7 +266,7 @@ func (s *V1Server) generateWorkflowFromPrompt(
 	candidateTarget := configuredN
 	if configuredN > 1 && gate.MonthlyUsdLimit != nil && gate.WarningThresholdCrossed {
 		candidateTarget = 1
-		audit.Write(ctx, s.pool, rc.authContext, "ai.generation.candidates_backoff", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.generation.candidates_backoff", audit.Options{
 			TargetType: "ai",
 			Metadata:   map[string]any{"from": configuredN, "to": 1, "reason": "budget_warning_threshold"},
 		})
@@ -287,22 +287,16 @@ func (s *V1Server) generateWorkflowFromPrompt(
 			return opError(http.StatusTooManyRequests, "rate_limited", aiErr.Error(), nil)
 		}
 		fallback, compilation := compiledFallbackForPrompt(prompt)
-		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 			TargetType: "ai", TargetID: templateID(fallback),
-			Metadata: map[string]any{
-				"mode": "fallback", "error": aiErr.Error(), "generationMode": "free_json",
-				"model": meta.model, "provider": meta.provider, "modelCallCount": meta.modelCalls,
-				"attempts": meta.attempts, "repairAttempts": meta.repairAttempts,
-				"candidateCount": meta.candidateCount, "validCandidates": meta.validCandidates,
-				"intentContractAdded": compilation.AddedOutputs, "recoveryContractAdded": compilation.AddedRecoveryContract,
-			},
+			Metadata: fallbackGenerationAuditMetadata(meta, aiErr, compilation),
 		})
 		return opOK(withMode(fallback, "fallback", aiErr.Error()))
 	}
 
 	var workflowDoc map[string]any
 	_ = json.Unmarshal(workflowJSON, &workflowDoc)
-	audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 		TargetType: "ai", TargetID: stringField(workflowDoc, "id"),
 		Metadata: map[string]any{
 			"mode": "ai", "generationMode": "free_json",
@@ -330,6 +324,23 @@ func budgetExceededResult(gate aibudget.CheckResult) opResult {
 	}}
 }
 
+func fallbackGenerationAuditMetadata(meta generationMeta, aiErr *ai.AIError, compilation assuranceCompilation) map[string]any {
+	metadata := map[string]any{
+		"mode": "fallback", "error": aiErr.Error(), "generationMode": "free_json",
+		"model": meta.model, "provider": meta.provider, "modelCallCount": meta.modelCalls,
+		"attempts": meta.attempts, "repairAttempts": meta.repairAttempts,
+		"candidateCount": meta.candidateCount, "validCandidates": meta.validCandidates,
+		"intentContractAdded": compilation.AddedOutputs, "recoveryContractAdded": compilation.AddedRecoveryContract,
+	}
+	if meta.failureStage != "" {
+		metadata["failureStage"] = meta.failureStage
+	}
+	if len(meta.validationIssueCodes) > 0 {
+		metadata["validationIssueCodes"] = meta.validationIssueCodes
+	}
+	return metadata
+}
+
 type generationMeta struct {
 	model                 string
 	provider              string
@@ -340,6 +351,8 @@ type generationMeta struct {
 	validCandidates       int
 	intentContractAdded   bool
 	recoveryContractAdded bool
+	failureStage          string
+	validationIssueCodes  []string
 }
 
 func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai.Client, prompt, modelHint string, rc v1Request, candidateTarget int, systemData string, rateLimitPerMin int) ([]byte, generationMeta, *ai.AIError) {
@@ -375,7 +388,7 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 				}
 			}
 			result, aiErr = aibudget.GuardedGenerateText(
-				ctx, s.pool, client, rc.userID, "ai.workflow.generated", input,
+				ctx, s.pool, s.audit, client, rc.userID, "ai.workflow.generated", input,
 			)
 			if aiErr != nil && aiErr.Class == "budget_blocked" {
 				return nil, aiErr
@@ -390,6 +403,7 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 			meta.modelCalls++
 		}
 		if result != nil && len(result.Text) > authoringMaxOutputBytes {
+			meta.failureStage = "output_limit"
 			return nil, &ai.AIError{Class: "invalid_output", Message: "model output exceeded the bounded workflow envelope"}
 		}
 		return result, aiErr
@@ -450,6 +464,7 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 		break
 	}
 	if workflowJSON == nil {
+		meta.failureStage = "json_or_reference"
 		return nil, meta, &ai.AIError{Class: "invalid_output", Message: "model output was not a valid workflow JSON object"}
 	}
 
@@ -480,11 +495,16 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 		}
 	}
 	if len(issues) > 0 {
+		meta.failureStage = "candidate_validation"
+		for _, issue := range issues[:min(len(issues), 5)] {
+			meta.validationIssueCodes = append(meta.validationIssueCodes, issue.Code)
+		}
 		return nil, meta, &ai.AIError{Class: "invalid_output",
 			Message: "generated workflow failed validation: " + issueSummary(issues)}
 	}
 	compiled, compilation, err := compileWorkflowAssuranceCandidate(prompt, workflowJSON)
 	if err != nil {
+		meta.failureStage = "assurance_compilation"
 		return nil, meta, &ai.AIError{Class: "invalid_output", Message: err.Error()}
 	}
 	meta.intentContractAdded = compilation.AddedOutputs

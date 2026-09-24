@@ -12,6 +12,7 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, useReactFlow, type EdgeProps, type Node } from '@xyflow/react'
 import { getNodeLabel } from '../constants'
 import { useT } from '../i18n'
+import { scrubOperatorGuidanceSecrets } from '../lib/operator-guidance'
 import type { WorkflowGraphEdge } from '../types'
 
 /** Human label for an edge endpoint: the node's step label, falling back to its
@@ -20,6 +21,16 @@ import type { WorkflowGraphEdge } from '../types'
 function endpointLabel(node: Node | undefined, fallbackId: string): string {
   const type = (node?.data as { type?: unknown } | undefined)?.type
   return typeof type === 'string' ? getNodeLabel(type) : fallbackId
+}
+
+/** Conditions are persisted operator input. Keep their useful expression in the
+ * canvas and accessible name, but never render control characters or known
+ * credential shapes. CSS owns visual truncation so the safe full value remains
+ * available to assistive technology and the native title tooltip. */
+function safeConditionLabel(condition: string | undefined): string {
+  return scrubOperatorGuidanceSecrets(condition ?? '')
+    .replace(/[\s\u0000-\u001f\u007f]+/g, ' ')
+    .trim()
 }
 
 /** Render one workflow edge with the cobalt selection state encoded via CSS. */
@@ -37,12 +48,20 @@ export function WorkflowEdge(props: EdgeProps<WorkflowGraphEdge>) {
   })
   const hasCondition = Boolean(data?.hasCondition)
   const hasOnError = Boolean(data?.hasOnError)
+  const condition = safeConditionLabel(data?.condition)
+  const kind = hasOnError ? 'error' : hasCondition && condition ? 'condition' : 'default'
+  const routeLabel = kind === 'error'
+    ? t('canvas.edge.onError')
+    : kind === 'condition'
+      ? t('canvas.edge.conditionValue', { condition })
+      : t('canvas.edge.default')
   // Directed "from → to" label so the connection is reachable without seeing the
   // arrow (screen readers, dense graphs). Endpoint labels resolve at render time
   // via getNodeLabel so a locale toggle re-renders the edge, not the projection.
-  const connectionLabel = t('canvas.edge.connection', {
+  const connectionLabel = t('canvas.edge.connectionRoute', {
     from: endpointLabel(getNode(source), source),
     to: endpointLabel(getNode(target), target),
+    route: routeLabel,
   })
   return (
     <>
@@ -56,23 +75,23 @@ export function WorkflowEdge(props: EdgeProps<WorkflowGraphEdge>) {
         aria-label={connectionLabel}
         role="img"
       />
-      {hasCondition || hasOnError ? (
-        <EdgeLabelRenderer>
-          <div
-            className="we-edge-label"
-            data-selected={selected ? 'true' : 'false'}
-            data-on-error={hasOnError ? 'true' : 'false'}
-            style={{
-              // The transform-only inline style is React Flow's standard
-              // pattern for label positioning (foreign-object portals);
-              // it carries no theme tokens.
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            }}
-          >
-            {hasOnError ? t('canvas.edge.onError') : t('canvas.edge.condition')}
-          </div>
-        </EdgeLabelRenderer>
-      ) : null}
+      <EdgeLabelRenderer>
+        <div
+          className="we-edge-label"
+          data-kind={kind}
+          data-selected={selected ? 'true' : 'false'}
+          title={routeLabel}
+          aria-hidden="true"
+          style={{
+            // The transform-only inline style is React Flow's standard
+            // pattern for label positioning (foreign-object portals);
+            // it carries no theme tokens.
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+          }}
+        >
+          {routeLabel}
+        </div>
+      </EdgeLabelRenderer>
     </>
   )
 }

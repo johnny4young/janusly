@@ -36,8 +36,8 @@ import (
 //go:embed assets/templates.json
 var templateCatalogJSON []byte
 
-var templateCatalog = func() []map[string]any {
-	var parsed []map[string]any
+var templateCatalog = func() []TemplateCatalogView {
+	var parsed []TemplateCatalogView
 	if err := json.Unmarshal(templateCatalogJSON, &parsed); err != nil || len(parsed) == 0 {
 		panic("embedded template catalog is invalid")
 	}

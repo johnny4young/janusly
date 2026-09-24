@@ -5,7 +5,19 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/tokenhmac"
 )
+
+// signLegacy preserves the original v1 issuance shape only for verifier
+// compatibility tests. Production issuance always signs an expiry.
+func signLegacy(binding Binding, issuedAt int64) (string, error) {
+	payload := Payload{
+		OrgID: binding.OrgID, RunID: binding.RunID, NodeID: binding.NodeID,
+		Purpose: binding.Purpose, IssuedAt: issuedAt,
+	}
+	return tokenhmac.SignJSON(payload)
+}
 
 // The token matrix: expired, cross-purpose, foreign run/org, tampered,
 // TTL bounds, and the legacy v1 seven-day verifier boundary.
@@ -53,14 +65,14 @@ func TestResumeTokenMatrix(t *testing.T) {
 	}
 
 	// Legacy v1 without expiresAt: valid inside seven days, expired past.
-	fresh, err := SignLegacy(binding, time.Now().Unix()-DefaultTTLSeconds+60)
+	fresh, err := signLegacy(binding, time.Now().Unix()-DefaultTTLSeconds+60)
 	if err != nil {
 		t.Fatalf("legacy sign: %v", err)
 	}
 	if _, err := Verify(fresh, binding); err != nil {
 		t.Fatalf("legacy token inside the boundary must verify: %v", err)
 	}
-	stale, _ := SignLegacy(binding, time.Now().Unix()-DefaultTTLSeconds-10)
+	stale, _ := signLegacy(binding, time.Now().Unix()-DefaultTTLSeconds-10)
 	if _, err := Verify(stale, binding); !errors.Is(err, ErrInvalid) {
 		t.Fatal("legacy token past seven days must fail")
 	}
@@ -85,7 +97,7 @@ func TestResumeTokenMatrix(t *testing.T) {
 func TestLegacyResumeTokenRemainsByteCompatible(t *testing.T) {
 	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "compat-secret")
 	binding := Binding{OrgID: "org-a", RunID: "run-1", NodeID: "form", Purpose: "human_form"}
-	token, err := SignLegacy(binding, 1_700_000_000)
+	token, err := signLegacy(binding, 1_700_000_000)
 	if err != nil {
 		t.Fatalf("sign legacy: %v", err)
 	}

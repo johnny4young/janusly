@@ -47,6 +47,17 @@ describe('<UserMenu /> docs capability', () => {
     expect(screen.getByRole('button', { name: /Sign out/ })).toBeInTheDocument()
   })
 
+  it('shows the build ID from the current HTML shell', () => {
+    document.documentElement.dataset.buildId = '7ad05092'
+    try {
+      render(<UserMenu />)
+      fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }))
+      expect(screen.getByText('build 7ad05092')).toBeInTheDocument()
+    } finally {
+      delete document.documentElement.dataset.buildId
+    }
+  })
+
   it('closes with Escape and restores focus to the menu trigger', async () => {
     render(<UserMenu />)
     const trigger = screen.getByRole('button', { name: 'Open user menu' })

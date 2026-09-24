@@ -177,14 +177,6 @@ var workflowProposalResponse = obj(map[string]any{
 	}, "workflow", "intentContract", "recoveryContract", "qualification", "assumptions", "risks", "readiness", "diff", "applicable"),
 }, "mode", "brief", "clarifyingQuestions", "bindings", "proposal")
 
-var runView = obj(map[string]any{
-	"run":           map[string]any{"type": "object"},
-	"nodes":         arr(map[string]any{"type": "object"}),
-	"events":        arr(map[string]any{"type": "object"}),
-	"eventsCursor":  map[string]any{"type": []any{"string", "null"}},
-	"eventsHasMore": boolT(),
-})
-
 var recoveryCase = obj(map[string]any{
 	"id": str(), "orgId": str(), "runId": str(),
 	"workflowId":        map[string]any{"type": []any{"string", "null"}},
@@ -328,17 +320,17 @@ var Routes = []Route{
 			"backfilled": num(), "failed": num(), "remaining": num(),
 		}, "ok", "workflowId", "status", "backfilled", "failed", "remaining")},
 	{Method: "GET", Path: "/v1/workflows", Summary: "Keyset-paginated workflow list",
-		Response: arr(map[string]any{"type": "object"})},
+		Response: boundedPage(workflowListItem)},
 	{Method: "GET", Path: "/v1/workflows/latest", Summary: "Latest version of one workflow (nullable)",
-		Response: Schema{"type": []any{"object", "null"}}},
-	{Method: "GET", Path: "/v1/workflows/versions", Summary: "All versions of one workflow",
-		Response: arr(map[string]any{"type": "object"})},
+		Response: Schema{"anyOf": []any{workflowVersion, Schema{"type": "null"}}}},
+	{Method: "GET", Path: "/v1/workflows/versions", Summary: "Keyset-paginated versions of one workflow",
+		Response: boundedPage(workflowVersion)},
 	{Method: "GET", Path: "/v1/workflows/versions/{versionId}", Summary: "One exact immutable workflow version",
 		Response: workflowVersionSnapshot},
 	{Method: "GET", Path: "/v1/workflows/health", Summary: "Workflow assurance health score",
 		Response: workflowHealthScore},
 	{Method: "GET", Path: "/v1/templates", Summary: "Built-in workflow authoring templates",
-		Response: arr(map[string]any{"type": "object"})},
+		Response: arr(templateCatalogEntry)},
 	{Method: "POST", Path: "/v1/start", Summary: "Start an exact saved workflow version or an ad-hoc document",
 		Request: obj(map[string]any{
 			"workflow": workflowDoc, "workflowVersionId": str(), "input": map[string]any{},
@@ -376,7 +368,7 @@ var Routes = []Route{
 	{Method: "GET", Path: "/v1/status", Summary: "Alias of /v1/run",
 		Response: runView},
 	{Method: "GET", Path: "/v1/runs", Summary: "Keyset-paginated run list",
-		Response: arr(map[string]any{"type": "object"})},
+		Response: boundedPage(runSummary)},
 	{Method: "POST", Path: "/v1/resume", Summary: "Resume one waiting node",
 		Request:  obj(map[string]any{"runId": str(), "nodeId": str()}, "runId", "nodeId"),
 		Response: obj(map[string]any{"resumed": boolT()}, "resumed")},
@@ -384,7 +376,11 @@ var Routes = []Route{
 		Request:  obj(map[string]any{"runId": str(), "reason": str()}, "runId"),
 		Response: obj(map[string]any{"runId": str(), "status": str()}, "runId", "status")},
 	{Method: "GET", Path: "/v1/dlq", Summary: "Dead-letter list with server-side filters",
-		Response: arr(map[string]any{"type": "object"})},
+		Response: map[string]any{"type": "array", "items": deadLetterSummary, "maxItems": 200}},
+	{Method: "GET", Path: "/v1/dlq/entries/{deadLetterId}", Summary: "Tenant-bound dead-letter snapshot", Response: deadLetterDetail},
+	{Method: "POST", Path: "/v1/dlq/resolve", Summary: "Resolve one dead letter as accepted loss",
+		Request:  obj(map[string]any{"id": map[string]any{"type": "string", "minLength": 1}}, "id"),
+		Response: closedObj(map[string]any{"ok": map[string]any{"const": true}}, "ok")},
 	{Method: "GET", Path: "/v1/dlq/clusters", Summary: "Failure clusters over open dead letters",
 		Response: obj(map[string]any{
 			"clusters":     arr(map[string]any{"type": "object"}),
@@ -491,7 +487,7 @@ var Routes = []Route{
 	{Method: "GET", Path: "/v1/workflows/schedule-preview", Summary: "Validate a cron expression and preview its next fires",
 		Response: obj(map[string]any{"valid": boolT(), "nextFires": arr(str())})},
 	{Method: "GET", Path: "/v1/tools", Summary: "The AI Studio tool catalog",
-		Response: arr(map[string]any{"type": "object"})},
+		Response: arr(toolCatalogEntry)},
 	{Method: "GET", Path: "/v1/authoring/capabilities", Summary: "Exact tenant-safe capability catalog for workflow authoring",
 		Response: authoringCapabilities},
 	{Method: "POST", Path: "/v1/ai/workflow-briefs/compile", Summary: "Compile a bounded deterministic workflow intent brief",

@@ -240,7 +240,7 @@ func (s *V1Server) recoveryValidationReportHandler(w http.ResponseWriter, r *htt
 		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 		return
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "report.recovery_validation.exported", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "report.recovery_validation.exported", audit.Options{
 		TargetType: "org", TargetID: rc.orgID,
 		Metadata: map[string]any{
 			"format": format, "windowDays": report.WindowDays,
@@ -285,7 +285,7 @@ func (s *V1Server) runExplainHandler(w http.ResponseWriter, r *http.Request, rc 
 		writeUnversioned(w, opError(http.StatusNotFound, "reports_run_not_found", "Run not found", nil))
 		return
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "report.run_explain.exported", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "report.run_explain.exported", audit.Options{
 		TargetType: "run", TargetID: runID, Metadata: map[string]any{"format": format},
 	})
 	status, _ := report["summary"].(map[string]any)["status"].(string)
@@ -321,7 +321,7 @@ func (s *V1Server) runExplainDeliveryHandler(w http.ResponseWriter, r *http.Requ
 		metadata["format"] = auditFormat
 		metadata["runId"] = body.RunID
 		metadata["credentialName"] = destination.CredentialName
-		audit.Write(r.Context(), s.pool, rc.authContext, "report.run_explain.delivered", audit.Options{
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "report.run_explain.delivered", audit.Options{
 			TargetType: "run", TargetID: body.RunID, Metadata: metadata,
 		})
 	}
@@ -503,7 +503,7 @@ func (s *V1Server) recoveryEvidenceHandler(w http.ResponseWriter, r *http.Reques
 		"originalRun": runReport, "validationRun": validationBlock,
 		"auditTrail": trail,
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "report.evidence.exported", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "report.evidence.exported", audit.Options{
 		TargetType: "recovery-item", TargetID: id,
 		Metadata: map[string]any{
 			"format": format, "deadLetterId": item.DeadLetterID,
@@ -589,7 +589,7 @@ func (s *V1Server) valueDashboardReportHandler(w http.ResponseWriter, r *http.Re
 		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 		return
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "report.value_dashboard.exported", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "report.value_dashboard.exported", audit.Options{
 		TargetType: "org", TargetID: rc.orgID,
 		Metadata: map[string]any{"format": format, "windowDays": windowDays},
 	})

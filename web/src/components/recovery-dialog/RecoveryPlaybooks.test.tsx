@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../../api'
@@ -47,6 +47,70 @@ beforeEach(() => {
 })
 
 describe('Recovery Playbook reuse', () => {
+  it('does not overlap playbook use and Generate before validation', async () => {
+    let releaseUse!: (value: unknown) => void
+    const usePending = new Promise<unknown>(resolve => { releaseUse = resolve })
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.startsWith('/recovery/playbooks/match')) return Promise.resolve({ playbook })
+      if (path === '/recovery/playbooks/pb-1/use') return usePending
+      if (path === '/ai/patch-workflow') return Promise.resolve({
+        mode: 'ai', suggestedWorkflow: recoveredWorkflow, rationale: 'Raise timeout.',
+      })
+      if (path === '/dlq/validate-fix') return new Promise(() => {})
+      return Promise.resolve({ ok: true })
+    })
+
+    const onClose = vi.fn()
+    render(<RecoveryDialog dlq={dlq} onClose={onClose} />)
+    await screen.findByTestId('recovery-playbook-match')
+    fireEvent.click(screen.getByRole('button', { name: /Review playbook patch/i }))
+    expect(screen.getByRole('button', { name: /Close recovery dialog/i })).toBeDisabled()
+    const cancel = screen.getByRole('button', { name: /^Cancel$/i })
+    expect(cancel).toBeDisabled()
+    fireEvent.click(cancel)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    const generate = screen.getByRole('button', { name: /Generate suggestion/i })
+    fireEvent.click(generate)
+    expect(generate).toBeDisabled()
+    expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/ai/patch-workflow')).toHaveLength(0)
+
+    await act(async () => {
+      releaseUse({ suggestion: {
+        mode: 'playbook', suggestedWorkflow: recoveredWorkflow, rationale: playbook.instructionsMarkdown,
+        suggestions: [{ workflow: recoveredWorkflow, rationale: playbook.instructionsMarkdown,
+          approachLabel: 'raise_timeout', confidence: 100, calibratedConfidence: 100,
+          safety: { writeSide: false, approvalRequired: false, approvalPresent: true } }],
+        evidence: [{ kind: 'recovery_playbook', sourceRef: 'pb-1', snippet: 'Version 2; 3 successful uses.' }],
+        recoveryPassport: { failureSignature: playbook.signature, priorSameSignatureOutcome: null },
+        playbook,
+      } })
+      await usePending
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
+    expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/dlq/validate-fix')).toHaveLength(1)
+  })
+
+  it('keeps the dialog open while retiring a playbook', async () => {
+    let releaseRetire!: (value: unknown) => void
+    const retirePending = new Promise<unknown>(resolve => { releaseRetire = resolve })
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.startsWith('/recovery/playbooks/match')) return Promise.resolve({ playbook })
+      if (path === '/recovery/playbooks/pb-1/retire') return retirePending
+      return Promise.resolve({ ok: true })
+    })
+    const onClose = vi.fn()
+    render(<RecoveryDialog dlq={dlq} onClose={onClose} />)
+    await screen.findByTestId('recovery-playbook-match')
+    fireEvent.click(screen.getByRole('button', { name: /^Retire$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Retire playbook$/ }))
+    expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Close recovery dialog/i })).toBeDisabled()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    await act(async () => { releaseRetire({ ok: true }); await retirePending })
+  })
+
   it('offers an exact match explicitly and still routes it through sandbox validation', async () => {
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
       if (path.startsWith('/recovery/playbooks/match')) return { playbook }
@@ -80,7 +144,7 @@ describe('Recovery Playbook reuse', () => {
     expect(screen.getByTestId('recovery-playbook-retire-confirm')).toHaveTextContent('Retire this playbook?')
     expect(vi.mocked(api).mock.calls.some((call) => call[0] === '/recovery/playbooks/pb-1/retire')).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: /^Keep active$/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Use and revalidate/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Review playbook patch/i }))
 
     const source = await screen.findByTestId('recovery-playbook-revalidation')
     expect(source).toHaveTextContent('Recover billing v2')
@@ -120,7 +184,7 @@ describe('Recovery Playbook reuse', () => {
       if (path === '/dlq/validate-fix') return { runId: 'validation-regressed' }
       if (path.startsWith('/run?runId=validation-regressed')) {
         return {
-          run: { id: 'validation-regressed', status: 'failed' },
+          events: [], eventsCursor: null, eventsHasMore: false, run: { id: 'validation-regressed', status: 'failed' },
           nodes: [{ nodeId: 'fetch', status: 'failed', errorJson: { message: 'timeout still exceeded' } }],
         }
       }
@@ -132,7 +196,7 @@ describe('Recovery Playbook reuse', () => {
 
     render(<RecoveryDialog dlq={dlq} onClose={vi.fn()} />)
     await screen.findByTestId('recovery-playbook-match')
-    fireEvent.click(screen.getByRole('button', { name: /Use and revalidate/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Review playbook patch/i }))
     await screen.findByTestId('recovery-playbook-revalidation')
     fireEvent.click(screen.getByRole('button', { name: /Validate in sandbox/i }))
 

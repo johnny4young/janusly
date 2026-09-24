@@ -27,8 +27,8 @@ describe('<RunStreamChip />', () => {
     expect(screen.getByText(/3m ago/)).toBeInTheDocument()
   })
 
-  it('omits the age when there are no events yet', () => {
-    useWorkflowStore.setState({ ...initialState, runId: 'r1', streamTransport: 'sse', events: [] }, true)
+  it.each([{ events: [] }, { events: [{ id: 'undated', type: 'node.completed', createdAt: null }] }])('omits the age without timestamp evidence: %j', ({ events }) => {
+    useWorkflowStore.setState({ ...initialState, runId: 'r1', streamTransport: 'sse', events }, true)
     render(<RunStreamChip />)
     expect(screen.getByText('Live')).toBeInTheDocument()
     expect(screen.queryByText(/ago/)).not.toBeInTheDocument()

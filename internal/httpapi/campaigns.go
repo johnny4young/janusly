@@ -213,7 +213,7 @@ func (s *V1Server) campaignCreateCore(r *http.Request, rc v1Request) opResult {
 	// The due clock is the runtime's only dispatch substrate — there is no
 	// queue publication to lose, so this is always false.
 	detail["publicationDeferred"] = false
-	audit.Write(ctx, s.pool, rc.authContext, "recovery.campaign.created", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "recovery.campaign.created", audit.Options{
 		TargetType: "replay_campaign", TargetID: campaignID,
 		Metadata: map[string]any{
 			"total": len(preview.Eligible), "pacingMs": int32(*body.PacingMs),
@@ -298,7 +298,7 @@ func (s *V1Server) campaignCancelCore(r *http.Request, rc v1Request, id string) 
 		return result
 	}
 	cancelled, _ := detail["campaign"].(map[string]any)
-	audit.Write(ctx, s.pool, rc.authContext, "recovery.campaign.cancelled", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "recovery.campaign.cancelled", audit.Options{
 		TargetType: "replay_campaign", TargetID: id,
 		Metadata: map[string]any{
 			"replayed": cancelled["replayedCount"], "failed": cancelled["failedCount"],

@@ -1,6 +1,7 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Template } from '../types'
+import { changeRuntimeLocale } from '../i18n'
 import { TemplatesPanel } from './RightPanel'
 
 function makeTemplate(id: string, name: string): Template {
@@ -50,5 +51,30 @@ describe('<TemplatesPanel />', () => {
     fireEvent.change(input, { target: { value: '' } })
     expect(screen.getByText('Invoice sync')).toBeInTheDocument()
     expect(screen.getByText('Lead router')).toBeInTheDocument()
+  })
+
+  it('reprojects a recipe search in the active language without clearing the query', async () => {
+    const template = {
+      ...makeTemplate('incident-triage', 'Incident triage'),
+      nameCode: 'incident-triage.name',
+      descriptionCode: 'incident-triage.description',
+    }
+    await changeRuntimeLocale('en')
+    render(<TemplatesPanel templates={[template]} onUseTemplate={vi.fn()} {...catalogProps} />)
+
+    const input = screen.getByPlaceholderText('Search templates…')
+    fireEvent.change(input, { target: { value: 'summarizes' } })
+    expect(screen.getByText('Incident triage → GitHub + Slack')).toBeInTheDocument()
+
+    try {
+      await act(() => changeRuntimeLocale('es'))
+      expect(input).toHaveValue('summarizes')
+      expect(screen.getByText('Ninguna receta coincide con esta búsqueda.')).toBeInTheDocument()
+
+      fireEvent.change(input, { target: { value: 'resume' } })
+      expect(screen.getByText('Triage de incidentes → GitHub + Slack')).toBeInTheDocument()
+    } finally {
+      await act(() => changeRuntimeLocale('en'))
+    }
   })
 })

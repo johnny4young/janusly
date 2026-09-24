@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -224,8 +225,11 @@ func TestPagerDutySignedV3Flow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("callback: %v", err)
 		}
-		defer response.Body.Close()
-		raw, _ := io.ReadAll(response.Body)
+		raw, readErr := io.ReadAll(response.Body)
+		closeErr := response.Body.Close()
+		if readErr != nil || closeErr != nil {
+			t.Fatalf("callback response: read: %v, close: %v", readErr, closeErr)
+		}
 		var parsed map[string]any
 		_ = json.Unmarshal(raw, &parsed)
 		return response.StatusCode, parsed
@@ -405,10 +409,10 @@ func TestPagerDutyConcurrentRateLimitSettlementNeverStartsRun(t *testing.T) {
 				responses <- response{err: err}
 				return
 			}
-			defer providerResponse.Body.Close()
 			var envelope map[string]any
-			err = json.NewDecoder(providerResponse.Body).Decode(&envelope)
-			responses <- response{status: providerResponse.StatusCode, body: envelope, err: err}
+			decodeErr := json.NewDecoder(providerResponse.Body).Decode(&envelope)
+			closeErr := providerResponse.Body.Close()
+			responses <- response{status: providerResponse.StatusCode, body: envelope, err: errors.Join(decodeErr, closeErr)}
 		}()
 	}
 	close(start)
@@ -537,9 +541,11 @@ func TestPagerDutyCrashWindowUsesPersistedWorkflowSnapshot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer response.Body.Close()
 		var envelope map[string]any
 		_ = json.NewDecoder(response.Body).Decode(&envelope)
+		if err := response.Body.Close(); err != nil {
+			t.Fatalf("close callback response: %v", err)
+		}
 		return response.StatusCode, envelope
 	}
 	// A damaged current snapshot is an infrastructure failure for a new
@@ -700,7 +706,6 @@ func TestCompiledPagerDutyFlagshipVerifiesProviderOutcome(t *testing.T) {
 			// never exposes the expected authoritative state afterward.
 			if incidentID != "PINC_BROKEN" {
 				providerStatuses[incidentID] = "acknowledged"
-				status = "acknowledged"
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"incidents": []any{map[string]any{
 				"id": incidentID, "status": "acknowledged",
@@ -796,9 +801,11 @@ func TestCompiledPagerDutyFlagshipVerifiesProviderOutcome(t *testing.T) {
 		if err != nil {
 			t.Fatalf("post flagship event: %v", err)
 		}
-		defer response.Body.Close()
 		var envelope map[string]any
 		_ = json.NewDecoder(response.Body).Decode(&envelope)
+		if err := response.Body.Close(); err != nil {
+			t.Fatalf("close flagship callback response: %v", err)
+		}
 		if response.StatusCode != http.StatusOK || envelope["ok"] != true {
 			t.Fatalf("post flagship event: %d %+v", response.StatusCode, envelope)
 		}

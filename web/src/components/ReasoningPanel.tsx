@@ -398,7 +398,7 @@ export function ReasoningPanel({
               ? 'rightPanel.reasoning.noMatches.loadedBody'
               : 'rightPanel.reasoning.noMatches.body')}
             cta={{
-              label: t('rightPanel.reasoning.clearFilter'),
+              label: t('common.clearFilter'),
               onClick: () => setQuery(''),
             }}
           />
@@ -748,7 +748,7 @@ function LoadOlderEventsButton({ onClick }: { onClick: () => void | Promise<void
         }
       }}
     >
-      {busy ? t('rightPanel.reasoning.loading') : t('rightPanel.reasoning.loadOlder')}
+      {busy ? t('common.loading') : t('rightPanel.reasoning.loadOlder')}
     </button>
   )
 }

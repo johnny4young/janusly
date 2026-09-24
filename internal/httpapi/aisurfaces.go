@@ -104,7 +104,7 @@ func canonicalImprovementWorkflow(raw string, expectedID string) (map[string]any
 	if workflow == nil || workflow.ID != expectedID || workflowContainsUnsafeProviderSecret(workflow) {
 		return nil, false
 	}
-	document, err := canonicalAuthoringWorkflowDocument(workflow)
+	document, err := canonicalWorkflowDocument(workflow)
 	return document, err == nil
 }
 
@@ -117,7 +117,7 @@ func canonicalImprovementWorkflow(raw string, expectedID string) (map[string]any
 // configured provider with blocked budget answers 402; a rate hit answers 429.
 func (s *V1Server) aiSurfaceEgressGate(r *http.Request, rc v1Request, action string, settings aiconfig.Settings) *opResult {
 	ctx := r.Context()
-	gate := aibudget.Gate(ctx, s.pool, rc.orgID, rc.userID, action)
+	gate := aibudget.Gate(ctx, s.pool, s.audit, rc.orgID, rc.userID, action)
 	if !gate.Allowed {
 		blocked := opResult{status: http.StatusPaymentRequired, data: map[string]any{
 			"error": "budget_exceeded", "code": "budget_exceeded",
@@ -269,7 +269,7 @@ func (s *V1Server) explainWorkflowCore(r *http.Request, rc v1Request) opResult {
 	ctx := r.Context()
 	intent := explainWorkflowIntent(body.Prompt)
 	fallback := func(aiError string) opResult {
-		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.explained", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.explained", audit.Options{
 			TargetType: "ai", Metadata: map[string]any{"mode": "fallback", "error": aiError, "intent": intent},
 		})
 		response := map[string]any{"mode": "fallback", "explanation": s.fallbackExplainWorkflow(body.Workflow, body.Prompt)}
@@ -305,7 +305,7 @@ func (s *V1Server) explainWorkflowCore(r *http.Request, rc v1Request) opResult {
 	if len(result.Text) > aiResponseRawMaxBytes {
 		return fallback("model output exceeded the bounded explanation envelope")
 	}
-	audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.explained", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.explained", audit.Options{
 		TargetType: "ai", Metadata: map[string]any{"mode": "ai", "model": result.Model, "provider": result.Provider, "intent": intent},
 	})
 	return opOK(map[string]any{
@@ -355,7 +355,7 @@ func (s *V1Server) explainRunCore(r *http.Request, rc v1Request) opResult {
 	}
 
 	writeAudit := func(mode, model, provider, aiError string) {
-		audit.Write(ctx, s.pool, rc.authContext, "ai.run.explained", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.run.explained", audit.Options{
 			TargetType: "run", TargetID: body.RunID,
 			Metadata: map[string]any{
 				"mode": mode, "model": model, "provider": provider,
@@ -458,7 +458,7 @@ func (s *V1Server) reviewWorkflowCore(r *http.Request, rc v1Request) opResult {
 	ctx := r.Context()
 	wf := workflowFromDoc(body.Workflow)
 	if wf == nil {
-		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.reviewed", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.reviewed", audit.Options{
 			TargetType: "ai", Metadata: map[string]any{"mode": "fallback", "reason": "invalid_workflow_shape"},
 		})
 		return opOK(map[string]any{
@@ -475,7 +475,7 @@ func (s *V1Server) reviewWorkflowCore(r *http.Request, rc v1Request) opResult {
 	writeAudit := func(mode string, extra map[string]any) {
 		metadata := map[string]any{"mode": mode}
 		maps.Copy(metadata, extra)
-		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.reviewed", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.reviewed", audit.Options{
 			TargetType: "ai", TargetID: wf.ID, Metadata: metadata,
 		})
 	}
@@ -664,7 +664,7 @@ func (s *V1Server) suggestImprovementCore(r *http.Request, rc v1Request) opResul
 	writeAudit := func(mode string, extra map[string]any) {
 		metadata := map[string]any{"mode": mode}
 		maps.Copy(metadata, extra)
-		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.improvement_suggested", audit.Options{
+		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.improvement_suggested", audit.Options{
 			TargetType: "ai", Metadata: metadata,
 		})
 	}

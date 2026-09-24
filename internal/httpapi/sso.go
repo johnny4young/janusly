@@ -94,7 +94,7 @@ func (s *V1Server) createSsoConnection(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "org.sso.connection_added", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "org.sso.connection_added", audit.Options{
 		TargetType: "sso_connection", TargetID: row.ID,
 		Metadata: map[string]any{
 			"provider": row.Provider, "providerConnectionId": row.ProviderConnectionID,
@@ -147,7 +147,7 @@ func (s *V1Server) updateSsoConnection(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "org.sso.connection_updated", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "org.sso.connection_updated", audit.Options{
 		TargetType: "sso_connection", TargetID: params.ID, Metadata: metadata,
 	})
 	return opOK(ssoConnectionView(updated))
@@ -169,7 +169,7 @@ func (s *V1Server) revokeSsoConnection(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "org.sso.connection_revoked", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "org.sso.connection_revoked", audit.Options{
 		TargetType: "sso_connection", TargetID: id,
 	})
 	return opOK(map[string]any{"ok": true})
@@ -246,7 +246,7 @@ func (s *V1Server) startSso(w http.ResponseWriter, r *http.Request) {
 		writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 		return
 	}
-	audit.WriteAs(r.Context(), s.pool, orgID, "sso", "auth.sso.start", audit.Options{
+	s.audit.WriteAs(r.Context(), s.pool, orgID, "sso", "auth.sso.start", audit.Options{
 		TargetType: "sso_connection", TargetID: connection.ID,
 		Metadata: map[string]any{
 			"provider": connection.Provider, "connectionId": connection.ProviderConnectionID,
@@ -260,7 +260,7 @@ func (s *V1Server) startSso(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *V1Server) invalidSsoState(ctx context.Context, orgID, reason string) {
-	audit.WriteAs(ctx, s.pool, orgID, "sso", "auth.sso.state_invalid", audit.Options{
+	s.audit.WriteAs(ctx, s.pool, orgID, "sso", "auth.sso.state_invalid", audit.Options{
 		TargetType: "sso_state", Metadata: map[string]any{"reason": reason},
 	})
 }
@@ -270,7 +270,7 @@ func (s *V1Server) failedSsoCallback(ctx context.Context, orgID, userID, connect
 		metadata = map[string]any{}
 	}
 	metadata["reason"] = reason
-	audit.WriteAs(ctx, s.pool, orgID, userID, "auth.sso.callback_failed", audit.Options{
+	s.audit.WriteAs(ctx, s.pool, orgID, userID, "auth.sso.callback_failed", audit.Options{
 		TargetType: "sso_connection", TargetID: connectionID, Metadata: metadata,
 	})
 }
@@ -377,7 +377,7 @@ func (s *V1Server) callbackSso(w http.ResponseWriter, r *http.Request) {
 		Mode: auth.ModeJanuslySession, Source: auth.SourceSSO,
 	}
 	var session store.AuthSession
-	err = audit.WithIdentityAuditTx(r.Context(), s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
+	err = s.audit.WithIdentityAuditTx(r.Context(), s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
 		q := store.New(tx)
 		if err := q.UpsertSsoMembership(r.Context(), store.UpsertSsoMembershipParams{
 			ID: s.newID(), OrgID: state.OrgID, UserID: profile.ID,

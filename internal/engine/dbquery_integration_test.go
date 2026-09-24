@@ -31,8 +31,6 @@ func TestDbQueryToolsLoop(t *testing.T) {
 	}
 	secretstore.ResetForTests()
 	t.Cleanup(secretstore.ResetForTests)
-	tools.ResetDbPoolsForTests()
-	t.Cleanup(tools.ResetDbPoolsForTests)
 	t.Setenv("JANUSLY_CREDENTIAL_MASTER_KEY",
 		base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
 	ctx := context.Background()
@@ -41,7 +39,12 @@ func TestDbQueryToolsLoop(t *testing.T) {
 		t.Fatalf("pool: %v", err)
 	}
 	defer pool.Close()
-	eng := New(pool)
+	dbPools, err := tools.NewDBPools(25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dbPools.Close()
+	eng := New(pool, WithDBPools(dbPools))
 	q := store.New(pool)
 	org := fmt.Sprintf("org-db-%d", time.Now().UnixNano())
 

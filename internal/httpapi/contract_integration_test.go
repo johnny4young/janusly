@@ -41,7 +41,7 @@ func newAPIHarnessWithoutWorkers(t *testing.T) *apiHarness {
 }
 
 func newAPIHarnessWithWorkers(t *testing.T, startWorkers bool) *apiHarness {
-	options := DefaultV1ServerOptions()
+	options := defaultV1ServerOptionsForTest()
 	options.Logger = quietTestLogger()
 	return newAPIHarnessWithOptions(t, startWorkers, options)
 }
@@ -222,6 +222,7 @@ func TestStartStatusRunAndListShapes(t *testing.T) {
 		res := h.call("GET", path, nil, "")
 		requireEnvelope(t, res)
 		payload := res.body["data"].(map[string]any)
+		requireManifestData(t, strings.Split(path, "?")[0], payload)
 		requireKeys(t, payload, "run", "nodes", "events", "eventsCursor", "eventsHasMore")
 		run := payload["run"].(map[string]any)
 		requireKeys(t, run,
@@ -256,11 +257,13 @@ func TestRunTenancyIsAnIndistinguishableForbidden(t *testing.T) {
 	runID := started.body["data"].(map[string]any)["runId"].(string)
 	h.waitRun(runID, "succeeded")
 
-	// Golden: unknown run and cross-org run both read 403 runs_forbidden.
-	requireError(t, h.call("GET", "/v1/run?runId=ghost-run-id", nil, ""),
-		403, "runs_forbidden", "Forbidden")
-	requireError(t, h.call("GET", "/v1/run?runId="+runID, nil, h.org+"-other"),
-		403, "runs_forbidden", "Forbidden")
+	// Unknown and cross-org snapshots are indistinguishable on both aliases.
+	for _, path := range []string{"/v1/run", "/v1/status"} {
+		requireError(t, h.call("GET", path+"?runId=ghost-run-id", nil, ""),
+			403, "runs_forbidden", "Forbidden")
+		requireError(t, h.call("GET", path+"?runId="+runID, nil, h.org+"-other"),
+			403, "runs_forbidden", "Forbidden")
+	}
 }
 
 func TestStartInvalidWorkflowMatchesGoldenError(t *testing.T) {
@@ -504,6 +507,7 @@ func TestRunsKeysetCursorRoundTrip(t *testing.T) {
 			path += "&before=" + strings.ReplaceAll(cursor, "|", "%7C")
 		}
 		res := h.call("GET", path, nil, "")
+		requireManifestData(t, "/v1/runs", res.body["data"])
 		items, _ := res.body["data"].([]any)
 		if len(items) == 0 {
 			break

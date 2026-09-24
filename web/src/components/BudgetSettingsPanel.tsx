@@ -16,9 +16,11 @@
  * Used by `OperationsPage.tsx`.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Coins, Info, Save, ShieldAlert } from "lucide-react";
-import { api, contractApi } from "../api";
+import { api } from "../api";
+import { readSavedWorkflowPage } from "../lib/list-contract";
+import type { SavedWorkflow } from "../types";
 import { useWorkflowStore } from "../store";
 import { tApiError, useT } from "../i18n";
 import { Button } from "./ui/Button";
@@ -37,10 +39,7 @@ type OrgBudgetForm = {
   policy: "warn" | "block";
 };
 
-type WorkflowSummaryRow = {
-  id?: string;
-  name?: string;
-};
+type WorkflowSummaryRow = Pick<SavedWorkflow, "id" | "name">;
 
 const ORG_CONFIG_KEYS = {
   monthlyUsd: "ai.budgetMonthlyUsd",
@@ -121,11 +120,10 @@ export function BudgetSettingsPanel() {
   // Load workflows for the per-workflow dropdown.
   useEffect(() => {
     let cancelled = false;
-    contractApi('GET /workflows', "/workflows", undefined)
+    readSavedWorkflowPage()
       .then((payload) => {
         if (cancelled) return;
-        const list = (Array.isArray(payload) ? payload : []) as WorkflowSummaryRow[];
-        setWorkflows(list.filter((entry) => typeof entry.id === "string"));
+        setWorkflows(payload);
       })
       .catch(() => {
         if (cancelled) return;
@@ -245,9 +243,7 @@ export function BudgetSettingsPanel() {
     }
   };
 
-  const orgBudgetDisabled = useMemo(() => {
-    return Number(form.monthlyUsd) === 0;
-  }, [form.monthlyUsd]);
+  const orgBudgetDisabled = Number(form.monthlyUsd) === 0;
   const aboutSectionLabel = t("common.aboutSection");
   const budgetIntro = t("budget.intro");
   // Live field validation mirrors the save-handler guards so the operator sees

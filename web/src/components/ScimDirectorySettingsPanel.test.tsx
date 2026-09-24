@@ -47,6 +47,19 @@ function mockApi(opts: {
   })
 }
 
+function directoryReadCount(): number {
+  return vi.mocked(api).mock.calls.filter(([path, init]) => (
+    path === '/org/scim/directories' && (init?.method ?? 'GET') === 'GET'
+  )).length
+}
+
+async function waitForDirectoryRefresh(previousReads: number): Promise<void> {
+  await waitFor(() => {
+    expect(directoryReadCount()).toBeGreaterThan(previousReads)
+    expect(screen.queryByText('Loading SCIM directories…')).not.toBeInTheDocument()
+  }, { timeout: 5_000 })
+}
+
 describe('<ScimDirectorySettingsPanel />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
@@ -93,6 +106,7 @@ describe('<ScimDirectorySettingsPanel />', () => {
     const idInput = await screen.findByPlaceholderText(/directory_01…/)
     fireEvent.change(idInput, { target: { value: '  directory_test  ' } })
     fireEvent.change(screen.getByPlaceholderText(/okta_scim, azure_scim/), { target: { value: 'azure_scim' } })
+    const previousReads = directoryReadCount()
     fireEvent.click(screen.getByRole('button', { name: /Connect directory/i }))
 
     await waitFor(() => {
@@ -108,6 +122,7 @@ describe('<ScimDirectorySettingsPanel />', () => {
         }),
       )
     })
+    await waitForDirectoryRefresh(previousReads)
   })
 
   it('confirms before revoking and calls the DELETE route', async () => {
@@ -115,11 +130,13 @@ describe('<ScimDirectorySettingsPanel />', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
     render(<ScimDirectorySettingsPanel />)
     const button = await screen.findByRole('button', { name: /Disconnect/i })
+    const previousReads = directoryReadCount()
     fireEvent.click(button)
 
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/org/scim/directories/sd-1', { method: 'DELETE' })
     })
+    await waitForDirectoryRefresh(previousReads)
     confirmSpy.mockRestore()
   })
 
@@ -161,11 +178,13 @@ describe('<ScimDirectorySettingsPanel />', () => {
     render(<ScimDirectorySettingsPanel />)
     expect(await screen.findByText('dg_stale')).toBeInTheDocument()
     const removeButton = screen.getByRole('button', { name: /Remove mapping for dg_stale/i })
+    const previousReads = directoryReadCount()
     fireEvent.click(removeButton)
 
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/org/scim/group-role-mappings/m1', { method: 'DELETE' })
     })
+    await waitForDirectoryRefresh(previousReads)
     confirmSpy.mockRestore()
   })
 
@@ -179,8 +198,9 @@ describe('<ScimDirectorySettingsPanel />', () => {
       mappings: [],
     })
     render(<ScimDirectorySettingsPanel />)
-    await screen.findByText(/Group → role mappings/i)
+    await screen.findByLabelText('Group')
 
+    const previousReads = directoryReadCount()
     fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'dg2' } })
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'admin' } })
     fireEvent.click(screen.getByRole('button', { name: /Add mapping/i }))
@@ -194,6 +214,7 @@ describe('<ScimDirectorySettingsPanel />', () => {
         }),
       )
     })
+    await waitForDirectoryRefresh(previousReads)
   })
 
   it('updates a mapping role inline via the per-row select', async () => {
@@ -204,6 +225,7 @@ describe('<ScimDirectorySettingsPanel />', () => {
     })
     render(<ScimDirectorySettingsPanel />)
     const roleSelect = await screen.findByLabelText('Role for Engineering')
+    const previousReads = directoryReadCount()
     fireEvent.change(roleSelect, { target: { value: 'admin' } })
 
     await waitFor(() => {
@@ -212,6 +234,7 @@ describe('<ScimDirectorySettingsPanel />', () => {
         expect.objectContaining({ method: 'POST', body: JSON.stringify({ role: 'admin' }) }),
       )
     })
+    await waitForDirectoryRefresh(previousReads)
   })
 
   it('optimistically reflects the new role on the controlled select before the refetch', async () => {
@@ -233,6 +256,7 @@ describe('<ScimDirectorySettingsPanel />', () => {
     })
     render(<ScimDirectorySettingsPanel />)
     const roleSelect = (await screen.findByLabelText('Role for Engineering')) as HTMLSelectElement
+    const previousReads = directoryReadCount()
     fireEvent.change(roleSelect, { target: { value: 'admin' } })
 
     // POST still in flight (never resolved) — value reflects the optimistic write.
@@ -240,6 +264,7 @@ describe('<ScimDirectorySettingsPanel />', () => {
       expect((screen.getByLabelText('Role for Engineering') as HTMLSelectElement).value).toBe('admin')
     })
     resolveUpdate({ id: 'm1' })
+    await waitForDirectoryRefresh(previousReads)
   })
 
   it('reverts the select to the previous role when the update POST fails', async () => {
@@ -277,11 +302,13 @@ describe('<ScimDirectorySettingsPanel />', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
     render(<ScimDirectorySettingsPanel />)
     const removeButton = await screen.findByRole('button', { name: /Remove mapping for Engineering/i })
+    const previousReads = directoryReadCount()
     fireEvent.click(removeButton)
 
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/org/scim/group-role-mappings/m1', { method: 'DELETE' })
     })
+    await waitForDirectoryRefresh(previousReads)
     confirmSpy.mockRestore()
   })
 
@@ -314,9 +341,11 @@ describe('<ScimDirectorySettingsPanel />', () => {
     })
     render(<ScimDirectorySettingsPanel />)
     const button = await screen.findByRole('button', { name: /Re-sync every active member/i })
+    const previousReads = directoryReadCount()
     fireEvent.click(button)
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/org/scim/resync', expect.objectContaining({ method: 'POST' }))
     })
+    await waitForDirectoryRefresh(previousReads)
   })
 })

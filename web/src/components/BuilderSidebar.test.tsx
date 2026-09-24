@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BuilderSidebar } from './BuilderSidebar'
+import { changeRuntimeLocale } from '../i18n'
 
 type Deferred<T = void> = {
   promise: Promise<T>
@@ -85,6 +86,22 @@ describe('<BuilderSidebar />', () => {
 
     expect(screen.queryByRole('button', { name: 'Call an API' })).not.toBeInTheDocument()
     expect(screen.getByRole('searchbox', { name: 'Search sections…' })).toBeInTheDocument()
+  })
+
+  it('reprojects destination search after a locale switch without clearing the query', async () => {
+    await changeRuntimeLocale('en')
+    renderSidebar()
+    const search = screen.getByRole('searchbox', { name: 'Search sections…' })
+    fireEvent.change(search, { target: { value: 'automatizaciones' } })
+    expect(screen.queryByRole('button', { name: /^Workflows$/ })).not.toBeInTheDocument()
+
+    try {
+      await act(() => changeRuntimeLocale('es'))
+      expect(search).toHaveValue('automatizaciones')
+      expect(screen.getByRole('button', { name: /^Flujos$/ })).toBeInTheDocument()
+    } finally {
+      await act(() => changeRuntimeLocale('en'))
+    }
   })
 
   it('opens real keyboard help and does not render the dead whats-new affordance', () => {

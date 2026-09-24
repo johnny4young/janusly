@@ -42,6 +42,17 @@ function recovery(
 }
 
 describe('activity feed model', () => {
+  it('keeps runs with nullable timestamps without inventing recency', () => {
+    const feed = buildActivityFeed([
+      { id: 'undated', status: 'running', createdAt: null },
+      run('dated', 'succeeded', '2026-09-21T00:00:00.000Z'),
+    ], [], workflows)
+
+    expect(feed.map(item => item.runId)).toEqual(['dated', 'undated'])
+    expect(feed[1]?.createdAt).toBeUndefined()
+    expect(feed[1]?.category).toBe('running')
+  })
+
   it('merges runs and recoveries chronologically with human workflow identity', () => {
     const feed = buildActivityFeed(
       [

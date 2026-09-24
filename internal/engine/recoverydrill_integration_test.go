@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -88,8 +89,10 @@ func TestRuntimeFailureDrillCrossesWorkerDLQBoundary(t *testing.T) {
 }
 
 func TestStalledNodeDrillUsesExactScopedReaper(t *testing.T) {
-	ctx, pool, eng, org := newHarness(t)
-	t.Setenv("JANUSLY_REAPER_THRESHOLD_MS", "900000")
+	ctx, pool, _, org := newHarness(t)
+	settings := config.DefaultReaper()
+	settings.Threshold = 48 * time.Hour
+	eng := New(pool, WithReaper(settings))
 	workflow := mustParse(t, `{
 		"id":"incident-triage","nodes":[
 			{"id":"trigger","type":"noop","config":{}},
@@ -119,7 +122,7 @@ func TestStalledNodeDrillUsesExactScopedReaper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stalled drill: %v", err)
 	}
-	if result.Evidence.ThresholdMinutes != 15 || result.Evidence.Scanned != 1 ||
+	if result.Evidence.ThresholdMinutes != 48*60 || result.Evidence.Scanned != 1 ||
 		result.Evidence.Reaped != 1 || result.Evidence.DeadLettered != 1 {
 		t.Fatalf("stalled evidence: %+v", result)
 	}

@@ -11,6 +11,7 @@ jq -e '.metricsPrivate == true and .metricsPublished == false' <<<"$result" >/de
 grep -F -- '--publish "127.0.0.1:${app_port}:3001"' "$script" >/dev/null
 grep -F '.["9464/tcp"] == null' "$script" >/dev/null
 grep -F 'http://janusly:9464/metrics' "$script" >/dev/null
+grep -F 'docker exec "$postgres" pg_isready -h 127.0.0.1 -p 5432 -U janusly -d janusly' "$script" >/dev/null
 
 compose_config=$(mktemp "${TMPDIR:-/tmp}/janusly-compose-config.XXXXXX.json")
 trap 'rm -f -- "$compose_config"' EXIT
@@ -21,6 +22,7 @@ JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY=512 \
 JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS=20000 \
   docker compose -f "$root/docker-compose.yml" config --format json >"$compose_config"
 jq -e '
+  .services.postgres.healthcheck.test == ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U janusly -d janusly"] and
   .services.janusly.environment.JANUSLY_INTERNAL_HOST == "0.0.0.0" and
   .services.janusly.environment.JANUSLY_MEMORY_ENABLED == "true" and
   (.services.janusly.environment | has("JANUSLY_EMBEDDING_PROVIDER") | not) and

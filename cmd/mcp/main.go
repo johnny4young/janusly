@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/boot"
 	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/engine"
@@ -25,6 +26,7 @@ import (
 	"github.com/johnny4young/janusly/internal/mcpserver"
 	"github.com/johnny4young/janusly/internal/migrate"
 	"github.com/johnny4young/janusly/internal/ratelimit"
+	"github.com/johnny4young/janusly/internal/tools"
 )
 
 func main() {
@@ -37,6 +39,11 @@ func main() {
 func run() error {
 	ctx := context.Background()
 	cfg, err := config.Load(os.Getenv)
+	if err != nil {
+		return err
+	}
+	// Reject invalid authority before opening pools or starting workers.
+	permissions, err := mcpserver.ParsePermissionCeiling(os.Getenv("JANUSLY_MCP_PERMISSIONS"))
 	if err != nil {
 		return err
 	}
@@ -55,7 +62,21 @@ func run() error {
 		return err
 	}
 
-	eng := engine.New(pool)
+	dbPools, err := tools.NewDBPools(cfg.DBToolMaxProcessPools)
+	if err != nil {
+		return err
+	}
+	// Registered before workers: drain external leases before the control pool.
+	defer func() {
+		dbPools.Close()
+		logger.Info("external database pools drained")
+	}()
+	persistence, err := grammar.NewPersister(cfg.PersistMaxBytes)
+	if err != nil {
+		return err
+	}
+	auditWriter := audit.NewWriter(persistence)
+	eng := engine.New(pool, engine.WithReaper(cfg.Reaper), engine.WithPersistence(persistence), engine.WithDBPools(dbPools))
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
@@ -68,7 +89,7 @@ func run() error {
 		_ = eng.RunWorkers(workerCtx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
 	})
 	background.Go(func() {
-		eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
+		eng.StartReaper(workerCtx, logger)
 	})
 	defer func() { stopWorkers(); background.Wait() }()
 
@@ -76,15 +97,12 @@ func run() error {
 	if org == "" {
 		org = "default"
 	}
-	permissions, err := mcpserver.ParsePermissionCeiling(os.Getenv("JANUSLY_MCP_PERMISSIONS"))
-	if err != nil {
-		return err
-	}
-	tracker := ratelimit.NewTracker(pool)
+	tracker := ratelimit.NewTracker(pool, auditWriter)
 	limiter := ratelimit.New(pool, ratelimit.Hooks{
 		OnError: tracker.RecordError, OnSuccess: tracker.RecordRecovery,
 	})
 	server := mcpserver.NewServer(mcpserver.Deps{
+		Audit:  auditWriter,
 		Engine: eng, Pool: pool, OrgID: org, UserID: "mcp", NewID: uuid.NewString,
 		Permissions: permissions, CatalogSource: mcpclient.New(pool, limiter), Limiter: limiter,
 	})

@@ -30,7 +30,10 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 | Lane | Command | Needs |
 |---|---|---|
 | Go unit (race) | `make test` | nothing |
-| Go integration | `make test-integration` | `JANUSLY_DATABASE_URL` pointing at a migrated PostgreSQL; runs `-p 1` |
+| CI classification/gate | `make test-ci` | git, bash, jq; fixture repositories only |
+| Browser/API route parity | `make test-route-parity` | Go, no database; reads frontend sources |
+| Two-instance HA (race) | `make test-ha` | Docker; owns a fresh PostgreSQL 18 project and migrates twice |
+| Go integration | `make test-integration` | `JANUSLY_DATABASE_URL` pointing at a migrated PostgreSQL test role with `CREATEDB`; runs `-p 1` |
 | Web unit (jsdom) | `cd web && pnpm test` | nothing; CSS is not parsed |
 | Web browser (Chromium) | `cd web && pnpm test:browser` | Playwright browsers |
 | Web scripts | `cd web && pnpm test:scripts` | nothing |
@@ -40,10 +43,24 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 `make verify` (`scripts/verify-isolated.sh`) creates a fresh PostgreSQL
 compose project, migrates twice (the second run must be a no-op), regenerates
 `schema.sql` and checks it for drift, runs `make generate` drift, lint, vuln,
-Go unit and integration, the web verify (`audit:ci`, lint, typecheck, unit,
-scripts, browser, build, `bundle-check`) and the e2e lane, then ends with
+Go unit, integration and two-instance HA, the web verify (`audit:ci`, lint,
+app/unit/E2E typecheck, unit, scripts, browser, build, `bundle-check`) and the
+e2e lane, then ends with
 `git diff --exit-code`. Commit first, verify after, and do not touch tracked
 files while it runs.
+
+The E2E harness labels its image with the exact Git commit and tree only when
+its source checkout is clean. Standalone `make test-e2e` still accepts WIP, but
+uses unverified placeholder labels rather than claiming the last commit built
+the dirty source. Ambient build-label variables cannot override this choice.
+The selected real-executable lane includes `responsive.spec.ts`: its EN/ES
+640×360 CSS viewport at 2× device scale is an automated approximation of a
+1280×720 desktop at 200% browser zoom, not a physical zoom or screen-reader
+acceptance pass. Those still require the separate study in
+`docs/usability-testing.md`.
+The same lane runs `usability-study-readiness.spec.ts` against real failures
+and routes in both locales; it verifies affordances only, not interviews or
+unassisted participant completion.
 
 A throwaway database for local integration runs, isolated from the dev one:
 
@@ -56,9 +73,62 @@ JANUSLY_DATABASE_URL='postgres://janusly:janusly-local@127.0.0.1:15499/janusly?s
 docker compose -p janusly-w1 down --volumes   # when done — do not leave it running
 ```
 
+The executable browser lane also runs the operator keyboard-triage proof in
+English and Spanish: accepted-loss confirmation, cancellation, focus recovery and
+copy/palette navigation use real seeded failures, not mocked UI mutations.
+It also exercises outcome qualification, bounded canary creation and automatic
+baseline return, with English and Spanish deployment views.
+
+The executable shutdown integration test builds `cmd/api`, creates and migrates
+its own UUID-named database, and starts the binary with an explicit environment
+without provider credentials. It signals SIGTERM during a real external DB-tool
+query, verifies durable completion and pool drain, and removes only its owned
+database. The Compose test role already has the required `CREATEDB` privilege.
+
 Any Janusly process on the same database (a soak, `make dev`) claims queued
 nodes: tests that `StartRun` and then `claimBatch` race with it. Seed rows by
 SQL when a test must own a specific node.
+
+## CI selection and required checks
+
+The `CI` workflow runs on pull requests, merge groups and pushes to `main` or
+`develop`, including docs-only changes. Its stable **CI gate** evaluates the
+classified inputs and every relevant lane result. Only an intentionally
+unselected lane may be `skipped`; missing, failed, cancelled or unexpectedly
+skipped results fail the gate. Making this check required is a separate repository
+owner action; changing the workflow does not enable branch protection.
+
+| Changed inputs | Product lanes | Website |
+|---|---|---|
+| `web/` | Frontend, route parity, single-runtime E2E | skipped |
+| Go/API/database | Backend, integration, HA, route parity, E2E | skipped |
+| OpenAPI/contract | Both product sets | skipped |
+| `website/` or website workflows | skipped | npm check/build |
+| Documentation only | skipped; CI gate still runs | skipped |
+| Shared/unknown inputs or missing base | All | npm check/build |
+
+The classifier reads a NUL-delimited complete diff with renames treated as
+removal plus addition, so deleted inputs and unusual filenames retain ownership.
+A failed diff is an error, never an empty change set. `make test-ci` exercises
+path selection and all flag combinations against failure, cancellation and
+unintended-skip results. The separate website workflow is reusable from CI,
+receives no deployment secrets, and never joins `make verify` or product builds.
+Website deployment remains its existing main/manual workflow; Wrangler is an
+exact dev dependency restored with `npm ci`, not a floating `npx` download.
+
+HA has its own PostgreSQL service in CI. Both replica pools are capped at four
+connections on every host, and both worker and campaign loops drain before pool
+cleanup. The ten-minute Go timeout emits goroutine stacks; the larger job budget
+leaves room to upload the HA log. `make test-ha` uses the isolated local harness;
+`test-ha-current-db` is the internal target for callers that already own a
+migrated test database. Product artifacts run only on product-changing pushes
+after CI gate succeeds, not website- or documentation-only pushes.
+
+These choices follow GitHub's guidance on
+[required check skips and dependent jobs](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)
+and Cloudflare's recommendation to
+[install Wrangler locally](https://developers.cloudflare.com/workers/wrangler/install-and-update/).
+Local fixture and lane results do not replace exact-head GitHub Actions results.
 
 ## Lint gates
 
@@ -72,7 +142,10 @@ Web: `pnpm lint` runs oxlint plus the ratchets in `web/scripts/`: i18n casts,
 CSS class ownership (every class in every stylesheet must have a production
 owner), legacy UI guard, e2e selector presence, raw `/v1` reads (must go
 through `contractApi`), and duplicate runtime guards (`src/lib/guards.ts` is
-the only home). `web/src/modal-contract.test.ts` requires every
+the only home). The native Oxlint `react/rules-of-hooks` rule is an error;
+`web/scripts/react-hooks-lint.test.mjs` proves the repository configuration
+rejects a conditional hook. `react/exhaustive-deps` is diagnostic-only, not a
+current gate. `web/src/modal-contract.test.ts` requires every
 `role="dialog"` file to call `useDialogFocusTrap` in the same file.
 
 Diagnostics that are not gates but drive the refactor backlog:
@@ -94,13 +167,15 @@ upgrade bridges. The whole file sits inside one `-- +goose StatementBegin` /
 goose splits plpgsql bodies at every `;`.
 
 1. Edit the baseline.
-2. Hand-add the same columns to `schema.sql` so `sqlc` and the binary
-   compile (`make generate`).
+2. Generate `schema.sql` from the edited baseline on a fresh, isolated
+   PostgreSQL 18 database: `bash scripts/verify-isolated.sh schema`. Never edit
+   the dump by hand; the harness owns and removes only its disposable project.
 3. Write or change queries in `internal/store/queries/*.sql`; `SELECT *`
    returns the table model struct, an explicit column list returns a
    query-specific row struct.
-4. Regenerate the real dump from a fresh database:
-   `bash scripts/verify-isolated.sh schema` then `make generate` again.
+4. Run `make generate` to regenerate store code and contracts, then update the
+   callers for the generated types. If the baseline changes again, repeat the
+   isolated schema step before regeneration.
 5. Add new required columns to `assertBaseline` in `internal/migrate/migrate.go`.
 6. `make verify` proves fresh migration, idempotent second migration and no
    drift.

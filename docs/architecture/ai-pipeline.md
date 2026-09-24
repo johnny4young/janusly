@@ -11,6 +11,24 @@ before calling the client.
 - Usage recording occurs at the client boundary and cannot fail the call.
 - Generated text is bounded before parsing or persistence.
 - Workflow generation and patching pass `internal/domain` validation.
+- Recovery patch responses and prompts use the canonical parsed workflow DAG,
+  never the dead-letter run snapshot. Run-only input, tenant, and actor carriers
+  are stripped before provider egress and before either AI or deterministic
+  fallback suggestions reach the browser. An invalid stored snapshot returns a
+  closed `ai_workflow_snapshot_invalid` error instead of a nominal fallback the
+  client cannot safely apply.
+- Recovery patch confidence is not authority: the model's raw integer
+  percentage remains the feedback signal, while the displayed value and
+  suggestion order use a tenant-scoped per-approach calibration curve only when
+  that tenant enables calibration and a finite, positive-slope fit from at
+  least 20 labeled decisions was refreshed within 48 hours. The supervised
+  fit makes one pass after boot and then daily over a rolling 30-day window;
+  it walks organizations in stable 500-row keyset pages, so a completed pass
+  does not silently omit tenants beyond the first page. Failures report sweep
+  telemetry. Missing, stale, invalid, or unreadable
+  curves leave the raw value unchanged without breaking a valid AI response.
+  A deterministic fallback remains 0 and no calibrated number grants approval
+  or bypasses workflow validation.
 - Workflow generation finishes with a deterministic assurance compilation:
   terminal `outputs` form the Intent Contract, and explicit resilience intent
   may add a conservative technical Recovery Contract V1. The compiler never
@@ -141,9 +159,11 @@ lanes share one core, one strict decoder, and the `ai.write` gate.
 
 Anthropic model pricing lives once in `internal/ai/pricing.go`. `make generate`
 projects that dated catalog into `web/src/lib/llm-pricing.generated.ts`; the UI
-never maintains an independent hand-copied price table. Unknown models remain
-explicitly unpriced rather than inheriting an optimistic estimate. The real
-provider chokepoint rejects an unpriced model before egress. A catalogued model
+never maintains an independent hand-copied price table. The snapshot date is
+checked against [Anthropic's first-party API pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+Sonnet 5 retains the $2/$10 per-million input/output rate as standard. Unknown
+models remain explicitly unpriced rather than inheriting an optimistic
+estimate. The real provider chokepoint rejects an unpriced model before egress. A catalogued model
 can temporarily override its positive finite `input,output` rates while
 retaining the catalogued cache multipliers. A newly released model absent from
 the catalog must provide all four billable rates explicitly as
@@ -165,10 +185,39 @@ payload limits, and engine-owned recovery candidate authority.
 The opt-in `make qualify-real-provider` profile is deliberately separate from
 ordinary tests. With explicit consent and `ANTHROPIC_API_KEY`, it replays the
 same 20 cases through the production authoring and diagnosis chokepoints. Hard
-breakers allow at most two calls per case, 40 calls globally, USD 3 globally,
-and zero SDK retries. The gate requires 20/20 valid bounded envelopes, 20/20
-without invented graph capabilities or authority escalation, and at least
-18/20 useful under the checked rubric. Evidence records case ID/category,
+breakers allow at most four calls per case in one run (matching the product's
+generation and repair ladder), six calls per case across bounded reruns, 80
+calls across the ledger's lifetime, USD 3 cumulatively, and zero SDK retries.
+The paid corpus caps each provider request at 2,400 output tokens and reserves
+against that actual cap before egress. The gate requires 20/20 valid bounded
+envelopes, 20/20 without invented graph capabilities or authority escalation,
+and at least 18/20 useful under the checked rubric. Evidence records case ID/category,
 model, tokens, latency, cost, repair flag, and result only—never prompts or raw
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.
+Failed authoring cases additionally retain a bounded internal failure stage and
+up to five validator issue codes; they never retain model text or error messages.
+
+The paid profile has **no checkout-local default ledger**. Set
+`JANUSLY_REAL_PROVIDER_LEDGER` explicitly to one durable absolute path outside
+every Git worktree (for example, a private operator state directory), and
+reuse that exact path across every attempt charged to the same authorization.
+One local choice is
+`$HOME/.local/state/janusly/real-provider-ledger.jsonl`; create its parent
+with mode 0700 and export the absolute path before `make qualify-real-provider`.
+The shell profile rejects missing or relative paths and paths inside a Git
+worktree, including paths reached through a symlink, before provider egress.
+If an earlier profile already created
+reservations under its former checkout-local default, preserve and migrate
+that ledger while no profile is running; never start with an empty ledger as
+another USD 3 allowance. Before egress,
+an interprocess file lock serializes a conservative USD reservation and
+lifetime global/per-case call counts. Input is priced as one token per UTF-8
+byte plus a framing allowance at the highest input/cache rate; output is
+reserved at the configured maximum. A timeout, failed response, interrupted
+test, or unknown provider charge **does not refund** its reservation. A corrupt
+ledger fails closed before provider egress. The sanitized summary reports
+measured successful-response cost separately from lifetime reserved USD;
+neither replaces the provider's billing statement. Keep the ledger when
+retrying, changing worktrees, or reviewing a failed run. Do not reset it to
+obtain another USD 3 allowance.

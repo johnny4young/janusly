@@ -103,7 +103,7 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 		text, _ := normalized.(string)
 		metadata = map[string]any{"key": def.Key, "bytes": len(text)}
 	}
-	audit.Write(ctx, s.pool, rc.authContext, "org.config.updated", audit.Options{
+	s.audit.Write(ctx, s.pool, rc.authContext, "org.config.updated", audit.Options{
 		TargetType: "org_config", TargetID: def.Key, Metadata: metadata,
 	})
 	if def.Key == "memory.enabled" && previousMemoryEnabled != nil {
@@ -120,7 +120,7 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 				// pending deadline was cancelled without queue bookkeeping.
 				transition["pendingPurgeCancelled"] = previousMemorySource == "tenant"
 			}
-			audit.Write(ctx, s.pool, rc.authContext, action, audit.Options{
+			s.audit.Write(ctx, s.pool, rc.authContext, action, audit.Options{
 				TargetType: "org_config", TargetID: def.Key, Metadata: transition,
 			})
 		}

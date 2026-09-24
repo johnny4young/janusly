@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/authpolicy"
 	"github.com/johnny4young/janusly/internal/browsersession"
 	"github.com/johnny4young/janusly/internal/ssostate"
@@ -46,7 +47,7 @@ func newPublicSsoServer(t *testing.T, pool *pgxpool.Pool, client workosClient, n
 	if newID == nil {
 		newID = uuid.NewString
 	}
-	server := &V1Server{pool: pool, newID: newID, workos: client, authPolicy: authpolicy.New(pool)}
+	server := &V1Server{pool: pool, newID: newID, workos: client, authPolicy: authpolicy.New(pool, audit.Writer{})}
 	mux := http.NewServeMux()
 	server.mountSsoRoutes(mux)
 	probe := httptest.NewServer(WithBrowserHeaders(mux))

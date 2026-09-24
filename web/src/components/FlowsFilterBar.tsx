@@ -168,20 +168,20 @@ export function FlowsFilterBar({
               data-testid="workflows-tag-rename-input"
             />
             <Button size="sm" onClick={() => void renameTag(soleTagFilter, tagRenameDraft)} data-testid="workflows-tag-rename-save">
-              {t('workflowsDashboard.saveRename')}
+              {t('common.save')}
             </Button>
             <Button size="sm" onClick={() => setRenamingTag(false)}>
-              {t('workflowsDashboard.cancelAction')}
+              {t('common.cancel')}
             </Button>
           </span>
         ) : confirmDeleteTag ? (
           <span className="we-list-tag-manage">
             <span className="we-list-tag-manage__confirm">{t('workflowsDashboard.deleteTagConfirm', { tag: soleTagFilter })}</span>
             <Button size="sm" variant="danger" onClick={() => void deleteTag(soleTagFilter)} data-testid="workflows-tag-delete-confirm">
-              {t('workflowsDashboard.confirmDeleteCta')}
+              {t('common.delete')}
             </Button>
             <Button size="sm" onClick={() => setConfirmDeleteTag(false)}>
-              {t('workflowsDashboard.cancelAction')}
+              {t('common.cancel')}
             </Button>
           </span>
         ) : (

@@ -469,7 +469,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
             disabled={readOnly || loadState !== 'ready' || saving || runbookOverCap || aiGuidanceOverCap || aiGuidanceHasSecret}
             data-testid="workflow-metadata-save"
           >
-            {t('workflowMetadata.action.save')}
+            {t('common.save')}
           </Button>
         </FormActions>
       </form>

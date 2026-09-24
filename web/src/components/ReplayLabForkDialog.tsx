@@ -170,7 +170,7 @@ export function ReplayLabForkDialog({
             type="button"
             className="run-input-dialog__close"
             onClick={onBackdrop}
-            aria-label={t('replayLab.fork.close')}
+            aria-label={t('common.close')}
             disabled={step.kind === 'starting'}
           >
             <X size={16} aria-hidden="true" />
@@ -242,7 +242,7 @@ export function ReplayLabForkDialog({
           {step.kind === 'idle' && (
             <>
               <Button variant="secondary" type="button"  onClick={onClose}>
-                {t('replayLab.fork.cancel')}
+                {t('common.cancel')}
               </Button>
               <Button variant="primary"
                 ref={primaryRef}
@@ -264,7 +264,7 @@ export function ReplayLabForkDialog({
           {step.kind === 'error' && (
             <>
               <Button variant="secondary" type="button"  onClick={onClose}>
-                {t('replayLab.fork.close')}
+                {t('common.close')}
               </Button>
               <Button variant="primary"
                 ref={primaryRef}

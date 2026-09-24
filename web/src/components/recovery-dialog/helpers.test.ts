@@ -3,7 +3,6 @@ import {
   classifyRecoveryError,
   isActionableSuggestion,
   normalizeConsideredAlternatives,
-  normalisePatchSuggestion,
   pickErrorMessage,
   pickFailedNodeErrorJson,
   resolveConfidenceDisplay,
@@ -50,8 +49,6 @@ describe('normalizeConsideredAlternatives', () => {
 function suggestion(overrides: Partial<PatchSuggestion> = {}): PatchSuggestion {
   return {
     mode: 'ai',
-    suggestedWorkflow: baseWorkflow,
-    rationale: 'r',
     suggestions: [
       { workflow: baseWorkflow, rationale: 'r', approachLabel: 'other', confidence: 50 },
     ],
@@ -112,51 +109,6 @@ describe('pickFailedNodeErrorJson', () => {
 
   it('returns null when nodes is undefined', () => {
     expect(pickFailedNodeErrorJson(undefined, 'fetch')).toBeNull()
-  })
-})
-
-describe('normalisePatchSuggestion', () => {
-  it('passes through a response that already has a non-empty suggestions array', () => {
-    const input = suggestion()
-    expect(normalisePatchSuggestion(input)).toBe(input)
-  })
-
-  it('synthesizes a single "other" item from the legacy shape (ai mode → confidence 50)', () => {
-    const legacy = {
-      mode: 'ai',
-      suggestedWorkflow: baseWorkflow,
-      rationale: 'Legacy single-suggestion shape.',
-    } as unknown as PatchSuggestion
-    const result = normalisePatchSuggestion(legacy)
-    expect(result.suggestions).toHaveLength(1)
-    expect(result.suggestions[0]).toMatchObject({
-      workflow: baseWorkflow,
-      rationale: 'Legacy single-suggestion shape.',
-      approachLabel: 'other',
-      confidence: 50,
-      calibratedConfidence: 50,
-    })
-  })
-
-  it('synthesizes confidence 0 for a legacy fallback-mode response', () => {
-    const legacy = {
-      mode: 'fallback',
-      suggestedWorkflow: baseWorkflow,
-      rationale: 'AI unavailable.',
-    } as unknown as PatchSuggestion
-    const result = normalisePatchSuggestion(legacy)
-    expect(result.suggestions[0]).toMatchObject({ confidence: 0, calibratedConfidence: 0 })
-  })
-
-  it('binds every patch shape to the exact persisted workflow identity', () => {
-    const input = suggestion()
-    const result = normalisePatchSuggestion(input, 'persisted-workflow-id')
-
-    expect(result).not.toBe(input)
-    expect(result.suggestedWorkflow.id).toBe('persisted-workflow-id')
-    expect(result.suggestions.map((item) => item.workflow.id)).toEqual(['persisted-workflow-id'])
-    expect(input.suggestedWorkflow).toBe(baseWorkflow)
-    expect('id' in baseWorkflow).toBe(false)
   })
 })
 

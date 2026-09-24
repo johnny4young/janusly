@@ -3,12 +3,10 @@
  *
  * Used by: web/src/components/RecoveryDialog.tsx (via ReviewBody).
  * Owns the collapsible evidence list: one chip per row grouped visually by
- * `kind`, each with its `sourceRef` deep-link token, plus the render-time
- * re-scrub (defense in depth on top of the API's read-time scrub).
+ * `kind`, each with its validated `sourceRef` deep-link token.
  */
 
-import { useMemo } from 'react'
-import { scrubEvidenceRow, type EvidenceRow } from '@/lib/ai-evidence'
+import type { EvidenceRow } from '@/lib/ai-evidence-runtime'
 import { useT } from '../../i18n'
 import { evidenceKindLabel } from './recovery-dialog-model'
 import './recovery-dialog.css'
@@ -20,28 +18,19 @@ import './recovery-dialog.css'
  * token (run id, recovery item id, memory entry id, tool name, signature
  * category) so the operator can trace the suggestion back to its source.
  *
- * Defense in depth: every row re-passes through the shared `scrubEvidenceRow`
- * at render time even though the API already scrubbed at read time — the
- * AC's "scrubbed at read even though scrubbed at write" applies on the
- * browser side too. An empty list hides the panel entirely.
+ * Rows have already passed the untrusted HTTP-boundary parser, including
+ * read-time redaction and bounds. An empty list hides the panel entirely.
  */
 export function EvidencePanel({ evidence }: { evidence: readonly EvidenceRow[] }) {
   const { t } = useT()
-  // Re-scrub at render (cheap, idempotent) and drop any row that scrubbed
-  // down to an empty snippet. Memoized so a re-render of the tabpanel (e.g.
-  // switching suggestion tabs) doesn't re-walk the list each time.
-  const rows = useMemo(
-    () => evidence.map((row) => scrubEvidenceRow(row)).filter((row) => row.snippet.length > 0),
-    [evidence],
-  )
-  if (rows.length === 0) return null
+  if (evidence.length === 0) return null
   return (
     <details className="we-recovery-evidence">
       <summary className="we-recovery-evidence__summary">
-        {t('recoveryDialog.evidence.summary', { count: rows.length })}
+        {t('recoveryDialog.evidence.summary', { count: evidence.length })}
       </summary>
       <ul className="we-recovery-evidence__list">
-        {rows.map((row, index) => (
+        {evidence.map((row, index) => (
           <li
             key={`${row.kind}:${row.sourceRef}:${index}`}
             className="we-recovery-evidence__row"

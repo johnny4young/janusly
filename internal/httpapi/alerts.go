@@ -134,7 +134,7 @@ func (s *V1Server) createAlertPolicyCore(r *http.Request, rc v1Request) opResult
 		return opError(http.StatusConflict, "alert_policy_conflict",
 			"An alert policy with this name already exists", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "alert.policy.created", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "alert.policy.created", audit.Options{
 		TargetType: "alert-policy", TargetID: id,
 		Metadata: map[string]any{"trigger": body.Trigger, "name": body.Name},
 	})
@@ -198,7 +198,7 @@ func (s *V1Server) updateAlertPolicyCore(r *http.Request, rc v1Request, id strin
 		return opError(http.StatusConflict, "alert_policy_conflict",
 			"An alert policy with this name already exists", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "alert.policy.updated", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "alert.policy.updated", audit.Options{
 		TargetType: "alert-policy", TargetID: id,
 	})
 	row, err := q.GetAlertPolicy(r.Context(), store.GetAlertPolicyParams{OrgID: rc.orgID, ID: id})
@@ -218,7 +218,7 @@ func (s *V1Server) deleteAlertPolicyCore(r *http.Request, rc v1Request, id strin
 	if deleted == 0 {
 		return opError(http.StatusNotFound, "alert_policy_not_found", "Alert policy not found", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "alert.policy.deleted", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "alert.policy.deleted", audit.Options{
 		TargetType: "alert-policy", TargetID: id,
 	})
 	return opOK(map[string]any{"ok": true})

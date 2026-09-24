@@ -4,8 +4,11 @@
 Go HTTP server. `cmd/contract` generates `contract/openapi.json`.
 
 Contracted `/v1` routes return a stable envelope with `apiVersion`,
-`requestId`, and either `data` or `error`. Request and response payloads are
-validated at runtime. `X-Request-Id` is always safe to expose.
+`requestId`, and either `data` or `error`. Handlers validate their requests and
+serialize response envelopes; the manifest is a schema description, not a
+universal production response validator. Conformance tests compare supported
+wire responses to those schemas, and high-risk browser boundaries validate the
+received projection before applying it. `X-Request-Id` is always safe to expose.
 
 Generic server failures are deliberately opaque at the public boundary. Every
 `internal_error` response uses the stable `Internal error` message, omits
@@ -63,6 +66,23 @@ Proposal responses expose the canonical parsed workflow, not the raw provider
 document. This matches workflow save: unknown carrier fields are stripped and
 normalization happens before the workflow, intent/recovery contract projections,
 qualification flags, bindings, and readiness leave the server.
+
+`GET /v1/run` and `/v1/status` share an explicit required snapshot contract:
+run identity/lifecycle, typed node and event rows, nullable persisted metadata,
+and event pagination. Their unversioned aliases serialize the same typed Go
+views. Timestamps retain the existing UTC millisecond format; absent columns
+remain explicit nulls, while empty collections remain arrays. Event pages retain
+the existing 500-row maximum; this does not impose a new graph-size limit.
+Extensible input/output/state/error/event JSON remains a JSON value rather than
+an invented closed business schema. Unit fixtures and actual PostgreSQL-backed
+responses (including pagination and tenancy errors) protect the wire shape.
+
+The browser uses the generated pagination types and one validated run display
+projection for polling, history, Replay Lab and recovery validation. An unreadable,
+malformed or wrong-run snapshot cannot replace the last known history, consume a
+pagination cursor, start a comparison or authorize Apply. Recovery validation
+uses the shared terminal-status set, including `timed_out`, rather than waiting
+for a separate dialog timeout after the run has already terminated.
 
 Run `make generate` after contract changes and require a clean diff on a second
 run.
@@ -132,3 +152,49 @@ Public workflow status pages use a 256-bit bearer token at
 response; PostgreSQL stores its SHA-256 digest, so a later admin read can report
 and revoke enablement but cannot reconstruct the public URL. Public payloads are
 aggregate-only and intentionally omit tenant ids, run ids, and error bodies.
+
+## Dead-letter snapshots and resolution
+
+`GET /v1/dlq` remains a bounded summary array (at most 200 rows), with explicit
+nullable ownership metadata and opaque error/comment JSON. It is not a detail
+union. `GET /v1/dlq/entries/{deadLetterId}` returns the full tenant-bound failed
+workflow/node snapshot and bounded drill provenance/outcome. The legacy
+`GET /dlq?id=...` and unversioned entry path share the same core and wire keys.
+Missing or foreign entries are indistinguishable 404 responses. Persisted absent
+timestamps remain null; the browser must not invent recency or downtime.
+
+The browser's shared detail boundary validates identity, lifecycle, required
+snapshot keys and drill projections before enabling recovery; an incomplete or
+wrong-row response cannot become evidence. Extension workflow/node/error JSON is
+not redefined as a closed business schema. The explicit `entries` namespace also
+keeps legacy `/dlq/queue`, `/dlq/counts` and `/dlq/cluster-members` out of the
+versioned-path rewrite.
+
+`POST /v1/dlq/resolve` and its existing unversioned alias require editor-level
+`recovery.write`, accept `{id}`, and return `{ok: true}` only when an owned row
+was updated. Missing/foreign ids return `dlq_not_found` without a success audit.
+This is acceptance of loss, not verified recovery; the linked recovery item
+retains `accepted_loss`. The browser checks the affirmative receipt before
+showing success or refreshing projections.
+
+### List and catalog projections
+
+Runs, saved workflows and workflow versions have explicit row schemas and the
+existing 200-row ceiling. Version history remains newest-first keyset pagination;
+exact-version reads must return only that workflow and version. The latest-version
+read may return `null` when the workflow has no version. Nullable metadata keeps
+its explicit JSON nulls; DAGs and extension JSON are not redefined by the transport.
+
+Tools expose the typed registry catalog directly, including its `array`, `object`
+and `unknown` field kinds. The browser edits those kinds as JSON, without changing
+the public kind values. Runtime callbacks and accepted-type internals never enter
+the wire. Absent input examples remain omitted and explicit empty examples remain
+objects. The typed template envelope preserves the embedded workflows and absent
+versus empty credential requirements.
+
+Browser readers validate entire pages before updating a projection: malformed
+successful responses are errors, not empty lists or partially filtered success.
+They reject duplicate identities, invalid consumed fields and mismatched version
+ownership/cursors; authoring uses the existing workflow-definition guard. A failed
+bootstrap refresh retains previous lists and newer run-event patches. Version
+history does not advance its cursor when an older page is rejected.

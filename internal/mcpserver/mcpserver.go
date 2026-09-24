@@ -36,6 +36,7 @@ const (
 
 // Deps carries the in-process dependencies every tool shares.
 type Deps struct {
+	Audit  audit.Writer
 	Engine *engine.Engine
 	Pool   *pgxpool.Pool
 	OrgID  string
@@ -246,7 +247,7 @@ func (d Deps) saveWorkflow(ctx context.Context, document map[string]any) (*mcp.C
 	default:
 		return expected("workflow save failed")
 	}
-	audit.Write(ctx, d.Pool, d.auditContext(), "workflow.saved", audit.Options{
+	d.Audit.Write(ctx, d.Pool, d.auditContext(), "workflow.saved", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
 		Metadata: map[string]any{"version": committed.Version, "attempts": committed.Attempts},
 	})
@@ -316,7 +317,7 @@ func (d Deps) startRun(
 	if !started.Binding.Bound {
 		startAction = "run.started.adhoc"
 	}
-	audit.Write(ctx, d.Pool, d.auditContext(), startAction, audit.Options{
+	d.Audit.Write(ctx, d.Pool, d.auditContext(), startAction, audit.Options{
 		TargetType: "run", TargetID: started.RunID,
 		Metadata: map[string]any{
 			"workflowId":        started.Workflow.ID,
@@ -450,7 +451,7 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	err := d.Engine.RedriveDeadLetter(ctx, d.OrgID, deadLetterID)
 	switch {
 	case err == nil:
-		audit.Write(ctx, d.Pool, d.auditContext(), "dlq.replayed", audit.Options{
+		d.Audit.Write(ctx, d.Pool, d.auditContext(), "dlq.replayed", audit.Options{
 			TargetType: "dlq", TargetID: deadLetterID,
 		})
 		return ok(map[string]any{"redriven": true, "deadLetterId": deadLetterID})

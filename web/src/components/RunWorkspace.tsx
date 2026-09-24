@@ -52,6 +52,7 @@ export type RunWorkspaceProps = Omit<
 }
 
 const VIEW_ORDER: readonly RunWorkspaceView[] = ['overview', 'timeline', 'agents']
+const EMPTY_RUN_EVENTS: RunEvent[] = []
 
 function countAgentEvents(events: RunEvent[]): number {
   return events.filter(event => event.type.startsWith('multi_agent.')).length
@@ -180,7 +181,7 @@ export function RunWorkspace({
     runId: string | null | undefined
     view: RunWorkspaceView
   }>({ runId: runsProps.activeRunId, view: 'overview' })
-  const events = runsProps.runEvents ?? []
+  const events = runsProps.runEvents ?? EMPTY_RUN_EVENTS
   const agentEventCount = useMemo(() => countAgentEvents(events), [events])
   const hasActiveRun = Boolean(runsProps.activeRunId)
   const effectiveView = hasActiveRun && selection.runId === runsProps.activeRunId

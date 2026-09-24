@@ -12,9 +12,9 @@ GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || printf '%040d' 0)
 GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 
 .PHONY: dev build artifact supply-chain db-up db-down db-reset migrate generate lint test \
-	test-integration test-e2e test-e2e-full verify verify-current-db vuln frontend-install \
+	test-integration test-ha test-ha-current-db test-route-parity test-ci test-e2e test-e2e-full verify verify-current-db vuln frontend-install \
 	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
-	restore-local recovery-local-selftest load-soak-local-selftest \
+	restore-local recovery-local-selftest recovery-local-drill load-soak-local-selftest \
 	qualify-oci-local qualify-private-metrics-local qualify-real-provider qualify-pagerduty
 
 dev: db-up migrate
@@ -87,9 +87,23 @@ vuln:
 	go tool govulncheck ./...
 
 test:
+	$(MAKE) test-ci
 	bash scripts/local-db-port.test.sh
 	go test -race ./...
 	cd web && $(PNPM) test && $(PNPM) test:scripts && $(PNPM) test:browser
+
+test-ci:
+	bash scripts/ci-contract.test.sh
+
+test-route-parity:
+	go test -race -count=1 -timeout 5m ./internal/httpapi -run '^(TestEveryContractClientOperationMatchesAllSources|TestEveryWebPathResolvesToARegisteredRoute|TestEveryWebPathTraversesViteDevProxy|TestRouteParityAllowlistStaysHonest)$$' -v
+
+# Local HA owns a fresh PostgreSQL project; CI supplies a dedicated service DB.
+test-ha:
+	bash scripts/verify-isolated.sh ha
+
+test-ha-current-db:
+	JANUSLY_DATABASE_URL='$(DB_URL)' go test -race -tags integration,ha -p 1 -count=1 -timeout 10m ./internal/engine -run '^TestHA' -v
 
 test-integration:
 	JANUSLY_DATABASE_URL='$(DB_URL)' go test -race -tags integration -p 1 -count=1 ./...
@@ -111,6 +125,7 @@ qualify-local-selftest:
 	bash scripts/load-soak-local.test.sh
 	bash scripts/assert-clean-source.test.sh
 	bash scripts/oci-railway-local.test.sh
+	bash scripts/process-config.test.sh
 	bash scripts/private-metrics-local.test.sh
 	bash scripts/supply-chain-local.test.sh
 	bash scripts/real-provider-local.test.sh
@@ -138,6 +153,10 @@ qualify-real-provider:
 
 recovery-local-selftest:
 	bash scripts/postgres-local-recovery.test.sh
+	bash scripts/postgres-local-recovery.drill.test.sh
+
+recovery-local-drill:
+	@CONFIRM='$(CONFIRM)' bash scripts/postgres-local-recovery.drill.sh
 
 backup-local:
 	@bash scripts/postgres-local-recovery.sh backup '$(or $(OUTPUT),output/backups/$$(date -u +%Y%m%dT%H%M%SZ))'
@@ -152,6 +171,8 @@ verify:
 # migrated a fresh PostgreSQL 18 database. Callers that opt into this target
 # own the lifecycle and schema state of DB_URL.
 verify-current-db:
+	bash scripts/process-config.test.sh
+	$(MAKE) recovery-local-selftest
 	$(MAKE) schema COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME)
 	$(MAKE) generate
 	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts || { \
@@ -163,6 +184,7 @@ verify-current-db:
 	$(MAKE) frontend-audit
 	$(MAKE) test
 	$(MAKE) test-integration
+	$(MAKE) test-ha-current-db
 	$(MAKE) frontend-build
 	cd web && $(PNPM) bundle-check
 	$(MAKE) test-e2e

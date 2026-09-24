@@ -414,7 +414,7 @@ export function ReportDeliveryDialog({
           {step.kind === 'idle' && (
             <>
               <Button variant="secondary" type="button"  onClick={onClose}>
-                {t('reportDelivery.cancel')}
+                {t('common.cancel')}
               </Button>
               <Button variant="primary"
                 ref={primaryRef}
@@ -442,13 +442,13 @@ export function ReportDeliveryDialog({
               onClick={onClose}
               data-testid="report-delivery-close-done"
             >
-              {t('reportDelivery.closeButton')}
+              {t('common.close')}
             </Button>
           )}
           {step.kind === 'failed' && (
             <>
               <Button variant="secondary" type="button"  onClick={onClose}>
-                {t('reportDelivery.closeButton')}
+                {t('common.close')}
               </Button>
               <Button variant="primary"
                 ref={primaryRef}
@@ -457,7 +457,7 @@ export function ReportDeliveryDialog({
                 onClick={() => setStep({ kind: 'idle' })}
                 data-testid="report-delivery-retry"
               >
-                {t('reportDelivery.retry')}
+                {t('common.retry')}
               </Button>
             </>
           )}

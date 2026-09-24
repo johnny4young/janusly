@@ -28,6 +28,7 @@ export const V1_READ_PATHS = {
   runStatus: "/status",
   runExplainReport: "/reports/run-explain",
   deadLetters: "/dlq",
+  deadLetterEntry: "/dlq/entries/{deadLetterId}",
   failureClusters: "/dlq/clusters",
 } as const;
 
@@ -47,6 +48,7 @@ export const V1_WRITE_PATHS = {
   cancelRun: "/run/cancel",
   resumeWorkflow: "/workflows/{workflowId}/resume",
   replayDeadLetter: "/dlq/replay",
+  resolveDeadLetter: "/dlq/resolve",
   diagnoseRecoveryCase: "/recovery/cases/{caseId}/diagnose",
   createRecoveryCandidates: "/recovery/cases/{caseId}/candidates",
   validateRecoveryCandidate: "/recovery/cases/{caseId}/validate",

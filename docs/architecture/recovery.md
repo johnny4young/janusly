@@ -7,6 +7,12 @@ impact attribution, and feedback.
 ## Invariants
 
 - Terminal failure, dead-letter creation, and run state change are atomic.
+- Automatic ownership uses the completion transaction's connection, including
+  configuration reads and system audit receipts. Savepoints isolate optional
+  failures: unreadable tenant configuration falls back to environment/defaults;
+  an incident failure leaves the dead letter intact; an audit failure leaves
+  the incident intact. Successful receipts roll back if completion rolls back.
+  Savepoint recovery failures abort completion rather than claiming success.
 - Replay claims are compare-and-set and bound to the exact failed task.
 - Validation replay suppresses external write effects.
 - Circuit breaking pauses every run entry point and requires explicit resume.
@@ -71,13 +77,15 @@ recovery handlers in `internal/httpapi`.
 ## Data-plane recovery boundary
 
 Workflow recovery does not replace database disaster recovery. The local
-operator drill uses `scripts/postgres-local-recovery.sh` to verify a
-checksum-bound PostgreSQL 18 custom-format backup against an empty isolated
-target. It binds the package to the single embedded migration source and, when
-managed credentials exist, to a one-way fingerprint of the high-entropy
-credential root key. Restore refuses a running application, a non-empty
-database, a different PostgreSQL major, schema drift, checksum drift, or a
-mismatched key.
+operator drill uses `scripts/postgres-local-recovery.drill.sh` to exercise
+`scripts/postgres-local-recovery.sh` against two disposable PostgreSQL 18
+databases and verify a checksum-bound custom-format backup against an empty
+isolated target. The helper binds the package to the single embedded migration
+source and, when managed credentials exist, to a one-way fingerprint of the
+high-entropy credential root key. Restore refuses a running application, a
+non-empty database, a different PostgreSQL major, schema drift, checksum
+drift, or a mismatched key. The automated positive drill seeds no managed
+credentials; key escrow and recovery need a separate operator test.
 
 The application database, Supabase identities, and the credential root key are
 three distinct recovery domains. Production operators must back up and test

@@ -14,7 +14,7 @@
  * stay clickable; the link safety guard is on by default.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ExternalLink, Copy } from 'lucide-react'
 
 import type { RecoveryItemSeverity } from '@/lib/recovery-item'
@@ -100,10 +100,7 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
     }
   }, [workflowId, invalidationNonce])
 
-  const ownersDisplay = useMemo(() => {
-    if (!metadata) return []
-    return metadata.owners.slice(0, 3)
-  }, [metadata])
+  const ownersDisplay = metadata?.owners.slice(0, 3) ?? []
 
   const ownersOverflow = metadata && metadata.owners.length > 3
     ? metadata.owners.length - 3

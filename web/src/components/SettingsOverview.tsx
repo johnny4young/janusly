@@ -12,13 +12,11 @@ import { Button } from './ui/Button'
 
 export function SettingsOverview({
   permissions,
-  connectionCount,
   aiHealth,
   onOpenSection,
   onOpenTab,
 }: {
   permissions?: readonly string[]
-  connectionCount: number
   aiHealth: AiHealth | null
   onOpenSection: (section: Exclude<OpsSection, 'overview'>) => void
   onOpenTab: (tab: ActiveTab) => void
@@ -40,12 +38,6 @@ export function SettingsOverview({
   })
 
   const statusFor = (area: Exclude<OpsSection, 'overview'>): string | null => {
-    if (area === 'integrations') {
-      return t('rightPanel.credentials.inventoryCount', {
-        shown: connectionCount,
-        total: connectionCount,
-      })
-    }
     if (area === 'ai') {
       if (aiHealth === null) return t('badges.health.unavailable')
       return t(aiHealth?.enabled ? 'aiStudio.healthOn' : 'aiStudio.healthOff')
@@ -107,7 +99,7 @@ export function SettingsOverview({
       <div className="we-settings-index__quick-paths" aria-label={t('operations.section.railLabel')}>
         {can('credentials.read') && (
           <Button size="sm" onClick={() => onOpenTab('credentials')}>
-            {t('workspace.section.credentials.label')}
+            {t('palette.group.open')} {t('workspace.section.credentials.label')}
           </Button>
         )}
         {can('members.read') && (

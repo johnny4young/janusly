@@ -1,3 +1,4 @@
+import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
 /**
  * Real-Chromium regression smoke for the recovery dialog lifecycle.
  * A successful cluster apply schedules a platform refresh; the refreshed
@@ -44,6 +45,7 @@ describe('<FailureClustersCard /> recovery lifecycle (browser smoke)', () => {
       samples: [{ source: 'dead_letter', id: 'dlq-recovery', runId: 'run-recovery-12345678' }],
     }
     const dlq = {
+      ...deadLetterWireDefaults,
       id: 'dlq-recovery',
       runId: 'run-recovery-12345678',
       nodeId: 'fetch',
@@ -83,7 +85,7 @@ describe('<FailureClustersCard /> recovery lifecycle (browser smoke)', () => {
         })
       }
       if (path.startsWith('/dlq/cluster-members?')) return { deadLetterIds: ['dlq-recovery', 'dlq-peer'], total: 2, capped: false }
-      if (path === '/dlq?id=dlq-recovery') return dlq
+      if (path === '/dlq/entries/dlq-recovery') return dlq
       if (path === '/ai/patch-workflow') {
         return {
           mode: 'ai',
@@ -97,7 +99,7 @@ describe('<FailureClustersCard /> recovery lifecycle (browser smoke)', () => {
       }
       if (path === '/dlq/validate-fix') return { runId: 'validation-cluster' }
       if (path.startsWith('/run?runId=validation-cluster')) {
-        return { run: { id: 'validation-cluster', status: 'succeeded' }, nodes: [{ nodeId: 'fetch', status: 'succeeded' }] }
+        return { run: { id: 'validation-cluster', status: 'succeeded' }, nodes: [{ nodeId: 'fetch', status: 'succeeded' }], events: [], eventsCursor: null, eventsHasMore: false }
       }
       if (path === '/workflows/save') return { workflowId: 'wf-recovery', versionId: 'v2', version: 2 }
       if (path === '/dlq/cluster-apply') return { replayed: 2, failed: 0, errors: [] }

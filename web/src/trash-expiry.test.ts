@@ -5,6 +5,15 @@ const DAY = 86_400_000
 const NOW = Date.UTC(2026, 5, 27, 12, 0, 0) // fixed "now" so the math is deterministic
 
 describe('daysUntilPurge', () => {
+  it.each([
+    { offset: -1, expected: 26 },
+    { offset: 0, expected: 25 },
+    { offset: 1, expected: 25 },
+  ])('respects the millisecond edge of a whole day: $offset', ({ offset, expected }) => {
+    const deletedAt = new Date(NOW - 5 * DAY).toISOString()
+    expect(daysUntilPurge(deletedAt, 30, NOW + offset)).toBe(expected)
+  })
+
   it('returns the days remaining for a row deleted within the window', () => {
     const deletedAt = new Date(NOW - 5 * DAY).toISOString()
     expect(daysUntilPurge(deletedAt, 30, NOW)).toBe(25) // 30 - 5

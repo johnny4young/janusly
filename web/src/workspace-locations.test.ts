@@ -4,6 +4,7 @@ import {
   listWorkspaceSections,
   resolveWorkspaceDestinationTarget,
   workspaceDestinationForTab,
+  workspaceSectionForTab,
 } from './workspace-locations'
 import type { ActiveTab } from './types'
 
@@ -60,5 +61,13 @@ describe('workspace locations', () => {
     ]).map((section) => section.tab)).toEqual([
       'runs',
     ])
+  })
+
+  it('retains the exact hidden subdestination as navigation context', () => {
+    expect(workspaceSectionForTab('runs')?.tab).toBe('runs')
+    expect(workspaceSectionForTab('recover')?.tab).toBe('recover')
+    expect(workspaceSectionForTab('reasoning')?.tab).toBe('reasoning')
+    expect(workspaceSectionForTab('multiAgent')?.tab).toBe('multiAgent')
+    expect(workspaceSectionForTab('recoveryCase')?.tab).toBe('recover')
   })
 })

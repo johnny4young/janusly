@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import {
   Bot,
   BrainCircuit,
@@ -15,10 +14,9 @@ import { Button } from '../ui/Button'
 import type { AiStudioModel } from './useAiStudioController'
 
 export function AiStudioFooter({ model }: { model: AiStudioModel }) {
-  const { t, i18n } = useT()
-  const locale = i18n.resolvedLanguage
+  const { t } = useT()
   const { health, onOpenRuns, onOpenTemplates } = model
-  const useCases = useMemo(() => [
+  const useCases = [
     {
       icon: <Workflow size={16} />,
       title: t('aiStudio.useCase.prompt.title'),
@@ -49,8 +47,8 @@ export function AiStudioFooter({ model }: { model: AiStudioModel }) {
       body: t('aiStudio.useCase.causal.body'),
       state: t('aiStudio.useCase.causal.alwaysOn'),
     },
-  ], [health?.enabled, locale, t])
-  const readinessSteps = useMemo(() => [
+  ]
+  const readinessSteps = [
     {
       icon: <KeyRound size={15} />,
       title: t('aiStudio.readiness.envTitle'),
@@ -71,7 +69,7 @@ export function AiStudioFooter({ model }: { model: AiStudioModel }) {
         : t('aiStudio.readiness.healthBodyOff'),
       ready: Boolean(health?.enabled),
     },
-  ], [health, locale, t])
+  ]
   return (
     <>
       <section className="we-card">

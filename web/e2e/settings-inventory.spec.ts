@@ -15,8 +15,9 @@ const copy = {
     settings: 'Settings',
     workspace: 'Workspace',
     connections: 'Connections',
+    openConnections: 'Open Connections',
     indexTitle: 'Find a setting',
-    search: 'Find provider, credential, member, alert, queue…',
+    search: 'Search settings…',
     queue: 'queue',
     infrastructure: 'Infrastructure',
     connectionSearch: 'Search by name, type, or owner…',
@@ -28,8 +29,9 @@ const copy = {
     settings: 'Configuración',
     workspace: 'Espacio de trabajo',
     connections: 'Conexiones',
+    openConnections: 'Abrir Conexiones',
     indexTitle: 'Buscar configuración',
-    search: 'Buscar proveedor, credencial, miembro, alerta, cola…',
+    search: 'Buscar configuración…',
     queue: 'cola',
     infrastructure: 'Infraestructura',
     connectionSearch: 'Buscar por nombre, tipo o propietario…',
@@ -112,7 +114,7 @@ test('a fresh workspace shows a truthful Connections empty state', async ({ page
   await openWorkspaceSection(page, copy.en.settings, copy.en.workspace)
   await page.getByTestId('settings-index-integrations').click()
   await page.locator('.we-operations-page__content')
-    .getByRole('button', { name: copy.en.connections, exact: true })
+    .getByRole('button', { name: copy.en.openConnections, exact: true })
     .click()
   await expect(
     page.getByRole('region', { name: copy.en.connections })
@@ -175,7 +177,7 @@ test('Settings and Connections are inventory-first in English and Spanish', asyn
 
     await page.getByTestId('settings-index-integrations').click()
     await page.locator('.we-operations-page__content')
-      .getByRole('button', { name: copy[locale].connections, exact: true })
+      .getByRole('button', { name: copy[locale].openConnections, exact: true })
       .click()
     const inventory = page.getByTestId('connections-virtual-list')
     await expect(inventory).toContainText(managedName)
@@ -206,6 +208,28 @@ test('Settings and Connections are inventory-first in English and Spanish', asyn
       const shell = page.locator('.app-shell')
       const overflow = await shell.evaluate((element) => element.scrollWidth - element.clientWidth)
       expect(overflow).toBeLessThanOrEqual(1)
+      const mobileInventory = page.locator('.we-connections-inventory')
+      const addButtonFits = await mobileInventory.evaluate((element) => {
+        const button = element.querySelector<HTMLElement>('.we-card__header .ui-button')
+        if (!button) return false
+        const containerBounds = element.getBoundingClientRect()
+        const buttonBounds = button.getBoundingClientRect()
+        return buttonBounds.left >= containerBounds.left
+          && buttonBounds.right <= containerBounds.right
+      })
+      expect(addButtonFits).toBe(true)
+      const firstRowFits = await inventory.locator('.we-connection-row').first()
+        .evaluate((element) => {
+          const actions = element.querySelector<HTMLElement>('.we-connection-row__actions')
+          if (!actions) return false
+          const rowBounds = element.getBoundingClientRect()
+          const actionBounds = actions.getBoundingClientRect()
+          return actionBounds.left >= rowBounds.left
+            && actionBounds.right <= rowBounds.right
+            && actionBounds.top >= rowBounds.top
+            && actionBounds.bottom <= rowBounds.bottom
+        })
+      expect(firstRowFits).toBe(true)
       await capture(shell, 'web-es-connections-mobile')
     }
   }

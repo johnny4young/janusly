@@ -5,7 +5,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 script="$root/scripts/postgres-local-recovery.sh"
 
 bash -n "$script"
-result=$("$script" selftest)
+result=$(COMPOSE_PROJECT_NAME=janusly "$script" selftest)
 jq -e '
   .project == "janusly" and
   .postgresMajor == 18 and

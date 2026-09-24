@@ -14,13 +14,10 @@ import (
 )
 
 const (
-	defaultFeedbackMemoryWorkers       = 4
-	defaultFeedbackMemoryQueueCapacity = 256
-	defaultFeedbackMemoryTaskTimeout   = 15 * time.Second
-	feedbackMemoryWorkersMax           = 32
-	feedbackMemoryQueueCapacityMax     = 4096
-	feedbackMemoryTaskTimeoutMin       = time.Second
-	feedbackMemoryTaskTimeoutMax       = 5 * time.Minute
+	feedbackMemoryWorkersMax       = 32
+	feedbackMemoryQueueCapacityMax = 4096
+	feedbackMemoryTaskTimeoutMin   = time.Second
+	feedbackMemoryTaskTimeoutMax   = 5 * time.Minute
 )
 
 var (
@@ -73,14 +70,6 @@ func validateFeedbackMemoryPoolOptions(options feedbackMemoryPoolOptions) error 
 			feedbackMemoryTaskTimeoutMin, feedbackMemoryTaskTimeoutMax))
 	}
 	return errors.Join(problems...)
-}
-
-type feedbackMemoryPoolSnapshot struct {
-	accepted int64
-	dropped  int64
-	failed   int64
-	active   int64
-	depth    int64
 }
 
 // feedbackMemoryPool owns a fixed number of workers and the only sender-side
@@ -246,12 +235,5 @@ func (p *feedbackMemoryPool) shutdown(ctx context.Context) error {
 		p.cancel()
 		<-p.done
 		return fmt.Errorf("drain feedback memory pool: %w", ctx.Err())
-	}
-}
-
-func (p *feedbackMemoryPool) snapshot() feedbackMemoryPoolSnapshot {
-	return feedbackMemoryPoolSnapshot{
-		accepted: p.accepted.Load(), dropped: p.dropped.Load(), failed: p.failed.Load(),
-		active: p.active.Load(), depth: p.depth.Load(),
 	}
 }

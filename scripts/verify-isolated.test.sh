@@ -42,7 +42,7 @@ cat >"$tmp/make" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'make %s\n' "$*" >>"$JANUSLY_VERIFY_TEST_LOG"
-if [[ ${JANUSLY_VERIFY_TEST_FAIL:-0} == 1 && " $* " == *" verify-current-db "* ]]; then
+if [[ ${JANUSLY_VERIFY_TEST_FAIL:-0} == 1 && ( " $* " == *" verify-current-db "* || " $* " == *" test-ha-current-db "* ) ]]; then
   exit 7
 fi
 EOF
@@ -56,7 +56,7 @@ run_fake() {
   JANUSLY_VERIFY_POSTGRES_PORT=55438 \
   JANUSLY_VERIFY_DOCKER_BIN="$tmp/docker" \
   JANUSLY_VERIFY_MAKE_BIN="$tmp/make" \
-    "$@" "$root/scripts/verify-isolated.sh"
+    "$@" "$root/scripts/verify-isolated.sh" "${TEST_VERIFY_MODE:-verify}"
 }
 
 success_log="$tmp/success.log"
@@ -71,5 +71,17 @@ if run_fake "$failure_log" env JANUSLY_VERIFY_TEST_FAIL=1 >/dev/null 2>&1; then
   exit 1
 fi
 grep -F 'down --volumes --remove-orphans' "$failure_log" >/dev/null
+
+ha_log="$tmp/ha.log"
+TEST_VERIFY_MODE=ha run_fake "$ha_log" env >/dev/null
+[[ $(grep -c ' migrate DB_URL=' "$ha_log") == 2 ]]
+[[ $(grep -c ' test-ha-current-db DB_URL=' "$ha_log") == 1 ]]
+if grep -q ' verify-current-db ' "$ha_log"; then echo 'HA ran the full lane' >&2; exit 1; fi
+grep -F 'down --volumes --remove-orphans' "$ha_log" >/dev/null
+ha_failure_log="$tmp/ha-failure.log"
+if TEST_VERIFY_MODE=ha run_fake "$ha_failure_log" env JANUSLY_VERIFY_TEST_FAIL=1 >/dev/null 2>&1; then
+  echo 'HA harness swallowed a test failure' >&2; exit 1
+fi
+grep -F 'down --volumes --remove-orphans' "$ha_failure_log" >/dev/null
 
 printf 'isolated verification harness selftest passed\n'

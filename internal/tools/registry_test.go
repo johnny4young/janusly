@@ -140,7 +140,14 @@ func TestRegistryValidationAndCatalog(t *testing.T) {
 	// + sheet.append (integration chokepoint)
 	// + time.now/time.window + 5 pagerduty.* + 4 db.*; csv.fetch registers from the
 	// executors package on top of this base set.
-	catalog := NewRegistry().Catalog()
+	raw, marshalErr := json.Marshal(NewRegistry().CatalogEntries())
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	var catalog []map[string]any
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		t.Fatal(err)
+	}
 	if len(catalog) != 27 {
 		t.Fatalf("catalog size: %d", len(catalog))
 	}
@@ -347,5 +354,41 @@ func TestVectorAndTextToolsRejectUnboundedInputsAtAuthoring(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), test.message) {
 			t.Fatalf("%s expected %q rejection, got %v", test.tool, test.message, err)
 		}
+	}
+}
+
+func TestCatalogWirePreservesEmptyExamplesAndOmitsRuntimeFields(t *testing.T) {
+	registry := &Registry{byName: map[string]Definition{
+		"absent": {Name: "absent"},
+		"empty":  {Name: "empty", InputExample: map[string]any{}, Fields: []Field{{Name: "union", Type: "json", AcceptedTypes: []string{"string", "number"}}}},
+	}}
+	raw, err := json.Marshal(registry.CatalogEntries())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := rows[0]["inputExample"]; exists {
+		t.Fatal("nil example must be omitted")
+	}
+	if example, ok := rows[1]["inputExample"].(map[string]any); !ok || len(example) != 0 {
+		t.Fatal("explicit empty example must remain an object")
+	}
+	for _, row := range rows {
+		if _, ok := row["required"].([]any); !ok {
+			t.Fatal("required must be an array")
+		}
+		if _, ok := row["inputFields"].([]any); !ok {
+			t.Fatal("inputFields must be an array")
+		}
+		if _, exists := row["optional"]; exists {
+			t.Fatal("empty optional must be omitted")
+		}
+	}
+	field := rows[1]["inputFields"].([]any)[0].(map[string]any)
+	if len(field) != 3 || field["name"] != "union" || field["kind"] != "json" || field["required"] != false {
+		t.Fatalf("runtime field metadata leaked: %v", field)
 	}
 }

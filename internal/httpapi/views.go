@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/httpkit"
+	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -23,37 +24,37 @@ type RunView struct {
 	ID                                   string          `json:"id"`
 	OrgID                                string          `json:"orgId"`
 	WorkflowVersionID                    string          `json:"workflowVersionId"`
-	WorkflowRolloutID                    any             `json:"workflowRolloutId"`
-	WorkflowRolloutVariant               any             `json:"workflowRolloutVariant"`
+	WorkflowRolloutID                    *string         `json:"workflowRolloutId"`
+	WorkflowRolloutVariant               *string         `json:"workflowRolloutVariant"`
 	Status                               string          `json:"status"`
-	OutcomeStatus                        any             `json:"outcomeStatus"`
+	OutcomeStatus                        *string         `json:"outcomeStatus"`
 	SemanticViolationCount               int32           `json:"semanticViolationCount"`
 	InputJSON                            json.RawMessage `json:"inputJson"`
 	OutputJSON                           json.RawMessage `json:"outputJson"`
-	ParentRunID                          any             `json:"parentRunId"`
-	ParentNodeID                         any             `json:"parentNodeId"`
-	ParentLinkKind                       any             `json:"parentLinkKind"`
-	ParentNotificationAfter              any             `json:"parentNotificationAfter"`
-	RecoveryPlaybookAppliedRecordedAt    any             `json:"recoveryPlaybookAppliedRecordedAt"`
-	RecoveryPlaybookValidationRecordedAt any             `json:"recoveryPlaybookValidationRecordedAt"`
-	ReplayMode                           any             `json:"replayMode"`
-	TraceID                              any             `json:"traceId"`
-	ValidationEvidenceLevel              any             `json:"validationEvidenceLevel"`
-	CreatedBy                            any             `json:"createdBy"`
-	CreatedAt                            any             `json:"createdAt"`
+	ParentRunID                          *string         `json:"parentRunId"`
+	ParentNodeID                         *string         `json:"parentNodeId"`
+	ParentLinkKind                       *string         `json:"parentLinkKind"`
+	ParentNotificationAfter              *string         `json:"parentNotificationAfter"`
+	RecoveryPlaybookAppliedRecordedAt    *string         `json:"recoveryPlaybookAppliedRecordedAt"`
+	RecoveryPlaybookValidationRecordedAt *string         `json:"recoveryPlaybookValidationRecordedAt"`
+	ReplayMode                           *string         `json:"replayMode"`
+	TraceID                              *string         `json:"traceId"`
+	ValidationEvidenceLevel              *string         `json:"validationEvidenceLevel"`
+	CreatedBy                            *string         `json:"createdBy"`
+	CreatedAt                            *string         `json:"createdAt"`
 }
 
 func newRunView(run store.GetRunRow) RunView {
 	return RunView{
 		ID: run.ID, OrgID: run.OrgID,
 		WorkflowVersionID: run.WorkflowVersionID,
-		Status:            run.Status, OutcomeStatus: textOrNull(run.OutcomeStatus),
+		Status:            run.Status, OutcomeStatus: nullableTextValue(run.OutcomeStatus),
 		SemanticViolationCount: run.SemanticViolationCount,
 		InputJSON:              normalizedRaw(run.InputJson), OutputJSON: normalizedRaw(run.OutputJson),
-		ParentRunID: textOrNull(run.ParentRunID), ParentNodeID: textOrNull(run.ParentNodeID),
-		ReplayMode: textOrNull(run.ReplayMode), TraceID: textOrNull(run.TraceID),
-		ValidationEvidenceLevel: textOrNull(run.ValidationEvidenceLevel),
-		CreatedBy:               textOrNull(run.CreatedBy), CreatedAt: timeOrNull(run.CreatedAt),
+		ParentRunID: nullableTextValue(run.ParentRunID), ParentNodeID: nullableTextValue(run.ParentNodeID),
+		ReplayMode: nullableTextValue(run.ReplayMode), TraceID: nullableTextValue(run.TraceID),
+		ValidationEvidenceLevel: nullableTextValue(run.ValidationEvidenceLevel),
+		CreatedBy:               nullableTextValue(run.CreatedBy), CreatedAt: nullableTimeValue(run.CreatedAt),
 	}
 }
 
@@ -62,20 +63,20 @@ type RunSummaryView struct {
 	ID                      string          `json:"id"`
 	OrgID                   string          `json:"orgId"`
 	WorkflowID              string          `json:"workflowId"`
-	WorkflowName            any             `json:"workflowName"`
+	WorkflowName            *string         `json:"workflowName"`
 	WorkflowVersionID       string          `json:"workflowVersionId"`
 	Status                  string          `json:"status"`
 	HasWaitingNodes         bool            `json:"hasWaitingNodes"`
-	OutcomeStatus           any             `json:"outcomeStatus"`
+	OutcomeStatus           *string         `json:"outcomeStatus"`
 	SemanticViolationCount  int             `json:"semanticViolationCount"`
 	OutputJSON              json.RawMessage `json:"outputJson"`
-	ParentRunID             any             `json:"parentRunId"`
-	ParentNodeID            any             `json:"parentNodeId"`
-	ReplayMode              any             `json:"replayMode"`
-	TraceID                 any             `json:"traceId"`
-	ValidationEvidenceLevel any             `json:"validationEvidenceLevel"`
-	CreatedBy               any             `json:"createdBy"`
-	CreatedAt               any             `json:"createdAt"`
+	ParentRunID             *string         `json:"parentRunId"`
+	ParentNodeID            *string         `json:"parentNodeId"`
+	ReplayMode              *string         `json:"replayMode"`
+	TraceID                 *string         `json:"traceId"`
+	ValidationEvidenceLevel *string         `json:"validationEvidenceLevel"`
+	CreatedBy               *string         `json:"createdBy"`
+	CreatedAt               *string         `json:"createdAt"`
 }
 
 func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
@@ -84,13 +85,13 @@ func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
 		WorkflowID: row.WorkflowID, WorkflowName: textOrNullString(row.WorkflowName),
 		WorkflowVersionID: row.WorkflowVersionID, Status: row.Status,
 		HasWaitingNodes:        row.HasWaitingNodes,
-		OutcomeStatus:          textOrNull(row.OutcomeStatus),
+		OutcomeStatus:          nullableTextValue(row.OutcomeStatus),
 		SemanticViolationCount: int(row.SemanticViolationCount),
 		OutputJSON:             normalizedRaw(row.OutputJson),
-		ParentRunID:            textOrNull(row.ParentRunID), ParentNodeID: textOrNull(row.ParentNodeID),
-		ReplayMode: textOrNull(row.ReplayMode), TraceID: textOrNull(row.TraceID),
-		ValidationEvidenceLevel: textOrNull(row.ValidationEvidenceLevel),
-		CreatedBy:               textOrNull(row.CreatedBy), CreatedAt: timeOrNull(row.CreatedAt),
+		ParentRunID:            nullableTextValue(row.ParentRunID), ParentNodeID: nullableTextValue(row.ParentNodeID),
+		ReplayMode: nullableTextValue(row.ReplayMode), TraceID: nullableTextValue(row.TraceID),
+		ValidationEvidenceLevel: nullableTextValue(row.ValidationEvidenceLevel),
+		CreatedBy:               nullableTextValue(row.CreatedBy), CreatedAt: nullableTimeValue(row.CreatedAt),
 	}
 }
 
@@ -99,53 +100,53 @@ func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
 // RecoveryOverlayView is the ownership incident riding a DLQ list row.
 type RecoveryOverlayView struct {
 	ID                 string          `json:"id"`
-	Owner              any             `json:"owner"`
+	Owner              *string         `json:"owner"`
 	Severity           string          `json:"severity"`
 	Status             string          `json:"status"`
-	SlaTargetAt        any             `json:"slaTargetAt"`
-	ResolutionReason   any             `json:"resolutionReason"`
+	SlaTargetAt        *string         `json:"slaTargetAt"`
+	ResolutionReason   *string         `json:"resolutionReason"`
 	Comments           json.RawMessage `json:"comments"`
-	WorkflowID         any             `json:"workflowId"`
-	MetadataWorkflowID any             `json:"metadataWorkflowId"`
+	WorkflowID         *string         `json:"workflowId"`
+	MetadataWorkflowID *string         `json:"metadataWorkflowId"`
 	OccurrenceCount    int32           `json:"occurrenceCount"`
-	LastOccurredAt     any             `json:"lastOccurredAt"`
+	LastOccurredAt     *string         `json:"lastOccurredAt"`
 }
 
 // DeadLetterSummaryView is one GET /v1/dlq list row.
 type DeadLetterSummaryView struct {
-	ID           string          `json:"id"`
-	OrgID        string          `json:"orgId"`
-	RunID        string          `json:"runId"`
-	NodeID       string          `json:"nodeId"`
-	Attempt      int32           `json:"attempt"`
-	ErrorJSON    json.RawMessage `json:"errorJson"`
-	Status       string          `json:"status"`
-	ReplayedAt   any             `json:"replayedAt"`
-	CreatedAt    any             `json:"createdAt"`
-	NodeType     any             `json:"nodeType"`
-	WorkflowName any             `json:"workflowName"`
-	Recovery     any             `json:"recovery"`
+	ID           string               `json:"id"`
+	OrgID        string               `json:"orgId"`
+	RunID        string               `json:"runId"`
+	NodeID       string               `json:"nodeId"`
+	Attempt      int32                `json:"attempt"`
+	ErrorJSON    json.RawMessage      `json:"errorJson"`
+	Status       string               `json:"status"`
+	ReplayedAt   *string              `json:"replayedAt"`
+	CreatedAt    *string              `json:"createdAt"`
+	NodeType     *string              `json:"nodeType"`
+	WorkflowName *string              `json:"workflowName"`
+	Recovery     *RecoveryOverlayView `json:"recovery"`
 }
 
 func newDeadLetterSummaryView(row store.ListDeadLetterSummariesRow) DeadLetterSummaryView {
-	var recovery any
+	var recovery *RecoveryOverlayView
 	if row.RecoveryID.Valid {
-		recovery = RecoveryOverlayView{
-			ID: row.RecoveryID.String, Owner: textOrNull(row.RecoveryOwner),
+		recovery = &RecoveryOverlayView{
+			ID: row.RecoveryID.String, Owner: nullableTextValue(row.RecoveryOwner),
 			Severity: row.RecoverySeverity, Status: row.RecoveryStatus,
-			SlaTargetAt:        timeOrNull(row.RecoverySlaTargetAt),
-			ResolutionReason:   textOrNull(row.RecoveryResolutionReason),
+			SlaTargetAt:        nullableTimeValue(row.RecoverySlaTargetAt),
+			ResolutionReason:   nullableTextValue(row.RecoveryResolutionReason),
 			Comments:           normalizedRaw(row.RecoveryComments),
-			WorkflowID:         textOrNull(row.RecoveryWorkflowID),
-			MetadataWorkflowID: textOrNull(row.RecoveryMetadataWorkflowID),
+			WorkflowID:         nullableTextValue(row.RecoveryWorkflowID),
+			MetadataWorkflowID: nullableTextValue(row.RecoveryMetadataWorkflowID),
 			OccurrenceCount:    row.RecoveryOccurrenceCount,
-			LastOccurredAt:     timeOrNull(row.RecoveryLastOccurredAt),
+			LastOccurredAt:     nullableTimeValue(row.RecoveryLastOccurredAt),
 		}
 	}
 	return DeadLetterSummaryView{
 		ID: row.ID, OrgID: row.OrgID, RunID: row.RunID, NodeID: row.NodeID,
 		Attempt: row.Attempt, ErrorJSON: normalizedRaw(row.ErrorJson), Status: row.Status,
-		ReplayedAt: timeOrNull(row.ReplayedAt), CreatedAt: timeOrNull(row.CreatedAt),
+		ReplayedAt: nullableTimeValue(row.ReplayedAt), CreatedAt: nullableTimeValue(row.CreatedAt),
 		NodeType: textOrNullString(row.NodeType), WorkflowName: textOrNullString(row.WorkflowName),
 		Recovery: recovery,
 	}
@@ -153,21 +154,21 @@ func newDeadLetterSummaryView(row store.ListDeadLetterSummariesRow) DeadLetterSu
 
 // DeadLetterDetailView is the legacy GET /dlq?id= exact-snapshot detail.
 type DeadLetterDetailView struct {
-	ID              string          `json:"id"`
-	OrgID           string          `json:"orgId"`
-	RunID           string          `json:"runId"`
-	NodeID          string          `json:"nodeId"`
-	Attempt         int32           `json:"attempt"`
-	WorkflowJSON    json.RawMessage `json:"workflowJson"`
-	NodeJSON        json.RawMessage `json:"nodeJson"`
-	ErrorJSON       json.RawMessage `json:"errorJson"`
-	Status          string          `json:"status"`
-	ReplayedAt      any             `json:"replayedAt"`
-	CreatedAt       any             `json:"createdAt"`
-	ReplayClaimedAt any             `json:"replayClaimedAt"`
-	SuspectVersion  any             `json:"suspectVersion"`
-	Drill           any             `json:"drill"`
-	DrillOutcome    any             `json:"drillOutcome"`
+	ID              string                   `json:"id"`
+	OrgID           string                   `json:"orgId"`
+	RunID           string                   `json:"runId"`
+	NodeID          string                   `json:"nodeId"`
+	Attempt         int32                    `json:"attempt"`
+	WorkflowJSON    json.RawMessage          `json:"workflowJson"`
+	NodeJSON        json.RawMessage          `json:"nodeJson"`
+	ErrorJSON       json.RawMessage          `json:"errorJson"`
+	Status          string                   `json:"status"`
+	ReplayedAt      *string                  `json:"replayedAt"`
+	CreatedAt       *string                  `json:"createdAt"`
+	ReplayClaimedAt *string                  `json:"replayClaimedAt"`
+	SuspectVersion  json.RawMessage          `json:"suspectVersion"`
+	Drill           *recoveryDrillProvenance `json:"drill"`
+	DrillOutcome    *recovery.DrillOutcome   `json:"drillOutcome"`
 }
 
 type recoveryDrillProvenance struct {
@@ -211,8 +212,8 @@ func newDeadLetterDetailView(row store.GetDeadLetterRow) DeadLetterDetailView {
 		ID: row.ID, OrgID: row.OrgID, RunID: row.RunID, NodeID: row.NodeID,
 		Attempt: row.Attempt, WorkflowJSON: normalizedRaw(row.WorkflowJson),
 		NodeJSON: normalizedRaw(row.NodeJson), ErrorJSON: normalizedRaw(row.ErrorJson),
-		Status: row.Status, ReplayedAt: timeOrNull(row.ReplayedAt),
-		CreatedAt: timeOrNull(row.CreatedAt), ReplayClaimedAt: timeOrNull(row.ReplayClaimedAt),
+		Status: row.Status, ReplayedAt: nullableTimeValue(row.ReplayedAt),
+		CreatedAt: nullableTimeValue(row.CreatedAt), ReplayClaimedAt: nullableTimeValue(row.ReplayClaimedAt),
 	}
 }
 
@@ -223,27 +224,27 @@ type WorkflowListItemView struct {
 	ID                   string   `json:"id"`
 	OrgID                string   `json:"orgId"`
 	Name                 string   `json:"name"`
-	CreatedBy            any      `json:"createdBy"`
-	CreatedAt            any      `json:"createdAt"`
-	LastRunStatus        any      `json:"lastRunStatus"`
-	RunCount             any      `json:"runCount"`
+	CreatedBy            *string  `json:"createdBy"`
+	CreatedAt            *string  `json:"createdAt"`
+	LastRunStatus        *string  `json:"lastRunStatus"`
+	RunCount             int32    `json:"runCount"`
 	BufferedTriggerCount int      `json:"bufferedTriggerCount"`
 	Status               string   `json:"status"`
-	PausedReason         any      `json:"pausedReason"`
+	PausedReason         *string  `json:"pausedReason"`
 	Tags                 []string `json:"tags"`
-	Folder               any      `json:"folder"`
-	DeletedAt            any      `json:"deletedAt"`
+	Folder               *string  `json:"folder"`
+	DeletedAt            *string  `json:"deletedAt"`
 }
 
 func newWorkflowListItemView(row store.ListWorkflowRowsRow) WorkflowListItemView {
 	return WorkflowListItemView{
 		ID: row.ID, OrgID: row.OrgID, Name: row.Name,
-		CreatedBy: textOrNull(row.CreatedBy), CreatedAt: timeOrNull(row.CreatedAt),
+		CreatedBy: nullableTextValue(row.CreatedBy), CreatedAt: nullableTimeValue(row.CreatedAt),
 		LastRunStatus: textOrNullString(row.LastRunStatus), RunCount: row.RunCount,
 		BufferedTriggerCount: int(row.BufferedTriggerCount),
-		Status:               row.Status, PausedReason: textOrNull(row.PausedReason),
-		Tags: decodeStringArray(row.Tags), Folder: textOrNull(row.Folder),
-		DeletedAt: timeOrNull(row.DeletedAt),
+		Status:               row.Status, PausedReason: nullableTextValue(row.PausedReason),
+		Tags: decodeStringArray(row.Tags), Folder: nullableTextValue(row.Folder),
+		DeletedAt: nullableTimeValue(row.DeletedAt),
 	}
 }
 
@@ -262,17 +263,17 @@ type VersionView struct {
 	WorkflowID            string          `json:"workflowId"`
 	Version               int32           `json:"version"`
 	DagJSON               json.RawMessage `json:"dagJson"`
-	SloJSON               any             `json:"sloJson"`
-	UpstreamHealthSources any             `json:"upstreamHealthSources"`
-	CreatedBy             any             `json:"createdBy"`
-	CreatedAt             any             `json:"createdAt"`
+	SloJSON               json.RawMessage `json:"sloJson"`
+	UpstreamHealthSources json.RawMessage `json:"upstreamHealthSources"`
+	CreatedBy             *string         `json:"createdBy"`
+	CreatedAt             *string         `json:"createdAt"`
 }
 
 func newVersionView(id, orgID, workflowID string, version int32, dagJSON json.RawMessage, createdBy pgtype.Text, createdAt *time.Time) VersionView {
 	return VersionView{
 		ID: id, OrgID: orgID, WorkflowID: workflowID, Version: version,
 		DagJSON:   normalizedRaw(dagJSON),
-		CreatedBy: textOrNull(createdBy), CreatedAt: timeOrNull(createdAt),
+		CreatedBy: nullableTextValue(createdBy), CreatedAt: nullableTimeValue(createdAt),
 	}
 }
 

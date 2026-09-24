@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { initI18n } from '../../i18n'
 import { RecoveryCenterHero } from './RecoveryCenterHero'
 
 const baseProps = {
@@ -64,21 +65,26 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
 
     expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(onRefreshStatus).toHaveBeenCalledOnce()
+    expect(onRefreshStatus).toHaveBeenCalledExactlyOnceWith()
   })
 
   it('renders the all-clear summary and animated burst as a focused hero state', () => {
-    render(<RecoveryCenterHero
-      {...baseProps}
-      streak={{ current: 9, longest: 14 }}
-      allClear
-      allClearDowntimeMs={3_660_000}
-      celebrationTrigger={1}
-    />)
+    render(
+      <main>
+        <RecoveryCenterHero
+          {...baseProps}
+          streak={{ current: 9, longest: 14 }}
+          allClear
+          allClearDowntimeMs={3_660_000}
+          celebrationTrigger={1}
+        />
+      </main>,
+    )
 
-    const hero = screen.getByRole('banner')
+    const hero = screen.getByTestId('recovery-center-hero')
     const burst = screen.getByTestId('celebration-burst')
     expect(hero).toHaveAttribute('data-all-clear', 'true')
+    expect(screen.queryByRole('banner')).toBeNull()
     expect(screen.getByTestId('recovery-center-all-clear-summary')).toHaveTextContent(
       '1h 1m of downtime ended this window · 9-day clean streak',
     )
@@ -95,7 +101,7 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
       celebrationTrigger={1}
     />)
 
-    const hero = screen.getByRole('banner')
+    const hero = screen.getByTestId('recovery-center-hero')
     expect(hero).not.toHaveAttribute('data-all-clear')
     expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(
       'Good afternoon, Jane.',
@@ -130,5 +136,39 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
 
     rerender(<RecoveryCenterHero {...baseProps} personalWins={personalWins} allClear />)
     expect(screen.queryByTestId('recovery-center-personal-wins')).toBeNull()
+  })
+})
+
+
+describe('Home evidence truth in Chromium', () => {
+  it.each(['en', 'es'] as const)('does not celebrate empty, stale or unavailable evidence in %s', locale => {
+    initI18n(locale)
+    const { rerender } = render(<RecoveryCenterHero {...baseProps} metricsStatus="empty"
+      healthScore={null} allClear streak={{ current: 5, longest: 5 }} />)
+    const expected = locale === 'en' ? 'No evidence yet' : 'Aún sin evidencia'
+    expect(screen.getByTestId('home-health-summary')).toHaveTextContent(expected)
+    for (const status of ['empty', 'loading', 'unavailable', 'stale'] as const) {
+      rerender(<RecoveryCenterHero {...baseProps} metricsStatus={status} allClear
+        streak={{ current: 5, longest: 5 }} personalWins={{ recovered: 4, windowDays: 30 }} />)
+      expect(screen.queryByTestId('recovery-center-all-clear-summary')).toBeNull()
+      expect(screen.queryByTestId('recovery-center-clean-streak')).toBeNull()
+      expect(screen.queryByTestId('recovery-center-personal-wins')).toBeNull()
+      expect(screen.queryByLabelText(/87/)).toBeNull()
+      expect(screen.getByTestId('home-health-summary')).not.toHaveTextContent('On track')
+    }
+    initI18n('en')
+  })
+  it('distinguishes a first failed sample from missing evidence, even with no priority rows', () => {
+    initI18n('en')
+    render(<RecoveryCenterHero {...baseProps} healthScore={0} />)
+    expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Needs attention')
+    expect(screen.getByLabelText('Health score 0 of 100')).toBeVisible()
+  })
+  it('lets the operator retry stale evidence by keyboard', async () => {
+    const { userEvent } = await import('vitest/browser')
+    const retry = vi.fn()
+    render(<RecoveryCenterHero {...baseProps} metricsStatus="stale" onRefreshStatus={retry} />)
+    await userEvent.keyboard('{Tab}{Enter}')
+    expect(retry).toHaveBeenCalledExactlyOnceWith()
   })
 })

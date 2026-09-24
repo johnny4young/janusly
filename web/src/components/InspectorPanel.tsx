@@ -33,6 +33,47 @@ import { SwitchField } from './ui/SwitchField'
 
 const WorkflowIoEditor = React.lazy(() => loadWorkflowIoEditor().then(module => ({ default: module.WorkflowIoEditor })))
 
+const JSON_FEEDBACK_DELAY_MS = 300
+
+type JsonDraftFeedback =
+  | null
+  | 'valid'
+  | 'object'
+  | { line: number; column: number }
+
+function jsonErrorLocation(error: unknown, draft: string): { line: number; column: number } {
+  const message = error instanceof Error ? error.message : ''
+  const explicit = /line\s+(\d+)\s+column\s+(\d+)/iu.exec(message)
+  if (explicit) return { line: Number(explicit[1]), column: Number(explicit[2]) }
+  const positioned = /position\s+(\d+)/iu.exec(message)
+  const unexpected = /^Unexpected token '([^']+)'/u.exec(message)
+  const unexpectedPosition = unexpected ? draft.lastIndexOf(unexpected[1]) : -1
+  const position = positioned
+    ? Number(positioned[1])
+    : unexpectedPosition >= 0
+      ? unexpectedPosition
+      : 0
+  const prefix = draft.slice(0, Number.isSafeInteger(position) ? position : 0)
+  const lines = prefix.split(/\r?\n/u)
+  return { line: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 }
+}
+
+function inspectJsonDraft(
+  draft: string,
+  onValid?: (value: Record<string, unknown>) => void,
+): JsonDraftFeedback {
+  try {
+    const value: unknown = JSON.parse(draft)
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return 'object'
+    }
+    onValid?.(value as Record<string, unknown>)
+    return 'valid'
+  } catch (error) {
+    return jsonErrorLocation(error, draft)
+  }
+}
+
 type InspectorPanelProps = {
   readOnly?: boolean
   selectedNode: WorkflowGraphNode | null
@@ -84,8 +125,9 @@ export function InspectorPanel({
   const updateWorkflowOutputs = useWorkflowStore(state => state.updateWorkflowOutputs)
   const currentWorkflowTemplatePolicy = useWorkflowStore(state => state.currentWorkflowTemplatePolicy)
   const updateWorkflowTemplatePolicy = useWorkflowStore(state => state.updateWorkflowTemplatePolicy)
-  const [jsonError, setJsonError] = useState<string | null>(null)
   const [jsonDraft, setJsonDraft] = useState(() => selectedNode ? JSON.stringify(selectedNode.data.config, null, 2) : '')
+  const [jsonTouched, setJsonTouched] = useState(false)
+  const [jsonFeedback, setJsonFeedback] = useState<JsonDraftFeedback>(null)
   const [typeChangePending, setTypeChangePending] = useState(false)
   const typeChangePendingRef = useRef(false)
   const entityRef = useRef<HTMLElement | null>(null)
@@ -102,9 +144,18 @@ export function InspectorPanel({
   const selectedNodeType = selectedNode?.data.type ?? null
   const selectedNodeConfig = selectedNode?.data.config ?? null
   React.useEffect(() => {
-    setJsonError(null)
     setJsonDraft(selectedNodeConfig ? JSON.stringify(selectedNodeConfig, null, 2) : '')
+    setJsonTouched(false)
+    setJsonFeedback(null)
   }, [selectedNodeConfig, selectedNodeId, selectedNodeType])
+
+  React.useEffect(() => {
+    if (!jsonTouched) return
+    const timer = window.setTimeout(() => {
+      setJsonFeedback(inspectJsonDraft(jsonDraft))
+    }, JSON_FEEDBACK_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [jsonDraft, jsonTouched])
 
   useEffect(() => {
     const pending = consumeAuthoringFocus()
@@ -166,6 +217,14 @@ export function InspectorPanel({
     const failureMessage = status === 'failed' ? pickErrorMessage(nodeStatus?.errorJson) : null
     const failureDuration = status === 'failed' ? formatNodeDuration(nodeStatus?.startedAt, nodeStatus?.finishedAt) : null
     const failureMeta: string[] = []
+    const jsonInvalid = jsonFeedback !== null && jsonFeedback !== 'valid'
+    const jsonFeedbackText = jsonFeedback === 'valid'
+      ? t('rightPanel.inspector.validJson')
+      : jsonFeedback === 'object'
+        ? t('rightPanel.inspector.invalidJsonObject')
+        : jsonFeedback
+          ? t('rightPanel.inspector.invalidJsonAt', { line: jsonFeedback.line, column: jsonFeedback.column })
+          : null
     if (status === 'failed') {
       if (typeof nodeStatus?.attempts === 'number' && nodeStatus.attempts > 0) {
         failureMeta.push(t('rightPanel.runs.nodeAttempt', { count: nodeStatus.attempts }))
@@ -297,20 +356,29 @@ export function InspectorPanel({
               data-ui-control
               value={jsonDraft}
               aria-label={t('rightPanel.inspector.advancedJsonSummary')}
-              aria-describedby="node-config-hint"
-              aria-invalid={Boolean(jsonError) || undefined}
-              onChange={(event) => setJsonDraft(event.target.value)}
+              aria-describedby={jsonFeedbackText ? 'node-config-hint node-config-feedback' : 'node-config-hint'}
+              aria-errormessage={jsonInvalid ? 'node-config-feedback' : undefined}
+              aria-invalid={jsonInvalid || undefined}
+              onChange={(event) => {
+                setJsonDraft(event.target.value)
+                setJsonTouched(true)
+                setJsonFeedback(null)
+              }}
               onBlur={(event) => {
-                try {
-                  const parsed = JSON.parse(event.target.value) as Record<string, unknown>
-                  onUpdateNodeConfig(parsed)
-                  setJsonError(null)
-                } catch (error) {
-                  setJsonError(error instanceof Error ? error.message : (t('rightPanel.inspector.invalidJson')))
-                }
+                const feedback = inspectJsonDraft(event.target.value, onUpdateNodeConfig)
+                setJsonFeedback(feedback)
+                setJsonTouched(true)
               }}
             />
-            {jsonError && <div className="ui-field__error" role="alert">{jsonError}</div>}
+            {jsonFeedbackText && (
+              <div
+                id="node-config-feedback"
+                className={jsonInvalid ? 'ui-field__error' : 'ui-field__hint'}
+                role={jsonInvalid ? 'alert' : 'status'}
+              >
+                {jsonFeedbackText}
+              </div>
+            )}
           </FormDisclosure>
         </FieldStack>
 

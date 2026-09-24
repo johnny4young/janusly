@@ -63,7 +63,6 @@ const (
 	stderrTailChars         = 1024
 	rateLimitWindow         = time.Minute
 	clientWritesEnabledEnv  = "JANUSLY_MCP_CLIENT_WRITES_ENABLED"
-	stdioAllowedCommandsEnv = "JANUSLY_MCP_STDIO_ALLOWED_COMMANDS"
 )
 
 // Client executes MCP tool calls for workflow runs.

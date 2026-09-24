@@ -14,7 +14,7 @@ import { Award, Clock3, Flame } from 'lucide-react'
 import { useT } from '../../i18n'
 import { HealthRing } from './HealthRing'
 import { CelebrationBurst } from './CelebrationBurst'
-import { formatDowntime, type DowntimeSeverity, type OperatorWins, type StreakSummary } from './recovery-center-model'
+import { formatDowntime, type HomeEvidenceStatus, type DowntimeSeverity, type OperatorWins, type StreakSummary } from './recovery-center-model'
 import { Button } from '@/components/ui/Button'
 
 export function RecoveryCenterHero({
@@ -40,7 +40,7 @@ export function RecoveryCenterHero({
   healthScore: number | null
   openFailures: number
   priorityCount: number
-  metricsStatus: 'loading' | 'available' | 'unavailable'
+  metricsStatus: HomeEvidenceStatus
   streak: StreakSummary
   longestOpenMs?: number | null
   longestOpenSeverity?: DowntimeSeverity
@@ -53,8 +53,9 @@ export function RecoveryCenterHero({
   onOpenMemoryGovernance?: () => void
 }) {
   const { t } = useT()
-  const effectiveAllClear = Boolean(allClear && openFailures === 0)
-  const showStreak = streak.current >= 3
+  const hasEvidence = metricsStatus === 'available' && healthScore !== null
+  const effectiveAllClear = Boolean(allClear && openFailures === 0 && hasEvidence)
+  const showStreak = hasEvidence && streak.current >= 3
   const allClearDuration = typeof allClearDowntimeMs === 'number' && allClearDowntimeMs > 0
     ? formatDowntime(allClearDowntimeMs)
     : ''
@@ -67,15 +68,23 @@ export function RecoveryCenterHero({
         : t('recoveryCenter.hero.allClearFallback')
   const healthTitle = metricsStatus === 'loading'
     ? t('common.loading')
-    : metricsStatus === 'unavailable'
-      ? t('home.health.unavailable')
-      : priorityCount > 0
-        ? t('home.health.attention')
-        : t('home.health.clear')
+    : metricsStatus === 'stale'
+      ? t('home.health.stale')
+      : metricsStatus === 'unavailable' || (metricsStatus === 'available' && healthScore === null)
+        ? t('home.health.unavailable')
+        : priorityCount > 0 || openFailures > 0
+          ? t('home.health.attention')
+          : !hasEvidence
+            ? t('home.health.empty')
+            : healthScore < 80
+              ? t('home.health.attention')
+              : t('home.health.clear')
   return (
     <header
       className="we-recovery-center-hero we-home-header"
-      role="banner"
+      role="region"
+      aria-labelledby="recovery-center-hero-title"
+      data-testid="recovery-center-hero"
       data-all-clear={effectiveAllClear ? 'true' : undefined}
     >
       {effectiveAllClear && <CelebrationBurst trigger={celebrationTrigger ?? 0} />}
@@ -85,7 +94,7 @@ export function RecoveryCenterHero({
         </div>
         {effectiveAllClear ? (
           <div className="we-recovery-center-hero__all-clear" role="status" aria-live="polite">
-            <h1 className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">
+            <h1 id="recovery-center-hero-title" className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">
               {t('recoveryCenter.hero.allClearTitle')}
             </h1>
             <p className="we-recovery-center-hero__subline" data-testid="recovery-center-all-clear-summary">
@@ -94,7 +103,7 @@ export function RecoveryCenterHero({
           </div>
         ) : (
           <>
-            <h1 className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">{salutation}</h1>
+            <h1 id="recovery-center-hero-title" className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">{salutation}</h1>
             <p className="we-recovery-center-hero__subline">{subline}</p>
             {typeof longestOpenMs === 'number' && longestOpenMs >= 0 && openFailures > 0 && (
               <p
@@ -105,7 +114,7 @@ export function RecoveryCenterHero({
                 {t('recoveryCenter.hero.longestDowntime', { duration: formatDowntime(longestOpenMs) })}
               </p>
             )}
-            {priorityCount === 0 && personalWins && personalWins.recovered > 0 && (
+            {hasEvidence && priorityCount === 0 && personalWins && personalWins.recovered > 0 && (
               <p className="we-recovery-center-hero__wins" data-testid="recovery-center-personal-wins">
                 <Award size={14} aria-hidden="true" />
                 {t('recoveryCenter.hero.personalWins', {
@@ -140,11 +149,11 @@ export function RecoveryCenterHero({
         )}
       </div>
       <div className="we-home-health-summary" data-testid="home-health-summary">
-        <HealthRing score={healthScore} />
+        <HealthRing score={hasEvidence ? healthScore : null} />
         <div>
           <strong>{healthTitle}</strong>
-          {metricsStatus === 'unavailable' && onRefreshStatus && (
-            <Button variant="ghost" size="sm" type="button"  onClick={onRefreshStatus}>
+          {(metricsStatus === 'unavailable' || metricsStatus === 'stale') && onRefreshStatus && (
+            <Button variant="ghost" size="sm" type="button"  onClick={() => onRefreshStatus()}>
               {t('common.retry')}
             </Button>
           )}

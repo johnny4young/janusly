@@ -74,6 +74,10 @@ func TestOrgConfigCatalogSurface(t *testing.T) {
 	reject(map[string]any{"key": "made.up", "value": 1}, "Unknown org config key")
 	reject(map[string]any{"key": "http.timeoutMs", "value": "fast"}, "must be a finite number")
 	reject(map[string]any{"key": "http.timeoutMs", "value": float64(0)}, "must be >=")
+	for _, key := range []string{"http.timeoutMs", "http.maxResponseBytes", "http.maxRedirects", "http.streamPreviewBytes"} {
+		def := orgconfig.Get(key)
+		reject(map[string]any{"key": key, "value": *def.Min + 0.5}, "must be an integer")
+	}
 	reject(map[string]any{"key": "email.provider", "value": "grok"}, "must be one of")
 	reject(map[string]any{"key": "email.from", "value": "sk-ant-secret123"}, "must not contain secret-like values")
 	reject(map[string]any{"key": "email.provider", "value": "   "}, "non-empty")

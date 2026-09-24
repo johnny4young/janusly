@@ -60,7 +60,7 @@ func (e *Engine) SweepMemoryConsentPurges(ctx context.Context) (int, error) {
 			continue
 		}
 		purged++
-		audit.Write(ctx, e.pool, &auth.Context{OrgID: row.OrgID, UserID: "system:memory-purge"},
+		e.audit.Write(ctx, e.pool, &auth.Context{OrgID: row.OrgID, UserID: "system:memory-purge"},
 			"memory.bulk.purged", audit.Options{
 				TargetType: "org", TargetID: row.OrgID,
 				Metadata: map[string]any{

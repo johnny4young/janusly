@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -171,39 +170,22 @@ func TestSubworkflowTerminalReconcilerRepairsCrashWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start parent: %v", err)
 	}
-	// Let the parent spawn the child and pause.
-	deadline := time.Now().Add(10 * time.Second)
+	// Drive the ordinary parent/child lifecycle to completion and drain its
+	// workers before reconstructing the crash window. Short-lived worker
+	// contexts could abandon a running child on slower race-enabled runners.
+	runDispatcherToTerminal(t, eng, pool, parentRunID, "succeeded")
 	var childRunID string
-	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
-	workerCtx, stop := context.WithCancel(context.Background())
-	go func() { _ = eng.RunWorkers(workerCtx, 2, 25*time.Millisecond, dispatcher.Execute, quietLogger()) }()
-	for childRunID == "" && time.Now().Before(deadline) {
-		_ = pool.QueryRow(ctx, `SELECT id FROM runs WHERE parent_run_id = $1`, parentRunID).Scan(&childRunID)
-		time.Sleep(25 * time.Millisecond)
+	if err := pool.QueryRow(ctx, `SELECT id FROM runs WHERE parent_run_id = $1`, parentRunID).Scan(&childRunID); err != nil {
+		t.Fatalf("child run: %v", err)
 	}
-	stop()
-	if childRunID == "" {
-		t.Fatal("child never spawned")
-	}
-	// Wait for the child to finish; then SIMULATE the crash window by
-	// re-arming the marker and reopening the parent node if the immediate
-	// notifier already settled it.
-	waitDeadline := time.Now().Add(10 * time.Second)
 	var childStatus string
-	for time.Now().Before(waitDeadline) {
-		_ = pool.QueryRow(ctx, `SELECT status FROM runs WHERE id = $1`, childRunID).Scan(&childStatus)
-		if childStatus == "succeeded" {
-			break
-		}
-		workerCtx2, stop2 := context.WithCancel(context.Background())
-		go func() { _ = eng.RunWorkers(workerCtx2, 2, 25*time.Millisecond, dispatcher.Execute, quietLogger()) }()
-		time.Sleep(100 * time.Millisecond)
-		stop2()
+	if err := pool.QueryRow(ctx, `SELECT status FROM runs WHERE id = $1`, childRunID).Scan(&childStatus); err != nil {
+		t.Fatalf("child status: %v", err)
 	}
 	if childStatus != "succeeded" {
 		t.Fatalf("child status: %s", childStatus)
 	}
-	// Force the crash-window shape: parent node back to waiting on this
+	// Simulate the crash-window shape: parent node back to waiting on this
 	// exact child + armed marker + parent running.
 	waitingState, _ := json.Marshal(map[string]any{"waiting": map[string]any{
 		"kind": "subworkflow", "childRunId": childRunID,

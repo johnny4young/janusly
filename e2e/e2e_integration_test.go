@@ -73,8 +73,33 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("free port: %v", err)
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	port := l.Addr().(*net.TCPAddr).Port
+	if err := l.Close(); err != nil {
+		t.Fatalf("release free port: %v", err)
+	}
+	return port
+}
+
+// Reserve one listener while selecting the second port. Asking the OS for
+// two ephemeral ports after closing each listener can return the same port,
+// making the binary reject its own public/internal port configuration.
+func distinctFreePorts(t *testing.T) (int, int) {
+	t.Helper()
+	holder, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve public port: %v", err)
+	}
+	defer holder.Close()
+	return holder.Addr().(*net.TCPAddr).Port, freePort(t)
+}
+
+func TestDistinctFreePorts(t *testing.T) {
+	for range 32 {
+		public, internal := distinctFreePorts(t)
+		if public == internal {
+			t.Fatalf("public and internal ports must differ: %d", public)
+		}
+	}
 }
 
 type binaryAPI struct {
@@ -91,7 +116,7 @@ func bootBinary(t *testing.T) *binaryAPI {
 		t.Skip("JANUSLY_DATABASE_URL not set; run through `make test`")
 	}
 	bin := buildBinary(t)
-	port, internal := freePort(t), freePort(t)
+	port, internal := distinctFreePorts(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("JANUSLY_PORT=%d", port),
@@ -127,7 +152,9 @@ func bootBinary(t *testing.T) *binaryAPI {
 	for {
 		res, err := http.Get(api.base + "/healthz")
 		if err == nil {
-			res.Body.Close()
+			if err := res.Body.Close(); err != nil {
+				t.Fatalf("close health response: %v", err)
+			}
 			if res.StatusCode == 200 {
 				return api
 			}
@@ -157,7 +184,11 @@ func (a *binaryAPI) call(t *testing.T, method, path string, body any) (int, map[
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close API response: %v", err)
+		}
+	}()
 	var parsed map[string]any
 	_ = json.NewDecoder(res.Body).Decode(&parsed)
 	return res.StatusCode, parsed
@@ -337,7 +368,11 @@ func TestEngineMetricsExposeOnTheInternalPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scrape: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close metrics response: %v", err)
+		}
+	}()
 	raw, _ := io.ReadAll(res.Body)
 	body := string(raw)
 	for _, series := range []string{
@@ -362,7 +397,11 @@ func TestInternalBuildIdentityMatchesTheFinishedBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get build identity: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close build identity response: %v", err)
+		}
+	}()
 	var identity struct {
 		SchemaVersion  int    `json:"schemaVersion"`
 		Commit         string `json:"commit"`
@@ -394,7 +433,11 @@ func TestMetricsConsistencyNamesAndBindConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scrape: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close consistency metrics response: %v", err)
+		}
+	}()
 	body, _ := io.ReadAll(res.Body)
 	text := string(body)
 	for _, name := range []string{
@@ -416,7 +459,11 @@ func TestMetricsConsistencyNamesAndBindConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("holder: %v", err)
 	}
-	defer holder.Close()
+	t.Cleanup(func() {
+		if err := holder.Close(); err != nil {
+			t.Errorf("close held internal port: %v", err)
+		}
+	})
 	taken := holder.Addr().(*net.TCPAddr).Port
 	conflict := exec.Command(buildBinary(t))
 	conflict.Env = append(os.Environ(),
@@ -460,9 +507,36 @@ func TestAlertsAndDashboardOnlyNameMetricsTheBinaryExposes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scrape: %v", err)
 	}
-	defer res.Body.Close()
-	raw, _ := io.ReadAll(res.Body)
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			t.Errorf("close metric names response: %v", err)
+		}
+	}()
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read metrics: %v", err)
+	}
 	rawMetrics := string(raw)
+	// The confidence fit makes its first observed pass inside the real binary,
+	// not just in a direct engine test or a source-level wiring assertion.
+	calibrationLiveness := `janusly_sweep_last_success_timestamp_seconds{sweep="` + observability.SweepCalibration + `"}`
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(rawMetrics, calibrationLiveness) && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		next, err := http.Get(api.internal + "/metrics")
+		if err != nil {
+			t.Fatalf("rescrape calibration liveness: %v", err)
+		}
+		raw, readErr := io.ReadAll(next.Body)
+		closeErr := next.Body.Close()
+		if readErr != nil || closeErr != nil {
+			t.Fatalf("read/close calibration metrics: %v / %v", readErr, closeErr)
+		}
+		rawMetrics = string(raw)
+	}
+	if !strings.Contains(rawMetrics, calibrationLiveness) {
+		t.Fatal("real executable never reported its startup calibration sweep")
+	}
 	exposed := map[string]bool{}
 	for _, line := range strings.Split(rawMetrics, "\n") {
 		if fields := strings.Fields(line); len(fields) >= 3 && fields[0] == "#" && fields[1] == "TYPE" {

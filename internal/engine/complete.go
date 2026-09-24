@@ -97,7 +97,7 @@ func (e *Engine) claimConfigNumber(ctx context.Context, claim ClaimedNode, key s
 // claimHTTPBounds resolves the outbound HTTP bounds for the claim's tenant
 // from the same held rows.
 func (e *Engine) claimHTTPBounds(ctx context.Context, claim ClaimedNode, lookupEnv func(string) (string, bool)) executors.HTTPBounds {
-	return httpBoundsFromTenantRows(e.claimTenantRows(ctx, claim), lookupEnv)
+	return orgconfig.ResolveHTTPBounds(e.claimTenantRows(ctx, claim), lookupEnv)
 }
 
 // replayMode is the run's replay mode from the claim snapshot, or one
@@ -141,7 +141,7 @@ func (e *Engine) CompleteRouterNode(ctx context.Context, claim ClaimedNode, plan
 	if err := json.Unmarshal(decisionJSON, &decisionValue); err != nil {
 		return fmt.Errorf("project router decision: %w", err)
 	}
-	decisionPayload := safePersist(decisionValue, defaultPersistMaxBytes())
+	decisionPayload := safePersist(decisionValue, e.persistence.MaxBytes())
 	return e.completeNode(ctx, claim, map[string]any{"decision": decisionValue}, completionOptions{
 		// The compatibility runtime uses decision.made as the router's
 		// timeline receipt and advances the node row without a second,
@@ -158,7 +158,7 @@ func (e *Engine) CompleteRouterNode(ctx context.Context, claim ClaimedNode, plan
 			}
 			reason := fmt.Sprintf("Router %s chose %s", claim.NodeID, chosen)
 			stateJSON := safePersist(map[string]any{"skipped": map[string]any{"reason": reason}}, stateJSONMaxBytes)
-			payloadJSON := safePersist(map[string]any{"reason": reason}, defaultPersistMaxBytes())
+			payloadJSON := safePersist(map[string]any{"reason": reason}, e.persistence.MaxBytes())
 			for _, candidate := range plan.Candidates {
 				if candidate.NodeID == chosen || !plan.SuccessorIDs[candidate.NodeID] {
 					continue
@@ -207,7 +207,7 @@ func (e *Engine) completeNode(ctx context.Context, claim ClaimedNode, output any
 			"outputBytes": len(outputJSON), "outputTruncated": true, "attempt": claim.Attempt,
 		}
 	}
-	eventJSON := safePersist(eventPayload, defaultPersistMaxBytes())
+	eventJSON := safePersist(eventPayload, e.persistence.MaxBytes())
 
 	finishedAt := e.eventNow()
 	terminal := false
@@ -441,7 +441,7 @@ func (e *Engine) persistSemanticViolations(
 			"sourceNodeId": violation.SourceNodeID, "kind": violation.Kind,
 			"action": violation.Action, "message": violation.Message,
 			"details": details,
-		}, defaultPersistMaxBytes())
+		}, e.persistence.MaxBytes())
 		events.add(e.newID(), claim.RunID, claim.NodeID, "recovery.semantic_violation", payload, finishedAt)
 	}
 

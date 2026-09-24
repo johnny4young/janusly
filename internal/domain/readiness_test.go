@@ -194,3 +194,38 @@ func TestSuggestionSafetyUsesRegistryWriteMetadata(t *testing.T) {
 		t.Fatalf("registry write metadata must govern recovery safety: %+v", safety)
 	}
 }
+
+func TestSensitiveActionNodeUsesRegistryWriteMetadata(t *testing.T) {
+	writeSide := ReadinessOptions{
+		IsWriteSideTool: func(tool string, _ map[string]any) bool {
+			return tool == "future.arbitrary"
+		},
+	}
+	cases := []struct {
+		name string
+		node Node
+		want bool
+	}{
+		{
+			name: "newly registered write tool",
+			node: Node{Type: "tool", Config: map[string]any{"tool": "future.arbitrary"}},
+			want: true,
+		},
+		{
+			name: "legacy write-looking name is read-only in registry",
+			node: Node{Type: "tool", Config: map[string]any{"tool": "slack.post_message"}},
+		},
+		{
+			name: "MCP tool fails closed independently of registry",
+			node: Node{Type: "mcp_tool", Config: map[string]any{}},
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsSensitiveActionNodeWithOptions(tc.node, writeSide); got != tc.want {
+				t.Fatalf("write-side classification = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}

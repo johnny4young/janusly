@@ -1,3 +1,7 @@
+import { currentApiRequestLifecycle } from '../api-request-lifecycle'
+import { useAliveRef } from '../hooks/useAliveRef'
+import { DeadLetterCloseDialog, type DeadLetterCloseTarget } from './DeadLetterCloseDialog'
+import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 /**
  * Dead-letter operations panel — surfaces `dead_letters` rows with replay
  * + resolve actions. Calls `bumpPlatformVersion(DEAD_LETTER_MUTATION_TAGS)` after a successful
@@ -8,7 +12,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
-import { api, downloadFromApi, contractApi } from '../api'
+import { api, downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
@@ -26,7 +30,6 @@ import {
   RECOVERY_QUEUE_FOCUS_EVENT,
   type RecoveryQueueFocusRequest,
 } from './recovery-queue-focus-bus'
-import { requestRecoveryAllClearIfQueueEmpty } from './recovery-all-clear-coordinator'
 import {
   isBulkReplayResult,
   isBulkResolveResult,
@@ -108,7 +111,7 @@ export function DeadLettersPanel({
   // request is honoured off-list, a click can't be off-list by construction.
   const [requestedId, setRequestedId] = useState<string | null>(null)
   const [offListSelected, setOffListSelected] = useState<DeadLetter | null>(null)
-  const [requestedNotFound, setRequestedNotFound] = useState(false)
+  const [requestedNotFoundId, setRequestedNotFoundId] = useState<string | null>(null)
   const [pendingKeyboardFocusId, setPendingKeyboardFocusId] = useState<string | null>(null)
   const [pendingTriageFocus, setPendingTriageFocus] = useState<PendingTriageFocus | null>(null)
   const [replayingIds, setReplayingIds] = useState<ReadonlySet<string>>(() => new Set())
@@ -129,7 +132,42 @@ export function DeadLettersPanel({
   // Bulk replay re-runs every ticked workflow (cost + side effects), so it
   // asks for an inline confirm first instead of firing on the first click.
   const [confirmBulkReplay, setConfirmBulkReplay] = useState(false)
-  const [confirmBulkResolve, setConfirmBulkResolve] = useState(false)
+  const alive = useAliveRef()
+  const orgId = useWorkflowStore(state => state.orgId)
+  const userId = useWorkflowStore(state => state.userId)
+  const [closeRequest, setCloseRequest] = useState<{
+    targets: DeadLetterCloseTarget[]
+    bulk: boolean
+    orgId: string | null
+    userId: string | null
+    signal: AbortSignal
+  } | null>(null)
+
+  useEffect(() => {
+    if (!closeRequest) return
+    const cancel = () => setCloseRequest(current => current === closeRequest ? null : current)
+    if (!canResolve || closeRequest.orgId !== orgId || closeRequest.userId !== userId || closeRequest.signal.aborted) {
+      cancel()
+      return
+    }
+    closeRequest.signal.addEventListener('abort', cancel, { once: true })
+    return () => closeRequest.signal.removeEventListener('abort', cancel)
+  }, [closeRequest, orgId, userId, canResolve])
+
+  const closeIsCurrent = () => {
+    const current = useWorkflowStore.getState()
+    return alive.current && closeRequest !== null && !closeRequest.signal.aborted
+      && current.orgId === closeRequest.orgId && current.userId === closeRequest.userId
+  }
+
+  const requestClose = (items: DeadLetterCloseTarget[], bulk: boolean) => {
+    if (!canResolve || closeRequest || items.length === 0) return
+    setPendingTriageFocus(null)
+    setCloseRequest({
+      targets: items.map(({ id, workflowName, runId, nodeId }) => ({ id, workflowName, runId, nodeId })),
+      bulk, orgId, userId, signal: currentApiRequestLifecycle().signal,
+    })
+  }
   // Per-row failure reasons from the last bulk action's partial-success
   // envelope. The count toast says HOW MANY failed; this surfaces WHY (and which
   // rows), so the operator can tell a transient blip from "already replayed".
@@ -182,17 +220,16 @@ export function DeadLettersPanel({
   // 200 partial-success envelope, so inspect it before deciding whether to
   // clear or keep the remaining failed selections.
   const bulkResolve = async () => {
-    if (!canResolve) return
-    setConfirmBulkResolve(false)
-    const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
-    if (ids.length === 0) return
+    if (!canResolve || !closeIsCurrent() || !closeRequest) return false
+    const ids = closeRequest.targets.map(item => item.id)
+    if (ids.some(id => replayingIds.has(id))) return false
     setBulkErrors([])
     try {
       const result = await api('/dlq/bulk-resolve', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
+      if (!closeIsCurrent()) return false
       if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed'))
 
       if (result.resolved > 0) {
-        await requestRecoveryAllClearIfQueueEmpty()
         bumpPlatformVersion(DEAD_LETTER_MUTATION_TAGS)
         refreshQueue()
         void onRefresh()
@@ -203,13 +240,16 @@ export function DeadLettersPanel({
         setSelectedIds(new Set(failedIds))
         setBulkErrors(result.errors)
         addToast(t('dlq.bulkResolvePartial', { resolved: result.resolved, failed: result.failed }), 'error')
-        return
+        return true
       }
 
       addToast(t('dlq.bulkResolveSuccess', { count: result.resolved }), 'success')
       exitSelection()
+      return true
     } catch (error) {
+      if (!closeIsCurrent()) return false
       addToast(tApiError(error) || (t('dlq.bulkResolveFailed')), 'error')
+      return false
     }
   }
 
@@ -219,7 +259,7 @@ export function DeadLettersPanel({
   // exit selection. Only `open` rows are replayable server-side, so an
   // already-replayed/resolved row in the selection comes back in the failed set.
   const bulkReplay = async () => {
-    if (!canReplay) return
+    if (!canReplay || closeRequest) return
     setConfirmBulkReplay(false)
     const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
@@ -280,39 +320,44 @@ export function DeadLettersPanel({
   // that is off-list is fetched on its own below, and only an UNREQUESTED
   // selection defaults to the first row.
   const listSelected = filtered.find(item => item.id === selectedId) ?? null
+  const requestedRow = requestedId ? filtered.find(item => item.id === requestedId) ?? null : null
   // Off-list is a fact about the REQUESTED id versus the loaded page — not
   // about `selectedId`, which lags a render behind the request and would send
   // an in-list request down the by-id fetch for nothing.
-  const requestedOffList = Boolean(requestedId) && !filtered.some(item => item.id === requestedId)
-  const selected = listSelected ?? (requestedId ? offListSelected : filtered[0] ?? null) ?? null
+  const requestedOffList = Boolean(requestedId) && !requestedRow
+  const selected = requestedId
+    ? requestedRow ?? (offListSelected?.id === requestedId ? offListSelected : null)
+    : listSelected ?? filtered[0] ?? null
+  const requestedNotFound = requestedOffList && requestedNotFoundId === requestedId
 
-  // Resolve a requested id the current page doesn't contain. `/dlq?id=` is
+  // Resolve a requested id the current page doesn't contain. the entry read is
   // org-scoped and unconstrained by filters or pagination, so it can originate
   // a selection the list never had. A 404 is surfaced, not swallowed: a stale
   // alert link must say "this failure is gone", not quietly show another one.
   useEffect(() => {
     if (!requestedOffList || !requestedId) {
       setOffListSelected(null)
-      setRequestedNotFound(false)
+      setRequestedNotFoundId(null)
       return
     }
     let cancelled = false
-    setRequestedNotFound(false)
-    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(requestedId)}`, undefined)
+    setOffListSelected(null)
+    setRequestedNotFoundId(null)
+    readDeadLetterDetail(requestedId)
       .then((row) => {
-        if (!cancelled) setOffListSelected(row as unknown as DeadLetter)
+        if (!cancelled) setOffListSelected(row)
       })
       .catch(() => {
         if (!cancelled) {
           setOffListSelected(null)
-          setRequestedNotFound(true)
+          setRequestedNotFoundId(requestedId)
         }
       })
     return () => { cancelled = true }
   }, [requestedOffList, requestedId])
 
   // List rows are summary projections (no workflowJson / nodeJson). Fetch the
-  // full `/dlq?id=` detail for the selected row so the detail blocks and the
+  // full entry detail for the selected row so the detail blocks and the
   // Recovery dialog get the real snapshots; the summary row is the graceful
   // fallback while loading or on fetch failure.
   const [selectedDetail, setSelectedDetail] = useState<DeadLetter | null>(null)
@@ -327,9 +372,9 @@ export function DeadLettersPanel({
     let cancelled = false
     setSelectedDetail(null)
     setShowSuspectDiff(false)
-    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(selectedRowId)}`, undefined)
+    readDeadLetterDetail(selectedRowId)
       .then((row) => {
-        if (!cancelled) setSelectedDetail(row as unknown as DeadLetter)
+        if (!cancelled) setSelectedDetail(row)
       })
       .catch(() => {
         // Summary row keeps rendering — the detail blocks just stay lighter.
@@ -374,6 +419,8 @@ export function DeadLettersPanel({
   const focusQueueRow = useCallback((index: number) => {
     const next = filtered[index]
     if (!next) return
+    setQueueFocusRequest(null)
+    setRequestedId(null)
     setSelectedId(next.id)
     const row = queueRowRefs.current.get(next.id)
     if (row) {
@@ -386,23 +433,24 @@ export function DeadLettersPanel({
   }, [filtered, scrollToQueueIndex])
 
   useEffect(() => {
-    if (!pendingKeyboardFocusId) return
+    if (closeRequest || !pendingKeyboardFocusId) return
     const row = queueRowRefs.current.get(pendingKeyboardFocusId)
     if (!row) return
     row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     row.focus({ preventScroll: true })
     setPendingKeyboardFocusId(null)
-  }, [pendingKeyboardFocusId, visibleDeadLetters])
+  }, [closeRequest, pendingKeyboardFocusId, visibleDeadLetters])
 
   const runSelectedTriageAction = async (
     action: (id: string) => boolean | Promise<boolean> | undefined,
+    target: Pick<DeadLetter, 'id'> | null = selected,
   ) => {
-    if (!selected) return
-    const actionIndex = filtered.findIndex((item) => item.id === selected.id)
+    if (!target) return false
+    const actionIndex = filtered.findIndex((item) => item.id === target.id)
     const neighborIds = [filtered[actionIndex + 1]?.id, filtered[actionIndex - 1]?.id]
       .filter((id): id is string => Boolean(id))
     const request: PendingTriageFocus = {
-      actionId: selected.id,
+      actionId: target.id,
       neighborIds,
       fallbackIndex: Math.max(0, actionIndex),
       queueSignature: triageQueueSignature(filtered),
@@ -410,23 +458,25 @@ export function DeadLettersPanel({
     }
     setPendingTriageFocus(request)
     try {
-      const succeeded = await action(selected.id)
+      const succeeded = await action(target.id)
       setPendingTriageFocus((current) => (
         current?.actionId === request.actionId
           ? succeeded === false ? null : { ...current, settled: true }
           : current
       ))
+      return succeeded !== false
     } catch {
       setPendingTriageFocus((current) => current?.actionId === request.actionId ? null : current)
+      return false
     }
   }
 
   const replaySelected = async () => {
-    if (!canReplay || !selected || selected.status === 'replayed' || replayingIds.has(selected.id)) return
+    if (closeRequest || !canReplay || !selected || selected.status === 'replayed' || replayingIds.has(selected.id)) return
     const replayingId = selected.id
     setReplayingIds((current) => new Set(current).add(replayingId))
     try {
-      await runSelectedTriageAction((id) => onReplay(id, selected.createdAt))
+      await runSelectedTriageAction((id) => onReplay(id, selected.createdAt ?? undefined))
     } finally {
       setReplayingIds((current) => {
         const next = new Set(current)
@@ -438,11 +488,11 @@ export function DeadLettersPanel({
 
   const resolveSelected = async () => {
     if (!canResolve || !selected || selected.status === 'resolved' || replayingIds.has(selected.id)) return
-    await runSelectedTriageAction(onResolve)
+    requestClose([selected], false)
   }
 
   useEffect(() => {
-    if (!pendingTriageFocus?.settled || recoveryFilterLoading) return
+    if (closeRequest || !pendingTriageFocus?.settled || recoveryFilterLoading) return
     if (triageQueueSignature(filtered) === pendingTriageFocus.queueSignature) return
 
     const actionIndex = filtered.findIndex((item) => item.id === pendingTriageFocus.actionId)
@@ -462,7 +512,7 @@ export function DeadLettersPanel({
       queueSectionRef.current?.focus({ preventScroll: true })
     }
     setPendingTriageFocus(null)
-  }, [filtered, focusQueueRow, pendingTriageFocus, recoveryFilterLoading])
+  }, [closeRequest, filtered, focusQueueRow, pendingTriageFocus, recoveryFilterLoading])
 
   useEffect(() => {
     if (!pendingTriageFocus?.settled) return
@@ -474,7 +524,7 @@ export function DeadLettersPanel({
   }, [pendingTriageFocus?.actionId, pendingTriageFocus?.settled])
 
   const handleQueueKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.repeat || isKeyboardShortcutTypingTarget(event.target)) return
+    if (closeRequest || event.repeat || isKeyboardShortcutTypingTarget(event.target)) return
     const key = event.key.toLowerCase()
     const hasCommandModifier = event.metaKey || event.ctrlKey
 
@@ -535,19 +585,29 @@ export function DeadLettersPanel({
   // scrolling/focusing. No extra fetch is introduced: the handoff consumes the
   // same bounded page the panel already owns.
   useEffect(() => {
+    const adopt = (request: RecoveryQueueFocusRequest) => {
+      setSelectionMode(false)
+      setSelectedIds(new Set())
+      setConfirmBulkReplay(false)
+      setBulkErrors([])
+      setOffListSelected(null)
+      setRequestedNotFoundId(null)
+      setRequestedId(request.deadLetterId ?? null)
+      setQueueFocusRequest(request)
+    }
     const pendingRequest = consumeRecoveryQueueFocus()
-    if (pendingRequest) setQueueFocusRequest(pendingRequest)
+    if (pendingRequest) adopt(pendingRequest)
 
     const onQueueFocus = (event: Event) => {
       const request = consumeRecoveryQueueFocus() ?? parseRecoveryQueueFocusEvent(event)
-      if (request) setQueueFocusRequest(request)
+      if (request) adopt(request)
     }
     window.addEventListener(RECOVERY_QUEUE_FOCUS_EVENT, onQueueFocus)
     return () => window.removeEventListener(RECOVERY_QUEUE_FOCUS_EVENT, onQueueFocus)
   }, [])
 
   useEffect(() => {
-    if (!queueFocusRequest || recoveryFilterLoading) return
+    if (closeRequest || !queueFocusRequest || recoveryFilterLoading) return
     const targetId = queueFocusRequest.deadLetterId
     if (targetId) {
       // Record the ASK before resolving it. If the row isn't on this page the
@@ -556,7 +616,14 @@ export function DeadLettersPanel({
       setRequestedId(targetId)
       const targetIndex = filtered.findIndex((item) => item.id === targetId)
       const targetRow = queueRowRefs.current.get(targetId)
-      if (!targetRow && targetIndex >= 0 && virtualContainerRef.current) {
+      if (targetIndex < 0) {
+        if (offListSelected?.id === targetId || requestedNotFoundId === targetId) {
+          queueSectionRef.current?.querySelector<HTMLElement>('.detail-box')?.focus({ preventScroll: true })
+          setQueueFocusRequest(null)
+        }
+        return
+      }
+      if (!targetRow && virtualContainerRef.current) {
         scrollToQueueIndex(targetIndex, 'center')
         return
       }
@@ -567,19 +634,14 @@ export function DeadLettersPanel({
         setQueueFocusRequest(null)
         return
       }
-      // Off-list: the detail box renders it via the by-id fetch, so stop here
-      // rather than falling through to the generic queue-heading focus.
-      if (requestedOffList) {
-        setQueueFocusRequest(null)
-        return
-      }
+      return
     }
 
     const queue = queueSectionRef.current
     queue?.scrollIntoView?.({ block: 'start', inline: 'nearest' })
     queue?.focus({ preventScroll: true })
     setQueueFocusRequest(null)
-  }, [filtered, queueFocusRequest, recoveryFilterLoading, scrollToQueueIndex, visibleDeadLetters])
+  }, [closeRequest, filtered, offListSelected, queueFocusRequest, recoveryFilterLoading, requestedNotFoundId, scrollToQueueIndex, virtualContainerRef, visibleDeadLetters])
 
   const exportSelectedRunExplain = async () => {
     if (!selected) return
@@ -614,7 +676,7 @@ export function DeadLettersPanel({
           replayingIds,
           openRecoveryItem,
           confirmBulkReplay,
-          confirmBulkResolve,
+          closing: closeRequest !== null,
           bulkErrors,
           loadedIds,
           allLoadedSelected,
@@ -628,11 +690,12 @@ export function DeadLettersPanel({
           toggleSelectAll,
           toggleSelect,
           setConfirmBulkReplay,
-          setConfirmBulkResolve,
           bulkReplay,
-          bulkResolve,
+          bulkResolve: async () => requestClose([...selectedIds]
+            .filter(id => !replayingIds.has(id))
+            .map(id => filtered.find(item => item.id === id) ?? { id }), true),
           createReplayCampaign: setCampaignDeadLetterIds,
-          selectRow: setSelectedId,
+          selectRow: (id) => { setQueueFocusRequest(null); setRequestedId(null); setSelectedId(id) },
           openRecoveryItem: setOpenRecoveryItemId,
           loadMore,
           startRecovery: setRecoveryDeadLetter,
@@ -644,6 +707,17 @@ export function DeadLettersPanel({
           toggleSuspectDiff: () => setShowSuspectDiff((value) => !value),
         }}
       />
+      {closeRequest && (
+        <DeadLetterCloseDialog targets={closeRequest.targets}
+          onClose={() => setCloseRequest(current => current === closeRequest ? null : current)}
+          onConfirm={async () => {
+            if (!canResolve || !closeIsCurrent()) return false
+            if (closeRequest.bulk) return bulkResolve()
+            const target = closeRequest.targets[0]
+            if (!target || replayingIds.has(target.id)) return false
+            return runSelectedTriageAction(onResolve, target)
+          }} />
+      )}
       <RecoveryAutomationDisclosure
         canRecover={canUseRecovery}
         canCancelCampaign={canReplay}

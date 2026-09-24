@@ -25,7 +25,7 @@ describe('Recovery Playbooks (browser smoke)', () => {
     const card = await screen.findByTestId('recovery-playbook-match')
     expect(card).toHaveTextContent('Recover billing dependency')
     expect(card).toHaveTextContent('This playbook never runs automatically')
-    expect(screen.getByRole('button', { name: 'Use and revalidate' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Review playbook patch' })).toBeVisible()
     expect(card.getBoundingClientRect().height).toBeGreaterThan(120)
   })
 

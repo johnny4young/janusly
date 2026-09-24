@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -155,7 +156,7 @@ func TestEvaluatorLoadsNarrowConfigAndAuditsRejections(t *testing.T) {
 		}
 	}
 
-	evaluator := New(pool)
+	evaluator := New(pool, audit.Writer{})
 	rejected := evaluator.Evaluate(ctx, Input{
 		OrgID: orgID, UserID: "supabase-user", Email: "ada@acme.com", Mode: auth.ModeSupabase,
 	})
@@ -199,7 +200,7 @@ func TestEvaluatorFailsClosedWhenPolicyStoreIsUnreadable(t *testing.T) {
 	orgID := "org-policy-closed-" + fmt.Sprint(time.Now().UnixNano())
 
 	// A healthy pool with no policy rows is "no policy configured": allow.
-	healthy := New(pool)
+	healthy := New(pool, audit.Writer{})
 	if decision := healthy.Evaluate(ctx, Input{
 		OrgID: orgID, UserID: "u1", Email: "someone@anywhere.com", Mode: auth.ModeSupabase,
 	}); !decision.Allowed {
@@ -213,7 +214,7 @@ func TestEvaluatorFailsClosedWhenPolicyStoreIsUnreadable(t *testing.T) {
 		t.Fatalf("spare pool: %v", err)
 	}
 	broken.Close()
-	decision := New(broken).Evaluate(ctx, Input{
+	decision := New(broken, audit.Writer{}).Evaluate(ctx, Input{
 		OrgID: orgID, UserID: "u1", Email: "someone@anywhere.com", Mode: auth.ModeSupabase,
 	})
 	if decision.Allowed {
@@ -225,7 +226,7 @@ func TestEvaluatorFailsClosedWhenPolicyStoreIsUnreadable(t *testing.T) {
 
 	// Service tokens carry no user policy: a storage fault must not take
 	// machine callers down with it.
-	if machine := New(broken).Evaluate(ctx, Input{
+	if machine := New(broken, audit.Writer{}).Evaluate(ctx, Input{
 		OrgID: orgID, UserID: "svc", Mode: auth.ModeServiceToken,
 	}); !machine.Allowed {
 		t.Fatalf("service tokens must survive a policy-store fault: %+v", machine)

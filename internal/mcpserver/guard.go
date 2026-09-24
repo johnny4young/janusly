@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -37,7 +38,7 @@ func ParsePermissionCeiling(raw string) (map[string]bool, error) {
 			continue
 		}
 		if !auth.IsPermission(value) {
-			return nil, fmt.Errorf("unknown JANUSLY_MCP_PERMISSIONS entry %q", value)
+			return nil, errors.New("invalid configuration: JANUSLY_MCP_PERMISSIONS contains an unknown permission")
 		}
 		permissions[value] = true
 	}
@@ -215,7 +216,7 @@ func (d Deps) auditToolDecision(
 	if d.Pool == nil {
 		return
 	}
-	audit.Write(ctx, d.Pool, d.auditContext(), "mcp.tool.invoked", audit.Options{
+	d.Audit.Write(ctx, d.Pool, d.auditContext(), "mcp.tool.invoked", audit.Options{
 		TargetType: "mcp_tool", TargetID: toolName,
 		Metadata: map[string]any{
 			"permissions": permissions, "write": write, "allowed": allowed,

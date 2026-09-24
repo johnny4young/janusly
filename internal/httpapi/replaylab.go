@@ -141,7 +141,7 @@ func (s *V1Server) replayLabCore(r *http.Request, rc v1Request) opResult {
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "replay_lab.started", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "replay_lab.started", audit.Options{
 		TargetType: "run", TargetID: body.SourceRunID,
 		Metadata: map[string]any{"replayRunId": replayRunID, "hasPatch": hasPatch},
 	})
@@ -191,7 +191,7 @@ func (s *V1Server) replayLabForkCore(r *http.Request, rc v1Request) opResult {
 	if !result.OK {
 		return opError(http.StatusUnprocessableEntity, result.Code, result.Message, nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "replay_lab.fork_started", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "replay_lab.fork_started", audit.Options{
 		TargetType: "run", TargetID: body.SourceRunID,
 		Metadata: map[string]any{
 			"replayRunId": result.RunID, "forkNodeId": body.ForkNodeID,

@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react'
 import { OnboardingReplayButton } from './OnboardingReplayButton'
 import { OnboardingBanner } from './OnboardingBanner'
 import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
+import { RecoveryLabEntry } from './recovery-center/RecoveryCenterEmptyState'
 import { HomeActionWorkspace } from './recovery-center/HomeActionWorkspace'
 import { downtimeSeverity } from './recovery-center/recovery-center-model'
 import { useT } from '../i18n'
@@ -46,7 +47,14 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         onOpenMemoryGovernance={onOpenMemoryGovernance}
       />
 
-      <HomeActionWorkspace
+      {showOnboarding ? (
+        <RecoveryLabEntry
+          onOpenStudio={() => onOpenTab('ai-studio')}
+          onOpenRecipes={() => onOpenTab('templates')}
+          onStartDrill={onStartRecoveryDrill}
+          onDismiss={dismissIntro}
+        />
+      ) : <HomeActionWorkspace
         actions={recommendedActions}
         activeRuns={activeRuns}
         activeRunCount={allActiveRuns.length}
@@ -55,7 +63,7 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         onSelectAction={handleRecommendedAction}
         onOpenRun={onOpenRun}
         onOpenActivity={onOpenActivity}
-      />
+      />}
 
       <OnboardingBanner onOpenTab={onOpenTab} />
 
@@ -96,12 +104,9 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
                 validation={validation}
                 ledger={ledger}
                 personalWins={operatorWins}
-                showRecoveryLab={showOnboarding}
                 recentDlqRunId={openDeadLetters[0]?.runId}
                 onOpenTab={onOpenTab}
                 onOpenRecoveryQueue={onOpenRecoveryQueue}
-                onStartRecoveryDrill={onStartRecoveryDrill}
-                onDismissRecoveryLab={dismissIntro}
               />
             </Suspense>
 

@@ -2,56 +2,50 @@ name: CI
 
 on:
   pull_request:
-    paths-ignore: ['docs/**', '**/*.md']
+  merge_group:
   push:
     branches: [develop, main]
-    paths-ignore: ['docs/**', '**/*.md']
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    shell: bash
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # One diff decides which lanes a change needs: a web-only change skips the
-  # Go and PostgreSQL lanes, a Go-only change skips the frontend lane, and
-  # the single-runtime E2E runs for either. Shared inputs (workflows,
-  # Makefile, scripts, deploy, the OpenAPI contract) run everything.
+  # The workflow always emits CI gate, even for documentation-only changes.
+  # Product and website builds remain separate; shared/unknown inputs fail closed.
   changes:
     name: Changed paths
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       web: ${{ steps.classify.outputs.web }}
       go: ${{ steps.classify.outputs.go }}
+      website: ${{ steps.classify.outputs.website }}
+      product: ${{ steps.classify.outputs.product }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - id: classify
+      - name: CI selection and isolated harness regressions
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-          else
-            base="${{ github.event.before }}"
-          fi
-          if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
-            changed="everything"
-          else
-            # The marketing site has its own workflow; its files never touch the product lanes.
-            changed=$(git diff --name-only "$base" "${{ github.sha }}" | grep -Ev '^(website/|\.github/workflows/deploy-website\.yml$)' || true)
-          fi
-          web=false; go=false
-          if [ "$changed" = "everything" ]; then web=true; go=true; fi
-          if printf '%s\n' "$changed" | grep -Eq '^(web/|contract/|internal/contract/)'; then web=true; fi
-          if printf '%s\n' "$changed" | grep -Eq '^(cmd/|internal/|e2e/|go\.(mod|sum)$|schema\.sql$|sqlc\.yaml$|contract/)'; then go=true; fi
-          if printf '%s\n' "$changed" | grep -Eq '^(\.github/|Makefile$|scripts/|deploy/|docker-compose\.yml$|Dockerfile$)'; then web=true; go=true; fi
-          echo "web=$web" >> "$GITHUB_OUTPUT"
-          echo "go=$go" >> "$GITHUB_OUTPUT"
+          bash scripts/ci-contract.test.sh
+          bash scripts/verify-isolated.test.sh
+      - id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: bash scripts/ci-changes.sh "$BASE_SHA" "$HEAD_SHA" | tee -a "$GITHUB_OUTPUT"
 
   frontend:
     name: Frontend
+    timeout-minutes: 20
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
@@ -90,6 +84,7 @@ jobs:
 
   backend:
     name: Backend
+    timeout-minutes: 25
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
@@ -105,6 +100,8 @@ jobs:
         run: go build ./...
       - name: Local database port contract
         run: bash scripts/local-db-port.test.sh
+      - name: Recovery guard contracts
+        run: make recovery-local-selftest
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.18.0
@@ -124,10 +121,11 @@ jobs:
       - name: Reachable vulnerabilities
         run: go tool govulncheck ./...
       - name: Unit and race tests
-        run: go test -race ./...
+        run: go test -race -timeout 15m ./...
 
   integration:
     name: PostgreSQL 18 integration
+    timeout-minutes: 30
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
@@ -141,7 +139,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U janusly -d janusly"
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U janusly -d janusly"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
@@ -153,14 +151,17 @@ jobs:
         with:
           go-version: 1.26.6
           cache: true
+      - name: Process configuration forwarding
+        run: bash scripts/process-config.test.sh
       - run: go run ./cmd/api migrate
       - run: go run ./cmd/api migrate
-      - run: go test -race -tags integration -p 1 -count=1 ./...
+      - run: go test -race -tags integration -p 1 -count=1 -timeout 20m ./...
 
   e2e:
     name: Single-runtime E2E
+    timeout-minutes: 30
     needs: changes
-    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -185,16 +186,92 @@ jobs:
         run: pnpm --dir web exec playwright install-deps chromium
       - run: bash scripts/test-e2e.sh
 
+  parity:
+    name: Browser route parity
+    needs: changes
+    if: needs.changes.outputs.product == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: 1.26.6
+          cache: true
+      - run: make test-route-parity
+
+  ha:
+    name: PostgreSQL 18 HA
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
+        env:
+          POSTGRES_USER: janusly
+          POSTGRES_PASSWORD: janusly-local
+          POSTGRES_DB: janusly
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U janusly -d janusly"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      JANUSLY_DATABASE_URL: postgres://janusly:janusly-local@127.0.0.1:5432/janusly?sslmode=disable&pool_max_conns=4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: 1.26.6
+          cache: true
+      - run: make migrate DB_URL="$JANUSLY_DATABASE_URL"
+      - run: make migrate DB_URL="$JANUSLY_DATABASE_URL"
+      - name: Bounded two-instance HA with test and timeout diagnostics
+        run: |
+          mkdir -p output/ci
+          make test-ha-current-db DB_URL="$JANUSLY_DATABASE_URL" 2>&1 | tee output/ci/ha.log
+      - name: Preserve HA diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ha-${{ github.sha }}
+          path: output/ci/ha.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  website:
+    name: Website
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
+    uses: ./.github/workflows/website-check.yml
+
+  gate:
+    name: CI gate
+    needs: [changes, frontend, backend, integration, ha, parity, e2e, website]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Require success or an explicitly classified skip
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bash scripts/ci-gate.sh
+
   artifact:
     name: Artifact
+    timeout-minutes: 30
     runs-on: ubuntu-latest
-    needs: [changes, frontend, backend, integration, e2e]
-    # The image build is the expensive lane: only pushes to the integration
-    # branches pay for it, and only when every lane that ran passed (skipped
-    # lanes are not failures).
+    needs: [changes, gate]
+    # Product artifacts only, after all relevant validation passes. Website
+    # and docs-only pushes never build a product image.
     if: >-
       !cancelled() && github.event_name == 'push'
-      && !contains(needs.*.result, 'failure')
+      && needs.changes.outputs.product == 'true' && needs.gate.result == 'success'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0

@@ -57,3 +57,36 @@ test('narrow desktop keeps contextual navigation readable without overflow', asy
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(2)
 })
+
+test('200% logical zoom keeps the recovery workspace navigable in both locales', async ({ browser }) => {
+  // A 1280x720 desktop at 200% browser zoom exposes approximately 640x360
+  // CSS pixels. Chromium's 2x device scale exercises the corresponding
+  // rasterization, but this automated check is not a physical zoom pass.
+  for (const locale of ['en', 'es'] as const) {
+    const context = await browser.newContext({
+      baseURL: test.info().project.use.baseURL,
+      viewport: { width: 640, height: 360 },
+      deviceScaleFactor: 2,
+      reducedMotion: 'reduce',
+    })
+    try {
+      const page = await context.newPage()
+      await page.addInitScript(selectedLocale => {
+        window.localStorage.setItem('janusly:locale', selectedLocale)
+      }, locale)
+      await page.goto('/')
+      await expect(page.locator('.we-recovery-center-hero')).toBeVisible()
+
+      const activity = locale === 'en' ? 'Activity' : 'Actividad'
+      const runs = locale === 'en' ? 'Runs' : 'Ejecuciones'
+      await openWorkspaceSection(page, activity, runs)
+      await expect(page.getByTestId('activity-run-history')).toBeVisible()
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - window.innerWidth,
+      )
+      expect(overflow, `${locale} page overflow at 200% logical zoom`).toBeLessThanOrEqual(2)
+    } finally {
+      await context.close()
+    }
+  }
+})

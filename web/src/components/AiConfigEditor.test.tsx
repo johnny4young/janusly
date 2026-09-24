@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
@@ -169,6 +169,54 @@ describe('<AiConfigEditor />', () => {
     expect(screen.getByLabelText('Saved prompt')).toHaveValue('current_prompt')
     fireEvent.change(screen.getByLabelText('Prompt source'), { target: { value: 'inline' } })
     expect(screen.getByLabelText('Prompt')).toBeVisible()
+  })
+
+  it('tracks externally controlled prompt source changes on the same node', () => {
+    const onUpdate = vi.fn()
+    const { rerender } = render(
+      <AiConfigEditor nodeId="classify" config={{ prompt: 'Inline' }} onUpdate={onUpdate} />,
+    )
+    expect(screen.getByLabelText('Prompt source')).toHaveValue('inline')
+
+    rerender(<AiConfigEditor nodeId="classify"
+      config={{ promptRef: { name: 'saved_classifier' } }} onUpdate={onUpdate} />)
+    expect(screen.getByLabelText('Prompt source')).toHaveValue('saved')
+    expect(screen.getByLabelText('Saved prompt')).toHaveValue('saved_classifier')
+
+    rerender(<AiConfigEditor nodeId="classify" config={{ prompt: 'Inline again' }} onUpdate={onUpdate} />)
+    expect(screen.getByLabelText('Prompt source')).toHaveValue('inline')
+    expect(screen.getByLabelText('Prompt')).toHaveValue('Inline again')
+    expect(onUpdate).not.toHaveBeenCalled()
+  })
+
+  it('reveals newly configured advanced options without overriding a manual collapse', async () => {
+    const onUpdate = vi.fn()
+    const { rerender } = render(
+      <AiConfigEditor nodeId="classify" config={{ prompt: 'Classify' }} onUpdate={onUpdate} />,
+    )
+    expect(screen.getByTestId('ai-options')).not.toHaveAttribute('open')
+
+    rerender(<AiConfigEditor nodeId="classify"
+      config={{ prompt: 'Classify', model: 'model-a' }} onUpdate={onUpdate} />)
+    await waitFor(() => expect(screen.getByTestId('ai-options')).toHaveAttribute('open'))
+    expect(screen.getByLabelText('Model override')).toHaveValue('model-a')
+
+    // The native <details> toggle event is queued after the click in jsdom.
+    await act(async () => {
+      fireEvent.click(screen.getByText('Advanced options'))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    expect(screen.getByTestId('ai-options')).not.toHaveAttribute('open')
+    rerender(<AiConfigEditor nodeId="classify"
+      config={{ prompt: 'Classify', model: 'model-b' }} onUpdate={onUpdate} />)
+    expect(screen.getByTestId('ai-options')).not.toHaveAttribute('open')
+
+    rerender(<AiConfigEditor nodeId="classify" config={{ prompt: 'Classify' }} onUpdate={onUpdate} />)
+    expect(screen.getByTestId('ai-options')).not.toHaveAttribute('open')
+    rerender(<AiConfigEditor nodeId="classify"
+      config={{ prompt: 'Classify', model: 'model-c' }} onUpdate={onUpdate} />)
+    await waitFor(() => expect(screen.getByTestId('ai-options')).toHaveAttribute('open'))
+    expect(onUpdate).not.toHaveBeenCalled()
   })
 
   it('keeps the model override progressive and removes it when cleared', () => {

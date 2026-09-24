@@ -84,7 +84,7 @@ func (s *V1Server) organizationCreateCore(r *http.Request, rc identityRequest) o
 	orgID := "org_" + s.newID()
 	memberID := s.newID()
 	ctx := r.Context()
-	err := audit.WithIdentityAuditTx(ctx, s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
+	err := s.audit.WithIdentityAuditTx(ctx, s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
 		q := store.New(tx)
 		if _, err := q.UpsertIdentityProfile(ctx, store.UpsertIdentityProfileParams{
 			ID: identity.UserID, Name: identityText(profileName), Email: identityText(identity.Email),
@@ -180,7 +180,7 @@ func (s *V1Server) invitationAcceptCore(r *http.Request, rc identityRequest) opR
 	ctx := r.Context()
 	normalizedEmail := strings.ToLower(strings.TrimSpace(identity.Email))
 	acceptedOrgID := ""
-	err := audit.WithIdentityAuditTx(ctx, s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
+	err := s.audit.WithIdentityAuditTx(ctx, s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
 		q := store.New(tx)
 		target, err := q.GetIdentityInvitationLockTarget(ctx, store.GetIdentityInvitationLockTargetParams{
 			ID: invitationID, Email: normalizedEmail,
@@ -264,7 +264,7 @@ func (s *V1Server) pluginInstallCore(r *http.Request, rc v1Request) opResult {
 	}
 	var metadata map[string]any
 	_ = json.Unmarshal(config, &metadata)
-	audit.Write(r.Context(), s.pool, rc.authContext, "plugin.installed", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "plugin.installed", audit.Options{
 		TargetType: "plugin", TargetID: body.PluginID, Metadata: metadata,
 	})
 	return opOK(map[string]any{"id": id})

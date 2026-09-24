@@ -60,9 +60,14 @@ type Decision struct {
 }
 
 // Evaluator owns the fail-soft policy reads and rejection audit chokepoint.
-type Evaluator struct{ pool *pgxpool.Pool }
+type Evaluator struct {
+	pool  *pgxpool.Pool
+	audit audit.Writer
+}
 
-func New(pool *pgxpool.Pool) *Evaluator { return &Evaluator{pool: pool} }
+func New(pool *pgxpool.Pool, writer audit.Writer) *Evaluator {
+	return &Evaluator{pool: pool, audit: writer}
+}
 
 func defaultConfig() Config { return Config{SessionTTLSeconds: defaultSessionTTLSeconds} }
 
@@ -213,7 +218,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, input Input) Decision {
 		if input.Email != "" {
 			email = input.Email
 		}
-		audit.WriteAs(ctx, e.pool, input.OrgID, input.UserID, "auth.policy.rejected", audit.Options{
+		e.audit.WriteAs(ctx, e.pool, input.OrgID, input.UserID, "auth.policy.rejected", audit.Options{
 			TargetType: "user", TargetID: input.UserID,
 			Metadata: map[string]any{
 				"policyKey": decision.PolicyKey, "reason": decision.Reason,

@@ -4,8 +4,8 @@
  * not linger under node B's card.
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { InspectorPanel } from './InspectorPanel'
 import { ConfirmProvider } from './ConfirmDialog'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
@@ -75,6 +75,10 @@ function renderPanelWithConfirm(overrides: Partial<Parameters<typeof InspectorPa
 }
 
 describe('<InspectorPanel /> selection-change hygiene', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('shows the newly selected edge\'s own condition, not the previous edge\'s text', () => {
     const onUpdateEdgeCondition = vi.fn()
     const { rerender, props } = renderPanel({
@@ -114,6 +118,65 @@ describe('<InspectorPanel /> selection-change hygiene', () => {
 
     // Node B never had a parse error; node A's banner must not follow it.
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('debounces contextual JSON feedback without replacing the invalid draft', async () => {
+    vi.useFakeTimers()
+    const onUpdateNodeConfig = vi.fn()
+    renderPanel({ selectedNode: makeNode('node-a'), onUpdateNodeConfig })
+    const jsonField = document.getElementById('node-config') as HTMLTextAreaElement
+    const invalidDraft = '{\n  "retry":,\n}'
+
+    fireEvent.change(jsonField, { target: { value: invalidDraft } })
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    await act(async () => vi.advanceTimersByTime(350))
+
+    const feedback = screen.getByRole('alert')
+    expect(feedback).toHaveTextContent(/Invalid JSON at line 2, column \d+\./)
+    expect(feedback).not.toHaveTextContent(/unexpected|expected property|position/i)
+    expect(jsonField).toHaveValue(invalidDraft)
+    expect(onUpdateNodeConfig).not.toHaveBeenCalled()
+  })
+
+  it('locates a later invalid token instead of an earlier valid delimiter', async () => {
+    vi.useFakeTimers()
+    renderPanel({ selectedNode: makeNode('node-a') })
+    const jsonField = document.getElementById('node-config') as HTMLTextAreaElement
+
+    fireEvent.change(jsonField, { target: { value: '{\n  "retry": 1,\n  "timeoutMs":,\n}' } })
+    await act(async () => vi.advanceTimersByTime(350))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid JSON at line 3, column 15.')
+  })
+
+  it('validates while typing but applies only a complete JSON object on blur', async () => {
+    vi.useFakeTimers()
+    const onUpdateNodeConfig = vi.fn()
+    renderPanel({ selectedNode: makeNode('node-a'), onUpdateNodeConfig })
+    const jsonField = document.getElementById('node-config') as HTMLTextAreaElement
+    const validDraft = '{\n  "timeoutMs": 5000\n}'
+
+    fireEvent.change(jsonField, { target: { value: validDraft } })
+    await act(async () => vi.advanceTimersByTime(350))
+
+    expect(screen.getByRole('status')).toHaveTextContent('Valid JSON.')
+    expect(onUpdateNodeConfig).not.toHaveBeenCalled()
+    fireEvent.blur(jsonField)
+    expect(onUpdateNodeConfig).toHaveBeenCalledWith({ timeoutMs: 5000 })
+  })
+
+  it('rejects arrays as node configuration without destroying the draft', () => {
+    const onUpdateNodeConfig = vi.fn()
+    renderPanel({ selectedNode: makeNode('node-a'), onUpdateNodeConfig })
+    const jsonField = document.getElementById('node-config') as HTMLTextAreaElement
+
+    fireEvent.change(jsonField, { target: { value: '["not", "an", "object"]' } })
+    fireEvent.blur(jsonField)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter a JSON object.')
+    expect(jsonField).toHaveValue('["not", "an", "object"]')
+    expect(onUpdateNodeConfig).not.toHaveBeenCalled()
   })
 
   it('refreshes Advanced JSON when the same selected node receives a new kind and config', () => {

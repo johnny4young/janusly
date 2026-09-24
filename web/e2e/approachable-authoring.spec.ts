@@ -17,6 +17,8 @@ const locales = {
     creationTitle: 'How do you want to start?',
     creationChoices: ['Describe it', 'Start blank', 'Use a template'],
     addStep: 'Add step',
+    describeOutcome: 'Describe the outcome',
+    emptyCanvasBody: 'Draft locally with Janusly, or build manually with Add step.',
     searchSteps: 'Search steps…',
     httpStep: 'Call an API',
     httpMethod: 'HTTP method',
@@ -41,6 +43,8 @@ const locales = {
     creationTitle: '¿Cómo quieres empezar?',
     creationChoices: ['Descríbelo', 'Empezar vacío', 'Usar una plantilla'],
     addStep: 'Agregar paso',
+    describeOutcome: 'Describir el resultado',
+    emptyCanvasBody: 'Crea un borrador local con Janusly o usa Agregar paso para construirlo manualmente.',
     searchSteps: 'Buscar pasos…',
     httpStep: 'Llamar a una API',
     httpMethod: 'Método HTTP',
@@ -128,9 +132,16 @@ for (const locale of ['en', 'es'] as const) {
     await page.keyboard.press('Enter')
 
     await expect(page.getByRole('heading', { name: copy.build, exact: true })).toBeVisible()
-    await expect(page.getByTestId('canvas-empty')).toBeVisible()
+    const emptyCanvas = page.getByTestId('canvas-empty')
+    await expect(emptyCanvas).toBeVisible()
+    await expect(emptyCanvas).toContainText(copy.emptyCanvasBody)
     await expect(page.locator('.canvas-step-picker')).toHaveCount(1)
     await expectReadablePrimaryText(page.locator('.authoring-scope-nav button'))
+
+    await emptyCanvas.getByRole('button', { name: copy.describeOutcome, exact: true }).click()
+    await expect(page.locator('.ai-studio-prompt')).toBeFocused()
+    await openWorkspaceSection(page, copy.workflows, copy.build)
+    await expect(emptyCanvas).toBeVisible()
 
     await page.getByRole('button', { name: copy.addStep, exact: true }).click()
     const search = page.getByRole('searchbox', { name: copy.searchSteps, exact: true })

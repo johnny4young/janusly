@@ -4,6 +4,10 @@ Janusly reads process configuration from environment variables. The application
 validates core values before opening listeners. Tenant-adjustable behavior lives
 in `org_configs`; secrets never do.
 
+See the [classified environment reference](environment-reference.md) for types,
+defaults, ranges, precedence, restart scope, CLI/build inputs and unsupported
+names. It distinguishes strict boot validation from feature-specific fallbacks.
+
 ## Core runtime
 
 | Variable | Default | Meaning |
@@ -18,16 +22,109 @@ in `org_configs`; secrets never do.
 | `JANUSLY_TRUSTED_PROXY` | `false` | When `true`, per-IP rate limits key on the first `X-Forwarded-For` hop instead of the socket peer. Set it only behind a proxy that overwrites that header; otherwise a client can pick its own bucket. |
 | `JANUSLY_BROWSER_CONNECT_ORIGINS` | empty | Comma-separated explicit loopback HTTP origins added to browser CSP for local identity labs; non-loopback and non-HTTP values are ignored. |
 | `JANUSLY_WORKER_CONCURRENCY` | `8` | Concurrent workflow task limit, range 1–64. |
-| `JANUSLY_API_POOL_SIZE` | `10` | Public-request PostgreSQL pool size. |
-| `JANUSLY_WORKER_POOL_SIZE` | derived | Execution PostgreSQL pool size; `0` derives concurrency plus two. |
+| `JANUSLY_API_POOL_SIZE` | `10` | Public-request PostgreSQL pool size; integer range 1–100. |
+| `JANUSLY_WORKER_POOL_SIZE` | derived | Execution PostgreSQL pool size; integer range 0–100; `0` derives concurrency plus two. |
 | `JANUSLY_POLL_MS` | `250` | Durable-queue fallback poll interval, range 50–5000 ms. |
-| `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Default outbound HTTP timeout; integer range 1..600000 ms. |
+| `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Outbound HTTP environment fallback; integer range 1..600000 ms; tenant overrides remain dynamic. |
 | `JANUSLY_FEEDBACK_MEMORY_WORKERS` | `4` | Fixed workers for optional feedback-derived memory commits, range 1–32. |
 | `JANUSLY_FEEDBACK_MEMORY_QUEUE_CAPACITY` | `256` | Waiting-task bound for optional feedback-derived memory, range 1–4096; saturation never rejects durable feedback. |
 | `JANUSLY_FEEDBACK_MEMORY_TIMEOUT_MS` | `15000` | Per-task deadline for feedback-derived memory, range 1000–300000 ms. |
 
 `JANUSLY_PORT` and `JANUSLY_INTERNAL_PORT` must differ. There are no alternate
 names for these settings.
+
+## Tenant-adjustable HTTP defaults
+
+These numeric environment values must represent whole numbers. Blank/unset uses
+the catalog default; surrounding whitespace is ignored. Nonblank malformed,
+fractional, non-finite or out-of-range values reject API/MCP startup in every
+mode with key/range-only errors, never the supplied value.
+
+| Environment fallback | Tenant key | Default | Inclusive range |
+| --- | --- | --- | --- |
+| `JANUSLY_HTTP_TIMEOUT_MS` | `http.timeoutMs` | `30000` | 1–600000 ms |
+| `JANUSLY_HTTP_MAX_RESPONSE_BYTES` | `http.maxResponseBytes` | `1000000` | 1–67108864 bytes |
+| `JANUSLY_HTTP_MAX_REDIRECTS` | `http.maxRedirects` | `5` | 0–20 hops; zero disables redirects |
+| `JANUSLY_HTTP_STREAM_PREVIEW_BYTES` | `http.streamPreviewBytes` | `65536` | 1024–1048576 bytes |
+
+Precedence is valid tenant row → environment fallback → catalog default. A
+validated workflow-node override can then replace the effective default but
+cannot exceed platform ceilings. The process validates environment fallbacks
+at boot, not the tenant rows: each execution claim resolves its tenant snapshot
+through the same catalog. Tenant edits affect subsequent claims without a
+restart; deployment environment changes require restarting the process. One
+tenant's setting never becomes another tenant's default. Invalid legacy rows
+fall through, while new fractional HTTP tenant writes are rejected, not rounded.
+
+## Persistence payload limit
+
+`JANUSLY_PERSIST_MAX_BYTES` is a process-only integer byte cap, default **256000**,
+minimum **2**, maximum the platform signed integer. Invalid input rejects boot
+without echoing it; changing the value requires restart. Engine events and all
+audit producers share the immutable policy. Fixed state/recovery limits and
+unbounded redacted replay snapshots keep their own rules. See
+[engine persistence](architecture/engine-persistence.md#process-serialization-policy).
+
+## External database tool pool budget
+
+`JANUSLY_DB_TOOL_MAX_PROCESS_POOLS` is a process-wide integer in **1–500**,
+default **25**. Blank/unset uses the default; a nonblank invalid value rejects
+startup in development and production, naming the key/range without echoing the
+value. Environment overrides the default; there is no tenant override. A change
+requires a process restart and affects new work only after that restart.
+
+API and MCP composition roots each construct one explicit external pool owner
+and share it across their engine producers. It is separate from Janusly's API
+and worker PostgreSQL pools. Each external pool is physically limited to one
+connection; the per-organization limit remains five. Retired pools with active
+leases still consume capacity until closed. Shutdown stops producers, drains
+external leases, then closes control-plane pools. No environment read during
+acquisition can change admission midway through a run, and no implicit global
+cache is created by an unconfigured engine.
+
+## Process reaper settings
+
+These are process-wide integer millisecond settings, not `org_configs` keys.
+Both the HTTP executable and stdio MCP entry point validate them before opening
+a database connection or starting workers. Defaults and overrides are copied into
+the engine at construction; changing environment variables requires a restart.
+The periodic sweep and the scoped recovery drill use that same snapshot.
+
+| Variable | Default | Range | Precedence / meaning |
+| --- | ---: | --- | --- |
+| `JANUSLY_REAPER_INTERVAL_MS` | `60000` | 1–9223372035854 ms | Sweep cadence; no tenant override. |
+| `JANUSLY_REAPER_THRESHOLD_MS` | `3600000` | 1–9223372035854 ms | Requested stall age; effective threshold is the larger of this value and the floor. |
+| `JANUSLY_REAPER_THRESHOLD_FLOOR_MS` | `900000` | 1–9223372035854 ms | Safety floor; an explicit override logs the floor and effective threshold. Lowering it can fail legitimate long-running nodes. |
+
+The upper bound prevents duration overflow and reserves one second for the
+historical drill's age margin; it is not a recommended operating threshold.
+Long thresholds are not silently shortened to a drill-only 24-hour cap.
+`JANUSLY_STALLED_NODE_THRESHOLD_MINUTES` was an undocumented drill-only fallback
+that did not configure the production sweep. It is now rejected at boot with an
+instruction to use `JANUSLY_REAPER_THRESHOLD_MS`, rather than reporting a drill
+policy different from the actual worker policy.
+
+Invalid validated core values fail startup with their variable name and accepted
+range, never the supplied value. Unset or whitespace-only values use the documented
+default. The validated core settings (ports, pools, concurrency, polling, default
+HTTP defaults, feedback workers, reaper and persistence) are restart-scoped. This does **not**
+freeze tenant configuration: organization settings continue through their
+existing database → environment → default resolution at runtime.
+
+### Configuration ownership categories
+
+- **Public process:** validated boot values above; the executable owns their
+  lifecycle. Other feature-specific process settings are described below.
+- **Tenant override:** catalogued `org_configs` values and their documented
+  environment fallback; do not capture these in an immutable boot snapshot.
+- **Harness/test:** `JANUSLY_VERIFY_*`, `JANUSLY_E2E_*`, and qualification controls
+  belong to their scripts, not to the product configuration surface. Harnesses
+  may explicitly lower the public reaper floor only in isolated stacks.
+- **Third party/platform:** `PATH`, `HOSTNAME`, `PG*`, and `OTEL_*` retain their
+  library/platform ownership; they are not Janusly business settings.
+- **Secret:** database URLs, provider credentials, token-signing and encryption
+  keys are never included in configuration-validation error values. Their
+  feature-specific checks and rotation rules remain separate from numeric knobs.
 
 ## Production requirements
 
@@ -135,9 +232,8 @@ Outbound safety and integration settings include:
 
 Outbound HTTP settings remain bounded even when configured per tenant or per
 workflow node: response bodies are capped at 67,108,864 bytes (64 MiB), redirect
-chains at 20 hops, and timeouts at 600,000 ms. Values outside those ranges fall
-back when read from legacy/environment configuration and are rejected on new
-tenant or workflow writes.
+chains at 20 hops, and timeouts at 600,000 ms. Invalid legacy rows fall back defensively; invalid deployment environment
+settings fail at boot and invalid new tenant/workflow writes are rejected.
 - `JANUSLY_MCP_WRITES_ENABLED` (server-side write tools) and
   `JANUSLY_MCP_CLIENT_WRITES_ENABLED` (`mcp_tool` steps against external
   servers)

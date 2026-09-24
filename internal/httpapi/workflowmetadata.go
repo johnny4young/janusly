@@ -269,7 +269,7 @@ func (s *V1Server) setWorkflowSloCore(r *http.Request, rc v1Request, workflowID 
 	if err := tx.Commit(r.Context()); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.slo.set", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.slo.set", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
 		Metadata: map[string]any{
 			"workflowId": workflowID, "versionId": versionID, "cleared": slo == nil,
@@ -344,7 +344,7 @@ func (s *V1Server) postWorkflowsMetadataCore(r *http.Request, rc v1Request) opRe
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	view := workflowMetadataView(row)
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.metadata.set", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.metadata.set", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
 		Metadata: map[string]any{"workflowId": workflowID, "after": metadataForAudit(view)},
 	})
@@ -376,7 +376,7 @@ func (s *V1Server) postWorkflowsFolderCore(r *http.Request, rc v1Request) opResu
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.metadata.set", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.metadata.set", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
 		Metadata: map[string]any{"workflowId": workflowID, "folder": textOrNull(row.Folder)},
 	})
@@ -413,7 +413,7 @@ func (s *V1Server) postWorkflowsTagsCore(r *http.Request, rc v1Request) opResult
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tag.set", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tag.set", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
 		Metadata: map[string]any{"workflowId": workflowID, "tags": *body.Tags},
 	})
@@ -453,7 +453,7 @@ func (s *V1Server) postWorkflowsFoldersRenameCore(r *http.Request, rc v1Request)
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.folder.renamed", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.folder.renamed", audit.Options{
 		Metadata: map[string]any{"from": body.From, "to": body.To, "affected": changed},
 	})
 	return opOK(map[string]any{"ok": true, "affected": changed})
@@ -472,7 +472,7 @@ func (s *V1Server) postWorkflowsFoldersDeleteCore(r *http.Request, rc v1Request)
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.folder.deleted", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.folder.deleted", audit.Options{
 		Metadata: map[string]any{"folder": body.Folder, "affected": changed},
 	})
 	return opOK(map[string]any{"ok": true, "affected": changed})
@@ -505,7 +505,7 @@ func (s *V1Server) postWorkflowsFoldersAssignCore(r *http.Request, rc v1Request)
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.folder.bulk_assigned", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.folder.bulk_assigned", audit.Options{
 		Metadata: map[string]any{"folder": body.Folder, "workflowIds": owned, "affected": len(owned)},
 	})
 	return opOK(map[string]any{"ok": true, "affected": len(owned)})
@@ -548,7 +548,7 @@ func (s *V1Server) postWorkflowsTagsAssignCore(r *http.Request, rc v1Request) op
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tags.bulk_assigned", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tags.bulk_assigned", audit.Options{
 		Metadata: map[string]any{"tag": body.Tag, "remove": body.Remove, "workflowIds": owned, "affected": len(owned)},
 	})
 	return opOK(map[string]any{"ok": true, "affected": len(owned)})
@@ -567,7 +567,7 @@ func (s *V1Server) postWorkflowsTagsRenameCore(r *http.Request, rc v1Request) op
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tag.renamed", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tag.renamed", audit.Options{
 		Metadata: map[string]any{"from": body.From, "to": body.To, "affected": changed},
 	})
 	return opOK(map[string]any{"ok": true, "affected": changed})
@@ -585,7 +585,7 @@ func (s *V1Server) postWorkflowsTagsDeleteCore(r *http.Request, rc v1Request) op
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tag.deleted", audit.Options{
+	s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tag.deleted", audit.Options{
 		Metadata: map[string]any{"tag": body.Tag, "affected": changed},
 	})
 	return opOK(map[string]any{"ok": true, "affected": changed})

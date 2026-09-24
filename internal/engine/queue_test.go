@@ -29,6 +29,21 @@ const diamondDoc = `{"nodes":[
 	{"from":"left","to":"join"},{"from":"right","to":"join"}
 ]}`
 
+// readySuccessors returns, in declaration order, every pending node whose
+// dependencies are satisfied.
+func readySuccessors(wf *domain.Workflow, statuses map[string]string) []string {
+	var ready []string
+	for _, node := range wf.Nodes {
+		if statuses[node.ID] != "pending" {
+			continue
+		}
+		if depsSatisfied(wf, node.ID, statuses) {
+			ready = append(ready, node.ID)
+		}
+	}
+	return ready
+}
+
 func TestReadySuccessorsTable(t *testing.T) {
 	diamond := wfFromJSON(t, diamondDoc)
 	linear := wfFromJSON(t, `{"nodes":[

@@ -1,3 +1,4 @@
+import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 import {
   lazy,
   Suspense,
@@ -27,7 +28,6 @@ import {
   type ActivityFeedItem,
   type ActivityFilter,
 } from '../activity-feed'
-import { contractApi } from '../api'
 import { formatStatusLabel, getNodeLabel } from '../constants'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 import { useVirtualList } from '../hooks/useVirtualList'
@@ -145,7 +145,7 @@ function ActivityRow({
         </span>
         <span className="we-activity-row__status">
           <span className="status-pill" data-status={statusTone}>{displayedStatus}</span>
-          <time dateTime={item.createdAt}>{activityTime(item.createdAt)}</time>
+          <time dateTime={item.createdAt ?? undefined}>{activityTime(item.createdAt ?? undefined)}</time>
         </span>
         <span className="we-activity-row__next">
           {t(`activity.nextAction.${item.nextAction}`)}
@@ -173,6 +173,7 @@ export function ActivityWorkspace({
   const feedHeadingRef = useRef<HTMLHeadingElement | null>(null)
   const detailRef = useRef<HTMLElement | null>(null)
   const reducedMotion = usePrefersReducedMotion()
+  const { onOpenRun } = runWorkspaceProps
   const previousRunIdRef = useRef(runWorkspaceProps.activeRunId)
   const selectedRunId = pendingRunId ?? runWorkspaceProps.activeRunId
   const selection: ActivitySelection | null = activeRecoveryId
@@ -181,6 +182,10 @@ export function ActivityWorkspace({
       ? { kind: 'run', id: selectedRunId }
       : null
   const selectionKey = selection ? `${selection.kind}:${selection.id}` : null
+  const offListRecoveryId = canReadDeadLetters && selection?.kind === 'recovery'
+    && !deadLetters.some(item => item.id === selection.id)
+    ? selection.id
+    : null
   const feed = useMemo(
     () => buildActivityFeed(runWorkspaceProps.runs, deadLetters, runWorkspaceProps.workflows),
     [deadLetters, runWorkspaceProps.runs, runWorkspaceProps.workflows],
@@ -191,7 +196,8 @@ export function ActivityWorkspace({
     ? feed.find(item => item.kind === selection.kind && item.entityId === selection.id) ?? null
     : null
   const selectedRecovery = selection?.kind === 'recovery'
-    ? deadLetters.find(item => item.id === selection.id) ?? offListRecovery
+    ? deadLetters.find(item => item.id === selection.id)
+      ?? (canReadDeadLetters && offListRecovery?.id === selection.id ? offListRecovery : null)
     : null
   const {
     containerRef,
@@ -227,13 +233,13 @@ export function ActivityWorkspace({
     setShowDetailedHistory(false)
     setPendingRunId(runId)
     onSelectRecovery(null)
-    const opening = runWorkspaceProps.onOpenRun(runId)
+    const opening = onOpenRun(runId)
     if (opening && typeof opening.then === 'function') {
       void opening.finally(() => {
         setPendingRunId(current => current === runId ? null : current)
       })
     }
-  }, [onSelectRecovery, runWorkspaceProps.onOpenRun])
+  }, [onOpenRun, onSelectRecovery])
 
   const selectRecovery = useCallback((deadLetterId: string) => {
     setShowDetailedHistory(false)
@@ -277,24 +283,20 @@ export function ActivityWorkspace({
   }, [runWorkspaceProps.activeRunId])
 
   useEffect(() => {
-    if (selection?.kind !== 'recovery') {
-      setOffListRecovery(null)
-      return
-    }
-    if (deadLetters.some(item => item.id === selection.id)) {
+    if (!offListRecoveryId) {
       setOffListRecovery(null)
       return
     }
     const controller = new AbortController()
-    contractApi('GET /dlq', `/dlq?id=${encodeURIComponent(selection.id)}`, undefined, { signal: controller.signal })
+    readDeadLetterDetail(offListRecoveryId, controller.signal)
       .then(value => {
-        if (!controller.signal.aborted) setOffListRecovery(value as unknown as DeadLetter)
+        if (!controller.signal.aborted) setOffListRecovery(value)
       })
       .catch(() => {
         if (!controller.signal.aborted) setOffListRecovery(null)
       })
     return () => controller.abort()
-  }, [deadLetters, selection])
+  }, [offListRecoveryId])
 
   if (showDetailedHistory) {
     return (

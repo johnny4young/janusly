@@ -81,7 +81,11 @@ effect is owned by `V1Server`, not by request goroutines: a fixed worker pool
 has a 15-second deadline. A full or closed queue drops only that optional side
 effect; the durable feedback row and successful response remain intact. Logs
 contain a closed reason and sampled aggregate count, never tenant, operator,
-panic, provider, or memory content.
+panic, provider, or memory content. The executable supplies validated process
+settings to the single `NewV1HandlerWithOptions` construction path; invalid
+memory bounds abort boot rather than returning a nominal fallback handler.
+The process retains the context-aware shutdown callback and drains it before
+closing PostgreSQL pools.
 
 The internal listener publishes accepted, dropped, failed, active, queue-depth,
 and duration metrics under `janusly_feedback_memory_*`. Shutdown first closes

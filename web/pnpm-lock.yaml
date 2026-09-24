@@ -66,9 +66,6 @@ importers:
       jsdom:
         specifier: 29.1.1
         version: 29.1.1(@noble/hashes@1.8.0)
-      nanoid:
-        specifier: 3.3.18
-        version: 3.3.18
       oxc-parser:
         specifier: 0.140.0
         version: 0.140.0

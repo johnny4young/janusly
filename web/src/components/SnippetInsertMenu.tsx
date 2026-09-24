@@ -97,7 +97,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
       }
     })()
     return () => window.cancelAnimationFrame(id)
-  }, [open, selectedNodeId])
+  }, [aliveRef, open, selectedNodeId])
 
   /** Resolve the display name (built-ins use i18n; custom use their stored name). */
   const nameFor = useCallback(
@@ -220,7 +220,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
             type="button"
             className="we-shortcuts-close"
             onClick={onClose}
-            aria-label={t('snippets.menu.cancel')}
+            aria-label={t('common.cancel')}
           >
             <X size={16} aria-hidden="true" />
           </button>

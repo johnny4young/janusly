@@ -5,10 +5,6 @@ import type { ToolSchema } from '../types'
 import { fieldId } from './quick-config-fields'
 import { FormField } from './ui/Form'
 
-function exampleFor(tool: ToolSchema | undefined): Record<string, unknown> {
-  return tool?.inputExample ?? {}
-}
-
 export function ToolPicker({
   nodeId,
   selectedTool,
@@ -30,6 +26,8 @@ export function ToolPicker({
 
   useEffect(() => setQuery(''), [nodeId])
 
+  // Tool descriptions use runtimeT indirectly; locale must invalidate search.
+  /* oxlint-disable react/exhaustive-deps -- tToolDescription reads the runtime locale */
   const filteredTools = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
     const matching = normalized
@@ -40,6 +38,7 @@ export function ToolPicker({
       : tools
     return [...matching].sort((left, right) => left.name.localeCompare(right.name))
   }, [i18n.resolvedLanguage, query, tools])
+  /* oxlint-enable react/exhaustive-deps */
 
   const visibleTools = matchedTool && !filteredTools.some(tool => tool.name === matchedTool.name)
     ? [matchedTool, ...filteredTools]
@@ -65,7 +64,7 @@ export function ToolPicker({
             value={selectedTool}
             onChange={(event) => {
               const next = event.target.value
-              onChange(next, exampleFor(tools.find(tool => tool.name === next)))
+              onChange(next, tools.find(tool => tool.name === next)?.inputExample ?? {})
             }}
           >
             {!selectedTool && <option value="">{t('rightPanel.quickConfig.pickTool')}</option>}

@@ -4,7 +4,7 @@
 // (optional caller-provided resolved-secret list — defense in depth over
 // the engine's pre-write redaction), sensitive-key redaction (always on;
 // reuses IsSensitiveKey — never fork the pattern), and size bounding
-// (default 256 KB, env JANUSLY_PERSIST_MAX_BYTES, per-call override, or
+// (default 256 KB, injected process policy, per-call override, or
 // unbounded for the DLQ snapshots replay needs verbatim). An over-cap
 // payload becomes the contract's {__truncated, originalBytes, maxBytes,
 // preview} sentinel. Lives in grammar so the engine AND the audit writer
@@ -13,14 +13,13 @@ package grammar
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
-	"os"
-	"strconv"
 	"unicode/utf8"
 )
 
-// defaultPersistCap is the contract's DEFAULT_MAX_BYTES.
-const defaultPersistCap = 256_000
+// DefaultPersistMaxBytes is the contract's DEFAULT_MAX_BYTES.
+const DefaultPersistMaxBytes = 256_000
 
 // PersistUnbounded skips the truncation layer entirely (the contract's
 // POSITIVE_INFINITY): DLQ workflow/node JSONs must replay byte-for-byte,
@@ -34,21 +33,40 @@ type PersistOptions struct {
 	// RedactedValues holds per-run resolved secrets to scrub from string
 	// occurrences. Optional — engine paths usually pre-redact at dispatch.
 	RedactedValues []string
-	// MaxBytes: 0 resolves the default (env JANUSLY_PERSIST_MAX_BYTES or
-	// 256 KB); PersistUnbounded skips truncation; any positive value is an
+	// MaxBytes: 0 resolves the policy default (256 KB for the pure helper);
+	// PersistUnbounded skips truncation; a positive value is an
 	// explicit per-call cap.
 	MaxBytes int
 }
 
-// DefaultPersistMaxBytes resolves the default cap: the env override when
-// set to a positive integer, the contract's 256 KB otherwise.
-func DefaultPersistMaxBytes() int {
-	if raw := os.Getenv("JANUSLY_PERSIST_MAX_BYTES"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			return n
-		}
+// Persister is an immutable process-owned serialization policy. Its zero value
+// uses the contract default; construction never reads the environment.
+type Persister struct{ maxBytes int }
+
+// NewPersister validates a default cap large enough to hold the fail-closed
+// empty JSON object. Explicit per-column and unbounded overrides are separate.
+func NewPersister(maxBytes int) (Persister, error) {
+	if maxBytes < 2 {
+		return Persister{}, fmt.Errorf("persistence max bytes must be at least 2")
 	}
-	return defaultPersistCap
+	return Persister{maxBytes: maxBytes}, nil
+}
+
+// MaxBytes returns the immutable effective default cap.
+func (p Persister) MaxBytes() int {
+	if p.maxBytes == 0 {
+		return DefaultPersistMaxBytes
+	}
+	return p.maxBytes
+}
+
+// Payload preserves explicit caps and resolved-secret redaction while supplying
+// this process's default for callers that do not set a per-column override.
+func (p Persister) Payload(value any, opts PersistOptions) json.RawMessage {
+	if opts.MaxBytes == 0 {
+		opts.MaxBytes = p.MaxBytes()
+	}
+	return SafePersistPayload(value, opts)
 }
 
 // SafePersistPayload runs a payload through the value/key/size stack and
@@ -66,7 +84,7 @@ func SafePersistPayload(value any, opts PersistOptions) json.RawMessage {
 	}
 	cap := opts.MaxBytes
 	if cap == 0 {
-		cap = DefaultPersistMaxBytes()
+		cap = DefaultPersistMaxBytes
 	}
 	if cap < 0 {
 		return raw

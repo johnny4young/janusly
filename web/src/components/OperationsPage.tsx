@@ -12,12 +12,13 @@
  * `overview` — same posture as `BuilderSidebar`'s stored-state loader.
  *
  * Wired into `RightPanel.tsx` for the `'operations'` tab — this shell owns
- * the mounted operations experience.
+ * the mounted settings experience.
  */
 
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import {
   BrainCircuit,
+  Building2,
   ChartNoAxesCombined,
   Gauge,
   LayoutGrid,
@@ -90,13 +91,6 @@ type HealthPayload = {
 }
 
 
-// The section bus (sub-section enum + deep-link helper) lives in its own
-// module so OperationsPage stays code-splittable — see operations-section-bus.
-// Re-exported here for back-compat with existing `from './OperationsPage'`
-// callers; new callers should import from the bus directly.
-export { requestOperationsSection } from './operations-section-bus'
-export type { OpsSection } from './operations-section-bus'
-
 type SignalSummary = {
   /** `/health` rate-limiter snapshot. Drives the chip and Infrastructure dot. */
   rateLimiter: RateLimiterHealth | null
@@ -127,12 +121,10 @@ function hasPermission(permissions: readonly string[] | undefined, permission: s
 
 export function OperationsPage({
   permissions,
-  connectionCount = 0,
   aiHealth = null,
   onOpenTab = () => undefined,
 }: {
   permissions?: readonly string[]
-  connectionCount?: number
   aiHealth?: AiHealth | null
   onOpenTab?: (tab: ActiveTab) => void
 }) {
@@ -304,19 +296,24 @@ export function OperationsPage({
       <div className="we-operations-page__body">
         <OperationsRail section={effectiveSection} onChange={setSection} signals={signals} permissions={permissions} />
         <div className="we-operations-page__content" data-section={effectiveSection}>
+          {effectiveSection !== 'overview' && (
+            <header className="we-card__header">
+              <h3>{t(`operations.section.${effectiveSection}.label`)}</h3>
+            </header>
+          )}
           <Suspense fallback={<p className="helper-text" role="status">{t('common.working')}</p>}>
             {effectiveSection === 'overview' && (
               <SettingsOverview
                 permissions={permissions}
-                connectionCount={connectionCount}
                 aiHealth={aiHealth}
                 onOpenSection={setSection}
                 onOpenTab={onOpenTab}
               />
             )}
             {effectiveSection === 'reliability' && <ReliabilitySection permissions={permissions} />}
+            {effectiveSection === 'organization' && <OrganizationSection permissions={permissions} />}
             {effectiveSection === 'integrations' && (
-              <IntegrationsSection permissions={permissions} onOpenTab={onOpenTab} />
+              <ConnectionsSection permissions={permissions} onOpenTab={onOpenTab} />
             )}
             {effectiveSection === 'access' && <AccessSection permissions={permissions} />}
             {effectiveSection === 'ai' && <AiSection permissions={permissions} aiHealth={aiHealth} />}
@@ -379,10 +376,11 @@ function OperationsHeader({
 
 const RAIL_ITEMS: Array<{ section: OpsSection; icon: ReactNode }> = [
   { section: 'overview', icon: <LayoutGrid size={14} aria-hidden="true" /> },
-  { section: 'reliability', icon: <RefreshCw size={14} aria-hidden="true" /> },
-  { section: 'integrations', icon: <Plug size={14} aria-hidden="true" /> },
+  { section: 'organization', icon: <Building2 size={14} aria-hidden="true" /> },
   { section: 'access', icon: <ShieldCheck size={14} aria-hidden="true" /> },
+  { section: 'integrations', icon: <Plug size={14} aria-hidden="true" /> },
   { section: 'ai', icon: <BrainCircuit size={14} aria-hidden="true" /> },
+  { section: 'reliability', icon: <RefreshCw size={14} aria-hidden="true" /> },
   { section: 'usage', icon: <ChartNoAxesCombined size={14} aria-hidden="true" /> },
   { section: 'infrastructure', icon: <ServerCog size={14} aria-hidden="true" /> },
 ]
@@ -410,6 +408,7 @@ function OperationsRail({
       && queueNeedsAttention(signals.maintenanceQueue))
   const dotKind: Record<OpsSection, 'danger' | 'warning' | null> = {
     overview: signals.overviewUnhealthy ? 'warning' : null,
+    organization: null,
     reliability: signals.reliabilityUnhealthy ? 'warning' : null,
     integrations: null,
     access: null,
@@ -466,36 +465,47 @@ function OperationsRail({
 }
 
 function ReliabilitySection({ permissions }: { permissions?: readonly string[] }) {
-  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
-      {can('alerts.read') && <AlertPoliciesPanel canWrite={can('alerts.write')} />}
-      {can('alerts.read') && <RecentAlertsCard />}
-      {can('upstream.read') && <UpstreamHealthPanel canWrite={can('upstream.write')} />}
-      {can('dlq.read') && <FailureClustersCard />}
+      {hasPermission(permissions, 'alerts.read') && (
+        <AlertPoliciesPanel canWrite={hasPermission(permissions, 'alerts.write')} />
+      )}
+      {hasPermission(permissions, 'alerts.read') && <RecentAlertsCard />}
+      {hasPermission(permissions, 'upstream.read') && (
+        <UpstreamHealthPanel canWrite={hasPermission(permissions, 'upstream.write')} />
+      )}
+      {hasPermission(permissions, 'dlq.read') && <FailureClustersCard />}
     </>
   )
 }
 
 function AccessSection({ permissions }: { permissions?: readonly string[] }) {
-  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
-      {can('org.config.write') && <AuthPolicySettingsPanel />}
-      {can('members.read') && (
+      {hasPermission(permissions, 'org.config.write') && <AuthPolicySettingsPanel />}
+      {hasPermission(permissions, 'members.read') && (
         <ScimDirectorySettingsPanel
-          canConfigureDirectory={can('org.config.write')}
-          canSetRoles={can('members.role_set')}
+          canConfigureDirectory={hasPermission(permissions, 'org.config.write')}
+          canSetRoles={hasPermission(permissions, 'members.role_set')}
         />
       )}
-      {can('members.read') && <PermissionGrantsPanel canWrite={can('org.permissions.write')} />}
-      {can('recovery.read') && <MemoryGovernancePanel />}
-      {can('org.config.write') && <AuditLogPanel />}
+      {hasPermission(permissions, 'members.read') && (
+        <PermissionGrantsPanel canWrite={hasPermission(permissions, 'org.permissions.write')} />
+      )}
     </>
   )
 }
 
-function IntegrationsSection({
+function OrganizationSection({ permissions }: { permissions?: readonly string[] }) {
+  return (
+    <>
+      {hasPermission(permissions, 'recovery.read') && <MemoryGovernancePanel />}
+      {hasPermission(permissions, 'org.config.write') && <AuditLogPanel />}
+    </>
+  )
+}
+
+function ConnectionsSection({
   permissions,
   onOpenTab,
 }: {
@@ -503,27 +513,25 @@ function IntegrationsSection({
   onOpenTab: (tab: ActiveTab) => void
 }) {
   const { t } = useT()
-  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
-      {can('credentials.read') && (
+      {hasPermission(permissions, 'credentials.read') && (
         <section className="we-card">
           <div className="we-card__header">
-            <div>
-              <strong>{t('workspace.section.credentials.label')}</strong>
-              <p className="helper-text">{t('workspace.section.credentials.helper')}</p>
-            </div>
+            <p className="helper-text">{t('workspace.section.credentials.helper')}</p>
             <Button size="sm" onClick={() => onOpenTab('credentials')}>
-              {t('workspace.section.credentials.label')}
+              {t('palette.group.open')} {t('workspace.section.credentials.label')}
             </Button>
           </div>
         </section>
       )}
-      {can('external-runtimes.read') && (
-        <ExternalRuntimePanel canWrite={can('external-runtimes.write')} />
+      {hasPermission(permissions, 'external-runtimes.read') && (
+        <ExternalRuntimePanel canWrite={hasPermission(permissions, 'external-runtimes.write')} />
       )}
-      {can('credentials.write') && <SlackInteractionsPanel />}
-      {can('mcp.connections.read') && <McpConnectionsPanel canWrite={can('mcp.connections.write')} />}
+      {hasPermission(permissions, 'credentials.write') && <SlackInteractionsPanel />}
+      {hasPermission(permissions, 'mcp.connections.read') && (
+        <McpConnectionsPanel canWrite={hasPermission(permissions, 'mcp.connections.write')} />
+      )}
     </>
   )
 }
@@ -535,12 +543,11 @@ function AiSection({
   permissions?: readonly string[]
   aiHealth: AiHealth | null
 }) {
-  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
       <AiRuntimeStatusCard health={aiHealth} />
-      {can('org.config.write') && <BudgetSettingsPanel />}
-      {can('org.config.write') && <AiGuidanceSettingsPanel />}
+      {hasPermission(permissions, 'org.config.write') && <BudgetSettingsPanel />}
+      {hasPermission(permissions, 'org.config.write') && <AiGuidanceSettingsPanel />}
     </>
   )
 }

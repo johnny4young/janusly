@@ -1,6 +1,6 @@
 /**
- * Workflow version history list. Re-fetches whenever `platformVersion`
- * changes (the cross-panel reactivity hook from AGENTS.md). Two modes:
+ * Workflow version history list. Resource invalidation refreshes the owned
+ * history snapshot. Two modes:
  *
  *   - **Default**: clicking a version row hydrates the canvas with that
  *     DAG. Same behaviour the panel always had.
@@ -12,9 +12,10 @@
  * Used by `RightPanel.tsx` (Inspector tab → version history).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
-import { api, contractApi } from '../api'
+import { api } from '../api'
+import { readWorkflowVersionPage, type WorkflowVersionRow } from '../lib/list-contract'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
@@ -30,7 +31,7 @@ import { Button } from './ui/Button'
 
 const VERSION_HISTORY_TAGS = [PLATFORM_TAG, 'workflows', 'versions', 'rollouts'] as const
 
-type VersionRow = { id: string; version: number; dagJson: WorkflowDefinition; createdAt?: string }
+type VersionRow = WorkflowVersionRow
 
 /**
  * Improvement suggestion as the API returns it. Mirrors the helper's
@@ -65,9 +66,7 @@ type ImprovementState =
       kind: 'ai'
       suggestions: ImprovementSuggestion[]
       activeIdx: number
-      baseWorkflow: WorkflowDefinition
-      baseLabel: string
-      model?: string
+      base: VersionRow
     }
   | { kind: 'fallback'; aiError: string }
 
@@ -75,120 +74,97 @@ type ImprovementState =
 // the oldest version already shown.
 const VERSIONS_PAGE_SIZE = 50
 
-function versionsPagePath(workflowId: string, beforeVersion?: number): string {
-  const cursor = beforeVersion === undefined ? '' : `&beforeVersion=${beforeVersion}`
-  return `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}&limit=${VERSIONS_PAGE_SIZE}${cursor}`
-}
-
-const APPROACH_KEYS: Record<string, string> = {
-  add_retry: 'versionHistory.approach.add_retry',
-  raise_timeout: 'versionHistory.approach.raise_timeout',
-  swap_secret_ref: 'versionHistory.approach.swap_secret_ref',
-  add_approval: 'versionHistory.approach.add_approval',
-  add_observability: 'versionHistory.approach.add_observability',
-  simplify: 'versionHistory.approach.simplify',
-  other: 'versionHistory.approach.other',
-}
+const APPROACHES = ['add_retry', 'raise_timeout', 'swap_secret_ref', 'add_approval', 'add_observability', 'simplify', 'other']
 
 function approachLabelText(label: string): string {
-  const key = APPROACH_KEYS[label]
-  return key ? (runtimeT(key)) : label
+  return APPROACHES.includes(label) ? runtimeT(`versionHistory.approach.${label}`) : label
 }
 
 /** Render the version-history list for the active workflow with click-to-hydrate. */
 export function VersionHistoryPanel() {
+  const scope = useWorkflowStore(historyScope)
+  return <ScopedVersionHistory key={scope} scope={scope} />
+}
+
+function historyScope(state: ReturnType<typeof useWorkflowStore.getState>): string {
+  return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.currentWorkflowSaved,
+    sessionCan(state.identityContext, 'workflows.write'), sessionCan(state.identityContext, 'ai.write')])
+}
+
+function ScopedVersionHistory({ scope }: { scope: string }) {
   const { t } = useT()
   const confirm = useConfirm()
-  const currentWorkflowId = useWorkflowStore(state => state.currentWorkflowId)
-  const currentWorkflowSaved = useWorkflowStore(state => state.currentWorkflowSaved)
-  const identityContext = useWorkflowStore(state => state.identityContext)
-  const hydrateWorkflow = useWorkflowStore(state => state.hydrateWorkflow)
-  const addToast = useWorkflowStore(state => state.addToast)
+  // The keyed wrapper subscribes to every contextual value used here.
+  const { currentWorkflowId, currentWorkflowSaved, identityContext, hydrateWorkflow, addToast } = useWorkflowStore.getState()
   const platformVersion = useInvalidationNonce(VERSION_HISTORY_TAGS)
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [hasMoreVersions, setHasMoreVersions] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [compareMode, setCompareMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  // Snapshot the (current, target) ids at the moment the operator clicks
-  // Rollback. We don't read `versions[0]` at dialog-render time because a
-  // sibling save bumping `platformVersion` between open and close would
-  // shift "current" to a newer version under the operator — the diff
-  // they're looking at would silently change.
-  const [rollbackPair, setRollbackPair] = useState<{ currentId: string; targetId: string } | null>(null)
-  // Local state for the AI improvement-suggestion affordance. Local —
-  // not Zustand — because no other panel cares about this transient
-  // suggestion state, and a fetch in flight should not survive a
-  // workflow switch. Cleared whenever the active workflow changes,
-  // compare mode toggles, or the operator picks a different version
-  // pair (see effects below).
+  // Retain the exact diff the operator opened; refresh clears this pair.
+  const [rollbackPair, setRollbackPair] = useState<{ current: VersionRow; target: VersionRow } | null>(null)
   const [improvement, setImprovement] = useState<ImprovementState>({ kind: 'idle' })
-  // Cancel flag for an in-flight `/ai/suggest-improvement` call. Each
-  // of the three invalidation sites (workflow change, compare-mode
-  // toggle, version-pair change) flips this to true before resetting
-  // `improvement` to idle; the click handler checks it after the
-  // `await` so a stale promise can't overwrite the now-cleared state
-  // with a suggestion that's tied to a different baseline.
-  const suggestCancelRef = useRef(false)
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [retry, setRetry] = useState(0)
+  const owner = useRef<AbortController | null>(null)
+  const suggestion = useRef<AbortController | null>(null)
+  const current = useCallback((request: AbortController | null): request is AbortController =>
+    request !== null && !request.signal.aborted && historyScope(useWorkflowStore.getState()) === scope, [scope])
 
   useEffect(() => {
-    suggestCancelRef.current = true
+    const request = new AbortController()
+    owner.current = request
     setVersions([])
     setHasMoreVersions(false)
-    setSelectedIds([])
-    setCompareMode(false)
+    setLoadingMore(false)
     setRollbackPair(null)
     setImprovement({ kind: 'idle' })
-  }, [currentWorkflowId])
-
-  useEffect(() => {
-    let cancelled = false
-
+    setLoadState('loading')
     const loadVersions = async () => {
       if (!currentWorkflowId || !currentWorkflowSaved) {
-        setVersions([])
+        setLoadState('ready')
         return
       }
       try {
-        const data = await contractApi('GET /workflows/versions', versionsPagePath(currentWorkflowId), undefined)
-        if (cancelled) return
-        const rows = Array.isArray(data) ? (data as VersionRow[]) : []
+        const rows = await readWorkflowVersionPage(currentWorkflowId, { limit: VERSIONS_PAGE_SIZE }, request.signal)
+        if (!current(request)) return
         setVersions(rows)
+        setLoadState('ready')
         setHasMoreVersions(rows.length >= VERSIONS_PAGE_SIZE)
-        setSelectedIds((prev) => prev.filter((id) => rows.some((version) => version.id === id)))
+        setSelectedIds(prev => prev.filter(id => rows.some(version => version.id === id)))
         if (rows.length < 2) setCompareMode(false)
       } catch (error) {
-        if (!cancelled) {
-          addToast(error instanceof Error ? error.message : (t('versionHistory.loadFailed')), 'error')
-        }
+        if (!current(request)) return
+        setLoadState('error')
+        addToast(error instanceof Error ? error.message : t('versionHistory.loadFailed'), 'error')
       }
     }
-
     void loadVersions()
     return () => {
-      cancelled = true
+      request.abort()
+      suggestion.current?.abort()
     }
-  }, [addToast, currentWorkflowId, currentWorkflowSaved, platformVersion, t])
+  }, [addToast, current, currentWorkflowId, currentWorkflowSaved, platformVersion, retry, t])
 
   const canRollback = sessionCan(identityContext, 'workflows.write')
   const canSuggest = sessionCan(identityContext, 'ai.write')
 
   // Resolve the two selected rows; sort by version asc so the older one
   // is always on the left regardless of click order.
-  const comparePair = useMemo(() => {
-    if (selectedIds.length !== 2) return null
-    const rows = selectedIds
-      .map((id) => versions.find((v) => v.id === id))
-      .filter((row): row is VersionRow => Boolean(row))
-    if (rows.length !== 2) return null
-    return [...rows].sort((a, b) => a.version - b.version) as [VersionRow, VersionRow]
-  }, [selectedIds, versions])
+  const [left, right] = selectedIds.map(id => versions.find(version => version.id === id))
+  const comparePair = left && right
+    ? (left.version < right.version ? [left, right] as const : [right, left] as const)
+    : null
 
   const onRowClick = (version: VersionRow) => {
     if (compareMode) {
       toggleSelected(version.id)
       return
     }
+    const request = owner.current
+    const revision = useWorkflowStore.getState().workflowRevision
+    if (!current(request)) return
     void (async () => {
       // Loading an old version replaces the canvas — same unsaved-work guard
       // as the App-level hydrate paths.
@@ -201,7 +177,8 @@ export function VersionHistoryPanel() {
         })
         if (!proceed) return
       }
-      hydrateWorkflow(version.dagJson)
+      if (!current(request) || useWorkflowStore.getState().workflowRevision !== revision) return
+      hydrateWorkflow({ ...version.dagJson, id: currentWorkflowId }, { version: { id: version.id, version: version.version } })
       addToast(t('versionHistory.loaded', { version: version.version }), 'success')
     })()
   }
@@ -216,70 +193,63 @@ export function VersionHistoryPanel() {
     })
   }
 
-  const onLoadMoreVersions = useCallback(async () => {
-    if (!currentWorkflowId || loadingMore || versions.length === 0) return
+  const onLoadMoreVersions = async () => {
+    const request = owner.current
+    if (!current(request) || !currentWorkflowId || loadingMore || versions.length === 0) return
     const oldest = versions[versions.length - 1].version
     setLoadingMore(true)
     try {
-      const data = await contractApi('GET /workflows/versions', versionsPagePath(currentWorkflowId, oldest), undefined)
-      const rows = Array.isArray(data) ? (data as VersionRow[]) : []
+      const rows = await readWorkflowVersionPage(currentWorkflowId, { limit: VERSIONS_PAGE_SIZE, beforeVersion: oldest }, request.signal)
+      if (!current(request)) return
       setVersions((prev) => [...prev, ...rows.filter((row) => !prev.some((known) => known.id === row.id))])
       setHasMoreVersions(rows.length >= VERSIONS_PAGE_SIZE)
     } catch (error) {
-      addToast(error instanceof Error ? error.message : t('versionHistory.loadFailed'), 'error')
+      if (current(request)) addToast(error instanceof Error ? error.message : t('versionHistory.loadFailed'), 'error')
     } finally {
-      setLoadingMore(false)
+      if (current(request)) setLoadingMore(false)
     }
-  }, [currentWorkflowId, loadingMore, versions, addToast, t])
-
-  const onToggleCompare = () => {
-    setCompareMode((prev) => {
-      const next = !prev
-      if (!next) setSelectedIds([])
-      // Picking a fresh comparison invalidates any in-flight or
-      // already-rendered improvement suggestions — they were tied to
-      // a different version pair.
-      suggestCancelRef.current = true
-      setImprovement({ kind: 'idle' })
-      return next
-    })
   }
 
-  // Drop any rendered improvement when the operator changes which two
-  // versions they're comparing. The suggestions hung off the previous
-  // pair's "newer" version; keeping them around would silently mismatch.
+  const onResetImprovement = () => {
+    suggestion.current?.abort()
+    setImprovement({ kind: 'idle' })
+  }
+
+  const onToggleCompare = () => {
+    onResetImprovement()
+    if (compareMode) setSelectedIds([])
+    setCompareMode(!compareMode)
+  }
+
   useEffect(() => {
-    suggestCancelRef.current = true
+    suggestion.current?.abort()
     setImprovement({ kind: 'idle' })
   }, [selectedIds])
 
   const onSuggestImprovement = async () => {
-    if (!comparePair) return
-    // Reset the cancel flag for THIS call. Subsequent invalidation
-    // sites flip it back to true; we check after `await` to bail out
-    // of the resolved (or rejected) promise's setState path.
-    suggestCancelRef.current = false
+    const history = owner.current
+    if (!current(history) || !canSuggest || !comparePair || improvement.kind === 'loading') return
+    suggestion.current?.abort()
+    const request = new AbortController()
+    suggestion.current = request
     const newer = comparePair[1]
     setImprovement({ kind: 'loading' })
     try {
       const data = await api('/ai/suggest-improvement', {
-        method: 'POST',
+        method: 'POST', signal: request.signal,
         body: JSON.stringify({ workflow: newer.dagJson }),
       }) as {
         mode?: 'ai' | 'fallback'
         suggestions?: ImprovementSuggestion[]
         aiError?: string
-        model?: string
-      }
-      if (suggestCancelRef.current) return
+        }
+      if (!current(history) || request.signal.aborted) return
       if (data.mode === 'ai' && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
         setImprovement({
           kind: 'ai',
           suggestions: data.suggestions,
           activeIdx: 0,
-          baseWorkflow: newer.dagJson,
-          baseLabel: `v${newer.version}`,
-          model: data.model,
+          base: newer,
         })
       } else {
         setImprovement({
@@ -288,17 +258,12 @@ export function VersionHistoryPanel() {
         })
       }
     } catch (error) {
-      if (suggestCancelRef.current) return
+      if (!current(history) || request.signal.aborted) return
       setImprovement({
         kind: 'fallback',
         aiError: error instanceof Error ? error.message : (t('versionHistory.aiRequestFailed')),
       })
     }
-  }
-
-  const onResetImprovement = () => {
-    suggestCancelRef.current = true
-    setImprovement({ kind: 'idle' })
   }
 
   const showSuggestButton =
@@ -322,12 +287,15 @@ export function VersionHistoryPanel() {
             onClick={onToggleCompare}
             leadingIcon={<GitCompare size={12} />}
           >
-            {compareMode ? t('versionHistory.cancelCompare') : t('versionHistory.compare')}
+            {compareMode ? t('common.cancel') : t('versionHistory.compare')}
           </Button>
         )}
       </div>
 
-      {versions.length === 0 && (
+      {loadState === 'loading' && <p role="status">{t('common.loading')}</p>}
+      {loadState === 'error' && <div role="alert"><p>{t('versionHistory.loadFailed')}</p>
+        <Button onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</Button></div>}
+      {loadState === 'ready' && versions.length === 0 && (
         <EmptyState
           icon={<History />}
           kicker={t('versionHistory.emptyKicker')}
@@ -366,15 +334,14 @@ export function VersionHistoryPanel() {
               <span>{version.createdAt ? new Date(version.createdAt).toLocaleString(getResolvedLocale()) : ''}</span>
             </button>
             {showRollback && versions[0] && (
-              <button
-                type="button"
+              <Button size="icon" variant="ghost"
                 className="version-row__rollback"
-                onClick={() => setRollbackPair({ currentId: versions[0]!.id, targetId: version.id })}
+                onClick={() => setRollbackPair({ current: versions[0]!, target: version })}
                 aria-label={t('versionHistory.rollbackAria', { version: version.version })}
                 title={t('versionHistory.rollbackAria', { version: version.version })}
               >
                 <RotateCcw size={12} aria-hidden="true" />
-              </button>
+              </Button>
             )}
           </div>
         )
@@ -382,8 +349,6 @@ export function VersionHistoryPanel() {
       {hasMoreVersions && (
         <Button
           size="sm"
-         
-         
           onClick={onLoadMoreVersions}
           disabled={loadingMore}
           data-testid="version-history-load-more"
@@ -411,8 +376,6 @@ export function VersionHistoryPanel() {
         <div className="we-suggest-actions">
           <Button
             size="sm"
-           
-           
             onClick={onSuggestImprovement}
             disabled={improvement.kind === 'loading'}
           >
@@ -432,38 +395,33 @@ export function VersionHistoryPanel() {
             <div className="we-suggest-header">
               <span className="section-kicker">
                 <Sparkles size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
-                {t('versionHistory.aiHeader', { baseLabel: improvement.baseLabel })}
+                {t('versionHistory.aiHeader', { baseLabel: `v${improvement.base.version}` })}
               </span>
-              <button
-                type="button"
-                className="we-suggest-close"
+              <Button size="icon" variant="ghost"
                 onClick={onResetImprovement}
                 aria-label={t('versionHistory.dismissAi')}
                 title={t('versionHistory.dismissShort')}
               >
                 <X size={12} aria-hidden="true" />
-              </button>
+              </Button>
             </div>
             {improvement.suggestions.length > 1 && (
-              <div className="we-suggest-chips" role="tablist" aria-label={t('versionHistory.anglesAria')}>
+              <div className="we-suggest-chips" role="group" aria-label={t('versionHistory.anglesAria')}>
                 {improvement.suggestions.map((suggestion, idx) => (
-                  <button
+                  <Button size="sm"
                     key={`${suggestion.approachLabel}:${idx}`}
-                    type="button"
-                    role="tab"
-                    aria-selected={idx === improvement.activeIdx}
-                    className={`we-suggest-chip${idx === improvement.activeIdx ? ' we-suggest-chip--active' : ''}`}
+                    aria-pressed={idx === improvement.activeIdx}
                     onClick={() => setImprovement({ ...improvement, activeIdx: idx })}
                   >
                     {approachLabelText(suggestion.approachLabel)} · {improvementConfidencePercent(suggestion.confidence)}%
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}
             <WorkflowDiffView
-              before={improvement.baseWorkflow}
+              before={improvement.base.dagJson}
               after={active.workflow}
-              beforeLabel={improvement.baseLabel}
+              beforeLabel={`v${improvement.base.version}`}
               afterLabel={t('versionHistory.suggested', { approach: approachLabelText(active.approachLabel) })}
               aiPatchRationale={active.rationale}
             />
@@ -475,32 +433,24 @@ export function VersionHistoryPanel() {
         <div className="we-suggest-fallback" role="status" aria-live="polite">
           <span className="we-suggest-fallback__title">{t('versionHistory.aiUnavailable')}</span>
           <span className="we-suggest-fallback__detail">{improvement.aiError}</span>
-          <button
-            type="button"
+          <Button size="icon" variant="ghost"
             className="we-suggest-fallback__close"
             onClick={onResetImprovement}
             aria-label={t('versionHistory.dismissFallback')}
           >
             <X size={12} aria-hidden="true" />
-          </button>
+          </Button>
         </div>
       )}
 
-      {rollbackPair && (() => {
-        const current = versions.find((row) => row.id === rollbackPair.currentId)
-        const target = versions.find((row) => row.id === rollbackPair.targetId)
-        // If either snapshot row dropped out (e.g. a deletion / refetch
-        // race) the dialog can't render meaningfully — close it.
-        if (!current || !target) return null
-        return (
-          <RollbackConfirmDialog
-            workflowId={currentWorkflowId}
-            current={current}
-            target={target}
-            onClose={() => setRollbackPair(null)}
-          />
-        )
-      })()}
+      {rollbackPair && (
+        <RollbackConfirmDialog
+          workflowId={currentWorkflowId}
+          current={rollbackPair.current}
+          target={rollbackPair.target}
+          onClose={() => setRollbackPair(null)}
+        />
+      )}
     </div>
   )
 }

@@ -230,20 +230,6 @@ func substitutePDFVariablesBounded(template string, variables map[string]string,
 	return out.String(), true
 }
 
-// SubstituteVariables replaces known {{name}} placeholders; unknown ones
-// stay intact (the contract's visible-typo posture).
-func SubstituteVariables(template string, variables map[string]string) string {
-	// Kept as the public pure helper for callers and compatibility tests. The
-	// executable path below applies the hard expansion ceiling.
-	return placeholderPattern.ReplaceAllStringFunc(template, func(match string) string {
-		name := placeholderPattern.FindStringSubmatch(match)[1]
-		if value, known := variables[name]; known {
-			return value
-		}
-		return match
-	})
-}
-
 // executePdfGenerate runs the tool through the chokepoint deps.
 func executePdfGenerate(ctx context.Context, input map[string]any, deps *IntegrationDeps) map[string]any {
 	start := time.Now()

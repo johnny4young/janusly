@@ -4,16 +4,17 @@
  * Zero React: every function here is deterministic. The label helpers call
  * the non-React translation accessor `runtimeT` (the same accessor the
  * parent used inline before the split), so they need no `t` argument. The
- * shape/diff helpers (`isActionableSuggestion`, `toWorkflow`,
- * `normalisePatchSuggestion`, `pick*`) are render-free transforms.
+ * shape/diff helpers (`isActionableSuggestion`, `toWorkflow`, `pick*`) are
+ * render-free transforms.
  *
  * Used by: web/src/components/RecoveryDialog.tsx and its render bodies
  * under `./` (ReviewBody, ValidationFailedBody). Owns the
- * confidence-display + suggestion-normalisation + error-extraction logic.
+ * confidence-display + error-extraction logic.
  */
 
+import type { RunNode } from '../../types'
 import { computeWorkflowDiff } from '@/lib/workflow-diff'
-import type { EvidenceKind } from '@/lib/ai-evidence'
+import type { EvidenceKind } from '@/lib/ai-evidence-runtime'
 import { scrubOperatorGuidanceSecrets } from '@/lib/operator-guidance'
 import { t as runtimeT } from '../../i18n/runtime'
 import type { WorkflowDefinition } from '../../types'
@@ -21,7 +22,6 @@ import type {
   PatchApproachLabel,
   ConsideredAlternative,
   PatchSuggestion,
-  RunStatusPayload,
   SuggestionTab,
 } from './types'
 
@@ -59,27 +59,12 @@ export function normalizeConsideredAlternatives(value: unknown): ConsideredAlter
 export const CALIBRATION_SUBTITLE_DELTA = 10
 
 export function approachLabelDisplay(label: PatchApproachLabel): string {
-  switch (label) {
-    case 'add_retry': return runtimeT('recoveryDialog.approachLabel.add_retry')
-    case 'raise_timeout': return runtimeT('recoveryDialog.approachLabel.raise_timeout')
-    case 'swap_secret_ref': return runtimeT('recoveryDialog.approachLabel.swap_secret_ref')
-    case 'add_approval': return runtimeT('recoveryDialog.approachLabel.add_approval')
-    case 'fix_url': return runtimeT('recoveryDialog.approachLabel.fix_url')
-    case 'other': return runtimeT('recoveryDialog.approachLabel.other')
-  }
+  return runtimeT(`recoveryDialog.approachLabel.${label}`)
 }
 
 /** Human label for an evidence kind, localized. */
 export function evidenceKindLabel(kind: EvidenceKind): string {
-  switch (kind) {
-    case 'recovery_feedback': return runtimeT('recoveryDialog.evidence.kind.recovery_feedback')
-    case 'memory_entry': return runtimeT('recoveryDialog.evidence.kind.memory_entry')
-    case 'runbook_excerpt': return runtimeT('recoveryDialog.evidence.kind.runbook_excerpt')
-    case 'recent_error': return runtimeT('recoveryDialog.evidence.kind.recent_error')
-    case 'signature_rule': return runtimeT('recoveryDialog.evidence.kind.signature_rule')
-    case 'tool_contract': return runtimeT('recoveryDialog.evidence.kind.tool_contract')
-    case 'recovery_playbook': return runtimeT('recoveryDialog.evidence.kind.recovery_playbook')
-  }
+  return runtimeT(`recoveryDialog.evidence.kind.${kind}`)
 }
 
 export function suggestionTabKey(tab: SuggestionTab): string {
@@ -120,7 +105,7 @@ export function resolveConfidenceDisplay(tab: SuggestionTab): {
   }
 }
 
-export function pickFailedNodeErrorJson(nodes: RunStatusPayload['nodes'], failingNodeId: string): unknown {
+export function pickFailedNodeErrorJson(nodes: readonly RunNode[] | undefined, failingNodeId: string): unknown {
   if (!nodes) return null
   // Prefer the originally-failing node's error so the operator sees the
   // reason their proposed fix didn't unstick the run; fall back to any
@@ -198,47 +183,4 @@ export function isActionableSuggestion(
 export function toWorkflow(value: unknown): WorkflowDefinition {
   if (value && typeof value === 'object') return value as WorkflowDefinition
   return { dslVersion: '1.0', nodes: [], edges: [] }
-}
-
-/**
- * Normalise the patch-route response into the multi-suggestion shape.
- * The current route always emits `suggestions: [...]`, but older test
- * fixtures and a future cached response from before the upgrade might
- * still return only the legacy `{ mode, suggestedWorkflow, rationale }`
- * fields — fall back to a single-item array in that case so the dialog
- * code never has to branch on which shape it received.
- */
-export function normalisePatchSuggestion(
-  raw: PatchSuggestion,
-  persistedWorkflowId?: string | null,
-): PatchSuggestion {
-  const normalised: PatchSuggestion = Array.isArray(raw.suggestions) && raw.suggestions.length > 0
-    ? raw
-    : {
-    ...raw,
-    suggestions: [{
-      workflow: raw.suggestedWorkflow,
-      rationale: raw.rationale,
-      approachLabel: 'other',
-      confidence: raw.mode === 'ai' ? 50 : 0,
-      // No server-side calibration on the legacy shape — mirror raw so the
-      // renderer shows a single number (delta is 0, subtitle suppressed).
-      calibratedConfidence: raw.mode === 'ai' ? 50 : 0,
-    }],
-  }
-  if (!persistedWorkflowId) return normalised
-
-  const bindIdentity = (workflow: WorkflowDefinition): WorkflowDefinition => (
-    workflow.id === persistedWorkflowId
-      ? workflow
-      : { ...workflow, id: persistedWorkflowId }
-  )
-  return {
-    ...normalised,
-    suggestedWorkflow: bindIdentity(normalised.suggestedWorkflow),
-    suggestions: normalised.suggestions.map((suggestion) => ({
-      ...suggestion,
-      workflow: bindIdentity(suggestion.workflow),
-    })),
-  }
 }

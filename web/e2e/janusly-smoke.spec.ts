@@ -248,6 +248,12 @@ test('ai studio against Go: $0 fallback generate, save, run, approve', async ({ 
     .catch(() => false)
   if (replaceConfirmationVisible) await discard.click()
   await expect(page.getByText('Proposal applied to the unsaved draft').first()).toBeVisible()
+  const viewCanvas = page.getByRole('button', { name: 'View changes in canvas', exact: true })
+  await expect(viewCanvas).toBeVisible()
+  await expect(page.locator('.ai-studio-prompt')).toBeVisible()
+  await viewCanvas.click()
+  await expect(page.getByTestId('workflow-canvas')).toBeFocused()
+  await expect(page.locator('.ai-studio-prompt')).toBeVisible()
 
   // The drafted canvas carries the fallback template; save + run it.
   await page.getByRole('button', { name: 'Validate', exact: true }).click()
@@ -353,7 +359,13 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
       nodes: [{ id: 'call', type: 'http', config: { url: upstreamUrl, timeoutMs: 500 } }],
       edges: [],
     }
-    await request.post(`${API_URL}/workflows/save`, { headers: headers(orgId), data: failing })
+    // Keep each fixture below the real five-failure circuit-breaker threshold.
+    // Replays and accepted-loss closures exercise distinct workflow histories.
+    const closing = { ...failing, id: `queue-close-${orgId}`, name: 'Queue close flow' }
+    for (const workflow of [failing, closing]) {
+      const saved = await request.post(`${API_URL}/workflows/save`, { headers: headers(orgId), data: workflow })
+      expect(saved.ok(), await saved.text()).toBe(true)
+    }
     const waitStatus = async (runId: string, want: string) => {
       const deadline = Date.now() + 30_000
       for (;;) {
@@ -365,18 +377,20 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
       }
     }
     const runIds: string[] = []
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       const started = await request.post(`${API_URL}/start`, {
-        headers: headers(orgId), data: { workflow: failing },
+        headers: headers(orgId), data: { workflow: i < 3 ? failing : closing },
       })
+      expect(started.ok(), await started.text()).toBe(true)
       const { runId } = await started.json() as { runId: string }
+      expect(runId).toEqual(expect.any(String))
       runIds.push(runId)
       await waitStatus(runId, 'failed')
     }
     // The Go /dlq bare array feeds the id lookup (T-143 closed that gap).
     const dlqRes = await request.get(`${API_URL}/dlq`, { headers: headers(orgId) })
     const dlqRows = await dlqRes.json() as Array<{ id: string; runId: string }>
-    expect(dlqRows.length).toBeGreaterThanOrEqual(3)
+    expect(dlqRows.length).toBeGreaterThanOrEqual(6)
     const byRun = new Map(dlqRows.map((row) => [row.runId, row.id]))
 
     // One replay via API opens its ownership incident (badge + drawer).
@@ -393,12 +407,12 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     }, { activeOrg: orgId })
     await page.goto('/')
     await expect(page.getByTestId('recovery-queue')).toBeVisible()
-    // Default Show=Open lists the two open rows; the replayed one is
+    // Default Show=Open lists the five open rows; the replayed one is
     // filtered out until the operator widens the status filter.
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[1])}`)).toBeVisible()
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[2])}`)).toBeVisible()
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[0])}`)).toBeHidden()
-    await page.getByRole('combobox', { name: 'Show' }).selectOption({ label: 'All' })
+    await page.getByRole('combobox', { name: 'Failure status' }).selectOption({ label: 'All' })
     for (const runId of runIds) {
       await expect(page.getByTestId(`dlq-row-${byRun.get(runId)}`)).toBeVisible()
     }
@@ -431,6 +445,58 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     await page.getByTestId('dlq-bulk-replay-confirm').click()
     await waitStatus(runIds[1], 'succeeded')
     await waitStatus(runIds[2], 'succeeded')
+
+    // Closing is an accepted loss, not a replay. Cancellation sends no mutation;
+    // confirmed single and bulk closure persist while the source runs stay failed.
+    await expect(page.getByTestId('dlq-bulk-bar')).toBeHidden()
+    const singleId = byRun.get(runIds[3])!
+    const singleRow = page.getByTestId(`dlq-row-${singleId}`)
+    await singleRow.click()
+    await singleRow.focus()
+    await page.keyboard.press('Control+Enter')
+    await expect(page.getByRole('alertdialog')).toContainText(singleId)
+    await expect(page.getByTestId('dlq-close-cancel')).toBeFocused()
+    await page.keyboard.press('Escape')
+    const readClosedStatus = async (id: string) => {
+      const response = await request.get(`${API_URL}/v1/dlq/entries/${id}`, { headers: headers(orgId) })
+      const payload = await response.json() as { data: { status: string } }
+      return payload.data.status
+    }
+    expect(await readClosedStatus(singleId)).toBe('open')
+    await singleRow.focus()
+    await page.keyboard.press('Control+Enter')
+    await expect(page.getByTestId('dlq-close-cancel')).toBeFocused()
+    await page.screenshot({ path: test.info().outputPath('accepted-loss-confirmation-en.png'), animations: 'disabled' })
+    const dialogBounds = await page.getByRole('alertdialog').boundingBox()
+    const viewport = page.viewportSize()!
+    expect(dialogBounds).not.toBeNull()
+    expect(dialogBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(dialogBounds!.y).toBeGreaterThanOrEqual(0)
+    expect(dialogBounds!.x + dialogBounds!.width).toBeLessThanOrEqual(viewport.width)
+    expect(dialogBounds!.y + dialogBounds!.height).toBeLessThanOrEqual(viewport.height)
+    await page.getByTestId('dlq-close-confirm').click()
+    await expect.poll(() => readClosedStatus(singleId)).toBe('resolved')
+    await waitStatus(runIds[3], 'failed')
+    await expect(page.getByRole('alertdialog')).toBeHidden()
+
+    await page.getByTestId('dlq-select-toggle').click()
+    for (const runId of runIds.slice(4)) {
+      const deadLetterId = byRun.get(runId)!
+      await page.getByTestId(`dlq-select-row-${deadLetterId}`).click()
+      await expect(page.getByTestId(`dlq-row-${deadLetterId}`)).toHaveAttribute('aria-selected', 'true')
+    }
+    await expect(page.getByTestId('dlq-bulk-bar')).toContainText('2 selected')
+    await page.getByTestId('dlq-bulk-resolve').click()
+    await expect(page.getByRole('alertdialog')).toContainText('Close 2 failures without recovery?')
+    for (const runId of runIds.slice(4)) {
+      await expect(page.getByRole('alertdialog')).toContainText(byRun.get(runId)!)
+    }
+    await page.getByTestId('dlq-close-confirm').click()
+    await expect(page.getByRole('alertdialog')).toBeHidden()
+    for (const runId of runIds.slice(4)) {
+      await expect.poll(() => readClosedStatus(byRun.get(runId)!)).toBe('resolved')
+      await waitStatus(runId, 'failed')
+    }
 
     expect(pageErrors, `page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
   } finally {
@@ -545,3 +611,95 @@ test('first kilometer against Go: Home cluster CTA lands on an actionable recove
   await expect(passport).not.toContainText('1 occurrence')
   expect(pageErrors).toEqual([])
 })
+
+for (const locale of ['en', 'es'] as const) {
+  test(`Home evidence and provider-free first action against Go in ${locale}`, async ({ page, request }) => {
+    test.setTimeout(90_000)
+    const orgId = `go-home-${locale}-${Date.now()}`
+    const pageErrors: string[] = []
+    page.on('pageerror', error => pageErrors.push(String(error)))
+    await page.addInitScript(({ orgId, locale }) => {
+      localStorage.setItem('janusly:activeOrg', orgId)
+      localStorage.setItem('janusly:locale', locale)
+    }, { orgId, locale })
+    await page.goto('/#/home')
+    const health = page.getByTestId('home-health-summary')
+    await expect(health).toContainText(locale === 'en' ? 'No evidence yet' : 'Aún sin evidencia')
+    await expect(page.getByTestId('recovery-lab-entry')).toBeVisible()
+    await expect(page.getByTestId('home-priority-inbox')).toBeHidden()
+    await expect(page.getByTestId('home-active-work')).toBeHidden()
+    await expect(page.getByTestId('recovery-center-greeting').locator('..')).not.toContainText('Recovery posture is clean')
+    if (locale === 'es') await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: test.info().outputPath(`home-no-evidence-${locale}.png`), animations: 'disabled' })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+    // Real controlled missing-secret drill: no AI key or billing credentials.
+    // UI permission gate and backend authorization remain in the path.
+    const drillResponse = page.waitForResponse(response => response.url().includes('/solution-packs/failed-payment-recovery/inject-failure')
+      && response.request().method() === 'POST')
+    const drill = page.getByTestId('recovery-center-empty-cta-drill')
+    await drill.focus()
+    await page.keyboard.press('Enter')
+    const response = await drillResponse
+    expect(response.ok(), await response.text()).toBe(true)
+    const result = await response.json() as { runId: string; deadLetterId: string }
+    expect(result.runId).toEqual(expect.any(String))
+    const dlqResponse = await request.get(`${API_URL}/v1/dlq/entries/${result.deadLetterId}`, { headers: headers(orgId) })
+    expect(dlqResponse.ok()).toBe(true)
+    const dlq = await dlqResponse.json() as { data: { status: string } }
+    expect(dlq.data.status).toBe('open')
+    await page.goto('/#/home')
+    // Validation evidence never becomes a successful production sample.
+    await expect(health).not.toContainText(locale === 'en' ? 'On track' : 'Todo encaminado')
+    await expect(page.getByTestId('recovery-lab-entry')).toBeHidden()
+    await expect(page.getByTestId('home-priority-inbox')).toBeVisible()
+
+    // The first failed production run is evidence of failure, not an empty sample.
+    const start = await request.post(`${API_URL}/start`, { headers: headers(orgId), data: { workflow: {
+      id: `home-failed-${orgId}`, name: 'Home first failure',
+      nodes: [{ id: 'call', type: 'http', config: { url: 'https://home-evidence.invalid/', timeoutMs: 200, retry: { maxAttempts: 1 } } }], edges: [],
+    } } })
+    expect(start.ok(), await start.text()).toBe(true)
+    const started = await start.json() as { runId: string }
+    await expect.poll(async () => {
+      const response = await request.get(`${API_URL}/v1/status?runId=${started.runId}`, { headers: headers(orgId) })
+      return (await response.json() as { data: { run: { status: string } } }).data.run.status
+    }, { timeout: 30_000 }).toBe('failed')
+    await page.reload()
+    await expect(health).toContainText(locale === 'en' ? 'Needs attention' : 'Necesita atención')
+    await expect(health.getByLabel(locale === 'en' ? 'Health score 0 of 100' : 'Puntuación de salud 0 de 100')).toBeVisible()
+
+    // A failed first read is unavailable, never the same state as zero samples.
+    await page.route('**/recovery/home', route => route.abort('failed'))
+    await page.reload()
+    await expect(health).toContainText(locale === 'en' ? 'Status is incomplete' : 'El estado está incompleto')
+    await expect(page.getByTestId('recovery-lab-entry')).toBeHidden()
+    await page.unroute('**/recovery/home')
+    const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/recovery/home' && !new URL(response.url()).search)
+    await health.getByRole('button', { name: locale === 'en' ? 'Retry' : 'Reintentar', exact: true }).click()
+    expect((await refreshed).ok()).toBe(true)
+    await expect(health).toContainText(locale === 'en' ? 'Needs attention' : 'Necesita atención')
+    // A successful metrics section cannot conceal missing priorities or queue.
+    for (const missing of ['brief', 'queue'] as const) {
+      const wirePath = missing === 'brief' ? '/v1/operations/brief' : '/recovery/home'
+      const path = `**${wirePath}`
+      await page.route(path, async route => {
+        if (missing === 'brief') return route.abort('failed')
+        const response = await route.fetch()
+        const payload = await response.json()
+        payload.sections.queue = { status: 'unavailable' }
+        await route.fulfill({ response, json: payload })
+      })
+      await page.reload()
+      await expect(health).toContainText(locale === 'en' ? 'Status is incomplete' : 'El estado está incompleto')
+      await expect(health.getByLabel(locale === 'en' ? 'Health score 0 of 100' : 'Puntuación de salud 0 de 100')).toBeHidden()
+      await page.unroute(path)
+      const fresh = page.waitForResponse(response => new URL(response.url()).pathname === wirePath
+        && !new URL(response.url()).search)
+      await health.getByRole('button', { name: locale === 'en' ? 'Retry' : 'Reintentar', exact: true }).click()
+      expect((await fresh).ok()).toBe(true)
+      await expect(health).toContainText(locale === 'en' ? 'Needs attention' : 'Necesita atención')
+    }
+    expect(pageErrors).toHaveLength(0)
+  })
+}

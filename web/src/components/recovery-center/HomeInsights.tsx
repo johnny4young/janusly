@@ -15,7 +15,6 @@ import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from '../Vit
 import { requestRecoveryDayFocus } from '../recovery-day-focus-bus'
 import { selectRecoveryTimeMetric } from '../recovery-metrics'
 import { RecoveryCenterComposer } from './RecoveryCenterComposer'
-import { RecoveryLabEntry } from './RecoveryCenterEmptyState'
 import {
   BudgetTile,
   CalibrationHealthTile,
@@ -44,12 +43,9 @@ export function HomeInsights({
   validation,
   ledger,
   personalWins,
-  showRecoveryLab,
   recentDlqRunId,
   onOpenTab,
   onOpenRecoveryQueue,
-  onStartRecoveryDrill,
-  onDismissRecoveryLab,
 }: {
   metrics: RecoveryMetrics | null
   openFailureCount: number
@@ -61,12 +57,9 @@ export function HomeInsights({
   validation: RecoveryValidationReport | null | undefined
   ledger: RecoveryLedger | null
   personalWins: OperatorWins | null
-  showRecoveryLab: boolean
   recentDlqRunId: string | undefined
   onOpenTab: (tab: ActiveTab) => void
   onOpenRecoveryQueue: (deadLetterId?: string) => void
-  onStartRecoveryDrill: (() => void | Promise<void>) | undefined
-  onDismissRecoveryLab: () => void
 }) {
   const { t } = useT()
   const failuresLabel = t('recoveryCenter.metric.failures.label')
@@ -265,14 +258,6 @@ export function HomeInsights({
             onOpenTab={onOpenTab}
             recentDlqRunId={recentDlqRunId}
           />
-          {showRecoveryLab && (
-            <RecoveryLabEntry
-              onOpenStudio={() => onOpenTab('ai-studio')}
-              onOpenRecipes={() => onOpenTab('templates')}
-              onStartDrill={onStartRecoveryDrill}
-              onDismiss={onDismissRecoveryLab}
-            />
-          )}
         </section>
         <aside className="we-home-insights__rail" aria-label={t('recoveryCenter.railAria')}>
           <FailureClustersTile

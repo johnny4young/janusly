@@ -15,7 +15,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Download, FilterX, FlaskConical, GitCompareArrows, RefreshCcw, Send } from 'lucide-react'
 import { isTerminalRunStatus, runStatusValues, type RunStatus } from '@/lib/status'
-import { downloadFromApi, contractApi } from '../api'
+import { downloadFromApi } from '../api'
+import { readRunSummaryPage } from '../lib/list-contract'
 import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, useT } from '../i18n'
 import { useVirtualList } from '../hooks/useVirtualList'
@@ -88,13 +89,13 @@ export function RunHistoryList({
     if (status) params.set('status', status)
     setRemote({ key: filterKey, kind: 'loading', runs: [] })
 
-    contractApi('GET /runs', `/runs?${params.toString()}`, undefined, { signal: controller.signal })
+    readRunSummaryPage(`/runs?${params.toString()}`, controller.signal)
       .then(value => {
         if (controller.signal.aborted) return
         setRemote({
           key: filterKey,
           kind: 'ready',
-          runs: Array.isArray(value) ? value as RunSummary[] : [],
+          runs: value,
         })
       })
       .catch(() => {
@@ -111,6 +112,9 @@ export function RunHistoryList({
     ? remoteForCurrentFilter.runs
     : hasActiveFilters ? [] : runs
 
+  // Workflow names use the runtime locale for collation; useT subscribes to
+  // locale changes, while getResolvedLocale reads it outside the closure.
+  /* oxlint-disable react/exhaustive-deps -- getResolvedLocale reads the runtime locale */
   const workflowOptions = useMemo(() => {
     const labels = new Map<string, string>()
     for (const workflow of workflows) labels.set(workflow.id, workflow.name)
@@ -121,6 +125,7 @@ export function RunHistoryList({
       a.name.localeCompare(b.name, getResolvedLocale()),
     )
   }, [i18n.language, runs, workflows])
+  /* oxlint-enable react/exhaustive-deps */
   const workflowLabels = useMemo(
     () => new Map(workflowOptions.map(option => [option.id, option.name])),
     [workflowOptions],
@@ -196,7 +201,7 @@ export function RunHistoryList({
           <AlertCircle size={15} aria-hidden="true" />
           <span>{t('rightPanel.runs.historyLoadError')}</span>
           <Button size="sm" onClick={() => setRetryNonce(value => value + 1)}>
-            <RefreshCcw size={12} aria-hidden="true" /> {t('rightPanel.runs.historyRetry')}
+            <RefreshCcw size={12} aria-hidden="true" /> {t('common.retry')}
           </Button>
         </div>
       )}
