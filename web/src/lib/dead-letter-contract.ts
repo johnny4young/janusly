@@ -1,15 +1,17 @@
 import { contractApi } from '../api'
 import { t } from '../i18n/runtime'
 import type { ApiResponses } from './api-types.generated'
-import { isRecord, isNonNegativeSafeInteger as count } from './guards'
+import {
+  isRecord,
+  isNonEmptyString as nonempty,
+  isNonNegativeSafeInteger as count,
+  isNullableString as nullableText,
+} from './guards'
 
 export type DeadLetterDetail = ApiResponses['GET /dlq/entries/{deadLetterId}']
 type Drill = NonNullable<DeadLetterDetail['drill']>
 type Outcome = NonNullable<DeadLetterDetail['drillOutcome']>
 
-const text = (value: unknown) => typeof value === 'string'
-const nullableText = (value: unknown) => value === null || text(value)
-const nonempty = (value: unknown) => typeof value === 'string' && value.trim() !== ''
 const oneOf = (value: unknown, options: readonly string[]) => typeof value === 'string' && options.includes(value)
 
 function isDrill(value: unknown): value is Drill {
@@ -24,7 +26,7 @@ function isOutcome(value: unknown): value is Outcome {
     && nullableText(value.startedAt) && nullableText(value.completedAt)
     && (value.elapsedMs === null || count(value.elapsedMs))
     && (value.evidence === null || oneOf(value.evidence, ['terminal_impact', 'explicit_resolution']))
-    && count(value.attemptCount) && text(value.latestDeadLetterId) && typeof value.chainCapped === 'boolean'
+    && count(value.attemptCount) && typeof value.latestDeadLetterId === 'string' && typeof value.chainCapped === 'boolean'
     && isRecord(value.recurrence)
     && oneOf(value.recurrence.status, ['not_applicable', 'monitoring', 'clear', 'recurred'])
     && nullableText(value.recurrence.windowEndsAt) && nullableText(value.recurrence.recurredAt)

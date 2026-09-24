@@ -1,6 +1,12 @@
 import type { ApiResponses } from './api-types.generated'
 import type { RunEvent, RunNode, RunSummary } from '../types'
-import { isRecord, isNonNegativeSafeInteger as count } from './guards'
+import {
+  isRecord,
+  isNonEmptyString as nonempty,
+  isNonNegativeSafeInteger as count,
+  isOptionalNullableString as nullableString,
+  isOptionalString as optionalString,
+} from './guards'
 import { isOpenNodeStatus, isOpenRunStatus, isTerminalNodeStatus, isTerminalRunStatus } from './status'
 
 // A validated display projection: extension JSON is narrowed to the object
@@ -11,12 +17,9 @@ export type RunStatusSnapshot = Pick<ApiResponses['GET /status'], 'eventsCursor'
   events: RunEvent[]
 }
 
-const optionalString = (value: unknown) => value === undefined || typeof value === 'string'
-const nullableString = (value: unknown) => value === null || optionalString(value)
 const optionalBoolean = (value: unknown) => value === undefined || typeof value === 'boolean'
 const nullableRecord = (value: unknown) => value === undefined || value === null || isRecord(value)
 const optionalCount = (value: unknown) => value === undefined || count(value)
-const nonempty = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
 
 export function isRunSummary(value: unknown): value is RunSummary {
   if (!isRecord(value) || !nonempty(value.id) || (!isOpenRunStatus(value.status) && !isTerminalRunStatus(value.status))) return false

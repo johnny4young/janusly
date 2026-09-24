@@ -1,4 +1,4 @@
-import { isRecord, isNonNegativeSafeInteger as count } from './guards'
+import { isRecord, isFiniteNumber as finite, isNonNegativeSafeInteger as count } from './guards'
 
 export type HealthSnapshot = {
   score: number
@@ -20,7 +20,6 @@ export type RecoveryDelta = {
   priorVersion: { version: number; versionId: string } | null
 }
 
-const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const nullableNumber = (value: unknown) => value === null || finite(value)
 const id = (value: unknown): value is string => typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 256
 function snapshot(value: unknown): value is HealthSnapshot {

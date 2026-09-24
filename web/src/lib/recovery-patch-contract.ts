@@ -2,7 +2,7 @@
 
 import { parseEvidenceRows } from './ai-evidence-runtime'
 import { isWorkflowDefinition } from './authoring-contract'
-import { isNonNegativeSafeInteger, isRecord } from './guards'
+import { isNonEmptyString, isNonNegativeSafeInteger, isRecord } from './guards'
 import type { WorkflowDefinition } from '../types'
 import type {
   PatchApproachLabel,
@@ -22,7 +22,7 @@ export type RecoveryPatchParseOptions = {
 }
 
 function text(value: unknown, max: number): value is string {
-  return typeof value === 'string' && value.trim().length > 0 && value.length <= max
+  return isNonEmptyString(value) && value.length <= max
 }
 
 function approach(value: unknown): value is PatchApproachLabel {
