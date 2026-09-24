@@ -7,13 +7,14 @@ shown=${allowlist#"$root"/}
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/janusly-deadcode.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 
-# Every main package under cmd/ is a production root; test files never are.
+# Every main package under cmd/ is a root, including dev tools such as the
+# seeder; deadcode never loads test packages without -test.
 (cd "$root" && go tool deadcode \
-  -f '{{range .Funcs}}{{printf "%s.%s\t%s\n" $.Path .Name .Position.File}}{{end}}' \
+  -f '{{range .Funcs}}{{printf "%s.%s\n" $.Path .Name}}{{end}}' \
   ./cmd/...) >"$tmp/raw"
-awk -F'\t' '$1 != "" && $2 !~ /_test\.go$/ { print $1 }' "$tmp/raw" | LC_ALL=C sort -u >"$tmp/reported"
+grep -v '^$' "$tmp/raw" | LC_ALL=C sort -u >"$tmp/reported" || true
 
-entry_re='^([^[:space:]#]+\.[^[:space:]#]+)[[:space:]]+#[[:space:]]*[^[:space:]]'
+entry_re='^([^[:space:]#]+\.[^[:space:]#/]+)[[:space:]]+#[[:space:]]*[^[:space:]]'
 blank_re='^[[:space:]]*(#.*)?$'
 failed=0
 lineno=0

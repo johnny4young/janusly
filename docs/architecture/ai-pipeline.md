@@ -182,7 +182,10 @@ on a mismatched rate or on a catalog model the page no longer lists; dated
 aliases inherit their family's row, and page models absent from the catalog
 are reported but allowed. `scripts/pricing-check.test.sh` covers the parser
 offline against `scripts/testdata/pricing-page.html` and runs in
-`make qualify-local-selftest`; neither runs in CI.
+`make qualify-local-selftest`; neither runs in CI. The networked check is a
+manual step on purpose (the page is not a stable API); the 120-day test below
+forces it to happen. The parser is exercised with BSD awk; run the self-test
+once on a Linux host before relying on it there.
 
 `TestModelPricingSnapshotIsRecent` fails once `ModelPricingSnapshotDate` is
 more than 120 days old. Re-verify with `make pricing-check`, fix any drift,

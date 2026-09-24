@@ -54,7 +54,6 @@
     "oxlint": "1.74.0",
     "playwright": "1.61.1",
     "playwright-core": "1.61.1",
-    "rolldown": "1.1.5",
     "supabase": "2.115.0",
     "tailwindcss": "4.3.3",
     "terser": "5.50.0",

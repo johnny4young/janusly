@@ -108,7 +108,8 @@ What is missing is a way to know the next time it drifts.
 
 - `scripts/pricing-check.sh` (opt-in, network): fetch the vendor pricing page,
   extract the per-model input/output rates, and diff them against
-  `go run ./cmd/pricing --json`. Add it to `qualify-local`, never to CI.
+  `go run ./cmd/pricing --json`. Run it by hand (`make pricing-check`); its
+  offline self-test joins `qualify-local-selftest`, never CI.
 - A unit test that fails when `ModelPricingSnapshotDate` is older than 120
   days, with a message pointing at the script. Re-verifying is then a dated
   one-line change.

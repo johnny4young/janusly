@@ -16,10 +16,7 @@ cat "$DEADCODE_FIXTURE"
 STUB
 chmod +x "$tmp/bin/go"
 
-printf '%s\t%s\n' \
-  example.com/m/internal/a.Seam internal/a/a.go \
-  example.com/m/internal/a.helper internal/a/helper_test.go \
-  example.com/m/internal/b.Reset internal/b/b.go >"$tmp/clean.out"
+printf '%s\n' example.com/m/internal/a.Seam example.com/m/internal/b.Reset >"$tmp/clean.out"
 cat >"$tmp/allow.txt" <<'LIST'
 # comment
 
@@ -44,7 +41,7 @@ expect_failure() {
 check "$tmp/clean.out" "$tmp/allow.txt"
 grep -F '2 unreachable function(s)' "$tmp/stdout" >/dev/null
 
-{ cat "$tmp/clean.out"; printf 'example.com/m/internal/c.Orphan\tinternal/c/c.go\n'; } >"$tmp/new.out"
+{ cat "$tmp/clean.out"; printf 'example.com/m/internal/c.Orphan\n'; } >"$tmp/new.out"
 expect_failure "$tmp/new.out" "$tmp/allow.txt" '  example.com/m/internal/c.Orphan # <reason>'
 
 grep -v 'b.Reset' "$tmp/clean.out" >"$tmp/stale.out"
@@ -59,4 +56,7 @@ expect_failure "$tmp/clean.out" "$tmp/malformed.txt" 'malformed.txt:5: malformed
 { cat "$tmp/allow.txt"; printf 'example.com/m/internal/a.Seam # again\n'; } >"$tmp/dup.txt"
 expect_failure "$tmp/clean.out" "$tmp/dup.txt" 'duplicate entry: example.com/m/internal/a.Seam'
 
-echo 'deadcode-check tests passed (clean, new, stale, malformed, duplicate)'
+{ cat "$tmp/allow.txt"; printf 'example.com/m/internal/pkg # no function\n'; } >"$tmp/nofunc.txt"
+expect_failure "$tmp/clean.out" "$tmp/nofunc.txt" 'nofunc.txt:5: malformed entry'
+
+echo 'deadcode-check tests passed (clean, new, stale, malformed, duplicate, no function)'

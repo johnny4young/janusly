@@ -139,13 +139,14 @@ keeps the workflow core free of transport and persistence, forbids importing
 `internal/httpapi/*` leaves that depend on `internal/httpkit` only.
 
 Dead code: `make deadcode` runs `go tool deadcode` over every `./cmd/...`
-root and diffs the unreachable functions against
+root (including dev tools such as the seeder and load generator) and diffs the unreachable functions against
 `scripts/deadcode-allowlist.txt`, one `<import path>.<Func> # <reason>` per
 line. A new unreachable function fails with the exact line to add (or delete
 the function); an entry that is no longer reported fails as stale. It runs in
 `make verify` and the Backend CI job. On the web side, `pnpm lint` ends with
 `knip` (`web/knip.json`), which fails on unused exports, files and
-dependencies.
+dependencies. It counts test files as consumers, so an export used only by
+tests passes; tag an intentionally public export with `/** @public */`.
 
 Web: `pnpm lint` runs oxlint plus the ratchets in `web/scripts/`: i18n casts,
 CSS class ownership (every class in every stylesheet must have a production

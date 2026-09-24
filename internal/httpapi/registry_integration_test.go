@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -175,10 +176,5 @@ func TestUnregisteredPatternFailsClosed(t *testing.T) {
 }
 
 func defaultRoleHasPermission(role auth.Role, key string) bool {
-	for _, entry := range auth.PermissionCatalog {
-		if entry.Key == key {
-			return entry.DefaultRoles[role]
-		}
-	}
-	return false
+	return slices.Contains(auth.DefaultPermissionsForRole(role), key)
 }

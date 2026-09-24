@@ -81,9 +81,6 @@ importers:
       playwright-core:
         specifier: 1.61.1
         version: 1.61.1
-      rolldown:
-        specifier: 1.1.5
-        version: 1.1.5
       supabase:
         specifier: 2.115.0
         version: 2.115.0

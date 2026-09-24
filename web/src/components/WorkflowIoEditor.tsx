@@ -39,7 +39,8 @@ function shapeForType(type: WorkflowInputSchemaShape['type'], description?: stri
   return base
 }
 
-function SchemaFieldsEditor({
+/** @public Imported by the design-sync preview of the same name. */
+export function SchemaFieldsEditor({
   scope,
   schema,
   form = false,
@@ -155,7 +156,6 @@ function SchemaFieldsEditor({
   )
 }
 
-export default SchemaFieldsEditor
 
 /** Shared name-editing state for input and output rows: the draft, the
  *  rejected-rename flag, and the commit that trims an accepted name. */
