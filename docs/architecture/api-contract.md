@@ -108,6 +108,49 @@ cycle instead of degrading to `unknown`.
 Run `make generate` after contract changes and require a clean diff on a second
 run.
 
+## Browser validation
+
+`web/scripts/generate-api-guards.mjs` renders `web/src/lib/api-guards.generated.ts`
+from the same document: one `is<Component>` per shared schema and one
+`is<Operation>Response` per operation with a 2xx payload (for example
+`isGetRunResponse` for `GET /run`). Guards are plain functions composed from the
+primitives in `web/src/lib/guards.ts`; there is no schema library, no aggregate
+map and no module state, so a bundle carries only the guards its call sites
+import.
+
+A guard enforces shape: JSON types, nullability, `enum`/`const`, required keys,
+closed key sets (`additionalProperties: false`), typed map values and integer
+exactness. It deliberately does not enforce `maxItems`, `maxLength`,
+`minLength`, `minItems`, `minimum` or `maximum`: those are server policy that
+can change without a client release, and the browser validates shape, never
+policy. `oneOf` is checked as "any branch matches" because manifest branches are
+disjoint closed shapes. The generator throws, naming the schema path, on any
+other keyword, so a new manifest construct cannot be silently skipped.
+
+Adopt a guard by passing it to `contractApi` next to the call:
+
+```ts
+import { isGetRunResponse } from '../lib/api-guards.generated'
+
+const run = await contractApi('GET /run', path, undefined, { guard: isGetRunResponse })
+```
+
+The option is typed to the operation, so a guard for another operation does not
+compile. `contractApi` runs it on the unwrapped payload of a 2xx response only;
+non-2xx responses (including a 429 that carries a data envelope) still throw
+`ApiError` before any guard runs, and the `/start`/`/resume` field-error
+envelope is passed through. A rejected payload raises the existing
+`api.error.malformedResponse` error. Without a guard the call behaves exactly as
+before. Cross-field UI invariants (a delta is present iff there is enough data,
+page ids are unique) are not shape and stay in the hand-written readers.
+
+`make generate` regenerates the guards after the types; the drift gate covers
+the generated file, `web/scripts/generate-api-guards.test.mjs` compiles and runs
+synthetic output for every supported keyword, and
+`web/src/lib/api-guards.generated.test.ts` samples every operation from
+`contract/openapi.json` and checks acceptance, closed keys, required keys,
+wrong types and that server bounds are not enforced.
+
 ## Text-search query boundary
 
 The `q` workflow filter and `search` recovery-queue filter share one boundary.

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { contractApi } from '../api'
 import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
+import { isGetDlqEntriesDeadLetterIdResponse, isPostDlqResolveResponse } from './api-guards.generated'
 import { parseDeadLetterDetail, readDeadLetterDetail, resolveDeadLetterEntry } from './dead-letter-contract'
 
 vi.mock('../api', () => ({ contractApi: vi.fn() }))
@@ -32,7 +33,9 @@ describe('dead letter boundaries', () => {
     const controller = new AbortController()
     vi.mocked(contractApi).mockResolvedValue({ ...deadLetterWireDefaults, id: 'a/b' })
     await expect(readDeadLetterDetail('a/b', controller.signal)).resolves.toMatchObject({ id: 'a/b' })
-    expect(contractApi).toHaveBeenCalledWith('GET /dlq/entries/{deadLetterId}', '/dlq/entries/a%2Fb', undefined, { signal: controller.signal })
+    expect(contractApi).toHaveBeenCalledWith('GET /dlq/entries/{deadLetterId}', '/dlq/entries/a%2Fb', undefined, {
+      signal: controller.signal, guard: isGetDlqEntriesDeadLetterIdResponse,
+    })
     vi.mocked(contractApi).mockResolvedValue(deadLetterWireDefaults)
     await expect(readDeadLetterDetail('other')).rejects.toThrow()
   })
@@ -45,6 +48,6 @@ describe('dead letter boundaries', () => {
   it('sends exactly the selected id and accepts only an affirmative receipt', async () => {
     vi.mocked(contractApi).mockResolvedValue({ ok: true })
     await expect(resolveDeadLetterEntry('dead-letter')).resolves.toBeUndefined()
-    expect(contractApi).toHaveBeenCalledWith('POST /dlq/resolve', '/dlq/resolve', { id: 'dead-letter' })
+    expect(contractApi).toHaveBeenCalledWith('POST /dlq/resolve', '/dlq/resolve', { id: 'dead-letter' }, { guard: isPostDlqResolveResponse })
   })
 })

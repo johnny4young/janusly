@@ -57,6 +57,17 @@ placeholders, so the only way the browser could validate them was by hand.
 - Done: guard output is part of `make generate`; the worst-locale and
   artifact budgets pass without a rebase, or are rebased once by the measured
   cost.
+- Landed: shared manifest fragments became `components/schemas` entries
+  referenced by `$ref` (`contract/openapi.json` 627 → 238 KB,
+  `api-types.generated.ts` 81 → 48 KB). `api-guards.generated.ts` carries 97
+  component and 56 operation guards; 21 operations are adopted at their
+  `contractApi` call sites. The recovery-case mutations (diagnose, candidates,
+  validate, approve, apply) are not guarded: a guard failure after the server
+  committed the mutation would report a failure and skip the case reload.
+- Budget: the adopted guards measured 3,374 gzip bytes (artifact
+  618,497 → 621,871 B, worst locale 573,597 → 576,971 B, all of it in
+  `app-workspace.js`). The caps were rebased once by that cost: artifact
+  605 → 608.3 KiB, worst single locale 560.5 → 563.8 KiB.
 
 ### Wave 3 — shrink the hand-written contracts to UI invariants
 

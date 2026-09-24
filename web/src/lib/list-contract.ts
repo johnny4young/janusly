@@ -9,6 +9,13 @@ import {
   isOptionalNullableString as nullableText,
 } from './guards'
 import { isRunSummary } from './run-status-contract'
+import {
+  isGetRunsResponse,
+  isGetTemplatesResponse,
+  isGetToolsResponse,
+  isGetWorkflowsResponse,
+  isGetWorkflowsVersionsResponse,
+} from './api-guards.generated'
 
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string')
 const malformed = () => new Error(t('api.error.malformedResponse'))
@@ -35,11 +42,11 @@ export function parseSavedWorkflowPage(value: unknown): SavedWorkflow[] {
 }
 
 export async function readRunSummaryPage(path = '/runs', signal?: AbortSignal): Promise<RunSummary[]> {
-  return parseRunSummaryPage(await contractApi('GET /runs', path, undefined, { signal }))
+  return parseRunSummaryPage(await contractApi('GET /runs', path, undefined, { signal, guard: isGetRunsResponse }))
 }
 
 export async function readSavedWorkflowPage(): Promise<SavedWorkflow[]> {
-  return parseSavedWorkflowPage(await contractApi('GET /workflows', '/workflows', undefined))
+  return parseSavedWorkflowPage(await contractApi('GET /workflows', '/workflows', undefined, { guard: isGetWorkflowsResponse }))
 }
 
 function isTool(value: unknown): value is ToolSchema {
@@ -54,14 +61,14 @@ function isTool(value: unknown): value is ToolSchema {
 }
 
 export async function readToolCatalog(): Promise<ToolSchema[]> {
-  const value: unknown = await contractApi('GET /tools', '/tools', undefined)
+  const value: unknown = await contractApi('GET /tools', '/tools', undefined, { guard: isGetToolsResponse })
   if (!Array.isArray(value) || !value.every(isTool) || new Set(value.map(row => row.name)).size !== value.length) throw malformed()
   return value
 }
 
 export async function readTemplateCatalog(): Promise<Template[]> {
   const [payload, { isWorkflowDefinition }] = await Promise.all([
-    contractApi('GET /templates', '/templates', undefined), import('./authoring-contract'),
+    contractApi('GET /templates', '/templates', undefined, { guard: isGetTemplatesResponse }), import('./authoring-contract'),
   ])
   const value: unknown = payload
   const isTemplate = (row: unknown): row is Template => isRecord(row)
@@ -81,7 +88,7 @@ export async function readWorkflowVersionPage(workflowId: string, options: { bef
   const query = new URLSearchParams({ workflowId })
   for (const [key, value] of Object.entries(options)) if (value !== undefined) query.set(key, String(value))
   const [value, { isWorkflowDefinition }] = await Promise.all([
-    contractApi('GET /workflows/versions', `/workflows/versions?${query}`, undefined, signal ? { signal } : undefined), import('./authoring-contract'),
+    contractApi('GET /workflows/versions', `/workflows/versions?${query}`, undefined, signal ? { signal, guard: isGetWorkflowsVersionsResponse } : { guard: isGetWorkflowsVersionsResponse }), import('./authoring-contract'),
   ])
   if (!Array.isArray(value) || value.length > 200) throw malformed()
   const rows: WorkflowVersionRow[] = []

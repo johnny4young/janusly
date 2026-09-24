@@ -38,6 +38,7 @@ import { t as runtimeT } from '../i18n/runtime'
 import { Button } from '@/components/ui/Button'
 import './FailureClustersCard.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { isGetDlqClustersResponse } from '../lib/api-guards.generated'
 
 const FAILURE_CLUSTER_TAGS = [PLATFORM_TAG, 'dlq', 'recovery', 'runs'] as const
 
@@ -154,7 +155,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
     let cancelled = false
     setLoading(true)
     setError(null)
-    contractApi('GET /dlq/clusters', '/dlq/clusters', undefined)
+    contractApi('GET /dlq/clusters', '/dlq/clusters', undefined, { guard: isGetDlqClustersResponse })
       .then((payload) => {
         if (cancelled) return
         const parsed = parseFailureClusters(payload)

@@ -5,11 +5,7 @@ import type {
   WorkflowIntentBrief,
   WorkflowProposalResponse,
 } from '../types'
-import { isRecord } from './guards'
-
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(value).every((key) => allowed.includes(key))
-}
+import { hasOnlyKeys, isRecord } from './guards'
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string')

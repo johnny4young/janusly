@@ -26,6 +26,7 @@ import type {
   Step,
   SuggestionTab,
 } from './types'
+import { isGetRunResponse, isGetWorkflowsHealthResponse } from '../../lib/api-guards.generated'
 
 const VALIDATION_POLL_INTERVAL_MS = 1500
 // A sandbox run that never reaches a terminal status used to hold the
@@ -221,7 +222,7 @@ export function useRecoveryDialogController({
         return
       }
       try {
-        const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(validationRunId)}`, undefined)
+        const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(validationRunId)}`, undefined, { guard: isGetRunResponse })
         if (cancelled) return
         const result = parseRunStatusSnapshot(payload, validationRunId)
         if (!result) throw new Error(runtimeT('api.error.malformedResponse'))
@@ -416,7 +417,7 @@ export function useRecoveryDialogController({
           score?: number
           status?: string
           signals?: { p95LatencyMs?: number | null; totalRuns?: number; totalCostUsd?: number }
-        } = await contractApi('GET /workflows/health', `/workflows/health?workflowId=${encodeURIComponent(targetWorkflowId)}`, undefined)
+        } = await contractApi('GET /workflows/health', `/workflows/health?workflowId=${encodeURIComponent(targetWorkflowId)}`, undefined, { guard: isGetWorkflowsHealthResponse })
         if (typeof snapshot.score === 'number' && typeof snapshot.status === 'string' && snapshot.signals) {
           preSaveBeforeSnapshot = {
             score: snapshot.score,

@@ -68,6 +68,7 @@ import {
   type RecoveryAllClearRequest,
 } from './recovery-all-clear-bus'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { isGetOperationsBriefResponse } from '../lib/api-guards.generated'
 
 const RECOVERY_CENTER_TAGS = [PLATFORM_TAG, 'recovery', 'runs', 'dlq', 'auto-healing', 'campaigns'] as const
 const EMPTY_HEATMAP: HeatmapDay[] = []
@@ -407,7 +408,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       orgId: resolvedOrgId, userId: resolvedUserId,
       value: { brief: null, status: 'loading' },
     })
-    void contractApi('GET /operations/brief', '/operations/brief', undefined, { signal: controller.signal })
+    void contractApi('GET /operations/brief', '/operations/brief', undefined, { signal: controller.signal, guard: isGetOperationsBriefResponse })
       .then((payload) => {
         if (cancelled) return
         const brief = decodeOperatorBrief(payload)

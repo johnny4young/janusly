@@ -12,8 +12,11 @@ vi.mock('../api', () => {
     ...module,
     // Typed reads route through contractApi; delegate to the same mock so the
     // path-keyed expectations below keep working.
-    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
-      options === undefined ? module.api(path) : module.api(path, options),
+    // The response guard is not a fetch option.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit & { guard?: unknown }) => {
+      const { guard: _guard, ...init } = options ?? {}
+      return Object.keys(init).length === 0 ? module.api(path) : module.api(path, init)
+    },
   }
 })
 

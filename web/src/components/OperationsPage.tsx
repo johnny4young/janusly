@@ -53,6 +53,7 @@ import { useT } from '../i18n'
 import './OperationsPage.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { Button } from './ui/Button'
+import { isGetRecoveryMetricsResponse } from '../lib/api-guards.generated'
 
 const OPERATIONS_TAGS = [PLATFORM_TAG, 'health', 'org-config', 'runs'] as const
 
@@ -175,7 +176,7 @@ export function OperationsPage({
       setMetrics(null)
       return () => { cancelled = true }
     }
-    contractApi('GET /recovery/metrics', '/recovery/metrics', undefined)
+    contractApi('GET /recovery/metrics', '/recovery/metrics', undefined, { guard: isGetRecoveryMetricsResponse })
       .then((payload) => {
         if (cancelled) return
         // A payload we cannot read is the same as no metrics: the page

@@ -22,6 +22,13 @@ import {
 } from '../types'
 import type { AppCommandsOptions } from './app-command-types'
 import { clearDraft, readDraft } from './useDraftPersistence'
+import {
+  isGetAuthoringCapabilitiesResponse,
+  isGetWorkflowsLatestResponse,
+  isGetWorkflowsVersionsVersionIdResponse,
+  isPostAiWorkflowBriefsCompileResponse,
+  isPostAiWorkflowProposalsResponse,
+} from '../lib/api-guards.generated'
 
 const loadAuthoringContract = () => import('../lib/authoring-contract')
 
@@ -194,7 +201,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     if (!authority) return false
     try {
       const [data, { isWorkflowDefinition, workflowVersionIdentity }] = await Promise.all([
-        contractApi('GET /workflows/latest', `/workflows/latest?workflowId=${encodeURIComponent(id)}`, undefined),
+        contractApi('GET /workflows/latest', `/workflows/latest?workflowId=${encodeURIComponent(id)}`, undefined, { guard: isGetWorkflowsLatestResponse }),
         loadAuthoringContract(),
       ])
       if (!canvasAuthorityMatches(authority)) {
@@ -245,6 +252,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
           'GET /workflows/versions/{versionId}',
           path,
           undefined,
+          { guard: isGetWorkflowsVersionsVersionIdResponse },
         ),
         loadAuthoringContract(),
       ])
@@ -281,6 +289,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
       'GET /authoring/capabilities',
       '/authoring/capabilities',
       undefined,
+      { guard: isGetAuthoringCapabilitiesResponse },
     )
   }, [])
 
@@ -290,6 +299,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
         'POST /ai/workflow-briefs/compile',
         '/ai/workflow-briefs/compile',
         { prompt },
+        { guard: isPostAiWorkflowBriefsCompileResponse },
       ),
       loadAuthoringContract(),
     ])
@@ -314,6 +324,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
           catalogVersion,
           currentWorkflow: getWorkflowJson(),
         },
+        { guard: isPostAiWorkflowProposalsResponse },
       ),
       loadAuthoringContract(),
     ])

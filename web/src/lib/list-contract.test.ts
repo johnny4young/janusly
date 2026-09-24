@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { contractApi } from '../api'
+import { isGetRunsResponse, isGetWorkflowsResponse, isGetWorkflowsVersionsResponse } from './api-guards.generated'
 import { parseRunSummaryPage, parseSavedWorkflowPage, readRunSummaryPage, readSavedWorkflowPage, readTemplateCatalog, readToolCatalog, readWorkflowVersionPage } from './list-contract'
 
 vi.mock('../api', () => ({ contractApi: vi.fn() }))
@@ -40,9 +41,9 @@ describe('list read boundaries', () => {
     respond([])
     const signal = new AbortController().signal
     await readRunSummaryPage('/runs?workflowId=workflow-a&limit=50', signal)
-    expect(contractApi).toHaveBeenLastCalledWith('GET /runs', '/runs?workflowId=workflow-a&limit=50', undefined, { signal })
+    expect(contractApi).toHaveBeenLastCalledWith('GET /runs', '/runs?workflowId=workflow-a&limit=50', undefined, { signal, guard: isGetRunsResponse })
     await readSavedWorkflowPage()
-    expect(contractApi).toHaveBeenLastCalledWith('GET /workflows', '/workflows', undefined)
+    expect(contractApi).toHaveBeenLastCalledWith('GET /workflows', '/workflows', undefined, { guard: isGetWorkflowsResponse })
   })
 
   it('forwards version cancellation separately from bounded query options', async () => {
@@ -50,7 +51,7 @@ describe('list read boundaries', () => {
     const signal = new AbortController().signal
     await readWorkflowVersionPage('workflow-a', { limit: 50, beforeVersion: 3 }, signal)
     expect(contractApi).toHaveBeenLastCalledWith('GET /workflows/versions',
-      '/workflows/versions?workflowId=workflow-a&limit=50&beforeVersion=3', undefined, { signal })
+      '/workflows/versions?workflowId=workflow-a&limit=50&beforeVersion=3', undefined, { signal, guard: isGetWorkflowsVersionsResponse })
   })
 
   it('preserves network failures rather than manufacturing empty pages', async () => {
@@ -87,7 +88,7 @@ describe('list read boundaries', () => {
     expect(await readWorkflowVersionPage(workflow.id, { beforeVersion: 3, limit: 50 })).toEqual([
       { id: version.id, version: 2, dagJson: workflow, createdAt: null },
     ])
-    expect(contractApi).toHaveBeenLastCalledWith('GET /workflows/versions', '/workflows/versions?workflowId=workflow-a&beforeVersion=3&limit=50', undefined, undefined)
+    expect(contractApi).toHaveBeenLastCalledWith('GET /workflows/versions', '/workflows/versions?workflowId=workflow-a&beforeVersion=3&limit=50', undefined, { guard: isGetWorkflowsVersionsResponse })
     await expect(readWorkflowVersionPage(workflow.id, { version: 2 })).resolves.toHaveLength(1)
     await expect(readWorkflowVersionPage(workflow.id, { version: 1 })).rejects.toThrow()
     await expect(readWorkflowVersionPage(workflow.id, { beforeVersion: 2 })).rejects.toThrow()

@@ -3,6 +3,7 @@ import { contractApi } from '../api'
 import { parseMemoryConsentStatus, type MemoryConsentStatus } from '../memory-consent-status'
 import { useWorkflowStore } from '../store'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { isGetMemoryConsentStatusResponse } from '../lib/api-guards.generated'
 
 const MEMORY_CONSENT_TAGS = [PLATFORM_TAG, 'org-config', 'memory'] as const
 
@@ -25,7 +26,7 @@ export function useMemoryConsentStatus(): {
     let cancelled = false
     setLoading(true)
     setUnavailableForOrg(null)
-    contractApi('GET /memory/consent-status', '/memory/consent-status', undefined)
+    contractApi('GET /memory/consent-status', '/memory/consent-status', undefined, { guard: isGetMemoryConsentStatusResponse })
       .then((payload) => {
         if (cancelled) return
         const parsed = parseMemoryConsentStatus(payload)

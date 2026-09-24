@@ -56,6 +56,7 @@ generate:
 	go run ./cmd/contract
 	go run ./cmd/pricing
 	cd web && node scripts/generate-api-types.mjs
+	cd web && node scripts/generate-api-guards.mjs
 
 contract:
 	go run ./cmd/contract
@@ -184,8 +185,8 @@ verify-current-db:
 	$(MAKE) recovery-local-selftest
 	$(MAKE) schema COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME)
 	$(MAKE) generate
-	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts || { \
-		echo "schema.sql or generated SQLC, OpenAPI, pricing or API-type files drifted; run scripts/verify-isolated.sh schema and make generate, then commit the result."; \
+	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts web/src/lib/api-guards.generated.ts || { \
+		echo "schema.sql or generated SQLC, OpenAPI, pricing, API-type or API-guard files drifted; run scripts/verify-isolated.sh schema and make generate, then commit the result."; \
 		exit 1; \
 	}
 	$(MAKE) lint

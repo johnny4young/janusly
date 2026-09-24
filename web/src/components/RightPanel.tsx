@@ -56,6 +56,7 @@ import { workspaceDestinationForTab } from '../workspace-locations'
 import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 import type { WorkflowCreationMode } from './WorkflowsDashboard'
 import { Button } from './ui/Button'
+import { isGetRunUsageResponse } from '../lib/api-guards.generated'
 
 export type RightPanelAuthoring = AuthoringPanelModel & {
   aiHealth: AiHealth | null
@@ -184,7 +185,7 @@ function RightPanelRouter(props: RightPanelProps) {
   const { authoring, catalog, execution, navigation } = props
   const can = (permission: string) => props.permissions === undefined || props.permissions.includes(permission)
   const loadRunUsage = useCallback((runId: string, signal: AbortSignal) =>
-    contractApi('GET /run/usage', `/run/usage?runId=${encodeURIComponent(runId)}`, undefined, { signal }), [])
+    contractApi('GET /run/usage', `/run/usage?runId=${encodeURIComponent(runId)}`, undefined, { signal, guard: isGetRunUsageResponse }), [])
   const replayDecision = useCallback((eventId: string, nodeId: string, signal: AbortSignal) => {
     if (!execution.activeRunId) return Promise.resolve(null)
     return api(`/causal?runId=${encodeURIComponent(execution.activeRunId)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })

@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api, contractApi } from '../api'
+import { isGetWorkflowsVersionsVersionIdResponse } from '../lib/api-guards.generated'
 import type { ApiResponse } from '../lib/api-types.generated'
 import { useWorkflowStore } from '../store'
 import type {
@@ -166,6 +167,7 @@ describe('useWorkflowCommands exact workflow versions', () => {
       'GET /workflows/versions/{versionId}',
       '/workflows/versions/version-7?workflowId=workflow-1',
       undefined,
+      { guard: isGetWorkflowsVersionsVersionIdResponse },
     )
     expect(useWorkflowStore.getState()).toMatchObject({
       currentWorkflowId: 'workflow-1',

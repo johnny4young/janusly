@@ -7,6 +7,7 @@ import {
   isNonNegativeSafeInteger as count,
   isNullableString as nullableText,
 } from './guards'
+import { isGetDlqEntriesDeadLetterIdResponse, isPostDlqResolveResponse } from './api-guards.generated'
 
 export type DeadLetterDetail = ApiResponses['GET /dlq/entries/{deadLetterId}']
 type Drill = NonNullable<DeadLetterDetail['drill']>
@@ -57,13 +58,13 @@ export function parseDeadLetterDetail(value: unknown, id: string): DeadLetterDet
 }
 
 export async function readDeadLetterDetail(id: string, signal?: AbortSignal): Promise<DeadLetterDetail> {
-  const payload = await contractApi('GET /dlq/entries/{deadLetterId}', `/dlq/entries/${encodeURIComponent(id)}`, undefined, { signal })
+  const payload = await contractApi('GET /dlq/entries/{deadLetterId}', `/dlq/entries/${encodeURIComponent(id)}`, undefined, { signal, guard: isGetDlqEntriesDeadLetterIdResponse })
   const detail = parseDeadLetterDetail(payload, id)
   if (!detail) throw new Error(t('api.error.malformedResponse'))
   return detail
 }
 
 export async function resolveDeadLetterEntry(id: string): Promise<void> {
-  const payload: unknown = await contractApi('POST /dlq/resolve', '/dlq/resolve', { id })
+  const payload: unknown = await contractApi('POST /dlq/resolve', '/dlq/resolve', { id }, { guard: isPostDlqResolveResponse })
   if (!isRecord(payload) || payload.ok !== true) throw new Error(t('api.error.malformedResponse'))
 }
