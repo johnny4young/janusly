@@ -58,6 +58,9 @@ The selected real-executable lane includes `responsive.spec.ts`: its EN/ES
 1280×720 desktop at 200% browser zoom, not a physical zoom or screen-reader
 acceptance pass. Those still require the separate study in
 `docs/usability-testing.md`.
+The same lane runs `usability-study-readiness.spec.ts` against real failures
+and routes in both locales; it verifies affordances only, not interviews or
+unassisted participant completion.
 
 A throwaway database for local integration runs, isolated from the dev one:
 
