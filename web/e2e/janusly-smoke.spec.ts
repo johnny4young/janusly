@@ -481,8 +481,11 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
 
     await page.getByTestId('dlq-select-toggle').click()
     for (const runId of runIds.slice(4)) {
-      await page.getByTestId(`dlq-select-row-${byRun.get(runId)}`).click()
+      const deadLetterId = byRun.get(runId)!
+      await page.getByTestId(`dlq-select-row-${deadLetterId}`).click()
+      await expect(page.getByTestId(`dlq-row-${deadLetterId}`)).toHaveAttribute('aria-selected', 'true')
     }
+    await expect(page.getByTestId('dlq-bulk-bar')).toContainText('2 selected')
     await page.getByTestId('dlq-bulk-resolve').click()
     await expect(page.getByRole('alertdialog')).toContainText('Close 2 failures without recovery?')
     for (const runId of runIds.slice(4)) {
