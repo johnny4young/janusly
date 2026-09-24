@@ -80,6 +80,28 @@ func freePort(t *testing.T) int {
 	return port
 }
 
+// Reserve one listener while selecting the second port. Asking the OS for
+// two ephemeral ports after closing each listener can return the same port,
+// making the binary reject its own public/internal port configuration.
+func distinctFreePorts(t *testing.T) (int, int) {
+	t.Helper()
+	holder, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve public port: %v", err)
+	}
+	defer holder.Close()
+	return holder.Addr().(*net.TCPAddr).Port, freePort(t)
+}
+
+func TestDistinctFreePorts(t *testing.T) {
+	for range 32 {
+		public, internal := distinctFreePorts(t)
+		if public == internal {
+			t.Fatalf("public and internal ports must differ: %d", public)
+		}
+	}
+}
+
 type binaryAPI struct {
 	base     string
 	internal string
@@ -94,7 +116,7 @@ func bootBinary(t *testing.T) *binaryAPI {
 		t.Skip("JANUSLY_DATABASE_URL not set; run through `make test`")
 	}
 	bin := buildBinary(t)
-	port, internal := freePort(t), freePort(t)
+	port, internal := distinctFreePorts(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("JANUSLY_PORT=%d", port),
