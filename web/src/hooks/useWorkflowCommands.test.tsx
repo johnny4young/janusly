@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api, contractApi } from '../api'
-import { isGetWorkflowsVersionsVersionIdResponse } from '../lib/api-guards.generated'
+import { isGetWorkflowsVersionsVersionIdResponse } from '../lib/api-guards/operations/GetWorkflowsVersionsVersionId'
 import type { ApiResponse } from '../lib/api-types.generated'
 import { useWorkflowStore } from '../store'
 import type {

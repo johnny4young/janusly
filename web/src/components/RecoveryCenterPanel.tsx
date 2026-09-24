@@ -68,7 +68,7 @@ import {
   type RecoveryAllClearRequest,
 } from './recovery-all-clear-bus'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
-import { isGetOperationsBriefResponse } from '../lib/api-guards.generated'
+import { isGetOperationsBriefResponse } from '../lib/api-guards/operations/GetOperationsBrief'
 
 const RECOVERY_CENTER_TAGS = [PLATFORM_TAG, 'recovery', 'runs', 'dlq', 'auto-healing', 'campaigns'] as const
 const EMPTY_HEATMAP: HeatmapDay[] = []

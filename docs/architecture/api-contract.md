@@ -110,13 +110,17 @@ run.
 
 ## Browser validation
 
-`web/scripts/generate-api-guards.mjs` renders `web/src/lib/api-guards.generated.ts`
-from the same document: one `is<Component>` per shared schema and one
-`is<Operation>Response` per operation with a 2xx payload (for example
-`isGetRunResponse` for `GET /run`). Guards are plain functions composed from the
-primitives in `web/src/lib/guards.ts`; there is no schema library, no aggregate
-map and no module state, so a bundle carries only the guards its call sites
-import.
+`web/scripts/generate-api-guards.mjs` renders `web/src/lib/api-guards/` from
+the same document: one module per shared schema (`components/<Name>.ts`
+exporting `is<Name>`) and one per operation with a 2xx payload
+(`operations/<Stem>.ts` exporting `is<Stem>Response`, for example
+`operations/GetRun.ts` with `isGetRunResponse` for `GET /run`). Guards are plain
+functions composed from the primitives in `web/src/lib/guards.ts`; each module
+imports only the primitives and component guards it references. There is no
+schema library, no barrel, no aggregate map and no module state, so a guard
+ships in the chunk of the call sites that import it: a guard used only by a lazy
+panel stays in that panel's chunk. The generator rewrites the whole directory,
+so a removed schema leaves no orphan module.
 
 A guard enforces shape: JSON types, nullability, `enum`/`const`, required keys,
 closed key sets (`additionalProperties: false`), typed map values and integer
@@ -125,19 +129,22 @@ exactness. It deliberately does not enforce `maxItems`, `maxLength`,
 can change without a client release, and the browser validates shape, never
 policy. `oneOf` is checked as "any branch matches" because manifest branches are
 disjoint closed shapes. The generator throws, naming the schema path, on any
-other keyword, so a new manifest construct cannot be silently skipped.
+other keyword, and on an empty `enum`/`const` set or a literal that contradicts
+the declared `type`, so a new manifest construct cannot be silently skipped or
+compiled into a guard that rejects everything.
 
 Adopt a guard by passing it to `contractApi` next to the call:
 
 ```ts
-import { isGetRunResponse } from '../lib/api-guards.generated'
+import { isGetRunResponse } from '../lib/api-guards/operations/GetRun'
 
 const run = await contractApi('GET /run', path, undefined, { guard: isGetRunResponse })
 ```
 
-The option is typed to the operation, so a guard for another operation does not
-compile. `contractApi` runs it on the unwrapped payload of a 2xx response only;
-non-2xx responses (including a 429 that carries a data envelope) still throw
+The option is typed to the operation, so a guard for a structurally different
+operation does not compile (type predicates are structural: two operations with
+the same payload type accept each other's guard). `contractApi` runs it on the
+unwrapped payload of a 2xx response only; non-2xx responses (including a 429 that carries a data envelope) still throw
 `ApiError` before any guard runs, and the `/start`/`/resume` field-error
 envelope is passed through. A rejected payload raises the existing
 `api.error.malformedResponse` error. Without a guard the call behaves exactly as
@@ -145,9 +152,9 @@ before. Cross-field UI invariants (a delta is present iff there is enough data,
 page ids are unique) are not shape and stay in the hand-written readers.
 
 `make generate` regenerates the guards after the types; the drift gate covers
-the generated file, `web/scripts/generate-api-guards.test.mjs` compiles and runs
-synthetic output for every supported keyword, and
-`web/src/lib/api-guards.generated.test.ts` samples every operation from
+the generated directory, including new untracked modules;
+`web/scripts/generate-api-guards.test.mjs` compiles and runs synthetic output for every supported keyword, and
+`web/src/lib/api-guards.test.ts` samples every operation from
 `contract/openapi.json` and checks acceptance, closed keys, required keys,
 wrong types and that server bounds are not enforced.
 

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { contractApi } from '../api'
 import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
-import { isGetDlqEntriesDeadLetterIdResponse, isPostDlqResolveResponse } from './api-guards.generated'
+import { isGetDlqEntriesDeadLetterIdResponse } from './api-guards/operations/GetDlqEntriesDeadLetterId'
+import { isPostDlqResolveResponse } from './api-guards/operations/PostDlqResolve'
 import { parseDeadLetterDetail, readDeadLetterDetail, resolveDeadLetterEntry } from './dead-letter-contract'
 
 vi.mock('../api', () => ({ contractApi: vi.fn() }))

@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import * as generated from './api-guards.generated'
 
 type Schema = Record<string, unknown>
 type Operation = { operationId: string; responses: Record<string, { content?: Record<string, { schema?: Schema }> }> }
@@ -9,7 +8,9 @@ const document = JSON.parse(readFileSync('../contract/openapi.json', 'utf8')) as
   paths: Record<string, Record<string, Operation>>
   components: { schemas: Record<string, Schema> }
 }
-const guards = generated as unknown as Record<string, (value: unknown) => boolean>
+// One module per guard and no barrel, so gather them the way a bundler would see them.
+const modules = import.meta.glob<Record<string, (value: unknown) => boolean>>('./api-guards/**/*.ts', { eager: true })
+const guards: Record<string, (value: unknown) => boolean> = Object.assign({}, ...Object.values(modules))
 
 function resolve(schema: Schema): Schema {
   const ref = schema.$ref

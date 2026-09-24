@@ -38,7 +38,7 @@ import { t as runtimeT } from '../i18n/runtime'
 import { Button } from '@/components/ui/Button'
 import './FailureClustersCard.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
-import { isGetDlqClustersResponse } from '../lib/api-guards.generated'
+import { isGetDlqClustersResponse } from '../lib/api-guards/operations/GetDlqClusters'
 
 const FAILURE_CLUSTER_TAGS = [PLATFORM_TAG, 'dlq', 'recovery', 'runs'] as const
 

@@ -26,7 +26,8 @@ import type {
   Step,
   SuggestionTab,
 } from './types'
-import { isGetRunResponse, isGetWorkflowsHealthResponse } from '../../lib/api-guards.generated'
+import { isGetRunResponse } from '../../lib/api-guards/operations/GetRun'
+import { isGetWorkflowsHealthResponse } from '../../lib/api-guards/operations/GetWorkflowsHealth'
 
 const VALIDATION_POLL_INTERVAL_MS = 1500
 // A sandbox run that never reaches a terminal status used to hold the

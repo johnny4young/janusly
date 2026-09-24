@@ -56,7 +56,7 @@ import { workspaceDestinationForTab } from '../workspace-locations'
 import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 import type { WorkflowCreationMode } from './WorkflowsDashboard'
 import { Button } from './ui/Button'
-import { isGetRunUsageResponse } from '../lib/api-guards.generated'
+import { isGetRunUsageResponse } from '../lib/api-guards/operations/GetRunUsage'
 
 export type RightPanelAuthoring = AuthoringPanelModel & {
   aiHealth: AiHealth | null

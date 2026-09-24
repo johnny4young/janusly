@@ -1,8 +1,9 @@
 /**
  * Generate runtime response guards from the public v1 OpenAPI document: one
- * `is<Component>` per shared schema and one `is<Operation>Response` per
- * operation with a 2xx payload. Every export is a pure function, so a bundle
- * keeps only the guards its call sites import.
+ * module per shared schema (`components/<Name>.ts` exporting `is<Name>`) and
+ * one per operation with a 2xx payload (`operations/<Stem>.ts` exporting
+ * `is<Stem>Response`). There is no barrel: a module belongs to the chunk of
+ * the call sites that import it, so a lazy panel's guard stays lazy.
  *
  * Guards check shape only (types, nullability, enums, required and closed
  * keys, integers). Length, item-count and numeric bounds are server policy:
@@ -77,6 +78,8 @@ function propertyKey(key) {
 class GuardCompiler {
   constructor(components) {
     this.components = components;
+    // Component guards referenced by the body being compiled.
+    this.refs = new Set();
   }
 
   validate(schema, where) {
@@ -105,7 +108,9 @@ class GuardCompiler {
       const siblings = Object.keys(schema).filter((key) => key !== "$ref" && !ANNOTATIONS.has(key));
       if (siblings.length > 0) throw new Error(`${where}: $ref cannot be combined with ${siblings.join(", ")}`);
       const name = refComponentName(schema.$ref, this.components);
-      return this.acceptsAnything(this.components.get(name)) ? "isAny" : `is${name}`;
+      if (this.acceptsAnything(this.components.get(name))) return "isAny";
+      this.refs.add(name);
+      return `is${name}`;
     }
     const parts = [];
     let literals = null;
@@ -119,6 +124,8 @@ class GuardCompiler {
       }
       literals = literals ? literals.filter((value) => schema.enum.includes(value)) : schema.enum;
     }
+    // An empty or contradictory literal set would compile to a guard that rejects everything.
+    if (literals && literals.length === 0) throw new Error(`${where}: const and enum admit no value`);
     if (literals) parts.push(`literal(${literals.map((value) => JSON.stringify(value)).join(", ")})`);
     if (schema.type !== undefined) {
       const types = Array.isArray(schema.type) ? schema.type : [schema.type];
@@ -126,8 +133,14 @@ class GuardCompiler {
       for (const type of types) {
         if (!TYPES.has(type)) throw new Error(`${where}: unsupported type ${JSON.stringify(type)}`);
       }
-      const implied = literals && literals.every((value) => types.some((type) => matchesType(value, type)));
-      if (!implied) parts.push(this.typeGuard(schema, types, where, depth));
+      if (literals) {
+        const stray = literals.find((value) => !types.some((type) => matchesType(value, type)));
+        if (stray !== undefined) {
+          throw new Error(`${where}: literal ${JSON.stringify(stray)} contradicts type ${JSON.stringify(schema.type)}`);
+        }
+      } else {
+        parts.push(this.typeGuard(schema, types, where, depth));
+      }
     } else if (this.hasObjectKeywords(schema) || schema.items !== undefined) {
       throw new Error(`${where}: object and array keywords need a type`);
     }
@@ -242,7 +255,18 @@ function operationsOf(document) {
   return operations.sort((left, right) => left.key.localeCompare(right.key));
 }
 
-/** Render the guard module for one contract document. */
+function renderModule(body, compiler, componentPath) {
+  const primitives = PRIMITIVES.filter((name) => new RegExp(`\\b${name}\\b`).test(body));
+  const lines = [HEADER, `import type * as Api from "../../api-types.generated"`];
+  if (primitives.length > 0) lines.push(`import { ${primitives.join(", ")} } from "../../guards"`);
+  for (const name of [...compiler.refs].sort()) lines.push(`import { is${name} } from "${componentPath}${name}"`);
+  return `${lines.join("\n")}\n\n${body}`;
+}
+
+/**
+ * Render the guard modules for one contract document, keyed by their path
+ * relative to the output directory.
+ */
 export function generateGuards(document) {
   const components = payloadComponents(document);
   const operations = operationsOf(document);
@@ -254,25 +278,31 @@ export function generateGuards(document) {
     names.add(name);
   }
   const compiler = new GuardCompiler(components);
+  const files = new Map();
 
-  const exported = [];
   for (const name of componentNames) {
+    compiler.refs = new Set();
     const body = compiler.functionBody(components.get(name), `#/components/schemas/${name}`);
+    compiler.refs.delete(name);
     // An opaque fragment never reads its argument.
     const parameter = body === "  return true" ? "_value" : "value";
-    exported.push(`export function is${name}(${parameter}: unknown): ${parameter} is Api.${name} {\n${body}\n}\n`);
+    const source = `export function is${name}(${parameter}: unknown): ${parameter} is Api.${name} {\n${body}\n}\n`;
+    files.set(`components/${name}.ts`, renderModule(source, compiler, "./"));
   }
   for (const { key, stem, data } of operations) {
+    compiler.refs = new Set();
     const body = compiler.functionBody(data, `${key} response`);
-    exported.push(`/** ${key} */\nexport function is${stem}Response(value: unknown): value is Api.ApiResponses[${JSON.stringify(key)}] {\n${body}\n}\n`);
+    const source = `/** ${key} */\nexport function is${stem}Response(value: unknown): value is Api.ApiResponses[${JSON.stringify(key)}] {\n${body}\n}\n`;
+    files.set(`operations/${stem}.ts`, renderModule(source, compiler, "../components/"));
   }
-  const body = exported.join("\n");
-  const imports = PRIMITIVES.filter((name) => new RegExp(`\\b${name}\\b`).test(body));
-  const importLine = imports.length > 0 ? `import { ${imports.join(", ")} } from "./guards"\n` : "";
-  return `${HEADER}
-import type * as Api from "./api-types.generated"
-${importLine}
-${body}`;
+  // Case-insensitive file systems would silently merge two modules.
+  const seen = new Map();
+  for (const file of files.keys()) {
+    const folded = file.toLowerCase();
+    if (seen.has(folded)) throw new Error(`${file}: guard module collides with ${seen.get(folded)} on a case-insensitive file system`);
+    seen.set(folded, file);
+  }
+  return files;
 }
 
 function isMainModule() {
@@ -280,14 +310,19 @@ function isMainModule() {
 }
 
 export const CONTRACT_PATH = "../contract/openapi.json";
-export const OUTPUT_PATH = "src/lib/api-guards.generated.ts";
+export const OUTPUT_DIR = "src/lib/api-guards";
 
 if (isMainModule()) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const document = JSON.parse(fs.readFileSync(path.join(root, CONTRACT_PATH), "utf8"));
-  const output = generateGuards(document);
-  fs.writeFileSync(path.join(root, OUTPUT_PATH), output);
-  const operations = (output.match(/^\/\*\* [A-Z]+ \//gm) ?? []).length;
-  const components = (output.match(/^export function /gm) ?? []).length - operations;
-  console.log(`api guards generated (${components} components, ${operations} operations).`);
+  const files = generateGuards(document);
+  const outDir = path.join(root, OUTPUT_DIR);
+  // The directory is wholly generated: rebuilding it leaves no orphan from a removed schema.
+  fs.rmSync(outDir, { recursive: true, force: true });
+  for (const [file, source] of files) {
+    fs.mkdirSync(path.dirname(path.join(outDir, file)), { recursive: true });
+    fs.writeFileSync(path.join(outDir, file), source);
+  }
+  const operations = [...files.keys()].filter((file) => file.startsWith("operations/")).length;
+  console.log(`api guards generated (${files.size - operations} components, ${operations} operations).`);
 }

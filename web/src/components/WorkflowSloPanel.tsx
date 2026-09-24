@@ -21,7 +21,7 @@ import { tApiError, useT } from '../i18n'
 import { Button } from '@/components/ui/Button'
 import { FieldStack, FormField } from '@/components/ui/Form'
 import { PLATFORM_TAG, useInvalidationNonce, type ResourceTag } from '../lib/query-cache'
-import { isGetWorkflowsHealthResponse } from '../lib/api-guards.generated'
+import { isGetWorkflowsHealthResponse } from '../lib/api-guards/operations/GetWorkflowsHealth'
 
 const WORKFLOW_SLO_TAGS = [PLATFORM_TAG, 'workflows'] as const
 

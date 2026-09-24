@@ -3,7 +3,7 @@ import { contractApi } from '../api'
 import { parseMemoryConsentStatus, type MemoryConsentStatus } from '../memory-consent-status'
 import { useWorkflowStore } from '../store'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
-import { isGetMemoryConsentStatusResponse } from '../lib/api-guards.generated'
+import { isGetMemoryConsentStatusResponse } from '../lib/api-guards/operations/GetMemoryConsentStatus'
 
 const MEMORY_CONSENT_TAGS = [PLATFORM_TAG, 'org-config', 'memory'] as const
 

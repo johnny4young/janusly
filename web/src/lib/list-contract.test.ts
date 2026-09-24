@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { contractApi } from '../api'
-import { isGetRunsResponse, isGetWorkflowsResponse, isGetWorkflowsVersionsResponse } from './api-guards.generated'
+import { isGetRunsResponse } from './api-guards/operations/GetRuns'
+import { isGetWorkflowsResponse } from './api-guards/operations/GetWorkflows'
+import { isGetWorkflowsVersionsResponse } from './api-guards/operations/GetWorkflowsVersions'
 import { parseRunSummaryPage, parseSavedWorkflowPage, readRunSummaryPage, readSavedWorkflowPage, readTemplateCatalog, readToolCatalog, readWorkflowVersionPage } from './list-contract'
 
 vi.mock('../api', () => ({ contractApi: vi.fn() }))

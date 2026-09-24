@@ -185,7 +185,8 @@ verify-current-db:
 	$(MAKE) recovery-local-selftest
 	$(MAKE) schema COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME)
 	$(MAKE) generate
-	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts web/src/lib/api-guards.generated.ts || { \
+	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts web/src/lib/api-guards \
+		&& test -z "$$(git status --porcelain -- web/src/lib/api-guards)" || { \
 		echo "schema.sql or generated SQLC, OpenAPI, pricing, API-type or API-guard files drifted; run scripts/verify-isolated.sh schema and make generate, then commit the result."; \
 		exit 1; \
 	}

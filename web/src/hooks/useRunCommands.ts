@@ -8,7 +8,7 @@ import type { ActiveTab } from '../types'
 import { isTerminalRunStatus } from '@/lib/status'
 import { parseRunStatusSnapshot } from '../lib/run-status-contract'
 import type { AppCommandsOptions } from './app-command-types'
-import { isGetRunResponse } from '../lib/api-guards.generated'
+import { isGetRunResponse } from '../lib/api-guards/operations/GetRun'
 
 type WorkflowCommands = {
   validateWorkflow: () => Promise<boolean>

@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { contractApi } from '../api'
 import { getResolvedLocale, useT } from '../i18n'
-import { isGetWorkflowsSchedulePreviewResponse } from '../lib/api-guards.generated'
+import { isGetWorkflowsSchedulePreviewResponse } from '../lib/api-guards/operations/GetWorkflowsSchedulePreview'
 
 export type ScheduleCronPreviewKind = 'idle' | 'loading' | 'invalid' | 'error' | 'ready'
 

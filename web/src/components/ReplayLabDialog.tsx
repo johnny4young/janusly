@@ -31,7 +31,7 @@ import { RunComparisonView, type RunComparisonPayload } from './RunComparisonVie
 import { useT } from '../i18n'
 import { formatStatusLabel } from '../constants'
 import { Button } from '@/components/ui/Button'
-import { isGetRunResponse } from '../lib/api-guards.generated'
+import { isGetRunResponse } from '../lib/api-guards/operations/GetRun'
 
 type SourceRun = {
   id: string

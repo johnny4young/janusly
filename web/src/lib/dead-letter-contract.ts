@@ -7,7 +7,8 @@ import {
   isNonNegativeSafeInteger as count,
   isNullableString as nullableText,
 } from './guards'
-import { isGetDlqEntriesDeadLetterIdResponse, isPostDlqResolveResponse } from './api-guards.generated'
+import { isGetDlqEntriesDeadLetterIdResponse } from './api-guards/operations/GetDlqEntriesDeadLetterId'
+import { isPostDlqResolveResponse } from './api-guards/operations/PostDlqResolve'
 
 export type DeadLetterDetail = ApiResponses['GET /dlq/entries/{deadLetterId}']
 type Drill = NonNullable<DeadLetterDetail['drill']>

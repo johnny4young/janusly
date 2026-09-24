@@ -10,7 +10,7 @@
     "vitest-worker-policy.ts"
   ],
   "project": ["src/**"],
-  "ignore": ["src/lib/*.generated.ts"],
+  "ignore": ["src/lib/*.generated.ts", "src/lib/api-guards/**"],
   "ignoreDependencies": ["@vitest/browser", "supabase"],
   "ignoreExportsUsedInFile": true
 }

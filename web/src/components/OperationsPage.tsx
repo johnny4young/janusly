@@ -53,7 +53,7 @@ import { useT } from '../i18n'
 import './OperationsPage.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { Button } from './ui/Button'
-import { isGetRecoveryMetricsResponse } from '../lib/api-guards.generated'
+import { isGetRecoveryMetricsResponse } from '../lib/api-guards/operations/GetRecoveryMetrics'
 
 const OPERATIONS_TAGS = [PLATFORM_TAG, 'health', 'org-config', 'runs'] as const
 

@@ -29,7 +29,7 @@ import { Activity } from 'lucide-react'
 import { contractApi } from '../api'
 import { tHealthRationale, useT } from '../i18n'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
-import { isGetWorkflowsHealthResponse } from '../lib/api-guards.generated'
+import { isGetWorkflowsHealthResponse } from '../lib/api-guards/operations/GetWorkflowsHealth'
 
 const WORKFLOW_HEALTH_TAGS = [PLATFORM_TAG, 'workflows', 'runs', 'dlq', 'recovery'] as const
 

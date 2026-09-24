@@ -22,13 +22,11 @@ import {
 } from '../types'
 import type { AppCommandsOptions } from './app-command-types'
 import { clearDraft, readDraft } from './useDraftPersistence'
-import {
-  isGetAuthoringCapabilitiesResponse,
-  isGetWorkflowsLatestResponse,
-  isGetWorkflowsVersionsVersionIdResponse,
-  isPostAiWorkflowBriefsCompileResponse,
-  isPostAiWorkflowProposalsResponse,
-} from '../lib/api-guards.generated'
+import { isGetAuthoringCapabilitiesResponse } from '../lib/api-guards/operations/GetAuthoringCapabilities'
+import { isGetWorkflowsLatestResponse } from '../lib/api-guards/operations/GetWorkflowsLatest'
+import { isGetWorkflowsVersionsVersionIdResponse } from '../lib/api-guards/operations/GetWorkflowsVersionsVersionId'
+import { isPostAiWorkflowBriefsCompileResponse } from '../lib/api-guards/operations/PostAiWorkflowBriefsCompile'
+import { isPostAiWorkflowProposalsResponse } from '../lib/api-guards/operations/PostAiWorkflowProposals'
 
 const loadAuthoringContract = () => import('../lib/authoring-contract')
 

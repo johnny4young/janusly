@@ -111,8 +111,8 @@ consistent without counting UTF-16 code units as characters.
 Runtime shape guards (`isRecord`, `asRecord`, `asRecordOrEmpty`) live in
 `src/lib/guards.ts` only; `scripts/check-duplicate-guards.mjs` (part of
 `pnpm lint`) rejects a second definition. The generated response guards in
-`src/lib/api-guards.generated.ts` compose the primitives defined there and are
-passed to `contractApi` as its `guard` option (see
+`src/lib/api-guards/` (one module per guard, no barrel) compose the primitives
+defined there and are passed to `contractApi` as its `guard` option (see
 `docs/architecture/api-contract.md`). The `/org/config` payload has one
 reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector load
 lazily like every other tab panel: `src/components/panel-loaders.ts` holds one

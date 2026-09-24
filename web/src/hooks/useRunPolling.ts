@@ -30,7 +30,7 @@ import { isTerminalRunStatus } from '@/lib/status'
 import type { RunSummary } from '../types'
 import { parseRunStatusSnapshot, type RunStatusSnapshot } from '../lib/run-status-contract'
 import type { RunSummaryUpdateStarter } from './useBootstrapData'
-import { isGetStatusResponse } from '../lib/api-guards.generated'
+import { isGetStatusResponse } from '../lib/api-guards/operations/GetStatus'
 
 /** The poll machinery surface returned to the shell. `loadStatus` is shared
  *  with the shell's run-action handlers (approve / resume / replay / cancel),

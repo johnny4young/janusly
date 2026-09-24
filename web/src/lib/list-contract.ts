@@ -9,13 +9,11 @@ import {
   isOptionalNullableString as nullableText,
 } from './guards'
 import { isRunSummary } from './run-status-contract'
-import {
-  isGetRunsResponse,
-  isGetTemplatesResponse,
-  isGetToolsResponse,
-  isGetWorkflowsResponse,
-  isGetWorkflowsVersionsResponse,
-} from './api-guards.generated'
+import { isGetRunsResponse } from './api-guards/operations/GetRuns'
+import { isGetTemplatesResponse } from './api-guards/operations/GetTemplates'
+import { isGetToolsResponse } from './api-guards/operations/GetTools'
+import { isGetWorkflowsResponse } from './api-guards/operations/GetWorkflows'
+import { isGetWorkflowsVersionsResponse } from './api-guards/operations/GetWorkflowsVersions'
 
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string')
 const malformed = () => new Error(t('api.error.malformedResponse'))

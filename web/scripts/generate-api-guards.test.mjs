@@ -36,16 +36,24 @@ function spec(paths, schemas) {
   }
 }
 
-// Compile the emitted TypeScript with the real guards.ts primitives and load it.
+// Compile every emitted module with the real guards.ts primitives, mirroring
+// the src/lib layout so relative imports resolve, and merge their exports.
 async function load(document, t) {
-  const source = generateGuards(document)
+  const files = generateGuards(document)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'janusly-api-guards-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
   const guards = fs.readFileSync(path.join(here, '../src/lib/guards.ts'), 'utf8')
   fs.writeFileSync(path.join(dir, 'guards.mjs'), stripTypeScriptTypes(guards))
-  const module = stripTypeScriptTypes(source).replace('from "./guards"', 'from "./guards.mjs"')
-  fs.writeFileSync(path.join(dir, 'api-guards.mjs'), module)
-  return { source, guards: await import(pathToFileURL(path.join(dir, 'api-guards.mjs')).href) }
+  const loaded = {}
+  const written = []
+  for (const [file, source] of files) {
+    const target = path.join(dir, 'api-guards', file.replace(/\.ts$/, '.mjs'))
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, stripTypeScriptTypes(source).replace(/from "(\.[^"]+)"/g, 'from "$1.mjs"'))
+    written.push(target)
+  }
+  for (const target of written) Object.assign(loaded, await import(pathToFileURL(target).href))
+  return { files, source: [...files.values()].join('\n'), guards: loaded }
 }
 
 const components = {
@@ -100,7 +108,7 @@ const item = {
 }
 
 test('names one guard per component and per operation without the version segment', async (t) => {
-  const { source, guards } = await load(document, t)
+  const { files, source, guards } = await load(document, t)
   for (const name of ['isStatus', 'isOpaque', 'isItem', 'isEither', 'isBoth', 'isMaybeItem',
     'isGetItemsResponse', 'isPostItemsResponse', 'isGetItemsIdResponse', 'isGetBothResponse']) {
     assert.equal(typeof guards[name], 'function', name)
@@ -108,6 +116,11 @@ test('names one guard per component and per operation without the version segmen
   assert.match(source, /export function isItem\(value: unknown\): value is Api\.Item \{/)
   assert.match(source, /export function isGetItemsResponse\(value: unknown\): value is Api\.ApiResponses\["GET \/items"\] \{/)
   assert.doesNotMatch(source, /^(?:const|let|var) /m, 'no module-level state')
+  assert.deepEqual([...files.keys()].sort(), [
+    'components/Both.ts', 'components/Either.ts', 'components/Item.ts', 'components/MaybeItem.ts',
+    'components/Opaque.ts', 'components/Status.ts', 'operations/GetBoth.ts', 'operations/GetItems.ts',
+    'operations/GetItemsId.ts', 'operations/PostItems.ts',
+  ])
   assert.equal(operationStem({ operationId: 'get_v1_recovery_my-wins' }, 'k'), 'GetRecoveryMyWins')
 })
 
@@ -171,4 +184,32 @@ test('rejects unsupported keywords with the schema path', () => {
   assert.throws(() => generateGuards(broken({ type: 'date' })), /unsupported type "date"/)
   assert.throws(() => generateGuards(broken({ $ref: '#/components/schemas/Missing' })), /names no component/)
   assert.throws(() => generateGuards(broken({ type: 'object', properties: { ['__proto__']: { type: 'string' } } })), /__proto__/)
+})
+
+test('each module imports only what it references, with no barrel', () => {
+  const files = generateGuards(document)
+  assert.equal(files.get('operations/GetItems.ts').includes('import { isItem } from "../components/Item"'), true)
+  assert.doesNotMatch(files.get('operations/GetItems.ts'), /Status|Either/)
+  assert.match(files.get('components/MaybeItem.ts'), /import \{ isItem \} from "\.\/Item"/)
+  assert.match(files.get('components/Item.ts'), /import \{ isStatus \} from "\.\/Status"/)
+  assert.doesNotMatch(files.get('components/Item.ts'), /from "\.\/Opaque"/, 'an opaque reference compiles to isAny')
+  assert.match(files.get('components/Status.ts'), /import \{ literal \} from "\.\.\/\.\.\/guards"/)
+  assert.equal([...files.keys()].some((file) => /index\.ts$/.test(file)), false)
+})
+
+test('rejects empty or contradictory literal sets with the schema path', () => {
+  const broken = (schema) => spec({ '/x': { get: operation('get_v1_x', ref('Broken')) } }, { Broken: schema })
+  assert.throws(() => generateGuards(broken({ type: 'string', const: 5 })),
+    /#\/components\/schemas\/Broken: literal 5 contradicts type "string"/)
+  assert.throws(() => generateGuards(broken({ enum: ['a'], const: 'b' })), /Broken: const and enum admit no value/)
+  assert.throws(() => generateGuards(broken({ type: 'string', enum: [] })), /Broken: const and enum admit no value/)
+  assert.throws(() => generateGuards(broken({ type: 'object', properties: { a: { type: 'integer', enum: [1, 1.5] } } })),
+    /Broken\/properties\/a: literal 1.5 contradicts type "integer"/)
+  assert.throws(() => generateGuards(broken({ type: ['string'], enum: ['a', null] })), /literal null contradicts/)
+  assert.doesNotThrow(() => generateGuards(broken({ type: ['string', 'null'], enum: ['a', null] })))
+})
+
+test('refuses module names that collide on a case-insensitive file system', () => {
+  const document = spec({ '/x': { get: operation('get_v1_x', ref('Item')) } }, { Item: { type: 'string' }, ITEM: { type: 'string' } })
+  assert.throws(() => generateGuards(document), /case-insensitive/)
 })
