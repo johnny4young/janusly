@@ -211,8 +211,8 @@ export function BuilderSidebar({
               onClick={() => { void runAction('save', onSave) }}
               disabled={busyAction !== null || !permissions.includes('workflows.write')}
               aria-busy={busyAction === 'save'}
-              title={t('sidebar.action.save')}
-              aria-label={t('sidebar.action.save')}
+              title={t('common.save')}
+              aria-label={t('common.save')}
             >
               {busyAction === 'save'
                 ? <Loader2 size={13} className="we-spin" aria-hidden="true" />

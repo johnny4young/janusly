@@ -316,10 +316,10 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
                 onClick={() => saveRole(role)}
                 disabled={!canWrite || savingRole === role.name}
                 loading={savingRole === role.name}
-                loadingLabel={t("permissions.save")}
+                loadingLabel={t("common.save")}
                 leadingIcon={<Save size={14} />}
               >
-                {t("permissions.save")}
+                {t("common.save")}
               </Button>
               {role.isBuiltin && role.isOverride && (
                 <Button
@@ -341,7 +341,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
                   aria-label={t("permissions.deleteAria", { role: role.name })}
                   leadingIcon={<Trash2 size={14} />}
                 >
-                  {t("permissions.delete")}
+                  {t("common.delete")}
                 </Button>
               )}
             </footer>

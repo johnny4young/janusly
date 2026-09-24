@@ -201,7 +201,7 @@ export function RunHistoryList({
           <AlertCircle size={15} aria-hidden="true" />
           <span>{t('rightPanel.runs.historyLoadError')}</span>
           <Button size="sm" onClick={() => setRetryNonce(value => value + 1)}>
-            <RefreshCcw size={12} aria-hidden="true" /> {t('rightPanel.runs.historyRetry')}
+            <RefreshCcw size={12} aria-hidden="true" /> {t('common.retry')}
           </Button>
         </div>
       )}

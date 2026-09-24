@@ -245,7 +245,7 @@ export function ReplayLabDialog({
           {step.kind === 'idle' && (
             <>
               <Button variant="secondary" type="button"  onClick={onClose}>
-                {t('replayLab.cancel')}
+                {t('common.cancel')}
               </Button>
               <Button variant="primary"
                 ref={primaryRef}
@@ -277,13 +277,13 @@ export function ReplayLabDialog({
               onClick={onClose}
               data-testid="replay-lab-close-done"
             >
-              {t('replayLab.closeButton')}
+              {t('common.close')}
             </Button>
           )}
           {step.kind === 'error' && (
             <>
               <Button variant="secondary" type="button"  onClick={onClose}>
-                {t('replayLab.closeButton')}
+                {t('common.close')}
               </Button>
               <Button variant="primary"
                 ref={primaryRef}
@@ -292,7 +292,7 @@ export function ReplayLabDialog({
                 onClick={() => setStep({ kind: 'idle' })}
               >
                 <RefreshCcw size={14} aria-hidden="true" />
-                {t('replayLab.retry')}
+                {t('common.retry')}
               </Button>
             </>
           )}

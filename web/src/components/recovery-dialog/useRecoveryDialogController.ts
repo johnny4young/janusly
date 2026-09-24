@@ -35,6 +35,8 @@ const VALIDATION_POLL_INTERVAL_MS = 1500
 // or retry — the validation run itself is unaffected.
 const VALIDATION_POLL_DEADLINE_MS = 5 * 60 * 1000
 
+const errorMessage = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback
+
 export type RecoveryDialogProps = {
   dlq: DeadLetter
   onClose: () => void
@@ -104,15 +106,17 @@ export function useRecoveryDialogController({
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
-  const busy = step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating' || step.kind === 'cancelling'
   const validationRequestPendingRef = useRef(false)
+  const suggestionRequestPendingRef = useRef(false)
   const [matchingPlaybook, setMatchingPlaybook] = useState<RecoveryPlaybookSummary | null>(null)
   const [playbookBusy, setPlaybookBusy] = useState<'use' | 'retire' | null>(null)
+  const busy = step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating' || step.kind === 'cancelling' || playbookBusy !== null
 
   // Only entering a fresh review releases the synchronous request claim.
   // Keep it held across the request → polling transition.
   const enterReview = (suggestion: PatchSuggestion) => {
     validationRequestPendingRef.current = false
+    setSelectedSuggestionIndex(0)
     setStep({ kind: 'review', suggestion })
   }
 
@@ -212,6 +216,7 @@ export function useRecoveryDialogController({
         setStep({
           kind: 'error',
           message: runtimeT('recoveryDialog.errors.validationTimedOut'),
+          suggestion: step.suggestion,
         })
         return
       }
@@ -271,7 +276,8 @@ export function useRecoveryDialogController({
         if (cancelled) return
         setStep({
           kind: 'error',
-          message: error instanceof Error ? error.message : (runtimeT('recoveryDialog.errors.validationPolling')),
+          message: errorMessage(error, runtimeT('recoveryDialog.errors.validationPolling')),
+          suggestion: step.suggestion,
         })
       }
     }
@@ -284,6 +290,8 @@ export function useRecoveryDialogController({
   }, [dlq.id, dlq.nodeId, step])
 
   const generateSuggestion = async () => {
+    if (suggestionRequestPendingRef.current) return
+    suggestionRequestPendingRef.current = true
     setStep({ kind: 'loading' })
     try {
       const result = await api('/ai/patch-workflow', {
@@ -295,18 +303,20 @@ export function useRecoveryDialogController({
         expectedFailureSignature: priorFailureSignature,
       })
       if (!normalised) throw new Error(runtimeT('api.error.malformedResponse'))
-      setSelectedSuggestionIndex(0)
       enterReview(normalised)
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.suggestionRequest')),
+        message: errorMessage(error, t('recoveryDialog.errors.suggestionRequest')),
       })
+    } finally {
+      suggestionRequestPendingRef.current = false
     }
   }
 
   const loadMatchingPlaybook = async () => {
-    if (!matchingPlaybook) return
+    if (!matchingPlaybook || suggestionRequestPendingRef.current) return
+    suggestionRequestPendingRef.current = true
     setPlaybookBusy('use')
     try {
       const result = await api(`/recovery/playbooks/${encodeURIComponent(matchingPlaybook.id)}/use`, {
@@ -319,17 +329,18 @@ export function useRecoveryDialogController({
         expectedPlaybookId: matchingPlaybook.id,
       })
       if (!suggestion) throw new Error(runtimeT('api.error.malformedResponse'))
-      setSelectedSuggestionIndex(0)
       enterReview(suggestion)
     } catch (error) {
-      setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.useFailed')) })
+      setStep({ kind: 'error', message: errorMessage(error, t('recoveryDialog.playbook.useFailed')) })
     } finally {
       setPlaybookBusy(null)
+      suggestionRequestPendingRef.current = false
     }
   }
 
   const retireMatchingPlaybook = async () => {
-    if (!matchingPlaybook) return
+    if (!matchingPlaybook || suggestionRequestPendingRef.current) return
+    suggestionRequestPendingRef.current = true
     setPlaybookBusy('retire')
     try {
       await api(`/recovery/playbooks/${encodeURIComponent(matchingPlaybook.id)}/retire`, {
@@ -339,9 +350,10 @@ export function useRecoveryDialogController({
       setMatchingPlaybook(null)
       bumpPlatformVersion()
     } catch (error) {
-      setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.retireFailed')) })
+      setStep({ kind: 'error', message: errorMessage(error, t('recoveryDialog.playbook.retireFailed')) })
     } finally {
       setPlaybookBusy(null)
+      suggestionRequestPendingRef.current = false
     }
   }
 
@@ -352,21 +364,27 @@ export function useRecoveryDialogController({
     if (!selected) return
     validationRequestPendingRef.current = true
     setStep({ kind: 'validating', suggestion, selectedIndex: safeSelectedIndex, runId: null })
+    const requestSignal = AbortSignal.timeout(60_000)
     try {
       const result = await api('/dlq/validate-fix', {
         method: 'POST',
+        signal: requestSignal,
         body: JSON.stringify({
           deadLetterId: dlq.id,
           suggestedWorkflow: selected.workflow,
           ...(suggestion.playbook ? { recoveryPlaybookId: suggestion.playbook.id } : {}),
         }),
       }) as { runId?: unknown } | null
+      if (requestSignal.aborted) throw requestSignal.reason
       if (typeof result?.runId !== 'string' || !result.runId) throw new Error(runtimeT('api.error.malformedResponse'))
       setStep({ kind: 'validating', suggestion, selectedIndex: safeSelectedIndex, runId: result.runId })
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.validationRequest')),
+        message: requestSignal.aborted
+          ? t('recoveryDialog.errors.validationTimedOut')
+          : errorMessage(error, t('recoveryDialog.errors.validationRequest')),
+        suggestion,
       })
     }
   }
@@ -429,6 +447,7 @@ export function useRecoveryDialogController({
       // replay throws — without this, a save+replay sequence that fails
       // at replay leaves panels stale until a manual refresh.
       bumpPlatformVersion()
+      let applyOutcome: { runId?: string; cluster?: ClusterApplyResult }
       if (isClusterMode) {
         // Bulk replay — one save above + N replays in series. The route
         // re-validates each row's signature server-side so a stale
@@ -449,61 +468,26 @@ export function useRecoveryDialogController({
             } : {}),
           }),
         }) as ClusterApplyResult
-        bumpPlatformVersion()
-        // Operator → system feedback: Apply succeeded, so the operator
-        // accepted this approach for THIS workflow. Future patch
-        // suggestions for the same workflow will see this as accepted.
-        // Passing `rationale` lets the api seed a `patch_rationale`
-        // memory entry alongside the standard `recovery_rationale`.
-        // Fire-and-forget: a feedback-write failure must not block the UX.
-        const feedbackRecorded = await recordFeedback({
-          deadLetterId: dlq.id,
-          suggestionMode: suggestion.mode,
-          approachLabel: selected.approachLabel,
-          accepted: true,
-          rationale: selected.rationale,
-          rawConfidence: suggestion.mode === 'playbook' ? undefined : selected.confidence,
-        })
-        setStep({
-          kind: 'applied',
-          cluster: result,
-          appliedWorkflowId,
-          appliedVersion,
-          priorFailureSignature,
-          preSaveBeforeSnapshot,
-          playbookUsePending: Boolean(suggestion.playbook),
-          ...(!suggestion.playbook && feedbackRecorded && sourceWorkflowVersionId ? {
-            playbookPromotionSource: {
-              deadLetterId: dlq.id,
-              validationRunId,
-              sourceWorkflowVersionId,
-              defaultTitle: t('recoveryDialog.playbook.defaultTitle', { nodeId: dlq.nodeId }),
-              defaultInstructions: selected.rationale,
-            },
-          } : {}),
-        })
-        return
+        applyOutcome = { cluster: result }
+      } else {
+        // Replay the applied fix, not the original failed snapshot.
+        const replay = await api('/dlq/replay', {
+          method: 'POST',
+          body: JSON.stringify({
+            deadLetterId: dlq.id,
+            suggestedWorkflow: selected.workflow,
+            ...(suggestion.playbook ? {
+              recoveryPlaybookId: suggestion.playbook.id,
+              recoveryValidationRunId: validationRunId,
+            } : {}),
+          }),
+        }) as { runId?: string }
+        applyOutcome = { runId: replay.runId }
+        addToast(t('toasts.deadLetterReplayed'), 'success')
       }
-      // Replay against the applied fix (not the original failed snapshot) so
-      // the run actually recovers — the API validates it through the same gate
-      // as the sandbox and writes it as the run's authoritative workflow.
-      const replay = await api('/dlq/replay', {
-        method: 'POST',
-        body: JSON.stringify({
-          deadLetterId: dlq.id,
-          suggestedWorkflow: selected.workflow,
-          ...(suggestion.playbook ? {
-            recoveryPlaybookId: suggestion.playbook.id,
-            recoveryValidationRunId: validationRunId,
-          } : {}),
-        }),
-      }) as { runId?: string }
       bumpPlatformVersion()
-      addToast(t('toasts.deadLetterReplayed'), 'success')
-      // Operator → system feedback: same as cluster mode above. The
-      // `rationale` here seeds the `patch_rationale` memory kind so
-      // future similar failures recall the LLM's explanation, not just
-      // the approachLabel.
+      // Both apply modes make the same operator decision durable. A feedback
+      // failure cannot undo the workflow save or the production replay.
       const feedbackRecorded = await recordFeedback({
         deadLetterId: dlq.id,
         suggestionMode: suggestion.mode,
@@ -514,7 +498,7 @@ export function useRecoveryDialogController({
       })
       setStep({
         kind: 'applied',
-        runId: replay.runId,
+        ...applyOutcome,
         appliedWorkflowId,
         appliedVersion,
         priorFailureSignature,
@@ -533,7 +517,7 @@ export function useRecoveryDialogController({
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.applyFailed')),
+        message: errorMessage(error, t('recoveryDialog.errors.applyFailed')),
       })
     }
   }
@@ -562,7 +546,7 @@ export function useRecoveryDialogController({
   const backFromCancelling = () => {
     if (step.kind !== 'cancelling') return
     if (step.sourceStep === 'review') {
-      enterReview(step.suggestion)
+      setStep({ kind: 'review', suggestion: step.suggestion })
     } else if (step.sourceStep === 'validated') {
       setStep({ kind: 'validated', suggestion: step.suggestion, selectedIndex: step.selectedIndex, runId: step.runId ?? '' })
     } else {
@@ -575,19 +559,22 @@ export function useRecoveryDialogController({
 
   // Every dialog decision is labeled: a rejection writes the feedback row
   // before closing.
+  const rejectSuggestion = (suggestion: PatchSuggestion, index: number, comment?: string) => {
+    const selected = suggestion.suggestions[index]
+    if (!selected) return
+    void recordFeedback({
+      deadLetterId: dlq.id,
+      suggestionMode: suggestion.mode,
+      approachLabel: selected.approachLabel,
+      accepted: false,
+      comment,
+      rawConfidence: suggestion.mode === 'playbook' ? undefined : selected.confidence,
+    })
+  }
+
   const submitRejection = (comment: string) => {
     if (step.kind !== 'cancelling') return
-    const selected = step.suggestion.suggestions[step.selectedIndex]
-    if (selected) {
-      void recordFeedback({
-        deadLetterId: dlq.id,
-        suggestionMode: step.suggestion.mode,
-        approachLabel: selected.approachLabel,
-        accepted: false,
-        comment: comment.length > 0 ? comment : undefined,
-        rawConfidence: step.suggestion.mode === 'playbook' ? undefined : selected.confidence,
-      })
-    }
+    rejectSuggestion(step.suggestion, step.selectedIndex, comment || undefined)
     onClose()
   }
 
@@ -598,21 +585,20 @@ export function useRecoveryDialogController({
   // rejected it outright."
   const iterateAfterValidationFailure = () => {
     if (step.kind !== 'validation-failed') return
-    const selected = step.suggestion.suggestions[step.selectedIndex]
-    if (selected) {
-      void recordFeedback({
-        deadLetterId: dlq.id,
-        suggestionMode: step.suggestion.mode,
-        approachLabel: selected.approachLabel,
-        accepted: false,
-        comment: 'validation_failed',
-        rawConfidence: step.suggestion.mode === 'playbook' ? undefined : selected.confidence,
-      })
-    }
+    rejectSuggestion(step.suggestion, step.selectedIndex, 'validation_failed')
     void generateSuggestion()
   }
 
-  const retry = () => setStep({ kind: 'idle' })
+  // A failed or ambiguous validation must not silently spend another AI call.
+  // Return to the same patch for an explicit review and validation decision.
+  const retry = () => {
+    if (step.kind === 'error' && step.suggestion) {
+      validationRequestPendingRef.current = false
+      setStep({ kind: 'review', suggestion: step.suggestion })
+      return
+    }
+    setStep({ kind: 'idle' })
+  }
 
   return {
     dlq,

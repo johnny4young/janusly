@@ -157,7 +157,7 @@ function ScopedRecoveryDeltaCard({ workflowId, afterVersion, priorFailureSignatu
           <AlertCircle size={14} aria-hidden="true" /> {t('recoveryDelta.errorMessage', { detail: state.message })}
         </span>
         <Button size="sm" onClick={() => setRetryNonce((n) => n + 1)}>
-          {t('recoveryDelta.retry')}
+          {t('common.retry')}
         </Button>
       </div>
     )

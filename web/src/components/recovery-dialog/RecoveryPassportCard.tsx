@@ -90,7 +90,7 @@ export function RecoveryPassportCard({
           <dt>{t('recoveryDialog.passport.risk')}</dt>
           <dd>{selected.safety
             ? t(selected.safety.writeSide ? 'recoveryDialog.passport.writeSide' : 'recoveryDialog.passport.readSide')
-            : t('recoveryDialog.passport.unknown')}</dd>
+            : t('common.unknown')}</dd>
         </div>
         <div>
           <dt>{t('recoveryDialog.passport.approval')}</dt>

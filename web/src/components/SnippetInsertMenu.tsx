@@ -220,7 +220,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
             type="button"
             className="we-shortcuts-close"
             onClick={onClose}
-            aria-label={t('snippets.menu.cancel')}
+            aria-label={t('common.cancel')}
           >
             <X size={16} aria-hidden="true" />
           </button>

@@ -420,7 +420,7 @@ function MembersPanelForOrganization() {
                 leadingIcon={<RefreshCw size={14} />}
                 onClick={() => void load()}
               >
-                {t('members.list.retry')}
+                {t('common.retry')}
               </Button>
             )}
           />
@@ -578,7 +578,7 @@ function MembersPanelForOrganization() {
                   leadingIcon={<RefreshCw size={14} />}
                   onClick={() => void loadInvitations()}
                 >
-                  {t('members.list.retry')}
+                  {t('common.retry')}
                 </Button>
               )}
             />

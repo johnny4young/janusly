@@ -112,7 +112,7 @@ export function RunHistoryComparisonDialog({
             type="button"
             className="run-input-dialog__close"
             onClick={onClose}
-            aria-label={t('runHistoryComparison.close')}
+            aria-label={t('common.close')}
           >
             <X size={16} aria-hidden="true" />
           </button>
@@ -142,7 +142,7 @@ export function RunHistoryComparisonDialog({
               <div>
                 <span>{t('runHistoryComparison.error')}</span>
                 <Button size="sm" onClick={() => setRetryNonce(value => value + 1)}>
-                  <RefreshCcw size={12} aria-hidden="true" /> {t('runHistoryComparison.retry')}
+                  <RefreshCcw size={12} aria-hidden="true" /> {t('common.retry')}
                 </Button>
               </div>
             </div>
@@ -173,7 +173,7 @@ export function RunHistoryComparisonDialog({
 
         <footer className="run-input-dialog__footer">
           <Button variant="secondary" type="button"  onClick={onClose}>
-            {t('runHistoryComparison.close')}
+            {t('common.close')}
           </Button>
         </footer>
       </div>

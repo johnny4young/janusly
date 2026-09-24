@@ -74,7 +74,7 @@ export function ExperimentSummaryDetail({
                     <tr key={side}>
                       <th scope="row">{t(`experiments.arm.${side}`)}</th>
                       <td>{formatPercent(sideSummary.meanScore * 100)}</td>
-                      <td>{sideSummary.costKnownCount > 0 ? formatCurrency(sideSummary.totalCostUsd) : t('experiments.metric.unknown')}</td>
+                      <td>{sideSummary.costKnownCount > 0 ? formatCurrency(sideSummary.totalCostUsd) : t('common.unknown')}</td>
                       <td>{t('experiments.metric.latency', { value: Math.round(sideSummary.meanLatencyMs) })}</td>
                       <td data-severity={sideSummary.errorCount > 0 ? 'danger' : 'healthy'}>{sideSummary.errorCount}</td>
                       <td>{sideSummary.judgedByLlmCount}</td>

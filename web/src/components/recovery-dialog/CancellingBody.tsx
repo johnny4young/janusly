@@ -108,7 +108,7 @@ export function CancellingBody({
         </button>
         <div className="we-recovery-cancelling__primary">
           <Button variant="secondary" type="button"  onClick={onBack}>
-            {t('recoveryDialog.cancelling.back')}
+            {t('common.back')}
           </Button>
           <Button variant="primary"
             type="button"

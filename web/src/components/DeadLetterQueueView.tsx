@@ -179,7 +179,7 @@ export function DeadLetterQueueView({
               {selectionMode ? t('dlq.selectDone') : t('dlq.selectRows')}
             </Button>
           )}
-          <Button size="sm" onClick={actions.refresh}>{t('dlq.refresh')}</Button>
+          <Button size="sm" onClick={actions.refresh}>{t('common.refresh')}</Button>
         </div>
       </div>
 
@@ -541,7 +541,7 @@ export function DeadLetterQueueView({
               disabled={loadingMore}
               data-testid="dlq-load-more"
             >
-              {loadingMore ? t('dlq.loadingMore') : t('dlq.loadMore')}
+              {loadingMore ? t('common.loading') : t('dlq.loadMore')}
             </Button>
           )}
           </>

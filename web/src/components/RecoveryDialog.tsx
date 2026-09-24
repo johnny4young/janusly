@@ -20,8 +20,9 @@
  *   7. **Applying** — `POST /workflows/save` followed
  *      by `POST /dlq/replay` (the production replay) chained together.
  *   8. **Applied** — success ribbon + production replay run id.
- *   9. **Error** — surfaces a transport / unexpected failure with a
- *      Retry button that re-enters Idle.
+ *   9. **Error** — surfaces a transport / unexpected failure. Validation
+ *      errors return to the same patch for explicit review; other errors
+ *      offer Retry to re-enter Idle.
  *
  * Reuses the `run-input-*` modal CSS tokens from the run-input dialog
  * (same-shape modal). The Apply button is disabled when the suggestion

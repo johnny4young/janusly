@@ -287,7 +287,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
             onClick={onToggleCompare}
             leadingIcon={<GitCompare size={12} />}
           >
-            {compareMode ? t('versionHistory.cancelCompare') : t('versionHistory.compare')}
+            {compareMode ? t('common.cancel') : t('versionHistory.compare')}
           </Button>
         )}
       </div>

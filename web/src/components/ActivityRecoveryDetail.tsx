@@ -231,7 +231,7 @@ export function ActivityRecoveryDetail({
             onClick={() => { void runMutation('replay') }}
           >
             <RefreshCcw size={12} aria-hidden="true" />
-            {t('dlq.action.retry')}
+            {t('common.retry')}
           </Button>
         )}
         {canResolve && (

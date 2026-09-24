@@ -242,7 +242,7 @@ export function MultiAgentTimeline({
           disabled={loadingOlder}
           onClick={handleLoadOlder}
         >
-          {loadingOlder ? t('multiAgent.loading') : t('multiAgent.loadOlder')}
+          {loadingOlder ? t('common.loading') : t('multiAgent.loadOlder')}
         </button>
       )}
 

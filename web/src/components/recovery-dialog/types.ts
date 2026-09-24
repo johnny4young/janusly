@@ -155,4 +155,4 @@ export type Step =
       playbookPromotionSource?: RecoveryPlaybookPromotionSource
       playbookUsePending?: boolean
     }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; suggestion?: PatchSuggestion }

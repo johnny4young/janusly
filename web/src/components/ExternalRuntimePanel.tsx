@@ -272,7 +272,7 @@ export function ExternalRuntimePanel({ canWrite }: { canWrite: boolean }) {
             }}
           >
             {showForm ? <X size={14} aria-hidden /> : <Plus size={14} aria-hidden />}
-            {t(showForm ? 'externalRuntime.action.cancel' : 'externalRuntime.action.new')}
+            {t(showForm ? 'common.cancel' : 'externalRuntime.action.new')}
           </Button>
         )}
       </div>
@@ -398,7 +398,7 @@ export function ExternalRuntimePanel({ canWrite }: { canWrite: boolean }) {
 
                         onClick={() => void remove(connection)}
                       >
-                        <Trash2 size={13} aria-hidden /> {t('externalRuntime.action.delete')}
+                        <Trash2 size={13} aria-hidden /> {t('common.delete')}
                       </Button>
                     )}
                   </div>

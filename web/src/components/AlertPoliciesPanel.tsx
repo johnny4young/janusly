@@ -721,7 +721,7 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
 
               onClick={cancelForm}
             >
-              {t('alerts.form.cancel')}
+              {t('common.cancel')}
             </Button>
           </div>
         </div>
@@ -757,7 +757,7 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
 
                   onClick={() => startEdit(policy)}
                   disabled={!canWrite}
-                  aria-label={t('alerts.action.edit')}
+                  aria-label={t('common.edit')}
                   data-testid="alert-policy-edit"
                 >
                   <Pencil size={14} />
@@ -778,7 +778,7 @@ export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } =
 
                   onClick={() => deletePolicy(policy)}
                   disabled={!canWrite}
-                  aria-label={t('alerts.action.delete')}
+                  aria-label={t('common.delete')}
                 >
                   <Trash2 size={14} />
                 </Button>

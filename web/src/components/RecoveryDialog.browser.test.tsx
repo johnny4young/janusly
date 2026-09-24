@@ -129,8 +129,8 @@ describe('<RecoveryDialog /> keyboard focus (Chromium)', () => {
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
     fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent('validation transport failed')
-    fireEvent.click(screen.getByRole('button', { name: /Retry/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Review patch/i }))
+    expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/ai/patch-workflow')).toHaveLength(1)
     fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
     expect(validationRequests).toBe(2)
   })
@@ -147,5 +147,34 @@ describe('<RecoveryDialog /> keyboard focus (Chromium)', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/unreadable response/i)
     expect(screen.getByRole('button', { name: /Close recovery dialog/i })).toBeEnabled()
+  })
+
+  it('recovers when the validation start request never answers', async () => {
+    const deadline = new AbortController()
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal)
+    try {
+      vi.mocked(api).mockImplementation((path: string, options?: RequestInit) => {
+        if (path === '/ai/patch-workflow') return Promise.resolve(suggestion)
+        if (path === '/dlq/validate-fix') return new Promise((_, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(new DOMException('Request cancelled', 'AbortError')), { once: true })
+        })
+        return Promise.resolve({ ok: true })
+      })
+
+      render(<RecoveryDialog dlq={dlq} onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+      fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
+      expect(screen.getByRole('button', { name: /Close recovery dialog/i })).toBeDisabled()
+      deadline.abort(new DOMException('Validation start timed out', 'TimeoutError'))
+      expect(await screen.findByRole('alert')).toHaveTextContent(/check Runs.*before retrying/i)
+      expect(screen.getByRole('button', { name: /Close recovery dialog/i })).toBeEnabled()
+      expect(timeout).toHaveBeenCalledWith(60_000)
+      fireEvent.click(screen.getByRole('button', { name: /Review patch/i }))
+      expect(await screen.findByRole('button', { name: /Validate in sandbox/i })).toBeEnabled()
+      expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/ai/patch-workflow')).toHaveLength(1)
+      expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/dlq/validate-fix')).toHaveLength(1)
+    } finally {
+      timeout.mockRestore()
+    }
   })
 })

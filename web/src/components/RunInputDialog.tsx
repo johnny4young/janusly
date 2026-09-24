@@ -240,7 +240,7 @@ export function RunInputDialog({
                       }}
                       leadingIcon={<Trash2 size={13} />}
                     >
-                      {t('runInput.presets.delete')}
+                      {t('common.delete')}
                     </Button>
                   )}
                 </div>
@@ -318,7 +318,7 @@ export function RunInputDialog({
 
           <footer className="run-input-dialog__footer">
             <Button variant="secondary" onClick={handleCancel} disabled={submitting}>
-              {t('runInput.cancel')}
+              {t('common.cancel')}
             </Button>
             <Button
               type="submit"

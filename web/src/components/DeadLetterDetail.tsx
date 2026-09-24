@@ -104,7 +104,7 @@ export function DeadLetterDetail({
                 disabled={closing || selected.status === 'replayed' || replayingIds.has(selected.id)}
                 onClick={() => { void actions.replaySelected() }}
               >
-                <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
+                <span>{t('common.retry')}</span><kbd aria-hidden="true">R</kbd>
               </Button>
             )}
             {canResolve && (

@@ -35,22 +35,22 @@ export function RecoveryDialogFooter({ model }: { model: RecoveryDialogModel }) 
       break
     case 'error':
       action = model.retry
-      label = t('recoveryDialog.footer.retry')
+      label = step.suggestion ? t('recoveryDialog.footer.reviewPatch') : t('common.retry')
       break
     case 'applied':
       action = onClose
-      label = t('recoveryDialog.footer.close')
+      label = t('common.close')
   }
   return (
     <footer className="run-input-dialog__footer">
       {(canCancel || step.kind === 'idle' || step.kind === 'error') && (
-        <Button variant="secondary" onClick={canCancel ? model.startCancelling : onClose}>
-          {t(step.kind === 'error' ? 'recoveryDialog.footer.close' : 'recoveryDialog.footer.cancel')}
+        <Button variant="secondary" onClick={canCancel ? model.startCancelling : onClose} disabled={busy}>
+          {t(step.kind === 'error' ? 'common.close' : 'common.cancel')}
         </Button>
       )}
       {action && (
         <Button variant="primary" ref={primaryRef} onClick={action} leadingIcon={Icon && <Icon size={14} aria-hidden="true" />}
-          disabled={patchDecision && !canApplyPatch}
+          disabled={(patchDecision && !canApplyPatch) || (step.kind === 'idle' && model.playbookBusy !== null)}
           title={step.kind === 'review' && !canApplyPatch ? t('recoveryDialog.footer.applyDisabledReason') : undefined}>
           {label}
         </Button>

@@ -219,7 +219,7 @@ export function AuditLogPanel() {
               onClick={loadMore}
               disabled={loadingMore}
             >
-              {loadingMore ? t("audit.loadingMore") : t("audit.loadMore")}
+              {loadingMore ? t('common.loading') : t('audit.loadMore')}
             </Button>
           )}
         </>

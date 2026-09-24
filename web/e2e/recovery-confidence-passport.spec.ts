@@ -286,7 +286,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(playbookMatch).toBeVisible()
   await expect(playbookMatch).toContainText('never runs automatically')
   await captureElement(playbookMatch, 'web-en-recovery-playbook-match')
-  await page.getByRole('button', { name: 'Use and revalidate', exact: true }).click()
+  await page.getByRole('button', { name: 'Review playbook patch', exact: true }).click()
   const playbookReview = page.getByTestId('recovery-playbook-revalidation')
   await expect(playbookReview).toBeVisible()
   await expect(page.getByRole('button', { name: /Apply validated fix/i })).toHaveCount(0)
@@ -368,7 +368,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(retireConfirm).toContainText('¿Retirar este playbook?')
   await captureElement(retireConfirm, 'web-es-recovery-playbook-retire-confirm')
   await page.getByRole('button', { name: 'Mantener activo', exact: true }).click()
-  await page.getByRole('button', { name: 'Usar y volver a validar', exact: true }).click()
+  await page.getByRole('button', { name: 'Revisar parche del playbook', exact: true }).click()
   const spanishPlaybookReview = page.getByTestId('recovery-playbook-revalidation')
   await expect(spanishPlaybookReview).toContainText('ejecuta el sandbox actual')
   await captureElement(spanishPlaybookReview, 'web-es-recovery-playbook-revalidation')
@@ -409,7 +409,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
     playbook: { status: 'active' },
   })
   await expect(page.getByTestId('recovery-playbook-match')).toBeVisible({ timeout: 30_000 })
-  await page.getByRole('button', { name: 'Usar y volver a validar', exact: true }).click()
+  await page.getByRole('button', { name: 'Revisar parche del playbook', exact: true }).click()
   await expect(page.getByTestId('recovery-playbook-revalidation')).toBeVisible()
 
   // The backend regression transition is covered against real Postgres in

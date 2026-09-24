@@ -426,7 +426,7 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
       )}
 
       {loading ? (
-        <LoadingSkeleton rows={3} label={t('mcpConnections.list.loading')} />
+        <LoadingSkeleton rows={3} label={t('common.loading')} />
       ) : connections.length === 0 ? (
         <p className="helper-text">{t('mcpConnections.list.empty')}</p>
       ) : (

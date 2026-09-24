@@ -258,7 +258,7 @@ export const FlowRow = memo(function FlowRow({
                 onClick={(event) => { event.stopPropagation(); void deleteWorkflow(workflow.id) }}
                 data-testid={`workflows-delete-confirm-${workflow.id}`}
               >
-                {t('workflowsDashboard.confirmDeleteCta')}
+                {t('common.delete')}
               </Button>
               <Button
                 size="sm"
@@ -266,7 +266,7 @@ export const FlowRow = memo(function FlowRow({
                
                 onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(null) }}
               >
-                {t('workflowsDashboard.cancelAction')}
+                {t('common.cancel')}
               </Button>
             </span>
           ) : (
