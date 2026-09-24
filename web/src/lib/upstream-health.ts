@@ -150,21 +150,6 @@ export const UpstreamHealthSourceConfigSchema = /* @__PURE__ */ z.object({
   enabled: z._default(z.boolean(), true),
 })
 
-/** POST body for create/update — the config plus an optional id for upsert. */
-export const UpsertUpstreamHealthSourceBodySchema = /* @__PURE__ */ z.object({
-  source: UpstreamHealthSourceConfigSchema,
-})
-
-/**
- * The `workflow_versions.upstreamHealthSources` tag list — a bounded array of
- * source names a workflow subscribes to. Lives on its own column (not the DAG
- * JSON), so the save route validates the raw save-body field against this
- * schema. Capped at the same `MAX_EXPECTED_COMPONENTS` to bound the row size.
- */
-export const UpstreamHealthSourceTagsSchema = /* @__PURE__ */ z
-  .array(z.string().check(z.trim(), z.minLength(1), z.maxLength(80)))
-  .check(z.maxLength(MAX_EXPECTED_COMPONENTS))
-
 // ---------- feed parsing (PURE) ----------
 
 /**

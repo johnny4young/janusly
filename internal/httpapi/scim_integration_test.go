@@ -4,6 +4,9 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,8 +14,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/johnny4young/janusly/internal/httpapi/scim"
 )
 
 // The full WorkOS Directory Sync lifecycle against fixtures — never a real
@@ -72,7 +73,7 @@ func TestScimDirectorySyncLifecycle(t *testing.T) {
 		return string(payload)
 	}
 	deliver := func(body string) map[string]any {
-		status, parsed := post(body, scim.SignWebhookHeader(secret, body, time.Now().UnixMilli()))
+		status, parsed := post(body, signScimWebhookHeader(secret, body, time.Now().UnixMilli()))
 		if status != 200 {
 			t.Fatalf("delivery must 200: %d %+v (body %s)", status, parsed, body)
 		}
@@ -97,11 +98,11 @@ func TestScimDirectorySyncLifecycle(t *testing.T) {
 	if status, _ := post(probe, ""); status != 401 {
 		t.Fatalf("missing signature must 401: %d", status)
 	}
-	if status, _ := post(probe, scim.SignWebhookHeader("wrong-secret", probe, time.Now().UnixMilli())); status != 401 {
+	if status, _ := post(probe, signScimWebhookHeader("wrong-secret", probe, time.Now().UnixMilli())); status != 401 {
 		t.Fatalf("wrong secret must 401: %d", status)
 	}
 	stale := time.Now().Add(-10 * time.Minute).UnixMilli()
-	if status, _ := post(probe, scim.SignWebhookHeader(secret, probe, stale)); status != 401 {
+	if status, _ := post(probe, signScimWebhookHeader(secret, probe, stale)); status != 401 {
 		t.Fatalf("stale timestamp must 401: %d", status)
 	}
 	var signatureAudits int
@@ -339,4 +340,11 @@ func TestScimDirectorySyncLifecycle(t *testing.T) {
 	})); parsed["action"] != "provisioned" {
 		t.Fatalf("re-attach must absorb the scim-owned row: %+v", parsed)
 	}
+}
+
+// signScimWebhookHeader produces the WorkOS-Signature header the receiver accepts.
+func signScimWebhookHeader(secret, body string, atMs int64) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = fmt.Fprintf(mac, "%d.%s", atMs, body)
+	return fmt.Sprintf("t=%d,v1=%s", atMs, hex.EncodeToString(mac.Sum(nil)))
 }

@@ -1,6 +1,9 @@
 package scim
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"testing"
 	"time"
@@ -43,7 +46,13 @@ func TestVerifyWorkOsSignature(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	body := `{"id":"evt_1"}`
 	secret := "whsec_test"
-	valid := SignWebhookHeader(secret, body, now.UnixMilli())
+	// Mirrors the WorkOS-Signature scheme the verifier accepts.
+	signWebhookHeader := func(secret string, atMs int64) string {
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = fmt.Fprintf(mac, "%d.%s", atMs, body)
+		return fmt.Sprintf("t=%d,v1=%s", atMs, hex.EncodeToString(mac.Sum(nil)))
+	}
+	valid := signWebhookHeader(secret, now.UnixMilli())
 
 	cases := []struct {
 		name   string
@@ -55,9 +64,9 @@ func TestVerifyWorkOsSignature(t *testing.T) {
 		{"missing header", "", secret, "missing_header"},
 		{"malformed header", "t=abc", secret, "malformed_header"},
 		{"non-hex signature", fmt.Sprintf("t=%d,v1=zz", now.UnixMilli()), secret, "malformed_header"},
-		{"expired", SignWebhookHeader(secret, body, now.Add(-6*time.Minute).UnixMilli()), secret, "expired"},
-		{"future timestamp", SignWebhookHeader(secret, body, now.Add(6*time.Minute).UnixMilli()), secret, "future_timestamp"},
-		{"wrong secret", SignWebhookHeader("other", body, now.UnixMilli()), secret, "signature_mismatch"},
+		{"expired", signWebhookHeader(secret, now.Add(-6*time.Minute).UnixMilli()), secret, "expired"},
+		{"future timestamp", signWebhookHeader(secret, now.Add(6*time.Minute).UnixMilli()), secret, "future_timestamp"},
+		{"wrong secret", signWebhookHeader("other", now.UnixMilli()), secret, "signature_mismatch"},
 	}
 	for _, c := range cases {
 		ok, reason := verifyWorkOsSignature(c.header, body, c.secret, now)

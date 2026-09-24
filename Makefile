@@ -12,7 +12,7 @@ GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || printf '%040d' 0)
 GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 
 .PHONY: dev build artifact supply-chain db-up db-down db-reset migrate generate lint test \
-	test-integration test-ha test-ha-current-db test-route-parity test-ci test-e2e test-e2e-full verify verify-current-db vuln frontend-install \
+	test-integration test-ha test-ha-current-db test-route-parity test-ci test-e2e test-e2e-full verify verify-current-db vuln deadcode frontend-install \
 	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
 	restore-local recovery-local-selftest recovery-local-drill load-soak-local-selftest \
 	qualify-oci-local qualify-private-metrics-local qualify-real-provider qualify-pagerduty
@@ -85,6 +85,10 @@ lint:
 
 vuln:
 	go tool govulncheck ./...
+
+deadcode:
+	bash scripts/deadcode-check.test.sh
+	bash scripts/deadcode-check.sh
 
 test:
 	$(MAKE) test-ci
@@ -180,6 +184,7 @@ verify-current-db:
 		exit 1; \
 	}
 	$(MAKE) lint
+	$(MAKE) deadcode
 	$(MAKE) vuln
 	$(MAKE) frontend-audit
 	$(MAKE) test

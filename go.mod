@@ -104,5 +104,6 @@ require (
 
 tool (
 	github.com/sqlc-dev/sqlc/cmd/sqlc
+	golang.org/x/tools/cmd/deadcode
 	golang.org/x/vuln/cmd/govulncheck
 )

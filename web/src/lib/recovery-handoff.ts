@@ -68,32 +68,6 @@ export const HandoffRequestBodySchema = /* @__PURE__ */ z.strictObject({
     }
   }))
 
-// ---------- dispatch outcomes ----------
-
-/**
- * Result envelope from the per-destination dispatch helper. Never thrown —
- * `ok: false` carries the upstream error message verbatim (scrubbed for
- * secret shapes by the dispatcher before persistence).
- */
-export const HandoffDispatchResultSchema = /* @__PURE__ */ z.strictObject({
-    destination: RecoveryHandoffDestinationSchema,
-    ok: z.boolean(),
-    statusCode: z.optional(z.nullable(z.int().check(z.minimum(100), z.maximum(599)))),
-    error: z.optional(z.nullable(z.string().check(z.maxLength(1000)))),
-    latencyMs: z.int().check(z.minimum(0)),
-    externalId: z.optional(z.nullable(z.string().check(z.maxLength(200)))),
-    externalUrl: z.optional(
-      z.nullable(
-        z.url().check(
-          z.maxLength(2048),
-          z.refine((v) => /^https?:\/\//i.test(v), { message: "externalUrl must be http(s)" }),
-        ),
-      ),
-    ),
-    /** Set on the second-call append branch for GitHub (commentId, etc). */
-    commentId: z.optional(z.nullable(z.string().check(z.maxLength(200)))),
-  })
-
 // ---------- idempotency key ----------
 
 /**

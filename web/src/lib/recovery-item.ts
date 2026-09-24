@@ -77,13 +77,6 @@ export type RecoveryItemResolutionReason = z.infer<typeof RecoveryItemResolution
 export const RECOVERY_ITEM_COMMENT_BODY_MAX = 4_000
 export const MAX_COMMENTS_PER_ITEM = 200
 
-export const RecoveryItemCommentSchema = /* @__PURE__ */ z.strictObject({
-  id: z.string().check(z.minLength(1), z.maxLength(64)),
-  authorUserId: z.string().check(z.minLength(1), z.maxLength(200)),
-  body: z.string().check(z.minLength(1), z.maxLength(RECOVERY_ITEM_COMMENT_BODY_MAX)),
-  createdAt: z.string().check(z.minLength(1), z.maxLength(64)), // ISO timestamp
-})
-
 // ---------- request bodies (route → repo) ----------
 
 /** Optional ISO override for the SLA target. Capped at 30 days out. */
@@ -129,18 +122,6 @@ export const CommentBodySchema = /* @__PURE__ */ z.strictObject({
 
 export const AssignOwnerBodySchema = /* @__PURE__ */ z.strictObject({
   owner: z.optional(z.nullable(z.string().check(z.minLength(1), z.maxLength(200)))),
-})
-
-// ---------- list filter ----------
-
-export const RECOVERY_ITEMS_MAX_LIMIT = 200
-
-export const ListRecoveryItemsFilterSchema = /* @__PURE__ */ z.strictObject({
-  status: z.optional(RecoveryItemStatusSchema),
-  owner: z.optional(z.string().check(z.minLength(1), z.maxLength(200))),
-  severity: z.optional(RecoveryItemSeveritySchema),
-  limit: z.optional(z.int().check(z.minimum(1), z.maximum(RECOVERY_ITEMS_MAX_LIMIT))),
-  cursorIso: z.optional(z.iso.datetime()),
 })
 
 // ---------- helpers ----------

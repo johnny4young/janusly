@@ -39,7 +39,7 @@ function shapeForType(type: WorkflowInputSchemaShape['type'], description?: stri
   return base
 }
 
-export function SchemaFieldsEditor({
+function SchemaFieldsEditor({
   scope,
   schema,
   form = false,

@@ -134,8 +134,6 @@ export const WorkflowMetadataSchema = /* @__PURE__ */ z.strictObject({
     severityDefault: z.optional(z.nullable(z.enum(RECOVERY_ITEM_SEVERITIES))),
   })
 
-export type WorkflowMetadata = z.infer<typeof WorkflowMetadataSchema>
-
 /** Body of `POST /workflows/:id/metadata`. */
 export const UpsertWorkflowMetadataBodySchema = /* @__PURE__ */ z.object({
   metadata: WorkflowMetadataSchema,
@@ -248,11 +246,3 @@ export const SetWorkflowTagBodySchema = /* @__PURE__ */ z.strictObject({
   tag: z.string().check(z.minLength(1), z.maxLength(WORKFLOW_METADATA_TAG_MAX_LENGTH)),
   op: z.enum(['add', 'remove']),
 })
-
-/** Hydrated row shape returned by the data repo + the GET route. */
-export type WorkflowMetadataRecord = WorkflowMetadata & {
-  workflowId: string
-  createdBy: string | null
-  createdAt: string
-  updatedAt: string
-}

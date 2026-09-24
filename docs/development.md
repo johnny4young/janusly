@@ -42,7 +42,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 
 `make verify` (`scripts/verify-isolated.sh`) creates a fresh PostgreSQL
 compose project, migrates twice (the second run must be a no-op), regenerates
-`schema.sql` and checks it for drift, runs `make generate` drift, lint, vuln,
+`schema.sql` and checks it for drift, runs `make generate` drift, lint, deadcode, vuln,
 Go unit, integration and two-instance HA, the web verify (`audit:ci`, lint,
 app/unit/E2E typecheck, unit, scripts, browser, build, `bundle-check`) and the
 e2e lane, then ends with
@@ -137,6 +137,15 @@ Go: `golangci-lint` with the standard set plus `bodyclose`, `depguard`,
 keeps the workflow core free of transport and persistence, forbids importing
 `internal/httpapi` from services, and keeps the feature packages under
 `internal/httpapi/*` leaves that depend on `internal/httpkit` only.
+
+Dead code: `make deadcode` runs `go tool deadcode` over every `./cmd/...`
+root and diffs the unreachable functions against
+`scripts/deadcode-allowlist.txt`, one `<import path>.<Func> # <reason>` per
+line. A new unreachable function fails with the exact line to add (or delete
+the function); an entry that is no longer reported fails as stale. It runs in
+`make verify` and the Backend CI job. On the web side, `pnpm lint` ends with
+`knip` (`web/knip.json`), which fails on unused exports, files and
+dependencies.
 
 Web: `pnpm lint` runs oxlint plus the ratchets in `web/scripts/`: i18n casts,
 CSS class ownership (every class in every stylesheet must have a production

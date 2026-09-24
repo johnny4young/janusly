@@ -120,6 +120,10 @@ jobs:
           args: --timeout=10m
       - name: Reachable vulnerabilities
         run: go tool govulncheck ./...
+      - name: Dead code inventory
+        run: |
+          bash scripts/deadcode-check.test.sh
+          bash scripts/deadcode-check.sh
       - name: Unit and race tests
         run: go test -race -timeout 15m ./...
 

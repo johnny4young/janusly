@@ -56,15 +56,6 @@ export const V1_WRITE_PATHS = {
   applyRecoveryCandidate: "/recovery/cases/{caseId}/apply",
 } as const;
 
-/** Stable MCP connection-management paths, including OpenAPI templates. */
-export const V1_MCP_PATHS = {
-  connections: "/mcp/connections",
-  connection: "/mcp/connections/{alias}",
-  rediscoverConnection: "/mcp/connections/{alias}/rediscover",
-  connectionTools: "/mcp/connections/{alias}/tools",
-  connectionTool: "/mcp/connections/{alias}/tools/{toolName}",
-} as const;
-
 const V1_READ_PATH_SET: ReadonlySet<string> = new Set(Object.values(V1_READ_PATHS));
 const V1_READ_PATH_TEMPLATES = Object.values(V1_READ_PATHS)
   .filter(path => path.includes('{'))
