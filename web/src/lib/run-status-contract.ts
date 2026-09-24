@@ -51,7 +51,7 @@ function runEvent(value: unknown, runId: string): value is RunEvent {
 export function parseRunStatusSnapshot(value: unknown, runId: string): RunStatusSnapshot | null {
   if (!isRecord(value) || !isRunSummary(value.run) || value.run.id !== runId
     || !Array.isArray(value.nodes) || !value.nodes.every(node => runNode(node, runId))
-    || !Array.isArray(value.events) || value.events.length > 500 || !value.events.every(event => runEvent(event, runId))
+    || !Array.isArray(value.events) || !value.events.every(event => runEvent(event, runId))
     || typeof value.eventsHasMore !== 'boolean'
     || !(value.eventsCursor === null || typeof value.eventsCursor === 'string')
     || (value.eventsHasMore ? !nonempty(value.eventsCursor) : value.eventsCursor !== null)) return null

@@ -23,12 +23,20 @@ describe('recovery health wire boundary', () => {
     data.delta!.p95LatencyMs = data.delta!.costPerRunUsd = null
     expect(accepts(data)).toBe(true)
   })
-  it('accepts gathering only below the terminal sample floor and with no delta', () => {
-    const data = fixture()
-    data.after.signals.totalRuns = 4
-    data.hasEnoughData = false
-    data.delta = null
-    expect(accepts(data)).toBe(true)
+  it('leaves the sample floor, sample cap and window bound to the server', () => {
+    const gathering = fixture()
+    gathering.after.signals.totalRuns = 40
+    gathering.hasEnoughData = false
+    gathering.delta = null
+    expect(accepts(gathering)).toBe(true)
+    const tuned = fixture()
+    tuned.after.signals.totalRuns = 2
+    tuned.windowDays = 90
+    tuned.delta!.score = 3
+    tuned.priorVersion!.version = 1
+    tuned.sameFailureSinceApply!.count = 9
+    tuned.sameFailureSinceApply!.sampleDeadLetterIds = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    expect(isRecoveryDelta({ ...tuned, afterVersion: 4 }, 'workflow', 4, 'signature')).toBe(true)
   })
   it.each([
     ['invalid score', (d: RecoveryDelta) => { d.before.score = 101 }],
@@ -37,13 +45,18 @@ describe('recovery health wire boundary', () => {
     ['infinite latency', (d: RecoveryDelta) => { d.after.signals.p95LatencyMs = Infinity }],
     ['negative latency', (d: RecoveryDelta) => { d.after.signals.p95LatencyMs = -1 }],
     ['fractional count', (d: RecoveryDelta) => { d.after.signals.totalRuns = 1.5 }],
-    ['inconsistent delta', (d: RecoveryDelta) => { d.delta!.score = 10 }],
+    ['delta while gathering', (d: RecoveryDelta) => { d.hasEnoughData = false }],
+    ['missing delta with enough data', (d: RecoveryDelta) => { d.delta = null }],
+    ['non-boolean sufficiency', (d: RecoveryDelta) => { (d as { hasEnoughData: unknown }).hasEnoughData = 'yes' }],
     ['nonfinite delta', (d: RecoveryDelta) => { d.delta!.costPerRunUsd = NaN }],
-    ['unbounded window', (d: RecoveryDelta) => { d.windowDays = 31 }],
+    ['empty window', (d: RecoveryDelta) => { d.windowDays = 0 }],
     ['inconsistent run totals', (d: RecoveryDelta) => { d.recentRunsAgainstAfter.running = 7 }],
     ['noncanonical prior id', (d: RecoveryDelta) => { d.priorVersion!.versionId = ' prior' }],
+    ['prior not older than applied version', (d: RecoveryDelta) => { d.priorVersion!.version = 2 }],
+    ['nonpositive prior version', (d: RecoveryDelta) => { d.priorVersion!.version = 0 }],
+    ['foreign failure signature', (d: RecoveryDelta) => { d.sameFailureSinceApply!.priorSignature = 'other' }],
     ['duplicate evidence', (d: RecoveryDelta) => { d.sameFailureSinceApply!.count = 2; d.sameFailureSinceApply!.sampleDeadLetterIds = ['id', 'id'] }],
-    ['excessive evidence', (d: RecoveryDelta) => { d.sameFailureSinceApply!.count = 6; d.sameFailureSinceApply!.sampleDeadLetterIds = ['a','b','c','d','e','f'] }],
+    ['more samples than failures', (d: RecoveryDelta) => { d.sameFailureSinceApply!.sampleDeadLetterIds = ['a', 'b'] }],
   ] as const)('rejects %s', (_label, mutate) => {
     const data = fixture()
     mutate(data)

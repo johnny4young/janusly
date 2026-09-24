@@ -30,25 +30,27 @@ function snapshot(value: unknown): value is HealthSnapshot {
     && (value.signals.p95LatencyMs === null || (finite(value.signals.p95LatencyMs) && value.signals.p95LatencyMs >= 0))
 }
 
+// Shape only: sample floors, sample caps and window bounds are server policy.
 export function isRecoveryDelta(value: unknown, workflowId: string, afterVersion: number, signature: string | null): value is RecoveryDelta {
   if (!isRecord(value) || value.workflowId !== workflowId || value.afterVersion !== afterVersion
     || !count(afterVersion) || afterVersion < 1 || afterVersion > 2147483647
-    || !count(value.windowDays) || value.windowDays < 1 || value.windowDays > 30
+    || !count(value.windowDays) || value.windowDays < 1
     || !snapshot(value.before) || !snapshot(value.after)
-    || value.hasEnoughData !== (value.after.signals.totalRuns >= 5)) return false
+    || typeof value.hasEnoughData !== 'boolean') return false
   const runs = value.recentRunsAgainstAfter
   if (!isRecord(runs) || !count(runs.totalRuns) || !count(runs.succeeded) || !count(runs.failed) || !count(runs.running)
     || runs.succeeded + runs.failed + runs.running > runs.totalRuns) return false
   const delta = value.delta
   if (value.hasEnoughData) {
-    if (!isRecord(delta) || delta.score !== value.after.score - value.before.score
+    if (!isRecord(delta) || !finite(delta.score)
       || !nullableNumber(delta.p95LatencyMs) || !nullableNumber(delta.costPerRunUsd)) return false
   } else if (delta !== null) return false
   const prior = value.priorVersion
-  if (prior !== null && (!isRecord(prior) || prior.version !== afterVersion - 1 || afterVersion === 1 || !id(prior.versionId))) return false
+  if (prior !== null && (!isRecord(prior) || !count(prior.version) || prior.version < 1
+    || prior.version >= afterVersion || !id(prior.versionId))) return false
   const failure = value.sameFailureSinceApply
   return failure === null || (isRecord(failure) && !!signature && failure.priorSignature === signature
     && count(failure.count) && Array.isArray(failure.sampleDeadLetterIds)
-    && failure.sampleDeadLetterIds.length <= Math.min(5, failure.count)
+    && failure.sampleDeadLetterIds.length <= failure.count
     && failure.sampleDeadLetterIds.every(id) && new Set(failure.sampleDeadLetterIds).size === failure.sampleDeadLetterIds.length)
 }
