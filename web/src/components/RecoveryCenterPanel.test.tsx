@@ -1801,10 +1801,16 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
 
   it('marks the mounted full metrics sample stale while impact polling continues', async () => {
     vi.useFakeTimers()
+    let metricsReads = 0
+    let releaseRefresh: (() => void) | null = null
     mockRecoveryApi(async path => {
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
-      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/recovery/metrics') {
+        metricsReads++
+        if (metricsReads > 1) await new Promise<void>(resolve => { releaseRefresh = resolve })
+        return baseMetrics
+      }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/ledger') return { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }
       if (path === '/recovery/my-wins?days=30') return { recovered: 0, windowDays: 30 }
@@ -1812,14 +1818,54 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
       if (path.startsWith('/dlq/queue?')) return { items: [] }
       throw new Error(`unexpected fetch: ${path}`)
     })
+    const fullReads = () => vi.mocked(api).mock.calls.filter(([path]) => path === '/recovery/home').length
     const view = render(<RecoveryCenterPanel {...baseProps} />)
     try {
       await act(async () => { await vi.advanceTimersByTimeAsync(0) })
       expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track')
+      expect(fullReads()).toBe(1)
       await act(async () => { await vi.advanceTimersByTimeAsync(300_000) })
       expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home?scope=impact', { signal: expect.any(AbortSignal) })
       expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Previous data')
       expect(screen.queryByLabelText('Health score 87 of 100')).not.toBeInTheDocument()
+      expect(fullReads()).toBe(2)
+      await act(async () => {
+        releaseRefresh?.()
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track')
+      expect(fullReads()).toBe(2)
+    } finally { view.unmount(); vi.useRealTimers() }
+  })
+
+  it('refreshes an aged metrics sample only once when the refresh fails', async () => {
+    vi.useFakeTimers()
+    let metricsReads = 0
+    mockRecoveryApi(async path => {
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
+      if (path === '/operations/brief') return operatorBrief()
+      if (path === '/recovery/metrics') {
+        metricsReads++
+        if (metricsReads > 1) throw new Error('offline')
+        return baseMetrics
+      }
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/recovery/ledger') return { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }
+      if (path === '/recovery/my-wins?days=30') return { recovered: 0, windowDays: 30 }
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+    const fullReads = () => vi.mocked(api).mock.calls.filter(([path]) => path === '/recovery/home').length
+    const view = render(<RecoveryCenterPanel {...baseProps} />)
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(300_000) })
+      expect(fullReads()).toBe(2)
+      await act(async () => { await vi.advanceTimersByTimeAsync(900_000) })
+      expect(fullReads()).toBe(2)
+      expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Previous data')
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
     } finally { view.unmount(); vi.useRealTimers() }
   })
 

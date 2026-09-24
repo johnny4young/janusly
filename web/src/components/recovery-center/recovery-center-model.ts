@@ -589,6 +589,8 @@ export function clusterOwnerLabel(owner: ClusterOwner): string {
 export type HomeEvidenceStatus = 'loading' | 'unavailable' | 'stale' | 'empty' | 'available'
 
 /** A loaded run page is not a historical sample; only validated metrics are. */
+export const HOME_EVIDENCE_STALE_MS = 5 * 60_000
+
 export function homeEvidenceStatus({ metrics, loading, unavailable, incomplete = false, ageMs = 0 }: {
   metrics: RecoveryMetrics | null
   loading: boolean
@@ -599,7 +601,7 @@ export function homeEvidenceStatus({ metrics, loading, unavailable, incomplete =
   if (loading || unavailable) return metrics ? 'stale' : loading ? 'loading' : 'unavailable'
   if (incomplete) return 'unavailable'
   if (!metrics) return 'loading'
-  if (ageMs >= 5 * 60_000) return 'stale'
+  if (ageMs >= HOME_EVIDENCE_STALE_MS) return 'stale'
   if (metrics.terminalRuns === 0) return 'empty'
   return readHealthScore(metrics) === null ? 'unavailable' : 'available'
 }

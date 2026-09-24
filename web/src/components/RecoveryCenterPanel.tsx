@@ -50,6 +50,7 @@ import {
   readDisplayName,
   readHealthScore,
   homeEvidenceStatus,
+  HOME_EVIDENCE_STALE_MS,
   shouldShowOnboarding,
   type ClustersResponse,
   type HeatmapDay,
@@ -190,6 +191,8 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     : null
   const [currentHour, setCurrentHour] = useState(12)
   const [nowMs, setNowMs] = useState<number | null>(null)
+  const [staleRefreshNonce, setStaleRefreshNonce] = useState(0)
+  const staleRefreshReceivedAtRef = useRef<number | null>(null)
   const [allClear, setAllClear] = useState(false)
   const [allClearDowntimeOverride, setAllClearDowntimeOverride] = useState<number | null>(null)
   const [celebrationTrigger, setCelebrationTrigger] = useState(0)
@@ -395,7 +398,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       })
 
     return () => { cancelled = true; controller.abort() }
-  }, [applyImpactSnapshot, platformVersion, resolvedOrgId, resolvedUserId])
+  }, [applyImpactSnapshot, platformVersion, resolvedOrgId, resolvedUserId, staleRefreshNonce])
 
   useEffect(() => {
     let cancelled = false
@@ -454,14 +457,25 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     ? openDeadLetters.filter((deadLetter) => !currentQueueOverview.observedOpenIds.includes(deadLetter.id)).length
     : openDeadLetters.length
   const openFailureCount = Math.max(currentQueueOverview?.openCount ?? 0, unobservedVisibleFailures)
+  const metricsAgeMs = metricsSnapshot && nowMs !== null ? Math.max(0, nowMs - metricsSnapshot.receivedAt) : 0
   const metricsStatus = homeEvidenceStatus({
     metrics,
     loading: metricsLoading || semanticCasesStatus === 'loading' || operatorBriefStatus === 'loading' || queueStatus === 'loading',
     unavailable: Boolean(metricsError),
     incomplete: semanticCasesStatus === 'unavailable' || operatorBriefStatus === 'unavailable'
       || queueStatus === 'unavailable' || (operatorBrief?.warnings.length ?? 0) > 0,
-    ageMs: metricsSnapshot && nowMs !== null ? Math.max(0, nowMs - metricsSnapshot.receivedAt) : 0,
+    ageMs: metricsAgeMs,
   })
+  const staleSampleReceivedAt = metrics && !metricsLoading && metricsAgeMs >= HOME_EVIDENCE_STALE_MS
+    ? metricsSnapshot?.receivedAt ?? null
+    : null
+  // One background refresh per aged sample; a failed refresh keeps the stale
+  // label and Retry until a later successful read replaces receivedAt.
+  useEffect(() => {
+    if (staleSampleReceivedAt === null || staleRefreshReceivedAtRef.current === staleSampleReceivedAt) return
+    staleRefreshReceivedAtRef.current = staleSampleReceivedAt
+    setStaleRefreshNonce((nonce) => nonce + 1)
+  }, [staleSampleReceivedAt])
   const recoveryClearEligible = metricsStatus === 'available' && openFailureCount === 0 && semanticOutcomePosture === 'clear'
 
   const impactPollMs = openFailureCount > 0
