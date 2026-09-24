@@ -53,6 +53,11 @@ The E2E harness labels its image with the exact Git commit and tree only when
 its source checkout is clean. Standalone `make test-e2e` still accepts WIP, but
 uses unverified placeholder labels rather than claiming the last commit built
 the dirty source. Ambient build-label variables cannot override this choice.
+The selected real-executable lane includes `responsive.spec.ts`: its EN/ES
+640×360 CSS viewport at 2× device scale is an automated approximation of a
+1280×720 desktop at 200% browser zoom, not a physical zoom or screen-reader
+acceptance pass. Those still require the separate study in
+`docs/usability-testing.md`.
 
 A throwaway database for local integration runs, isolated from the dev one:
 

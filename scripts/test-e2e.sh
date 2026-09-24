@@ -18,6 +18,7 @@ specs=(
   e2e/operator-velocity.spec.ts
   e2e/workflow-rollouts.spec.ts
   e2e/recovery-confidence-passport.spec.ts
+  e2e/responsive.spec.ts
 )
 
 usage() {

@@ -26,7 +26,7 @@ jq -e --arg commit "$expected_commit" --arg tree "$expected_tree" --arg id "$exp
 jq -e '.specs == [
   "e2e/janusly-smoke.spec.ts", "e2e/text-search.spec.ts",
   "e2e/operator-velocity.spec.ts", "e2e/workflow-rollouts.spec.ts",
-  "e2e/recovery-confidence-passport.spec.ts"
+  "e2e/recovery-confidence-passport.spec.ts", "e2e/responsive.spec.ts"
 ]' <<<"$result" >/dev/null
 
 if JANUSLY_E2E_PROJECT=janusly-e2e bash "$script" selftest >/dev/null 2>&1; then
