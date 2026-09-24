@@ -105,8 +105,16 @@ export function useRecoveryDialogController({
   const addToast = useWorkflowStore((state) => state.addToast)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
   const busy = step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating' || step.kind === 'cancelling'
+  const validationRequestPendingRef = useRef(false)
   const [matchingPlaybook, setMatchingPlaybook] = useState<RecoveryPlaybookSummary | null>(null)
   const [playbookBusy, setPlaybookBusy] = useState<'use' | 'retire' | null>(null)
+
+  // Only entering a fresh review releases the synchronous request claim.
+  // Keep it held across the request → polling transition.
+  const enterReview = (suggestion: PatchSuggestion) => {
+    validationRequestPendingRef.current = false
+    setStep({ kind: 'review', suggestion })
+  }
 
   // Derive the original failure's signature once when the source DLQ
   // mounts. The delta route uses this to count "same failure since
@@ -194,7 +202,8 @@ export function useRecoveryDialogController({
   // away from `validating`, so a long-running validation can't leak
   // requests after the operator dismisses the dialog.
   useEffect(() => {
-    if (step.kind !== 'validating') return
+    if (step.kind !== 'validating' || !step.runId) return
+    const validationRunId = step.runId
     let cancelled = false
     const startedAt = Date.now()
     const poll = async () => {
@@ -207,9 +216,9 @@ export function useRecoveryDialogController({
         return
       }
       try {
-        const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(step.runId)}`, undefined)
+        const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(validationRunId)}`, undefined)
         if (cancelled) return
-        const result = parseRunStatusSnapshot(payload, step.runId)
+        const result = parseRunStatusSnapshot(payload, validationRunId)
         if (!result) throw new Error(runtimeT('api.error.malformedResponse'))
         const status = result.run.status
         if (!isTerminalRunStatus(status)) {
@@ -229,7 +238,7 @@ export function useRecoveryDialogController({
           try {
             const outcome = await api(`/recovery/playbooks/${encodeURIComponent(step.suggestion.playbook.id)}/outcome`, {
               method: 'POST',
-              body: JSON.stringify({ deadLetterId: dlq.id, validationRunId: step.runId, phase: 'validation' }),
+              body: JSON.stringify({ deadLetterId: dlq.id, validationRunId, phase: 'validation' }),
             }) as { playbook?: RecoveryPlaybookSummary | null }
             if (outcome.playbook?.status === 'retired') {
               playbookRetired = true
@@ -245,7 +254,7 @@ export function useRecoveryDialogController({
             kind: 'validated',
             suggestion: step.suggestion,
             selectedIndex: step.selectedIndex,
-            runId: step.runId,
+            runId: validationRunId,
           })
           return
         }
@@ -254,7 +263,7 @@ export function useRecoveryDialogController({
           kind: 'validation-failed',
           suggestion: step.suggestion,
           selectedIndex: step.selectedIndex,
-          runId: step.runId,
+          runId: validationRunId,
           errorJson,
           playbookRetired,
         })
@@ -287,7 +296,7 @@ export function useRecoveryDialogController({
       })
       if (!normalised) throw new Error(runtimeT('api.error.malformedResponse'))
       setSelectedSuggestionIndex(0)
-      setStep({ kind: 'review', suggestion: normalised })
+      enterReview(normalised)
     } catch (error) {
       setStep({
         kind: 'error',
@@ -311,7 +320,7 @@ export function useRecoveryDialogController({
       })
       if (!suggestion) throw new Error(runtimeT('api.error.malformedResponse'))
       setSelectedSuggestionIndex(0)
-      setStep({ kind: 'review', suggestion })
+      enterReview(suggestion)
     } catch (error) {
       setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.useFailed')) })
     } finally {
@@ -337,10 +346,12 @@ export function useRecoveryDialogController({
   }
 
   const validateSuggestion = async () => {
-    if (step.kind !== 'review') return
+    if (step.kind !== 'review' || validationRequestPendingRef.current) return
     const suggestion = step.suggestion
     const selected = suggestion.suggestions[safeSelectedIndex]
     if (!selected) return
+    validationRequestPendingRef.current = true
+    setStep({ kind: 'validating', suggestion, selectedIndex: safeSelectedIndex, runId: null })
     try {
       const result = await api('/dlq/validate-fix', {
         method: 'POST',
@@ -349,7 +360,8 @@ export function useRecoveryDialogController({
           suggestedWorkflow: selected.workflow,
           ...(suggestion.playbook ? { recoveryPlaybookId: suggestion.playbook.id } : {}),
         }),
-      }) as { runId: string }
+      }) as { runId?: unknown } | null
+      if (typeof result?.runId !== 'string' || !result.runId) throw new Error(runtimeT('api.error.malformedResponse'))
       setStep({ kind: 'validating', suggestion, selectedIndex: safeSelectedIndex, runId: result.runId })
     } catch (error) {
       setStep({
@@ -550,7 +562,7 @@ export function useRecoveryDialogController({
   const backFromCancelling = () => {
     if (step.kind !== 'cancelling') return
     if (step.sourceStep === 'review') {
-      setStep({ kind: 'review', suggestion: step.suggestion })
+      enterReview(step.suggestion)
     } else if (step.sourceStep === 'validated') {
       setStep({ kind: 'validated', suggestion: step.suggestion, selectedIndex: step.selectedIndex, runId: step.runId ?? '' })
     } else {

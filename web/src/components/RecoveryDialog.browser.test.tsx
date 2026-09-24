@@ -85,4 +85,67 @@ describe('<RecoveryDialog /> keyboard focus (Chromium)', () => {
     expect(dialog).toHaveFocus()
     expect(apply).not.toHaveFocus()
   })
+
+  it('starts only one sandbox when Validate is activated twice before the request returns', async () => {
+    let releaseValidation!: (value: unknown) => void
+    const validationPending = new Promise<unknown>(resolve => { releaseValidation = resolve })
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/ai/patch-workflow') return Promise.resolve(suggestion)
+      if (path === '/dlq/validate-fix') return validationPending
+      if (path.startsWith('/run?')) return new Promise(() => {})
+      return Promise.resolve({ ok: true })
+    })
+
+    const onClose = vi.fn()
+    render(<RecoveryDialog dlq={dlq} onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    const validate = await screen.findByRole('button', { name: /Validate in sandbox/i })
+    fireEvent.click(validate)
+    fireEvent.click(validate)
+    expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/dlq/validate-fix')).toHaveLength(1)
+    const dialog = screen.getByRole('dialog')
+    await waitFor(() => expect(dialog).toHaveFocus())
+    expect(screen.getByRole('button', { name: /Close recovery dialog/i })).toBeDisabled()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    releaseValidation({ runId: 'val-once' })
+  })
+
+  it('permits a fresh validation after a failed request is retried', async () => {
+    let validationRequests = 0
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/ai/patch-workflow') return Promise.resolve(suggestion)
+      if (path === '/dlq/validate-fix') {
+        validationRequests += 1
+        return validationRequests === 1
+          ? Promise.reject(new Error('validation transport failed'))
+          : Promise.resolve({ runId: 'val-retry' })
+      }
+      if (path.startsWith('/run?')) return new Promise(() => {})
+      return Promise.resolve({ ok: true })
+    })
+
+    render(<RecoveryDialog dlq={dlq} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('validation transport failed')
+    fireEvent.click(screen.getByRole('button', { name: /Retry/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
+    expect(validationRequests).toBe(2)
+  })
+
+  it('recovers from a validation response without a run id', async () => {
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/ai/patch-workflow') return Promise.resolve(suggestion)
+      if (path === '/dlq/validate-fix') return Promise.resolve({})
+      return Promise.resolve({ ok: true })
+    })
+
+    render(<RecoveryDialog dlq={dlq} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Validate in sandbox/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/unreadable response/i)
+    expect(screen.getByRole('button', { name: /Close recovery dialog/i })).toBeEnabled()
+  })
 })

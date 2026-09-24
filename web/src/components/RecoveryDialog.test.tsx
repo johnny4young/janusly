@@ -837,8 +837,8 @@ describe('<RecoveryDialog />', () => {
       // Step 1 (validate) is active while validating; the replay step names the count.
       expect(steps.querySelector('li[data-state="active"]')).toHaveTextContent(/Validate/i)
       expect(steps).toHaveTextContent(/Replay 3 runs/i)
-      // The cluster-aware copy sets the 1-representative expectation.
-      expect(screen.getByText(/representative failure/i)).toBeInTheDocument()
+      // The cluster-aware copy distinguishes one validation from N applies.
+      expect(screen.getByText(/Validating one failure.*3 matching failures/i)).toBeInTheDocument()
     })
   })
 })

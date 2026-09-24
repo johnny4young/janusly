@@ -123,7 +123,7 @@ export type Step =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'review'; suggestion: PatchSuggestion }
-  | { kind: 'validating'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
+  | { kind: 'validating'; suggestion: PatchSuggestion; selectedIndex: number; runId: string | null }
   | { kind: 'validated'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
   | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown; playbookRetired?: boolean }
   | {

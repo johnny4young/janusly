@@ -51,16 +51,25 @@ export function ReviewBody({
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
     if (!showTabs) return
     const lastIndex = tabs.length - 1
-    const nextIndexByKey: Record<string, number> = {
-      ArrowRight: index === lastIndex ? 0 : index + 1,
-      ArrowDown: index === lastIndex ? 0 : index + 1,
-      ArrowLeft: index === 0 ? lastIndex : index - 1,
-      ArrowUp: index === 0 ? lastIndex : index - 1,
-      Home: 0,
-      End: lastIndex,
+    let nextIndex: number
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = index === lastIndex ? 0 : index + 1
+        break
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = index === 0 ? lastIndex : index - 1
+        break
+      case 'Home':
+        nextIndex = 0
+        break
+      case 'End':
+        nextIndex = lastIndex
+        break
+      default:
+        return
     }
-    const nextIndex = nextIndexByKey[event.key]
-    if (nextIndex === undefined) return
     event.preventDefault()
     onSelectIndex(nextIndex)
     window.requestAnimationFrame(() => {
@@ -103,8 +112,9 @@ export function ReviewBody({
       <SimilarRunsCard failureSignature={failureSignature} />
       {showTabs && (
         <div className="we-recovery-tabs" role="tablist" aria-label={t('recoveryDialog.review.tabsAriaLabel')}>
-          {tabs.map((tab, index) => (
-            <button
+          {tabs.map((tab, index) => {
+            const { primary, showSelfRated, selfRated } = resolveConfidenceDisplay(tab)
+            return <button
               key={suggestionTabKey(tab)}
               type="button"
               role="tab"
@@ -116,29 +126,21 @@ export function ReviewBody({
               disabled={selectionLocked}
               onClick={() => onSelectIndex(index)}
               onKeyDown={(event) => onTabKeyDown(event, index)}
-              title={(() => {
-                const { primary, showSelfRated, selfRated } = resolveConfidenceDisplay(tab)
-                return showSelfRated
-                  ? t('recoveryDialog.review.tabCalibratedTitle', { confidence: primary, selfRated })
-                  : t('recoveryDialog.review.tabConfidenceTitle', { confidence: primary })
-              })()}
+              title={showSelfRated
+                ? t('recoveryDialog.review.tabCalibratedTitle', { confidence: primary, selfRated })
+                : t('recoveryDialog.review.tabConfidenceTitle', { confidence: primary })}
             >
               <span className="we-recovery-tab__label">{approachLabelDisplay(tab.approachLabel)}</span>
-              {(() => {
-                const { primary, showSelfRated, selfRated } = resolveConfidenceDisplay(tab)
-                return (
-                  <span className="we-recovery-tab__confidence">
-                    <span className="we-recovery-tab__confidence-primary">{primary}%</span>
-                    {showSelfRated && (
-                      <span className="we-recovery-tab__confidence-self">
-                        {t('recoveryDialog.review.selfRated', { confidence: selfRated })}
-                      </span>
-                    )}
+              <span className="we-recovery-tab__confidence">
+                <span className="we-recovery-tab__confidence-primary">{primary}%</span>
+                {showSelfRated && (
+                  <span className="we-recovery-tab__confidence-self">
+                    {t('recoveryDialog.review.selfRated', { confidence: selfRated })}
                   </span>
-                )
-              })()}
+                )}
+              </span>
             </button>
-          ))}
+          })}
         </div>
       )}
       <div
