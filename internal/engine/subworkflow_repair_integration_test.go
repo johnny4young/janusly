@@ -100,6 +100,9 @@ func TestSubworkflowRepairKeepsMarkerWhenTransactionFails(t *testing.T) {
 	if !marker.Valid {
 		t.Fatal("marker must survive a failed repair so the next lease retries it")
 	}
+	if !marker.Time.After(time.Now()) {
+		t.Fatalf("the failed repair must have claimed this marker for a future retry, lease=%s", marker.Time)
+	}
 
 	// Second pass, once the lease lapses and the fault is gone: the repair lands.
 	eng.wrapTx = baseWrap
