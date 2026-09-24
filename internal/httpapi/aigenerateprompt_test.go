@@ -231,6 +231,32 @@ func TestAuthoringNeverAcceptsAWorkflowThatDropsOperatorReferences(t *testing.T)
 	}
 }
 
+func TestFallbackAuditCarriesCandidateValidationDiagnostics(t *testing.T) {
+	duplicate := `{"dslVersion":"1.0","id":"dup","name":"Dup","nodes":[{"id":"a","type":"noop","config":{}},{"id":"a","type":"noop","config":{}}],"edges":[]}`
+	client := &scriptedAuthoringClient{replies: []string{duplicate}}
+	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		t.Context(), client, "two noops", "", v1Request{}, 1, "", 0,
+	)
+	if raw != nil || aiErr == nil || meta.failureStage != "candidate_validation" {
+		t.Fatalf("persistently invalid candidate must fail validation: raw=%s meta=%+v err=%v", raw, meta, aiErr)
+	}
+	metadata := fallbackGenerationAuditMetadata(meta, aiErr, assuranceCompilation{})
+	codes, _ := metadata["validationIssueCodes"].([]string)
+	if metadata["failureStage"] != "candidate_validation" || !slices.Contains(codes, domain.CodeDuplicateNodeID) ||
+		len(codes) > 5 || metadata["repairAttempts"] != maxRepairAttempts {
+		t.Fatalf("fallback audit lacks validation diagnostics: %+v", metadata)
+	}
+
+	providerErr := &ai.AIError{Class: "rate_limit", Message: "simulated"}
+	bare := fallbackGenerationAuditMetadata(generationMeta{}, providerErr, assuranceCompilation{})
+	if _, ok := bare["failureStage"]; ok {
+		t.Fatalf("provider failures must not claim a generation stage: %+v", bare)
+	}
+	if _, ok := bare["validationIssueCodes"]; ok {
+		t.Fatalf("provider failures must not carry issue codes: %+v", bare)
+	}
+}
+
 func TestAuthoringBestOfNFiltersCandidatesThatDropReferences(t *testing.T) {
 	omitted := `{"dslVersion":"1.0","id":"omitted","name":"Omitted","nodes":[{"id":"done","type":"noop","config":{}}],"edges":[]}`
 	preserved := `{"dslVersion":"1.0","id":"preserved","name":"Preserved","nodes":[{"id":"done","type":"noop","config":{"token":"{{secret.BILLING_TOKEN}}"}}],"edges":[]}`

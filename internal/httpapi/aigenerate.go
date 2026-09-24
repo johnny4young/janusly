@@ -289,13 +289,7 @@ func (s *V1Server) generateWorkflowFromPrompt(
 		fallback, compilation := compiledFallbackForPrompt(prompt)
 		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 			TargetType: "ai", TargetID: templateID(fallback),
-			Metadata: map[string]any{
-				"mode": "fallback", "error": aiErr.Error(), "generationMode": "free_json",
-				"model": meta.model, "provider": meta.provider, "modelCallCount": meta.modelCalls,
-				"attempts": meta.attempts, "repairAttempts": meta.repairAttempts,
-				"candidateCount": meta.candidateCount, "validCandidates": meta.validCandidates,
-				"intentContractAdded": compilation.AddedOutputs, "recoveryContractAdded": compilation.AddedRecoveryContract,
-			},
+			Metadata: fallbackGenerationAuditMetadata(meta, aiErr, compilation),
 		})
 		return opOK(withMode(fallback, "fallback", aiErr.Error()))
 	}
@@ -328,6 +322,23 @@ func budgetExceededResult(gate aibudget.CheckResult) opResult {
 		},
 		"budget": envelope,
 	}}
+}
+
+func fallbackGenerationAuditMetadata(meta generationMeta, aiErr *ai.AIError, compilation assuranceCompilation) map[string]any {
+	metadata := map[string]any{
+		"mode": "fallback", "error": aiErr.Error(), "generationMode": "free_json",
+		"model": meta.model, "provider": meta.provider, "modelCallCount": meta.modelCalls,
+		"attempts": meta.attempts, "repairAttempts": meta.repairAttempts,
+		"candidateCount": meta.candidateCount, "validCandidates": meta.validCandidates,
+		"intentContractAdded": compilation.AddedOutputs, "recoveryContractAdded": compilation.AddedRecoveryContract,
+	}
+	if meta.failureStage != "" {
+		metadata["failureStage"] = meta.failureStage
+	}
+	if len(meta.validationIssueCodes) > 0 {
+		metadata["validationIssueCodes"] = meta.validationIssueCodes
+	}
+	return metadata
 }
 
 type generationMeta struct {
