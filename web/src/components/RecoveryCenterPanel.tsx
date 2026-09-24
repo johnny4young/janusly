@@ -293,7 +293,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
         if (cancelled) return
         const snapshot = parseRecoveryHomeSnapshot(payload)
         if (!snapshot || snapshot.scope !== 'full') {
-          throw new Error(t('recoveryCenter.invalidHomeResponse'))
+          throw new Error(runtimeT('recoveryCenter.invalidHomeResponse'))
         }
 
         const metricsValue = readRecoveryHomeSection(
@@ -395,7 +395,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       })
 
     return () => { cancelled = true; controller.abort() }
-  }, [applyImpactSnapshot, platformVersion, resolvedOrgId, resolvedUserId, t])
+  }, [applyImpactSnapshot, platformVersion, resolvedOrgId, resolvedUserId])
 
   useEffect(() => {
     let cancelled = false
