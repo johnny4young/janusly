@@ -105,6 +105,9 @@ func Load(getenv func(string) string) (Config, error) {
 	num := func(name string, def, min, max int) int {
 		return int(integer(name, int64(def), int64(min), int64(max)))
 	}
+	millis := func(name string, def time.Duration) time.Duration {
+		return time.Duration(integer(name, int64(def/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond
+	}
 	production := IsProduction(getenv)
 	reaperDefaults := DefaultReaper()
 
@@ -112,9 +115,9 @@ func Load(getenv func(string) string) (Config, error) {
 		PersistMaxBytes:       num("JANUSLY_PERSIST_MAX_BYTES", grammar.DefaultPersistMaxBytes, 2, math.MaxInt),
 		DBToolMaxProcessPools: num("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", DefaultDBToolMaxProcessPools, 1, MaxDBToolProcessPools),
 		Reaper: Reaper{
-			Interval:        time.Duration(integer("JANUSLY_REAPER_INTERVAL_MS", int64(reaperDefaults.Interval/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond,
-			Threshold:       time.Duration(integer("JANUSLY_REAPER_THRESHOLD_MS", int64(reaperDefaults.Threshold/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond,
-			Floor:           time.Duration(integer("JANUSLY_REAPER_THRESHOLD_FLOOR_MS", int64(reaperDefaults.Floor/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond,
+			Interval:        millis("JANUSLY_REAPER_INTERVAL_MS", reaperDefaults.Interval),
+			Threshold:       millis("JANUSLY_REAPER_THRESHOLD_MS", reaperDefaults.Threshold),
+			Floor:           millis("JANUSLY_REAPER_THRESHOLD_FLOOR_MS", reaperDefaults.Floor),
 			FloorOverridden: strings.TrimSpace(getenv("JANUSLY_REAPER_THRESHOLD_FLOOR_MS")) != "",
 		},
 		Production:                  production,
