@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	errDbPoolExhausted = errors.New("db_pool_exhausted")
-	errDbPoolsClosed   = errors.New("db_pools_closed")
-	metricDbToolPools  = promauto.NewGauge(prometheus.GaugeOpts{
+	errDbPoolExhausted   = errors.New("db_pool_exhausted")
+	errDbPoolsClosed     = errors.New("db_pools_closed")
+	errDbPoolNeedsConfig = errors.New("db_pool_needs_config")
+	metricDbToolPools    = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "janusly_db_tool_pools",
 		Help: "Live external db-tool pools, including retired pools still draining.",
 	})
@@ -64,20 +65,19 @@ func NewDBPools(maxPools int) (*DBPools, error) {
 }
 
 func (c *DBPools) acquire(ctx context.Context, orgID, credentialName, dsn string) (*dbPoolLease, error) {
-	// Parsing may read local pg service/password configuration; keep it outside
-	// the mutex. The credential value never appears in cache errors or metrics.
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		return nil, errors.New("invalid postgres credential value")
-	}
-	config.MaxConns, config.MinConns, config.MinIdleConns = 1, 0, 0
-	config.ConnConfig.ConnectTimeout = 10 * time.Second
 	key := orgID + "\x00" + credentialName
 	fingerprint := sha256.Sum256([]byte(dsn))
+	var config *pgxpool.Config
 	for {
 		c.mu.Lock()
 		lease, victim, err := c.acquireLocked(ctx, key, orgID, fingerprint, config)
 		c.mu.Unlock()
+		if errors.Is(err, errDbPoolNeedsConfig) {
+			if config, err = dbToolPoolConfig(dsn); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if victim == nil {
 			return lease, err
 		}
@@ -87,6 +87,20 @@ func (c *DBPools) acquire(ctx context.Context, orgID, credentialName, dsn string
 	}
 }
 
+// Parsing may read local pg service/password configuration; keep it outside
+// the mutex. The credential value never appears in cache errors or metrics.
+func dbToolPoolConfig(dsn string) (*pgxpool.Config, error) {
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, errors.New("invalid postgres credential value")
+	}
+	config.MaxConns, config.MinConns, config.MinIdleConns = 1, 0, 0
+	config.ConnConfig.ConnectTimeout = 10 * time.Second
+	return config, nil
+}
+
+// A nil config admits only a cached pool with the same fingerprint; any other
+// path asks the caller to parse outside the lock and retry.
 func (c *DBPools) acquireLocked(ctx context.Context, key, orgID string, fingerprint [32]byte, config *pgxpool.Config) (*dbPoolLease, *dbPoolEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -94,13 +108,15 @@ func (c *DBPools) acquireLocked(ctx context.Context, key, orgID string, fingerpr
 	if c.closed {
 		return nil, nil, errDbPoolsClosed
 	}
-	if existing := c.entries[key]; existing != nil {
-		if existing.fingerprint == fingerprint {
-			return c.leaseLocked(existing), nil, nil
-		}
-		if c.retireLocked(existing) {
-			return nil, existing, nil
-		}
+	existing := c.entries[key]
+	if existing != nil && existing.fingerprint == fingerprint {
+		return c.leaseLocked(existing), nil, nil
+	}
+	if config == nil {
+		return nil, nil, errDbPoolNeedsConfig
+	}
+	if existing != nil && c.retireLocked(existing) {
+		return nil, existing, nil
 	}
 	// Retired pools still own a physical slot. Only idle same-org LRU entries
 	// may be evicted; never close a busy victim or steal another tenant's pool.

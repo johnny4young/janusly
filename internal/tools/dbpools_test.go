@@ -38,6 +38,27 @@ func TestDbPoolConfigurationAndCanceledAdmission(t *testing.T) {
 	}
 }
 
+func TestDbPoolInvalidRotationKeepsCachedPool(t *testing.T) {
+	cache := testDBPools(t, 25)
+	const dsn = "postgres://test:test@127.0.0.1:1/test"
+	first, err := cache.acquire(t.Context(), "org", "db", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Release()
+	if _, err := cache.acquire(t.Context(), "org", "db", "postgres://%zz"); err == nil || err.Error() != "invalid postgres credential value" {
+		t.Fatalf("invalid rotation: %v", err)
+	}
+	warm, err := cache.acquire(t.Context(), "org", "db", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer warm.Release()
+	if warm.pool != first.pool {
+		t.Fatal("invalid rotation retired the cached pool")
+	}
+}
+
 func testDBPools(t *testing.T, maxPools int) *DBPools {
 	t.Helper()
 	pools, err := NewDBPools(maxPools)
