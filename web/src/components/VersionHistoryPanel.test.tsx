@@ -407,6 +407,32 @@ describe('<VersionHistoryPanel />', () => {
     expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
   })
 
+  it('previews rollback from the latest version to the clicked row and keeps that pair while older pages load', async () => {
+    const page = (from: number, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        workflowId: 'wf_compare', createdAt: null, id: `version_${from - index}`, version: from - index, dagJson: makeWorkflow(`https://example.test/${from - index}`),
+      }))
+    vi.mocked(api).mockImplementation(async (path) => {
+      const url = new URL(path, 'http://localhost')
+      if (!url.pathname.startsWith('/workflows/versions')) throw new Error(`Unexpected API call: ${path}`)
+      const before = url.searchParams.get('beforeVersion')
+      return before ? page(Number(before) - 1, 3) : page(60, 50)
+    })
+    render(<VersionHistoryPanel />)
+    await screen.findByText('v60')
+
+    fireEvent.click(screen.getByLabelText('Roll back to v12'))
+    expect(screen.getByRole('heading', { name: 'Roll back to v12?' })).toBeInTheDocument()
+    expect(screen.getByText('v60 (current)')).toBeInTheDocument()
+    expect(screen.getByText('v12 (rolling back to)')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('version-history-load-more'))
+    await screen.findByText('v8')
+    expect(screen.getByText('v60 (current)')).toBeInTheDocument()
+    expect(screen.getByText('v12 (rolling back to)')).toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
+  })
+
   it('exposes the Suggest improvement button only in compare mode with two versions selected and editor role', async () => {
     mockVersionHistoryApi({
       wf_compare: [
