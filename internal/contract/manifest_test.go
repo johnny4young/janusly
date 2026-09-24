@@ -314,3 +314,49 @@ func TestClosedSchemaGateRejectsOpenShapes(t *testing.T) {
 		}
 	}
 }
+
+func collectRefs(value any, refs map[string]bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		if ref, ok := typed["$ref"].(string); ok {
+			refs[strings.TrimPrefix(ref, ComponentRef(""))] = true
+		}
+		for _, child := range typed {
+			collectRefs(child, refs)
+		}
+	case []any:
+		for _, child := range typed {
+			collectRefs(child, refs)
+		}
+	}
+}
+
+// A registered component must be distinct and reachable from some route, or
+// the rendered document carries a schema nothing uses.
+func TestComponentsAreUniqueAndReachable(t *testing.T) {
+	schemas, err := ComponentSchemas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := map[string]bool{}
+	for _, route := range Routes {
+		collectRefs(RenderSchema(route.Response), refs)
+		if route.Request != nil {
+			collectRefs(RenderSchema(route.Request), refs)
+		}
+	}
+	collectRefs(schemas, refs)
+	for _, component := range Components {
+		if !refs[component.Name] {
+			t.Errorf("component %s is not referenced by any route", component.Name)
+		}
+	}
+	for name := range refs {
+		if schemas[name] == nil {
+			t.Errorf("$ref to unregistered component %s", name)
+		}
+	}
+	if rendered, _ := RenderSchema(workflowDoc).(map[string]any); rendered["$ref"] != ComponentRef("WorkflowDoc") {
+		t.Fatalf("a registered fragment must render as a $ref, got %v", rendered)
+	}
+}

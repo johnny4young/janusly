@@ -93,6 +93,9 @@ func metricObjWith(extra map[string]any) Schema {
 	return closedObj(properties, required...)
 }
 
+// The plain metric shape is shared by the metrics that add no fields.
+var recoveryMetric = metricObjWith(nil)
+
 var costProviderRow = closedObj(map[string]any{
 	"provider": str(), "model": str(), "usd": num(), "tokens": num(),
 	"inputTokens": num(), "cachedInputTokens": num(), "cacheCreationInputTokens": num(),
@@ -101,15 +104,15 @@ var costProviderRow = closedObj(map[string]any{
 	"cacheCreationInputTokens", "calls", "aggregated")
 
 var recoveryMetrics = closedObj(map[string]any{
-	"successRate": metricObjWith(nil),
+	"successRate": recoveryMetric,
 	"verifiedRecovery": metricObjWith(map[string]any{
 		"definitionVersion": str(), "metric": str(), "unit": str(),
 		"sampleSize": countT(), "p50Ms": nullableNum(), "p90Ms": nullableNum(),
 	}),
-	"mttr":             metricObjWith(nil),
-	"p95Latency":       metricObjWith(nil),
-	"approvalsPending": metricObjWith(nil),
-	"replayRate":       metricObjWith(nil),
+	"mttr":             recoveryMetric,
+	"p95Latency":       recoveryMetric,
+	"approvalsPending": recoveryMetric,
+	"replayRate":       recoveryMetric,
 	"costThisWindow": metricObjWith(map[string]any{
 		"providers": arr(costProviderRow),
 		"cache": closedObj(map[string]any{
@@ -122,7 +125,7 @@ var recoveryMetrics = closedObj(map[string]any{
 	"timeToFirstAction": metricObjWith(map[string]any{
 		"unit": str(), "sampleSize": countT(), "avgSeconds": nullableNum(), "p95Seconds": nullableNum(),
 	}),
-	"recurrenceRate": metricObjWith(nil),
+	"recurrenceRate": recoveryMetric,
 	"valueEstimate": closedObj(map[string]any{
 		"hoursSaved": num(), "dollarSaved": num(), "mttrDeltaSeconds": nullableNum(),
 		"assumptions": closedObj(map[string]any{

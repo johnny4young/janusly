@@ -97,6 +97,14 @@ pagination cursor, start a comparison or authorize Apply. Recovery validation
 uses the shared terminal-status set, including `timed_out`, rather than waiting
 for a separate dialog timeout after the run has already terminated.
 
+Shared fragments are registered by name in `internal/contract/components.go`.
+`cmd/contract` emits each once under `components/schemas` and references it with
+`$ref` everywhere else, including a route whose whole payload is one component;
+the Go tests keep validating the in-memory schemas, so references never need
+resolving there. `web/scripts/generate-api-types.mjs` turns every component into
+a named TypeScript type and fails on an unresolved reference or a reference
+cycle instead of degrading to `unknown`.
+
 Run `make generate` after contract changes and require a clean diff on a second
 run.
 
