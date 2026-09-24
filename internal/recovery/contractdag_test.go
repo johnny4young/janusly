@@ -50,7 +50,7 @@ func issueCodes(result domain.ValidationResult) string {
 }
 
 func validate(wf *domain.Workflow) domain.ValidationResult {
-	return domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, FixtureOutcomesForValidation)
+	return domain.ValidateWithOptions(wf, grammar.DomainValidator, FixtureOutcomesForValidation, domain.ValidationOptions{})
 }
 
 // The contract-vs-DAG fail-closed save rules: dominance, undeclared

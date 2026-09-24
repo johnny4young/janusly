@@ -49,8 +49,8 @@ func TestFailedPaymentPackIsQualifiedFlagship(t *testing.T) {
 	if wf == nil || len(issues) > 0 {
 		t.Fatalf("parse flagship: %+v", issues)
 	}
-	validation := domain.ValidateWithSemanticFixtures(
-		wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation,
+	validation := domain.ValidateWithOptions(
+		wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation, domain.ValidationOptions{},
 	)
 	if !validation.Valid {
 		raw, _ := json.Marshal(validation.Issues)

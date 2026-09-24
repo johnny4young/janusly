@@ -20,7 +20,7 @@ func TestDomainValidationUsesGrammarValidator(t *testing.T) {
 	// The contract relays the validator's message verbatim
 	// (workflow-validation.ts:151 — `expression.message ?? "Invalid
 	// condition expression"`), so no prefix is added here either.
-	result := domain.Validate(invalid, grammar.DomainValidator)
+	result := domain.ValidateWithOptions(invalid, grammar.DomainValidator, nil, domain.ValidationOptions{})
 	found := false
 	for _, issue := range result.Issues {
 		if issue.Code == "condition_invalid_expression" &&
@@ -35,7 +35,7 @@ func TestDomainValidationUsesGrammarValidator(t *testing.T) {
 	valid, _ := domain.Parse([]byte(`{"nodes":[
 		{"id":"c","type":"condition","config":{"expression":"context.http.output.statusCode === 200"}}
 	],"edges":[]}`))
-	if got := domain.Validate(valid, grammar.DomainValidator); !got.Valid {
+	if got := domain.ValidateWithOptions(valid, grammar.DomainValidator, nil, domain.ValidationOptions{}); !got.Valid {
 		t.Fatalf("well-formed condition must validate: %+v", got.Issues)
 	}
 }
@@ -50,7 +50,7 @@ func TestEdgeConditionsValidateThroughTheGrammar(t *testing.T) {
 	if len(issues) > 0 {
 		t.Fatalf("fixture must parse: %+v", issues)
 	}
-	result := domain.Validate(invalid, grammar.DomainValidator)
+	result := domain.ValidateWithOptions(invalid, grammar.DomainValidator, nil, domain.ValidationOptions{})
 	found := false
 	for _, issue := range result.Issues {
 		if issue.Code == "edge_invalid_condition" &&
@@ -68,7 +68,7 @@ func TestEdgeConditionsValidateThroughTheGrammar(t *testing.T) {
 	valid, _ := domain.Parse([]byte(`{"nodes":[
 		{"id":"a","type":"noop","config":{}},{"id":"b","type":"noop","config":{}}
 	],"edges":[{"from":"a","to":"b","condition":"context.a.output.tags contains 'billing' && context.a.output.status in ['open','held']"}]}`))
-	if got := domain.Validate(valid, grammar.DomainValidator); !got.Valid {
+	if got := domain.ValidateWithOptions(valid, grammar.DomainValidator, nil, domain.ValidationOptions{}); !got.Valid {
 		t.Fatalf("word operators must validate on edges: %+v", got.Issues)
 	}
 
@@ -77,7 +77,7 @@ func TestEdgeConditionsValidateThroughTheGrammar(t *testing.T) {
 	contract, _ := domain.Parse([]byte(`{"nodes":[
 		{"id":"a","type":"noop","config":{}},{"id":"b","type":"noop","config":{}}
 	],"edges":[{"from":"a","to":"b","condition":"context.a.output.x in 'not-an-array'"}]}`))
-	if got := domain.Validate(contract, grammar.DomainValidator); got.Valid {
+	if got := domain.ValidateWithOptions(contract, grammar.DomainValidator, nil, domain.ValidationOptions{}); got.Valid {
 		t.Fatal("operator-contract violations must be rejected at save")
 	}
 }

@@ -55,7 +55,7 @@ func TestCompilePagerDutyWorkflowBuildsCanonicalBoundedGraph(t *testing.T) {
 	if len(workflow.Nodes) != 11 || len(workflow.Edges) != 11 {
 		t.Fatalf("graph=%d nodes/%d edges want 11/11", len(workflow.Nodes), len(workflow.Edges))
 	}
-	if issues := domain.Validate(workflow, nil).Issues; len(issues) != 0 {
+	if issues := domain.ValidateWithOptions(workflow, nil, nil, domain.ValidationOptions{}).Issues; len(issues) != 0 {
 		t.Fatalf("canonical graph must validate: %+v", issues)
 	}
 	trigger := workflowNode(t, workflow, "on_pagerduty")
@@ -448,7 +448,7 @@ func TestCompilePagerDutyWorkflowAddsApprovalOnlyWhenRequested(t *testing.T) {
 	if approval.Config["decisionTimeoutMs"] != float64(pagerDutyApprovalTimeoutMs) || approval.Config["onTimeout"] != "auto_reject" {
 		t.Fatalf("approval deadline must fail closed: %+v", approval.Config)
 	}
-	if issues := domain.Validate(workflow, nil).Issues; len(issues) != 0 {
+	if issues := domain.ValidateWithOptions(workflow, nil, nil, domain.ValidationOptions{}).Issues; len(issues) != 0 {
 		t.Fatalf("approval graph must validate: %+v", issues)
 	}
 	foundRecheck, foundDirectMutation, foundStaleBranch, foundStaleProjection := false, false, false, false

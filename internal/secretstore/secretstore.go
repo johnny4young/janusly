@@ -370,19 +370,6 @@ func ResolveCredentialSecretRefWithError(
 	return string(plaintext), nil
 }
 
-// ResolveCredentialSecret resolves by tenant, kind, and name without
-// exposing the contract — THE org-aware resolver every integration tool
-// goes through.
-func ResolveCredentialSecret(ctx context.Context, q *store.Queries, orgID, kind, name string) string {
-	credential, err := q.GetCredentialByName(ctx, store.GetCredentialByNameParams{
-		OrgID: orgID, Kind: kind, Name: name,
-	})
-	if err != nil {
-		return ""
-	}
-	return ResolveCredentialSecretRef(ctx, q, orgID, credential.SecretRef)
-}
-
 // HasCredentialSecretRef is the health/readiness helper — never returns
 // the value.
 func HasCredentialSecretRef(ctx context.Context, q *store.Queries, orgID, secretRef string) bool {

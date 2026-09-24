@@ -106,13 +106,20 @@ func TestSecretStoreEnvelope(t *testing.T) {
 	}
 	_, _ = pool.Exec(ctx, `UPDATE credential_secret_versions SET org_id = $2 WHERE id = $1`, id, org)
 
-	// Resolve by (kind, name) — the org-aware resolver.
+	// Look up by (kind, name), then resolve the resulting ref through the
+	// same tenant-scoped production path used by integration tools.
 	if err := q.UpdateCredentialSecretRef(ctx, store.UpdateCredentialSecretRefParams{
 		OrgID: org, ID: credID, SecretRef: secretRef,
 	}); err != nil {
 		t.Fatalf("update ref: %v", err)
 	}
-	if got := ResolveCredentialSecret(ctx, q, org, "http", "api-token"); got != secretValue {
+	credential, err := q.GetCredentialByName(ctx, store.GetCredentialByNameParams{
+		OrgID: org, Kind: "http", Name: "api-token",
+	})
+	if err != nil {
+		t.Fatalf("lookup by name: %v", err)
+	}
+	if got := ResolveCredentialSecretRef(ctx, q, org, credential.SecretRef); got != secretValue {
 		t.Fatalf("resolve by name: %q", got)
 	}
 

@@ -31,7 +31,7 @@ func TestTemplateCatalogWorkflowsValidate(t *testing.T) {
 		if wf == nil {
 			t.Fatalf("%s: workflow does not parse: %+v", id, issues)
 		}
-		result := domain.Validate(wf, grammar.DomainValidator)
+		result := domain.ValidateWithOptions(wf, grammar.DomainValidator, nil, domain.ValidationOptions{})
 		if !result.Valid {
 			t.Errorf("%s: workflow invalid: %+v", id, result.Issues)
 		}
