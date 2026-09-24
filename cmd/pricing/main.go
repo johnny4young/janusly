@@ -1,12 +1,16 @@
 // Command pricing renders the browser's static completion-price table from
 // internal/ai, the runtime source of truth. It is part of make generate so a
 // price update cannot leave cost previews and recorded usage on different
-// rates.
+// rates. With --json it prints the catalog for scripts/pricing-check.sh and
+// writes nothing.
 package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strconv"
@@ -17,7 +21,27 @@ import (
 
 const outputPath = "web/src/lib/llm-pricing.generated.ts"
 
+type catalogJSON struct {
+	SnapshotDate string                    `json:"snapshotDate"`
+	Models       map[string]modelPriceJSON `json:"models"`
+}
+
+type modelPriceJSON struct {
+	InputUsdPer1M  float64 `json:"inputUsdPer1M"`
+	OutputUsdPer1M float64 `json:"outputUsdPer1M"`
+}
+
 func main() {
+	asJSON := flag.Bool("json", false, "print the catalog as JSON to stdout instead of writing "+outputPath)
+	flag.Parse()
+	if *asJSON {
+		if err := writeCatalogJSON(os.Stdout, ai.ModelPricingSnapshotDate, ai.StaticModelPrices()); err != nil {
+			fmt.Fprintln(os.Stderr, "print pricing:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	prices := ai.StaticModelPrices()
 	models := make([]string, 0, len(prices))
 	for model := range prices {
@@ -43,6 +67,16 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("%s: %d models, snapshot %s\n", outputPath, len(models), ai.ModelPricingSnapshotDate)
+}
+
+func writeCatalogJSON(w io.Writer, snapshotDate string, prices map[string]ai.ModelPrice) error {
+	catalog := catalogJSON{SnapshotDate: snapshotDate, Models: make(map[string]modelPriceJSON, len(prices))}
+	for model, price := range prices {
+		catalog.Models[model] = modelPriceJSON{InputUsdPer1M: price.InputUsdPer1M, OutputUsdPer1M: price.OutputUsdPer1M}
+	}
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(catalog)
 }
 
 func formatNumber(value float64) string {

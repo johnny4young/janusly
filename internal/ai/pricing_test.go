@@ -3,6 +3,7 @@ package ai
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func TestStaticModelPricesPinsSupportedAnthropicCatalog(t *testing.T) {
@@ -35,6 +36,18 @@ func TestStaticModelPricesPinsSupportedAnthropicCatalog(t *testing.T) {
 	delete(prices, "claude-sonnet-5")
 	if GetModelPrice("claude-sonnet-5") == nil {
 		t.Fatal("StaticModelPrices must return a defensive copy")
+	}
+}
+
+func TestModelPricingSnapshotIsRecent(t *testing.T) {
+	const maxAge = 120 * 24 * time.Hour
+	snapshot, err := time.Parse(time.DateOnly, ModelPricingSnapshotDate)
+	if err != nil {
+		t.Fatalf("ModelPricingSnapshotDate %q is not YYYY-MM-DD: %v", ModelPricingSnapshotDate, err)
+	}
+	if age := time.Since(snapshot); age > maxAge {
+		t.Fatalf("price catalog snapshot %s is %d days old (max 120); run make pricing-check (scripts/pricing-check.sh), fix any mismatch, then bump ModelPricingSnapshotDate and log it in docs/architecture/ai-pipeline.md",
+			ModelPricingSnapshotDate, int(age.Hours()/24))
 	}
 }
 

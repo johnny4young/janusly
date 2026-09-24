@@ -10,7 +10,7 @@ import {
 
 describe("llm-pricing", () => {
   it("ships a frozen, non-empty MODEL_PRICES table", () => {
-    expect(MODEL_PRICING_SNAPSHOT_DATE).toBe("2026-09-23");
+    expect(MODEL_PRICING_SNAPSHOT_DATE).toBe("2026-09-24");
     expect(Object.keys(MODEL_PRICES)).toHaveLength(14);
     expect(MODEL_PRICES["claude-haiku-4-5-20251001"]).toBeDefined();
     expect(MODEL_PRICES["claude-sonnet-5"]).toEqual({

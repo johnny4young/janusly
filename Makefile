@@ -15,7 +15,7 @@ GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 	test-integration test-ha test-ha-current-db test-route-parity test-ci test-e2e test-e2e-full verify verify-current-db vuln deadcode frontend-install \
 	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
 	restore-local recovery-local-selftest recovery-local-drill load-soak-local-selftest \
-	qualify-oci-local qualify-private-metrics-local qualify-real-provider qualify-pagerduty
+	qualify-oci-local qualify-private-metrics-local qualify-real-provider qualify-pagerduty pricing-check
 
 dev: db-up migrate
 	JANUSLY_DATABASE_URL='$(DB_URL)' PNPM='$(PNPM)' bash scripts/dev.sh
@@ -133,6 +133,7 @@ qualify-local-selftest:
 	bash scripts/private-metrics-local.test.sh
 	bash scripts/supply-chain-local.test.sh
 	bash scripts/real-provider-local.test.sh
+	bash scripts/pricing-check.test.sh
 
 load-soak-local-selftest:
 	bash scripts/load-soak-local.test.sh
@@ -154,6 +155,10 @@ qualify-private-metrics-local:
 
 qualify-real-provider:
 	bash scripts/real-provider-local.sh
+
+# Opt-in and networked: compares the price catalog with the vendor page.
+pricing-check:
+	bash scripts/pricing-check.sh
 
 recovery-local-selftest:
 	bash scripts/postgres-local-recovery.test.sh
