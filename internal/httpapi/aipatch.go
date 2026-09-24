@@ -463,4 +463,7 @@ func (s *V1Server) mountAiPatchRoutes(mux *http.ServeMux) {
 	s.route(mux, "POST /ai/patch-workflow", routeGate{auth.RoleEditor, "ai.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.patchWorkflowCore(r, rc))
 	})
+	s.route(mux, "POST /v1/ai/patch-workflow", routeGate{auth.RoleEditor, "ai.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.patchWorkflowCore(r, rc))
+	})
 }

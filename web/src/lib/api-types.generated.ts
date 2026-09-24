@@ -29,6 +29,8 @@ export interface ApiRequests {
   "GET /recovery/cases": undefined
   /** Inspect one governed semantic recovery case */
   "GET /recovery/cases/{caseId}": undefined
+  /** Coalesced Recovery Center read model */
+  "GET /recovery/home": undefined
   /** Lifetime verified-recovery impact ledger */
   "GET /recovery/ledger": undefined
   /** Recovery metrics: verified-recovery north star, reliability rollup, cost, value estimate */
@@ -51,8 +53,12 @@ export interface ApiRequests {
   "GET /tools": undefined
   /** Keyset-paginated workflow list */
   "GET /workflows": undefined
+  /** Recorded recovery qualification for a version pair */
+  "GET /workflows/{workflowId}/rollout/qualification": undefined
   /** Workflow assurance health score */
   "GET /workflows/health": undefined
+  /** Workflow health before and after a version cutoff */
+  "GET /workflows/health/delta": undefined
   /** Latest version of one workflow (nullable) */
   "GET /workflows/latest": undefined
   /** Validate a cron expression and preview its next fires */
@@ -61,6 +67,11 @@ export interface ApiRequests {
   "GET /workflows/versions": undefined
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": undefined
+  /** Suggest a validated fix for one dead letter without applying it */
+  "POST /ai/patch-workflow": {
+    "deadLetterId": string
+    "model"?: string
+  }
   /** Compile a bounded deterministic workflow intent brief */
   "POST /ai/workflow-briefs/compile": {
     "brief"?: {
@@ -93,8 +104,19 @@ export interface ApiRequests {
     }
     "catalogVersion"?: string
     "currentWorkflow"?: {
-      "edges": Record<string, unknown>[]
-      "nodes": Record<string, unknown>[]
+      "edges": {
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
+      }[]
+      "nodes": {
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
+      }[]
     }
     "model"?: string
     "prompt"?: string
@@ -103,9 +125,14 @@ export interface ApiRequests {
   "POST /dlq/redrive": {
     "deadLetterId": string
   }
-  /** Replay one dead letter (unversioned wire) */
+  /** Replay one dead letter, or one run node by exact identity */
   "POST /dlq/replay": {
-    "deadLetterId": string
+    "deadLetterId"?: string
+    "nodeId"?: string
+    "recoveryPlaybookId"?: string
+    "recoveryValidationRunId"?: string
+    "runId"?: string
+    "suggestedWorkflow"?: unknown
   }
   /** Resolve one dead letter as accepted loss */
   "POST /dlq/resolve": {
@@ -148,9 +175,15 @@ export interface ApiRequests {
     "candidateArtifactId": string
     "expectedRevision": number
   }
+  /** Offer an active Recovery Playbook's validated source for one dead letter */
+  "POST /recovery/playbooks/{id}/use": {
+    "deadLetterId": string
+  }
   /** Resume one waiting node */
   "POST /resume": {
+    "input"?: Record<string, unknown>
     "nodeId": string
+    "resumeToken"?: string
     "runId": string
   }
   /** Cancel a non-terminal run */
@@ -177,7 +210,10 @@ export interface ApiRequests {
       }[]
       "id"?: string
       "inputs"?: unknown
-      "metadata"?: Record<string, unknown>
+      "metadata"?: {
+        "description"?: string
+        "tags"?: string[]
+      }
       "name"?: string
       "nodes": {
         "config": Record<string, unknown>
@@ -188,7 +224,12 @@ export interface ApiRequests {
       "outputs"?: Record<string, string>
       "recovery"?: unknown
       "templatePolicy"?: string
-      "ui"?: Record<string, unknown>
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
     }
     "workflowVersionId"?: string
   }
@@ -196,7 +237,11 @@ export interface ApiRequests {
   "POST /triggers/email/ingest": {
     "aliasKey": string
     "attachmentBodies"?: Record<string, string>
-    "attachments"?: Record<string, unknown>[]
+    "attachments"?: {
+      "contentType"?: string
+      "filename": string
+      "sizeBytes"?: number
+    }[]
     "body"?: string
     "dkimPass"?: boolean
     "from": string
@@ -224,7 +269,40 @@ export interface ApiRequests {
     "resourceUri": string
   }
   /** Validate a workflow document without executing it */
-  "POST /validate": Record<string, unknown>
+  "POST /validate": {
+    "workflow": {
+      "dslVersion"?: string
+      "edges": {
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
+      }[]
+      "id"?: string
+      "inputs"?: unknown
+      "metadata"?: {
+        "description"?: string
+        "tags"?: string[]
+      }
+      "name"?: string
+      "nodes": {
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
+      }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
+    }
+  }
   /** Ingest one webhook trigger event */
   "POST /webhooks/{workflowId}": {
     "endpointKey": string
@@ -235,6 +313,23 @@ export interface ApiRequests {
   }
   /** Resume a workflow paused by its circuit breaker */
   "POST /workflows/{id}/resume": undefined
+  /** Start a bounded canary rollout */
+  "POST /workflows/{workflowId}/rollout": {
+    "baselineVersionId": string
+    "canaryVersionId": string
+    "minimumSampleSize"?: number
+    "minimumSuccessRatePercent"?: number
+    "trafficPercent"?: number
+  }
+  /** Promote or roll back an active rollout */
+  "POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}": {
+    "reason"?: string
+  }
+  /** Qualify a candidate version against the baseline dataset */
+  "POST /workflows/{workflowId}/rollout/qualification": {
+    "baselineVersionId": string
+    "candidateVersionId": string
+  }
   /** Deterministic production-readiness check */
   "POST /workflows/readiness": {
     "workflow": {
@@ -248,7 +343,10 @@ export interface ApiRequests {
       }[]
       "id"?: string
       "inputs"?: unknown
-      "metadata"?: Record<string, unknown>
+      "metadata"?: {
+        "description"?: string
+        "tags"?: string[]
+      }
       "name"?: string
       "nodes": {
         "config": Record<string, unknown>
@@ -259,7 +357,12 @@ export interface ApiRequests {
       "outputs"?: Record<string, string>
       "recovery"?: unknown
       "templatePolicy"?: string
-      "ui"?: Record<string, unknown>
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
     }
   }
   /** Append a prior snapshot as the new latest version */
@@ -279,7 +382,10 @@ export interface ApiRequests {
     }[]
     "id"?: string
     "inputs"?: unknown
-    "metadata"?: Record<string, unknown>
+    "metadata"?: {
+      "description"?: string
+      "tags"?: string[]
+    }
     "name"?: string
     "nodes": {
       "config": Record<string, unknown>
@@ -290,7 +396,12 @@ export interface ApiRequests {
     "outputs"?: Record<string, string>
     "recovery"?: unknown
     "templatePolicy"?: string
-    "ui"?: Record<string, unknown>
+    "ui"?: {
+      "positions"?: Record<string, {
+          "x": number
+          "y": number
+        }>
+    }
     "upstreamHealthSources"?: string[]
   }
 }
@@ -301,9 +412,9 @@ export interface ApiResponses {
   "GET /authoring/capabilities": {
     "builtinTools": ({
       "description": string
-      "inputExample"?: unknown
+      "inputExample"?: Record<string, unknown>
       "inputFields": ({
-        "kind": "string" | "number" | "boolean" | "object" | "array" | "json" | "unknown"
+        "kind": "string" | "number" | "integer" | "boolean" | "json" | "array" | "object" | "unknown"
         "name": string
         "required": boolean
       })[]
@@ -312,15 +423,15 @@ export interface ApiResponses {
       "required": string[]
       "writeSide": boolean
     })[]
-    "credentials": ({
+    "credentials": {
       "configured": boolean
       "expired": boolean
-      "expiresAt"?: string | null
+      "expiresAt"?: string
       "id": string
       "kind": string
       "name": string
       "updatedAt": string
-    })[]
+    }[]
     "mcpTools": ({
       "connectionAlias": string
       "description": string
@@ -382,7 +493,25 @@ export interface ApiResponses {
   })[]
   /** Failure clusters over open dead letters */
   "GET /dlq/clusters": {
-    "clusters": Record<string, unknown>[]
+    "clusters": {
+      "affectedWorkflows": {
+        "count": number
+        "workflowId": string
+        "workflowName": string
+      }[]
+      "category": string
+      "firstSeen": string
+      "frequency": number
+      "lastSeen": string
+      "recurredAfterRecovery": boolean
+      "samples": {
+        "id": string
+        "runId": string
+        "source": string
+      }[]
+      "signature": string
+      "suggestedOwner": string
+    }[]
     "totalSamples": number
     "windowDays": number
   }
@@ -425,14 +554,17 @@ export interface ApiResponses {
   }
   /** Tenant memory consent and purge posture */
   "GET /memory/consent-status": {
-    "enabled"?: boolean
-    "processEnabled"?: boolean
-    "purge"?: Record<string, unknown>
-    "tenantEnabled"?: boolean
+    "enabled": boolean
+    "processEnabled": boolean
+    "purge": {
+      "scheduledFor": string | null
+      "status": "none" | "unknown" | "scheduled" | "running"
+    }
+    "tenantEnabled": boolean
   }
   /** Bounded deterministic Operator Brief shared by UI and MCP */
   "GET /operations/brief": {
-    "actions": {
+    "actions": ({
       "allowedActions": string[]
       "bodyKey": string
       "createdAt": string
@@ -445,7 +577,22 @@ export interface ApiResponses {
       }[]
       "id": string
       "kind": string
-      "params": Record<string, unknown>
+      "params": {
+        "action"?: never
+        "state"?: never
+        "category"?: never
+        "count"?: never
+      } | {
+        "action": string
+        "state": string
+        "category"?: never
+        "count"?: never
+      } | {
+        "category": string
+        "count": number
+        "action"?: never
+        "state"?: never
+      }
       "priority": number
       "severity": string
       "target": {
@@ -456,7 +603,7 @@ export interface ApiResponses {
         "workflowId"?: string
       }
       "titleKey": string
-    }[]
+    })[]
     "generatedAt": string
     "version": string
     "warnings": string[]
@@ -466,21 +613,21 @@ export interface ApiResponses {
     "cases": ({
       "action": string
       "createdAt": string
-      "createdBy"?: string | null
-      "detailsJson"?: unknown
+      "createdBy": string | null
+      "detailsJson": unknown
       "detectorId": string
       "detectorKind": string
       "id": string
       "message": string
       "orgId": string
-      "resolvedAt"?: string | null
+      "resolvedAt": string | null
       "revision": number
       "runId": string
       "source": string
       "sourceNodeId": string
       "state": string
       "updatedAt": string
-      "workflowId"?: string | null
+      "workflowId": string | null
       "workflowVersionId": string
     })[]
   }
@@ -493,7 +640,7 @@ export interface ApiResponses {
       "validationArtifactId": string
     } | null
     "artifacts": ({
-      "actorId"?: string | null
+      "actorId": string | null
       "actorKind": string
       "caseId": string
       "createdAt": string
@@ -502,127 +649,595 @@ export interface ApiResponses {
       "payload": unknown
       "sha256": string
     })[]
-    "autonomy": Record<string, unknown>
+    "autonomy": {
+      "capabilities": {
+        "applyWithApproval": boolean
+        "autonomousApply": boolean
+        "observe": boolean
+        "recommend": boolean
+        "validate": boolean
+      }
+      "detectorIds": string[]
+      "factors": {
+        "capability": string
+        "enabled": boolean
+        "requiredLevel": number
+      }[]
+      "level": number | null
+      "source": string
+      "unavailableReason": string | null
+    }
     "case": {
       "action": string
       "createdAt": string
-      "createdBy"?: string | null
-      "detailsJson"?: unknown
+      "createdBy": string | null
+      "detailsJson": unknown
       "detectorId": string
       "detectorKind": string
       "id": string
       "message": string
       "orgId": string
-      "resolvedAt"?: string | null
+      "resolvedAt": string | null
       "revision": number
       "runId": string
       "source": string
       "sourceNodeId": string
       "state": string
       "updatedAt": string
-      "workflowId"?: string | null
+      "workflowId": string | null
       "workflowVersionId": string
     }
-    "transitions": Record<string, unknown>[]
+    "transitions": ({
+      "actorId": string | null
+      "actorKind": string
+      "caseId": string
+      "evidenceJson": unknown
+      "fromState": string
+      "id": string
+      "occurredAt": string
+      "orgId": string
+      "reason": string | null
+      "toState": string
+    })[]
+  }
+  /** Coalesced Recovery Center read model */
+  "GET /recovery/home": {
+    "generatedAt": string
+    "scope": "full" | "impact"
+    "sections": {
+      "cases"?: {
+        "status": "ok"
+        "value": {
+          "cases": ({
+            "action": string
+            "createdAt": string
+            "detectorId": string
+            "detectorKind": string
+            "id": string
+            "message": string
+            "runId": string
+            "source": string
+            "state": string
+            "workflowId": string | null
+          })[]
+        }
+      } | {
+        "status": "unavailable"
+        "value"?: never
+      }
+      "clusters"?: {
+        "status": "ok"
+        "value": {
+          "clusters": {
+            "affectedWorkflows": {
+              "count": number
+              "workflowId": string
+              "workflowName": string
+            }[]
+            "category": string
+            "firstSeen": string
+            "frequency": number
+            "lastSeen": string
+            "recurredAfterRecovery": boolean
+            "samples": {
+              "id": string
+              "runId": string
+              "source": string
+            }[]
+            "signature": string
+            "suggestedOwner": string
+          }[]
+          "totalSamples": number
+          "windowDays": number
+        }
+      } | {
+        "status": "unavailable"
+        "value"?: never
+      }
+      "heatmap"?: {
+        "status": "ok"
+        "value": {
+          "days": {
+            "day": string
+            "failures": number
+            "mttrSeconds": number
+            "recovered": number
+          }[]
+          "windowDays": number
+        }
+      } | {
+        "status": "unavailable"
+        "value"?: never
+      }
+      "ledger": {
+        "status": "ok"
+        "value": {
+          "downtimeEndedMs": number
+          "sinceIso": string | null
+          "totalRecovered": number
+        }
+      } | {
+        "status": "unavailable"
+        "value"?: never
+      }
+      "metrics"?: {
+        "status": "ok"
+        "value": {
+          "approvalsPending": {
+            "display": string
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "value": number | null
+          }
+          "clustersResolved": {
+            "capped": boolean
+            "display": string
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "totalEntries": number
+            "value": number | null
+          }
+          "costByProvider": {
+            "aggregated": boolean
+            "cacheCreationInputTokens": number
+            "cachedInputTokens": number
+            "calls": number
+            "inputTokens": number
+            "model": string
+            "provider": string
+            "tokens": number
+            "usd": number
+          }[]
+          "costThisWindow": {
+            "cache": {
+              "creationTokens": number
+              "inputTokens": number
+              "readSharePercent": number | null
+              "readTokens": number
+            }
+            "display": string
+            "providers": {
+              "aggregated": boolean
+              "cacheCreationInputTokens": number
+              "cachedInputTokens": number
+              "calls": number
+              "inputTokens": number
+              "model": string
+              "provider": string
+              "tokens": number
+              "usd": number
+            }[]
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "value": number | null
+          }
+          "downtimeEndedMs": number
+          "mttr": {
+            "display": string
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "value": number | null
+          }
+          "mttrMs": number | null
+          "mttrTrend": {
+            "day": string
+            "seconds": number
+          }[]
+          "p95Latency": {
+            "display": string
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "value": number | null
+          }
+          "recurrence": {
+            "recurred": number
+            "resolved": number
+            "stayedFixedRate": number | null
+            "windowDays": number
+          }
+          "recurrenceRate": {
+            "display": string
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "value": number | null
+          }
+          "replayRate": {
+            "display": string
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "value": number | null
+          }
+          "slaAttainment": {
+            "display": string
+            "metSla": number
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "resolvedInWindow": number
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "value": number | null
+          }
+          "successRate": {
+            "display": string
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "value": number | null
+          }
+          "terminalRuns": number
+          "timeToFirstAction": {
+            "avgSeconds": number | null
+            "display": string
+            "p95Seconds": number | null
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "sampleSize": number
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "unit": string
+            "value": number | null
+          }
+          "valueEstimate": {
+            "assumptions": {
+              "baselineMttrSeconds": number
+              "hourlyCost": number
+              "minutesSavedPerRecovery": number
+            }
+            "dollarSaved": number
+            "hoursSaved": number
+            "mttrDeltaSeconds": number | null
+          }
+          "verifiedRecovery": {
+            "definitionVersion": string
+            "display": string
+            "metric": string
+            "p50Ms": number | null
+            "p90Ms": number | null
+            "rationale": string
+            "rationaleCode": string
+            "rationaleMeta"?: Record<string, string | number | boolean>
+            "sampleSize": number
+            "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+            "unit": string
+            "value": number | null
+          }
+          "windowDays": number
+        }
+      } | {
+        "status": "unavailable"
+        "value"?: never
+      }
+      "queue": {
+        "status": "ok"
+        "value": {
+          "counts": {
+            "open": number
+            "replayed": number
+            "resolved": number
+            "total": number
+          }
+          "oldestOpen": {
+            "attempt": number
+            "createdAt": string | null
+            "errorJson": unknown
+            "id": string
+            "nodeId": string
+            "nodeType": string | null
+            "orgId": string
+            "recovery": {
+              "comments": unknown
+              "id": string
+              "lastOccurredAt": string | null
+              "metadataWorkflowId": string | null
+              "occurrenceCount": number
+              "owner": string | null
+              "resolutionReason": string | null
+              "severity": string
+              "slaTargetAt": string | null
+              "status": string
+              "workflowId": string | null
+            } | null
+            "replayedAt": string | null
+            "runId": string
+            "status": "open" | "replayed" | "resolved"
+            "workflowName": string | null
+          } | null
+        }
+      } | {
+        "status": "unavailable"
+        "value"?: never
+      }
+      "validation"?: {
+        "status": "ok"
+        "value": {
+          "byFailureMode": ({
+            "acceptedLoss": number
+            "completed": number
+            "key": string
+            "recovered": number
+            "recoveryRatePercent": number | null
+            "total": number
+          })[]
+          "byRecoveryPath": ({
+            "acceptedLoss": number
+            "completed": number
+            "key": string
+            "recovered": number
+            "recoveryRatePercent": number | null
+            "total": number
+          })[]
+          "generatedAt": string
+          "resolution": {
+            "automated": number
+            "operator": number
+            "operatorInterventionRatePercent": number | null
+            "unknown": number
+          }
+          "sampleCapped": boolean
+          "sampleLimit": number
+          "samples": ({
+            "failureMode": string
+            "fixtureId": string
+            "outcome": {
+              "attemptCount": number
+              "chainCapped": boolean
+              "completedAt": string | null
+              "elapsedMs": number | null
+              "evidence": null | "terminal_impact" | "explicit_resolution"
+              "latestDeadLetterId": string
+              "recurrence": {
+                "recurredAt": string | null
+                "status": "not_applicable" | "monitoring" | "clear" | "recurred"
+                "windowEndsAt": string | null
+              }
+              "startedAt": string | null
+              "status": "awaiting_action" | "replay_in_progress" | "recovered" | "accepted_loss" | "measurement_incomplete"
+            } | null
+            "packId": string
+            "recoveryPath": string
+            "resolutionMode": "operator" | "automated" | "unknown"
+            "runCreatedAt": string
+            "runId": string
+          })[]
+          "timing": {
+            "averageElapsedMs": number | null
+            "medianElapsedMs": number | null
+            "p90ElapsedMs": number | null
+            "p95ElapsedMs": number | null
+            "sampleSize": number
+          }
+          "totals": {
+            "acceptedLoss": number
+            "awaitingAction": number
+            "completed": number
+            "completionRatePercent": number | null
+            "drills": number
+            "measurementIncomplete": number
+            "missingEvidence": number
+            "recovered": number
+            "recoveryRatePercent": number | null
+            "replayInProgress": number
+          }
+          "windowDays": number
+        }
+      } | {
+        "status": "unavailable"
+        "value"?: never
+      }
+      "wins": {
+        "status": "ok"
+        "value": {
+          "recovered": number
+          "windowDays": number
+        }
+      } | {
+        "status": "unavailable"
+        "value"?: never
+      }
+    }
   }
   /** Lifetime verified-recovery impact ledger */
   "GET /recovery/ledger": {
-    "downtimeEndedMs"?: number
-    "sinceIso"?: string | null
-    "totalRecovered"?: number
+    "downtimeEndedMs": number
+    "sinceIso": string | null
+    "totalRecovered": number
   }
   /** Recovery metrics: verified-recovery north star, reliability rollup, cost, value estimate */
   "GET /recovery/metrics": {
     "approvalsPending": {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+      "display": string
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "value": number | null
     }
-    "clustersResolved"?: {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+    "clustersResolved": {
+      "capped": boolean
+      "display": string
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "totalEntries": number
+      "value": number | null
     }
-    "costByProvider"?: Record<string, unknown>[]
+    "costByProvider": {
+      "aggregated": boolean
+      "cacheCreationInputTokens": number
+      "cachedInputTokens": number
+      "calls": number
+      "inputTokens": number
+      "model": string
+      "provider": string
+      "tokens": number
+      "usd": number
+    }[]
     "costThisWindow": {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+      "cache": {
+        "creationTokens": number
+        "inputTokens": number
+        "readSharePercent": number | null
+        "readTokens": number
+      }
+      "display": string
+      "providers": {
+        "aggregated": boolean
+        "cacheCreationInputTokens": number
+        "cachedInputTokens": number
+        "calls": number
+        "inputTokens": number
+        "model": string
+        "provider": string
+        "tokens": number
+        "usd": number
+      }[]
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "value": number | null
     }
-    "downtimeEndedMs"?: number
+    "downtimeEndedMs": number
     "mttr": {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+      "display": string
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "value": number | null
     }
-    "mttrMs"?: number | null
-    "mttrTrend"?: Record<string, unknown>[]
+    "mttrMs": number | null
+    "mttrTrend": {
+      "day": string
+      "seconds": number
+    }[]
     "p95Latency": {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+      "display": string
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "value": number | null
     }
-    "recurrence"?: Record<string, unknown>
-    "recurrenceRate"?: {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+    "recurrence": {
+      "recurred": number
+      "resolved": number
+      "stayedFixedRate": number | null
+      "windowDays": number
+    }
+    "recurrenceRate": {
+      "display": string
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "value": number | null
     }
     "replayRate": {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+      "display": string
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "value": number | null
     }
-    "slaAttainment"?: {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+    "slaAttainment": {
+      "display": string
+      "metSla": number
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "resolvedInWindow": number
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "value": number | null
     }
     "successRate": {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+      "display": string
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "value": number | null
     }
     "terminalRuns": number
-    "timeToFirstAction"?: {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+    "timeToFirstAction": {
+      "avgSeconds": number | null
+      "display": string
+      "p95Seconds": number | null
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "sampleSize": number
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "unit": string
+      "value": number | null
     }
-    "valueEstimate"?: Record<string, unknown>
-    "verifiedRecovery"?: {
-      "display"?: string
-      "rationale"?: string
-      "rationaleCode"?: string
-      "severity"?: string
-      "value"?: number | null
+    "valueEstimate": {
+      "assumptions": {
+        "baselineMttrSeconds": number
+        "hourlyCost": number
+        "minutesSavedPerRecovery": number
+      }
+      "dollarSaved": number
+      "hoursSaved": number
+      "mttrDeltaSeconds": number | null
+    }
+    "verifiedRecovery": {
+      "definitionVersion": string
+      "display": string
+      "metric": string
+      "p50Ms": number | null
+      "p90Ms": number | null
+      "rationale": string
+      "rationaleCode": string
+      "rationaleMeta"?: Record<string, string | number | boolean>
+      "sampleSize": number
+      "severity": "healthy" | "warn" | "unhealthy" | "neutral"
+      "unit": string
+      "value": number | null
     }
     "windowDays": number
   }
   /** Current operator recovery wins */
   "GET /recovery/my-wins": {
-    "recovered"?: number
-    "windowDays"?: number
+    "recovered": number
+    "windowDays": number
   }
   /** One run with nodes and paginated events */
   "GET /run": {
@@ -674,11 +1289,30 @@ export interface ApiResponses {
   }
   /** Bounded per-run AI and memory usage */
   "GET /run/usage": {
-    "llm"?: Record<string, unknown>
-    "loadedRows"?: number
-    "memory"?: Record<string, unknown>
-    "rowCap"?: number
-    "truncated"?: boolean
+    "llm": {
+      "cacheCreationInputTokens": number
+      "cachedInputTokens": number
+      "calls": number
+      "inputTokens": number
+      "knownCostUsd": number
+      "outputTokens": number
+      "totalTokens": number
+      "unknownCostCalls": number
+    }
+    "loadedRows": number
+    "memory": {
+      "commits": number
+      "failures": number
+      "kinds": {
+        "commits": number
+        "failures": number
+        "kind": string
+        "recalls": number
+      }[]
+      "recalls": number
+    }
+    "rowCap": number
+    "truncated": boolean
   }
   /** Keyset-paginated run list */
   "GET /runs": ({
@@ -703,7 +1337,15 @@ export interface ApiResponses {
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": {
     "enabled": boolean
-    "entries": Record<string, unknown>[]
+    "entries": {
+      "content": string
+      "id": string
+      "kind": string
+      "metadata"?: unknown
+      "runId"?: string
+      "similarity": number
+      "workflowId"?: string
+    }[]
   }
   /** Alias of /v1/run */
   "GET /status": {
@@ -795,13 +1437,314 @@ export interface ApiResponses {
     "status": string
     "tags": string[]
   })[]
+  /** Recorded recovery qualification for a version pair */
+  "GET /workflows/{workflowId}/rollout/qualification": {
+    "qualification": {
+      "baselineVersionId": string
+      "candidateVersionId": string
+      "createdAt": string
+      "datasetDigest": string
+      "datasetVersion": string
+      "id": string
+      "mode": string
+      "status": string
+      "summary": {
+        "baselineCaseCount": number
+        "baselineDatasetValid": boolean
+        "candidateAssertionCount": number
+        "candidateCaseCount": number
+        "coverageFailureCount": number
+        "datasetDigest": string
+        "datasetVersion": string
+        "failedCandidateAssertions": number
+        "failures": {
+          "actual": string
+          "dataset": string
+          "expected": string
+          "fixtureId": string
+          "reason": string
+          "sourceNodeId": string
+          "violations"?: {
+            "action": string
+            "details"?: string[]
+            "detectorId": string
+            "kind": string
+            "message": string
+            "sourceNodeId": string
+          }[]
+        }[]
+        "failuresTruncated": boolean
+        "mode": string
+        "passedCandidateAssertions": number
+        "regressionCount": number
+        "status": string
+      }
+      "workflowId": string
+    } | null
+    "required": boolean
+    "summary"?: {
+      "baselineCaseCount": number
+      "baselineDatasetValid": boolean
+      "candidateAssertionCount": number
+      "candidateCaseCount": number
+      "coverageFailureCount": number
+      "datasetDigest": string
+      "datasetVersion": string
+      "failedCandidateAssertions": number
+      "failures": {
+        "actual": string
+        "dataset": string
+        "expected": string
+        "fixtureId": string
+        "reason": string
+        "sourceNodeId": string
+        "violations"?: {
+          "action": string
+          "details"?: string[]
+          "detectorId": string
+          "kind": string
+          "message": string
+          "sourceNodeId": string
+        }[]
+      }[]
+      "failuresTruncated": boolean
+      "mode": string
+      "passedCandidateAssertions": number
+      "regressionCount": number
+      "status": string
+    }
+  }
   /** Workflow assurance health score */
   "GET /workflows/health": {
-    "breakdown": Record<string, Record<string, unknown>>
+    "breakdown": {
+      "aiRisk": {
+        "rationale": string
+        "rationaleCode": string
+        "rationaleMeta"?: Record<string, string | number | boolean>
+        "score": number
+      }
+      "cost": {
+        "rationale": string
+        "rationaleCode": string
+        "rationaleMeta"?: Record<string, string | number | boolean>
+        "score": number
+      }
+      "latency": {
+        "rationale": string
+        "rationaleCode": string
+        "rationaleMeta"?: Record<string, string | number | boolean>
+        "score": number
+      }
+      "maintainability": {
+        "rationale": string
+        "rationaleCode": string
+        "rationaleMeta"?: Record<string, string | number | boolean>
+        "score": number
+      }
+      "reliability": {
+        "rationale": string
+        "rationaleCode": string
+        "rationaleMeta"?: Record<string, string | number | boolean>
+        "score": number
+      }
+      "safety": {
+        "rationale": string
+        "rationaleCode": string
+        "rationaleMeta"?: Record<string, string | number | boolean>
+        "score": number
+      }
+    }
     "score": number
-    "signals": Record<string, unknown>
-    "slo"?: Record<string, unknown> | null
-    "status": string
+    "signals": {
+      "dlqOpenCount": number
+      "failureCount": number
+      "p95LatencyMs": number | null
+      "retryCount": number
+      "successCount": number
+      "totalCostUsd": number
+      "totalRuns": number
+      "totalTokens": number
+      "versionCount": number
+    }
+    "slo": {
+      "breaches": {
+        "anyBreach": boolean
+        "p95": boolean
+        "successRate": boolean
+      }
+      "slo": {
+        "budgetBlocksPerWindow": number | null
+        "mttrSeconds": number | null
+        "p95DurationMs": number | null
+        "stuckWaitingNodesMax": number | null
+        "successRatePercent": number | null
+        "windowDays": number | null
+      }
+    } | null
+    "status": "healthy" | "warn" | "unhealthy"
+  }
+  /** Workflow health before and after a version cutoff */
+  "GET /workflows/health/delta": {
+    "after": {
+      "breakdown": {
+        "aiRisk": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "cost": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "latency": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "maintainability": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "reliability": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "safety": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+      }
+      "score": number
+      "signals": {
+        "dlqOpenCount": number
+        "failureCount": number
+        "p95LatencyMs": number | null
+        "retryCount": number
+        "successCount": number
+        "totalCostUsd": number
+        "totalRuns": number
+        "totalTokens": number
+        "versionCount": number
+      }
+      "slo": {
+        "breaches": {
+          "anyBreach": boolean
+          "p95": boolean
+          "successRate": boolean
+        }
+        "slo": {
+          "budgetBlocksPerWindow": number | null
+          "mttrSeconds": number | null
+          "p95DurationMs": number | null
+          "stuckWaitingNodesMax": number | null
+          "successRatePercent": number | null
+          "windowDays": number | null
+        }
+      } | null
+      "status": "healthy" | "warn" | "unhealthy"
+    }
+    "afterVersion": number
+    "before": {
+      "breakdown": {
+        "aiRisk": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "cost": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "latency": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "maintainability": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "reliability": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+        "safety": {
+          "rationale": string
+          "rationaleCode": string
+          "rationaleMeta"?: Record<string, string | number | boolean>
+          "score": number
+        }
+      }
+      "score": number
+      "signals": {
+        "dlqOpenCount": number
+        "failureCount": number
+        "p95LatencyMs": number | null
+        "retryCount": number
+        "successCount": number
+        "totalCostUsd": number
+        "totalRuns": number
+        "totalTokens": number
+        "versionCount": number
+      }
+      "slo": {
+        "breaches": {
+          "anyBreach": boolean
+          "p95": boolean
+          "successRate": boolean
+        }
+        "slo": {
+          "budgetBlocksPerWindow": number | null
+          "mttrSeconds": number | null
+          "p95DurationMs": number | null
+          "stuckWaitingNodesMax": number | null
+          "successRatePercent": number | null
+          "windowDays": number | null
+        }
+      } | null
+      "status": "healthy" | "warn" | "unhealthy"
+    }
+    "delta": {
+      "costPerRunUsd": number | null
+      "p95LatencyMs": number | null
+      "score": number
+    } | null
+    "hasEnoughData": boolean
+    "priorVersion": {
+      "version": number
+      "versionId": string
+    } | null
+    "recentRunsAgainstAfter": {
+      "failed": number
+      "running": number
+      "succeeded": number
+      "totalRuns": number
+    }
+    "sameFailureSinceApply": {
+      "count": number
+      "priorSignature": string
+      "sampleDeadLetterIds": string[]
+    } | null
+    "windowDays": number
+    "workflowId": string
   }
   /** Latest version of one workflow (nullable) */
   "GET /workflows/latest": {
@@ -817,8 +1760,8 @@ export interface ApiResponses {
   } | null
   /** Validate a cron expression and preview its next fires */
   "GET /workflows/schedule-preview": {
-    "nextFires"?: string[]
-    "valid"?: boolean
+    "nextFires": string[]
+    "valid": boolean
   }
   /** Keyset-paginated versions of one workflow */
   "GET /workflows/versions": ({
@@ -835,7 +1778,7 @@ export interface ApiResponses {
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": {
     "dagJson": {
-      "dslVersion"?: string
+      "dslVersion": string
       "edges": {
         "condition"?: string
         "from": string
@@ -845,7 +1788,10 @@ export interface ApiResponses {
       }[]
       "id"?: string
       "inputs"?: unknown
-      "metadata"?: Record<string, unknown>
+      "metadata"?: {
+        "description"?: string
+        "tags": string[]
+      }
       "name"?: string
       "nodes": {
         "config": Record<string, unknown>
@@ -856,11 +1802,114 @@ export interface ApiResponses {
       "outputs"?: Record<string, string>
       "recovery"?: unknown
       "templatePolicy"?: string
-      "ui"?: Record<string, unknown>
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
     }
     "id": string
     "version": number
     "workflowId": string
+  }
+  /** Suggest a validated fix for one dead letter without applying it */
+  "POST /ai/patch-workflow": {
+    "aiError"?: string
+    "evidence": {
+      "kind": string
+      "label"?: string
+      "snippet": string
+      "sourceRef": string
+      "weight"?: number
+    }[]
+    "mode": "ai" | "fallback"
+    "model"?: string
+    "provider"?: string
+    "rationale": string
+    "recoveryPassport": {
+      "failureSignature": string
+      "priorSameSignatureOutcome": null
+    }
+    "suggestedWorkflow": {
+      "dslVersion": string
+      "edges": {
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
+      }[]
+      "id"?: string
+      "inputs"?: unknown
+      "metadata"?: {
+        "description"?: string
+        "tags": string[]
+      }
+      "name"?: string
+      "nodes": {
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
+      }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
+    }
+    "suggestions": {
+      "approachLabel": string
+      "calibratedConfidence": number
+      "confidence": number
+      "consideredAlternatives": {
+        "approach": string
+        "rejectedBecause": string
+      }[]
+      "rationale": string
+      "safety": {
+        "approvalPresent": boolean
+        "approvalRequired": boolean
+        "writeSide": boolean
+      }
+      "workflow": {
+        "dslVersion": string
+        "edges": {
+          "condition"?: string
+          "from": string
+          "id"?: string
+          "onError"?: boolean
+          "to": string
+        }[]
+        "id"?: string
+        "inputs"?: unknown
+        "metadata"?: {
+          "description"?: string
+          "tags": string[]
+        }
+        "name"?: string
+        "nodes": {
+          "config": Record<string, unknown>
+          "id": string
+          "label"?: string
+          "type": string
+        }[]
+        "outputs"?: Record<string, string>
+        "recovery"?: unknown
+        "templatePolicy"?: string
+        "ui"?: {
+          "positions"?: Record<string, {
+              "x": number
+              "y": number
+            }>
+        }
+      }
+    }[]
   }
   /** Compile a bounded deterministic workflow intent brief */
   "POST /ai/workflow-briefs/compile": {
@@ -963,7 +2012,10 @@ export interface ApiResponses {
         }[]
         "id"?: string
         "inputs"?: unknown
-        "metadata"?: Record<string, unknown>
+        "metadata"?: {
+          "description"?: string
+          "tags"?: string[]
+        }
         "name"?: string
         "nodes": {
           "config": Record<string, unknown>
@@ -974,18 +2026,23 @@ export interface ApiResponses {
         "outputs"?: Record<string, string>
         "recovery"?: unknown
         "templatePolicy"?: string
-        "ui"?: Record<string, unknown>
+        "ui"?: {
+          "positions"?: Record<string, {
+              "x": number
+              "y": number
+            }>
+        }
       }
     }
     "providerGuarded"?: boolean
   }
   /** Redrive one dead letter */
   "POST /dlq/redrive": {
-    "redriven": boolean
+    "redriven": true
   }
-  /** Replay one dead letter (unversioned wire) */
+  /** Replay one dead letter, or one run node by exact identity */
   "POST /dlq/replay": {
-    "ok": boolean
+    "ok": true
   }
   /** Resolve one dead letter as accepted loss */
   "POST /dlq/resolve": {
@@ -1017,7 +2074,7 @@ export interface ApiResponses {
   /** Create immutable recovery candidates */
   "POST /recovery/cases/{caseId}/candidates": {
     "candidates": ({
-      "actorId"?: string | null
+      "actorId": string | null
       "actorKind": string
       "caseId": string
       "createdAt": string
@@ -1029,21 +2086,21 @@ export interface ApiResponses {
     "case": {
       "action": string
       "createdAt": string
-      "createdBy"?: string | null
-      "detailsJson"?: unknown
+      "createdBy": string | null
+      "detailsJson": unknown
       "detectorId": string
       "detectorKind": string
       "id": string
       "message": string
       "orgId": string
-      "resolvedAt"?: string | null
+      "resolvedAt": string | null
       "revision": number
       "runId": string
       "source": string
       "sourceNodeId": string
       "state": string
       "updatedAt": string
-      "workflowId"?: string | null
+      "workflowId": string | null
       "workflowVersionId": string
     }
   }
@@ -1052,25 +2109,25 @@ export interface ApiResponses {
     "case": {
       "action": string
       "createdAt": string
-      "createdBy"?: string | null
-      "detailsJson"?: unknown
+      "createdBy": string | null
+      "detailsJson": unknown
       "detectorId": string
       "detectorKind": string
       "id": string
       "message": string
       "orgId": string
-      "resolvedAt"?: string | null
+      "resolvedAt": string | null
       "revision": number
       "runId": string
       "source": string
       "sourceNodeId": string
       "state": string
       "updatedAt": string
-      "workflowId"?: string | null
+      "workflowId": string | null
       "workflowVersionId": string
     }
     "diagnosis": {
-      "actorId"?: string | null
+      "actorId": string | null
       "actorKind": string
       "caseId": string
       "createdAt": string
@@ -1079,33 +2136,33 @@ export interface ApiResponses {
       "payload": unknown
       "sha256": string
     }
-    "mode": string
+    "mode": "ai_enriched" | "deterministic_fallback"
   }
   /** Validate one immutable recovery candidate */
   "POST /recovery/cases/{caseId}/validate": {
     "case": {
       "action": string
       "createdAt": string
-      "createdBy"?: string | null
-      "detailsJson"?: unknown
+      "createdBy": string | null
+      "detailsJson": unknown
       "detectorId": string
       "detectorKind": string
       "id": string
       "message": string
       "orgId": string
-      "resolvedAt"?: string | null
+      "resolvedAt": string | null
       "revision": number
       "runId": string
       "source": string
       "sourceNodeId": string
       "state": string
       "updatedAt": string
-      "workflowId"?: string | null
+      "workflowId": string | null
       "workflowVersionId": string
     }
     "passed": boolean
     "validation": {
-      "actorId"?: string | null
+      "actorId": string | null
       "actorKind": string
       "caseId": string
       "createdAt": string
@@ -1115,18 +2172,132 @@ export interface ApiResponses {
       "sha256": string
     }
   }
+  /** Offer an active Recovery Playbook's validated source for one dead letter */
+  "POST /recovery/playbooks/{id}/use": {
+    "suggestion": {
+      "evidence": {
+        "kind": string
+        "label"?: string
+        "snippet": string
+        "sourceRef": string
+        "weight"?: number
+      }[]
+      "mode": "playbook"
+      "playbook": {
+        "activatedAt": string | null
+        "approachLabel": string
+        "createdAt": string | null
+        "id": string
+        "instructionsMarkdown": string
+        "lastValidatedAt": string | null
+        "regressions": number
+        "retiredAt": string | null
+        "signature": string
+        "status": string
+        "successfulUses": number
+        "title": string
+        "updatedAt": string | null
+        "version": number
+        "workflowId": string | null
+      }
+      "rationale": string
+      "recoveryPassport": {
+        "failureSignature": string
+        "priorSameSignatureOutcome": null
+      }
+      "suggestedWorkflow": {
+        "dslVersion": string
+        "edges": {
+          "condition"?: string
+          "from": string
+          "id"?: string
+          "onError"?: boolean
+          "to": string
+        }[]
+        "id"?: string
+        "inputs"?: unknown
+        "metadata"?: {
+          "description"?: string
+          "tags": string[]
+        }
+        "name"?: string
+        "nodes": {
+          "config": Record<string, unknown>
+          "id": string
+          "label"?: string
+          "type": string
+        }[]
+        "outputs"?: Record<string, string>
+        "recovery"?: unknown
+        "templatePolicy"?: string
+        "ui"?: {
+          "positions"?: Record<string, {
+              "x": number
+              "y": number
+            }>
+        }
+      }
+      "suggestions": {
+        "approachLabel": string
+        "calibratedConfidence": number
+        "confidence": number
+        "consideredAlternatives": {
+          "approach": string
+          "rejectedBecause": string
+        }[]
+        "rationale": string
+        "safety": {
+          "approvalPresent": boolean
+          "approvalRequired": boolean
+          "writeSide": boolean
+        }
+        "workflow": {
+          "dslVersion": string
+          "edges": {
+            "condition"?: string
+            "from": string
+            "id"?: string
+            "onError"?: boolean
+            "to": string
+          }[]
+          "id"?: string
+          "inputs"?: unknown
+          "metadata"?: {
+            "description"?: string
+            "tags": string[]
+          }
+          "name"?: string
+          "nodes": {
+            "config": Record<string, unknown>
+            "id": string
+            "label"?: string
+            "type": string
+          }[]
+          "outputs"?: Record<string, string>
+          "recovery"?: unknown
+          "templatePolicy"?: string
+          "ui"?: {
+            "positions"?: Record<string, {
+                "x": number
+                "y": number
+              }>
+          }
+        }
+      }[]
+    }
+  }
   /** Resume one waiting node */
   "POST /resume": {
-    "resumed": boolean
+    "resumed": true
   }
   /** Cancel a non-terminal run */
   "POST /run/cancel": {
     "runId": string
-    "status": string
+    "status": "cancelled"
   }
   /** Redrive by run and node (revive-in-place) */
   "POST /runs/redrive": {
-    "ok": boolean
+    "ok": true
     "runId": string
   }
   /** Start an exact saved workflow version or an ad-hoc document */
@@ -1135,63 +2306,260 @@ export interface ApiResponses {
   }
   /** Ingest a normalized inbound email event */
   "POST /triggers/email/ingest": {
-    "duplicate"?: boolean
-    "ok": boolean
-    "runId"?: string | null
+    "ok": true
+    "runId": string
     "triggerEventId": string
+    "duplicate"?: never
+    "buffered"?: never
+    "reason"?: never
+  } | {
+    "duplicate": true
+    "ok": true
+    "runId": string | null
+    "triggerEventId": string
+    "buffered"?: never
+    "reason"?: never
+  } | {
+    "buffered": true
+    "ok": true
+    "reason": string
+    "triggerEventId": string
+    "runId"?: never
+    "duplicate"?: never
   }
   /** Ingest a normalized object-store event */
   "POST /triggers/file/ingest": {
-    "duplicate"?: boolean
-    "ok": boolean
-    "runId"?: string | null
+    "ok": true
+    "runId": string
     "triggerEventId": string
+    "duplicate"?: never
+    "buffered"?: never
+    "reason"?: never
+  } | {
+    "duplicate": true
+    "ok": true
+    "runId": string | null
+    "triggerEventId": string
+    "buffered"?: never
+    "reason"?: never
+  } | {
+    "buffered": true
+    "ok": true
+    "reason": string
+    "triggerEventId": string
+    "runId"?: never
+    "duplicate"?: never
   }
   /** Ingest a normalized MCP resource event */
   "POST /triggers/mcp/ingest": {
-    "duplicate"?: boolean
-    "ok": boolean
-    "runId"?: string | null
+    "ok": true
+    "runId": string
     "triggerEventId": string
+    "duplicate"?: never
+    "buffered"?: never
+    "reason"?: never
+  } | {
+    "duplicate": true
+    "ok": true
+    "runId": string | null
+    "triggerEventId": string
+    "buffered"?: never
+    "reason"?: never
+  } | {
+    "buffered": true
+    "ok": true
+    "reason": string
+    "triggerEventId": string
+    "runId"?: never
+    "duplicate"?: never
   }
   /** Validate a workflow document without executing it */
   "POST /validate": {
-    "issues": Record<string, unknown>[]
+    "issues": {
+      "code": string
+      "edgeId"?: string
+      "message": string
+      "nodeId"?: string
+    }[]
     "valid": boolean
   }
   /** Ingest one webhook trigger event */
   "POST /webhooks/{workflowId}": {
-    "duplicate"?: boolean
-    "ok": boolean
-    "runId"?: string | null
+    "ok": true
+    "runId": string
     "triggerEventId": string
+    "duplicate"?: never
+    "buffered"?: never
+    "reason"?: never
+  } | {
+    "duplicate": true
+    "ok": true
+    "runId": string | null
+    "triggerEventId": string
+    "buffered"?: never
+    "reason"?: never
+  } | {
+    "buffered": true
+    "ok": true
+    "reason": string
+    "triggerEventId": string
+    "runId"?: never
+    "duplicate"?: never
   }
   /** Resume a workflow paused by its circuit breaker */
   "POST /workflows/{id}/resume": {
     "backfilled": number
     "failed": number
-    "ok": boolean
+    "ok": true
     "remaining": number
     "status": string
     "workflowId": string
   }
+  /** Start a bounded canary rollout */
+  "POST /workflows/{workflowId}/rollout": {
+    "rollout": {
+      "baselineFailed": number
+      "baselineSucceeded": number
+      "baselineVersionId": string
+      "canaryFailed": number
+      "canarySucceeded": number
+      "canaryVersionId": string
+      "createdAt": string
+      "endedAt": string | null
+      "id": string
+      "lastOutcomeAt": string | null
+      "minimumSampleSize": number
+      "minimumSuccessRatePercent": number
+      "rolledBackReason": string | null
+      "status": string
+      "trafficPercent": number
+      "updatedAt": string
+      "workflowId": string
+    }
+  }
+  /** Promote or roll back an active rollout */
+  "POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}": {
+    "rollout": {
+      "baselineFailed": number
+      "baselineSucceeded": number
+      "baselineVersionId": string
+      "canaryFailed": number
+      "canarySucceeded": number
+      "canaryVersionId": string
+      "createdAt": string
+      "endedAt": string | null
+      "id": string
+      "lastOutcomeAt": string | null
+      "minimumSampleSize": number
+      "minimumSuccessRatePercent": number
+      "rolledBackReason": string | null
+      "status": string
+      "trafficPercent": number
+      "updatedAt": string
+      "workflowId": string
+    }
+  }
+  /** Qualify a candidate version against the baseline dataset */
+  "POST /workflows/{workflowId}/rollout/qualification": {
+    "qualification": {
+      "baselineVersionId": string
+      "candidateVersionId": string
+      "createdAt": string
+      "datasetDigest": string
+      "datasetVersion": string
+      "id": string
+      "mode": string
+      "status": string
+      "summary": {
+        "baselineCaseCount": number
+        "baselineDatasetValid": boolean
+        "candidateAssertionCount": number
+        "candidateCaseCount": number
+        "coverageFailureCount": number
+        "datasetDigest": string
+        "datasetVersion": string
+        "failedCandidateAssertions": number
+        "failures": {
+          "actual": string
+          "dataset": string
+          "expected": string
+          "fixtureId": string
+          "reason": string
+          "sourceNodeId": string
+          "violations"?: {
+            "action": string
+            "details"?: string[]
+            "detectorId": string
+            "kind": string
+            "message": string
+            "sourceNodeId": string
+          }[]
+        }[]
+        "failuresTruncated": boolean
+        "mode": string
+        "passedCandidateAssertions": number
+        "regressionCount": number
+        "status": string
+      }
+      "workflowId": string
+    } | null
+    "required": boolean
+    "summary"?: {
+      "baselineCaseCount": number
+      "baselineDatasetValid": boolean
+      "candidateAssertionCount": number
+      "candidateCaseCount": number
+      "coverageFailureCount": number
+      "datasetDigest": string
+      "datasetVersion": string
+      "failedCandidateAssertions": number
+      "failures": {
+        "actual": string
+        "dataset": string
+        "expected": string
+        "fixtureId": string
+        "reason": string
+        "sourceNodeId": string
+        "violations"?: {
+          "action": string
+          "details"?: string[]
+          "detectorId": string
+          "kind": string
+          "message": string
+          "sourceNodeId": string
+        }[]
+      }[]
+      "failuresTruncated": boolean
+      "mode": string
+      "passedCandidateAssertions": number
+      "regressionCount": number
+      "status": string
+    }
+  }
   /** Deterministic production-readiness check */
   "POST /workflows/readiness": {
-    "issues": Record<string, unknown>[]
-    "status": string
+    "issues": ({
+      "code": string
+      "edgeId"?: string
+      "message": string
+      "nodeId"?: string
+      "severity": "info" | "warn" | "fail"
+      "suggestion"?: string
+    })[]
+    "status": "pass" | "warn" | "fail"
   }
   /** Append a prior snapshot as the new latest version */
   "POST /workflows/rollback": {
-    "sourceVersion"?: number
-    "version"?: number
-    "versionId"?: string
-    "workflowId"?: string
+    "sourceVersion": number
+    "version": number
+    "versionId": string
+    "workflowId": string
   }
   /** Save a workflow as a new immutable version */
   "POST /workflows/save": {
-    "version"?: number
-    "versionId"?: string
-    "workflowId"?: string
+    "version": number
+    "versionId": string
+    "workflowId": string
   }
 }
 
@@ -1213,6 +2581,8 @@ export interface ApiSuccessStatuses {
   "GET /recovery/cases": 200
   /** Inspect one governed semantic recovery case */
   "GET /recovery/cases/{caseId}": 200
+  /** Coalesced Recovery Center read model */
+  "GET /recovery/home": 200
   /** Lifetime verified-recovery impact ledger */
   "GET /recovery/ledger": 200
   /** Recovery metrics: verified-recovery north star, reliability rollup, cost, value estimate */
@@ -1235,8 +2605,12 @@ export interface ApiSuccessStatuses {
   "GET /tools": 200
   /** Keyset-paginated workflow list */
   "GET /workflows": 200
+  /** Recorded recovery qualification for a version pair */
+  "GET /workflows/{workflowId}/rollout/qualification": 200
   /** Workflow assurance health score */
   "GET /workflows/health": 200
+  /** Workflow health before and after a version cutoff */
+  "GET /workflows/health/delta": 200
   /** Latest version of one workflow (nullable) */
   "GET /workflows/latest": 200
   /** Validate a cron expression and preview its next fires */
@@ -1245,13 +2619,15 @@ export interface ApiSuccessStatuses {
   "GET /workflows/versions": 200
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": 200
+  /** Suggest a validated fix for one dead letter without applying it */
+  "POST /ai/patch-workflow": 200
   /** Compile a bounded deterministic workflow intent brief */
   "POST /ai/workflow-briefs/compile": 200
   /** Build a capability-bound workflow proposal without applying it */
   "POST /ai/workflow-proposals": 200
   /** Redrive one dead letter */
   "POST /dlq/redrive": 200
-  /** Replay one dead letter (unversioned wire) */
+  /** Replay one dead letter, or one run node by exact identity */
   "POST /dlq/replay": 200
   /** Resolve one dead letter as accepted loss */
   "POST /dlq/resolve": 200
@@ -1267,6 +2643,8 @@ export interface ApiSuccessStatuses {
   "POST /recovery/cases/{caseId}/diagnose": 200
   /** Validate one immutable recovery candidate */
   "POST /recovery/cases/{caseId}/validate": 200
+  /** Offer an active Recovery Playbook's validated source for one dead letter */
+  "POST /recovery/playbooks/{id}/use": 200
   /** Resume one waiting node */
   "POST /resume": 200
   /** Cancel a non-terminal run */
@@ -1287,6 +2665,12 @@ export interface ApiSuccessStatuses {
   "POST /webhooks/{workflowId}": 200
   /** Resume a workflow paused by its circuit breaker */
   "POST /workflows/{id}/resume": 200
+  /** Start a bounded canary rollout */
+  "POST /workflows/{workflowId}/rollout": 200
+  /** Promote or roll back an active rollout */
+  "POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}": 200
+  /** Qualify a candidate version against the baseline dataset */
+  "POST /workflows/{workflowId}/rollout/qualification": 200
   /** Deterministic production-readiness check */
   "POST /workflows/readiness": 200
   /** Append a prior snapshot as the new latest version */

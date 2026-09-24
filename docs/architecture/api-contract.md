@@ -42,6 +42,16 @@ call on any `V1_READ_PATHS` entry outside the transport and `lib/` layers;
 typed reads go through `contractApi`, and a component that needs a narrower
 runtime shape than the contract type narrows it explicitly.
 
+Every manifest schema, request and response, is closed: objects set
+`additionalProperties: false` or are typed maps. The few legitimately open
+objects (strip-parsed workflow documents, node configuration, relay
+payloads, form input, tool input examples) are listed with a reason in
+`openSchemaAllowlist` in `internal/contract/manifest_test.go`. Every route
+has a wire-conformance row in `internal/httpapi/manifest_conformance_test.go`:
+unit fixtures from the typed views and pure cores, or live PostgreSQL-backed
+responses in the matching integration test, each also rejecting an
+undeclared key.
+
 `GET /v1/workflows/versions` is a keyset page of one workflow's history,
 newest first: `limit` (default 50, at most 200), `beforeVersion` as the
 cursor below the oldest row shown, and `version` to pin one exact row. Rows

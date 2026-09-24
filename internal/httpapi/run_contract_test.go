@@ -34,6 +34,11 @@ func resolvedManifestSchema(t *testing.T, method, path string) *jsonschema.Resol
 	if err != nil {
 		t.Fatal(err)
 	}
+	return resolveSchemaJSON(t, raw)
+}
+
+func resolveSchemaJSON(t *testing.T, raw []byte) *jsonschema.Resolved {
+	t.Helper()
 	var schema jsonschema.Schema
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		t.Fatal(err)
@@ -47,8 +52,13 @@ func resolvedManifestSchema(t *testing.T, method, path string) *jsonschema.Resol
 
 func requireManifestData(t *testing.T, path string, data any) {
 	t.Helper()
-	if err := resolvedResponseSchema(t, path).Validate(data); err != nil {
-		t.Fatalf("%s wire data violates manifest: %v", path, err)
+	requireManifestDataFor(t, "GET", path, data)
+}
+
+func requireManifestDataFor(t *testing.T, method, path string, data any) {
+	t.Helper()
+	if err := resolvedManifestSchema(t, method, path).Validate(data); err != nil {
+		t.Fatalf("%s %s wire data violates manifest: %v", method, path, err)
 	}
 }
 

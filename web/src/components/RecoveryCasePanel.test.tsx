@@ -562,10 +562,10 @@ describe('<RecoveryCasePanel />', () => {
         verification,
       ]))
     vi.mocked(contractApi)
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({} as never)
       .mockResolvedValueOnce({
         runId: 'run-1',
         sourceNodeId: 'answer',
@@ -739,7 +739,7 @@ describe('<RecoveryCasePanel />', () => {
     vi.mocked(api)
       .mockResolvedValueOnce(detail('contained', 1))
       .mockResolvedValueOnce(detail('diagnosed', 1, [diagnosis]))
-    vi.mocked(contractApi).mockResolvedValue({})
+    vi.mocked(contractApi).mockResolvedValue({} as never)
 
     render(
       <RecoveryCasePanel
@@ -789,7 +789,7 @@ describe('<RecoveryCasePanel />', () => {
         lossValidation,
       ]))
     vi.mocked(contractApi)
-      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({} as never)
       .mockResolvedValueOnce({
         runId: 'run-1',
         sourceNodeId: 'answer',

@@ -23,13 +23,13 @@ vi.mock('../components/ConfirmDialog', () => ({
 
 const initialState = useWorkflowStore.getState()
 
-const sourceWorkflow: WorkflowDefinition = {
+const sourceWorkflow = {
   dslVersion: '1.0',
   id: 'workflow-1',
   name: 'Incident workflow',
   nodes: [{ id: 'done', type: 'noop', config: {} }],
   edges: [],
-}
+} satisfies WorkflowDefinition
 
 const authoringCatalog: AuthoringCapabilityCatalog = {
   schemaVersion: '1',

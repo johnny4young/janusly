@@ -143,21 +143,41 @@ func (s *V1Server) decideRolloutCore(r *http.Request, rc v1Request, workflowID, 
 }
 
 func (s *V1Server) mountRolloutRoutes(mux *http.ServeMux) {
-	s.route(mux, "GET /workflows/{workflowId}/rollout", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	read := routeGate{auth.RoleViewer, "workflows.read"}
+	write := routeGate{auth.RoleAdmin, "workflows.write"}
+	type rolloutRoute struct {
+		method, path string
+		gate         routeGate
+		core         func(*http.Request, v1Request) opResult
+	}
+	// A versioned GET of this path would collide with
+	// GET /v1/workflows/versions/{versionId} in the mux, so the read stays
+	// unversioned.
+	s.route(mux, "GET /workflows/{workflowId}/rollout", read, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.getRolloutCore(r, rc, r.PathValue("workflowId")))
 	})
-	s.route(mux, "POST /workflows/{workflowId}/rollout", routeGate{auth.RoleAdmin, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, s.createRolloutCore(r, rc, r.PathValue("workflowId")))
-	})
-	s.route(mux, "POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}", routeGate{auth.RoleAdmin, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, s.decideRolloutCore(r, rc, r.PathValue("workflowId"), r.PathValue("rolloutId"), r.PathValue("decision")))
-	})
-	s.route(mux, "GET /workflows/{workflowId}/rollout/qualification", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, s.getQualificationCore(r, rc, r.PathValue("workflowId")))
-	})
-	s.route(mux, "POST /workflows/{workflowId}/rollout/qualification", routeGate{auth.RoleAdmin, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeUnversioned(w, s.recordQualificationCore(r, rc, r.PathValue("workflowId")))
-	})
+	routes := []rolloutRoute{
+		{"POST", "/workflows/{workflowId}/rollout", write, func(r *http.Request, rc v1Request) opResult {
+			return s.createRolloutCore(r, rc, r.PathValue("workflowId"))
+		}},
+		{"POST", "/workflows/{workflowId}/rollout/{rolloutId}/{decision}", write, func(r *http.Request, rc v1Request) opResult {
+			return s.decideRolloutCore(r, rc, r.PathValue("workflowId"), r.PathValue("rolloutId"), r.PathValue("decision"))
+		}},
+		{"GET", "/workflows/{workflowId}/rollout/qualification", read, func(r *http.Request, rc v1Request) opResult {
+			return s.getQualificationCore(r, rc, r.PathValue("workflowId"))
+		}},
+		{"POST", "/workflows/{workflowId}/rollout/qualification", write, func(r *http.Request, rc v1Request) opResult {
+			return s.recordQualificationCore(r, rc, r.PathValue("workflowId"))
+		}},
+	}
+	for _, route := range routes {
+		s.route(mux, route.method+" "+route.path, route.gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+			writeUnversioned(w, route.core(r, rc))
+		})
+		s.route(mux, route.method+" /v1"+route.path, route.gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+			writeVersioned(w, rc.id, route.core(r, rc))
+		})
+	}
 }
 
 func qualificationView(row store.WorkflowRecoveryQualification) map[string]any {

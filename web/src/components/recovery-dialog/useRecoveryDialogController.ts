@@ -412,11 +412,11 @@ export function useRecoveryDialogController({
     let preSaveBeforeSnapshot: PreSaveBeforeSnapshot | null = null
     if (targetWorkflowId) {
       try {
-        const snapshot = await contractApi('GET /workflows/health', `/workflows/health?workflowId=${encodeURIComponent(targetWorkflowId)}`, undefined) as unknown as {
+        const snapshot: {
           score?: number
           status?: string
           signals?: { p95LatencyMs?: number | null; totalRuns?: number; totalCostUsd?: number }
-        }
+        } = await contractApi('GET /workflows/health', `/workflows/health?workflowId=${encodeURIComponent(targetWorkflowId)}`, undefined)
         if (typeof snapshot.score === 'number' && typeof snapshot.status === 'string' && snapshot.signals) {
           preSaveBeforeSnapshot = {
             score: snapshot.score,

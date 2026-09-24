@@ -23,9 +23,12 @@ var workflowVersion = closedObj(map[string]any{
 	"createdBy": nullableString(), "createdAt": nullableString(),
 }, "id", "orgId", "workflowId", "version", "dagJson", "sloJson", "upstreamHealthSources", "createdBy", "createdAt")
 
+// An example of the tool's own input object; the tool validates it.
+var toolInputExample = map[string]any{"type": "object", "additionalProperties": jsonValue()}
+
 var toolCatalogEntry = closedObj(map[string]any{
 	"name": str(), "description": str(), "required": arr(str()), "optional": arr(str()),
-	"writeSide": boolT(), "inputExample": map[string]any{"type": "object", "additionalProperties": jsonValue()},
+	"writeSide": boolT(), "inputExample": toolInputExample,
 	"inputFields": arr(closedObj(map[string]any{
 		"name": str(), "kind": map[string]any{"enum": []any{"string", "number", "integer", "boolean", "json", "array", "object", "unknown"}}, "required": boolT(),
 	}, "name", "kind", "required")),

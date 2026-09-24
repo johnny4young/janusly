@@ -476,6 +476,9 @@ func (s *V1Server) mountPlaybookRoutes(mux *http.ServeMux) {
 	s.route(mux, "POST /recovery/playbooks/{id}/use", write, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.usePlaybookCore(r, rc, r.PathValue("id")))
 	})
+	s.route(mux, "POST /v1/recovery/playbooks/{id}/use", write, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.usePlaybookCore(r, rc, r.PathValue("id")))
+	})
 	s.route(mux, "POST /recovery/playbooks/{id}/activate", write, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.playbookLifecycleCore(r, rc, r.PathValue("id"), "activate"))
 	})

@@ -1,6 +1,13 @@
 package contract
 
-import "testing"
+import (
+	"fmt"
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+)
 
 // The manifest is pure data the generator trusts — every entry
 // carries a method, a versioned path, and a response shape; no
@@ -120,5 +127,133 @@ func TestDlqClustersAndRecoveryMetricsManifestsMatchTheRuntimeShape(t *testing.T
 	}
 	if _, stale := properties["data"]; stale {
 		t.Fatal("/v1/recovery/metrics no longer carries a data envelope")
+	}
+}
+
+const stripParsedReason = "the domain workflow parser strips unknown keys instead of rejecting them"
+
+// openSchemaAllowlist names every object schema allowed to accept unknown
+// keys. Shared fragments are keyed by name so one entry covers every route
+// that embeds them; route-local entries use "METHOD PATH request|response#...".
+var openSchemaAllowlist = map[string]string{
+	"workflowDoc#":                stripParsedReason,
+	"workflowNodeDoc#":            stripParsedReason,
+	"workflowEdgeDoc#":            stripParsedReason,
+	"workflowMetadataDoc#":        stripParsedReason,
+	"workflowUIDoc#":              stripParsedReason,
+	"workflowPositionDoc#":        stripParsedReason,
+	"workflowNodeConfig#":         "node configuration is validated by each node type's executor, not the transport",
+	"workflowComparisonSnapshot#": "callers send their whole canvas document; only nodes and edges are read for the diff",
+	"relayPayload#":               "trigger payloads are the upstream system's own event body",
+	"humanInput#":                 "form input is validated against the waiting node's declared schema at resume time",
+	"toolInputExample#":           "an example of the tool's own input object, which the tool validates at execution",
+}
+
+func namedFragments() map[uintptr]string {
+	fragments := map[string]map[string]any{
+		"workflowDoc": workflowDoc, "workflowNodeDoc": workflowNodeDoc, "workflowEdgeDoc": workflowEdgeDoc,
+		"workflowMetadataDoc": workflowMetadataDoc, "workflowUIDoc": workflowUIDoc,
+		"workflowPositionDoc": workflowPositionDoc, "workflowNodeConfig": workflowNodeConfig,
+		"workflowComparisonSnapshot": workflowComparisonSnapshot,
+		"relayPayload":               relayPayload, "humanInput": humanInput, "toolInputExample": toolInputExample,
+	}
+	byIdentity := make(map[uintptr]string, len(fragments))
+	for name, schema := range fragments {
+		byIdentity[reflect.ValueOf(schema).Pointer()] = name
+	}
+	return byIdentity
+}
+
+func asSchemaMap(value any) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case Schema:
+		return typed, true
+	case map[string]any:
+		return typed, true
+	}
+	return nil, false
+}
+
+func isObjectTyped(schema map[string]any) bool {
+	switch kind := schema["type"].(type) {
+	case string:
+		return kind == "object"
+	case []any:
+		return slices.Contains(kind, any("object"))
+	}
+	return false
+}
+
+// A typed map (no declared properties, constrained values) is closed: its
+// keys are data. Anything else must reject unknown keys explicitly.
+func isClosedObject(schema map[string]any) bool {
+	if allows, declared := schema["additionalProperties"].(bool); declared {
+		return !allows
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	values, typedMap := asSchemaMap(schema["additionalProperties"])
+	return typedMap && len(properties) == 0 && len(values) > 0
+}
+
+func walkSchema(value any, path string, fragments map[uintptr]string, visit func(string, map[string]any)) {
+	schema, ok := asSchemaMap(value)
+	if !ok {
+		return
+	}
+	if name, named := fragments[reflect.ValueOf(schema).Pointer()]; named {
+		path = name + "#"
+	}
+	visit(path, schema)
+	if properties, ok := schema["properties"].(map[string]any); ok {
+		for _, key := range slices.Sorted(maps.Keys(properties)) {
+			walkSchema(properties[key], path+"/properties/"+key, fragments, visit)
+		}
+	}
+	walkSchema(schema["items"], path+"/items", fragments, visit)
+	walkSchema(schema["additionalProperties"], path+"/additionalProperties", fragments, visit)
+	for _, keyword := range []string{"anyOf", "oneOf", "allOf"} {
+		branches, _ := schema[keyword].([]any)
+		for index, branch := range branches {
+			walkSchema(branch, fmt.Sprintf("%s/%s/%d", path, keyword, index), fragments, visit)
+		}
+	}
+}
+
+func TestEveryRouteSchemaIsClosed(t *testing.T) {
+	fragments := namedFragments()
+	used := map[string]bool{}
+	var open []string
+	for _, route := range Routes {
+		for direction, schema := range map[string]Schema{"request": route.Request, "response": route.Response} {
+			if schema == nil {
+				continue
+			}
+			root := route.Method + " " + route.Path + " " + direction + "#"
+			walkSchema(schema, root, fragments, func(path string, node map[string]any) {
+				if !isObjectTyped(node) || isClosedObject(node) {
+					return
+				}
+				if _, allowed := openSchemaAllowlist[path]; allowed {
+					used[path] = true
+					return
+				}
+				open = append(open, path)
+			})
+		}
+	}
+	if len(open) > 0 {
+		slices.Sort(open)
+		open = slices.Compact(open)
+		t.Errorf("%d open object schema(s): set additionalProperties:false, or add an "+
+			"openSchemaAllowlist entry with the reason unknown keys are legitimate:\n   %s",
+			len(open), strings.Join(open, "\n   "))
+	}
+	for path, reason := range openSchemaAllowlist {
+		if strings.TrimSpace(reason) == "" {
+			t.Errorf("allowlist entry %s has no reason", path)
+		}
+		if !used[path] {
+			t.Errorf("allowlist entry %s matches no open schema; delete it", path)
+		}
 	}
 }
