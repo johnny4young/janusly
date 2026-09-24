@@ -9,7 +9,7 @@ var recoveryCase = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "runId": str(), "workflowId": nullableString(),
 	"workflowVersionId": str(), "source": str(), "detectorId": str(),
 	"sourceNodeId": str(), "detectorKind": str(), "action": str(),
-	"message": str(), "detailsJson": jsonValue(), "state": str(),
+	"message": str(), "detailsJson": recoveryEvidenceJSON, "state": str(),
 	"revision": intT(), "createdBy": nullableString(),
 	"createdAt": str(), "updatedAt": str(), "resolvedAt": nullableString(),
 }, "id", "orgId", "runId", "workflowId", "workflowVersionId", "source", "detectorId",
@@ -17,13 +17,13 @@ var recoveryCase = closedObj(map[string]any{
 	"createdBy", "createdAt", "updatedAt", "resolvedAt")
 
 var recoveryArtifact = closedObj(map[string]any{
-	"id": str(), "caseId": str(), "kind": str(), "payload": jsonValue(),
+	"id": str(), "caseId": str(), "kind": str(), "payload": recoveryEvidenceJSON,
 	"sha256": str(), "actorKind": str(), "actorId": nullableString(), "createdAt": str(),
 }, "id", "caseId", "kind", "payload", "sha256", "actorKind", "actorId", "createdAt")
 
 var recoveryTransition = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "caseId": str(), "fromState": str(), "toState": str(),
-	"actorKind": str(), "actorId": nullableString(), "evidenceJson": jsonValue(),
+	"actorKind": str(), "actorId": nullableString(), "evidenceJson": recoveryEvidenceJSON,
 	"reason": nullableString(), "occurredAt": str(),
 }, "id", "orgId", "caseId", "fromState", "toState", "actorKind", "actorId", "evidenceJson", "reason", "occurredAt")
 
@@ -164,7 +164,7 @@ var failureClusters = closedObj(map[string]any{
 
 var recallEntry = closedObj(map[string]any{
 	"id": str(), "kind": str(), "content": str(), "workflowId": str(), "runId": str(),
-	"similarity": num(), "metadata": jsonValue(),
+	"similarity": num(), "metadata": memoryMetadata,
 }, "id", "kind", "content", "similarity")
 
 var recoveryLedger = closedObj(map[string]any{

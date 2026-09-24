@@ -2,10 +2,11 @@ package contract
 
 // Per-node-type configuration is validated by the node's executor, not the
 // transport, so it stays an open map.
-var workflowNodeConfig = map[string]any{"type": "object", "additionalProperties": jsonValue()}
+var workflowNodeConfig = map[string]any{"type": "object"}
 
-// Request-side workflow documents: the domain parser strips unknown keys
-// rather than rejecting them, so these objects stay open.
+// Workflow documents as accepted on input and as served from storage: the
+// domain parser strips unknown keys and stored bytes are echoed as persisted,
+// so these objects stay open.
 var workflowPositionDoc = obj(map[string]any{"x": num(), "y": num()}, "x", "y")
 
 var workflowUIDoc = obj(map[string]any{
@@ -25,23 +26,23 @@ var workflowEdgeDoc = obj(map[string]any{
 var workflowDoc = obj(map[string]any{
 	"id": str(), "name": str(), "dslVersion": str(), "templatePolicy": str(),
 	"metadata": workflowMetadataDoc,
-	"inputs":   jsonValue(),
+	"inputs":   workflowParsedJSON,
 	"outputs":  map[string]any{"type": "object", "additionalProperties": str()},
-	"recovery": jsonValue(),
+	"recovery": workflowParsedJSON,
 	"ui":       workflowUIDoc,
 	"nodes":    arr(workflowNodeDoc),
 	"edges":    arr(workflowEdgeDoc),
 }, "nodes", "edges")
 
-// Server-rendered workflows are the parsed domain document, so every key is
+// Workflows parsed or canonicalized within the same request, so every key is
 // known. Metadata is optional because suggestion routes marshal the parsed
-// workflow directly rather than through the canonical save form.
+// workflow directly.
 var canonicalWorkflowDoc = closedObj(map[string]any{
 	"id": str(), "name": str(), "dslVersion": str(), "templatePolicy": str(),
 	"metadata": closedObj(map[string]any{"description": str(), "tags": arr(str())}, "tags"),
-	"inputs":   jsonValue(),
+	"inputs":   workflowParsedJSON,
 	"outputs":  map[string]any{"type": "object", "additionalProperties": str()},
-	"recovery": jsonValue(),
+	"recovery": workflowParsedJSON,
 	"ui": closedObj(map[string]any{
 		"positions": map[string]any{"type": "object", "additionalProperties": closedObj(map[string]any{"x": num(), "y": num()}, "x", "y")},
 	}),

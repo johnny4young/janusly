@@ -4,7 +4,7 @@ var runSummary = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "workflowId": str(), "workflowName": nullableString(),
 	"workflowVersionId": str(), "status": runStatusSchema,
 	"hasWaitingNodes": boolT(), "outcomeStatus": runOutcomeSchema,
-	"semanticViolationCount": map[string]any{"type": "integer", "minimum": 0}, "outputJson": jsonValue(),
+	"semanticViolationCount": map[string]any{"type": "integer", "minimum": 0}, "outputJson": runJSON,
 	"parentRunId": nullableString(), "parentNodeId": nullableString(), "replayMode": nullableString(), "traceId": nullableString(),
 	"validationEvidenceLevel": validationEvidenceSchema,
 	"createdBy":               nullableString(), "createdAt": nullableString(),
@@ -19,12 +19,12 @@ var workflowListItem = closedObj(map[string]any{
 
 var workflowVersion = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "workflowId": str(), "version": map[string]any{"type": "integer", "minimum": 1},
-	"dagJson": jsonValue(), "sloJson": jsonValue(), "upstreamHealthSources": jsonValue(),
+	"dagJson": workflowDoc, "sloJson": storedColumnJSON, "upstreamHealthSources": storedColumnJSON,
 	"createdBy": nullableString(), "createdAt": nullableString(),
 }, "id", "orgId", "workflowId", "version", "dagJson", "sloJson", "upstreamHealthSources", "createdBy", "createdAt")
 
 // An example of the tool's own input object; the tool validates it.
-var toolInputExample = map[string]any{"type": "object", "additionalProperties": jsonValue()}
+var toolInputExample = map[string]any{"type": "object"}
 
 var toolCatalogEntry = closedObj(map[string]any{
 	"name": str(), "description": str(), "required": arr(str()), "optional": arr(str()),
@@ -37,7 +37,7 @@ var toolCatalogEntry = closedObj(map[string]any{
 var templateCatalogEntry = closedObj(map[string]any{
 	"id": str(), "name": str(), "description": str(), "category": str(),
 	"nameCode": str(), "descriptionCode": str(), "categoryCode": str(),
-	"requiredCredentials": arr(str()), "workflow": jsonValue(),
+	"requiredCredentials": arr(str()), "workflow": workflowDoc,
 }, "id", "name", "description", "category", "nameCode", "descriptionCode", "categoryCode", "workflow")
 
 func boundedPage(item Schema) Schema { return Schema{"type": "array", "items": item, "maxItems": 200} }

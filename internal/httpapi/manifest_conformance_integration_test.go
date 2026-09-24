@@ -127,8 +127,6 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 	rec.record("GET /v1/dlq", h.call("GET", "/v1/dlq", nil, ""), http.StatusOK)
 	rec.record("GET /v1/dlq/entries/{deadLetterId}", h.call("GET", "/v1/dlq/entries/"+failed["patch"], nil, ""), http.StatusOK)
 	rec.record("GET /v1/dlq/clusters", h.call("GET", "/v1/dlq/clusters", nil, ""), http.StatusOK)
-	rec.record("GET /v1/recovery/home", h.call("GET", "/v1/recovery/home", nil, ""), http.StatusOK)
-	rec.record("GET /v1/recovery/home", h.call("GET", "/v1/recovery/home?scope=impact", nil, ""), http.StatusOK)
 	rec.record("POST /v1/ai/patch-workflow", h.call("POST", "/v1/ai/patch-workflow",
 		map[string]any{"deadLetterId": failed["patch"]}, ""), http.StatusOK)
 	rec.record("POST /v1/dlq/redrive", h.call("POST", "/v1/dlq/redrive",
@@ -137,8 +135,7 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 		map[string]any{"runId": failed["runs-redrive-run"], "nodeId": "call"}, ""), http.StatusOK)
 	rec.record("POST /v1/dlq/resolve", h.call("POST", "/v1/dlq/resolve", map[string]any{"id": failed["resolve"]}, ""), http.StatusOK)
 	rec.record("GET /v1/recovery/metrics", h.call("GET", "/v1/recovery/metrics", nil, ""), http.StatusOK)
-	rec.record("GET /v1/recovery/ledger", h.call("GET", "/v1/recovery/ledger", nil, ""), http.StatusOK)
-	rec.record("GET /v1/recovery/my-wins", h.call("GET", "/v1/recovery/my-wins", nil, ""), http.StatusOK)
+	rec.record("GET /v1/recovery/home", h.call("GET", "/v1/recovery/home?scope=impact", nil, ""), http.StatusOK)
 	rec.record("GET /v1/memory/consent-status", h.call("GET", "/v1/memory/consent-status", nil, ""), http.StatusOK)
 	rec.record("GET /v1/runs/semantic-search", h.call("GET", "/v1/runs/semantic-search?q=timeout", nil, ""), http.StatusOK)
 	rec.record("GET /v1/operations/brief", h.call("GET", "/v1/operations/brief", nil, ""), http.StatusOK)
@@ -151,6 +148,70 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 		map[string]any{"expectedRevision": 1}, ""), http.StatusOK)
 	rec.record("GET /v1/recovery/cases/{caseId}", h.call("GET", "/v1/recovery/cases/"+caseID, nil, ""), http.StatusOK)
 	rec.record("GET /v1/recovery/cases", h.call("GET", "/v1/recovery/cases?openOnly=false", nil, ""), http.StatusOK)
+
+	// A quarantined semantic violation driven through the governed lifecycle.
+	semanticRecovery := v2ContractDoc("calc")
+	semanticContract := semanticRecovery["contract"].(map[string]any)
+	semanticContract["autonomyLevel"] = 3
+	semanticFailure := semanticContract["failure"].(map[string]any)["semantic"].(map[string]any)
+	semanticFailure["detectors"].([]any)[0].(map[string]any)["action"] = "quarantine"
+	semanticRun := extractRunID(t, h.call("POST", "/v1/start", map[string]any{
+		"workflow": qualificationWorkflowDoc("conformance-semantic-"+suffix, semanticRecovery),
+		"input":    map[string]any{"total": "900"},
+	}, ""))
+	h.waitRun(semanticRun, "waiting")
+	var semanticCase string
+	if err := pool.QueryRow(ctx, `SELECT id FROM recovery_cases WHERE org_id = $1 AND run_id = $2
+		AND source = 'semantic_violation'`, h.org, semanticRun).Scan(&semanticCase); err != nil {
+		t.Fatalf("semantic case: %v", err)
+	}
+	casePath := "/v1/recovery/cases/" + semanticCase
+	revision := func(data map[string]any) any { return data["case"].(map[string]any)["revision"] }
+	diagnosed := rec.record("POST /v1/recovery/cases/{caseId}/diagnose", h.call("POST", casePath+"/diagnose",
+		map[string]any{"expectedRevision": 1}, ""), http.StatusOK)
+	candidates := rec.record("POST /v1/recovery/cases/{caseId}/candidates", h.call("POST", casePath+"/candidates", map[string]any{
+		"expectedRevision":  revision(diagnosed),
+		"manualReplacement": map[string]any{"output": map[string]any{"total": "10"}, "reason": "restore the contract total"},
+	}, ""), http.StatusOK)
+	var candidateID string
+	for _, raw := range candidates["candidates"].([]any) {
+		artifact := raw.(map[string]any)
+		if payload, _ := artifact["payload"].(map[string]any); payload["kind"] == "replace_output" {
+			candidateID = artifact["id"].(string)
+		}
+	}
+	if candidateID == "" {
+		t.Fatalf("no replacement candidate: %+v", candidates)
+	}
+	validated := rec.record("POST /v1/recovery/cases/{caseId}/validate", h.call("POST", casePath+"/validate", map[string]any{
+		"expectedRevision": revision(candidates), "candidateArtifactId": candidateID,
+	}, ""), http.StatusOK)
+	binding := map[string]any{
+		"expectedRevision": revision(validated), "candidateArtifactId": candidateID,
+		"validationArtifactId": validated["validation"].(map[string]any)["id"],
+	}
+	rec.record("POST /v1/recovery/cases/{caseId}/approve", h.call("POST", casePath+"/approve", binding, ""), http.StatusOK)
+	if detail := rec.record("GET /v1/recovery/cases/{caseId}", h.call("GET", casePath, nil, ""), http.StatusOK); detail["activeApproval"] == nil {
+		t.Fatalf("approved case must expose its active approval: %+v", detail)
+	}
+	rec.record("POST /v1/recovery/cases/{caseId}/apply", h.call("POST", casePath+"/apply", binding, ""), http.StatusOK)
+
+	// A qualification record exists once a candidate adds a semantic contract.
+	qualificationID := "conformance-qualification-" + suffix
+	qualBaseline := rec.record("POST /v1/workflows/save", h.call("POST", "/v1/workflows/save",
+		qualificationWorkflowDoc(qualificationID, nil), ""), http.StatusOK)
+	qualCandidate := rec.record("POST /v1/workflows/save", h.call("POST", "/v1/workflows/save",
+		qualificationWorkflowDoc(qualificationID, v2ContractDoc("calc")), ""), http.StatusOK)
+	qualified := rec.record("POST /v1/workflows/{workflowId}/rollout/qualification", h.call("POST",
+		"/v1/workflows/"+qualificationID+"/rollout/qualification", map[string]any{
+			"baselineVersionId": qualBaseline["versionId"], "candidateVersionId": qualCandidate["versionId"],
+		}, ""), http.StatusOK)
+	if qualified["required"] != true || qualified["qualification"] == nil {
+		t.Fatalf("semantic candidate must record a qualification: %+v", qualified)
+	}
+	rec.record("GET /v1/workflows/{workflowId}/rollout/qualification", h.call("GET",
+		"/v1/workflows/"+qualificationID+"/rollout/qualification?baselineVersionId="+qualBaseline["versionId"].(string)+
+			"&candidateVersionId="+qualCandidate["versionId"].(string), nil, ""), http.StatusOK)
 
 	// A validated fix becomes an active Recovery Playbook, then is offered for
 	// a second occurrence of the same failure.
@@ -292,6 +353,54 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 	rec.record("POST /v1/ai/workflow-proposals", h.call("POST", "/v1/ai/workflow-proposals", map[string]any{
 		"prompt": prompt, "brief": compiled["brief"], "catalogVersion": "stale",
 	}, ""), http.StatusOK)
+
+	// Provider-backed patch suggestions through the local simulator.
+	patchReply := `{"suggestions":[{"patchedConfig":{"url":"https://api.example.com/v2","timeoutMs":300},
+		"rationale":"fix the port","approachLabel":"fix_url","confidence":0.9,
+		"consideredAlternatives":[{"approach":"retry harder","rejectedBecause":"the target is gone"},
+		{"approach":"use sk-ant-abcdefghijklmnopqrstuvwx","rejectedBecause":"leaks sk-ant-abcdefghijklmnopqrstuvwx"},
+		{"approach":"third","rejectedBecause":"over the cap"}]}]}`
+	configureDiagnosisSimulator(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicReply(patchReply))
+	}))
+	patched := rec.record("POST /v1/ai/patch-workflow", h.call("POST", "/v1/ai/patch-workflow",
+		map[string]any{"deadLetterId": failed["patch"]}, ""), http.StatusOK)
+	if patched["mode"] != "ai" || patched["model"] == nil || patched["provider"] == nil {
+		t.Fatalf("simulated provider patch: %+v", patched)
+	}
+	alternatives := patched["suggestions"].([]any)[0].(map[string]any)["consideredAlternatives"].([]any)
+	if len(alternatives) != 2 || strings.Contains(fmt.Sprint(alternatives), "sk-ant-") {
+		t.Fatalf("alternatives must be capped and scrubbed: %+v", alternatives)
+	}
+
+	// Populated recovery reads: verified recoveries above, seeded LLM cost,
+	// and a measured MTTR baseline.
+	if _, err := pool.Exec(ctx, `INSERT INTO usage_events (id, org_id, metric, quantity, metadata)
+		VALUES ($1, $2, 'llm.completion', 120, '{"provider":"anthropic","model":"claude-haiku-4-5","costUsd":0.25,
+		"inputTokens":100,"cachedInputTokens":40,"cacheCreationInputTokens":10}'::jsonb)`,
+		"conformance-usage-"+suffix, h.org); err != nil {
+		t.Fatalf("seed usage: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1, $2, 'value.baselineMttrSeconds', '600', 'value', 'conformance', 'number')`,
+		h.org+"-baseline", h.org); err != nil {
+		t.Fatalf("seed baseline: %v", err)
+	}
+	metrics := rec.record("GET /v1/recovery/metrics", h.call("GET", "/v1/recovery/metrics", nil, ""), http.StatusOK)
+	verified := metrics["verifiedRecovery"].(map[string]any)
+	value := metrics["valueEstimate"].(map[string]any)
+	if verified["sampleSize"] == float64(0) || len(metrics["mttrTrend"].([]any)) == 0 ||
+		len(metrics["costByProvider"].([]any)) == 0 ||
+		len(metrics["costThisWindow"].(map[string]any)["providers"].([]any)) == 0 || value["mttrDeltaSeconds"] == nil {
+		t.Fatalf("recovery metrics must be populated: %+v", metrics)
+	}
+	home := rec.record("GET /v1/recovery/home", h.call("GET", "/v1/recovery/home", nil, ""), http.StatusOK)
+	if section := home["sections"].(map[string]any)["metrics"].(map[string]any); section["status"] != "ok" {
+		t.Fatalf("home metrics section: %+v", section)
+	}
+	rec.record("GET /v1/recovery/ledger", h.call("GET", "/v1/recovery/ledger", nil, ""), http.StatusOK)
+	rec.record("GET /v1/recovery/my-wins", h.call("GET", "/v1/recovery/my-wins", nil, ""), http.StatusOK)
 
 	rows := manifestConformanceRows()
 	for key, row := range rows {

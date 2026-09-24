@@ -43,10 +43,13 @@ typed reads go through `contractApi`, and a component that needs a narrower
 runtime shape than the contract type narrows it explicitly.
 
 Every manifest schema, request and response, is closed: objects set
-`additionalProperties: false` or are typed maps. The few legitimately open
-objects (strip-parsed workflow documents, node configuration, relay
-payloads, form input, tool input examples) are listed with a reason in
-`openSchemaAllowlist` in `internal/contract/manifest_test.go`. Every route
+`additionalProperties: false` or are typed maps, and every value names a
+type. The legitimately open ones are named fragments listed with a reason in
+`openSchemaAllowlist` in `internal/contract/manifest_test.go`: workflow
+documents (strip-parsed on input and served as stored bytes, so version
+reads never claim more than the persisted DAG), node configuration, relay
+payloads, form and start input, and grouped opaque JSON such as run
+payloads and dead-letter snapshots. Every route
 has a wire-conformance row in `internal/httpapi/manifest_conformance_test.go`:
 unit fixtures from the typed views and pure cores, or live PostgreSQL-backed
 responses in the matching integration test, each also rejecting an

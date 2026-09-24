@@ -132,7 +132,38 @@ export interface ApiRequests {
     "recoveryPlaybookId"?: string
     "recoveryValidationRunId"?: string
     "runId"?: string
-    "suggestedWorkflow"?: unknown
+    "suggestedWorkflow"?: {
+      "dslVersion"?: string
+      "edges": {
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
+      }[]
+      "id"?: string
+      "inputs"?: unknown
+      "metadata"?: {
+        "description"?: string
+        "tags"?: string[]
+      }
+      "name"?: string
+      "nodes": {
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
+      }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
+    } | null
   }
   /** Resolve one dead letter as accepted loss */
   "POST /dlq/resolve": {
@@ -142,7 +173,38 @@ export interface ApiRequests {
   "POST /dlq/validate-fix": {
     "deadLetterId": string
     "recoveryPlaybookId"?: string
-    "suggestedWorkflow": unknown
+    "suggestedWorkflow": {
+      "dslVersion"?: string
+      "edges": {
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
+      }[]
+      "id"?: string
+      "inputs"?: unknown
+      "metadata"?: {
+        "description"?: string
+        "tags"?: string[]
+      }
+      "name"?: string
+      "nodes": {
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
+      }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
+    }
     "validationEffectMode"?: string
   }
   /** Apply an approved immutable recovery candidate */
@@ -569,12 +631,12 @@ export interface ApiResponses {
       "bodyKey": string
       "createdAt": string
       "ctaKey": string
-      "evidence": {
+      "evidence": ({
         "id": string
         "key": string
         "kind": string
-        "value": unknown
-      }[]
+        "value": string | number
+      })[]
       "id": string
       "kind": string
       "params": {
@@ -1405,7 +1467,38 @@ export interface ApiResponses {
     "name": string
     "nameCode": string
     "requiredCredentials"?: string[]
-    "workflow": unknown
+    "workflow": {
+      "dslVersion"?: string
+      "edges": {
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
+      }[]
+      "id"?: string
+      "inputs"?: unknown
+      "metadata"?: {
+        "description"?: string
+        "tags"?: string[]
+      }
+      "name"?: string
+      "nodes": {
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
+      }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
+    }
   }[]
   /** The AI Studio tool catalog */
   "GET /tools": ({
@@ -1750,7 +1843,38 @@ export interface ApiResponses {
   "GET /workflows/latest": {
     "createdAt": string | null
     "createdBy": string | null
-    "dagJson": unknown
+    "dagJson": {
+      "dslVersion"?: string
+      "edges": {
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
+      }[]
+      "id"?: string
+      "inputs"?: unknown
+      "metadata"?: {
+        "description"?: string
+        "tags"?: string[]
+      }
+      "name"?: string
+      "nodes": {
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
+      }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
+    }
     "id": string
     "orgId": string
     "sloJson": unknown
@@ -1767,18 +1891,8 @@ export interface ApiResponses {
   "GET /workflows/versions": ({
     "createdAt": string | null
     "createdBy": string | null
-    "dagJson": unknown
-    "id": string
-    "orgId": string
-    "sloJson": unknown
-    "upstreamHealthSources": unknown
-    "version": number
-    "workflowId": string
-  })[]
-  /** One exact immutable workflow version */
-  "GET /workflows/versions/{versionId}": {
     "dagJson": {
-      "dslVersion": string
+      "dslVersion"?: string
       "edges": {
         "condition"?: string
         "from": string
@@ -1790,7 +1904,48 @@ export interface ApiResponses {
       "inputs"?: unknown
       "metadata"?: {
         "description"?: string
-        "tags": string[]
+        "tags"?: string[]
+      }
+      "name"?: string
+      "nodes": {
+        "config": Record<string, unknown>
+        "id": string
+        "label"?: string
+        "type": string
+      }[]
+      "outputs"?: Record<string, string>
+      "recovery"?: unknown
+      "templatePolicy"?: string
+      "ui"?: {
+        "positions"?: Record<string, {
+            "x": number
+            "y": number
+          }>
+      }
+    }
+    "id": string
+    "orgId": string
+    "sloJson": unknown
+    "upstreamHealthSources": unknown
+    "version": number
+    "workflowId": string
+  })[]
+  /** One exact immutable workflow version */
+  "GET /workflows/versions/{versionId}": {
+    "dagJson": {
+      "dslVersion"?: string
+      "edges": {
+        "condition"?: string
+        "from": string
+        "id"?: string
+        "onError"?: boolean
+        "to": string
+      }[]
+      "id"?: string
+      "inputs"?: unknown
+      "metadata"?: {
+        "description"?: string
+        "tags"?: string[]
       }
       "name"?: string
       "nodes": {

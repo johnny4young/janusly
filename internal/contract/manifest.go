@@ -37,9 +37,6 @@ func closedObj(props map[string]any, required ...string) Schema {
 func str() map[string]any   { return map[string]any{"type": "string"} }
 func num() map[string]any   { return map[string]any{"type": "number"} }
 func boolT() map[string]any { return map[string]any{"type": "boolean"} }
-func jsonValue() map[string]any {
-	return map[string]any{}
-}
 
 func intT() map[string]any   { return map[string]any{"type": "integer"} }
 func countT() map[string]any { return map[string]any{"type": "integer", "minimum": 0} }
@@ -76,7 +73,7 @@ var workflowSaveDoc = workflowSaveSchema()
 var workflowVersionSnapshot = closedObj(map[string]any{
 	"id": str(), "workflowId": str(),
 	"version": map[string]any{"type": "integer", "minimum": 1},
-	"dagJson": canonicalWorkflowDoc,
+	"dagJson": workflowDoc,
 }, "id", "workflowId", "version", "dagJson")
 
 // A 2xx ingest is a started run, a deduplicated delivery, or an event buffered
@@ -97,8 +94,8 @@ var triggerIngestResponse = map[string]any{"oneOf": []any{
 
 // Relay payloads are the upstream system's own event body; form input is
 // validated against the waiting node's own schema at resume time.
-var relayPayload = map[string]any{"type": "object", "additionalProperties": jsonValue()}
-var humanInput = map[string]any{"type": "object", "additionalProperties": jsonValue()}
+var relayPayload = map[string]any{"type": "object"}
+var humanInput = map[string]any{"type": "object"}
 
 // Routes is the closed v1 manifest, one entry per mounted /v1 route.
 var Routes = []Route{
@@ -159,7 +156,7 @@ var Routes = []Route{
 		Response: arr(templateCatalogEntry)},
 	{Method: "POST", Path: "/v1/start", Summary: "Start an exact saved workflow version or an ad-hoc document",
 		Request: closedObj(map[string]any{
-			"workflow": workflowDoc, "workflowVersionId": str(), "input": jsonValue(),
+			"workflow": workflowDoc, "workflowVersionId": str(), "input": runInput,
 		}, "workflow"),
 		Response: closedObj(map[string]any{"runId": str()}, "runId")},
 	{Method: "POST", Path: "/v1/webhooks/{workflowId}", Summary: "Ingest one webhook trigger event",
@@ -218,7 +215,7 @@ var Routes = []Route{
 		Response: closedObj(map[string]any{"redriven": map[string]any{"const": true}}, "redriven")},
 	{Method: "POST", Path: "/v1/dlq/replay", Summary: "Replay one dead letter, or one run node by exact identity",
 		Request: closedObj(map[string]any{
-			"deadLetterId": str(), "runId": str(), "nodeId": str(), "suggestedWorkflow": jsonValue(),
+			"deadLetterId": str(), "runId": str(), "nodeId": str(), "suggestedWorkflow": nullable(workflowDoc),
 			"recoveryPlaybookId": str(), "recoveryValidationRunId": str(),
 		}),
 		Response: closedObj(map[string]any{"ok": map[string]any{"const": true}}, "ok")},
@@ -227,7 +224,7 @@ var Routes = []Route{
 		Response: closedObj(map[string]any{"ok": map[string]any{"const": true}, "runId": str()}, "ok", "runId")},
 	{Method: "POST", Path: "/v1/dlq/validate-fix", Summary: "Start a write-suppressed validation replay for a proposed fix",
 		Request: closedObj(map[string]any{
-			"deadLetterId": str(), "suggestedWorkflow": jsonValue(),
+			"deadLetterId": str(), "suggestedWorkflow": workflowDoc,
 			"validationEffectMode": str(), "recoveryPlaybookId": str(),
 		}, "deadLetterId", "suggestedWorkflow"),
 		Response: closedObj(map[string]any{"runId": str()}, "runId")},
@@ -258,7 +255,7 @@ var Routes = []Route{
 			"expectedRevision": map[string]any{"type": "integer", "minimum": 1},
 			"acceptLossReason": map[string]any{"type": "string", "maxLength": 1000},
 			"manualReplacement": closedObj(map[string]any{
-				"output": jsonValue(), "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 1000},
+				"output": replacementOutput, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 1000},
 			}, "output", "reason"),
 		}, "expectedRevision"),
 		Response: closedObj(map[string]any{

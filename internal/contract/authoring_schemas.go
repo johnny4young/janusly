@@ -47,7 +47,7 @@ var workflowProposalResponse = closedObj(map[string]any{
 	"proposal": closedObj(map[string]any{
 		"workflow":         workflowDoc,
 		"intentContract":   map[string]any{"type": "object", "additionalProperties": str()},
-		"recoveryContract": jsonValue(),
+		"recoveryContract": workflowParsedJSON,
 		"qualification": closedObj(map[string]any{
 			"intent": boolT(), "recovery": boolT(), "semantic": boolT(),
 		}, "intent", "recovery", "semantic"),
@@ -107,7 +107,7 @@ var operatorBrief = closedObj(map[string]any{
 		"severity": str(), "titleKey": str(), "bodyKey": str(), "ctaKey": str(),
 		"params": operatorBriefParams,
 		"evidence": arr(closedObj(map[string]any{
-			"kind": str(), "id": str(), "key": str(), "value": jsonValue(),
+			"kind": str(), "id": str(), "key": str(), "value": map[string]any{"type": []any{"string", "number"}},
 		}, "kind", "id", "key", "value")),
 		"target": closedObj(map[string]any{
 			"kind": str(), "id": str(), "runId": str(), "workflowId": str(), "destination": str(),

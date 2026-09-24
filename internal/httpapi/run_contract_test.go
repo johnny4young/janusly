@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +50,34 @@ func resolveSchemaJSON(t *testing.T, raw []byte) *jsonschema.Resolved {
 		t.Fatal(err)
 	}
 	return resolved
+}
+
+// resolvedManifestFragment resolves the schema at a slash-separated pointer
+// inside one route's response, for branches a live tenant rarely reaches.
+func resolvedManifestFragment(t *testing.T, method, path, pointer string) *jsonschema.Resolved {
+	t.Helper()
+	var node any = map[string]any(manifestResponse(t, method, path))
+	for segment := range strings.SplitSeq(pointer, "/") {
+		switch typed := node.(type) {
+		case map[string]any:
+			node = typed[segment]
+		case contract.Schema:
+			node = typed[segment]
+		case []any:
+			index, err := strconv.Atoi(segment)
+			if err != nil || index >= len(typed) {
+				t.Fatalf("%s %s: bad pointer segment %q", method, path, segment)
+			}
+			node = typed[index]
+		default:
+			t.Fatalf("%s %s: pointer %q leaves the schema at %q", method, path, pointer, segment)
+		}
+	}
+	raw, err := json.Marshal(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolveSchemaJSON(t, raw)
 }
 
 func requireManifestData(t *testing.T, path string, data any) {

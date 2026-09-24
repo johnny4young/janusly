@@ -230,7 +230,6 @@
                                     "additionalProperties": false,
                                     "properties": {
                                       "config": {
-                                        "additionalProperties": {},
                                         "type": "object"
                                       },
                                       "id": {
@@ -414,7 +413,6 @@
                                           "additionalProperties": false,
                                           "properties": {
                                             "config": {
-                                              "additionalProperties": {},
                                               "type": "object"
                                             },
                                             "id": {
@@ -818,7 +816,6 @@
                         "items": {
                           "properties": {
                             "config": {
-                              "additionalProperties": {},
                               "type": "object"
                             },
                             "id": {
@@ -1265,7 +1262,6 @@
                                       "items": {
                                         "properties": {
                                           "config": {
-                                            "additionalProperties": {},
                                             "type": "object"
                                           },
                                           "id": {
@@ -1402,7 +1398,6 @@
                                     "type": "string"
                                   },
                                   "inputExample": {
-                                    "additionalProperties": {},
                                     "type": "object"
                                   },
                                   "inputFields": {
@@ -2362,7 +2357,131 @@
                   "runId": {
                     "type": "string"
                   },
-                  "suggestedWorkflow": {}
+                  "suggestedWorkflow": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "dslVersion": {
+                            "type": "string"
+                          },
+                          "edges": {
+                            "items": {
+                              "properties": {
+                                "condition": {
+                                  "type": "string"
+                                },
+                                "from": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "onError": {
+                                  "type": "boolean"
+                                },
+                                "to": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "from",
+                                "to"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "inputs": {},
+                          "metadata": {
+                            "properties": {
+                              "description": {
+                                "type": "string"
+                              },
+                              "tags": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "nodes": {
+                            "items": {
+                              "properties": {
+                                "config": {
+                                  "type": "object"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "type": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "type",
+                                "config"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "outputs": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "recovery": {},
+                          "templatePolicy": {
+                            "type": "string"
+                          },
+                          "ui": {
+                            "properties": {
+                              "positions": {
+                                "additionalProperties": {
+                                  "properties": {
+                                    "x": {
+                                      "type": "number"
+                                    },
+                                    "y": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "x",
+                                    "y"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "object"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "nodes",
+                          "edges"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
                 },
                 "type": "object"
               }
@@ -2500,7 +2619,124 @@
                   "recoveryPlaybookId": {
                     "type": "string"
                   },
-                  "suggestedWorkflow": {},
+                  "suggestedWorkflow": {
+                    "properties": {
+                      "dslVersion": {
+                        "type": "string"
+                      },
+                      "edges": {
+                        "items": {
+                          "properties": {
+                            "condition": {
+                              "type": "string"
+                            },
+                            "from": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "onError": {
+                              "type": "boolean"
+                            },
+                            "to": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "to"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "inputs": {},
+                      "metadata": {
+                        "properties": {
+                          "description": {
+                            "type": "string"
+                          },
+                          "tags": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "nodes": {
+                        "items": {
+                          "properties": {
+                            "config": {
+                              "type": "object"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "outputs": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "recovery": {},
+                      "templatePolicy": {
+                        "type": "string"
+                      },
+                      "ui": {
+                        "properties": {
+                          "positions": {
+                            "additionalProperties": {
+                              "properties": {
+                                "x": {
+                                  "type": "number"
+                                },
+                                "y": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "x",
+                                "y"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "nodes",
+                      "edges"
+                    ],
+                    "type": "object"
+                  },
                   "validationEffectMode": {
                     "type": "string"
                   }
@@ -2693,7 +2929,12 @@
                                         "kind": {
                                           "type": "string"
                                         },
-                                        "value": {}
+                                        "value": {
+                                          "type": [
+                                            "string",
+                                            "number"
+                                          ]
+                                        }
                                       },
                                       "required": [
                                         "kind",
@@ -7391,7 +7632,6 @@
                                         "additionalProperties": false,
                                         "properties": {
                                           "config": {
-                                            "additionalProperties": {},
                                             "type": "object"
                                           },
                                           "id": {
@@ -7575,7 +7815,6 @@
                                               "additionalProperties": false,
                                               "properties": {
                                                 "config": {
-                                                  "additionalProperties": {},
                                                   "type": "object"
                                                 },
                                                 "id": {
@@ -7705,7 +7944,6 @@
                 "additionalProperties": false,
                 "properties": {
                   "input": {
-                    "additionalProperties": {},
                     "type": "object"
                   },
                   "nodeId": {
@@ -8713,7 +8951,6 @@
                         "items": {
                           "properties": {
                             "config": {
-                              "additionalProperties": {},
                               "type": "object"
                             },
                             "id": {
@@ -9195,7 +9432,124 @@
                                 },
                                 "type": "array"
                               },
-                              "workflow": {}
+                              "workflow": {
+                                "properties": {
+                                  "dslVersion": {
+                                    "type": "string"
+                                  },
+                                  "edges": {
+                                    "items": {
+                                      "properties": {
+                                        "condition": {
+                                          "type": "string"
+                                        },
+                                        "from": {
+                                          "type": "string"
+                                        },
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "onError": {
+                                          "type": "boolean"
+                                        },
+                                        "to": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "from",
+                                        "to"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "inputs": {},
+                                  "metadata": {
+                                    "properties": {
+                                      "description": {
+                                        "type": "string"
+                                      },
+                                      "tags": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      }
+                                    },
+                                    "type": "object"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "nodes": {
+                                    "items": {
+                                      "properties": {
+                                        "config": {
+                                          "type": "object"
+                                        },
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "type": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "type",
+                                        "config"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "outputs": {
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    },
+                                    "type": "object"
+                                  },
+                                  "recovery": {},
+                                  "templatePolicy": {
+                                    "type": "string"
+                                  },
+                                  "ui": {
+                                    "properties": {
+                                      "positions": {
+                                        "additionalProperties": {
+                                          "properties": {
+                                            "x": {
+                                              "type": "number"
+                                            },
+                                            "y": {
+                                              "type": "number"
+                                            }
+                                          },
+                                          "required": [
+                                            "x",
+                                            "y"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        "type": "object"
+                                      }
+                                    },
+                                    "type": "object"
+                                  }
+                                },
+                                "required": [
+                                  "nodes",
+                                  "edges"
+                                ],
+                                "type": "object"
+                              }
                             },
                             "required": [
                               "id",
@@ -9256,7 +9610,6 @@
                                 "type": "string"
                               },
                               "inputExample": {
-                                "additionalProperties": {},
                                 "type": "object"
                               },
                               "inputFields": {
@@ -9690,7 +10043,6 @@
                     "type": "string"
                   },
                   "payload": {
-                    "additionalProperties": {},
                     "type": "object"
                   },
                   "receivedAt": {
@@ -9886,7 +10238,6 @@
                         "items": {
                           "properties": {
                             "config": {
-                              "additionalProperties": {},
                               "type": "object"
                             },
                             "id": {
@@ -10049,7 +10400,6 @@
                     "type": "string"
                   },
                   "payload": {
-                    "additionalProperties": {},
                     "type": "object"
                   },
                   "receivedAt": {
@@ -11623,7 +11973,124 @@
                                     "null"
                                   ]
                                 },
-                                "dagJson": {},
+                                "dagJson": {
+                                  "properties": {
+                                    "dslVersion": {
+                                      "type": "string"
+                                    },
+                                    "edges": {
+                                      "items": {
+                                        "properties": {
+                                          "condition": {
+                                            "type": "string"
+                                          },
+                                          "from": {
+                                            "type": "string"
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "onError": {
+                                            "type": "boolean"
+                                          },
+                                          "to": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "from",
+                                          "to"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "inputs": {},
+                                    "metadata": {
+                                      "properties": {
+                                        "description": {
+                                          "type": "string"
+                                        },
+                                        "tags": {
+                                          "items": {
+                                            "type": "string"
+                                          },
+                                          "type": "array"
+                                        }
+                                      },
+                                      "type": "object"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "nodes": {
+                                      "items": {
+                                        "properties": {
+                                          "config": {
+                                            "type": "object"
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "label": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "id",
+                                          "type",
+                                          "config"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "outputs": {
+                                      "additionalProperties": {
+                                        "type": "string"
+                                      },
+                                      "type": "object"
+                                    },
+                                    "recovery": {},
+                                    "templatePolicy": {
+                                      "type": "string"
+                                    },
+                                    "ui": {
+                                      "properties": {
+                                        "positions": {
+                                          "additionalProperties": {
+                                            "properties": {
+                                              "x": {
+                                                "type": "number"
+                                              },
+                                              "y": {
+                                                "type": "number"
+                                              }
+                                            },
+                                            "required": [
+                                              "x",
+                                              "y"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          "type": "object"
+                                        }
+                                      },
+                                      "type": "object"
+                                    }
+                                  },
+                                  "required": [
+                                    "nodes",
+                                    "edges"
+                                  ],
+                                  "type": "object"
+                                },
                                 "id": {
                                   "type": "string"
                                 },
@@ -11747,7 +12214,6 @@
                         "items": {
                           "properties": {
                             "config": {
-                              "additionalProperties": {},
                               "type": "object"
                             },
                             "id": {
@@ -12058,7 +12524,6 @@
                     "items": {
                       "properties": {
                         "config": {
-                          "additionalProperties": {},
                           "type": "object"
                         },
                         "id": {
@@ -12274,7 +12739,124 @@
                                   "null"
                                 ]
                               },
-                              "dagJson": {},
+                              "dagJson": {
+                                "properties": {
+                                  "dslVersion": {
+                                    "type": "string"
+                                  },
+                                  "edges": {
+                                    "items": {
+                                      "properties": {
+                                        "condition": {
+                                          "type": "string"
+                                        },
+                                        "from": {
+                                          "type": "string"
+                                        },
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "onError": {
+                                          "type": "boolean"
+                                        },
+                                        "to": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "from",
+                                        "to"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "inputs": {},
+                                  "metadata": {
+                                    "properties": {
+                                      "description": {
+                                        "type": "string"
+                                      },
+                                      "tags": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      }
+                                    },
+                                    "type": "object"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "nodes": {
+                                    "items": {
+                                      "properties": {
+                                        "config": {
+                                          "type": "object"
+                                        },
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "type": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "type",
+                                        "config"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "outputs": {
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    },
+                                    "type": "object"
+                                  },
+                                  "recovery": {},
+                                  "templatePolicy": {
+                                    "type": "string"
+                                  },
+                                  "ui": {
+                                    "properties": {
+                                      "positions": {
+                                        "additionalProperties": {
+                                          "properties": {
+                                            "x": {
+                                              "type": "number"
+                                            },
+                                            "y": {
+                                              "type": "number"
+                                            }
+                                          },
+                                          "required": [
+                                            "x",
+                                            "y"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        "type": "object"
+                                      }
+                                    },
+                                    "type": "object"
+                                  }
+                                },
+                                "required": [
+                                  "nodes",
+                                  "edges"
+                                ],
+                                "type": "object"
+                              },
                               "id": {
                                 "type": "string"
                               },
@@ -12348,14 +12930,12 @@
                           "additionalProperties": false,
                           "properties": {
                             "dagJson": {
-                              "additionalProperties": false,
                               "properties": {
                                 "dslVersion": {
                                   "type": "string"
                                 },
                                 "edges": {
                                   "items": {
-                                    "additionalProperties": false,
                                     "properties": {
                                       "condition": {
                                         "type": "string"
@@ -12386,7 +12966,6 @@
                                 },
                                 "inputs": {},
                                 "metadata": {
-                                  "additionalProperties": false,
                                   "properties": {
                                     "description": {
                                       "type": "string"
@@ -12398,9 +12977,6 @@
                                       "type": "array"
                                     }
                                   },
-                                  "required": [
-                                    "tags"
-                                  ],
                                   "type": "object"
                                 },
                                 "name": {
@@ -12408,10 +12984,8 @@
                                 },
                                 "nodes": {
                                   "items": {
-                                    "additionalProperties": false,
                                     "properties": {
                                       "config": {
-                                        "additionalProperties": {},
                                         "type": "object"
                                       },
                                       "id": {
@@ -12444,11 +13018,9 @@
                                   "type": "string"
                                 },
                                 "ui": {
-                                  "additionalProperties": false,
                                   "properties": {
                                     "positions": {
                                       "additionalProperties": {
-                                        "additionalProperties": false,
                                         "properties": {
                                           "x": {
                                             "type": "number"
@@ -12470,7 +13042,6 @@
                                 }
                               },
                               "required": [
-                                "dslVersion",
                                 "nodes",
                                 "edges"
                               ],

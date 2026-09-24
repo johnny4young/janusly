@@ -130,23 +130,31 @@ func TestDlqClustersAndRecoveryMetricsManifestsMatchTheRuntimeShape(t *testing.T
 	}
 }
 
-const stripParsedReason = "the domain workflow parser strips unknown keys instead of rejecting them"
+const workflowDocumentReason = "the domain workflow parser strips unknown keys, and stored versions are served as persisted bytes"
 
-// openSchemaAllowlist names every object schema allowed to accept unknown
-// keys. Shared fragments are keyed by name so one entry covers every route
-// that embeds them; route-local entries use "METHOD PATH request|response#...".
+// openSchemaAllowlist names every schema allowed to leave keys or values
+// undescribed. Shared fragments are keyed by name so one entry covers every
+// route that embeds them; route-local entries use "METHOD PATH request|response#...".
 var openSchemaAllowlist = map[string]string{
-	"workflowDoc#":                stripParsedReason,
-	"workflowNodeDoc#":            stripParsedReason,
-	"workflowEdgeDoc#":            stripParsedReason,
-	"workflowMetadataDoc#":        stripParsedReason,
-	"workflowUIDoc#":              stripParsedReason,
-	"workflowPositionDoc#":        stripParsedReason,
+	"workflowDoc#":                workflowDocumentReason,
+	"workflowNodeDoc#":            workflowDocumentReason,
+	"workflowEdgeDoc#":            workflowDocumentReason,
+	"workflowMetadataDoc#":        workflowDocumentReason,
+	"workflowUIDoc#":              workflowDocumentReason,
+	"workflowPositionDoc#":        workflowDocumentReason,
 	"workflowNodeConfig#":         "node configuration is validated by each node type's executor, not the transport",
+	"workflowParsedJSON#":         "recursive input schemas and versioned recovery contracts are validated by the domain parser",
 	"workflowComparisonSnapshot#": "callers send their whole canvas document; only nodes and edges are read for the diff",
 	"relayPayload#":               "trigger payloads are the upstream system's own event body",
 	"humanInput#":                 "form input is validated against the waiting node's declared schema at resume time",
+	"runInput#":                   "start input is validated against the workflow's declared input schema",
 	"toolInputExample#":           "an example of the tool's own input object, which the tool validates at execution",
+	"runJSON#":                    "run input, output, node state, error and event payloads are extension JSON owned by node executors",
+	"dlqSnapshot#":                "dead-letter snapshots keep the failed run's workflow, node and error JSON verbatim",
+	"storedColumnJSON#":           "persisted jsonb columns (SLO, upstream sources, recovery comments) are echoed verbatim",
+	"recoveryEvidenceJSON#":       "recovery case details, artifact payloads and transition evidence are versioned engine evidence",
+	"memoryMetadata#":             "memory metadata is redacted context recorded with each summary",
+	"replacementOutput#":          "replacement output is validated against the workflow's business outcome contract",
 }
 
 func namedFragments() map[uintptr]string {
@@ -154,8 +162,11 @@ func namedFragments() map[uintptr]string {
 		"workflowDoc": workflowDoc, "workflowNodeDoc": workflowNodeDoc, "workflowEdgeDoc": workflowEdgeDoc,
 		"workflowMetadataDoc": workflowMetadataDoc, "workflowUIDoc": workflowUIDoc,
 		"workflowPositionDoc": workflowPositionDoc, "workflowNodeConfig": workflowNodeConfig,
-		"workflowComparisonSnapshot": workflowComparisonSnapshot,
-		"relayPayload":               relayPayload, "humanInput": humanInput, "toolInputExample": toolInputExample,
+		"workflowParsedJSON": workflowParsedJSON, "workflowComparisonSnapshot": workflowComparisonSnapshot,
+		"relayPayload": relayPayload, "humanInput": humanInput, "runInput": runInput,
+		"toolInputExample": toolInputExample, "runJSON": runJSON, "dlqSnapshot": dlqSnapshot,
+		"storedColumnJSON": storedColumnJSON, "recoveryEvidenceJSON": recoveryEvidenceJSON,
+		"memoryMetadata": memoryMetadata, "replacementOutput": replacementOutput,
 	}
 	byIdentity := make(map[uintptr]string, len(fragments))
 	for name, schema := range fragments {
@@ -172,6 +183,16 @@ func asSchemaMap(value any) (map[string]any, bool) {
 		return typed, true
 	}
 	return nil, false
+}
+
+// A node that names no type or combinator accepts any JSON value.
+func isUntyped(schema map[string]any) bool {
+	for _, keyword := range []string{"type", "const", "enum", "oneOf", "anyOf", "allOf", "$ref"} {
+		if _, present := schema[keyword]; present {
+			return false
+		}
+	}
+	return true
 }
 
 func isObjectTyped(schema map[string]any) bool {
@@ -192,7 +213,11 @@ func isClosedObject(schema map[string]any) bool {
 	}
 	properties, _ := schema["properties"].(map[string]any)
 	values, typedMap := asSchemaMap(schema["additionalProperties"])
-	return typedMap && len(properties) == 0 && len(values) > 0
+	return typedMap && len(properties) == 0 && !isUntyped(values)
+}
+
+func isOpenSchema(schema map[string]any) bool {
+	return isUntyped(schema) || (isObjectTyped(schema) && !isClosedObject(schema))
 }
 
 func walkSchema(value any, path string, fragments map[uintptr]string, visit func(string, map[string]any)) {
@@ -219,33 +244,39 @@ func walkSchema(value any, path string, fragments map[uintptr]string, visit func
 	}
 }
 
+// openSchemaPaths reports open schemas under root that the allowlist does not
+// name, and records the allowlist entries it matched.
+func openSchemaPaths(schema Schema, root string, fragments map[uintptr]string, used map[string]bool) []string {
+	var open []string
+	walkSchema(schema, root, fragments, func(path string, node map[string]any) {
+		if !isOpenSchema(node) {
+			return
+		}
+		if _, allowed := openSchemaAllowlist[path]; allowed {
+			used[path] = true
+			return
+		}
+		open = append(open, path)
+	})
+	return open
+}
+
 func TestEveryRouteSchemaIsClosed(t *testing.T) {
 	fragments := namedFragments()
 	used := map[string]bool{}
 	var open []string
 	for _, route := range Routes {
 		for direction, schema := range map[string]Schema{"request": route.Request, "response": route.Response} {
-			if schema == nil {
-				continue
+			if schema != nil {
+				open = append(open, openSchemaPaths(schema, route.Method+" "+route.Path+" "+direction+"#", fragments, used)...)
 			}
-			root := route.Method + " " + route.Path + " " + direction + "#"
-			walkSchema(schema, root, fragments, func(path string, node map[string]any) {
-				if !isObjectTyped(node) || isClosedObject(node) {
-					return
-				}
-				if _, allowed := openSchemaAllowlist[path]; allowed {
-					used[path] = true
-					return
-				}
-				open = append(open, path)
-			})
 		}
 	}
 	if len(open) > 0 {
 		slices.Sort(open)
 		open = slices.Compact(open)
-		t.Errorf("%d open object schema(s): set additionalProperties:false, or add an "+
-			"openSchemaAllowlist entry with the reason unknown keys are legitimate:\n   %s",
+		t.Errorf("%d open schema(s): close the object, type the value, or add an "+
+			"openSchemaAllowlist entry with the reason it is legitimately open:\n   %s",
 			len(open), strings.Join(open, "\n   "))
 	}
 	for path, reason := range openSchemaAllowlist {
@@ -254,6 +285,32 @@ func TestEveryRouteSchemaIsClosed(t *testing.T) {
 		}
 		if !used[path] {
 			t.Errorf("allowlist entry %s matches no open schema; delete it", path)
+		}
+	}
+}
+
+func TestClosedSchemaGateRejectsOpenShapes(t *testing.T) {
+	fragments := namedFragments()
+	closed := closedObj(map[string]any{"id": str()}, "id")
+	for name, schema := range map[string]Schema{
+		"properties without type":   {"properties": map[string]any{"id": str()}, "additionalProperties": false},
+		"unnamed opaque value":      closedObj(map[string]any{"value": opaqueJSON()}, "value"),
+		"explicit open object":      obj(map[string]any{"id": str()}, "id"),
+		"open object in a union":    {"oneOf": []any{closed, obj(map[string]any{"id": str()})}},
+		"open value in a typed map": {"type": "object", "additionalProperties": opaqueJSON()},
+	} {
+		if len(openSchemaPaths(schema, "probe#", fragments, map[string]bool{})) == 0 {
+			t.Errorf("%s passed the closed-schema gate", name)
+		}
+	}
+	for name, schema := range map[string]Schema{
+		"closed object": closed,
+		"typed map":     {"type": "object", "additionalProperties": str()},
+		"nullable":      nullable(closed),
+		"enum":          {"enum": []any{"a", "b"}},
+	} {
+		if open := openSchemaPaths(schema, "probe#", fragments, map[string]bool{}); len(open) > 0 {
+			t.Errorf("%s was reported open: %v", name, open)
 		}
 	}
 }

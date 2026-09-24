@@ -247,17 +247,17 @@ func manifestConformanceRows() map[string]conformanceRow {
 				"mode": "ai_enriched",
 			})}
 		}},
-		"POST /v1/recovery/cases/{caseId}/candidates": {fixtures: func(t *testing.T) []any {
+		"POST /v1/recovery/cases/{caseId}/candidates": {integration: true, fixtures: func(t *testing.T) []any {
 			return []any{listWire(t, map[string]any{
 				"case": caseView(), "candidates": []map[string]any{recoveryArtifactView(conformanceArtifact("candidate"))},
 			})}
 		}},
-		"POST /v1/recovery/cases/{caseId}/validate": {fixtures: func(t *testing.T) []any {
+		"POST /v1/recovery/cases/{caseId}/validate": {integration: true, fixtures: func(t *testing.T) []any {
 			return []any{listWire(t, map[string]any{
 				"case": caseView(), "validation": recoveryArtifactView(conformanceArtifact("validation")), "passed": true,
 			})}
 		}},
-		"POST /v1/recovery/cases/{caseId}/approve": {fixtures: func(t *testing.T) []any {
+		"POST /v1/recovery/cases/{caseId}/approve": {integration: true, fixtures: func(t *testing.T) []any {
 			grant := store.RecoveryApprovalGrant{
 				ID: "grant", CaseID: "case-1", CaseRevision: 3, CandidateArtifactID: "candidate-1",
 				ValidationArtifactID: "validation-1", ExpiresAt: conformanceInstant,
@@ -268,7 +268,7 @@ func manifestConformanceRows() map[string]conformanceRow {
 				"expiresAt": grant.ExpiresAt,
 			}})}
 		}},
-		"POST /v1/recovery/cases/{caseId}/apply": {fixtures: func(t *testing.T) []any {
+		"POST /v1/recovery/cases/{caseId}/apply": {integration: true, fixtures: func(t *testing.T) []any {
 			return []any{listWire(t, map[string]any{
 				"runId": "run", "sourceNodeId": "node", "decision": "replace_output",
 				"resumed": true, "resolvedCaseIds": []string{"case-1"},
@@ -401,8 +401,6 @@ func TestManifestConformanceUnitFixtures(t *testing.T) {
 // Metric projections are pure; their populated branches are rarely reached
 // by an empty integration tenant, so each is checked against its property.
 func TestRecoveryMetricProjectionsMatchManifest(t *testing.T) {
-	schema := manifestResponse(t, "GET", "/v1/recovery/metrics")
-	properties, _ := schema["properties"].(map[string]any)
 	signals := store.QueryRecoveryDashboardSignalsRow{
 		Succeeded: 9, Failed: 1, ReplayedSuccess: 3, ReplayedAndReopened: 1,
 		P95LatencyMs: 1500, ApprovalsPending: 2, SlaResolved: 4, SlaMet: 3,
@@ -431,15 +429,48 @@ func TestRecoveryMetricProjectionsMatchManifest(t *testing.T) {
 		"clustersResolved": {resolvedClusterProjection([]store.ListResolvedRecoveryFailureRowsRow{{NodeID: "n", ErrorJson: []byte(`{"message":"boom"}`)}})},
 	}
 	for name, metrics := range cases {
-		raw, err := json.Marshal(properties[name])
-		if err != nil {
-			t.Fatal(err)
-		}
-		resolved := resolveSchemaJSON(t, raw)
+		resolved := resolvedManifestFragment(t, "GET", "/v1/recovery/metrics", "properties/"+name)
 		for _, metric := range metrics {
 			if err := resolved.Validate(listWire(t, metric)); err != nil {
 				t.Errorf("%s projection violates manifest: %v", name, err)
 			}
 		}
+	}
+}
+
+// Drill evidence only exists after a solution-pack drill, so the populated
+// report is built by the same pure builder the Home section serves.
+func TestRecoveryHomeValidationSectionMatchesManifest(t *testing.T) {
+	root := conformanceInstant.Add(-time.Hour)
+	replay, recovered := root.Add(10*time.Minute), root.Add(20*time.Minute)
+	outcome := func(facts recovery.DrillOutcomeFacts) *recovery.DrillOutcome {
+		value := recovery.BuildRecoveryDrillOutcome(facts, conformanceInstant)
+		return &value
+	}
+	samples := []recovery.RecoveryValidationSample{
+		{RunID: "run-1", RunCreatedAt: root.Format(time.RFC3339), PackID: "pack", FixtureID: "fixture",
+			FailureMode: "timeout", RecoveryPath: "runtime_failure", ResolutionMode: recovery.ValidationResolutionOperator,
+			Outcome: outcome(recovery.DrillOutcomeFacts{RootCreatedAt: &root, RootStatus: "replayed",
+				LatestDeadLetterID: "letter-1", LatestStatus: "replayed", AttemptCount: 1,
+				ReplayStartedAt: &replay, RecoveredAt: &recovered})},
+		{RunID: "run-2", RunCreatedAt: root.Format(time.RFC3339), PackID: "pack", FixtureID: "fixture",
+			FailureMode: "schema", RecoveryPath: "direct_failure", ResolutionMode: recovery.ValidationResolutionUnknown,
+			Outcome: outcome(recovery.DrillOutcomeFacts{RootCreatedAt: &root, RootStatus: "open",
+				LatestDeadLetterID: "letter-2", LatestStatus: "open", AttemptCount: 1})},
+		{RunID: "run-3", RunCreatedAt: root.Format(time.RFC3339), PackID: "pack", FixtureID: "fixture",
+			FailureMode: "schema", RecoveryPath: "direct_failure", ResolutionMode: recovery.ValidationResolutionAutomated},
+	}
+	report := listWire(t, recovery.BuildRecoveryValidationReport(samples, 30, conformanceInstant, false))
+	if len(report.(map[string]any)["samples"].([]any)) != len(samples) {
+		t.Fatalf("report dropped samples: %+v", report)
+	}
+	schema := resolvedManifestFragment(t, "GET", "/v1/recovery/home",
+		"properties/sections/properties/validation/oneOf/0/properties/value")
+	if err := schema.Validate(report); err != nil {
+		t.Fatalf("populated validation report violates manifest: %v", err)
+	}
+	injectUnknownWireKey(report.(map[string]any)["samples"])
+	if err := schema.Validate(report); err == nil {
+		t.Fatal("validation sample accepted an undeclared key")
 	}
 }

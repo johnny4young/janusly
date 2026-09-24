@@ -9,7 +9,7 @@ PR after a green `make verify`; waves are independent unless noted.
 ## Problem 1 — the browser rejects what the server says
 
 The API contract already has one source of truth: `internal/contract`
-(48 routes, closed JSON schemas) renders `contract/openapi.json`, which
+(56 routes, closed JSON schemas) renders `contract/openapi.json`, which
 generates `web/src/lib/api-types.generated.ts`. The remediation added
 hand-written runtime guards on top of those types (`list-contract`,
 `run-status-contract`, `dead-letter-contract`, `recovery-patch-contract`,
