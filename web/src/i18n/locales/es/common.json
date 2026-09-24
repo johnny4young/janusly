@@ -2233,7 +2233,7 @@
   "mcpConnections.status.pending": "pendiente",
   "recoveryDialog.kicker": "Sugerir un arreglo",
   "recoveryDialog.titleRecover": "Recuperar {{nodeId}} en la ejecución {{runIdShort}}…",
-  "recoveryDialog.description": "Janusly analizará la falla y propondrá un cambio en el flujo. Revisa el diff antes de que se guarde nada.",
+  "recoveryDialog.description": "Revisa el cambio de flujo sugerido por Janusly antes de aplicarlo.",
   "recoveryDialog.closeAria": "Cerrar diálogo de recuperación",
   "recoveryDialog.idle.failingNodeIs": "El nodo que falla es",
   "recoveryDialog.idle.onRun": "en la ejecución",

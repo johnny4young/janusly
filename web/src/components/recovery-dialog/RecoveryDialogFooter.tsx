@@ -3,10 +3,10 @@ import { Button } from '@/components/ui/Button'
 import { useT } from '../../i18n'
 import type { RecoveryDialogModel } from './useRecoveryDialogController'
 
-/** Shared action row; the controller focuses primaryRef when the step changes. */
+/** Shared action row; the dialog owns focus across asynchronous step changes. */
 export function RecoveryDialogFooter({ model }: { model: RecoveryDialogModel }) {
   const { t } = useT()
-  const { step, onClose, primaryRef, isClusterMode, clusterMemberCount, canApplyPatch } = model
+  const { step, onClose, primaryRef, isClusterMode, clusterMemberCount, canApplyPatch, busy } = model
   const patchDecision = step.kind === 'review' || step.kind === 'validated'
   const canCancel = patchDecision || step.kind === 'validation-failed'
   let action: (() => void) | undefined
@@ -55,7 +55,7 @@ export function RecoveryDialogFooter({ model }: { model: RecoveryDialogModel }) 
           {label}
         </Button>
       )}
-      {(step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating') && (
+      {busy && step.kind !== 'cancelling' && (
         <Button variant="secondary" disabled>{t('recoveryDialog.footer.working')}</Button>
       )}
     </footer>

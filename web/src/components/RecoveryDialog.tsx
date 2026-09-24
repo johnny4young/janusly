@@ -27,17 +27,15 @@
  * (same-shape modal). The Apply button is disabled when the suggestion
  * came back as `mode: "fallback"` (no point applying a no-op).
  *
- * This parent owns the `Step` state machine, the three effects (focus,
- * ESC, the validation polling loop), and the apply-flow callbacks
- * (`generateSuggestion`, `validateSuggestion`, `applyAfterValidation`,
- * `recordFeedback`, `onBackdropClick`). The pure helpers + the per-step
- * render bodies live under `./recovery-dialog/` (each body receives its
- * data via explicit props — no shared closures).
+ * The controller owns the `Step` state machine, validation polling, Escape
+ * guard and apply-flow callbacks. This view owns focus containment when an
+ * asynchronous step replaces its footer action. Pure helpers and step bodies
+ * live under `./recovery-dialog/` with explicit props.
  *
  * Used by `DeadLettersPanel.tsx` — a Suggest-fix button per row mounts
  * this dialog with the selected DLQ row.
  */
-import { lazy, Suspense, useRef } from 'react'
+import { lazy, Suspense, useLayoutEffect, useRef } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, Sparkles, X } from 'lucide-react'
 import { Trans, useT } from '../i18n'
@@ -69,6 +67,7 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
     safeSelectedIndex,
     selectedSuggestion,
     canApplyPatch,
+    primaryRef,
     priorFailureSignature,
     setSelectedSuggestionIndex,
     loadMatchingPlaybook,
@@ -80,6 +79,15 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
   // The focus trap belongs with the dialog element it guards.
   const dialogRef = useRef<HTMLDivElement | null>(null)
   useDialogFocusTrap(dialogRef)
+  // Async steps replace the focused footer action. Keep focus in the modal
+  // instead of letting the browser fall back to <body>. Do not auto-focus a
+  // newly available Apply button: an echoed Enter must never apply a fix.
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current
+    if (dialog && !dialog.contains(document.activeElement)) {
+      (step.kind === 'idle' ? primaryRef.current ?? dialog : dialog).focus()
+    }
+  }, [step.kind, primaryRef])
 
   // Two-step progress for cluster recovery so the validate-1-then-replay-N flow
   // reads as staged work, not a hung dialog. Visual only — the body line below
@@ -101,6 +109,7 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
         ref={dialogRef}
         className="run-input-dialog we-recovery-dialog"
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby="recovery-dialog-title"
         onClick={(event) => event.stopPropagation()}

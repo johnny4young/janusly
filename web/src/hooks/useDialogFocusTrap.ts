@@ -130,12 +130,20 @@ export function useDialogFocusTrap(
       if (event.key !== 'Tab') return
       const node = dialogRef.current
       // Only trap while focus is already inside this dialog.
-      if (!node || !node.contains(document.activeElement)) return
+      if (!node?.contains(document.activeElement)) return
       const focusables = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-      if (focusables.length === 0) return
+      if (focusables.length === 0) {
+        // Busy dialogs can intentionally have no enabled controls.
+        event.preventDefault()
+        return
+      }
       const first = focusables[0]!
       const last = focusables[focusables.length - 1]!
-      if (event.shiftKey && document.activeElement === first) {
+      if (document.activeElement === node) {
+        // A dialog may own focus while an asynchronous action is replaced.
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault()
         last.focus()
       } else if (!event.shiftKey && document.activeElement === last) {

@@ -2233,7 +2233,7 @@
   "mcpConnections.status.pending": "pending",
   "recoveryDialog.kicker": "Suggest a fix",
   "recoveryDialog.titleRecover": "Recover {{nodeId}} on run {{runIdShort}}…",
-  "recoveryDialog.description": "Janusly will analyse the failure and propose a workflow change. Review the diff before anything is saved.",
+  "recoveryDialog.description": "Review Janusly's suggested workflow change before applying it.",
   "recoveryDialog.closeAria": "Close recovery dialog",
   "recoveryDialog.idle.failingNodeIs": "The failing node is",
   "recoveryDialog.idle.onRun": "on run",

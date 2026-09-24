@@ -104,6 +104,7 @@ export function useRecoveryDialogController({
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
+  const busy = step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating' || step.kind === 'cancelling'
   const [matchingPlaybook, setMatchingPlaybook] = useState<RecoveryPlaybookSummary | null>(null)
   const [playbookBusy, setPlaybookBusy] = useState<'use' | 'retire' | null>(null)
 
@@ -153,9 +154,6 @@ export function useRecoveryDialogController({
     ? isActionableSuggestion(dlq.workflowJson, step.suggestion, selectedSuggestion)
     : false
 
-  // Focus the primary action on mount so keyboard users can hit Enter.
-  useEffect(() => { primaryRef.current?.focus() }, [])
-
   // Offer only the server-derived exact workflow + signature match. A miss or
   // transient read failure never blocks the normal AI recovery path.
   useEffect(() => {
@@ -184,17 +182,12 @@ export function useRecoveryDialogController({
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape') return
-      if (
-        step.kind === 'loading'
-        || step.kind === 'applying'
-        || step.kind === 'validating'
-        || step.kind === 'cancelling'
-      ) return
+      if (busy) return
       onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, step.kind])
+  }, [onClose, busy])
 
   // Poll the validation run until it reaches a terminal status. The poll
   // tears itself down when the dialog closes or the step transitions
@@ -537,18 +530,9 @@ export function useRecoveryDialogController({
     // Same guard as the ESC handler — cancelling has its own dedicated
     // close paths (Skip/Submit/Back) and the backdrop click would
     // otherwise silently bypass the feedback write.
-    if (
-      step.kind === 'loading'
-      || step.kind === 'applying'
-      || step.kind === 'validating'
-      || step.kind === 'cancelling'
-    ) return
+    if (busy) return
     onClose()
   }
-
-  // Every close path is blocked while async work is in flight, so an
-  // operator cannot lose an in-progress save or skip the feedback write.
-  const busy = step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating' || step.kind === 'cancelling'
 
   const startCancelling = () => {
     if (step.kind === 'review') {

@@ -133,8 +133,13 @@ gzip (2026-09). When adding styles for a lazy panel, put them in its adjacent
 sheet; `scripts/check-css-classes.mjs` still requires every class to have a
 production owner wherever the sheet lives. `RightPanel` and `AppWorkspace` are memoized, and the shell's derived counts
 are memoized on their inputs, because the shell renders on every store tick.
-Dialogs get Escape from `useDialogFocusTrap`'s `onEscape` option rather than
-their own keydown effects.
+Dialogs normally get Escape from `useDialogFocusTrap`'s `onEscape` option.
+Recovery keeps its state-specific Escape guard so in-flight saves and rejection
+feedback cannot be bypassed. It retains focus on its dialog root when an
+asynchronous step replaces the active button; Tab and Shift+Tab stay within the
+modal, including busy steps with no enabled controls. The initial Generate
+action may receive focus, but the validated Apply action never gains focus
+automatically after a sandbox response.
 Every product action is the `Button` primitive (`components/ui/Button.tsx`):
 `size="sm"` for inline row and toolbar actions, `variant="primary"` for the
 one action a surface leads with, `variant="danger"` for destructive ones,
