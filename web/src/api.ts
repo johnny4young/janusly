@@ -36,6 +36,7 @@ import {
 import { isV1ReadPath } from '@/lib/api-contract'
 import type { ApiOperation, ApiRequest, ApiResponse } from '@/lib/api-types.generated'
 import { getResolvedLocale, t } from './i18n/runtime'
+import { MalformedResponseError } from './lib/malformed-response'
 import { useWorkflowStore } from './store'
 
 // Production is always same-origin. Vite proxies API routes to the Go process
@@ -262,7 +263,7 @@ export async function contractApi<Operation extends ApiOperation>(
   const payload = await api(path, init)
   // api() throws on every non-2xx except the field-error envelope, which is not the operation's payload.
   if (guard && !guard(payload) && !isFieldErrorResult(path, payload)) {
-    throw new Error(t('api.error.malformedResponse'))
+    throw new MalformedResponseError()
   }
   return payload as ApiResponse<Operation>
 }
@@ -321,7 +322,7 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
     if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
       throw new DOMException('Request cancelled', 'AbortError')
     }
-    if (res.ok) throw new Error(t('api.error.malformedResponse'))
+    if (res.ok) throw new MalformedResponseError()
     // The known non-success HTTP status remains authoritative even when its
     // optional error detail is unreadable (especially 401/403).
   }
@@ -331,7 +332,7 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
     try {
       rawPayload = JSON.parse(rawText)
     } catch {
-      if (res.ok) throw new Error(t('api.error.malformedResponse'))
+      if (res.ok) throw new MalformedResponseError()
     }
   }
   const { payload, requestId: envelopeRequestId } = unwrapVersionedPayload(rawPayload, res.ok)

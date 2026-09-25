@@ -1,15 +1,18 @@
-/** Runtime guard for untrusted AI and Recovery Playbook patch responses. */
+/** UI invariants for AI and Recovery Playbook patch responses; shape is the generated guards'. */
 
+import type { ApiResponses } from './api-types.generated'
 import { parseEvidenceRows } from './ai-evidence-runtime'
 import { isWorkflowDefinition } from './authoring-contract'
-import { isNonEmptyString, isNonNegativeSafeInteger, isRecord } from './guards'
+import { isPostAiPatchWorkflowResponse } from './api-guards/operations/PostAiPatchWorkflow'
+import { isPostRecoveryPlaybooksIdUseResponse } from './api-guards/operations/PostRecoveryPlaybooksIdUse'
 import type { WorkflowDefinition } from '../types'
 import type {
   PatchApproachLabel,
   PatchSuggestion,
-  PriorSameSignatureOutcome,
   SuggestionTab,
 } from '../components/recovery-dialog/types'
+
+type WirePatch = ApiResponses['POST /ai/patch-workflow'] | ApiResponses['POST /recovery/playbooks/{id}/use']['suggestion']
 
 const APPROACHES: readonly PatchApproachLabel[] = [
   'add_retry', 'raise_timeout', 'swap_secret_ref', 'add_approval', 'fix_url', 'other',
@@ -21,126 +24,77 @@ export type RecoveryPatchParseOptions = {
   expectedPlaybookId?: string | null
 }
 
-function text(value: unknown, max: number): value is string {
-  return isNonEmptyString(value) && value.length <= max
-}
-
-function approach(value: unknown): value is PatchApproachLabel {
-  return typeof value === 'string' && APPROACHES.includes(value as PatchApproachLabel)
-}
-
-function percent(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 100
-}
-
+// Validation and save target the persisted workflow, never an id the model invented.
 function workflow(value: unknown, id?: string | null): WorkflowDefinition | null {
   if (!isWorkflowDefinition(value) || (id && value.id !== undefined && value.id !== id)) return null
   return id && value.id !== id ? { ...value, id } : value
 }
 
-function tab(value: unknown, id?: string | null): SuggestionTab | null {
-  if (!isRecord(value)) return null
+function tab(value: WirePatch['suggestions'][number], id?: string | null): SuggestionTab | null {
   const parsedWorkflow = workflow(value.workflow, id)
-  if (!parsedWorkflow || !text(value.rationale, 4_000) || !approach(value.approachLabel)
-    || !percent(value.confidence)) return null
-  if (value.calibratedConfidence !== undefined && !percent(value.calibratedConfidence)) return null
-  if (value.safety !== undefined && (!isRecord(value.safety)
-    || typeof value.safety.writeSide !== 'boolean'
-    || typeof value.safety.approvalRequired !== 'boolean'
-    || typeof value.safety.approvalPresent !== 'boolean')) return null
-  if (value.consideredAlternatives !== undefined && (!Array.isArray(value.consideredAlternatives)
-    || value.consideredAlternatives.length > 2
-    || value.consideredAlternatives.some((item) => !isRecord(item)
-      || !text(item.approach, 120) || !text(item.rejectedBecause, 280)))) return null
-  return { ...value, workflow: parsedWorkflow } as SuggestionTab
+  // The suggestion tabs translate the approach label; an unknown one has no copy.
+  if (!parsedWorkflow || !APPROACHES.includes(value.approachLabel as PatchApproachLabel)) return null
+  return { ...value, approachLabel: value.approachLabel as PatchApproachLabel, workflow: parsedWorkflow }
 }
 
-function priorOutcome(value: unknown): PriorSameSignatureOutcome | null | undefined {
-  if (value === null) return null
-  return isRecord(value) && text(value.status, 64) && text(value.occurredAt, 64)
-    ? { status: value.status, occurredAt: value.occurredAt }
-    : undefined
-}
-
-function passport(
-  value: unknown,
-  expected?: string | null,
-): PatchSuggestion['recoveryPassport'] | null {
-  if (!isRecord(value) || !text(value.failureSignature, 512)
-    || expected && value.failureSignature !== expected) return null
-  const prior = priorOutcome(value.priorSameSignatureOutcome)
-  return prior === undefined ? null : { failureSignature: value.failureSignature, priorSameSignatureOutcome: prior }
-}
-
-function playbook(value: unknown, options: RecoveryPatchParseOptions): PatchSuggestion['playbook'] | null {
-  if (!isRecord(value) || !text(value.id, 256) || !text(value.signature, 512)
-    || !text(value.title, 120) || !Number.isSafeInteger(value.version) || (value.version as number) < 1
-    || value.status !== 'active' || !isNonNegativeSafeInteger(value.successfulUses)
-    || !isNonNegativeSafeInteger(value.regressions)
-    || options.expectedPlaybookId && value.id !== options.expectedPlaybookId
-    || options.persistedWorkflowId && value.workflowId !== options.persistedWorkflowId
-    || options.expectedFailureSignature && value.signature !== options.expectedFailureSignature) return null
-  return {
-    id: value.id,
-    version: value.version as number,
-    title: value.title,
-    successfulUses: value.successfulUses,
-    regressions: value.regressions,
+function suggestion(value: WirePatch, options: RecoveryPatchParseOptions): PatchSuggestion | null {
+  // The review step always opens on a first tab.
+  if (value.suggestions.length === 0) return null
+  const suggestions: SuggestionTab[] = []
+  for (const item of value.suggestions) {
+    const parsed = tab(item, options.persistedWorkflowId)
+    if (!parsed) return null
+    suggestions.push(parsed)
   }
-}
-/**
- * Parse a patch response before it can enter dialog state. Only envelopes with
- * no `suggestions` property receive the intentional legacy projection; a
- * present malformed list fails closed.
- */
-export function parseRecoveryPatchSuggestion(
-  value: unknown,
-  options: RecoveryPatchParseOptions = {},
-): PatchSuggestion | null {
-  if (!isRecord(value) || !['ai', 'fallback', 'playbook'].includes(String(value.mode))) return null
-  const current = Object.hasOwn(value, 'suggestions')
-  let suggestions: SuggestionTab[]
-  if (!current) {
-    const mirror = workflow(value.suggestedWorkflow, options.persistedWorkflowId)
-    if (!mirror || !text(value.rationale, 4_000) || value.mode === 'playbook' || options.expectedPlaybookId) return null
-    const confidence = value.mode === 'ai' ? 50 : 0
-    suggestions = [{ workflow: mirror, rationale: value.rationale, approachLabel: 'other', confidence, calibratedConfidence: confidence }]
-  } else {
-    if (!Array.isArray(value.suggestions) || value.suggestions.length < 1 || value.suggestions.length > 3) return null
-    suggestions = value.suggestions.map((item) => tab(item, options.persistedWorkflowId)) as SuggestionTab[]
-    if (suggestions.some((item) => !item)) return null
-  }
+  // The confidence badge must not claim model confidence for a fallback or a replayed playbook.
+  // wire-policy: the patch route pins fallback to 0 and playbook replays to 100 confidence.
   const fixedConfidence = value.mode === 'fallback' ? 0 : value.mode === 'playbook' ? 100 : null
   if (fixedConfidence !== null && (value.mode === 'playbook' && suggestions.length !== 1
     || suggestions.some((item) => item.confidence !== fixedConfidence
       || (item.calibratedConfidence ?? fixedConfidence) !== fixedConfidence))) return null
 
-  const parsedPassport = value.recoveryPassport === undefined
-    ? null
-    : passport(value.recoveryPassport, options.expectedFailureSignature)
-  if (current && !parsedPassport || value.recoveryPassport !== undefined && !parsedPassport) return null
+  // The passport card describes the failure this dialog was opened for.
+  const passport = value.recoveryPassport
+  if (options.expectedFailureSignature && passport.failureSignature !== options.expectedFailureSignature) return null
 
-  const evidence = parseEvidenceRows(value.evidence ?? [])
+  const evidence = parseEvidenceRows(value.evidence)
   if (!evidence) return null
 
-  if (value.feedbackHealth !== undefined) return null
-  const parsedPlaybook = value.playbook === undefined ? undefined : playbook(value.playbook, options)
-  if (value.mode === 'playbook' ? !parsedPlaybook : value.playbook !== undefined || options.expectedPlaybookId) return null
-  if (value.aiError !== undefined && !text(value.aiError, 800)) return null
+  let playbook: PatchSuggestion['playbook']
+  if (value.mode === 'playbook') {
+    const source = value.playbook
+    // Only the playbook the operator picked, for this workflow and failure, may replay.
+    if (source.status !== 'active'
+      || options.expectedPlaybookId && source.id !== options.expectedPlaybookId
+      || options.persistedWorkflowId && source.workflowId !== options.persistedWorkflowId
+      || options.expectedFailureSignature && source.signature !== options.expectedFailureSignature) return null
+    playbook = {
+      id: source.id, version: source.version, title: source.title,
+      successfulUses: source.successfulUses, regressions: source.regressions,
+    }
+  } else if (options.expectedPlaybookId) return null
 
   return {
-    mode: value.mode as PatchSuggestion['mode'],
+    mode: value.mode,
     suggestions,
     evidence,
-    ...(parsedPassport ? { recoveryPassport: parsedPassport } : {}),
-    ...(typeof value.aiError === 'string' ? { aiError: value.aiError } : {}),
-    ...(parsedPlaybook ? { playbook: parsedPlaybook } : {}),
+    recoveryPassport: { failureSignature: passport.failureSignature, priorSameSignatureOutcome: null },
+    ...(value.mode !== 'playbook' && typeof value.aiError === 'string' ? { aiError: value.aiError } : {}),
+    ...(playbook ? { playbook } : {}),
   }
+}
+
+/** Parse a `POST /ai/patch-workflow` payload before it can enter dialog state. */
+export function parseRecoveryPatchSuggestion(
+  value: unknown,
+  options: RecoveryPatchParseOptions = {},
+): PatchSuggestion | null {
+  return isPostAiPatchWorkflowResponse(value) ? suggestion(value, options) : null
 }
 
 export function parseRecoveryPlaybookUseResponse(
   value: unknown,
   options: RecoveryPatchParseOptions,
 ): PatchSuggestion | null {
-  return isRecord(value) ? parseRecoveryPatchSuggestion(value.suggestion, options) : null
+  return isPostRecoveryPlaybooksIdUseResponse(value) ? suggestion(value.suggestion, options) : null
 }

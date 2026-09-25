@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { api } from '../api'
+import { contractApi } from '../api'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { Button } from '@/components/ui/Button'
-import { asRecord } from '../lib/guards'
+import type { QualificationEnvelope } from '../lib/api-types.generated'
+import { isGetWorkflowsWorkflowIdRolloutQualificationResponse } from '../lib/api-guards/operations/GetWorkflowsWorkflowIdRolloutQualification'
+import { isPostWorkflowsWorkflowIdRolloutQualificationResponse } from '../lib/api-guards/operations/PostWorkflowsWorkflowIdRolloutQualification'
+import { MalformedResponseError } from '../lib/malformed-response'
 import './WorkflowRecoveryQualification.css'
 
 export type RecoveryQualification = {
@@ -44,81 +47,52 @@ export type RecoveryQualificationGate = {
   status: RecoveryQualification['status'] | null
 }
 
-function boundedInteger(value: unknown, min = 0): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value >= min
-    ? value
-    : null
-}
+const STATUSES: ReadonlySet<string> = new Set<RecoveryQualification['status']>(['passed', 'failed'])
+const MODES: ReadonlySet<string> = new Set<RecoveryQualification['mode']>(['bootstrap', 'compare'])
+type Failure = RecoveryQualification['summary']['failures'][number]
+const DATASETS: ReadonlySet<string> = new Set<Failure['dataset']>(['baseline', 'candidate'])
+const REASONS: ReadonlySet<string> = new Set<Failure['reason']>([
+  'baseline_dataset_invalid', 'candidate_contract_missing', 'detector_uncovered', 'expected_mismatch',
+])
+// wire-policy: how many failures the card lists, not a wire bound.
+const VISIBLE_FAILURES = 5
 
-function parseRecoveryQualification(payload: unknown, baselineVersionId: string, candidateVersionId: string): RecoveryQualificationState | null {
-  const envelope = asRecord(payload)
-  if (typeof envelope?.required !== 'boolean') return null
-  if (envelope.qualification === null) {
-    return { required: envelope.required, qualification: null }
-  }
-  const row = asRecord(envelope.qualification)
-  const summary = asRecord(row?.summary)
-  if (!row || !summary || row.baselineVersionId !== baselineVersionId || row.candidateVersionId !== candidateVersionId) return null
-  if (row.status !== 'passed' && row.status !== 'failed') return null
-  if (row.mode !== 'bootstrap' && row.mode !== 'compare') return null
-  const strings = ['id', 'baselineVersionId', 'candidateVersionId', 'datasetVersion', 'datasetDigest', 'createdAt'] as const
-  if (strings.some(key => typeof row[key] !== 'string' || row[key].length === 0)) {
-    return null
-  }
-  const summaryKeys = [
-    'candidateAssertionCount',
-    'passedCandidateAssertions',
-    'failedCandidateAssertions',
-    'regressionCount',
-    'coverageFailureCount',
-  ] as const
-  const values = summaryKeys.map(key => boundedInteger(summary[key]))
-  if (
-    values.some(value => value === null)
-    || !Array.isArray(summary.failures)
-    || typeof summary.failuresTruncated !== 'boolean'
-  ) {
-    return null
-  }
-  const failures: RecoveryQualification['summary']['failures'] = []
-  for (const item of summary.failures) {
-    const failure = asRecord(item)
-    if (!failure) return null
-    const dataset = failure.dataset
-    const reason = failure.reason
-    if (
-      (dataset !== 'baseline' && dataset !== 'candidate')
-      || (
-        reason !== 'baseline_dataset_invalid'
-        && reason !== 'candidate_contract_missing'
-        && reason !== 'detector_uncovered'
-        && reason !== 'expected_mismatch'
-      )
-      || typeof failure.fixtureId !== 'string'
-      || typeof failure.sourceNodeId !== 'string'
-    ) {
-      return null
-    }
-    failures.push({
-      dataset,
-      fixtureId: failure.fixtureId,
-      sourceNodeId: failure.sourceNodeId,
-      reason,
-    })
-  }
+/**
+ * Shape is the generated guard's. The rollout gate must describe the exact
+ * workflow and version pair the form selected, and the card translates the
+ * status, mode, dataset and failure reason.
+ */
+function parseRecoveryQualification(
+  payload: QualificationEnvelope,
+  workflowId: string,
+  baselineVersionId: string,
+  candidateVersionId: string,
+): RecoveryQualificationState | null {
+  const row = payload.qualification
+  if (row === null) return { required: payload.required, qualification: null }
+  if (row.workflowId !== workflowId || row.baselineVersionId !== baselineVersionId
+    || row.candidateVersionId !== candidateVersionId
+    || !STATUSES.has(row.status) || !MODES.has(row.mode)
+    || !row.summary.failures.every(failure => DATASETS.has(failure.dataset) && REASONS.has(failure.reason))) return null
+  const summary = row.summary
   return {
-    required: envelope.required,
+    required: payload.required,
     qualification: {
-      baselineVersionId: row.baselineVersionId as string,
-      candidateVersionId: row.candidateVersionId as string,
-      mode: row.mode,
-      status: row.status,
+      baselineVersionId: row.baselineVersionId,
+      candidateVersionId: row.candidateVersionId,
+      mode: row.mode as RecoveryQualification['mode'],
+      status: row.status as RecoveryQualification['status'],
       summary: {
-        candidateAssertionCount: values[0]!,
-        passedCandidateAssertions: values[1]!,
-        regressionCount: values[3]!,
-        coverageFailureCount: values[4]!,
-        failures,
+        candidateAssertionCount: summary.candidateAssertionCount,
+        passedCandidateAssertions: summary.passedCandidateAssertions,
+        regressionCount: summary.regressionCount,
+        coverageFailureCount: summary.coverageFailureCount,
+        failures: summary.failures.map(failure => ({
+          dataset: failure.dataset as Failure['dataset'],
+          fixtureId: failure.fixtureId,
+          sourceNodeId: failure.sourceNodeId,
+          reason: failure.reason as Failure['reason'],
+        })),
         failuresTruncated: summary.failuresTruncated,
       },
     },
@@ -160,14 +134,16 @@ export function WorkflowRecoveryQualification({
       baselineVersionId,
       candidateVersionId,
     })
-    api(
+    contractApi(
+      'GET /workflows/{workflowId}/rollout/qualification',
       `${qualificationPath}?${query.toString()}`,
-      { signal: abortController.signal },
+      undefined,
+      { signal: abortController.signal, guard: isGetWorkflowsWorkflowIdRolloutQualificationResponse },
     )
       .then(payload => {
         if (abortController.signal.aborted) return
-        const parsed = parseRecoveryQualification(payload, baselineVersionId, candidateVersionId)
-        if (!parsed) throw new Error(t('workflowRollout.qualification.invalidResponse'))
+        const parsed = parseRecoveryQualification(payload, workflowId, baselineVersionId, candidateVersionId)
+        if (!parsed) throw new MalformedResponseError()
         setState(parsed)
         onGateChange({
           baselineVersionId, candidateVersionId,
@@ -180,7 +156,9 @@ export function WorkflowRecoveryQualification({
         if (abortController.signal.aborted) return
         setLoadError(true)
         onGateChange(null)
-        addToast(tApiError(error) || t('workflowRollout.qualification.loadFailed'), 'error')
+        addToast(error instanceof MalformedResponseError
+          ? t('workflowRollout.qualification.invalidResponse')
+          : tApiError(error) || t('workflowRollout.qualification.loadFailed'), 'error')
       })
     return () => {
       abortController.abort()
@@ -194,6 +172,7 @@ export function WorkflowRecoveryQualification({
     retry,
     t,
     qualificationPath,
+    workflowId,
   ])
 
   const runQualification = async () => {
@@ -201,16 +180,15 @@ export function WorkflowRecoveryQualification({
     if (!request || request.signal.aborted || readOnly || loading || qualifying) return
     setQualifying(true)
     try {
-      const payload = await api(qualificationPath, {
-        method: 'POST', signal: request.signal,
-        body: JSON.stringify({
-          baselineVersionId,
-          candidateVersionId,
-        }),
-      })
+      const payload = await contractApi(
+        'POST /workflows/{workflowId}/rollout/qualification',
+        qualificationPath,
+        { baselineVersionId, candidateVersionId },
+        { signal: request.signal, guard: isPostWorkflowsWorkflowIdRolloutQualificationResponse },
+      )
       if (request.signal.aborted) return
-      const parsed = parseRecoveryQualification(payload, baselineVersionId, candidateVersionId)
-      if (!parsed?.qualification) throw new Error(t('workflowRollout.qualification.invalidResponse'))
+      const parsed = parseRecoveryQualification(payload, workflowId, baselineVersionId, candidateVersionId)
+      if (!parsed?.qualification) throw new MalformedResponseError()
       setState(parsed)
       onGateChange({
         baselineVersionId, candidateVersionId,
@@ -225,7 +203,11 @@ export function WorkflowRecoveryQualification({
         parsed.qualification.status === 'passed' ? 'success' : 'error',
       )
     } catch (error) {
-      if (!request.signal.aborted) addToast(tApiError(error) || t('workflowRollout.qualification.runFailed'), 'error')
+      if (!request.signal.aborted) {
+        addToast(error instanceof MalformedResponseError
+          ? t('workflowRollout.qualification.invalidResponse')
+          : tApiError(error) || t('workflowRollout.qualification.runFailed'), 'error')
+      }
     } finally {
       if (!request.signal.aborted) setQualifying(false)
     }
@@ -275,7 +257,7 @@ export function WorkflowRecoveryQualification({
         <div className="we-rollout-panel__qualification-failures">
           <strong>{t('workflowRollout.qualification.failuresTitle')}</strong>
           <ul>
-            {qualification.summary.failures.slice(0, 5).map(failure => (
+            {qualification.summary.failures.slice(0, VISIBLE_FAILURES).map(failure => (
               <li key={`${failure.dataset}:${failure.fixtureId}:${failure.reason}`}>
                 <span>
                   {t(`workflowRollout.qualification.dataset.${failure.dataset}`)}
@@ -287,7 +269,7 @@ export function WorkflowRecoveryQualification({
               </li>
             ))}
           </ul>
-          {(qualification.summary.failures.length > 5
+          {(qualification.summary.failures.length > VISIBLE_FAILURES
             || qualification.summary.failuresTruncated) && (
             <p>{t('workflowRollout.qualification.failuresBounded')}</p>
           )}

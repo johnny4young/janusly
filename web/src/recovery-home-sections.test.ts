@@ -3,126 +3,53 @@ import { describe, expect, it } from 'vitest'
 import {
   decodeClustersResponse,
   decodeHeatmap,
-  decodeOperatorWins,
   decodeRecoveryCases,
-  decodeRecoveryLedger,
   decodeRecoveryMetrics,
   decodeRecoveryQueue,
-  decodeRecoveryValidationReport,
 } from './recovery-home-sections'
 
-const metric = {
-  value: 93,
-  display: '93%',
-  severity: 'healthy',
-  rationale: 'Healthy sample',
+const metric = { value: 93, display: '93%', severity: 'healthy', rationale: 'Healthy sample', rationaleCode: 'ok' }
+const verifiedRecovery = {
+  ...metric, definitionVersion: '1', metric: 'time_to_verified_recovery', unit: 'milliseconds',
+  sampleSize: 2, p50Ms: 120_000, p90Ms: 180_000,
+}
+const cluster = {
+  signature: 'http:timeout', category: 'network_timeout', frequency: 2, suggestedOwner: 'platform',
+  firstSeen: '2026-07-27T12:00:00.000Z', lastSeen: '2026-07-27T12:00:00.000Z',
+  recurredAfterRecovery: false, affectedWorkflows: [], samples: [],
 }
 
-const metrics = {
-  successRate: metric,
-  verifiedRecovery: {
-    ...metric,
-    definitionVersion: '1',
-    metric: 'time_to_verified_recovery',
-    unit: 'milliseconds',
-    sampleSize: 2,
-    p50Ms: 120_000,
-    p90Ms: 180_000,
-  },
-  mttr: metric,
-  p95Latency: metric,
-  approvalsPending: metric,
-  replayRate: metric,
-  recurrenceRate: metric,
-  windowDays: 30,
-  terminalRuns: 4,
-}
-
-describe('Recovery Home section decoders', () => {
-  it('accepts the supported recovery section shapes', () => {
-    expect(decodeRecoveryMetrics(metrics)).toEqual(metrics)
-    expect(decodeClustersResponse({
-      clusters: [{
-        signature: 'http:timeout',
-        category: 'network_timeout',
-        frequency: 2,
-        suggestedOwner: 'platform',
-        lastSeen: '2026-07-27T12:00:00.000Z',
-      }],
-      totalSamples: 2,
-      windowDays: 30,
-    })).not.toBeNull()
-    expect(decodeHeatmap({
-      days: [{
-        day: '2026-07-27',
-        failures: 2,
-        recovered: 1,
-        mttrSeconds: 90,
-      }],
-      windowDays: 90,
-    })).toEqual({
-      days: [{
-        day: '2026-07-27',
-        failures: 2,
-        recovered: 1,
-        mttrSeconds: 90,
-      }],
-    })
-    expect(decodeRecoveryLedger({
-      totalRecovered: 3,
-      downtimeEndedMs: 240_000,
-      sinceIso: null,
-    })).not.toBeNull()
-    expect(decodeOperatorWins({
-      recovered: 1,
-      windowDays: 30,
-    })).not.toBeNull()
-    expect(decodeRecoveryQueue({
-      counts: { open: 1 },
-      oldestOpen: { createdAt: '2026-07-27T12:00:00.000Z' },
-    })).not.toBeNull()
+// Section values arrive after the `GET /recovery/home` guard; these readers keep projections and UI invariants.
+describe('Recovery Home section readers', () => {
+  it('formats verified recovery only for the one metric the tile knows', () => {
+    expect(decodeRecoveryMetrics({ successRate: metric, verifiedRecovery })).not.toBeNull()
+    expect(decodeRecoveryMetrics({ successRate: metric, verifiedRecovery: { ...verifiedRecovery, unit: 'seconds' } })).toBeNull()
+    expect(decodeRecoveryMetrics({ successRate: metric, verifiedRecovery: { ...verifiedRecovery, definitionVersion: '2' } })).toBeNull()
   })
 
-  it('rejects malformed nested metrics and queue projections independently', () => {
-    expect(decodeRecoveryMetrics({
-      ...metrics,
-      replayRate: { ...metric, display: 42 },
-    })).toBeNull()
-    expect(decodeRecoveryMetrics({
-      ...metrics,
-      valueEstimate: {
-        hoursSaved: 4,
-        dollarSaved: 200,
-        mttrDeltaSeconds: null,
-        assumptions: null,
-      },
-    })).toBeNull()
-    expect(decodeRecoveryQueue({
-      counts: { open: -1 },
-      oldestOpen: null,
-    })).toBeNull()
+  it('rejects cluster categories and owners the tiles cannot label', () => {
+    expect(decodeClustersResponse({ clusters: [cluster], totalSamples: 2, windowDays: 30 })).not.toBeNull()
+    expect(decodeClustersResponse({ clusters: [{ ...cluster, category: 'quota' }], totalSamples: 2, windowDays: 30 })).toBeNull()
+    expect(decodeClustersResponse({ clusters: [{ ...cluster, suggestedOwner: 'finance' }], totalSamples: 2, windowDays: 30 })).toBeNull()
   })
 
-  it('rejects incomplete validation, semantic-case, and heatmap rows', () => {
-    expect(decodeRecoveryValidationReport({
-      generatedAt: '2026-07-27T12:00:00.000Z',
-      windowDays: 30,
-      sampleLimit: 100,
-      sampleCapped: false,
-      totals: {},
-      resolution: {},
-      timing: {},
-      byFailureMode: [],
-    })).toBeNull()
-    expect(decodeRecoveryCases({
-      cases: [{
-        id: 'case-incomplete',
-        runId: 'run-1',
-        action: 'quarantine',
-      }],
-    })).toBeNull()
-    expect(decodeHeatmap({
-      days: [{ day: '2026-07-27', failures: 'two' }],
-    })).toBeNull()
+  it('projects only the fields the Recovery Center reads', () => {
+    const day = { day: '2026-07-27', failures: 2, recovered: 1, mttrSeconds: 90 }
+    expect(decodeHeatmap({ days: [day], windowDays: 90 })).toEqual({ days: [day] })
+    expect(decodeRecoveryQueue({
+      counts: { open: 1, replayed: 0, resolved: 0, total: 1 },
+      oldestOpen: { id: 'dead-letter', createdAt: '2026-07-27T12:00:00.000Z' },
+    })).toEqual({ counts: { open: 1 }, oldestOpen: { createdAt: '2026-07-27T12:00:00.000Z' } })
+    expect(decodeRecoveryQueue({ counts: { open: 0, replayed: 0, resolved: 0, total: 0 }, oldestOpen: null }))
+      .toEqual({ counts: { open: 0 }, oldestOpen: null })
+  })
+
+  it('reads the home case summary rather than requiring the full case record', () => {
+    const summary = {
+      id: 'case-1', runId: 'run-1', action: 'quarantine', state: 'contained', createdAt: '2026-07-27T12:00:00.000Z',
+      detectorId: 'detector', detectorKind: 'expression', message: 'Output violated its contract',
+      source: 'semantic_violation', workflowId: null,
+    }
+    expect(decodeRecoveryCases({ cases: [summary] })).toEqual({ cases: [summary] })
   })
 })

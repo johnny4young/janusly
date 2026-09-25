@@ -198,6 +198,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
           confidence: 100,
           calibratedConfidence: 100,
           safety: { writeSide: false, approvalRequired: false, approvalPresent: true },
+          consideredAlternatives: [],
         }],
         evidence: [{ kind: 'signature_rule', sourceRef: 'demo_failure', snippet: 'Matched deterministic demo failure' }],
         recoveryPassport: {

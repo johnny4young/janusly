@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api, contractApi } from '../api'
 import { isGetWorkflowsVersionsVersionIdResponse } from '../lib/api-guards/operations/GetWorkflowsVersionsVersionId'
+import { MalformedResponseError } from '../lib/malformed-response'
 import type { ApiResponse } from '../lib/api-types.generated'
 import { useWorkflowStore } from '../store'
 import type {
@@ -242,6 +243,18 @@ describe('useWorkflowCommands proposal apply authority', () => {
     })
   })
 
+  it('applies a proposal it returned without Best-of-N metadata', async () => {
+    vi.mocked(contractApi).mockImplementation(async (operation) => (
+      operation === 'POST /ai/workflow-proposals' ? validProposal() : authoringCatalog
+    ) as never)
+    const { result } = renderHook(() => useWorkflowCommands(options()))
+    const proposal = await result.current.proposeWorkflow(validProposal().brief, authoringCatalog.version, 'prompt')
+    expect(Object.hasOwn(proposal, 'bonBackoff')).toBe(false)
+    let outcome: Awaited<ReturnType<typeof result.current.applyWorkflowProposal>> | undefined
+    await act(async () => { outcome = await result.current.applyWorkflowProposal(proposal) })
+    expect(outcome).toEqual({ status: 'applied' })
+  })
+
   it('rejects Apply when the canvas changes during lazy proposal validation', async () => {
     const proposal = validProposal()
     vi.mocked(contractApi).mockResolvedValue(authoringCatalog)
@@ -339,6 +352,17 @@ describe('useWorkflowCommands save authority', () => {
     })
   })
 
+  it('keeps each command\'s own copy when a payload fails its generated guard', async () => {
+    vi.mocked(contractApi).mockRejectedValue(new MalformedResponseError())
+    const { result } = renderHook(() => useWorkflowCommands(options()))
+    await expect(result.current.compileWorkflowBrief('Handle incidents')).rejects.toThrow('toasts.aiResponseInvalid')
+    await act(async () => { await result.current.openWorkflow('workflow-1') })
+    expect(useWorkflowStore.getState().toasts.at(-1)).toMatchObject({ message: 'apiErrors.workflows_version_malformed', tone: 'error' })
+    const transport = new Error('offline')
+    vi.mocked(contractApi).mockRejectedValue(transport)
+    await expect(result.current.compileWorkflowBrief('Handle incidents')).rejects.toBe(transport)
+  })
+
   it('does not mark later edits saved when an earlier save request returns', async () => {
     let resolveSave!: (value: { workflowId: string; versionId: string; version: number }) => void
     const pendingSave = new Promise<{ workflowId: string; versionId: string; version: number }>((resolve) => {
@@ -346,8 +370,11 @@ describe('useWorkflowCommands save authority', () => {
     })
     vi.mocked(api).mockImplementation(async (path) => {
       if (path === '/validate') return { valid: true, issues: [] }
-      if (path === '/workflows/save') return await pendingSave
       throw new Error(`unexpected API path: ${path}`)
+    })
+    vi.mocked(contractApi).mockImplementation(async (operation) => {
+      if (operation === 'POST /workflows/save') return await pendingSave as never
+      throw new Error(`unexpected operation: ${operation}`)
     })
     const { result } = renderHook(() => useWorkflowCommands(options()))
 
@@ -355,7 +382,7 @@ describe('useWorkflowCommands save authority', () => {
     act(() => {
       savePromise = result.current.saveWorkflow()
     })
-    await waitFor(() => expect(api).toHaveBeenCalledWith('/workflows/save', expect.anything()))
+    await waitFor(() => expect(contractApi).toHaveBeenCalledWith('POST /workflows/save', '/workflows/save', expect.anything(), expect.anything()))
     act(() => {
       useWorkflowStore.getState().setWorkflowName('Edited after save submission')
       resolveSave({ workflowId: 'current-workflow', versionId: 'version-8', version: 8 })

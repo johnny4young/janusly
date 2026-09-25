@@ -44,6 +44,11 @@ export function isOptionalNullableString(value: unknown): value is string | null
   return value == null || typeof value === 'string'
 }
 
+/** A record, null or an omitted field: opaque wire JSON that a component reads as an object. */
+export function isOptionalNullableRecord(value: unknown): value is Record<string, unknown> | null | undefined {
+  return value == null || isRecord(value)
+}
+
 /** A finite number; NaN and infinities are rejected. */
 export function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)

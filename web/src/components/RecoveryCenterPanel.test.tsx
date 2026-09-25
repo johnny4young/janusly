@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { MalformedResponseError } from '../lib/malformed-response'
 import { RecoveryCenterPanel } from './RecoveryCenterPanel'
 import {
   consumeRecoveryAllClear,
@@ -26,9 +27,13 @@ vi.mock('../api', () => {
   return {
     ...module,
     // Typed reads route through contractApi; delegate to the same mock so the
-    // path-keyed expectations below keep working.
-    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
-      options === undefined ? module.api(path) : module.api(path, options),
+    // path-keyed expectations below keep working. Section fixtures are partial,
+    // so the generated guard is not run here.
+    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit & { guard?: unknown }) => {
+      if (options === undefined) return module.api(path)
+      const { guard: _guard, ...rest } = options
+      return module.api(path, rest)
+    },
   }
 })
 
@@ -195,7 +200,9 @@ function mockRecoveryApi(handler: ApiMockHandler) {
   ): Promise<{ status: 'ok'; value: unknown } | { status: 'unavailable' }> => {
     try {
       return { status: 'ok', value: await loader() }
-    } catch {
+    } catch (error) {
+      // A section that fails the Home guard rejects the whole envelope, as contractApi does.
+      if (error instanceof MalformedResponseError) throw error
       return { status: 'unavailable' }
     }
   }
@@ -513,7 +520,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
   })
 
-  it('keeps healthy Home sections visible when one wire section is malformed', async () => {
+  it('keeps healthy Home sections visible when one section is unavailable', async () => {
     const healthyClusters = {
       clusters: [{
         signature: 'http:rate-limit',
@@ -528,12 +535,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     mockRecoveryApi(async (path: string) => {
       if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/operations/brief') return operatorBrief()
-      if (path === '/recovery/metrics') {
-        return {
-          ...baseMetrics,
-          replayRate: { ...baseMetrics.replayRate, display: 42 },
-        }
-      }
+      if (path === '/recovery/metrics') throw new Error('metrics section unavailable')
       if (path === '/dlq/clusters') return healthyClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
       if (path === '/recovery/validation?windowDays=30') return baseValidation
@@ -1371,14 +1373,11 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
 
   it.each([
     ['request failure', new Error('semantic projection unavailable')],
-    ['invalid success payload', {}],
+    ['Home payload that fails its generated guard', new MalformedResponseError()],
   ])('does not present an all-clear state after a semantic %s', async (_label, semanticResponse) => {
     mockRecoveryApi(async (path: string) => {
       if (path === '/operations/brief') return operatorBrief()
-      if (path === '/recovery/cases?limit=50') {
-        if (semanticResponse instanceof Error) throw semanticResponse
-        return semanticResponse
-      }
+      if (path === '/recovery/cases?limit=50') throw semanticResponse
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }

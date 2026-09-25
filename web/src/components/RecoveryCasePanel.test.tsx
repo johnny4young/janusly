@@ -1,11 +1,26 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { api, contractApi } from '../api'
+import { api } from '../api'
+import { MalformedResponseError } from '../lib/malformed-response'
 import { useWorkflowStore } from '../store'
 import { RecoveryCasePanel } from './RecoveryCasePanel'
 
-vi.mock('../api', () => ({ api: vi.fn(), contractApi: vi.fn() }))
+const { contractApi } = vi.hoisted(() => ({ contractApi: vi.fn() }))
+// Case reads answer from the `api` mock through their generated guard, like
+// contractApi does; governed mutations are recorded on `contractApi` alone.
+vi.mock('../api', async () => {
+  const api = vi.fn()
+  return {
+    api,
+    contractApi: async (operation: string, path: string, request: unknown, options?: { guard?: (value: unknown) => boolean }) => {
+      if (operation !== 'GET /recovery/cases/{caseId}') return contractApi(operation, path, request)
+      const payload = await api(`/v1${path}`)
+      if (options?.guard && !options.guard(payload)) throw new MalformedResponseError()
+      return payload
+    },
+  }
+})
 
 const initialState = useWorkflowStore.getState()
 
@@ -296,12 +311,6 @@ describe('<RecoveryCasePanel />', () => {
     ['transition timestamp', (payload: ReturnType<typeof detail>) => {
       payload.transitions[0]!.occurredAt = 'not-a-date'
     }],
-    ['artifact timestamp', (payload: ReturnType<typeof detail>) => {
-      payload.artifacts = [{ ...diagnosis, createdAt: 'not-a-date' }]
-    }],
-    ['over-bounded transition id', (payload: ReturnType<typeof detail>) => {
-      payload.transitions[0]!.id = 'x'.repeat(257)
-    }],
   ] as const)('rejects an unsafe %s before date formatting or rendering', async (_label, mutate) => {
     const payload = detail()
     mutate(payload)
@@ -323,13 +332,29 @@ describe('<RecoveryCasePanel />', () => {
     expect(screen.queryByTestId('recovery-case-workspace-case-1')).toBeNull()
   })
 
-  it('rejects over-bounded recovery history before rendering it', async () => {
+  it('leaves history length and identifier sizes to the server', async () => {
     const payload = detail()
     payload.transitions = Array.from({ length: 101 }, (_, index) => ({
       ...payload.transitions[0]!,
-      id: `transition-${index}`,
+      id: `transition-${index}-${'x'.repeat(257)}`,
     }))
     vi.mocked(api).mockResolvedValue(payload)
+
+    render(
+      <RecoveryCasePanel
+        caseId="case-1"
+        canResolve
+        onBack={vi.fn()}
+        onOpenRun={vi.fn()}
+        onResolved={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByTestId('recovery-case-workspace-case-1')).toBeVisible()
+  })
+
+  it('shows the panel copy when the envelope fails its generated guard', async () => {
+    vi.mocked(api).mockResolvedValue({ ...detail(), futureField: true })
 
     render(
       <RecoveryCasePanel
@@ -344,7 +369,6 @@ describe('<RecoveryCasePanel />', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'The recovery case response was invalid.',
     )
-    expect(screen.queryByTestId('recovery-case-workspace-case-1')).toBeNull()
   })
 
   it('rejects malformed governed candidate and validation payloads', async () => {
@@ -409,10 +433,6 @@ describe('<RecoveryCasePanel />', () => {
   it.each([
     ['missing evidence', undefined],
     ['an unknown evidence kind', [{ kind: 'secret', id: 'credential-1' }]],
-    ['an evidence identifier above the UTF-8 byte limit', [{
-      kind: 'run',
-      id: 'é'.repeat(251),
-    }]],
   ])('rejects a governed candidate with %s', async (_label, evidence) => {
     const candidatePayload: Record<string, unknown> = {
       kind: 'replace_output',

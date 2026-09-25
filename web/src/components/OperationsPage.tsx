@@ -54,6 +54,7 @@ import './OperationsPage.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { Button } from './ui/Button'
 import { isGetRecoveryMetricsResponse } from '../lib/api-guards/operations/GetRecoveryMetrics'
+import { MalformedResponseError } from '../lib/malformed-response'
 
 const OPERATIONS_TAGS = [PLATFORM_TAG, 'health', 'org-config', 'runs'] as const
 
@@ -186,6 +187,11 @@ export function OperationsPage({
       })
       .catch((err) => {
         if (cancelled) return
+        // An unreadable payload is the same as no metrics: the page's quiet unavailable state.
+        if (err instanceof MalformedResponseError) {
+          setMetrics(null)
+          return
+        }
         setError(err instanceof Error ? err.message : (t('operations.metricsUnavailable', { detail: '' })))
       })
     return () => { cancelled = true }

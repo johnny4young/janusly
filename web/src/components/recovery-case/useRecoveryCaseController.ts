@@ -14,7 +14,9 @@ import {
   type RecoveryCandidateKind,
   type RecoveryCaseDetail,
 } from '@/lib/recovery-case-contract'
-import { api, contractApi } from '../../api'
+import { contractApi } from '../../api'
+import { isGetRecoveryCasesCaseIdResponse } from '../../lib/api-guards/operations/GetRecoveryCasesCaseId'
+import { MalformedResponseError } from '../../lib/malformed-response'
 import { tApiError, useT } from '../../i18n'
 import { useWorkflowStore } from '../../store'
 
@@ -75,14 +77,14 @@ export function useRecoveryCaseController({
       setLoadError(null)
     }
     try {
-      const path = `/v1${V1_READ_PATHS.recoveryCase.replace(
-        '{caseId}',
-        encodeURIComponent(caseId),
-      )}`
-      const parsed = parseRecoveryCaseDetail(await api(path))
-      if (!parsed) {
-        throw new Error(t('recoveryCase.invalidResponse'))
-      }
+      const path = V1_READ_PATHS.recoveryCase.replace('{caseId}', encodeURIComponent(caseId))
+      const parsed = parseRecoveryCaseDetail(await contractApi(
+        'GET /recovery/cases/{caseId}',
+        path,
+        undefined,
+        { guard: isGetRecoveryCasesCaseIdResponse },
+      ))
+      if (!parsed) throw new MalformedResponseError()
       setDetail(parsed)
       setLoadError(null)
       const candidates = parsed.artifacts.filter(artifact => artifact.kind === 'candidate')
@@ -93,7 +95,9 @@ export function useRecoveryCaseController({
       ))
     } catch (error) {
       if (!background) setDetail(null)
-      setLoadError(tApiError(error) || t('recoveryCase.loadFailed'))
+      setLoadError(error instanceof MalformedResponseError
+        ? t('recoveryCase.invalidResponse')
+        : tApiError(error) || t('recoveryCase.loadFailed'))
     } finally {
       if (!background) setLoading(false)
     }

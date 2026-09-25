@@ -1,4 +1,5 @@
-import { isRecord, isFiniteNumber as finite, isNonNegativeSafeInteger as count } from './guards'
+import type { ApiResponses } from './api-types.generated'
+import { isGetWorkflowsHealthDeltaResponse } from './api-guards/operations/GetWorkflowsHealthDelta'
 
 export type HealthSnapshot = {
   score: number
@@ -6,50 +7,27 @@ export type HealthSnapshot = {
   signals: { p95LatencyMs: number | null; totalRuns: number; totalCostUsd: number }
 }
 
-/** Only the health-delta fields consumed by the recovery UI. */
-export type RecoveryDelta = {
-  workflowId: string
-  afterVersion: number
-  windowDays: number
-  hasEnoughData: boolean
-  before: HealthSnapshot
-  after: HealthSnapshot
-  delta: { score: number; p95LatencyMs: number | null; costPerRunUsd: number | null } | null
-  recentRunsAgainstAfter: { totalRuns: number; succeeded: number; failed: number; running: number }
-  sameFailureSinceApply: { count: number; sampleDeadLetterIds: string[]; priorSignature: string } | null
-  priorVersion: { version: number; versionId: string } | null
-}
+export type RecoveryDelta = ApiResponses['GET /workflows/health/delta']
 
-const nullableNumber = (value: unknown) => value === null || finite(value)
-const id = (value: unknown): value is string => typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 256
-function snapshot(value: unknown): value is HealthSnapshot {
-  return isRecord(value) && count(value.score) && value.score <= 100
-    && typeof value.status === 'string' && ['healthy', 'warn', 'unhealthy'].includes(value.status) && isRecord(value.signals)
-    && count(value.signals.totalRuns) && finite(value.signals.totalCostUsd) && value.signals.totalCostUsd >= 0
-    && (value.signals.p95LatencyMs === null || (finite(value.signals.p95LatencyMs) && value.signals.p95LatencyMs >= 0))
-}
-
-// Shape only: sample floors, sample caps and window bounds are server policy.
+/**
+ * Shape is the generated guard's; sample floors, sample caps, score ranges and
+ * window bounds are server policy. The rules below are what RecoveryDeltaCard
+ * renders from.
+ */
 export function isRecoveryDelta(value: unknown, workflowId: string, afterVersion: number, signature: string | null): value is RecoveryDelta {
-  if (!isRecord(value) || value.workflowId !== workflowId || value.afterVersion !== afterVersion
-    || !count(afterVersion) || afterVersion < 1 || afterVersion > 2147483647
-    || !count(value.windowDays) || value.windowDays < 1
-    || !snapshot(value.before) || !snapshot(value.after)
-    || typeof value.hasEnoughData !== 'boolean') return false
+  if (!isGetWorkflowsHealthDeltaResponse(value)) return false
+  // The card labels every number with the workflow version it asked about.
+  if (value.workflowId !== workflowId || value.afterVersion !== afterVersion) return false
   const runs = value.recentRunsAgainstAfter
-  if (!isRecord(runs) || !count(runs.totalRuns) || !count(runs.succeeded) || !count(runs.failed) || !count(runs.running)
-    || runs.succeeded + runs.failed + runs.running > runs.totalRuns) return false
-  const delta = value.delta
-  if (value.hasEnoughData) {
-    if (!isRecord(delta) || !finite(delta.score)
-      || !nullableNumber(delta.p95LatencyMs) || !nullableNumber(delta.costPerRunUsd)) return false
-  } else if (delta !== null) return false
-  const prior = value.priorVersion
-  if (prior !== null && (!isRecord(prior) || !count(prior.version) || prior.version < 1
-    || prior.version >= afterVersion || !id(prior.versionId))) return false
+  // The run sentence splits the total into succeeded, failed and running.
+  if (runs.succeeded + runs.failed + runs.running > runs.totalRuns) return false
+  // The delta pills render exactly when the server says there is enough data.
+  if (value.hasEnoughData !== (value.delta !== null)) return false
+  // Rollback offers the prior version as an older target than the applied one.
+  if (value.priorVersion && value.priorVersion.version >= afterVersion) return false
   const failure = value.sameFailureSinceApply
-  return failure === null || (isRecord(failure) && !!signature && failure.priorSignature === signature
-    && count(failure.count) && Array.isArray(failure.sampleDeadLetterIds)
+  // Recurrence evidence must be about the failure this recovery fixed, with distinct sample links.
+  return failure === null || (!!signature && failure.priorSignature === signature
     && failure.sampleDeadLetterIds.length <= failure.count
-    && failure.sampleDeadLetterIds.every(id) && new Set(failure.sampleDeadLetterIds).size === failure.sampleDeadLetterIds.length)
+    && new Set(failure.sampleDeadLetterIds).size === failure.sampleDeadLetterIds.length)
 }

@@ -5,6 +5,7 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { useRunPolling } from './useRunPolling'
 import type { RunSummaryUpdateStarter } from './useBootstrapData'
+import { runView } from '../test/run-view-fixture'
 
 vi.mock('../api', () => {
   const module = ({ api: vi.fn() })
@@ -21,7 +22,7 @@ vi.mock('../api', () => {
 })
 
 function statusResponse(value: unknown) {
-  return { nodes: [], events: [], eventsCursor: null, eventsHasMore: false, ...value as Record<string, unknown> }
+  return runView(value as Record<string, unknown>)
 }
 
 function Harness({
@@ -175,7 +176,7 @@ describe('useRunPolling request ownership', () => {
       })
     })
 
-    expect(useWorkflowStore.getState().runNodes).toEqual([{ nodeId: 'node-a', status: 'succeeded' }])
+    expect(useWorkflowStore.getState().runNodes).toMatchObject([{ nodeId: 'node-a', status: 'succeeded' }])
   })
 
   it('reserves summary ownership before awaiting the status response', async () => {
@@ -197,7 +198,7 @@ describe('useRunPolling request ownership', () => {
     await act(async () => {
       resolveStatus({ run: { id: 'run-a', status: 'running' } })
     })
-    expect(commit).toHaveBeenCalledWith({ id: 'run-a', status: 'running' })
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-a', status: 'running' }))
   })
 })
 
@@ -226,7 +227,7 @@ describe('useRunPolling snapshot integrity', () => {
 it('preserves an older history cursor when the latest page still has more events', async () => {
   const latest = { id: 'latest', type: 'node.running' }
   useWorkflowStore.setState({ runId: 'run-a', events: [{ id: 'older', type: 'node.queued' }, latest], eventsCursor: 'older-cursor', eventsHasMore: true })
-  vi.mocked(api).mockResolvedValue({ run: { id: 'run-a', status: 'running' }, nodes: [], events: [latest], eventsCursor: 'latest-cursor', eventsHasMore: true })
+  vi.mocked(api).mockResolvedValue(statusResponse({ run: { id: 'run-a', status: 'running' }, events: [latest], eventsCursor: 'latest-cursor', eventsHasMore: true }))
   let loadStatus!: (id: string) => Promise<unknown>
   render(<Harness runId={null} captureLoadStatus={load => { loadStatus = load }} />)
   await act(async () => { await loadStatus('run-a') })

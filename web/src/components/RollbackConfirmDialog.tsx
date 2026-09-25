@@ -21,8 +21,10 @@
 import { useEffect, useEffectEvent, useState, useRef } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { RotateCcw, X } from 'lucide-react'
-import { api } from '../api'
+import { contractApi } from '../api'
+import { isPostWorkflowsRollbackResponse } from '../lib/api-guards/operations/PostWorkflowsRollback'
 import { parseWorkflowRollbackReceipt } from '../lib/authoring-contract'
+import { MalformedResponseError } from '../lib/malformed-response'
 import { ownCanvas } from '../lib/canvas-authority'
 import { sessionCan } from '../identity-context'
 import { useWorkflowStore } from '../store'
@@ -90,8 +92,11 @@ export function RollbackConfirmDialog({
     request.current = null
     setStep({ kind: 'rolling-back' })
     try {
-      const result = await api('/workflows/rollback', { method: 'POST', signal: controller.signal,
-        body: JSON.stringify({ workflowId, sourceVersionId: snapshot.target.id }) })
+      const result = await contractApi('POST /workflows/rollback', '/workflows/rollback',
+        { workflowId, sourceVersionId: snapshot.target.id }, { signal: controller.signal, guard: isPostWorkflowsRollbackResponse })
+        .catch((error: unknown) => {
+          throw error instanceof MalformedResponseError ? new Error(t('rollback.failed')) : error
+        })
       if (controller.signal.aborted) return
       const version = parseWorkflowRollbackReceipt(result, workflowId, snapshot.current, snapshot.target)
       if (!version) throw new Error(t('rollback.failed'))

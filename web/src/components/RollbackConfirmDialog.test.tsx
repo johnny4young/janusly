@@ -7,9 +7,11 @@ import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 
-vi.mock('../api', () => ({
-  api: vi.fn(),
-}))
+vi.mock('../api', async () => {
+  const { contractApiOver } = await import('../test/contract-api-mock')
+  const api = vi.fn()
+  return { api, contractApi: contractApiOver(api) }
+})
 
 const REFRESH_TAGS = ['platform'] as const
 const initialState = useWorkflowStore.getState()
@@ -138,7 +140,7 @@ describe('<RollbackConfirmDialog />', () => {
 
   it.each([
     null, {}, { workflowId: 'other' }, { sourceVersion: 2 }, { versionId: '' },
-    { versionId: 'version_3' }, { versionId: 'version_5' }, { versionId: ' x ' }, { versionId: 'x'.repeat(257) }, { version: 5 }, { version: 6.5 }, { version: Number.MAX_SAFE_INTEGER + 1 },
+    { versionId: 'version_3' }, { versionId: 'version_5' }, { version: 5 }, { version: 6.5 }, { version: Number.MAX_SAFE_INTEGER + 1 },
   ])('rejects malformed or foreign rollback success %j', async patch => {
     vi.mocked(api).mockResolvedValueOnce(patch === null || Object.keys(patch).length === 0 ? patch
       : { workflowId: 'wf_rollback', versionId: 'v6', version: 6, sourceVersion: 3, ...patch })
@@ -148,6 +150,14 @@ describe('<RollbackConfirmDialog />', () => {
     await screen.findByRole('alert')
     expect(useWorkflowStore.getState().workflowRevision).toBe(revision)
     expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
+  it.each([{ versionId: ' x ' }, { versionId: 'x'.repeat(257) }])('leaves version id format to the server %j', async patch => {
+    vi.mocked(api).mockResolvedValueOnce({ workflowId: 'wf_rollback', version: 6, sourceVersion: 3, ...patch })
+    const onClose = vi.fn()
+    render(<RollbackConfirmDialog workflowId="wf_rollback" current={current} target={target} onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Roll back$/i }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
   it('does not offer rollback without a write grant', () => {

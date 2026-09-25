@@ -5,16 +5,21 @@ import { useWorkflowStore } from '../store'
 import { RecoveryDialog } from './RecoveryDialog'
 import type { DeadLetter } from './DeadLettersPanel'
 
-vi.mock('../api', () => {
-  const module = ({
-  api: vi.fn(),
-})
+vi.mock('../api', async () => {
+  const { contractApiOver } = await import('../test/contract-api-mock')
+  const { healthDelta } = await import('../test/health-delta-fixture')
+  const { patchResponse } = await import('../test/patch-response-fixture')
+  const { runView, versionRows } = await import('../test/run-view-fixture')
+  const api = vi.fn()
+  // Typed calls reach the same path-keyed mock; partial fixtures are completed to the manifest.
   return {
-    ...module,
-    // Typed reads route through contractApi; delegate to the same mock so the
-    // path-keyed expectations below keep working.
-    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
-      options === undefined ? module.api(path) : module.api(path, options),
+    api,
+    contractApi: contractApiOver(api, {
+      'GET /run': runView,
+      'GET /workflows/versions': versionRows,
+      'GET /workflows/health/delta': healthDelta,
+      'POST /ai/patch-workflow': patchResponse,
+    }),
   }
 })
 // The similar-runs card owns its own suite; here it must not consume the
@@ -175,13 +180,7 @@ describe('<RecoveryDialog />', () => {
           safety: { writeSide: false, approvalRequired: false, approvalPresent: true },
         }],
         evidence: [{ kind: 'signature_rule', sourceRef: 'network_timeout', snippet: 'Matched network timeout' }],
-        recoveryPassport: {
-          failureSignature: 'Network timeout on http node',
-          priorSameSignatureOutcome: {
-            status: 'applied',
-            occurredAt: '2026-07-01T00:00:00.000Z',
-          },
-        },
+        recoveryPassport: currentRecoveryPassport,
       })
       .mockResolvedValueOnce({ runId: 'val-passport' })
       .mockResolvedValueOnce({
@@ -267,7 +266,7 @@ describe('<RecoveryDialog />', () => {
       // /workflows/save
       .mockResolvedValueOnce({ workflowId: 'wf', versionId: 'v1', version: 2 })
       // /dlq/replay (production)
-      .mockResolvedValueOnce({ runId: 'run-replay-xyz' })
+      .mockResolvedValueOnce({ ok: true })
 
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
@@ -282,7 +281,6 @@ describe('<RecoveryDialog />', () => {
     await waitFor(() => {
       expect(screen.getByText(/Patch applied/i)).toBeInTheDocument()
     }, { timeout: 4000 })
-    expect(screen.getByText(/run-repl/i)).toBeInTheDocument()
     const calls = vi.mocked(api).mock.calls.map((call) => call[0])
     expect(calls).toContain('/ai/patch-workflow')
     expect(calls).toContain('/dlq/validate-fix')
@@ -578,31 +576,6 @@ describe('<RecoveryDialog />', () => {
 
       // No tablist mounts when the array has just one item — the UI is identical to today's single-suggestion path.
       expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
-    })
-
-    it('back-compat: renders a single-suggestion review for legacy ai responses without a `suggestions` field', async () => {
-      // A future cached or older-server response could omit `suggestions`.
-      // The dialog's normalisePatchSuggestion shim must synthesize a single
-      // item from the legacy `suggestedWorkflow` + `rationale` fields so
-      // Apply stays enabled and the diff renders.
-      vi.mocked(api).mockResolvedValueOnce({
-        mode: 'ai',
-        suggestedWorkflow: {
-          dslVersion: '1.0' as const,
-          nodes: [{ id: 'fetch', type: 'http' as const, config: { url: 'https://x', retry: { maxAttempts: 3 } } }],
-          edges: [],
-        },
-        rationale: 'Legacy single-suggestion shape — Add retry.',
-      })
-      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
-      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
-
-      await waitFor(() => screen.getByText(/Legacy single-suggestion shape/i))
-      // No tabs render for a single suggestion.
-      expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
-      // Apply is enabled — the synthesized item carries the legacy workflow as its `workflow`.
-      const applyButton = screen.getByRole('button', { name: /Validate in sandbox/i })
-      expect(applyButton).not.toBeDisabled()
     })
 
     it('a fresh suggestion request resets the selected tab back to the highest-confidence one', async () => {

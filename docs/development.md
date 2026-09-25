@@ -232,7 +232,9 @@ i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
 The artifact and worst-locale caps were rebased once more in 2026-10, by the
 measured 3.3 KiB of the generated response guards (605 → 608.3 and
 560.5 → 563.8 KiB); guards compose shared primitives so each new adoption costs
-only its own shape.
+only its own shape. Once the hand-written readers shrank to UI invariants and
+each guard became its own module (a lazy panel's guard ships in its chunk), the
+caps were lowered to the measured size plus about 1 KiB (605.9 and 562.0 KiB).
 
 ## Marketing site (`website/`)
 

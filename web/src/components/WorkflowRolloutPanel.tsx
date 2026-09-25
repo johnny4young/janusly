@@ -9,7 +9,7 @@
 import { GitBranch } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 
-import { api } from '../api'
+import { api, contractApi } from '../api'
 import { readWorkflowVersionPage } from '../lib/list-contract'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
@@ -19,7 +19,12 @@ import type {
 } from './WorkflowRecoveryQualification'
 import { Button } from '@/components/ui/Button'
 import { FormField } from '@/components/ui/Form'
-import { asRecord } from '../lib/guards'
+import { isRecord } from '../lib/guards'
+import type { WorkflowRollout as WireRollout } from '../lib/api-types.generated'
+import { isWorkflowRollout } from '../lib/api-guards/components/WorkflowRollout'
+import { isPostWorkflowsWorkflowIdRolloutResponse } from '../lib/api-guards/operations/PostWorkflowsWorkflowIdRollout'
+import { isPostWorkflowsWorkflowIdRolloutRolloutIdDecisionResponse } from '../lib/api-guards/operations/PostWorkflowsWorkflowIdRolloutRolloutIdDecision'
+import { MalformedResponseError } from '../lib/malformed-response'
 import './WorkflowRolloutPanel.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 
@@ -36,20 +41,7 @@ const WorkflowRolloutStatus = lazy(() => import('./WorkflowRolloutStatus').then(
 
 type VersionRow = { id: string; version: number }
 type RolloutStatus = 'active' | 'promoted' | 'rolled_back' | 'cancelled'
-type WorkflowRollout = {
-  id: string
-  workflowId: string
-  baselineVersionId: string
-  canaryVersionId: string
-  trafficPercent: number
-  minimumSampleSize: number
-  minimumSuccessRatePercent: number
-  status: RolloutStatus
-  baselineSucceeded: number
-  baselineFailed: number
-  canarySucceeded: number
-  canaryFailed: number
-}
+type WorkflowRollout = Omit<WireRollout, 'status'> & { status: RolloutStatus }
 
 type Draft = {
   baselineVersionId: string
@@ -58,6 +50,7 @@ type Draft = {
   minimumSuccessRatePercent: number
 }
 
+// wire-policy: form defaults and bounds for operator input mirror internal/engine/rollouts.go.
 const DEFAULT_DRAFT: Draft = {
   baselineVersionId: '',
   trafficPercent: 10,
@@ -65,46 +58,22 @@ const DEFAULT_DRAFT: Draft = {
   minimumSuccessRatePercent: 90,
 }
 
-function boundedInteger(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
-    ? value
-    : null
-}
+// wire-policy: a rollout compares a baseline with a newer canary version.
+const MIN_ROLLOUT_VERSIONS = 2
 
-function parseRollout(payload: unknown): WorkflowRollout | null {
-  const envelope = asRecord(payload)
-  if (envelope?.rollout === null) return null
-  const row = asRecord(envelope?.rollout)
-  if (!row) return null
-  const status = row.status
-  if (status !== 'active' && status !== 'promoted' && status !== 'rolled_back' && status !== 'cancelled') return null
-  const strings = ['id', 'workflowId', 'baselineVersionId', 'canaryVersionId', 'createdAt', 'updatedAt'] as const
-  if (strings.some(key => typeof row[key] !== 'string' || row[key].length === 0)) return null
-  const trafficPercent = boundedInteger(row.trafficPercent, 1, 50)
-  const minimumSampleSize = boundedInteger(row.minimumSampleSize, 5, 100)
-  const minimumSuccessRatePercent = boundedInteger(row.minimumSuccessRatePercent, 1, 100)
-  const counters = ['baselineSucceeded', 'baselineFailed', 'canarySucceeded', 'canaryFailed'] as const
-  const values = counters.map(key => boundedInteger(row[key], 0))
-  if (trafficPercent === null || minimumSampleSize === null || minimumSuccessRatePercent === null || values.some(value => value === null)) return null
-  return {
-    id: row.id as string,
-    workflowId: row.workflowId as string,
-    baselineVersionId: row.baselineVersionId as string,
-    canaryVersionId: row.canaryVersionId as string,
-    trafficPercent,
-    minimumSampleSize,
-    minimumSuccessRatePercent,
-    status,
-    baselineSucceeded: values[0]!,
-    baselineFailed: values[1]!,
-    canarySucceeded: values[2]!,
-    canaryFailed: values[3]!,
-  }
+const ICON_SIZE = 13 // wire-policy: presentation, not a wire bound.
+
+const ROLLOUT_STATUSES: ReadonlySet<string> = new Set<RolloutStatus>(['active', 'promoted', 'rolled_back', 'cancelled'])
+
+// Shape is the generated guard's. The status pill translates the status, and
+// the panel only ever shows a rollout of the workflow it is scoped to.
+function acceptRollout(row: WireRollout, workflowId: string): WorkflowRollout | null {
+  return row.workflowId === workflowId && ROLLOUT_STATUSES.has(row.status) ? row as WorkflowRollout : null
 }
 
 function successRate(succeeded: number, failed: number): number | null {
   const total = succeeded + failed
-  return total === 0 ? null : (succeeded / total) * 100
+  return total === 0 ? null : (succeeded / total) * 100 // wire-policy: ratio to percent, not a wire bound.
 }
 
 function rolloutScope(state: ReturnType<typeof useWorkflowStore.getState>): string {
@@ -147,12 +116,13 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
     setLoadState('loading')
     Promise.all([
       readWorkflowVersionPage(workflowId, {}, request.signal),
+      // The rollout read shares a mux pattern that keeps it out of the manifest; its row has the component guard.
       api(rolloutPath, { signal: request.signal }),
     ]).then(([versionsPayload, rolloutPayload]) => {
       if (!current(request)) return
-      const nextRollout = parseRollout(rolloutPayload)
-      if ((!nextRollout && asRecord(rolloutPayload)?.rollout !== null)
-        || (nextRollout && nextRollout.workflowId !== workflowId)) throw new Error(t('workflowRollout.invalidResponse'))
+      const row = isRecord(rolloutPayload) ? rolloutPayload.rollout : undefined
+      const nextRollout = isWorkflowRollout(row) ? acceptRollout(row, workflowId) : null
+      if (row !== null && !nextRollout) throw new Error(t('workflowRollout.invalidResponse'))
       const nextVersions = [...versionsPayload].sort((left, right) => right.version - left.version)
       setLoadState('ready')
       setVersions(nextVersions)
@@ -166,7 +136,9 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
     }).catch(error => {
       if (!current(request)) return
       setLoadState('error')
-      addToast(tApiError(error) || t('workflowRollout.loadFailed'), 'error')
+      addToast(error instanceof MalformedResponseError
+        ? t('workflowRollout.invalidResponse')
+        : tApiError(error) || t('workflowRollout.loadFailed'), 'error')
     })
     return () => { request.abort() }
   }, [addToast, current, platformVersion, retry, rolloutPath, t, workflowId])
@@ -190,19 +162,22 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
     && qualificationGate.baselineVersionId === draft.baselineVersionId && qualificationGate.candidateVersionId === latest.id
     && (!qualificationGate.required || qualificationGate.status === 'passed'))
 
-  const mutate = async (request: AbortController, path: string, body: object, success: string,
+  const mutate = async (request: AbortController, send: () => Promise<{ rollout: WireRollout }>, success: string,
     accepts: (value: WorkflowRollout) => boolean) => {
     setMutating(true)
     try {
-      const payload = await api(path, { method: 'POST', signal: request.signal, body: JSON.stringify(body) })
+      const payload = await send()
       if (!current(request)) return
-      const updated = parseRollout(payload)
-      if (!updated || updated.workflowId !== workflowId || !accepts(updated)) throw new Error(t('workflowRollout.invalidResponse'))
+      const updated = acceptRollout(payload.rollout, workflowId)
+      if (!updated || !accepts(updated)) throw new Error(t('workflowRollout.invalidResponse'))
       setRollout(updated)
       addToast(t(success), 'success')
       bumpPlatformVersion(WORKFLOW_ROLLOUT_MUTATION_TAGS)
     } catch (error) {
-      if (current(request)) addToast(tApiError(error) || t('workflowRollout.decisionFailed'), 'error')
+      if (!current(request)) return
+      addToast(error instanceof MalformedResponseError
+        ? t('workflowRollout.invalidResponse')
+        : tApiError(error) || t('workflowRollout.decisionFailed'), 'error')
     } finally {
       if (current(request)) setMutating(false)
     }
@@ -211,9 +186,10 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
   const createRollout = async () => {
     const request = owner.current
     if (!current(request) || !canStart || !latest) return
-    await mutate(request, rolloutPath,
-      { ...draft, canaryVersionId: latest.id }, 'workflowRollout.started',
-      value => value.baselineVersionId === draft.baselineVersionId && value.canaryVersionId === latest.id)
+    const body = { ...draft, canaryVersionId: latest.id }
+    await mutate(request, () => contractApi('POST /workflows/{workflowId}/rollout', rolloutPath, body,
+      { signal: request.signal, guard: isPostWorkflowsWorkflowIdRolloutResponse }), 'workflowRollout.started',
+    value => value.baselineVersionId === body.baselineVersionId && value.canaryVersionId === body.canaryVersionId)
   }
 
   const decide = async (decision: 'promote' | 'rollback') => {
@@ -226,15 +202,17 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
       tone: decision === 'rollback' ? 'danger' : 'default',
     })
     if (!accepted || !current(request)) return
-    await mutate(request, `${rolloutPath}/${encodeURIComponent(rollout.id)}/${decision}`,
-      {}, decision === 'promote' ? 'workflowRollout.promoted' : 'workflowRollout.rolledBack', value => value.id === rollout.id)
+    await mutate(request, () => contractApi('POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}',
+      `${rolloutPath}/${encodeURIComponent(rollout.id)}/${decision}`, {},
+      { signal: request.signal, guard: isPostWorkflowsWorkflowIdRolloutRolloutIdDecisionResponse }),
+    decision === 'promote' ? 'workflowRollout.promoted' : 'workflowRollout.rolledBack', value => value.id === rollout.id)
   }
 
   return (
     <section className="we-card we-rollout-panel" aria-labelledby="workflow-rollout-title" data-testid="workflow-rollout-panel">
       <div className="we-card__header">
         <div>
-          <p className="eyebrow"><GitBranch size={13} aria-hidden="true" /> {t('workflowRollout.eyebrow')}</p>
+          <p className="eyebrow"><GitBranch size={ICON_SIZE} aria-hidden="true" /> {t('workflowRollout.eyebrow')}</p>
           <h3 id="workflow-rollout-title">{t('workflowRollout.title')}</h3>
         </div>
         {rollout && rolloutControlsLatest && (
@@ -269,12 +247,12 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
       {loadError && <div role="alert"><p>{t('workflowRollout.loadFailed')}</p>
         <Button onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</Button></div>}
 
-      {!loading && !loadError && versions.length < 2 && (
+      {!loading && !loadError && versions.length < MIN_ROLLOUT_VERSIONS && (
         <p className="we-rollout-panel__empty">{t('workflowRollout.needsVersions')}</p>
       )}
 
       {!loading
-        && versions.length >= 2
+        && versions.length >= MIN_ROLLOUT_VERSIONS
         && qualificationBaselineVersionId
         && qualificationCandidateVersionId && (
         <Suspense fallback={<p className="helper-text" role="status">{t('workflowRollout.qualification.loading')}</p>}>
@@ -291,7 +269,7 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
 
       {!readOnly
         && !loading
-        && versions.length >= 2
+        && versions.length >= MIN_ROLLOUT_VERSIONS
         && (!rollout || !rolloutControlsLatest)
         && latest && (
         <form className="we-rollout-panel__form" onSubmit={event => { event.preventDefault(); void createRollout() }}>
@@ -314,6 +292,7 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
             </div>
           </div>
           <div className="we-rollout-panel__fields">
+            {/* wire-policy: form bounds for operator input mirror internal/engine/rollouts.go. */}
             {([
               ['trafficPercent', 'traffic', 1, 50],
               ['minimumSampleSize', 'sample', 5, 100],

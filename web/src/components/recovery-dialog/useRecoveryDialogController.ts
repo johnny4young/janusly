@@ -28,6 +28,9 @@ import type {
 } from './types'
 import { isGetRunResponse } from '../../lib/api-guards/operations/GetRun'
 import { isGetWorkflowsHealthResponse } from '../../lib/api-guards/operations/GetWorkflowsHealth'
+import { isPostAiPatchWorkflowResponse } from '../../lib/api-guards/operations/PostAiPatchWorkflow'
+import { isPostRecoveryPlaybooksIdUseResponse } from '../../lib/api-guards/operations/PostRecoveryPlaybooksIdUse'
+import { MalformedResponseError } from '../../lib/malformed-response'
 
 const VALIDATION_POLL_INTERVAL_MS = 1500
 // A sandbox run that never reaches a terminal status used to hold the
@@ -296,15 +299,12 @@ export function useRecoveryDialogController({
     suggestionRequestPendingRef.current = true
     setStep({ kind: 'loading' })
     try {
-      const result = await api('/ai/patch-workflow', {
-        method: 'POST',
-        body: JSON.stringify({ deadLetterId: dlq.id }),
-      })
+      const result = await contractApi('POST /ai/patch-workflow', '/ai/patch-workflow', { deadLetterId: dlq.id }, { guard: isPostAiPatchWorkflowResponse })
       const normalised = parseRecoveryPatchSuggestion(result, {
         persistedWorkflowId,
         expectedFailureSignature: priorFailureSignature,
       })
-      if (!normalised) throw new Error(runtimeT('api.error.malformedResponse'))
+      if (!normalised) throw new MalformedResponseError()
       enterReview(normalised)
     } catch (error) {
       setStep({
@@ -321,16 +321,18 @@ export function useRecoveryDialogController({
     suggestionRequestPendingRef.current = true
     setPlaybookBusy('use')
     try {
-      const result = await api(`/recovery/playbooks/${encodeURIComponent(matchingPlaybook.id)}/use`, {
-        method: 'POST',
-        body: JSON.stringify({ deadLetterId: dlq.id }),
-      })
+      const result = await contractApi(
+        'POST /recovery/playbooks/{id}/use',
+        `/recovery/playbooks/${encodeURIComponent(matchingPlaybook.id)}/use`,
+        { deadLetterId: dlq.id },
+        { guard: isPostRecoveryPlaybooksIdUseResponse },
+      )
       const suggestion = parseRecoveryPlaybookUseResponse(result, {
         persistedWorkflowId,
         expectedFailureSignature: priorFailureSignature,
         expectedPlaybookId: matchingPlaybook.id,
       })
-      if (!suggestion) throw new Error(runtimeT('api.error.malformedResponse'))
+      if (!suggestion) throw new MalformedResponseError()
       enterReview(suggestion)
     } catch (error) {
       setStep({ kind: 'error', message: errorMessage(error, t('recoveryDialog.playbook.useFailed')) })
@@ -368,15 +370,11 @@ export function useRecoveryDialogController({
     setStep({ kind: 'validating', suggestion, selectedIndex: safeSelectedIndex, runId: null })
     const requestSignal = AbortSignal.timeout(60_000)
     try {
-      const result = await api('/dlq/validate-fix', {
-        method: 'POST',
-        signal: requestSignal,
-        body: JSON.stringify({
-          deadLetterId: dlq.id,
-          suggestedWorkflow: selected.workflow,
-          ...(suggestion.playbook ? { recoveryPlaybookId: suggestion.playbook.id } : {}),
-        }),
-      }) as { runId?: unknown } | null
+      const result: { runId?: unknown } | null = await contractApi('POST /dlq/validate-fix', '/dlq/validate-fix', {
+        deadLetterId: dlq.id,
+        suggestedWorkflow: selected.workflow,
+        ...(suggestion.playbook ? { recoveryPlaybookId: suggestion.playbook.id } : {}),
+      }, { signal: requestSignal })
       if (requestSignal.aborted) throw requestSignal.reason
       if (typeof result?.runId !== 'string' || !result.runId) throw new Error(runtimeT('api.error.malformedResponse'))
       setStep({ kind: 'validating', suggestion, selectedIndex: safeSelectedIndex, runId: result.runId })
@@ -436,10 +434,9 @@ export function useRecoveryDialogController({
     }
 
     try {
-      const saveResponse = await api('/workflows/save', {
-        method: 'POST',
-        body: JSON.stringify(selected.workflow),
-      }) as { workflowId?: string; versionId?: string; version?: number }
+      // Unguarded: the save is durable, and the replay below must still run on an odd receipt.
+      const saveResponse: { workflowId?: unknown; versionId?: unknown; version?: unknown } =
+        await contractApi('POST /workflows/save', '/workflows/save', selected.workflow)
       const appliedWorkflowId = typeof saveResponse.workflowId === 'string' ? saveResponse.workflowId : undefined
       const sourceWorkflowVersionId = typeof saveResponse.versionId === 'string' ? saveResponse.versionId : undefined
       const appliedVersion = typeof saveResponse.version === 'number' ? saveResponse.version : undefined
@@ -473,18 +470,16 @@ export function useRecoveryDialogController({
         applyOutcome = { cluster: result }
       } else {
         // Replay the applied fix, not the original failed snapshot.
-        const replay = await api('/dlq/replay', {
-          method: 'POST',
-          body: JSON.stringify({
-            deadLetterId: dlq.id,
-            suggestedWorkflow: selected.workflow,
-            ...(suggestion.playbook ? {
-              recoveryPlaybookId: suggestion.playbook.id,
-              recoveryValidationRunId: validationRunId,
-            } : {}),
-          }),
-        }) as { runId?: string }
-        applyOutcome = { runId: replay.runId }
+        // The replay receipt is `{ ok: true }`; it names no run.
+        await contractApi('POST /dlq/replay', '/dlq/replay', {
+          deadLetterId: dlq.id,
+          suggestedWorkflow: selected.workflow,
+          ...(suggestion.playbook ? {
+            recoveryPlaybookId: suggestion.playbook.id,
+            recoveryValidationRunId: validationRunId,
+          } : {}),
+        })
+        applyOutcome = {}
         addToast(t('toasts.deadLetterReplayed'), 'success')
       }
       bumpPlatformVersion()

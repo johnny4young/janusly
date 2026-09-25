@@ -39,6 +39,7 @@ import { Button } from '@/components/ui/Button'
 import './FailureClustersCard.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { isGetDlqClustersResponse } from '../lib/api-guards/operations/GetDlqClusters'
+import { MalformedResponseError } from '../lib/malformed-response'
 
 const FAILURE_CLUSTER_TAGS = [PLATFORM_TAG, 'dlq', 'recovery', 'runs'] as const
 
@@ -171,7 +172,10 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : (t('clusters.unavailable', { detail: '' })))
+        // A payload that fails its guard is the card's unavailable state, like an unparseable one.
+        setError(err instanceof Error && !(err instanceof MalformedResponseError)
+          ? err.message
+          : t('clusters.unavailable', { detail: '' }))
         setLoading(false)
       })
     return () => { cancelled = true }
