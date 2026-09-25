@@ -21,15 +21,12 @@ import {
 } from './recovery-center/recovery-center-model'
 import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 
-vi.mock('../api', () => {
-  const module = ({ api: vi.fn() })
-  return {
-    ...module,
-    // Typed reads route through contractApi; delegate to the same mock so the
-    // path-keyed expectations below keep working.
-    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
-      options === undefined ? module.api(path) : module.api(path, options),
-  }
+vi.mock('../api', async () => {
+  const { contractApiOver } = await import('../test/contract-api-mock')
+  const { recoveryHome } = await import('../test/recovery-home-fixture')
+  const api = vi.fn()
+  // Typed calls reach the same path-keyed mock; partial Home sections are completed to the manifest.
+  return { api, contractApi: contractApiOver(api, { 'GET /recovery/home': recoveryHome }) }
 })
 
 const bumpPlatformVersion = vi.fn()
@@ -513,7 +510,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
   })
 
-  it('keeps healthy Home sections visible when one wire section is malformed', async () => {
+  it('keeps healthy Home sections visible when one section is unavailable', async () => {
     const healthyClusters = {
       clusters: [{
         signature: 'http:rate-limit',
@@ -528,12 +525,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     mockRecoveryApi(async (path: string) => {
       if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/operations/brief') return operatorBrief()
-      if (path === '/recovery/metrics') {
-        return {
-          ...baseMetrics,
-          replayRate: { ...baseMetrics.replayRate, display: 42 },
-        }
-      }
+      if (path === '/recovery/metrics') throw new Error('metrics section unavailable')
       if (path === '/dlq/clusters') return healthyClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
       if (path === '/recovery/validation?windowDays=30') return baseValidation
@@ -853,6 +845,54 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
     expect(screen.queryByTestId('recovery-center-personal-wins')).not.toBeInTheDocument()
   })
 
+  function editHomeEnvelope(edit: (payload: { sections: Record<string, unknown> }) => unknown) {
+    const read = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async (path, options) => {
+      const payload = await read(path, options)
+      return path === '/recovery/home' ? edit(payload as { sections: Record<string, unknown> }) : payload
+    })
+  }
+
+  it('degrades only the section whose value fails its generated guard', async () => {
+    mockImpactReads()
+    editHomeEnvelope(payload => ({
+      ...payload,
+      sections: { ...payload.sections, ledger: { status: 'ok', value: { totalRecovered: 'twelve' } } },
+    }))
+    render(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
+
+    expect(await screen.findByTestId('recovery-center-personal-wins')).toHaveTextContent(
+      'You recovered 3 failures in the last 30 days',
+    )
+    expect(screen.getByText('SLA attainment')).toBeInTheDocument()
+    expect(screen.queryByTestId('recovery-lifetime-ledger')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Metrics unavailable/i)).not.toBeInTheDocument()
+  })
+
+  it('ignores a section key the manifest does not name', async () => {
+    mockImpactReads()
+    editHomeEnvelope(payload => ({
+      ...payload,
+      sections: { ...payload.sections, forecast: { status: 'ok', value: { anything: true } } },
+    }))
+    render(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
+
+    expect(await screen.findByTestId('recovery-lifetime-ledger')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-center-personal-wins')).toBeInTheDocument()
+    expect(screen.queryByText(/Metrics unavailable/i)).not.toBeInTheDocument()
+  })
+
+  it('reports a malformed Home envelope with the Home copy', async () => {
+    mockImpactReads()
+    editHomeEnvelope(payload => ({ ...payload, sections: [] }))
+    render(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
+
+    expect(await screen.findByText(/Metrics unavailable — the recovery Home response was invalid/i)).toBeInTheDocument()
+  })
+
   it('never accepts a late personal-wins snapshot from the previous user', async () => {
     let releaseFirstWins: ((value: unknown) => void) | undefined
     const firstWins = new Promise((resolve) => { releaseFirstWins = resolve })
@@ -920,7 +960,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
         }),
         briefAction({
           id: 'recover_cluster', kind: 'failure_cluster', priority: 2, severity: 'medium',
-          params: { count: 3 }, target: { kind: 'failure_cluster', id: 'cluster-1', destination: 'recover' },
+          params: { category: 'secret_missing', count: 3 }, target: { kind: 'failure_cluster', id: 'cluster-1', destination: 'recover' },
         }),
       )
       if (path === '/recovery/metrics') return baseMetrics
@@ -990,7 +1030,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief(briefAction({
-        id: 'recover_cluster', kind: 'failure_cluster', severity: 'medium', params: { count: 3 },
+        id: 'recover_cluster', kind: 'failure_cluster', severity: 'medium', params: { category: 'secret_missing', count: 3 },
         target: { kind: 'failure_cluster', id: 'cluster-1', destination: 'recover' },
       }))
       if (path === '/recovery/metrics') return baseMetrics
@@ -1205,10 +1245,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
   })
 
   it('uses the org-wide count and oldest queue row instead of the capped bootstrap page', async () => {
-    const oldest = {
-      ...populatedDlq[0],
-      createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
-    }
+    const { workflowJson: _workflow, nodeJson: _node, ...summary } = populatedDlq[0]!
+    const oldest = { ...summary, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString() }
     mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief(briefAction({
@@ -1294,41 +1332,27 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
           cases: [
             {
               id: 'case-1',
-              orgId: 'default',
               runId: 'run-1',
               workflowId: 'workflow-1',
-              workflowVersionId: 'version-1',
               source: 'semantic_violation',
               detectorId: 'ai-mode',
-              sourceNodeId: 'answer',
               detectorKind: 'expression',
               action: 'quarantine',
               message: 'AI output is required',
-              detailsJson: ['$.mode must equal "ai"'],
               state: 'contained',
-              createdBy: 'dev-user',
               createdAt: '2026-07-27T12:00:00.000Z',
-              updatedAt: '2026-07-27T12:00:00.000Z',
-              resolvedAt: null,
             },
             {
               id: 'case-2',
-              orgId: 'default',
               runId: 'run-2',
               workflowId: 'workflow-2',
-              workflowVersionId: 'version-2',
               source: 'semantic_violation',
               detectorId: 'review-note',
-              sourceNodeId: 'review',
               detectorKind: 'schema',
               action: 'observe',
               message: 'Review note is missing',
-              detailsJson: ['$.note is required'],
               state: 'detected',
-              createdBy: 'dev-user',
               createdAt: '2026-07-27T11:00:00.000Z',
-              updatedAt: '2026-07-27T11:00:00.000Z',
-              resolvedAt: null,
             },
           ],
         }
@@ -1370,15 +1394,12 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
   })
 
   it.each([
-    ['request failure', new Error('semantic projection unavailable')],
-    ['invalid success payload', {}],
+    ['request failure', () => { throw new Error('semantic projection unavailable') }],
+    ['section that fails its generated guard', () => ({ cases: [{ id: 'case-1' }] })],
   ])('does not present an all-clear state after a semantic %s', async (_label, semanticResponse) => {
     mockRecoveryApi(async (path: string) => {
       if (path === '/operations/brief') return operatorBrief()
-      if (path === '/recovery/cases?limit=50') {
-        if (semanticResponse instanceof Error) throw semanticResponse
-        return semanticResponse
-      }
+      if (path === '/recovery/cases?limit=50') return semanticResponse()
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }

@@ -1,48 +1,27 @@
 import type { WorkflowVersionIdentity } from '../store'
 import type {
-  WorkflowBriefCompilation,
   WorkflowDefinition,
-  WorkflowIntentBrief,
   WorkflowProposalResponse,
 } from '../types'
-import { isRecord } from './guards'
+import { hasOnlyKeys, isNonEmptyString, isRecord, isStringArray } from './guards'
+import { isGetWorkflowsVersionsVersionIdResponse } from './api-guards/operations/GetWorkflowsVersionsVersionId'
+import { isPostAiWorkflowProposalsResponse } from './api-guards/operations/PostAiWorkflowProposals'
 
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(value).every((key) => allowed.includes(key))
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
-}
-
-function isNonemptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0
-}
+// Wire shape is checked by the generated guards; this module keeps the workflow
+// document rules the canvas depends on and the authoring binding invariants.
 
 function isCanonicalNonemptyString(value: unknown): value is string {
-  return isNonemptyString(value) && value === value.trim()
-}
-
-function isWorkflowIntentBrief(value: unknown): value is WorkflowIntentBrief {
-  if (!isRecord(value)) return false
-  return value.version === '1'
-    && typeof value.objective === 'string'
-    && typeof value.trigger === 'string'
-    && isStringArray(value.inputs)
-    && typeof value.expectedOutcome === 'string'
-    && isStringArray(value.externalEffects)
-    && isStringArray(value.approvals)
-    && typeof value.failurePolicy === 'string'
-    && isStringArray(value.examples)
-    && (value.language === 'en' || value.language === 'es')
+  return isNonEmptyString(value) && value === value.trim()
 }
 
 function isWorkflowInputSchema(value: unknown): boolean {
   const pending: unknown[] = [value]
   let visited = 0
+  // wire-policy: user-authored schemas are walked iteratively; Go shares this amplification bound.
+  const maxNodes = 512
   while (pending.length > 0) {
     const current = pending.pop()
-    if (!isRecord(current) || ++visited > 512) return false
+    if (!isRecord(current) || ++visited > maxNodes) return false
     if (!hasOnlyKeys(current, ['type', 'description', 'properties', 'required', 'items', 'enum', 'default'])) return false
     if (typeof current.type !== 'string'
       || !['string', 'number', 'boolean', 'object', 'array'].includes(current.type)) return false
@@ -67,13 +46,13 @@ function isWorkflowMetadata(value: unknown): boolean {
     || (isStringArray(value.tags) && value.tags.every(isCanonicalNonemptyString))
 }
 
+// The threshold's range is server policy; the canvas only needs its form.
 function isCircuitBreaker(value: unknown): boolean {
   if (value === false) return true
-  if (typeof value === 'number') return Number.isInteger(value) && value >= 2 && value <= 100
+  if (typeof value === 'number') return Number.isInteger(value)
   if (!isRecord(value) || !hasOnlyKeys(value, ['consecutiveFailures'])) return false
   const threshold = value.consecutiveFailures
-  return threshold === false
-    || (typeof threshold === 'number' && Number.isInteger(threshold) && threshold >= 2 && threshold <= 100)
+  return threshold === false || (typeof threshold === 'number' && Number.isInteger(threshold))
 }
 
 function isWorkflowRecoveryEnvelope(value: unknown): boolean {
@@ -118,7 +97,7 @@ export function isWorkflowDefinition(value: unknown): value is WorkflowDefinitio
     if (!isRecord(node) || !hasOnlyKeys(node, ['id', 'type', 'label', 'config'])
       || !isCanonicalNonemptyString(node.id) || !isCanonicalNonemptyString(node.type)
       || !isRecord(node.config)
-      || (node.label !== undefined && (!isCanonicalNonemptyString(node.label) || node.label.length > 80))) return false
+      || (node.label !== undefined && !isCanonicalNonemptyString(node.label))) return false
     if (nodeIds.has(node.id)) return false
     nodeIds.add(node.id)
   }
@@ -143,14 +122,17 @@ export function workflowVersionIdentity(
 ): WorkflowVersionIdentity | null {
   if (!isRecord(value)) return null
   const id = typeof value.versionId === 'string' ? value.versionId : value.id
-  if (value.workflowId !== expectedWorkflowId
-    || typeof id !== 'string' || id.length === 0 || id.length > 256
-    || typeof value.version !== 'number' || !Number.isSafeInteger(value.version) || value.version < 1) {
+  // The canvas records the saved version of the workflow it is editing, never another's.
+  if (value.workflowId !== expectedWorkflowId || !isNonEmptyString(id) || !Number.isSafeInteger(value.version)) {
     return null
   }
-  return { id, version: value.version }
+  return { id, version: value.version as number }
 }
 
+/**
+ * A rollback appends a new version copied from the target, so the receipt must
+ * name the requested source, a fresh id, and a version after the current one.
+ */
 export function parseWorkflowRollbackReceipt(
   value: unknown,
   workflowId: string,
@@ -159,9 +141,9 @@ export function parseWorkflowRollbackReceipt(
 ): WorkflowVersionIdentity | null {
   const version = workflowVersionIdentity(value, workflowId)
   if (!version || !isRecord(value) || value.sourceVersion !== target.version
-    || value.versionId !== version.id || !isCanonicalNonemptyString(version.id)
+    || value.versionId !== version.id
     || version.id === target.id || version.id === current.id
-    || version.version <= current.version || version.version > 2147483647) return null
+    || version.version <= current.version) return null
   return version
 }
 
@@ -173,44 +155,19 @@ export type WorkflowVersionSnapshot = {
 }
 
 /**
- * Runtime authority for an exact historical workflow read. The generated
- * client catches compile-time drift; this closed guard prevents a malformed,
- * mismatched, or legacy-expanded success payload from replacing the canvas.
+ * Runtime authority for an exact historical workflow read. The generated guard
+ * checks the closed shape; this binds the snapshot to both requested ids and
+ * the canvas workflow rules before it can replace the canvas.
  */
 export function parseWorkflowVersionSnapshot(
   value: unknown,
   expectedWorkflowId: string,
   expectedVersionId: string,
 ): WorkflowVersionSnapshot | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'workflowId', 'version', 'dagJson'])) return null
+  if (!isGetWorkflowsVersionsVersionIdResponse(value)) return null
   if (value.id !== expectedVersionId || value.workflowId !== expectedWorkflowId) return null
-  if (!isCanonicalNonemptyString(value.id) || value.id.length > 256
-    || !isCanonicalNonemptyString(value.workflowId) || value.workflowId.length > 256) return null
-  if (typeof value.version !== 'number' || !Number.isInteger(value.version) || value.version < 1) return null
   if (!isWorkflowDefinition(value.dagJson) || value.dagJson.id !== expectedWorkflowId) return null
-  return value as WorkflowVersionSnapshot
-}
-
-function isCapabilityBinding(value: unknown): boolean {
-  if (!isRecord(value)) return false
-  return typeof value.kind === 'string'
-    && typeof value.nodeId === 'string'
-    && typeof value.field === 'string'
-    && isStringArray(value.alternatives)
-    && (value.requested === undefined || typeof value.requested === 'string')
-    && (value.resolvedId === undefined || typeof value.resolvedId === 'string')
-    && (value.reason === undefined || typeof value.reason === 'string')
-}
-
-function isReadinessIssue(value: unknown): boolean {
-  if (!isRecord(value)) return false
-  return typeof value.code === 'string'
-    && typeof value.severity === 'string'
-    && ['info', 'warn', 'fail'].includes(value.severity)
-    && typeof value.message === 'string'
-    && (value.nodeId === undefined || typeof value.nodeId === 'string')
-    && (value.edgeId === undefined || typeof value.edgeId === 'string')
-    && (value.suggestion === undefined || typeof value.suggestion === 'string')
+  return { id: value.id, workflowId: value.workflowId, version: value.version, dagJson: value.dagJson }
 }
 
 // Compare JSON envelopes without recursion or key-order assumptions. Cyclic
@@ -266,72 +223,15 @@ function proposalContractsAreBound(value: WorkflowProposalResponse): boolean {
     && value.proposal.qualification.semantic === hasSemanticContract
 }
 
-/** Runtime guard for the generated compile operation's parsed JSON payload. */
-export function isWorkflowBriefCompilation(value: unknown): value is WorkflowBriefCompilation {
-  if (!isRecord(value)) return false
-  return isWorkflowIntentBrief(value.brief)
-    && isStringArray(value.clarifyingQuestions)
-    && value.clarifyingQuestions.length <= 3
-    && typeof value.complete === 'boolean'
-    && value.mode === 'deterministic'
-}
-
 /**
- * Runtime guard for the proposal boundary. OpenAPI provides compile-time
- * shapes; this check prevents malformed or stale success JSON from reaching
- * Apply even when an intermediary violates that contract.
+ * Runtime guard for the proposal boundary. The generated guard checks the wire
+ * shape; Apply additionally needs a workflow the canvas can open and never an
+ * applicable proposal whose capability bindings are incomplete.
  */
 export function isWorkflowProposalResponse(value: unknown): value is WorkflowProposalResponse {
-  if (!isRecord(value) || typeof value.mode !== 'string' || !['ai', 'fallback', 'error'].includes(value.mode)) return false
-  if (!isWorkflowIntentBrief(value.brief) || !isStringArray(value.clarifyingQuestions)
-    || value.clarifyingQuestions.length > 3) return false
-  if (value.aiError !== undefined && typeof value.aiError !== 'string') return false
-  if (value.providerGuarded !== undefined && typeof value.providerGuarded !== 'boolean') return false
-  if (value.bonBackoff !== undefined && (
-    !isRecord(value.bonBackoff)
-    || !hasOnlyKeys(value.bonBackoff, ['from', 'to'])
-    || typeof value.bonBackoff.from !== 'number'
-    || !Number.isInteger(value.bonBackoff.from)
-    || value.bonBackoff.from < 1
-    || typeof value.bonBackoff.to !== 'number'
-    || !Number.isInteger(value.bonBackoff.to)
-    || value.bonBackoff.to < 1
-  )) return false
-  if (!isRecord(value.bindings)
-    || typeof value.bindings.catalogVersion !== 'string'
-    || !Array.isArray(value.bindings.resolved)
-    || !value.bindings.resolved.every(isCapabilityBinding)
-    || !Array.isArray(value.bindings.missing)
-    || !value.bindings.missing.every(isCapabilityBinding)
-    || typeof value.bindings.complete !== 'boolean') return false
-  if (!isRecord(value.proposal) || !isWorkflowDefinition(value.proposal.workflow)) return false
-  if (!isRecord(value.proposal.intentContract)
-    || Object.values(value.proposal.intentContract).some((output) => typeof output !== 'string')) return false
-  if (!Object.hasOwn(value.proposal, 'recoveryContract')
-    || (value.proposal.recoveryContract !== null && !isRecord(value.proposal.recoveryContract))) return false
-  if (!isRecord(value.proposal.qualification)
-    || typeof value.proposal.qualification.intent !== 'boolean'
-    || typeof value.proposal.qualification.recovery !== 'boolean'
-    || typeof value.proposal.qualification.semantic !== 'boolean') return false
-  if (!isStringArray(value.proposal.assumptions) || !isStringArray(value.proposal.risks)) return false
-  if (!isRecord(value.proposal.readiness)
-    || typeof value.proposal.readiness.status !== 'string'
-    || !['pass', 'warn', 'fail'].includes(value.proposal.readiness.status)
-    || !Array.isArray(value.proposal.readiness.issues)
-    || !value.proposal.readiness.issues.every(isReadinessIssue)) return false
-  if (!isRecord(value.proposal.diff)
-    || !isStringArray(value.proposal.diff.nodesAdded)
-    || !isStringArray(value.proposal.diff.nodesRemoved)
-    || !isStringArray(value.proposal.diff.nodesChanged)
-    || typeof value.proposal.diff.edgesBefore !== 'number'
-    || !Number.isInteger(value.proposal.diff.edgesBefore)
-    || value.proposal.diff.edgesBefore < 0
-    || typeof value.proposal.diff.edgesAfter !== 'number'
-    || !Number.isInteger(value.proposal.diff.edgesAfter)
-    || value.proposal.diff.edgesAfter < 0
-    || typeof value.proposal.applicable !== 'boolean') return false
-  if (value.proposal.applicable && !value.bindings.complete) return false
-  return true
+  return isPostAiWorkflowProposalsResponse(value)
+    && isWorkflowDefinition(value.proposal.workflow)
+    && (!value.proposal.applicable || value.bindings.complete)
 }
 
 /**

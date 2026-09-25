@@ -42,7 +42,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 
 `make verify` (`scripts/verify-isolated.sh`) creates a fresh PostgreSQL
 compose project, migrates twice (the second run must be a no-op), regenerates
-`schema.sql` and checks it for drift, runs `make generate` drift, lint, vuln,
+`schema.sql` and checks it for drift, runs `make generate` drift, lint, deadcode, vuln,
 Go unit, integration and two-instance HA, the web verify (`audit:ci`, lint,
 app/unit/E2E typecheck, unit, scripts, browser, build, `bundle-check`) and the
 e2e lane, then ends with
@@ -138,6 +138,16 @@ keeps the workflow core free of transport and persistence, forbids importing
 `internal/httpapi` from services, and keeps the feature packages under
 `internal/httpapi/*` leaves that depend on `internal/httpkit` only.
 
+Dead code: `make deadcode` runs `go tool deadcode` over every `./cmd/...`
+root (including dev tools such as the seeder and load generator) and diffs the unreachable functions against
+`scripts/deadcode-allowlist.txt`, one `<import path>.<Func> # <reason>` per
+line. A new unreachable function fails with the exact line to add (or delete
+the function); an entry that is no longer reported fails as stale. It runs in
+`make verify` and the Backend CI job. On the web side, `pnpm lint` ends with
+`knip` (`web/knip.json`), which fails on unused exports, files and
+dependencies. It counts test files as consumers, so an export used only by
+tests passes; tag an intentionally public export with `/** @public */`.
+
 Web: `pnpm lint` runs oxlint plus the ratchets in `web/scripts/`: i18n casts,
 CSS class ownership (every class in every stylesheet must have a production
 owner), legacy UI guard, e2e selector presence, raw `/v1` reads (must go
@@ -219,6 +229,12 @@ changes that add object keys (a controller/view model, a router) cost gzip
 bytes no minifier removes; the caps were raised once for that in 2026-09 and
 are not raised for features. The bundle held no duplicated modules and the
 i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
+The artifact and worst-locale caps were rebased once more in 2026-10, by the
+measured 3.3 KiB of the generated response guards (605 → 608.3 and
+560.5 → 563.8 KiB); guards compose shared primitives so each new adoption costs
+only its own shape. Once the hand-written readers shrank to UI invariants and
+each guard became its own module (a lazy panel's guard ships in its chunk), the
+caps were lowered to the measured size plus about 1 KiB (605.9 and 562.0 KiB).
 
 ## Marketing site (`website/`)
 

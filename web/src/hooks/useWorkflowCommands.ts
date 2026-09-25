@@ -22,8 +22,23 @@ import {
 } from '../types'
 import type { AppCommandsOptions } from './app-command-types'
 import { clearDraft, readDraft } from './useDraftPersistence'
+import { isGetAuthoringCapabilitiesResponse } from '../lib/api-guards/operations/GetAuthoringCapabilities'
+import { isGetWorkflowsLatestResponse } from '../lib/api-guards/operations/GetWorkflowsLatest'
+import { isGetWorkflowsVersionsVersionIdResponse } from '../lib/api-guards/operations/GetWorkflowsVersionsVersionId'
+import { isPostAiWorkflowBriefsCompileResponse } from '../lib/api-guards/operations/PostAiWorkflowBriefsCompile'
+import { isPostAiWorkflowProposalsResponse } from '../lib/api-guards/operations/PostAiWorkflowProposals'
+import { isPostWorkflowsSaveResponse } from '../lib/api-guards/operations/PostWorkflowsSave'
+import { MalformedResponseError } from '../lib/malformed-response'
 
 const loadAuthoringContract = () => import('../lib/authoring-contract')
+
+// A payload that fails its generated guard keeps the command's own message;
+// transport and HTTP errors pass through unchanged.
+function malformedAs(message: string) {
+  return (error: unknown): never => {
+    throw error instanceof MalformedResponseError ? new Error(message) : error
+  }
+}
 
 type ValidationResponse = {
   valid: boolean
@@ -164,7 +179,8 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
       const workflow = getWorkflowJson()
       const authorityAtSave = currentCanvasAuthority()
       const [result, { workflowVersionIdentity }] = await Promise.all([
-        api('/workflows/save', { method: 'POST', body: JSON.stringify(workflow) }),
+        contractApi('POST /workflows/save', '/workflows/save', workflow, { guard: isPostWorkflowsSaveResponse })
+          .catch(malformedAs(t('apiErrors.workflows_version_malformed'))),
         import('../lib/authoring-contract'),
       ])
       const committedVersion = workflowVersionIdentity(result, workflow.id ?? '')
@@ -194,7 +210,8 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     if (!authority) return false
     try {
       const [data, { isWorkflowDefinition, workflowVersionIdentity }] = await Promise.all([
-        contractApi('GET /workflows/latest', `/workflows/latest?workflowId=${encodeURIComponent(id)}`, undefined),
+        contractApi('GET /workflows/latest', `/workflows/latest?workflowId=${encodeURIComponent(id)}`, undefined, { guard: isGetWorkflowsLatestResponse })
+          .catch(malformedAs(t('apiErrors.workflows_version_malformed'))),
         loadAuthoringContract(),
       ])
       if (!canvasAuthorityMatches(authority)) {
@@ -245,7 +262,8 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
           'GET /workflows/versions/{versionId}',
           path,
           undefined,
-        ),
+          { guard: isGetWorkflowsVersionsVersionIdResponse },
+        ).catch(malformedAs(t('apiErrors.workflows_version_malformed'))),
         loadAuthoringContract(),
       ])
       if (!canvasAuthorityMatches(authority)) {
@@ -281,22 +299,17 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
       'GET /authoring/capabilities',
       '/authoring/capabilities',
       undefined,
+      { guard: isGetAuthoringCapabilitiesResponse },
     )
   }, [])
 
   const compileWorkflowBrief = useCallback(async (prompt: string): Promise<WorkflowBriefCompilation> => {
-    const [result, { isWorkflowBriefCompilation }] = await Promise.all([
-      contractApi(
-        'POST /ai/workflow-briefs/compile',
-        '/ai/workflow-briefs/compile',
-        { prompt },
-      ),
-      loadAuthoringContract(),
-    ])
-    if (!isWorkflowBriefCompilation(result)) {
-      throw new Error(t('toasts.aiResponseInvalid'))
-    }
-    return result
+    return await contractApi(
+      'POST /ai/workflow-briefs/compile',
+      '/ai/workflow-briefs/compile',
+      { prompt },
+      { guard: isPostAiWorkflowBriefsCompileResponse },
+    ).catch(malformedAs(t('toasts.aiResponseInvalid')))
   }, [t])
 
   const proposeWorkflow = useCallback(async (
@@ -314,16 +327,17 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
           catalogVersion,
           currentWorkflow: getWorkflowJson(),
         },
-      ),
+        { guard: isPostAiWorkflowProposalsResponse },
+      ).catch(malformedAs(t('toasts.aiResponseInvalid'))),
       loadAuthoringContract(),
     ])
     if (!isWorkflowProposalResponse(result)) {
       throw new Error(t('toasts.aiResponseInvalid'))
     }
-    return {
-      ...result,
-      bonBackoff: parseAiCandidateBackoff(result.bonBackoff),
-    }
+    // Apply re-runs the closed proposal guard, which rejects an optional key set to undefined.
+    const { bonBackoff: rawBackoff, ...rest } = result
+    const bonBackoff = parseAiCandidateBackoff(rawBackoff)
+    return bonBackoff ? { ...rest, bonBackoff } : rest
   }, [getWorkflowJson, t])
 
   const applyWorkflowProposal = useCallback(async (

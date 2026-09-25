@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, __resetInFlightForTests } from './api'
+import { api, contractApi, ApiError, __resetInFlightForTests } from './api'
+import { isGetRecoveryMetricsResponse } from './lib/api-guards/operations/GetRecoveryMetrics'
+import { isGetRecoveryMyWinsResponse } from './lib/api-guards/operations/GetRecoveryMyWins'
+import { isPostStartResponse } from './lib/api-guards/operations/PostStart'
+import type { ApiResponse } from './lib/api-types.generated'
 import { suspendApiRequestLifecycle } from './api-request-lifecycle'
 import { changeAppLanguage, initI18n } from './i18n'
 import { useWorkflowStore } from './store'
@@ -457,5 +461,68 @@ describe('api', () => {
     const second = await api('/runs')
     expect(second).toEqual({ ok: true })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('contractApi response guards', () => {
+  const wins = { recovered: 3, windowDays: 30 }
+  const envelope = (data: unknown) => ({ apiVersion: 'v1', requestId: 'guarded', data })
+  const recordingGuard = (seen: unknown[]) => (value: unknown): value is ApiResponse<'GET /recovery/my-wins'> => {
+    seen.push(value)
+    return isGetRecoveryMyWinsResponse(value)
+  }
+
+  beforeEach(() => {
+    initI18n('en')
+  })
+
+  afterEach(() => {
+    __resetInFlightForTests()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('returns the unwrapped payload a matching guard accepts', async () => {
+    mockJsonResponse(200, envelope(wins))
+    const seen: unknown[] = []
+    await expect(contractApi('GET /recovery/my-wins', '/recovery/my-wins', undefined, { guard: recordingGuard(seen) }))
+      .resolves.toEqual(wins)
+    expect(seen).toEqual([wins])
+  })
+
+  it('raises the malformed-response error when the guard rejects a 2xx payload', async () => {
+    mockJsonResponse(200, envelope({ ...wins, unexpected: true }))
+    await expect(contractApi('GET /recovery/my-wins', '/recovery/my-wins', undefined, { guard: isGetRecoveryMyWinsResponse }))
+      .rejects.toThrow('unreadable response')
+  })
+
+  it('keeps the unguarded path unchanged and never forwards the guard to fetch', async () => {
+    mockJsonResponse(200, envelope({ unexpected: true }))
+    await expect(contractApi('GET /recovery/my-wins', '/recovery/my-wins', undefined)).resolves.toEqual({ unexpected: true })
+    __resetInFlightForTests()
+    mockJsonResponse(200, envelope(wins))
+    await contractApi('GET /recovery/my-wins', '/recovery/my-wins', undefined, { guard: isGetRecoveryMyWinsResponse })
+    const init = vi.mocked(fetch).mock.calls[0]?.[1]
+    expect(init).toBeDefined()
+    expect(init).not.toHaveProperty('guard')
+  })
+
+  it('throws ApiError on a non-2xx response without consulting the guard', async () => {
+    mockJsonResponse(429, envelope({ ok: true, buffered: true }))
+    const seen: unknown[] = []
+    await expect(contractApi('GET /recovery/my-wins', '/recovery/my-wins', undefined, { guard: recordingGuard(seen) }))
+      .rejects.toBeInstanceOf(ApiError)
+    expect(seen).toEqual([])
+  })
+
+  it('does not treat the start field-error envelope as a malformed payload', async () => {
+    mockJsonResponse(400, { errors: ['$.invoiceId is required'] })
+    await expect(contractApi('POST /start', '/start', { workflow: { nodes: [], edges: [] } }, { guard: isPostStartResponse }))
+      .resolves.toEqual({ errors: ['$.invoiceId is required'] })
+  })
+
+  it('types the guard to its operation', () => {
+    // @ts-expect-error a recovery-metrics guard cannot vouch for a wins payload
+    void (() => contractApi('GET /recovery/my-wins', '/recovery/my-wins', undefined, { guard: isGetRecoveryMetricsResponse }))
   })
 })

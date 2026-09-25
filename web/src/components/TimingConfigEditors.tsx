@@ -15,7 +15,7 @@ import { loadWorkflowIoEditor } from './workflow-io-loader'
 import { FormField } from './ui/Form'
 import { SwitchField } from './ui/SwitchField'
 
-const SchemaFieldsEditor = lazy(loadWorkflowIoEditor)
+const SchemaFieldsEditor = lazy(() => loadWorkflowIoEditor().then(module => ({ default: module.SchemaFieldsEditor })))
 
 type ConfigEditorProps = {
   nodeId: string

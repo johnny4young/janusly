@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/main.tsx",
+    "e2e/**/*.ts",
+    "performance/**/*.ts",
+    "scripts/*.mjs",
+    "vite.config.ts",
+    "vitest.browser.config.ts",
+    "vitest-worker-policy.ts"
+  ],
+  "project": ["src/**"],
+  "ignore": ["src/lib/*.generated.ts", "src/lib/api-guards/**"],
+  "ignoreDependencies": ["@vitest/browser", "supabase"],
+  "ignoreExportsUsedInFile": true
+}

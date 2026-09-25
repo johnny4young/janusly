@@ -12,10 +12,10 @@ GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || printf '%040d' 0)
 GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 
 .PHONY: dev build artifact supply-chain db-up db-down db-reset migrate generate lint test \
-	test-integration test-ha test-ha-current-db test-route-parity test-ci test-e2e test-e2e-full verify verify-current-db vuln frontend-install \
+	test-integration test-ha test-ha-current-db test-route-parity test-ci test-e2e test-e2e-full verify verify-current-db vuln deadcode frontend-install \
 	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
 	restore-local recovery-local-selftest recovery-local-drill load-soak-local-selftest \
-	qualify-oci-local qualify-private-metrics-local qualify-real-provider qualify-pagerduty
+	qualify-oci-local qualify-private-metrics-local qualify-real-provider qualify-pagerduty pricing-check
 
 dev: db-up migrate
 	JANUSLY_DATABASE_URL='$(DB_URL)' PNPM='$(PNPM)' bash scripts/dev.sh
@@ -56,6 +56,7 @@ generate:
 	go run ./cmd/contract
 	go run ./cmd/pricing
 	cd web && node scripts/generate-api-types.mjs
+	cd web && node scripts/generate-api-guards.mjs
 
 contract:
 	go run ./cmd/contract
@@ -85,6 +86,10 @@ lint:
 
 vuln:
 	go tool govulncheck ./...
+
+deadcode:
+	bash scripts/deadcode-check.test.sh
+	bash scripts/deadcode-check.sh
 
 test:
 	$(MAKE) test-ci
@@ -129,6 +134,7 @@ qualify-local-selftest:
 	bash scripts/private-metrics-local.test.sh
 	bash scripts/supply-chain-local.test.sh
 	bash scripts/real-provider-local.test.sh
+	bash scripts/pricing-check.test.sh
 
 load-soak-local-selftest:
 	bash scripts/load-soak-local.test.sh
@@ -150,6 +156,10 @@ qualify-private-metrics-local:
 
 qualify-real-provider:
 	bash scripts/real-provider-local.sh
+
+# Opt-in and networked: compares the price catalog with the vendor page.
+pricing-check:
+	bash scripts/pricing-check.sh
 
 recovery-local-selftest:
 	bash scripts/postgres-local-recovery.test.sh
@@ -175,11 +185,13 @@ verify-current-db:
 	$(MAKE) recovery-local-selftest
 	$(MAKE) schema COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME)
 	$(MAKE) generate
-	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts || { \
-		echo "schema.sql or generated SQLC, OpenAPI, pricing or API-type files drifted; run scripts/verify-isolated.sh schema and make generate, then commit the result."; \
+	@git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts web/src/lib/api-guards \
+		&& test -z "$$(git status --porcelain -- web/src/lib/api-guards)" || { \
+		echo "schema.sql or generated SQLC, OpenAPI, pricing, API-type or API-guard files drifted; run scripts/verify-isolated.sh schema and make generate, then commit the result."; \
 		exit 1; \
 	}
 	$(MAKE) lint
+	$(MAKE) deadcode
 	$(MAKE) vuln
 	$(MAKE) frontend-audit
 	$(MAKE) test

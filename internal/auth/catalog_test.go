@@ -44,7 +44,7 @@ func TestPermissionCatalogPinned(t *testing.T) {
 		{"org.permissions.write", RoleAdmin, true},
 	}
 	for _, anchor := range anchors {
-		if got := DefaultRoleHasPermission(anchor.role, anchor.key); got != anchor.expect {
+		if got := defaultRoleHasPermission(anchor.role, anchor.key); got != anchor.expect {
 			t.Fatalf("%s for %s: got %v want %v", anchor.key, anchor.role, got, anchor.expect)
 		}
 	}
@@ -56,7 +56,7 @@ func TestPermissionCatalogPinned(t *testing.T) {
 	if len(viewer) == 0 || len(editor) <= len(viewer) {
 		t.Fatalf("effective built-in grants are incomplete: viewer=%v editor=%v", viewer, editor)
 	}
-	if !DefaultRoleHasPermission(RoleEditor, "workflows.write") || slices.Contains(viewer, "workflows.write") || !slices.Contains(editor, "workflows.write") {
+	if !defaultRoleHasPermission(RoleEditor, "workflows.write") || slices.Contains(viewer, "workflows.write") || !slices.Contains(editor, "workflows.write") {
 		t.Fatalf("effective built-in grants drifted: viewer=%v editor=%v", viewer, editor)
 	}
 }
@@ -86,4 +86,9 @@ func TestCoerceAdminFloor(t *testing.T) {
 	if len(coerced) != 0 || len(merged) != 1 {
 		t.Fatalf("custom admin must not be coerced: %v %v", merged, coerced)
 	}
+}
+
+func defaultRoleHasPermission(role Role, key string) bool {
+	entry, ok := permissionsByKey[key]
+	return ok && entry.DefaultRoles[role]
 }

@@ -13,7 +13,7 @@ var runRecord = closedObj(map[string]any{
 	"status":                 runStatusSchema,
 	"outcomeStatus":          runOutcomeSchema,
 	"semanticViolationCount": map[string]any{"type": "integer", "minimum": 0},
-	"inputJson":              jsonValue(), "outputJson": jsonValue(),
+	"inputJson":              runJSON, "outputJson": runJSON,
 	"parentRunId": nullableString(), "parentNodeId": nullableString(), "parentLinkKind": nullableString(),
 	"parentNotificationAfter": nullableString(), "recoveryPlaybookAppliedRecordedAt": nullableString(),
 	"recoveryPlaybookValidationRecordedAt": nullableString(),
@@ -28,14 +28,14 @@ var runRecord = closedObj(map[string]any{
 var runNode = closedObj(map[string]any{
 	"id": str(), "runId": str(), "nodeId": str(),
 	"status":    map[string]any{"type": "string", "enum": []any{"pending", "queued", "running", "waiting", "succeeded", "failed", "skipped", "cancelled"}},
-	"stateJson": jsonValue(), "errorJson": jsonValue(),
+	"stateJson": runJSON, "errorJson": runJSON,
 	"attempts":  map[string]any{"type": []any{"integer", "null"}, "minimum": 0},
 	"startedAt": nullableString(), "finishedAt": nullableString(),
 }, "id", "runId", "nodeId", "status", "stateJson", "errorJson", "attempts", "startedAt", "finishedAt")
 
 var runEvent = closedObj(map[string]any{
 	"id": str(), "runId": str(), "nodeId": nullableString(), "type": str(),
-	"payload": jsonValue(), "createdAt": nullableString(), "holdUntil": nullableString(),
+	"payload": runJSON, "createdAt": nullableString(), "holdUntil": nullableString(),
 }, "id", "runId", "nodeId", "type", "payload", "createdAt", "holdUntil")
 
 var runView = closedObj(map[string]any{

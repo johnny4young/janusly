@@ -17,9 +17,20 @@ afterEach(() => {
   useWorkflowStore.getState().resetRun()
 })
 
+// The full wire snapshot: the generated /status guard rejects partial rows.
 const snapshot = (status: string) => ({
-  run: { id: 'browser-run', status },
-  nodes: [{ nodeId: 'work', status }],
+  run: {
+    id: 'browser-run', orgId: 'org', workflowVersionId: 'version', workflowRolloutId: null,
+    workflowRolloutVariant: null, status, outcomeStatus: null, semanticViolationCount: 0,
+    inputJson: null, outputJson: null, parentRunId: null, parentNodeId: null, parentLinkKind: null,
+    parentNotificationAfter: null, recoveryPlaybookAppliedRecordedAt: null,
+    recoveryPlaybookValidationRecordedAt: null, replayMode: null, traceId: null,
+    validationEvidenceLevel: null, createdBy: null, createdAt: null,
+  },
+  nodes: [{
+    id: 'node-row', runId: 'browser-run', nodeId: 'work', status, stateJson: null, errorJson: null,
+    attempts: 1, startedAt: null, finishedAt: null,
+  }],
   events: [], eventsCursor: null, eventsHasMore: false,
 })
 
@@ -43,10 +54,10 @@ describe('status transport in Chromium', () => {
     // The failed request's ordinary dedup TTL expires; a later poll succeeds.
     await vi.waitFor(async () => {
       await act(async () => { await result.current.loadStatus('browser-run') })
-      expect(useWorkflowStore.getState().runNodes).toEqual([{ nodeId: 'work', status: 'succeeded' }])
+      expect(useWorkflowStore.getState().runNodes).toEqual([expect.objectContaining({ nodeId: 'work', status: 'succeeded' })])
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(commit).toHaveBeenCalledWith({ id: 'browser-run', status: 'succeeded' })
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({ id: 'browser-run', status: 'succeeded' }))
   })
 
   it('does not turn an aborted body stream into an empty success', async () => {

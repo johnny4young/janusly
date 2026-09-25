@@ -263,14 +263,3 @@ export function validateAlertPolicyConfig(policy: AlertPolicyConfig): AlertPolic
   return { ok: true, policy }
 }
 
-// ---------- dispatch outcomes ----------
-
-export const AlertChannelResultSchema = /* @__PURE__ */ z.strictObject({
-    destination: AlertDestinationSchema,
-    credentialName: boundedString(1, 200),
-    ok: z.boolean(),
-    statusCode: z.optional(z.nullable(boundedInt(100, 599))),
-    error: z.optional(z.nullable(z.string().check(z.maxLength(1000)))),
-    latencyMs: z.int().check(z.minimum(0)),
-  })
-

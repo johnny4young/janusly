@@ -13,7 +13,7 @@
  */
 
 import { getResolvedLocale } from '../../i18n'
-import { asRecord } from '../../lib/guards'
+import { asRecord, isFiniteNumber } from '../../lib/guards'
 
 export type ExperimentKind = 'prompt' | 'model'
 export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -96,10 +96,6 @@ export function estimateProviderCalls(exampleCount: number, scorerKind: RunForm[
 }
 
 export { asRecord }
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
-}
 
 function isNonNegativeNumber(value: unknown): value is number {
   return isFiniteNumber(value) && value >= 0

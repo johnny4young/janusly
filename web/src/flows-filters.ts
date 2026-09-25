@@ -14,6 +14,8 @@
  * Used by `web/src/components/WorkflowsDashboard.tsx`.
  */
 
+import { isStringArray } from './lib/guards'
+
 const KEY = 'janusly:flowsFilters'
 
 /** Sort options for the Flows list — exported so the dashboard's `sort` state
@@ -36,10 +38,6 @@ export type FlowsFilters = {
 
 function isSortKey(value: unknown): value is SortKey {
   return typeof value === 'string' && (SORT_KEYS as readonly string[]).includes(value)
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
 }
 
 /** True for an object carrying at least the `{ query, sort }` pair — rejects a

@@ -21,10 +21,7 @@ import {
 import { resolveSystemLocale, getBrowserSystemLanguages } from './resolve'
 import { getStoredLanguage, setStoredLanguage } from './storage'
 import {
-  COMMON_NAMESPACE,
   FALLBACK_LOCALE,
-  isSupportedLanguage,
-  SUPPORTED_LANGUAGES,
   type AppLanguage,
   type CatalogNamespace,
   type RuntimeLocale,
@@ -44,7 +41,7 @@ export { bootstrapI18n }
 export { changeRuntimeLocale }
 export { resolveSystemLocale, getBrowserSystemLanguages }
 export { getStoredLanguage, setStoredLanguage }
-export { COMMON_NAMESPACE, FALLBACK_LOCALE, isSupportedLanguage, SUPPORTED_LANGUAGES }
+export { FALLBACK_LOCALE }
 export type { AppLanguage, RuntimeLocale }
 
 export function I18nNamespaceGate({
@@ -62,7 +59,6 @@ export {
   tReadinessIssue,
   tAiReviewIssue,
   tRunEvent,
-  tFailureCluster,
   tHealthRationale,
   tRecoveryMetricRationale,
   tTemplateName,
@@ -70,7 +66,6 @@ export {
   tTemplateCategory,
   tToolDescription,
   tApiError,
-  tServerFallback,
 } from './server-events'
 export { getResolvedLocale } from './runtime'
 

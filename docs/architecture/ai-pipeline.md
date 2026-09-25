@@ -172,6 +172,29 @@ Janusly never guesses unknown cache pricing. Cache creation/read tokens are
 recorded at their distinct prices. Explicit simulator calls remain zero-cost
 and do not require a price entry.
 
+### Pricing verification
+
+`make pricing-check` (`scripts/pricing-check.sh`, opt-in, needs network)
+fetches the vendor pricing page, reads the per-model input and output rates
+from the model pricing table, and diffs them against
+`go run ./cmd/pricing --json`. It prints one row per catalog entry and fails
+on a mismatched rate or on a catalog model the page no longer lists; dated
+aliases inherit their family's row, and page models absent from the catalog
+are reported but allowed. `scripts/pricing-check.test.sh` covers the parser
+offline against `scripts/testdata/pricing-page.html` and runs in
+`make qualify-local-selftest`; neither runs in CI. The networked check is a
+manual step on purpose (the page is not a stable API); the 120-day test below
+forces it to happen. The parser is exercised with BSD awk; run the self-test
+once on a Linux host before relying on it there.
+
+`TestModelPricingSnapshotIsRecent` fails once `ModelPricingSnapshotDate` is
+more than 120 days old. Re-verify with `make pricing-check`, fix any drift,
+bump the date, run `make generate`, and add a line to the log below.
+
+Verification log:
+
+- 2026-09-24 — 14/14 catalog entries match the vendor page; Sonnet 5 keeps the USD 2/10 introductory rate as its standard rate.
+
 ## Qualification layers
 
 `internal/httpapi/testdata/workflow-assurance-golden.json` remains the focused

@@ -5,10 +5,6 @@
 package scim
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"time"
 
 	"github.com/johnny4young/janusly/internal/webhooksig"
@@ -186,12 +182,3 @@ type scimResult struct {
 
 func scimProcessed(action string) scimResult { return scimResult{Processed: true, Action: action} }
 func scimSkipped(reason string) scimResult   { return scimResult{Reason: reason} }
-
-// SignWebhookHeader produces the WorkOS-Signature header value the
-// receiver accepts for rawBody at instant now; tests and local tooling
-// sign with it.
-func SignWebhookHeader(secret, body string, atMs int64) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = fmt.Fprintf(mac, "%d.%s", atMs, body)
-	return fmt.Sprintf("t=%d,v1=%s", atMs, hex.EncodeToString(mac.Sum(nil)))
-}

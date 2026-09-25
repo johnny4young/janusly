@@ -107,19 +107,26 @@ jobs:
           node-version: 24.18.0
       - name: Generated files leave no drift
         # Every `make generate` output, not just the Go ones: the pricing
-        # table and the OpenAPI-derived TypeScript types are tracked files too.
+        # table and the OpenAPI-derived TypeScript types and guards are tracked files too.
         run: |
           go tool sqlc generate
           go run ./cmd/contract
           go run ./cmd/pricing
           (cd web && node scripts/generate-api-types.mjs)
-          git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts
+          (cd web && node scripts/generate-api-guards.mjs)
+          git diff --exit-code -- schema.sql internal/store contract web/src/lib/llm-pricing.generated.ts web/src/lib/api-types.generated.ts web/src/lib/api-guards
+          # A new guard module is untracked, which git diff cannot see.
+          test -z "$(git status --porcelain -- web/src/lib/api-guards)"
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
           args: --timeout=10m
       - name: Reachable vulnerabilities
         run: go tool govulncheck ./...
+      - name: Dead code inventory
+        run: |
+          bash scripts/deadcode-check.test.sh
+          bash scripts/deadcode-check.sh
       - name: Unit and race tests
         run: go test -race -timeout 15m ./...
 

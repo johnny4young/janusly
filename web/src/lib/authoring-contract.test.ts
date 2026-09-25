@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 
 import type { WorkflowBriefCompilation, WorkflowProposalResponse } from '../types'
 import {
-  isWorkflowBriefCompilation,
   isWorkflowProposalApplySafe,
   isWorkflowProposalResponse,
   parseWorkflowVersionSnapshot,
@@ -65,26 +64,13 @@ describe('authoring contract runtime guards', () => {
     expect(parseWorkflowVersionSnapshot(snapshot, 'pagerduty-example', 'version-2')).toEqual(snapshot)
     expect(parseWorkflowVersionSnapshot({ ...snapshot, id: 'version-swapped' }, 'pagerduty-example', 'version-2')).toBeNull()
     expect(parseWorkflowVersionSnapshot({ ...snapshot, workflowId: 'other' }, 'pagerduty-example', 'version-2')).toBeNull()
-    expect(parseWorkflowVersionSnapshot({ ...snapshot, version: 0 }, 'pagerduty-example', 'version-2')).toBeNull()
+    expect(parseWorkflowVersionSnapshot({ ...snapshot, version: 0 }, 'pagerduty-example', 'version-2')).toEqual({ ...snapshot, version: 0 })
+    expect(parseWorkflowVersionSnapshot({ ...snapshot, version: 1.5 }, 'pagerduty-example', 'version-2')).toBeNull()
     expect(parseWorkflowVersionSnapshot({ ...snapshot, extra: true }, 'pagerduty-example', 'version-2')).toBeNull()
     expect(parseWorkflowVersionSnapshot({
       ...snapshot,
       dagJson: { ...dagJson, id: 'other' },
     }, 'pagerduty-example', 'version-2')).toBeNull()
-  })
-
-  it('accepts the complete deterministic brief envelope', () => {
-    expect(isWorkflowBriefCompilation({
-      brief,
-      clarifyingQuestions: [],
-      complete: true,
-      mode: 'deterministic',
-    })).toBe(true)
-  })
-
-  it('rejects a stale or malformed brief envelope', () => {
-    expect(isWorkflowBriefCompilation({ brief: { ...brief, language: 'fr' }, clarifyingQuestions: [], complete: true, mode: 'deterministic' })).toBe(false)
-    expect(isWorkflowBriefCompilation({ brief, clarifyingQuestions: null, complete: true, mode: 'deterministic' })).toBe(false)
   })
 
   it('accepts a complete proposal before Apply', () => {
@@ -204,14 +190,20 @@ describe('authoring contract runtime guards', () => {
     }
   })
 
-  it('enforces the bounded clarification and numeric proposal envelope', () => {
+  it('delegates numeric types to the generated guard and leaves counts to the server', () => {
     const valid = validProposal()
-    expect(isWorkflowProposalResponse({ ...valid, clarifyingQuestions: ['1', '2', '3', '4'] })).toBe(false)
-    expect(isWorkflowProposalResponse({ ...valid, bonBackoff: { from: 1.5, to: 2 } })).toBe(false)
+    expect(isWorkflowProposalResponse({ ...valid, clarifyingQuestions: ['1', '2', '3', '4'] })).toBe(true)
     expect(isWorkflowProposalResponse({
       ...valid,
       proposal: { ...valid.proposal, diff: { ...valid.proposal.diff, edgesAfter: -1 } },
-    })).toBe(false)
+    })).toBe(true)
+    expect(isWorkflowProposalResponse({ ...valid, bonBackoff: { from: 1.5, to: 2 } })).toBe(false)
+    expect(isWorkflowProposalResponse({ ...valid, futureField: true })).toBe(false)
+  })
+
+  it('never lets an applicable proposal carry incomplete capability bindings', () => {
+    const valid = validProposal()
+    expect(isWorkflowProposalResponse({ ...valid, bindings: { ...valid.bindings, complete: false } })).toBe(false)
   })
 
   it('binds displayed contracts and qualification to the exact applied workflow', async () => {
@@ -240,7 +232,7 @@ describe('authoring contract runtime guards', () => {
       ...valid,
       proposal: {
         ...valid.proposal,
-        workflow: { ...valid.proposal.workflow, recovery: { circuitBreaker: 1 } },
+        workflow: { ...valid.proposal.workflow, recovery: { circuitBreaker: 1.5 } },
       },
     }
     expect(isWorkflowProposalResponse(invalidRecovery)).toBe(false)

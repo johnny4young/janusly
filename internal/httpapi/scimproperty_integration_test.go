@@ -151,7 +151,7 @@ func (p *scimPropHarness) deliver(directory string, event scimPropEvent) {
 		p.t.Fatalf("construct webhook event %q: %v", event.ID, err)
 	}
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("WorkOS-Signature", scim.SignWebhookHeader(p.secret, string(payload), time.Now().UnixMilli()))
+	req.Header.Set("WorkOS-Signature", signScimWebhookHeader(p.secret, string(payload), time.Now().UnixMilli()))
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
 		p.t.Fatalf("deliver webhook event %q: %v", event.ID, err)

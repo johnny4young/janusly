@@ -5,12 +5,22 @@ import { useWorkflowStore } from '../store'
 import { RecoveryDialog } from './RecoveryDialog'
 import type { DeadLetter } from './DeadLettersPanel'
 
-vi.mock('../api', () => {
-  const module = { api: vi.fn() }
+vi.mock('../api', async () => {
+  const { contractApiOver } = await import('../test/contract-api-mock')
+  const { healthDelta } = await import('../test/health-delta-fixture')
+  const { patchResponse } = await import('../test/patch-response-fixture')
+  const { runView, versionRows } = await import('../test/run-view-fixture')
+  const api = vi.fn()
+  // Typed calls reach the same path-keyed mock; partial fixtures are completed to the manifest.
   return {
-    ...module,
-    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
-      options === undefined ? module.api(path) : module.api(path, options),
+    api,
+    contractApi: contractApiOver(api, {
+      'GET /run': runView,
+      'GET /workflows/versions': versionRows,
+      'GET /workflows/health/delta': healthDelta,
+      'POST /ai/patch-workflow': (value: Record<string, unknown>) => patchResponse(value),
+      'POST /recovery/playbooks/{id}/use': (value: { suggestion: Record<string, unknown> }) => ({ suggestion: patchResponse(value.suggestion) }),
+    }),
   }
 })
 vi.mock('./recovery-dialog/SimilarRunsCard', () => ({ SimilarRunsCard: () => null }))

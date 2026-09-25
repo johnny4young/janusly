@@ -36,6 +36,7 @@ import {
 import { isV1ReadPath } from '@/lib/api-contract'
 import type { ApiOperation, ApiRequest, ApiResponse } from '@/lib/api-types.generated'
 import { getResolvedLocale, t } from './i18n/runtime'
+import { MalformedResponseError } from './lib/malformed-response'
 import { useWorkflowStore } from './store'
 
 // Production is always same-origin. Vite proxies API routes to the Go process
@@ -222,7 +223,10 @@ export async function api(path: string, options: RequestInit = {}): Promise<unkn
   return promise
 }
 
-type ContractRequestOptions = Omit<RequestInit, 'method' | 'body'>
+type ContractRequestOptions<Operation extends ApiOperation> = Omit<RequestInit, 'method' | 'body'> & {
+  /** Generated response guard for this operation; a mismatch is a malformed response. */
+  guard?: (value: unknown) => value is ApiResponse<Operation>
+}
 
 function matchesContractPath(template: string, actualPath: string): boolean {
   const queryIndex = actualPath.indexOf('?')
@@ -245,7 +249,7 @@ export async function contractApi<Operation extends ApiOperation>(
   operation: Operation,
   path: string,
   request: ApiRequest<Operation>,
-  options: ContractRequestOptions = {},
+  options: ContractRequestOptions<Operation> = {},
 ): Promise<ApiResponse<Operation>> {
   const separator = operation.indexOf(' ')
   const method = operation.slice(0, separator)
@@ -253,9 +257,15 @@ export async function contractApi<Operation extends ApiOperation>(
   if (separator <= 0 || !matchesContractPath(template, path)) {
     throw new TypeError(`Path ${path} does not match contract operation ${operation}`)
   }
-  const init: RequestInit = { ...options, method }
+  const { guard, ...requestOptions } = options
+  const init: RequestInit = { ...requestOptions, method }
   if (request !== undefined) init.body = JSON.stringify(request)
-  return await api(path, init) as ApiResponse<Operation>
+  const payload = await api(path, init)
+  // api() throws on every non-2xx except the field-error envelope, which is not the operation's payload.
+  if (guard && !guard(payload) && !isFieldErrorResult(path, payload)) {
+    throw new MalformedResponseError()
+  }
+  return payload as ApiResponse<Operation>
 }
 
 /**
@@ -312,7 +322,7 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
     if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
       throw new DOMException('Request cancelled', 'AbortError')
     }
-    if (res.ok) throw new Error(t('api.error.malformedResponse'))
+    if (res.ok) throw new MalformedResponseError()
     // The known non-success HTTP status remains authoritative even when its
     // optional error detail is unreadable (especially 401/403).
   }
@@ -322,14 +332,14 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
     try {
       rawPayload = JSON.parse(rawText)
     } catch {
-      if (res.ok) throw new Error(t('api.error.malformedResponse'))
+      if (res.ok) throw new MalformedResponseError()
     }
   }
   const { payload, requestId: envelopeRequestId } = unwrapVersionedPayload(rawPayload, res.ok)
   const requestId = envelopeRequestId ?? res.headers.get('x-request-id') ?? undefined
 
   if (!res.ok) {
-    if ((path === '/start' || path === '/resume') && res.status === 400 && isFieldErrorEnvelope(payload)) {
+    if (res.status === 400 && isFieldErrorResult(path, payload)) {
       return payload
     }
     // AI cost budget block — surface the envelope in the store so the
@@ -455,6 +465,10 @@ export async function openRunEventStream(
     throw new ApiError(t('api.error.requestFailed', { status: res.status }), { statusCode: res.status })
   }
   return res
+}
+
+function isFieldErrorResult(path: string, value: unknown): boolean {
+  return (path === '/start' || path === '/resume') && isFieldErrorEnvelope(value)
 }
 
 function isFieldErrorEnvelope(value: unknown): value is { errors: string[] } {

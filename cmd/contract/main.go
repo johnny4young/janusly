@@ -16,6 +16,11 @@ import (
 )
 
 func main() {
+	schemas, err := contract.ComponentSchemas()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "components:", err)
+		os.Exit(1)
+	}
 	paths := map[string]map[string]any{}
 	for _, route := range contract.Routes {
 		path := strings.TrimPrefix(route.Path, "/v1")
@@ -35,7 +40,7 @@ func main() {
 							"allOf": []any{
 								map[string]any{"$ref": "#/components/schemas/V1Envelope"},
 								map[string]any{"type": "object", "properties": map[string]any{
-									"data": route.Response,
+									"data": contract.RenderSchema(route.Response),
 								}},
 							},
 						},
@@ -53,13 +58,15 @@ func main() {
 			operation["requestBody"] = map[string]any{
 				"required": true,
 				"content": map[string]any{"application/json": map[string]any{
-					"schema": route.Request,
+					"schema": contract.RenderSchema(route.Request),
 				}},
 			}
 		}
 		item[strings.ToLower(route.Method)] = operation
 	}
 
+	schemas["V1Envelope"] = v1Envelope
+	schemas["V1ErrorEnvelope"] = v1ErrorEnvelope
 	document := map[string]any{
 		"openapi": "3.1.0",
 		"info": map[string]any{
@@ -70,35 +77,7 @@ func main() {
 		"servers": []any{map[string]any{"url": "/v1", "description": "Version 1"}},
 		"paths":   paths,
 		"components": map[string]any{
-			"schemas": map[string]any{
-				"V1Envelope": map[string]any{
-					"type":        "object",
-					"description": "The v1 success envelope: apiVersion + requestId (echoed as X-Request-Id) around the data payload.",
-					"properties": map[string]any{
-						"apiVersion": map[string]any{"type": "string", "const": "v1"},
-						"requestId":  map[string]any{"type": "string"},
-					},
-					"required": []any{"apiVersion", "requestId"},
-				},
-				"V1ErrorEnvelope": map[string]any{
-					"type":        "object",
-					"description": "The v1 error envelope: a stable code, a human message, and optional params.",
-					"properties": map[string]any{
-						"apiVersion": map[string]any{"type": "string", "const": "v1"},
-						"requestId":  map[string]any{"type": "string"},
-						"error": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"code":    map[string]any{"type": "string"},
-								"message": map[string]any{"type": "string"},
-								"params":  map[string]any{"type": "object"},
-							},
-							"required": []any{"code", "message"},
-						},
-					},
-					"required": []any{"apiVersion", "requestId", "error"},
-				},
-			},
+			"schemas": schemas,
 		},
 	}
 
@@ -126,4 +105,33 @@ func marshalStable(value any) ([]byte, error) {
 	// readable. The sort import guards against future non-map ordering.
 	_ = sort.Strings
 	return json.MarshalIndent(value, "", "  ")
+}
+
+var v1Envelope = map[string]any{
+	"type":        "object",
+	"description": "The v1 success envelope: apiVersion + requestId (echoed as X-Request-Id) around the data payload.",
+	"properties": map[string]any{
+		"apiVersion": map[string]any{"type": "string", "const": "v1"},
+		"requestId":  map[string]any{"type": "string"},
+	},
+	"required": []any{"apiVersion", "requestId"},
+}
+
+var v1ErrorEnvelope = map[string]any{
+	"type":        "object",
+	"description": "The v1 error envelope: a stable code, a human message, and optional params.",
+	"properties": map[string]any{
+		"apiVersion": map[string]any{"type": "string", "const": "v1"},
+		"requestId":  map[string]any{"type": "string"},
+		"error": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"code":    map[string]any{"type": "string"},
+				"message": map[string]any{"type": "string"},
+				"params":  map[string]any{"type": "object"},
+			},
+			"required": []any{"code", "message"},
+		},
+	},
+	"required": []any{"apiVersion", "requestId", "error"},
 }

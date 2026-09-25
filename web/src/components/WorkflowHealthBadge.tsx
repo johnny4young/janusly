@@ -29,6 +29,7 @@ import { Activity } from 'lucide-react'
 import { contractApi } from '../api'
 import { tHealthRationale, useT } from '../i18n'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { isGetWorkflowsHealthResponse } from '../lib/api-guards/operations/GetWorkflowsHealth'
 
 const WORKFLOW_HEALTH_TAGS = [PLATFORM_TAG, 'workflows', 'runs', 'dlq', 'recovery'] as const
 
@@ -119,7 +120,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
     let cancelled = false
     setLoading(true)
     setError(null)
-    contractApi('GET /workflows/health', `/workflows/health?workflowId=${encodeURIComponent(workflowId)}`, undefined)
+    contractApi('GET /workflows/health', `/workflows/health?workflowId=${encodeURIComponent(workflowId)}`, undefined, { guard: isGetWorkflowsHealthResponse })
       .then((payload) => {
         if (cancelled) return
         // The contract type is shallow; the renderer needs a numeric score

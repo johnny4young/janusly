@@ -62,7 +62,7 @@ func TestRouteRegistrySweepAsEditor(t *testing.T) {
 			if res.status != 403 || !strings.Contains(message(res), "requires admin role") {
 				t.Fatalf("%s: editor must get the admin 403, got %d %+v", pattern, res.status, res.body)
 			}
-		case gate.permission != "" && !auth.DefaultRoleHasPermission(auth.RoleEditor, gate.permission):
+		case gate.permission != "" && !defaultRoleHasPermission(auth.RoleEditor, gate.permission):
 			if res.status != 403 || !strings.Contains(message(res), "requires permission "+gate.permission) {
 				t.Fatalf("%s: editor must get the permission 403, got %d %+v", pattern, res.status, res.body)
 			}

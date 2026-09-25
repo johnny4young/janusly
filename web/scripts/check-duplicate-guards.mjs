@@ -1,8 +1,6 @@
 /**
- * Reject a second definition of the runtime shape guards. `src/lib/guards.ts`
- * owns `isRecord`, `asRecord` and `asRecordOrEmpty`; a local copy in a
- * component is how their null handling drifted apart.
- *
+ * Reject a local copy of a guard `src/lib/guards.ts` exports, even with
+ * different casing: that is how their null handling drifted apart.
  * Used by: `pnpm lint` and `scripts/check-duplicate-guards.test.mjs`.
  */
 
@@ -10,15 +8,35 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const GUARD_NAMES = ['isRecord', 'asRecord', 'asRecordOrEmpty']
 const OWNER = 'lib/guards.ts'
+const here = path.dirname(fileURLToPath(import.meta.url))
 
-/** Lines that declare one of the shared guards as a local function or const. */
-export function duplicateGuardDeclarations(source) {
-  const pattern = new RegExp(`^\\s*(?:export\\s+)?(?:function|const)\\s+(${GUARD_NAMES.join('|')})\\b`, 'gm')
+// Combinators (`shape`, `literal`, `isAny`) are ordinary names elsewhere and have no null handling to drift.
+const GENERIC = new Set(['isAny'])
+
+/** The guard-like (`is*`, `as*`, `has*`) function names a guards module exports. */
+export function ownedGuardNames(guardsSource) {
+  const names = [...guardsSource.matchAll(/^export function ((?:is|as|has)[A-Z]\w*)/gm)]
+    .map((match) => match[1])
+    .filter((name) => !GENERIC.has(name))
+  if (names.length === 0) throw new Error(`${OWNER} exports no guards`)
+  return names
+}
+
+let defaultNames
+function realGuardNames() {
+  defaultNames ??= ownedGuardNames(fs.readFileSync(path.resolve(here, '../src', OWNER), 'utf8'))
+  return defaultNames
+}
+
+/** Lines that declare one of the shared guards (compared case-insensitively) as a local function or const. */
+export function duplicateGuardDeclarations(source, names = realGuardNames()) {
+  const owned = new Map(names.map((name) => [name.toLowerCase(), name]))
   const findings = []
-  for (const match of source.matchAll(pattern)) {
-    findings.push({ name: match[1], line: source.slice(0, match.index).split('\n').length })
+  for (const match of source.matchAll(/^\s*(?:export\s+)?(?:function|const)\s+([A-Za-z_$][\w$]*)\b/gm)) {
+    const owner = owned.get(match[1].toLowerCase())
+    if (!owner) continue
+    findings.push({ name: match[1], owner, line: source.slice(0, match.index).split('\n').length })
   }
   return findings
 }
@@ -37,12 +55,12 @@ function listFiles(root) {
   return files
 }
 
-export function collectDuplicateGuards(srcRoot) {
+export function collectDuplicateGuards(srcRoot, names = ownedGuardNames(fs.readFileSync(path.join(srcRoot, OWNER), 'utf8'))) {
   const violations = []
   for (const file of listFiles(srcRoot)) {
     const relative = path.relative(srcRoot, file).split(path.sep).join('/')
     if (relative === OWNER) continue
-    for (const finding of duplicateGuardDeclarations(fs.readFileSync(file, 'utf8'))) {
+    for (const finding of duplicateGuardDeclarations(fs.readFileSync(file, 'utf8'), names)) {
       violations.push({ file: relative, ...finding })
     }
   }
@@ -50,14 +68,18 @@ export function collectDuplicateGuards(srcRoot) {
 }
 
 function main() {
-  const here = path.dirname(fileURLToPath(import.meta.url))
-  const violations = collectDuplicateGuards(path.resolve(here, '../src'))
+  const srcRoot = path.resolve(here, '../src')
+  const names = ownedGuardNames(fs.readFileSync(path.join(srcRoot, OWNER), 'utf8'))
+  const violations = collectDuplicateGuards(srcRoot, names)
   if (violations.length > 0) {
     console.error('Duplicate runtime guards — import them from src/lib/guards.ts instead:')
-    for (const violation of violations) console.error(`  src/${violation.file}:${violation.line}  ${violation.name}`)
+    for (const violation of violations) {
+      const alias = violation.name === violation.owner ? '' : ` (copy of ${violation.owner})`
+      console.error(`  src/${violation.file}:${violation.line}  ${violation.name}${alias}`)
+    }
     process.exit(1)
   }
-  console.log('duplicate guard ratchet passed (guards live in src/lib/guards.ts only).')
+  console.log(`duplicate guard ratchet passed (${names.length} guards live in src/lib/guards.ts only).`)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

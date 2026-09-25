@@ -30,7 +30,7 @@ import { currentCanvasAuthority, ownCanvas } from '../lib/canvas-authority'
 import { isRecoveryDelta, type RecoveryDelta as DeltaResponse, type HealthSnapshot as PreSaveBeforeSnapshot } from '../lib/health-delta'
 export type { HealthSnapshot as PreSaveBeforeSnapshot } from '../lib/health-delta'
 import { AlertCircle, ArrowDownRight, ArrowUpRight, Minus, RotateCcw } from 'lucide-react'
-import { api } from '../api'
+import { contractApi } from '../api'
 import { formatRoute } from '../lib/route'
 import { Button } from './ui/Button'
 import { readWorkflowVersionPage, type WorkflowVersionRow } from '../lib/list-contract'
@@ -41,6 +41,8 @@ import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
 import './RecoveryDeltaCard.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { MalformedResponseError } from '../lib/malformed-response'
+import { isGetWorkflowsHealthDeltaResponse } from '../lib/api-guards/operations/GetWorkflowsHealthDelta'
 
 const RECOVERY_DELTA_TAGS = [PLATFORM_TAG, 'workflows', 'recovery', 'dlq', 'runs'] as const
 
@@ -99,10 +101,10 @@ function ScopedRecoveryDeltaCard({ workflowId, afterVersion, priorFailureSignatu
       afterVersion: String(afterVersion),
     })
     if (priorFailureSignature) params.set('priorFailureSignature', priorFailureSignature)
-    api(`/workflows/health/delta?${params.toString()}`, { signal: controller.signal })
+    contractApi('GET /workflows/health/delta', `/workflows/health/delta?${params.toString()}`, undefined, { signal: controller.signal, guard: isGetWorkflowsHealthDeltaResponse })
       .then((data) => {
         if (controller.signal.aborted) return
-        if (!isRecoveryDelta(data, workflowId, afterVersion, priorFailureSignature)) throw new Error(runtimeT('api.error.malformedResponse'))
+        if (!isRecoveryDelta(data, workflowId, afterVersion, priorFailureSignature)) throw new MalformedResponseError()
         setState({ kind: 'ready', data })
       })
       .catch((error: unknown) => {

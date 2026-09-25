@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseRecoveryPatchSuggestion } from './recovery-patch-contract'
+import { parseRecoveryPatchSuggestion, parseRecoveryPlaybookUseResponse } from './recovery-patch-contract'
 
 const workflow = {
   dslVersion: '1.0' as const,
@@ -13,19 +13,21 @@ const passport = {
   priorSameSignatureOutcome: null,
 }
 
+const tab = {
+  workflow,
+  rationale: 'Add a bounded retry.',
+  approachLabel: 'add_retry',
+  confidence: 84,
+  calibratedConfidence: 79,
+  safety: { writeSide: false, approvalRequired: false, approvalPresent: true },
+  consideredAlternatives: [{ approach: 'Raise timeout', rejectedBecause: 'The failure is a reset.' }],
+}
+
 const currentResponse = {
   mode: 'ai',
   suggestedWorkflow: workflow,
   rationale: 'Add a bounded retry.',
-  suggestions: [{
-    workflow,
-    rationale: 'Add a bounded retry.',
-    approachLabel: 'add_retry',
-    confidence: 84,
-    calibratedConfidence: 79,
-    safety: { writeSide: false, approvalRequired: false, approvalPresent: true },
-    consideredAlternatives: [{ approach: 'Raise timeout', rejectedBecause: 'The failure is a reset.' }],
-  }],
+  suggestions: [tab],
   evidence: [{
     kind: 'recent_error',
     sourceRef: 'run-1',
@@ -39,6 +41,34 @@ const options = {
   expectedFailureSignature: passport.failureSignature,
 }
 
+const playbook = {
+  id: 'pb-1',
+  workflowId: 'wf-1',
+  signature: passport.failureSignature,
+  version: 2,
+  status: 'active',
+  title: 'Retry transient resets',
+  instructionsMarkdown: 'Revalidate this saved patch.',
+  approachLabel: 'add_retry',
+  successfulUses: 3,
+  regressions: 0,
+  lastValidatedAt: '2026-09-21T12:00:00.000Z',
+  activatedAt: '2026-09-21T12:00:00.000Z',
+  retiredAt: null,
+  createdAt: '2026-09-20T12:00:00.000Z',
+  updatedAt: '2026-09-21T12:00:00.000Z',
+}
+
+const playbookUse = (patch: Record<string, unknown> = {}) => ({
+  suggestion: {
+    ...currentResponse,
+    mode: 'playbook',
+    suggestions: [{ ...tab, confidence: 100, calibratedConfidence: 100 }],
+    playbook,
+    ...patch,
+  },
+})
+
 describe('parseRecoveryPatchSuggestion', () => {
   it('validates, scrubs and binds a current response to the persisted workflow', () => {
     const result = parseRecoveryPatchSuggestion(currentResponse, options)
@@ -48,109 +78,98 @@ describe('parseRecoveryPatchSuggestion', () => {
     expect(result?.evidence?.[0]?.snippet).toBe('Saw [redacted] in the old error')
   })
 
-  it('uses the validated suggestion as the current source of truth without legacy mirrors', () => {
-    const { suggestedWorkflow: _workflow, rationale: _rationale, ...withoutMirrors } = currentResponse
-    expect(parseRecoveryPatchSuggestion(withoutMirrors, options)?.suggestions[0]).toEqual(
-      expect.objectContaining({ approachLabel: 'add_retry', rationale: 'Add a bounded retry.' }),
-    )
-  })
-
-  it('supports only the intentional legacy envelope when suggestions is absent', () => {
-    expect(parseRecoveryPatchSuggestion({
-      mode: 'ai',
-      suggestedWorkflow: workflow,
-      rationale: 'Legacy response.',
-    }, options)?.suggestions).toEqual([expect.objectContaining({
-      approachLabel: 'other',
-      confidence: 50,
-      calibratedConfidence: 50,
-      rationale: 'Legacy response.',
-    })])
-
-    expect(parseRecoveryPatchSuggestion({
-      mode: 'fallback',
-      suggestedWorkflow: workflow,
-      rationale: 'Provider unavailable.',
-    }, options)?.suggestions[0]).toEqual(expect.objectContaining({
-      confidence: 0,
-      calibratedConfidence: 0,
-    }))
+  it('leaves rationale lengths, confidence ranges and alternative counts to the server', () => {
+    const long = {
+      ...tab,
+      rationale: 'x'.repeat(5_000),
+      confidence: 140,
+      calibratedConfidence: 140,
+      consideredAlternatives: Array.from({ length: 4 }, () => ({ approach: 'a'.repeat(200), rejectedBecause: 'b' })),
+    }
+    const suggestions = Array.from({ length: 4 }, () => long)
+    expect(parseRecoveryPatchSuggestion({ ...currentResponse, suggestions, aiError: 'e'.repeat(900) }, options)?.suggestions).toHaveLength(4)
   })
 
   it.each([
-    ['an empty current suggestions list', { ...currentResponse, suggestions: [] }],
-    ['a present but non-array suggestions field', { ...currentResponse, suggestions: undefined }],
+    ['a legacy envelope without suggestions', (() => {
+      const { suggestions: _suggestions, ...legacy } = currentResponse
+      return legacy
+    })()],
+    ['a missing recovery passport', (() => {
+      const { recoveryPassport: _passport, ...withoutPassport } = currentResponse
+      return withoutPassport
+    })()],
+    ['feedback health the dialog does not render', { ...currentResponse, feedbackHealth: {} }],
+    ['a playbook mode on the patch route', { ...currentResponse, mode: 'playbook' }],
+  ])('delegates shape to the generated guard: %s', (_name, payload) => {
+    expect(parseRecoveryPatchSuggestion(payload, options)).toBeNull()
+  })
+
+  it.each([
+    ['an empty suggestions list', { ...currentResponse, suggestions: [] }],
     ['an invalid suggested workflow', {
       ...currentResponse,
-      suggestions: [{ ...currentResponse.suggestions[0], workflow: { nodes: [], edges: [{ from: 'x', to: 'y' }] } }],
+      suggestions: [{ ...tab, workflow: { ...workflow, edges: [{ from: 'x', to: 'y' }] } }],
     }],
-    ['an out-of-range confidence', {
+    ['an approach the dialog cannot label', {
       ...currentResponse,
-      suggestions: [{ ...currentResponse.suggestions[0], confidence: 101 }],
+      suggestions: [{ ...tab, approachLabel: 'rewrite_everything' }],
     }],
     ['a misleading fallback calibration', {
       ...currentResponse,
       mode: 'fallback',
-      suggestions: [{ ...currentResponse.suggestions[0], confidence: 0, calibratedConfidence: 100 }],
+      suggestions: [{ ...tab, confidence: 0, calibratedConfidence: 100 }],
     }],
     ['an invalid evidence list', {
       ...currentResponse,
       evidence: [{ kind: 'recent_error', sourceRef: 'run-1', snippet: 'x', weight: 2 }],
     }],
-    ['a missing recovery passport', (() => {
-      const { recoveryPassport: _passport, ...withoutPassport } = currentResponse
-      return withoutPassport
-    })()],
     ['a mismatched recovery passport', {
       ...currentResponse,
       recoveryPassport: { ...passport, failureSignature: 'Other failure' },
     }],
     ['an explicitly foreign workflow identity', {
       ...currentResponse,
-      suggestions: [{ ...currentResponse.suggestions[0], workflow: { ...workflow, id: 'wf-other' } }],
+      suggestions: [{ ...tab, workflow: { ...workflow, id: 'wf-other' } }],
     }],
   ])('fails closed for %s', (_name, payload) => {
     expect(parseRecoveryPatchSuggestion(payload, options)).toBeNull()
   })
 
-  it('requires the playbook identity and source metadata to match the requested recovery', () => {
-    const playbook = {
-      id: 'pb-1',
-      workflowId: 'wf-1',
-      signature: passport.failureSignature,
-      version: 2,
-      status: 'active',
-      title: 'Retry transient resets',
-      instructionsMarkdown: 'Revalidate this saved patch.',
-      approachLabel: 'add_retry',
-      successfulUses: 3,
-      regressions: 0,
-      lastValidatedAt: '2026-09-21T12:00:00.000Z',
-      activatedAt: '2026-09-21T12:00:00.000Z',
-      retiredAt: null,
-      createdAt: '2026-09-20T12:00:00.000Z',
-      updatedAt: '2026-09-21T12:00:00.000Z',
-    }
-    const response = {
-      ...currentResponse,
-      mode: 'playbook',
-      suggestions: [{ ...currentResponse.suggestions[0], confidence: 100, calibratedConfidence: 100 }],
-      playbook,
-    }
+  it('never binds a patch response to a playbook the operator picked', () => {
+    expect(parseRecoveryPatchSuggestion(currentResponse, { ...options, expectedPlaybookId: 'pb-1' })).toBeNull()
+  })
+})
 
-    expect(parseRecoveryPatchSuggestion(response, {
-      ...options,
-      expectedPlaybookId: 'pb-1',
-    })?.playbook).toEqual({
+describe('parseRecoveryPlaybookUseResponse', () => {
+  it('requires the playbook identity and source metadata to match the requested recovery', () => {
+    const request = { ...options, expectedPlaybookId: 'pb-1' }
+    expect(parseRecoveryPlaybookUseResponse(playbookUse(), request)?.playbook).toEqual({
       id: 'pb-1',
       version: 2,
       title: 'Retry transient resets',
       successfulUses: 3,
       regressions: 0,
     })
-    expect(parseRecoveryPatchSuggestion(response, {
-      ...options,
-      expectedPlaybookId: 'pb-other',
-    })).toBeNull()
+    expect(parseRecoveryPlaybookUseResponse(playbookUse(), { ...request, expectedPlaybookId: 'pb-other' })).toBeNull()
+    for (const source of [
+      { ...playbook, status: 'retired' },
+      { ...playbook, workflowId: 'wf-other' },
+      { ...playbook, signature: 'Other failure' },
+    ]) {
+      expect(parseRecoveryPlaybookUseResponse(playbookUse({ playbook: source }), request)).toBeNull()
+    }
+  })
+
+  it('pins a replayed playbook to one full-confidence suggestion', () => {
+    const request = { ...options, expectedPlaybookId: 'pb-1' }
+    const second = { ...tab, confidence: 100, calibratedConfidence: 100 }
+    expect(parseRecoveryPlaybookUseResponse(playbookUse({ suggestions: [second, second] }), request)).toBeNull()
+    expect(parseRecoveryPlaybookUseResponse(playbookUse({ suggestions: [{ ...second, confidence: 90 }] }), request)).toBeNull()
+  })
+
+  it('delegates the envelope shape to the generated guard', () => {
+    expect(parseRecoveryPlaybookUseResponse(playbookUse().suggestion, options)).toBeNull()
+    expect(parseRecoveryPlaybookUseResponse(playbookUse({ mode: 'ai' }), options)).toBeNull()
   })
 })

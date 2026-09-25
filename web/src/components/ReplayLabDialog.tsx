@@ -31,6 +31,7 @@ import { RunComparisonView, type RunComparisonPayload } from './RunComparisonVie
 import { useT } from '../i18n'
 import { formatStatusLabel } from '../constants'
 import { Button } from '@/components/ui/Button'
+import { isGetRunResponse } from '../lib/api-guards/operations/GetRun'
 
 type SourceRun = {
   id: string
@@ -90,7 +91,7 @@ export function ReplayLabDialog({
 
     const tick = async () => {
       try {
-        const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(replayingRunId)}`, undefined)
+        const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(replayingRunId)}`, undefined, { guard: isGetRunResponse })
         if (cancelled || !aliveRef.current) return
         const result = parseRunStatusSnapshot(payload, replayingRunId)
         if (!result) throw new Error(t('api.error.malformedResponse'))

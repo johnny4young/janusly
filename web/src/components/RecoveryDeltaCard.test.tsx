@@ -4,6 +4,7 @@ import { api } from '../api'
 import { parseRoute } from '../lib/route'
 import { useWorkflowStore } from '../store'
 import { RecoveryDeltaCard } from './RecoveryDeltaCard'
+import { healthDelta } from '../test/health-delta-fixture'
 
 vi.mock('../api', () => {
   const module = ({
@@ -50,7 +51,7 @@ const baseDelta = (overrides: Partial<{
   recentRunsAgainstAfter: { totalRuns: number; succeeded: number; failed: number; running: number }
   sameFailureSinceApply: { count: number; sampleDeadLetterIds: string[]; priorSignature: string } | null
   priorVersion: { version: number; versionId: string } | null
-}> = {}) => ({
+}> = {}) => healthDelta({
   workflowId: 'wf-1',
   afterVersion: 2,
   windowDays: 1,

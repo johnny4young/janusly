@@ -7,22 +7,38 @@ import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { ConfirmProvider } from './ConfirmDialog'
 import { WorkflowRolloutPanel } from './WorkflowRolloutPanel'
 
-vi.mock('../api', () => {
-  const module = ({ api: vi.fn() })
-  return {
-    ...module,
-    // Typed reads route through contractApi; delegate to the same mock so the
-    // path-keyed expectations below keep working.
-    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
-      options === undefined ? module.api(path) : module.api(path, options),
-  }
+vi.mock('../api', async () => {
+  const { contractApiOver } = await import('../test/contract-api-mock')
+  const api = vi.fn()
+  return { api, contractApi: contractApiOver(api) }
 })
 
 const initialState = useWorkflowStore.getState()
+const versionRow = { orgId: 'org-1', workflowId: 'workflow-1', createdAt: null, createdBy: null, dagJson: { nodes: [], edges: [] }, sloJson: null, upstreamHealthSources: null }
 const versions = [
-  { workflowId: 'workflow-1', createdAt: null, id: 'version-2', version: 2, dagJson: { nodes: [], edges: [] } },
-  { workflowId: 'workflow-1', createdAt: null, id: 'version-1', version: 1, dagJson: { nodes: [], edges: [] } },
+  { ...versionRow, id: 'version-2', version: 2 },
+  { ...versionRow, id: 'version-1', version: 1 },
 ]
+
+function qualificationSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    baselineCaseCount: 4,
+    baselineDatasetValid: true,
+    candidateAssertionCount: 4,
+    candidateCaseCount: 4,
+    passedCandidateAssertions: 4,
+    failedCandidateAssertions: 0,
+    regressionCount: 0,
+    coverageFailureCount: 0,
+    datasetDigest: 'digest-1',
+    datasetVersion: 'semantic-outcomes-v1',
+    mode: 'compare',
+    status: 'passed',
+    failures: [],
+    failuresTruncated: false,
+    ...overrides,
+  }
+}
 
 function activeRollout(overrides: Record<string, unknown> = {}) {
   return {
@@ -52,6 +68,7 @@ function passedQualification(overrides: Record<string, unknown> = {}) {
     required: true,
     qualification: {
       id: 'qualification-1',
+      workflowId: 'workflow-1',
       baselineVersionId: 'version-1',
       candidateVersionId: 'version-2',
       datasetVersion: 'semantic-outcomes-v1',
@@ -59,15 +76,7 @@ function passedQualification(overrides: Record<string, unknown> = {}) {
       mode: 'compare',
       status: 'passed',
       createdAt: '2026-07-21T11:55:00.000Z',
-      summary: {
-        candidateAssertionCount: 4,
-        passedCandidateAssertions: 4,
-        failedCandidateAssertions: 0,
-        regressionCount: 0,
-        coverageFailureCount: 0,
-        failures: [],
-        failuresTruncated: false,
-      },
+      summary: qualificationSummary(),
       ...overrides,
     },
   }
@@ -317,7 +326,7 @@ describe('<WorkflowRolloutPanel />', () => {
     vi.mocked(api).mockImplementation(async path => {
       if (path.startsWith('/workflows/versions')) return versions
       if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
-      return { rollout: { ...activeRollout(), canaryFailed: -1 } }
+      return { rollout: { ...activeRollout(), canaryFailed: 1.5 } }
     })
 
     render(<WorkflowRolloutPanel />)
@@ -374,8 +383,8 @@ describe('<WorkflowRolloutPanel />', () => {
   it('explains bounded qualification failures without exposing evaluator internals', async () => {
     const qualification = passedQualification({
       status: 'failed',
-      summary: {
-        candidateAssertionCount: 4,
+      summary: qualificationSummary({
+        status: 'failed',
         passedCandidateAssertions: 3,
         failedCandidateAssertions: 1,
         regressionCount: 1,
@@ -385,9 +394,10 @@ describe('<WorkflowRolloutPanel />', () => {
           fixtureId: 'approved-payment',
           sourceNodeId: 'outcome',
           reason: 'detector_uncovered',
+          actual: 'uncovered',
+          expected: 'covered',
         }],
-        failuresTruncated: false,
-      },
+      }),
     })
     vi.mocked(api).mockImplementation(async path => {
       if (path.startsWith('/workflows/versions')) return versions

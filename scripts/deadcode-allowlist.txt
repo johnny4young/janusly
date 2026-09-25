@@ -1,0 +1,6 @@
+# Functions unreachable from every ./cmd/... production root that stay on
+# purpose. Format: <import path>.<Func> # <reason>
+# scripts/deadcode-check.sh fails on unlisted functions and on stale entries.
+
+github.com/johnny4young/janusly/internal/observability.SweepNames # test seam: wiring, alert-rule and e2e tests assert every supervised sweep is registered
+github.com/johnny4young/janusly/internal/secretstore.ResetForTests # test seam: integration tests clear the cached root key and warn-once state between cases

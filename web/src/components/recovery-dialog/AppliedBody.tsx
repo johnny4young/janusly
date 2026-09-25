@@ -19,7 +19,6 @@ const PlaybookPromotionCard = lazy(() => import('./PlaybookPromotionCard').then(
 })))
 
 export function AppliedBody({
-  runId,
   cluster,
   appliedWorkflowId,
   appliedVersion,
@@ -28,7 +27,6 @@ export function AppliedBody({
   playbookPromotionSource,
   playbookUsePending,
 }: {
-  runId?: string
   cluster?: ClusterApplyResult
   appliedWorkflowId?: string
   appliedVersion?: number
@@ -43,9 +41,7 @@ export function AppliedBody({
       {t('recoveryDialog.applied.replayedNofM', { replayed: cluster.replayed, total: cluster.replayed + cluster.failed })}
       {cluster.failed > 0 ? `; ${t('recoveryDialog.applied.numFailed', { count: cluster.failed })}` : ''}.
     </>
-  ) : runId
-    ? t('recoveryDialog.applied.runStarted', { runIdShort: runId.slice(0, 8) })
-    : t('recoveryDialog.applied.dlqReplayed')
+  ) : t('recoveryDialog.applied.dlqReplayed')
   const ribbon = (
     <div className="we-recovery-success" role="alert">
       <CheckCircle2 size={14} aria-hidden="true" />

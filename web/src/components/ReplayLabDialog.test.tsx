@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { ReplayLabDialog } from './ReplayLabDialog'
+import { runView } from '../test/run-view-fixture'
 
 vi.mock('../api', () => {
   const module = ({
@@ -28,16 +29,16 @@ const sourceRun = {
 }
 
 const replayResponse = { runId: 'replay-run-id' }
-const succeededRun = {
+const succeededRun = runView({
   run: { id: 'replay-run-id', status: 'succeeded' },
   nodes: [],
   events: [], eventsCursor: null, eventsHasMore: false,
-}
-const failedRun = {
+})
+const failedRun = runView({
   run: { id: 'replay-run-id', status: 'failed' },
   nodes: [],
   events: [], eventsCursor: null, eventsHasMore: false,
-}
+})
 const emptyComparison = {
   baseRun: { id: 'src-run-id', status: 'failed', replayMode: null, parentRunId: null, createdAt: null },
   replayRun: { id: 'replay-run-id', status: 'succeeded', replayMode: 'validation', parentRunId: 'src-run-id', createdAt: null },
@@ -45,7 +46,7 @@ const emptyComparison = {
 }
 
 describe('<ReplayLabDialog />', () => {
-  it.each([{}, { ...succeededRun, run: { id: 'other-run', status: 'succeeded' } }])('never compares an invalid replay snapshot: %j', async payload => {
+  it.each([{}, { ...succeededRun, run: { ...succeededRun.run as object, id: 'other-run' } }])('never compares an invalid replay snapshot: %j', async payload => {
     vi.mocked(api).mockResolvedValueOnce(replayResponse).mockResolvedValueOnce(payload)
     render(<ReplayLabDialog sourceRun={sourceRun} onClose={vi.fn()} />)
     fireEvent.click(screen.getByTestId('replay-lab-start'))

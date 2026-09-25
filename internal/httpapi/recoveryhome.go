@@ -165,4 +165,7 @@ func (s *V1Server) mountRecoveryHomeRoutes(mux *http.ServeMux) {
 	s.route(mux, "GET /recovery/home", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.recoveryHomeCore(r, rc))
 	})
+	s.route(mux, "GET /v1/recovery/home", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.recoveryHomeCore(r, rc))
+	})
 }

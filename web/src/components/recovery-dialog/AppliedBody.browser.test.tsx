@@ -27,7 +27,7 @@ describe('<AppliedBody /> replay queue state (browser smoke)', () => {
   it('renders the terminal-verification state in Spanish without clipping', () => {
     changeRuntimeLocale('es')
     const { getByTestId } = render(
-      <AppliedBody runId="run-12345678" playbookUsePending />,
+      <AppliedBody playbookUsePending />,
     )
 
     const pending = getByTestId('recovery-playbook-use-pending')

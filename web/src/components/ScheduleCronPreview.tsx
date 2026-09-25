@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 import { contractApi } from '../api'
 import { getResolvedLocale, useT } from '../i18n'
+import { isGetWorkflowsSchedulePreviewResponse } from '../lib/api-guards/operations/GetWorkflowsSchedulePreview'
 
 export type ScheduleCronPreviewKind = 'idle' | 'loading' | 'invalid' | 'error' | 'ready'
 
@@ -45,7 +46,7 @@ export function ScheduleCronPreview({ expression, enabled, id, onStateChange }: 
     let active = true
     setState({ expression: cron, kind: 'loading' })
     const timeout = window.setTimeout(() => {
-      contractApi('GET /workflows/schedule-preview', `/workflows/schedule-preview?cron=${encodeURIComponent(cron)}`, undefined, { signal: controller.signal })
+      contractApi('GET /workflows/schedule-preview', `/workflows/schedule-preview?cron=${encodeURIComponent(cron)}`, undefined, { signal: controller.signal, guard: isGetWorkflowsSchedulePreviewResponse })
         .then((payload) => {
           if (!active) return
           const preview = payload as { valid?: unknown; nextFires?: unknown }

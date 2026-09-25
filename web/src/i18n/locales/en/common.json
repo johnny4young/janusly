@@ -2321,7 +2321,6 @@
   "recoveryDialog.clusterProgress.replay": "Replay {{total}} runs",
   "recoveryDialog.applied.title": "Patch applied.",
   "recoveryDialog.applied.nextSteps": "Next: watch the Runs tab for new failures, or open the run timeline to confirm the fix held.",
-  "recoveryDialog.applied.runStarted": "Replay queued — run id {{runIdShort}}…",
   "recoveryDialog.applied.dlqReplayed": "DLQ replay queued.",
   "recoveryDialog.applied.replayedNofM": "Queued {{replayed}} of {{total}}",
   "recoveryDialog.applied.numFailed": "{{count}} could not be queued",

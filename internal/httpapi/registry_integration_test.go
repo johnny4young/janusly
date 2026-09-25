@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -57,7 +58,7 @@ func TestRouteRegistrySweepAsViewer(t *testing.T) {
 		// lacks (e.g. ai.write) must reject at the permission layer — the
 		// contract's permission-only route shape.
 		if gate.role == auth.RoleViewer && gate.permission != "" &&
-			!auth.DefaultRoleHasPermission(auth.RoleViewer, gate.permission) {
+			!defaultRoleHasPermission(auth.RoleViewer, gate.permission) {
 			message := ""
 			if enveloped, ok := res.body["error"].(map[string]any); ok {
 				message, _ = enveloped["message"].(string)
@@ -172,4 +173,8 @@ func TestUnregisteredPatternFailsClosed(t *testing.T) {
 	if identityRes.StatusCode != 500 || !strings.Contains(string(identityBody), "route_not_registered") {
 		t.Fatalf("unregistered identity pattern must fail closed: %d %s", identityRes.StatusCode, identityBody)
 	}
+}
+
+func defaultRoleHasPermission(role auth.Role, key string) bool {
+	return slices.Contains(auth.DefaultPermissionsForRole(role), key)
 }

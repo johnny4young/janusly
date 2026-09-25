@@ -31,11 +31,12 @@ locale invalidation, documented locally when the dependency analyzer cannot
 see through that helper. Other missing dependencies are fixed at the hook
 boundary rather than hidden with a broad lint exclusion.
 
-New contract-first surfaces use `contractApi` with operation types generated
-from `contract/openapi.json`. Authoring additionally validates the parsed
-success payload in `web/src/lib/authoring-contract.ts` before a proposal can
-reach Apply; generated types protect compilation, while the bounded runtime
-guard protects against stale proxies or malformed success JSON. Apply also
+New contract-first surfaces use `contractApi` with operation types and
+response guards generated from `contract/openapi.json` (see "Browser validation"
+in `docs/architecture/api-contract.md`). Authoring additionally checks, in
+`web/src/lib/authoring-contract.ts`, that a proposal's workflow can open on the
+canvas and that an applicable proposal has complete bindings before it can reach
+Apply. Apply also
 binds the duplicated intent/recovery contracts and qualification flags to the
 exact workflow snapshot, dynamically loading the full strict Recovery Contract
 validator only when a reviewed proposal carries recovery policy. The validated
@@ -46,23 +47,24 @@ Successful HTTP responses with unreadable bodies are errors, not empty success
 objects; cancellation remains `AbortError`. A genuinely empty body remains
 compatible with bodyless endpoints. Non-success responses retain their HTTP
 status even if error details cannot be read. Before polling mutates run state,
-`src/lib/run-status-contract.ts` validates the entire summary, nodes, events and
-pagination projection, including run identity and duplicate row identifiers.
+`src/lib/run-status-contract.ts` runs the generated `/status` guard and checks
+the invariants the store depends on: every row echoes the run, node and event
+ids are unique, and the event cursor is present exactly when more pages exist.
 Malformed snapshots leave the previous projection intact; stale requests are
 discarded before validation. A later valid poll can recover normally, and
 refreshing the latest event page never rewinds already-loaded history.
 
-Recovery AI patch and explicit playbook-use responses cross the dedicated
-untrusted-response boundary in `web/src/lib/recovery-patch-contract.ts` before
-entering dialog state. A current envelope (one with `suggestions`) must contain
-one to three bounded workflow proposals and a recovery passport whose failure
-signature matches the locally derived incident. Persisted workflow identity is
-added only when absent; an explicit foreign identity is rejected rather than
-rewritten. Playbook responses must also match the requested active playbook,
-workflow and signature. Evidence is bounded and re-scrubbed once at this HTTP
-boundary, and the React views consume only the projected read model. The legacy
-projection exists only for envelopes with no `suggestions` property; a present
-empty or malformed list fails closed. Do not add UI for response fields that no
+Recovery AI patch and explicit playbook-use responses cross the generated
+guards and then `web/src/lib/recovery-patch-contract.ts` before entering dialog
+state. The envelope must carry at least one suggestion the dialog can label and
+a recovery passport whose failure signature matches the locally derived
+incident; fallback and playbook suggestions keep their fixed confidence.
+Persisted workflow identity is added only when absent; an explicit foreign
+identity is rejected rather than rewritten. Playbook responses must also match
+the requested active playbook, workflow and signature. Evidence is re-scrubbed
+once at this HTTP boundary, and the React views consume only the projected read
+model. The manifest no longer admits the legacy envelope without `suggestions`,
+so there is no legacy projection. Do not add UI for response fields that no
 current server route produces.
 
 Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
@@ -72,8 +74,9 @@ bundle size. Top-level schema factories are marked pure so unused request-body
 schemas do not execute merely because a module also exports a shared enum.
 Semantic recovery response parsing lives in
 `web/src/lib/recovery-case-contract.ts` and shares the lazy
-`recovery-contract` chunk with the workflow recovery validator. The React
-panel consumes only the already-bounded read model. Authoring guards are loaded
+`recovery-contract` chunk with the workflow recovery validator. It keeps the
+case invariants (row echoes, candidate hashes, the approval binding); the React
+panel consumes only that read model. Authoring guards are loaded
 on demand by workflow commands, keeping the default app workspace below its
 immutable budget without weakening the final Apply boundary.
 
@@ -108,9 +111,14 @@ guidance rather than issuing a database request; overlong or control-containing
 terms show inline validation. This keeps browser behavior and direct API clients
 consistent without counting UTF-16 code units as characters.
 
-Runtime shape guards (`isRecord`, `asRecord`, `asRecordOrEmpty`) live in
-`src/lib/guards.ts` only; `scripts/check-duplicate-guards.mjs` (part of
-`pnpm lint`) rejects a second definition. The `/org/config` payload has one
+Shared runtime guards (`isRecord`, the nullable/optional string guards,
+`hasOnlyKeys`, `isStringArray` and the primitives the generated guards compose)
+live in `src/lib/guards.ts` only; `scripts/check-duplicate-guards.mjs` (part of
+`pnpm lint`) rejects a second definition of any function it exports, whatever
+its casing. The generated response guards in
+`src/lib/api-guards/` (one module per guard, no barrel) compose the primitives
+defined there and are passed to `contractApi` as its `guard` option (see
+`docs/architecture/api-contract.md`). The `/org/config` payload has one
 reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector load
 lazily like every other tab panel: `src/components/panel-loaders.ts` holds one
 dynamic importer per tab, `RightPanel` builds its `lazy()` components from
@@ -286,10 +294,10 @@ synchronous ownership also handles batched away-and-back context changes. A
 captured before snapshot is not shown under a different context. Revoking read
 access clears the surface and stops its reads.
 
-Health payloads validate the workflow/cutoff, bounded numeric signals, sample
-gate, score delta and recurrence references before display. Counts share the same
-non-negative safe-integer guard as run, list and dead-letter contracts, without
-coercion. Native progress exposes completed samples against the comparison floor.
+Health payloads pass the generated guard, then bind the workflow/cutoff, the
+delta to the sample gate, the run-count split and the recurrence references
+before display; score ranges and sample caps stay server policy. Native progress
+exposes completed samples against the comparison floor.
 Rollback fetches both
 exact versions and binds the prior immutable ID to the health evidence. Cancel
 restores focus to the preview trigger after its asynchronous loading state.

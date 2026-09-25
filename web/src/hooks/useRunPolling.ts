@@ -30,6 +30,7 @@ import { isTerminalRunStatus } from '@/lib/status'
 import type { RunSummary } from '../types'
 import { parseRunStatusSnapshot, type RunStatusSnapshot } from '../lib/run-status-contract'
 import type { RunSummaryUpdateStarter } from './useBootstrapData'
+import { isGetStatusResponse } from '../lib/api-guards/operations/GetStatus'
 
 /** The poll machinery surface returned to the shell. `loadStatus` is shared
  *  with the shell's run-action handlers (approve / resume / replay / cancel),
@@ -76,7 +77,7 @@ export function useRunPolling(
     )
     let payload: unknown
     try {
-      payload = await contractApi('GET /status', `/status?runId=${encodeURIComponent(id)}`, undefined)
+      payload = await contractApi('GET /status', `/status?runId=${encodeURIComponent(id)}`, undefined, { guard: isGetStatusResponse })
     } catch (error) {
       if (!isCurrentRequest()) return { discarded: true }
       throw error

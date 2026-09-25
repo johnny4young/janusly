@@ -29,14 +29,14 @@ describe('<AppliedBody /> replay queue state', () => {
   })
 
   it('names a single replay as queued', () => {
-    render(<AppliedBody runId="run-12345678" />)
+    render(<AppliedBody />)
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Replay queued — run id run-1234…')
+    expect(screen.getByRole('alert')).toHaveTextContent('Patch applied. DLQ replay queued.')
     expect(screen.queryByTestId('celebration-burst')).toBeNull()
   })
 
   it('keeps a playbook use pending until terminal recovery evidence exists', () => {
-    render(<AppliedBody runId="run-12345678" playbookUsePending />)
+    render(<AppliedBody playbookUsePending />)
 
     expect(screen.getByTestId('recovery-playbook-use-pending')).toHaveTextContent(
       'Playbook use awaiting verification',

@@ -6,7 +6,7 @@
  * Mirror of `lingua/src/shared/i18n/resources.ts` (resolveSystemLanguage).
  */
 
-import { FALLBACK_LOCALE, SUPPORTED_LANGUAGES, isSupportedLanguage, type RuntimeLocale } from './resources'
+import { FALLBACK_LOCALE, isSupportedLanguage, type RuntimeLocale } from './resources'
 
 /**
  * Walk a navigator-language list ("en-US", "es-MX", ...) and return the first
@@ -32,4 +32,3 @@ export function getBrowserSystemLanguages(): readonly string[] {
 }
 
 /** Re-export for ergonomic call-site usage. */
-export { SUPPORTED_LANGUAGES }

@@ -2321,7 +2321,6 @@
   "recoveryDialog.clusterProgress.replay": "Reproducir {{total}} ejecuciones",
   "recoveryDialog.applied.title": "Parche aplicado.",
   "recoveryDialog.applied.nextSteps": "Siguiente: vigila la pestaña Runs por nuevas fallas, o abre la línea de tiempo de la ejecución para confirmar que el arreglo se sostuvo.",
-  "recoveryDialog.applied.runStarted": "Reintento en cola — id de ejecución {{runIdShort}}…",
   "recoveryDialog.applied.dlqReplayed": "Reintento de DLQ puesto en cola.",
   "recoveryDialog.applied.replayedNofM": "Puestas en cola {{replayed}} de {{total}}",
   "recoveryDialog.applied.numFailed": "{{count}} no se pudieron poner en cola",

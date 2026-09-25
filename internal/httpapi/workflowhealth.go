@@ -248,123 +248,124 @@ func (s *V1Server) mountWorkflowHealthRoutes(mux *http.ServeMux) {
 	})
 
 	s.route(mux, "GET /workflows/health/delta", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		query := r.URL.Query()
-		workflowID := query.Get("workflowId")
-		afterVersion, validAfterVersion := parseIntegerNumber(query.Get("afterVersion"))
-		if workflowID == "" {
-			writeUnversioned(w, opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil))
-			return
-		}
-		if !validAfterVersion || afterVersion < 1 {
-			writeUnversioned(w, opError(http.StatusBadRequest, "workflows_after_version_invalid",
-				"afterVersion must be a positive integer", nil))
-			return
-		}
-		windowDays := defaultHealthWindowDays
-		if raw := query.Get("windowDays"); raw != "" {
-			if parsed, ok := parseIntegerNumber(raw); ok {
-				windowDays = min(30, max(1, parsed))
-			}
-		}
-		priorSignature := query.Get("priorFailureSignature")
-		if len(priorSignature) > 256 {
-			priorSignature = ""
-		}
+		writeUnversioned(w, s.workflowHealthDeltaCore(r, rc))
+	})
+	s.route(mux, "GET /v1/workflows/health/delta", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.workflowHealthDeltaCore(r, rc))
+	})
+}
 
-		wf, issues, slo, bad := s.resolveWorkflowHealthContext(r, rc, workflowID)
-		if bad != nil {
-			writeUnversioned(w, *bad)
-			return
+// workflowHealthDeltaCore splits the health window at a version cutoff.
+func (s *V1Server) workflowHealthDeltaCore(r *http.Request, rc v1Request) opResult {
+	query := r.URL.Query()
+	workflowID := query.Get("workflowId")
+	afterVersion, validAfterVersion := parseIntegerNumber(query.Get("afterVersion"))
+	if workflowID == "" {
+		return opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil)
+	}
+	if !validAfterVersion || afterVersion < 1 {
+		return opError(http.StatusBadRequest, "workflows_after_version_invalid",
+			"afterVersion must be a positive integer", nil)
+	}
+	windowDays := defaultHealthWindowDays
+	if raw := query.Get("windowDays"); raw != "" {
+		if parsed, ok := parseIntegerNumber(raw); ok {
+			windowDays = min(30, max(1, parsed))
 		}
-		ctx := r.Context()
-		q := store.New(s.pool)
-		since := time.Now().AddDate(0, 0, -windowDays)
-		cutoff := int32(afterVersion)
-		beforeRow, errBefore := q.QueryWorkflowHealthSignals(ctx, store.QueryWorkflowHealthSignalsParams{
-			WorkflowID: workflowID, OrgID: rc.orgID, Since: &since,
-			BeforeVersion: pgtype.Int4{Int32: cutoff, Valid: true},
+	}
+	priorSignature := query.Get("priorFailureSignature")
+	if len(priorSignature) > 256 {
+		priorSignature = ""
+	}
+
+	wf, issues, slo, bad := s.resolveWorkflowHealthContext(r, rc, workflowID)
+	if bad != nil {
+		return *bad
+	}
+	ctx := r.Context()
+	q := store.New(s.pool)
+	since := time.Now().AddDate(0, 0, -windowDays)
+	cutoff := int32(afterVersion)
+	beforeRow, errBefore := q.QueryWorkflowHealthSignals(ctx, store.QueryWorkflowHealthSignalsParams{
+		WorkflowID: workflowID, OrgID: rc.orgID, Since: &since,
+		BeforeVersion: pgtype.Int4{Int32: cutoff, Valid: true},
+	})
+	afterRow, errAfter := q.QueryWorkflowHealthSignals(ctx, store.QueryWorkflowHealthSignalsParams{
+		WorkflowID: workflowID, OrgID: rc.orgID, Since: &since,
+		FromVersion: pgtype.Int4{Int32: cutoff, Valid: true},
+	})
+	if errBefore != nil || errAfter != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	facts := workflowHealthFacts(wf)
+	beforeSignals := healthSignalsFromRow(beforeRow)
+	afterSignals := healthSignalsFromRow(afterRow)
+	before := health.Compute(facts, issues, beforeSignals, slo)
+	after := health.Compute(facts, issues, afterSignals, slo)
+
+	recentRow, err := q.QueryRecentRunsAgainstWorkflowVersion(ctx,
+		store.QueryRecentRunsAgainstWorkflowVersionParams{
+			WorkflowID: workflowID, OrgID: rc.orgID, Since: &since, FromVersion: cutoff,
 		})
-		afterRow, errAfter := q.QueryWorkflowHealthSignals(ctx, store.QueryWorkflowHealthSignalsParams{
-			WorkflowID: workflowID, OrgID: rc.orgID, Since: &since,
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	recent := recentRunsAgainstAfter{
+		TotalRuns: int(recentRow.TotalRuns), Succeeded: int(recentRow.Succeeded),
+		Failed: int(recentRow.Failed), Running: int(recentRow.Running),
+	}
+
+	// Same-failure check: post-cutoff dead letters whose normalized
+	// signature matches the caller-supplied prior failure. Only that
+	// caller value is echoed; freshly-derived signatures never cross
+	// this response boundary.
+	var sameFailure *sameFailureSinceApply
+	if priorSignature != "" {
+		rows, err := q.ListRecentDeadLettersForWorkflowDelta(ctx, store.ListRecentDeadLettersForWorkflowDeltaParams{
+			WorkflowID: workflowID, OrgID: rc.orgID, CreatedAt: &since,
 			FromVersion: pgtype.Int4{Int32: cutoff, Valid: true},
 		})
-		if errBefore != nil || errAfter != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		facts := workflowHealthFacts(wf)
-		beforeSignals := healthSignalsFromRow(beforeRow)
-		afterSignals := healthSignalsFromRow(afterRow)
-		before := health.Compute(facts, issues, beforeSignals, slo)
-		after := health.Compute(facts, issues, afterSignals, slo)
-
-		recentRow, err := q.QueryRecentRunsAgainstWorkflowVersion(ctx,
-			store.QueryRecentRunsAgainstWorkflowVersionParams{
-				WorkflowID: workflowID, OrgID: rc.orgID, Since: &since, FromVersion: cutoff,
-			})
 		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
-		recent := recentRunsAgainstAfter{
-			TotalRuns: int(recentRow.TotalRuns), Succeeded: int(recentRow.Succeeded),
-			Failed: int(recentRow.Failed), Running: int(recentRow.Running),
+		sameFailure = &sameFailureSinceApply{
+			SampleDeadLetterIDs: make([]string, 0, min(5, len(rows))), PriorSignature: priorSignature,
 		}
-
-		// Same-failure check: post-cutoff dead letters whose normalized
-		// signature matches the caller-supplied prior failure. Only that
-		// caller value is echoed; freshly-derived signatures never cross
-		// this response boundary.
-		var sameFailure *sameFailureSinceApply
-		if priorSignature != "" {
-			rows, err := q.ListRecentDeadLettersForWorkflowDelta(ctx, store.ListRecentDeadLettersForWorkflowDeltaParams{
-				WorkflowID: workflowID, OrgID: rc.orgID, CreatedAt: &since,
-				FromVersion: pgtype.Int4{Int32: cutoff, Valid: true},
+		for _, row := range rows {
+			normalized := signature.NormalizeJSON(row.ErrorJson, signature.Context{
+				NodeID: row.NodeID, NodeType: nodeTypeOf(row.NodeJson),
 			})
-			if err != nil {
-				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-				return
+			if normalized.Signature != priorSignature {
+				continue
 			}
-			sameFailure = &sameFailureSinceApply{
-				SampleDeadLetterIDs: make([]string, 0, min(5, len(rows))), PriorSignature: priorSignature,
-			}
-			for _, row := range rows {
-				normalized := signature.NormalizeJSON(row.ErrorJson, signature.Context{
-					NodeID: row.NodeID, NodeType: nodeTypeOf(row.NodeJson),
-				})
-				if normalized.Signature != priorSignature {
-					continue
-				}
-				sameFailure.Count++
-				if len(sameFailure.SampleDeadLetterIDs) < 5 {
-					sameFailure.SampleDeadLetterIDs = append(sameFailure.SampleDeadLetterIDs, row.ID)
-				}
+			sameFailure.Count++
+			if len(sameFailure.SampleDeadLetterIDs) < 5 {
+				sameFailure.SampleDeadLetterIDs = append(sameFailure.SampleDeadLetterIDs, row.ID)
 			}
 		}
+	}
 
-		var priorVersion *priorWorkflowVersion
-		if afterVersion > 1 {
-			row, err := q.GetWorkflowVersionByNumber(ctx, store.GetWorkflowVersionByNumberParams{
-				WorkflowID: workflowID, OrgID: rc.orgID, Version: cutoff - 1,
-			})
-			switch {
-			case err == nil:
-				priorVersion = &priorWorkflowVersion{Version: int(row.Version), VersionID: row.ID}
-			case errors.Is(err, pgx.ErrNoRows):
-				// A missing historical row is a valid no-rollback posture.
-			default:
-				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-				return
-			}
+	var priorVersion *priorWorkflowVersion
+	if afterVersion > 1 {
+		row, err := q.GetWorkflowVersionByNumber(ctx, store.GetWorkflowVersionByNumberParams{
+			WorkflowID: workflowID, OrgID: rc.orgID, Version: cutoff - 1,
+		})
+		switch {
+		case err == nil:
+			priorVersion = &priorWorkflowVersion{Version: int(row.Version), VersionID: row.ID}
+		case errors.Is(err, pgx.ErrNoRows):
+			// A missing historical row is a valid no-rollback posture.
+		default:
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
+	}
 
-		writeUnversioned(w, opOK(workflowHealthDelta{
-			WorkflowID: workflowID, AfterVersion: afterVersion, WindowDays: windowDays,
-			HasEnoughData: afterSignals.TotalRuns >= health.MinRunsForDelta,
-			Before:        before, After: after,
-			Delta:                  buildRecoveryDelta(before, after, beforeSignals, afterSignals),
-			RecentRunsAgainstAfter: recent, SameFailureSinceApply: sameFailure,
-			PriorVersion: priorVersion,
-		}))
+	return opOK(workflowHealthDelta{
+		WorkflowID: workflowID, AfterVersion: afterVersion, WindowDays: windowDays,
+		HasEnoughData: afterSignals.TotalRuns >= health.MinRunsForDelta,
+		Before:        before, After: after,
+		Delta:                  buildRecoveryDelta(before, after, beforeSignals, afterSignals),
+		RecentRunsAgainstAfter: recent, SameFailureSinceApply: sameFailure,
+		PriorVersion: priorVersion,
 	})
 }

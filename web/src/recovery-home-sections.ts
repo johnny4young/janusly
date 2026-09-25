@@ -1,334 +1,81 @@
-import type { RecoveryCase } from './types'
+/**
+ * Recovery Center section readers. Each checks its section with the generated
+ * component guard, so a malformed section degrades alone like an unavailable one.
+ */
+
+import type * as Api from './lib/api-types.generated'
+import { isFailureClusters } from './lib/api-guards/components/FailureClusters'
+import { isRecoveryHeatmap } from './lib/api-guards/components/RecoveryHeatmap'
+import { isRecoveryHomeCases } from './lib/api-guards/components/RecoveryHomeCases'
+import { isRecoveryHomeQueue } from './lib/api-guards/components/RecoveryHomeQueue'
+import { isRecoveryLedger } from './lib/api-guards/components/RecoveryLedger'
+import { isRecoveryMetrics } from './lib/api-guards/components/RecoveryMetrics'
+import { isRecoveryValidationReport } from './lib/api-guards/components/RecoveryValidationReport'
+import { isRecoveryWins } from './lib/api-guards/components/RecoveryWins'
 import type { RecoveryValidationReport } from './components/RecoveryValidationSection'
 import type {
+  ClusterCategory,
+  ClusterOwner,
   ClustersResponse,
-  FailureCluster,
   HeatmapDay,
   OperatorWins,
   RecoveryLedger,
-  RecoveryMetric,
   RecoveryMetrics,
 } from './components/recovery-center/recovery-center-model'
-import { isRecord } from './lib/guards'
 
 export type RecoveryHomeQueueSection = {
   counts: { open: number }
   oldestOpen: { createdAt?: string } | null
 }
 
-function isNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
-}
-
-function isNullableNumber(value: unknown): value is number | null {
-  return value === null || isNumber(value)
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === 'string'
-}
-
-function isRecoveryMetric(value: unknown): value is RecoveryMetric {
-  if (!isRecord(value)) return false
-  return isNullableNumber(value.value)
-    && typeof value.display === 'string'
-    && ['healthy', 'warn', 'unhealthy', 'neutral'].includes(String(value.severity))
-    && typeof value.rationale === 'string'
-}
-
-function optionalMetricIsValid(
-  value: Record<string, unknown>,
-  key: string,
-): boolean {
-  return value[key] === undefined || isRecoveryMetric(value[key])
-}
-
-function isValueEstimate(value: unknown): boolean {
-  if (!isRecord(value) || !isRecord(value.assumptions)) return false
-  return isNumber(value.hoursSaved)
-    && isNumber(value.dollarSaved)
-    && isNullableNumber(value.mttrDeltaSeconds)
-    && isNumber(value.assumptions.hourlyCost)
-    && isNumber(value.assumptions.minutesSavedPerRecovery)
-    && isNumber(value.assumptions.baselineMttrSeconds)
-}
-
-function isVerifiedRecoveryMetric(value: unknown): boolean {
-  if (!isRecord(value)) return false
-  const details = {
-    definitionVersion: value.definitionVersion,
-    metric: value.metric,
-    unit: value.unit,
-    sampleSize: value.sampleSize,
-    p50Ms: value.p50Ms,
-    p90Ms: value.p90Ms,
-  }
-  if (!isRecoveryMetric(value)) return false
-  return details.definitionVersion === '1'
-    && details.metric === 'time_to_verified_recovery'
-    && details.unit === 'milliseconds'
-    && isNumber(details.sampleSize)
-    && isNullableNumber(details.p50Ms)
-    && isNullableNumber(details.p90Ms)
-}
+export type RecoveryHomeCase = Api.RecoveryHomeCases['cases'][number]
 
 export function decodeRecoveryMetrics(value: unknown): RecoveryMetrics | null {
-  if (!isRecord(value)) return null
-  const validRequiredMetrics = [
-    'successRate',
-    'mttr',
-    'p95Latency',
-    'approvalsPending',
-    'replayRate',
-  ].every((key) => isRecoveryMetric(value[key]))
-  if (
-    !validRequiredMetrics
-    || !isNumber(value.windowDays)
-    || !isNumber(value.terminalRuns)
-  ) return null
-
-  if (
-    !optionalMetricIsValid(value, 'slaAttainment')
-    || !optionalMetricIsValid(value, 'timeToFirstAction')
-    || !optionalMetricIsValid(value, 'recurrenceRate')
-  ) return null
-  if (
-    value.verifiedRecovery !== undefined
-    && !isVerifiedRecoveryMetric(value.verifiedRecovery)
-  ) return null
-  if (
-    value.clustersResolved !== undefined
-    && (
-      !isRecord(value.clustersResolved)
-      || !isRecoveryMetric(value.clustersResolved)
-      || !isNumber(
-        (value.clustersResolved as Record<string, unknown>).totalEntries,
-      )
-      || typeof (value.clustersResolved as Record<string, unknown>).capped
-        !== 'boolean'
-    )
-  ) return null
-  if (
-    value.valueEstimate !== undefined
-    && !isValueEstimate(value.valueEstimate)
-  ) return null
-  if (
-    value.mttrTrend !== undefined
-    && (
-      !Array.isArray(value.mttrTrend)
-      || !value.mttrTrend.every((point) =>
-        isRecord(point)
-        && typeof point.day === 'string'
-        && isNumber(point.seconds))
-    )
-  ) return null
-  if (
-    value.downtimeEndedMs !== undefined
-    && !isNumber(value.downtimeEndedMs)
-  ) return null
+  if (!isRecoveryMetrics(value)) return null
+  // The verified-recovery tile formats p50/p90 as durations of this one metric.
+  const verified = value.verifiedRecovery
+  if (verified.definitionVersion !== '1' || verified.metric !== 'time_to_verified_recovery'
+    || verified.unit !== 'milliseconds') return null
   return value as RecoveryMetrics
 }
 
-function isFailureCluster(value: unknown): value is FailureCluster {
-  if (!isRecord(value)) return false
-  return typeof value.signature === 'string'
-    && [
-      'secret_missing',
-      'http_error',
-      'network_timeout',
-      'ai_provider',
-      'parse_error',
-      'tool_input',
-      'unknown',
-    ].includes(String(value.category))
-    && isNumber(value.frequency)
-    && ['ops', 'workflow_author', 'platform'].includes(
-      String(value.suggestedOwner),
-    )
-    && typeof value.lastSeen === 'string'
-    && (
-      value.recurredAfterRecovery === undefined
-      || typeof value.recurredAfterRecovery === 'boolean'
-    )
-}
+// The cluster tiles translate category and owner; an unknown value has no copy.
+const CLUSTER_CATEGORIES: ReadonlySet<string> = new Set<ClusterCategory>([
+  'secret_missing', 'http_error', 'network_timeout', 'ai_provider', 'parse_error', 'tool_input', 'unknown',
+])
+const CLUSTER_OWNERS: ReadonlySet<string> = new Set<ClusterOwner>(['ops', 'workflow_author', 'platform'])
 
-export function decodeClustersResponse(
-  value: unknown,
-): ClustersResponse | null {
-  if (!isRecord(value) || !Array.isArray(value.clusters)) return null
-  if (
-    !value.clusters.every(isFailureCluster)
-    || !isNumber(value.totalSamples)
-    || !isNumber(value.windowDays)
-  ) return null
+export function decodeClustersResponse(value: unknown): ClustersResponse | null {
+  if (!isFailureClusters(value) || !value.clusters.every(cluster => (
+    CLUSTER_CATEGORIES.has(cluster.category) && CLUSTER_OWNERS.has(cluster.suggestedOwner)
+  ))) return null
   return value as ClustersResponse
 }
 
-function isHeatmapDay(value: unknown): value is HeatmapDay {
-  if (!isRecord(value)) return false
-  return typeof value.day === 'string'
-    && isNumber(value.failures)
-    && isNumber(value.recovered)
-    && isNumber(value.mttrSeconds)
+export function decodeHeatmap(value: unknown): { days: HeatmapDay[] } | null {
+  return isRecoveryHeatmap(value) ? { days: value.days } : null
 }
 
-export function decodeHeatmap(
-  value: unknown,
-): { days: HeatmapDay[] } | null {
-  if (
-    !isRecord(value)
-    || !Array.isArray(value.days)
-    || !value.days.every(isHeatmapDay)
-  ) return null
-  return { days: value.days }
+export function decodeRecoveryValidationReport(value: unknown): RecoveryValidationReport | null {
+  return isRecoveryValidationReport(value) ? value as RecoveryValidationReport : null
 }
 
-function hasNumericFields(
-  value: unknown,
-  keys: readonly string[],
-  nullableKeys: readonly string[] = [],
-): boolean {
-  if (!isRecord(value)) return false
-  return keys.every((key) => isNumber(value[key]))
-    && nullableKeys.every((key) => isNullableNumber(value[key]))
+export function decodeRecoveryCases(value: unknown): { cases: RecoveryHomeCase[] } | null {
+  return isRecoveryHomeCases(value) ? { cases: value.cases } : null
 }
 
-export function decodeRecoveryValidationReport(
-  value: unknown,
-): RecoveryValidationReport | null {
-  if (
-    !isRecord(value)
-    || typeof value.generatedAt !== 'string'
-    || !isNumber(value.windowDays)
-    || !isNumber(value.sampleLimit)
-    || typeof value.sampleCapped !== 'boolean'
-    || !hasNumericFields(value.totals, [
-      'drills',
-      'completed',
-      'recovered',
-      'acceptedLoss',
-      'awaitingAction',
-      'replayInProgress',
-      'measurementIncomplete',
-      'missingEvidence',
-    ], ['completionRatePercent', 'recoveryRatePercent'])
-    || !hasNumericFields(value.resolution, [
-      'operator',
-      'automated',
-      'unknown',
-    ], ['operatorInterventionRatePercent'])
-    || !hasNumericFields(value.timing, ['sampleSize'], [
-      'medianElapsedMs',
-      'p90ElapsedMs',
-      'averageElapsedMs',
-      'p95ElapsedMs',
-    ])
-    || !Array.isArray(value.byFailureMode)
-    || !value.byFailureMode.every((item) =>
-      isRecord(item)
-      && typeof item.key === 'string'
-      && hasNumericFields(item, [
-        'total',
-        'completed',
-        'recovered',
-        'acceptedLoss',
-      ], ['recoveryRatePercent']))
-  ) return null
-  return value as RecoveryValidationReport
+export function decodeRecoveryLedger(value: unknown): RecoveryLedger | null {
+  return isRecoveryLedger(value) ? value : null
 }
 
-const RECOVERY_CASE_STATES = new Set([
-  'detected',
-  'contained',
-  'diagnosed',
-  'candidates_ready',
-  'validating',
-  'awaiting_approval',
-  'publishing',
-  'monitoring',
-  'verified_recovered',
-  'recurred',
-  'accepted_loss',
-  'abandoned',
-])
-
-function isRecoveryCase(value: unknown): value is RecoveryCase {
-  if (!isRecord(value)) return false
-  return typeof value.id === 'string'
-    && typeof value.orgId === 'string'
-    && typeof value.runId === 'string'
-    && isNullableString(value.workflowId)
-    && typeof value.workflowVersionId === 'string'
-    && value.source === 'semantic_violation'
-    && typeof value.detectorId === 'string'
-    && typeof value.sourceNodeId === 'string'
-    && ['expression', 'schema'].includes(String(value.detectorKind))
-    && ['observe', 'quarantine'].includes(String(value.action))
-    && typeof value.message === 'string'
-    && RECOVERY_CASE_STATES.has(String(value.state))
-    && isNullableString(value.createdBy)
-    && typeof value.createdAt === 'string'
-    && typeof value.updatedAt === 'string'
-    && isNullableString(value.resolvedAt)
+export function decodeOperatorWins(value: unknown): OperatorWins | null {
+  return isRecoveryWins(value) ? value : null
 }
 
-export function decodeRecoveryCases(
-  value: unknown,
-): { cases: RecoveryCase[] } | null {
-  if (
-    !isRecord(value)
-    || !Array.isArray(value.cases)
-    || !value.cases.every(isRecoveryCase)
-  ) return null
-  return { cases: value.cases }
-}
-
-export function decodeRecoveryLedger(
-  value: unknown,
-): RecoveryLedger | null {
-  if (!isRecord(value)) return null
-  if (
-    !isNumber(value.totalRecovered)
-    || !isNumber(value.downtimeEndedMs)
-    || !isNullableString(value.sinceIso)
-  ) return null
-  return value as RecoveryLedger
-}
-
-export function decodeOperatorWins(
-  value: unknown,
-): OperatorWins | null {
-  if (
-    !isRecord(value)
-    || !isNumber(value.recovered)
-    || !isNumber(value.windowDays)
-  ) return null
-  return value as OperatorWins
-}
-
-function isOldestOpenSummary(
-  value: unknown,
-): value is { createdAt?: string } {
-  if (!isRecord(value)) return false
-  return value.createdAt === undefined || typeof value.createdAt === 'string'
-}
-
-export function decodeRecoveryQueue(
-  value: unknown,
-): RecoveryHomeQueueSection | null {
-  if (
-    !isRecord(value)
-    || !isRecord(value.counts)
-    || !Number.isInteger(value.counts.open)
-    || !isNumber(value.counts.open)
-    || value.counts.open < 0
-    || (
-      value.oldestOpen !== null
-      && !isOldestOpenSummary(value.oldestOpen)
-    )
-  ) return null
+export function decodeRecoveryQueue(value: unknown): RecoveryHomeQueueSection | null {
+  if (!isRecoveryHomeQueue(value)) return null
   return {
     counts: { open: value.counts.open },
-    oldestOpen: value.oldestOpen,
+    oldestOpen: value.oldestOpen === null ? null : { createdAt: value.oldestOpen.createdAt ?? undefined },
   }
 }

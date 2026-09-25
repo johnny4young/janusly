@@ -8,9 +8,23 @@ import { useWorkflowStore } from '../store'
 import { ConfirmProvider } from './ConfirmDialog'
 import { WorkflowRolloutPanel } from './WorkflowRolloutPanel'
 
-vi.mock('../api', () => {
+vi.mock('../api', async () => {
+  const { contractApiOver } = await import('../test/contract-api-mock')
+  const { healthDelta } = await import('../test/health-delta-fixture')
+  const { patchResponse } = await import('../test/patch-response-fixture')
+  const { runView, versionRows } = await import('../test/run-view-fixture')
   const api = vi.fn()
-  return { api, contractApi: (_op: string, path: string, _body: unknown, options?: RequestInit) => api(path, options) }
+  // Typed calls reach the same path-keyed mock; partial fixtures are completed to the manifest.
+  return {
+    api,
+    contractApi: contractApiOver(api, {
+      'GET /run': runView,
+      'GET /workflows/versions': versionRows,
+      'GET /workflows/health/delta': healthDelta,
+      'POST /ai/patch-workflow': (value: Record<string, unknown>) => patchResponse(value),
+      'POST /recovery/playbooks/{id}/use': (value: { suggestion: Record<string, unknown> }) => ({ suggestion: patchResponse(value.suggestion) }),
+    }),
+  }
 })
 
 const initialState = useWorkflowStore.getState()
@@ -88,6 +102,7 @@ describe('Rollout intent and form behavior in Chromium', () => {
         trafficPercent: 10, minimumSampleSize: 10, minimumSuccessRatePercent: 90, status: 'active',
         baselineSucceeded: 8, baselineFailed: 0, canarySucceeded: 4, canaryFailed: 0,
         createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
+        endedAt: null, lastOutcomeAt: null, rolledBackReason: null,
       } }
     })
     render(<ConfirmProvider><WorkflowRolloutPanel /></ConfirmProvider>)

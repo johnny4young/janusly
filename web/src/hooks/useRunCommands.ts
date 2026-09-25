@@ -8,6 +8,7 @@ import type { ActiveTab } from '../types'
 import { isTerminalRunStatus } from '@/lib/status'
 import { parseRunStatusSnapshot } from '../lib/run-status-contract'
 import type { AppCommandsOptions } from './app-command-types'
+import { isGetRunResponse } from '../lib/api-guards/operations/GetRun'
 
 type WorkflowCommands = {
   validateWorkflow: () => Promise<boolean>
@@ -169,7 +170,7 @@ export function useRunCommands(
     setActivityRecoveryId(null)
     setActiveTab(targetTab ?? 'runs')
     try {
-      const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(id)}`, undefined)
+      const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(id)}`, undefined, { guard: isGetRunResponse })
       if (!runTransitionGuard.isCurrent(requestId)) return
       const data = parseRunStatusSnapshot(payload, id)
       if (!data) throw new Error(t('api.error.malformedResponse'))
@@ -221,7 +222,7 @@ export function useRunCommands(
       generation: useWorkflowStore.getState().runTransitionGeneration,
     }
     try {
-      const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(runId)}&eventsCursor=${encodeURIComponent(eventsCursor)}`, undefined)
+      const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(runId)}&eventsCursor=${encodeURIComponent(eventsCursor)}`, undefined, { guard: isGetRunResponse })
       if (!isRunRequestCurrent(context, useWorkflowStore.getState())) return
       const data = parseRunStatusSnapshot(payload, runId)
       if (!data) throw new Error(t('api.error.malformedResponse'))

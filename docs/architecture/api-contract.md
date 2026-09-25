@@ -42,6 +42,19 @@ call on any `V1_READ_PATHS` entry outside the transport and `lib/` layers;
 typed reads go through `contractApi`, and a component that needs a narrower
 runtime shape than the contract type narrows it explicitly.
 
+Every manifest schema, request and response, is closed: objects set
+`additionalProperties: false` or are typed maps, and every value names a
+type. The legitimately open ones are named fragments listed with a reason in
+`openSchemaAllowlist` in `internal/contract/manifest_test.go`: workflow
+documents (strip-parsed on input and served as stored bytes, so version
+reads never claim more than the persisted DAG), node configuration, relay
+payloads, form and start input, and grouped opaque JSON such as run
+payloads and dead-letter snapshots. Every route
+has a wire-conformance row in `internal/httpapi/manifest_conformance_test.go`:
+unit fixtures from the typed views and pure cores, or live PostgreSQL-backed
+responses in the matching integration test, each also rejecting an
+undeclared key.
+
 `GET /v1/workflows/versions` is a keyset page of one workflow's history,
 newest first: `limit` (default 50, at most 200), `beforeVersion` as the
 cursor below the oldest row shown, and `version` to pin one exact row. Rows
@@ -84,8 +97,155 @@ pagination cursor, start a comparison or authorize Apply. Recovery validation
 uses the shared terminal-status set, including `timed_out`, rather than waiting
 for a separate dialog timeout after the run has already terminated.
 
+Shared fragments are registered by name in `internal/contract/components.go`.
+`cmd/contract` emits each once under `components/schemas` and references it with
+`$ref` everywhere else, including a route whose whole payload is one component;
+the Go tests keep validating the in-memory schemas, so references never need
+resolving there. `web/scripts/generate-api-types.mjs` turns every component into
+a named TypeScript type and fails on an unresolved reference or a reference
+cycle instead of degrading to `unknown`.
+
 Run `make generate` after contract changes and require a clean diff on a second
 run.
+
+## Browser validation
+
+`web/scripts/generate-api-guards.mjs` renders `web/src/lib/api-guards/` from
+the same document: one module per shared schema (`components/<Name>.ts`
+exporting `is<Name>`) and one per operation with a 2xx payload
+(`operations/<Stem>.ts` exporting `is<Stem>Response`, for example
+`operations/GetRun.ts` with `isGetRunResponse` for `GET /run`). Guards are plain
+functions composed from the primitives in `web/src/lib/guards.ts`; each module
+imports only the primitives and component guards it references. There is no
+schema library, no barrel, no aggregate map and no module state, so a guard
+ships in the chunk of the call sites that import it: a guard used only by a lazy
+panel stays in that panel's chunk. A guard the eager Home controller imports
+ships eagerly: all eight `/recovery/home` section guards, including
+`RecoveryMetrics` and `FailureClusters`, land in `app-workspace.js` even though
+the lazy `HomeInsights` chunk renders them. The generator rewrites the whole
+directory, so a removed schema leaves no orphan module.
+
+A guard enforces shape: JSON types, nullability, `enum`/`const`, required keys,
+closed key sets (`additionalProperties: false`), typed map values and integer
+exactness. It deliberately does not enforce `maxItems`, `maxLength`,
+`minLength`, `minItems`, `minimum` or `maximum`: those are server policy that
+can change without a client release, and the browser validates shape, never
+policy. `oneOf` is checked as "any branch matches" because manifest branches are
+disjoint closed shapes. The generator throws, naming the schema path, on any
+other keyword, and on an empty `enum`/`const` set or a literal that contradicts
+the declared `type`, so a new manifest construct cannot be silently skipped or
+compiled into a guard that rejects everything.
+
+### The rule
+
+The browser validates **shape** from the manifest and never re-encodes server
+**policy**:
+
+- Shape (types, nullability, enums, required and closed keys) is the generated
+  guard's. A payload that fails it raises `MalformedResponseError`
+  (`web/src/lib/malformed-response.ts`) with the `api.error.malformedResponse`
+  copy; a panel that had its own unavailable copy catches that class and keeps
+  it, while transport and HTTP errors pass through unchanged.
+- The hand-written readers (`list-contract`, `run-status-contract`,
+  `dead-letter-contract`, `recovery-patch-contract`, `recovery-case-contract`,
+  `authoring-contract`, `health-delta`, `recovery-home-sections` and the rollout
+  and qualification parsers) keep only **UI invariants**: cross-field facts a
+  component depends on, each commented with the component that needs it. Examples:
+  echoed ids (`run.id === runId`, a rollout of this workflow), unique row ids,
+  `eventsCursor` present exactly when `eventsHasMore`, a delta present exactly
+  when `hasEnoughData`, fallback and playbook suggestions pinned to their fixed
+  confidence, a validation bound to its candidate by SHA-256, a vocabulary the UI
+  translates, a date `Intl` must format. Extension JSON that the manifest keeps
+  opaque is narrowed only as far as the component reads it.
+- Policy never appears in the browser: maximum lengths, page sizes, item counts
+  and numeric ranges copied from Go become a "malformed response" outage the day
+  the server changes them. Form bounds for operator input (the rollout draft) are
+  UX, not response validation, and carry a `// wire-policy:` marker naming their
+  Go source.
+
+### Adding a route end to end
+
+1. Describe the route in the Go manifest (`internal/contract`) with a closed
+   response schema, and keep its wire-conformance test green.
+2. Run `make generate`: it renders `contract/openapi.json`, the TypeScript
+   types and `web/src/lib/api-guards/operations/<Stem>.ts`.
+3. Import that one module and pass it to `contractApi` next to the call:
+
+```ts
+import { isGetRunResponse } from '../lib/api-guards/operations/GetRun'
+
+const run = await contractApi('GET /run', path, undefined, { guard: isGetRunResponse })
+```
+
+4. Add a reader function only if the component needs a UI invariant the shape
+   cannot express, and test that invariant plus one case proving shape is
+   delegated to the guard.
+
+The option is typed to the operation, so a guard for a structurally different
+operation does not compile (type predicates are structural: two operations with
+the same payload type accept each other's guard). `contractApi` runs it on the
+unwrapped payload of a 2xx response only; non-2xx responses (including a 429
+that carries a data envelope) still throw `ApiError` before any guard runs, and
+the `/start`/`/resume` field-error envelope is passed through. Without a guard
+the call behaves exactly as before.
+
+Every manifest route has a wire-conformance row, so a guard checks what the
+server is tested to send. Durable mutations follow one rule:
+
+- Guarded when the receipt drives client state: `POST /workflows/save` from
+  the editor, `POST /workflows/rollback`, rollout create
+  (`POST /workflows/{workflowId}/rollout`), rollout decision
+  (`POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}`), rollout
+  qualification (`POST /workflows/{workflowId}/rollout/qualification`),
+  `POST /dlq/resolve` and `POST /recovery/playbooks/{id}/use`.
+- Unguarded when the receipt is only a tolerated acknowledgement, so a
+  committed mutation is never reported as a failure: the recovery-case ladder
+  (`diagnose`, `candidates`, `validate`, `approve`, `apply`, each followed by a
+  case reload), `POST /dlq/validate-fix`, the recovery dialog's
+  `POST /workflows/save` and `POST /dlq/replay`.
+
+`GET /recovery/home` is read without the whole-response guard because the
+server settles each section independently. `recovery-home-snapshot` checks only
+the envelope (`scope`, `generatedAt`, a `sections` object) and a malformed
+envelope shows `recoveryCenter.invalidHomeResponse`. Each section reader in
+`recovery-home-sections` runs that section's generated component guard
+(`RecoveryLedger`, `RecoveryWins`, `RecoveryHomeQueue`, `RecoveryMetrics`,
+`FailureClusters`, `RecoveryHeatmap`, `RecoveryHomeCases`,
+`RecoveryValidationReport`); a section that fails it degrades alone, exactly
+like a server-side `unavailable`, and a section key the manifest does not name
+is ignored.
+
+`GET /workflows/{workflowId}/rollout` is outside the manifest because it shares
+a mux pattern with the versioned routes; its reader checks the envelope by hand
+around the generated `isWorkflowRollout` component guard.
+
+### Ratchets
+
+`pnpm lint` enforces the rule:
+
+- `scripts/check-wire-policy.mjs` fails on any numeric literal other than 0, 1
+  and -1 in the hand-written readers unless its own line carries
+  `// wire-policy: <reason>` or the line directly above is that marker alone
+  (baseline zero).
+- `scripts/check-duplicate-guards.mjs` owns the guard-like exports of
+  `src/lib/guards.ts` (`is*`, `as*`, `has*`, including the primitives the
+  generated guards import) and rejects a local re-declaration even with
+  different casing. Combinators (`shape`, `literal`, `nullable`, `anyOf`,
+  `isAny`, ...) are ordinary names elsewhere and are not checked.
+- `scripts/check-raw-v1-reads.mjs` rejects a raw `api()` call on a v1 read path
+  and on any manifest operation, reads and mutations, literal or templated
+  paths, matched by method. A deliberate exception carries `// raw-api: <reason>`;
+  calls that predate the check are listed in `RAW_OPERATION_BASELINE`, which may
+  only shrink. Its test also pins the variable-path call sites that motivated the
+  check to `contractApi`. Limitation: a variable or concatenated path, or a
+  variable `method`, is not seen.
+
+`make generate` regenerates the guards after the types; the drift gate covers
+the generated directory, including new untracked modules;
+`web/scripts/generate-api-guards.test.mjs` compiles and runs synthetic output
+for every supported keyword, and `web/src/lib/api-guards.test.ts` samples every
+operation from `contract/openapi.json` and checks acceptance, closed keys,
+required keys, wrong types and that server bounds are not enforced.
 
 ## Text-search query boundary
 
@@ -163,9 +323,9 @@ workflow/node snapshot and bounded drill provenance/outcome. The legacy
 Missing or foreign entries are indistinguishable 404 responses. Persisted absent
 timestamps remain null; the browser must not invent recency or downtime.
 
-The browser's shared detail boundary validates identity, lifecycle, required
-snapshot keys and drill projections before enabling recovery; an incomplete or
-wrong-row response cannot become evidence. Extension workflow/node/error JSON is
+The browser's shared detail boundary checks the generated shape and the row
+identity before enabling recovery, and copies only the declared keys; an
+incomplete or wrong-row response cannot become evidence. Extension workflow/node/error JSON is
 not redefined as a closed business schema. The explicit `entries` namespace also
 keeps legacy `/dlq/queue`, `/dlq/counts` and `/dlq/cluster-members` out of the
 versioned-path rewrite.
@@ -194,7 +354,8 @@ versus empty credential requirements.
 
 Browser readers validate entire pages before updating a projection: malformed
 successful responses are errors, not empty lists or partially filtered success.
-They reject duplicate identities, invalid consumed fields and mismatched version
-ownership/cursors; authoring uses the existing workflow-definition guard. A failed
-bootstrap refresh retains previous lists and newer run-event patches. Version
-history does not advance its cursor when an older page is rejected.
+Shape comes from the generated guards; the readers reject duplicate identities
+and mismatched version ownership/cursors, and authoring uses the existing
+workflow-definition guard. Page sizes stay server policy. A failed bootstrap
+refresh retains previous lists and newer run-event patches. Version history does
+not advance its cursor when an older page is rejected.

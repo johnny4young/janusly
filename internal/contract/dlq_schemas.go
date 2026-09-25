@@ -6,7 +6,7 @@ var deadLetterStatus = map[string]any{"enum": []any{"open", "replayed", "resolve
 
 var deadLetterRecovery = closedObj(map[string]any{
 	"id": str(), "owner": nullableString(), "severity": str(), "status": str(),
-	"slaTargetAt": nullableString(), "resolutionReason": nullableString(), "comments": jsonValue(),
+	"slaTargetAt": nullableString(), "resolutionReason": nullableString(), "comments": storedColumnJSON,
 	"workflowId": nullableString(), "metadataWorkflowId": nullableString(),
 	"occurrenceCount": map[string]any{"type": "integer", "minimum": 0}, "lastOccurredAt": nullableString(),
 }, "id", "owner", "severity", "status", "slaTargetAt", "resolutionReason", "comments", "workflowId", "metadataWorkflowId", "occurrenceCount", "lastOccurredAt")
@@ -14,7 +14,7 @@ var deadLetterRecovery = closedObj(map[string]any{
 var deadLetterSummary = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "runId": str(), "nodeId": str(),
 	"attempt": map[string]any{"type": "integer", "minimum": 0}, "status": deadLetterStatus,
-	"errorJson": jsonValue(), "replayedAt": nullableString(), "createdAt": nullableString(),
+	"errorJson": dlqSnapshot, "replayedAt": nullableString(), "createdAt": nullableString(),
 	"nodeType": nullableString(), "workflowName": nullableString(),
 	"recovery": map[string]any{"anyOf": []any{deadLetterRecovery, map[string]any{"type": "null"}}},
 }, "id", "orgId", "runId", "nodeId", "attempt", "status", "errorJson", "replayedAt", "createdAt", "nodeType", "workflowName", "recovery")
@@ -42,7 +42,7 @@ var drillOutcome = closedObj(map[string]any{
 var deadLetterDetail = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "runId": str(), "nodeId": str(),
 	"attempt": map[string]any{"type": "integer", "minimum": 0}, "status": deadLetterStatus,
-	"workflowJson": jsonValue(), "nodeJson": jsonValue(), "errorJson": jsonValue(),
+	"workflowJson": dlqSnapshot, "nodeJson": dlqSnapshot, "errorJson": dlqSnapshot,
 	"replayedAt": nullableString(), "createdAt": nullableString(), "replayClaimedAt": nullableString(),
 	// No suspect-version correlation is currently emitted by the detail handler.
 	"suspectVersion": map[string]any{"type": "null"},

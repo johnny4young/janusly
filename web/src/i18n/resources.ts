@@ -25,9 +25,6 @@ export type RuntimeLocale = SupportedLanguage
 /** Default when nothing else matches. */
 export const FALLBACK_LOCALE: RuntimeLocale = 'en'
 
-/** Stable namespace name retained for catalog tooling and compatibility. */
-export const COMMON_NAMESPACE = 'common'
-
 /** localStorage key for the user's chosen locale. Convention: `janusly:*` prefix. */
 export const LOCALE_STORAGE_KEY = 'janusly:locale'
 

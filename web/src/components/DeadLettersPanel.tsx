@@ -46,8 +46,6 @@ import { RecoveryAutomationDisclosure } from './RecoveryAutomationDisclosure'
 export type {
   DeadLetter,
   DeadLetterRecovery,
-  RecoveryDrillProvenance,
-  SuspectVersionInfo,
 } from './dead-letter-types'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 

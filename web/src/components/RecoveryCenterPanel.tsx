@@ -10,11 +10,10 @@ import {
 } from 'react'
 import type {
   ActiveTab,
-  RecoveryCase,
   RunNode,
   RunSummary,
 } from '../types'
-import { api, contractApi } from '../api'
+import { contractApi } from '../api'
 import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
 import { getMemoryPurgeCountdown } from '../memory-consent-status'
 import {
@@ -31,6 +30,7 @@ import {
   decodeRecoveryMetrics,
   decodeRecoveryQueue,
   decodeRecoveryValidationReport,
+  type RecoveryHomeCase,
 } from '../recovery-home-sections'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './dead-letter-types'
@@ -68,10 +68,12 @@ import {
   type RecoveryAllClearRequest,
 } from './recovery-all-clear-bus'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { isGetOperationsBriefResponse } from '../lib/api-guards/operations/GetOperationsBrief'
+import { MalformedResponseError } from '../lib/malformed-response'
 
 const RECOVERY_CENTER_TAGS = [PLATFORM_TAG, 'recovery', 'runs', 'dlq', 'auto-healing', 'campaigns'] as const
 const EMPTY_HEATMAP: HeatmapDay[] = []
-const EMPTY_SEMANTIC_CASES: RecoveryCase[] = []
+const EMPTY_SEMANTIC_CASES: RecoveryHomeCase[] = []
 
 export type RecoveryCenterPanelProps = {
   runs: RunSummary[]
@@ -129,7 +131,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   const [heatmapSnapshot, setHeatmapSnapshot] = useState<OrgSnapshot<HeatmapDay[]> | null>(null)
   const [validationSnapshot, setValidationSnapshot] = useState<OrgSnapshot<RecoveryValidationReport | null> | null>(null)
   const [semanticCasesSnapshot, setSemanticCasesSnapshot] = useState<OrgSnapshot<{
-    cases: RecoveryCase[]
+    cases: RecoveryHomeCase[]
     status: HomeReadStatus
   }> | null>(null)
   const [operatorBriefSnapshot, setOperatorBriefSnapshot] = useState<IdentitySnapshot<{
@@ -291,13 +293,13 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       },
     }))
 
-    void api('/recovery/home', { signal: controller.signal })
+    // Only the envelope is checked here; each section reader runs its own
+    // generated guard so one malformed projection never erases the others.
+    void contractApi('GET /recovery/home', '/recovery/home', undefined, { signal: controller.signal })
       .then((payload) => {
         if (cancelled) return
         const snapshot = parseRecoveryHomeSnapshot(payload)
-        if (!snapshot || snapshot.scope !== 'full') {
-          throw new Error(runtimeT('recoveryCenter.invalidHomeResponse'))
-        }
+        if (!snapshot || snapshot.scope !== 'full') throw new MalformedResponseError()
 
         const metricsValue = readRecoveryHomeSection(
           snapshot,
@@ -372,9 +374,11 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
         }
         setMetricsErrorSnapshot({
           orgId: resolvedOrgId,
-          value: error instanceof Error
-            ? error.message
-            : runtimeT('recoveryCenter.empty.metricsUnavailableFallback'),
+          value: error instanceof MalformedResponseError
+            ? runtimeT('recoveryCenter.invalidHomeResponse')
+            : error instanceof Error
+              ? error.message
+              : runtimeT('recoveryCenter.empty.metricsUnavailableFallback'),
         })
         startTransition(() => {
           setClustersSnapshot({ orgId: resolvedOrgId, value: null })
@@ -407,7 +411,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       orgId: resolvedOrgId, userId: resolvedUserId,
       value: { brief: null, status: 'loading' },
     })
-    void contractApi('GET /operations/brief', '/operations/brief', undefined, { signal: controller.signal })
+    void contractApi('GET /operations/brief', '/operations/brief', undefined, { signal: controller.signal, guard: isGetOperationsBriefResponse })
       .then((payload) => {
         if (cancelled) return
         const brief = decodeOperatorBrief(payload)
@@ -433,7 +437,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     const generation = ++impactReadGeneration.current
     const orgId = resolvedOrgId
     const userId = resolvedUserId
-    void api('/recovery/home?scope=impact', { signal: controller.signal })
+    void contractApi('GET /recovery/home', '/recovery/home?scope=impact', undefined, { signal: controller.signal })
       .then((payload) => {
         if (controller.signal.aborted) return
         const snapshot = parseRecoveryHomeSnapshot(payload)

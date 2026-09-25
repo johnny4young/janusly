@@ -76,12 +76,6 @@ func IsPermission(key string) bool {
 	return ok
 }
 
-// DefaultRoleHasPermission answers the built-in grant matrix.
-func DefaultRoleHasPermission(role Role, key string) bool {
-	entry, ok := permissionsByKey[key]
-	return ok && entry.DefaultRoles[role]
-}
-
 // DefaultPermissionsForRole returns the effective grant carried by a virtual
 // built-in role before an organization creates an override row. API consumers
 // must not have to interpret a missing row as an empty grant: persisting that

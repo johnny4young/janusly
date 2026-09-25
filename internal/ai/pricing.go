@@ -29,7 +29,7 @@ type ModelPrice struct {
 // ModelPricingSnapshotDate is the date the static Anthropic price catalog was
 // checked against the vendor's published pricing. Runtime env overrides remain
 // available for changes between source updates.
-const ModelPricingSnapshotDate = "2026-09-23"
+const ModelPricingSnapshotDate = "2026-09-24"
 
 // modelPrices is the completion runtime's single pricing source. Keys are
 // lowercase; cmd/pricing generates the browser copy from this map.

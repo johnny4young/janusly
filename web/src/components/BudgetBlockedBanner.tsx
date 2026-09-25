@@ -20,14 +20,6 @@ import { Trans, useT } from '../i18n'
 import { requestOperationsSection } from './operations-section-bus'
 import { Button } from '@/components/ui/Button'
 
-export type BudgetBlockedEnvelope = {
-  monthlyUsdSpent?: number
-  monthlyUsdLimit?: number | null
-  resolvedScope?: 'org' | 'workflow' | null
-  exceededAt?: 'org' | 'workflow' | null
-  policy?: 'warn' | 'block'
-}
-
 export function BudgetBlockedBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void }) {
   const { t } = useT()
   const envelope = useWorkflowStore((state) => state.budgetBlocked)
