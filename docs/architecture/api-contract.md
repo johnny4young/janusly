@@ -133,7 +133,40 @@ other keyword, and on an empty `enum`/`const` set or a literal that contradicts
 the declared `type`, so a new manifest construct cannot be silently skipped or
 compiled into a guard that rejects everything.
 
-Adopt a guard by passing it to `contractApi` next to the call:
+### The rule
+
+The browser validates **shape** from the manifest and never re-encodes server
+**policy**:
+
+- Shape (types, nullability, enums, required and closed keys) is the generated
+  guard's. A payload that fails it raises `MalformedResponseError`
+  (`web/src/lib/malformed-response.ts`) with the `api.error.malformedResponse`
+  copy; a panel that had its own unavailable copy catches that class and keeps
+  it, while transport and HTTP errors pass through unchanged.
+- The hand-written readers (`list-contract`, `run-status-contract`,
+  `dead-letter-contract`, `recovery-patch-contract`, `recovery-case-contract`,
+  `authoring-contract`, `health-delta`, `recovery-home-sections` and the rollout
+  and qualification parsers) keep only **UI invariants**: cross-field facts a
+  component depends on, each commented with the component that needs it. Examples:
+  echoed ids (`run.id === runId`, a rollout of this workflow), unique row ids,
+  `eventsCursor` present exactly when `eventsHasMore`, a delta present exactly
+  when `hasEnoughData`, fallback and playbook suggestions pinned to their fixed
+  confidence, a validation bound to its candidate by SHA-256, a vocabulary the UI
+  translates, a date `Intl` must format. Extension JSON that the manifest keeps
+  opaque is narrowed only as far as the component reads it.
+- Policy never appears in the browser: maximum lengths, page sizes, item counts
+  and numeric ranges copied from Go become a "malformed response" outage the day
+  the server changes them. Form bounds for operator input (the rollout draft) are
+  UX, not response validation, and carry a `// wire-policy:` marker naming their
+  Go source.
+
+### Adding a route end to end
+
+1. Describe the route in the Go manifest (`internal/contract`) with a closed
+   response schema, and keep its wire-conformance test green.
+2. Run `make generate`: it renders `contract/openapi.json`, the TypeScript
+   types and `web/src/lib/api-guards/operations/<Stem>.ts`.
+3. Import that one module and pass it to `contractApi` next to the call:
 
 ```ts
 import { isGetRunResponse } from '../lib/api-guards/operations/GetRun'
@@ -141,22 +174,47 @@ import { isGetRunResponse } from '../lib/api-guards/operations/GetRun'
 const run = await contractApi('GET /run', path, undefined, { guard: isGetRunResponse })
 ```
 
+4. Add a reader function only if the component needs a UI invariant the shape
+   cannot express, and test that invariant plus one case proving shape is
+   delegated to the guard.
+
 The option is typed to the operation, so a guard for a structurally different
 operation does not compile (type predicates are structural: two operations with
 the same payload type accept each other's guard). `contractApi` runs it on the
-unwrapped payload of a 2xx response only; non-2xx responses (including a 429 that carries a data envelope) still throw
-`ApiError` before any guard runs, and the `/start`/`/resume` field-error
-envelope is passed through. A rejected payload raises the existing
-`api.error.malformedResponse` error. Without a guard the call behaves exactly as
-before. Cross-field UI invariants (a delta is present iff there is enough data,
-page ids are unique) are not shape and stay in the hand-written readers.
+unwrapped payload of a 2xx response only; non-2xx responses (including a 429
+that carries a data envelope) still throw `ApiError` before any guard runs, and
+the `/start`/`/resume` field-error envelope is passed through. Without a guard
+the call behaves exactly as before. Mutations whose receipt the UI tolerates
+(the recovery-case ladder, the recovery dialog's save and replay) stay
+unguarded so a committed mutation is never reported as a failure.
+
+`GET /workflows/{workflowId}/rollout` is outside the manifest because it shares
+a mux pattern with the versioned routes; its reader checks the envelope by hand
+around the generated `isWorkflowRollout` component guard.
+
+### Ratchets
+
+`pnpm lint` enforces the rule:
+
+- `scripts/check-wire-policy.mjs` fails on any numeric literal other than 0, 1
+  and -1 in the hand-written readers unless its line, or the paragraph under a
+  standalone marker, carries `// wire-policy: <reason>` (baseline zero).
+- `scripts/check-duplicate-guards.mjs` owns every function `src/lib/guards.ts`
+  exports, including the primitives the generated guards import, and rejects a
+  local re-declaration even with different casing.
+- `scripts/check-raw-v1-reads.mjs` rejects a raw `api()` call on a v1 read path
+  and on any manifest operation, reads and mutations, literal or templated
+  paths, matched by method. A deliberate exception carries `// raw-api: <reason>`;
+  calls that predate the check are listed in `RAW_OPERATION_BASELINE`, which may
+  only shrink. Its test also pins the variable-path call sites that motivated the
+  check to `contractApi`.
 
 `make generate` regenerates the guards after the types; the drift gate covers
 the generated directory, including new untracked modules;
-`web/scripts/generate-api-guards.test.mjs` compiles and runs synthetic output for every supported keyword, and
-`web/src/lib/api-guards.test.ts` samples every operation from
-`contract/openapi.json` and checks acceptance, closed keys, required keys,
-wrong types and that server bounds are not enforced.
+`web/scripts/generate-api-guards.test.mjs` compiles and runs synthetic output
+for every supported keyword, and `web/src/lib/api-guards.test.ts` samples every
+operation from `contract/openapi.json` and checks acceptance, closed keys,
+required keys, wrong types and that server bounds are not enforced.
 
 ## Text-search query boundary
 
@@ -234,9 +292,9 @@ workflow/node snapshot and bounded drill provenance/outcome. The legacy
 Missing or foreign entries are indistinguishable 404 responses. Persisted absent
 timestamps remain null; the browser must not invent recency or downtime.
 
-The browser's shared detail boundary validates identity, lifecycle, required
-snapshot keys and drill projections before enabling recovery; an incomplete or
-wrong-row response cannot become evidence. Extension workflow/node/error JSON is
+The browser's shared detail boundary checks the generated shape and the row
+identity before enabling recovery, and copies only the declared keys; an
+incomplete or wrong-row response cannot become evidence. Extension workflow/node/error JSON is
 not redefined as a closed business schema. The explicit `entries` namespace also
 keeps legacy `/dlq/queue`, `/dlq/counts` and `/dlq/cluster-members` out of the
 versioned-path rewrite.
@@ -265,7 +323,8 @@ versus empty credential requirements.
 
 Browser readers validate entire pages before updating a projection: malformed
 successful responses are errors, not empty lists or partially filtered success.
-They reject duplicate identities, invalid consumed fields and mismatched version
-ownership/cursors; authoring uses the existing workflow-definition guard. A failed
-bootstrap refresh retains previous lists and newer run-event patches. Version
-history does not advance its cursor when an older page is rejected.
+Shape comes from the generated guards; the readers reject duplicate identities
+and mismatched version ownership/cursors, and authoring uses the existing
+workflow-definition guard. Page sizes stay server policy. A failed bootstrap
+refresh retains previous lists and newer run-event patches. Version history does
+not advance its cursor when an older page is rejected.

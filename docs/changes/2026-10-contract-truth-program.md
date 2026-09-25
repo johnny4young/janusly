@@ -3,8 +3,9 @@
 Follow-up to the September deep-review remediation. Three debts remain that
 the remediation could only patch: browser wire validators that re-encode
 server policy, a dead-code inventory that is still measured by hand, and a
-price catalog that is trusted rather than checked. Each wave lands as its own
-PR after a green `make verify`; waves are independent unless noted.
+price catalog that is trusted rather than checked. The waves shipped together
+as one PR with one commit series, each commit green on its own; waves are
+independent unless noted.
 
 ## Problem 1 — the browser rejects what the server says
 
@@ -74,13 +75,20 @@ placeholders, so the only way the browser could validate them was by hand.
 - Module by module, delete the shape and policy rules from the seven contract
   modules and the two inline parsers; keep only kind-2 invariants, each with a
   one-line comment naming the component that needs it.
-- Add a ratchet test (`web/scripts/wire-policy-ratchet.test.mjs`) that counts
-  numeric literals in `web/src/lib/*contract*.ts` and `health-delta.ts` and
-  fails when the count grows. Start at today's count, lower it each wave.
+- Add a ratchet (`web/scripts/check-wire-policy.mjs`, in `pnpm lint`) that
+  fails on numeric literals in the hand-written readers unless a
+  `// wire-policy: <reason>` marker explains them.
 - Update `docs/architecture/api-contract.md` with the rule: the browser
   validates shape from the manifest and never policy.
 - Done: ratchet at zero for policy literals; no `Number.isSafeInteger(...) &&
   value <= N` left outside generated code.
+- Landed: the generator emits one module per guard with no barrel, so a lazy
+  panel's guard ships in its own chunk. The readers delegate shape to their
+  generated guard and keep only commented UI invariants; a guard failure raises
+  `MalformedResponseError`, which panels map back to their own unavailable
+  copy. `check-duplicate-guards` now owns every `guards.ts` export and
+  `check-raw-v1-reads` also rejects raw `api()` calls on manifest operations
+  (older raw mutations sit in a shrinking baseline).
 
 ## Problem 2 — dead code measured by hand
 
@@ -137,5 +145,61 @@ What is missing is a way to know the next time it drifts.
 | 4 dead-code gate | — | S | None |
 | 5 pricing check | — | S | None |
 
-Waves 4 and 5 can ship first and in parallel. Waves 1–3 are the program's
-core and should ship in order, one PR each.
+Waves 4 and 5 could ship first and in parallel. Waves 1–3 are the program's
+core and shipped in order, within the same PR and commit series as 4 and 5.
+
+## Status
+
+Complete. One PR, one commit series on `codex/contract-truth-program`.
+
+| Wave | Status | Commits |
+|---|---|---|
+| 4 dead-code gate | done | `a5111ff8`, hardened in `2d30f0a2` |
+| 5 pricing check | done | `4dc8e3d4`, hardened in `2d30f0a2` |
+| 1 close the manifest | done | `a6e07762`, `014b5649` |
+| 2 generate guards | done | `4b671193`, `124383e2` |
+| 3 shrink contracts | done | `d23c6403`, `32caa367`, and the ratchet commit that adds this section |
+
+Measured at the end of the program:
+
+- Manifest: closed route responses 11 → 56 of 56, with 99 shared schema
+  components.
+- Generated guards: 56 operation and 97 component modules (the two envelope
+  schemas have no guard).
+- Adoption: operations validated by their generated guard 21 → 35. Wave 3 moved
+  15 call sites from raw `api()` to `contractApi` (12 with a guard, 3 typed
+  mutations that stay unguarded); 11 older raw mutation calls remain in
+  `RAW_OPERATION_BASELINE`, which may only shrink.
+- Dead-code allowlist: 2 documented test seams.
+
+Wire-policy literals (numeric literals other than 0, 1 and -1) per reader, at
+the start of Wave 3 and after it. After Wave 3 every remaining literal carries a
+`// wire-policy:` reason, so the unannotated count is 0 everywhere:
+
+| Reader | Before | After (annotated) |
+|---|---:|---:|
+| `recovery-case-contract.ts` | 27 | 1 (validate-then-approve revision step) |
+| `recovery-patch-contract.ts` | 16 | 1 (pinned playbook confidence) |
+| `authoring-contract.ts` | 12 | 1 (input-schema amplification bound shared with Go) |
+| `list-contract.ts` | 3 | 0 |
+| `health-delta.ts` | 3 | 0 |
+| `dead-letter-contract.ts` | 1 | 0 |
+| `run-status-contract.ts` | 0 | 0 |
+| `recovery-home-sections.ts` | 0 | 0 |
+| `WorkflowRolloutPanel.tsx` | 18 | 10 (form defaults and bounds, percent, two-version minimum, icon size) |
+| `WorkflowRecoveryQualification.tsx` | 4 | 1 (failures listed on the card) |
+| Total | 84 | 14 annotated, 0 unannotated |
+
+Bundle (gzip bytes; caps in KiB):
+
+| Point | Artifact | Worst single locale | Caps |
+|---|---:|---:|---|
+| Before the program | 618,497 | 573,597 | 605 / 560.5 |
+| After Wave 2 | 621,871 | 576,971 | 608.3 / 563.8 |
+| After Wave 3 | 619,475 | 574,575 | 605.9 / 562.0 |
+
+Per-guard modules moved the lazy-only guards out of the eager `app-workspace`
+chunk (−838 B there; `OperationsPage` +515 B and `FailureClustersCard` +129 B
+at that step), and removing the hand-written validators recovered the rest.
+The artifact now carries 35 adopted guards for 978 B more than before the
+program.

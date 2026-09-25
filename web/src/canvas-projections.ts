@@ -24,6 +24,7 @@
  */
 
 import type { EdgeMarker } from '@xyflow/react'
+import { isNonEmptyString } from './lib/guards'
 import type { JsonObject, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape, RunNode, RunSummary } from './types'
 
 /**
@@ -43,10 +44,6 @@ export const WORKFLOW_EDGE_MARKER_END: EdgeMarker = {
 
 function asObject(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : null
-}
-
-function isNonemptyString(value: unknown): value is string {
-  return typeof value === 'string' && Boolean(value.trim())
 }
 
 const WORKFLOW_INPUT_TYPES = new Set<WorkflowInputSchemaShape['type']>(['string', 'number', 'boolean', 'object', 'array'])
@@ -90,14 +87,14 @@ export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): Work
   let positionKeys: string[] = []
   if (!workflow || !Array.isArray(workflow.nodes) || !Array.isArray(workflow.edges)) return null
   if (workflow.dslVersion !== undefined && workflow.dslVersion !== '1.0') return null
-  if (workflow.id !== undefined && !isNonemptyString(workflow.id)) return null
-  if (workflow.name !== undefined && !isNonemptyString(workflow.name)) return null
+  if (workflow.id !== undefined && !isNonEmptyString(workflow.id)) return null
+  if (workflow.name !== undefined && !isNonEmptyString(workflow.name)) return null
   if (workflow.metadata !== undefined) {
     const metadata = asObject(workflow.metadata)
     if (!metadata) return null
     if (metadata.description !== undefined && typeof metadata.description !== 'string') return null
     if (metadata.tags !== undefined && (!Array.isArray(metadata.tags)
-      || !metadata.tags.every(tag => isNonemptyString(tag)))) return null
+      || !metadata.tags.every(tag => isNonEmptyString(tag)))) return null
   }
   if (workflow.inputs !== undefined && !isWorkflowInputSchema(workflow.inputs)) return null
   if (workflow.outputs !== undefined) {
@@ -125,8 +122,8 @@ export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): Work
   const nodeIds = new Set<string>()
   for (const rawNode of workflow.nodes) {
     const node = asObject(rawNode)
-    if (!isNonemptyString(node?.id) || !isNonemptyString(node.type)) return null
-    if (node.label !== undefined && (!isNonemptyString(node.label) || node.label.length > 80)) return null
+    if (!isNonEmptyString(node?.id) || !isNonEmptyString(node.type)) return null
+    if (node.label !== undefined && (!isNonEmptyString(node.label) || node.label.length > 80)) return null
     if (node.config !== undefined && !asObject(node.config)) return null
     if (nodeIds.has(node.id)) return null
     nodeIds.add(node.id)
@@ -135,10 +132,10 @@ export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): Work
 
   for (const rawEdge of workflow.edges) {
     const edge = asObject(rawEdge)
-    if (!isNonemptyString(edge?.from) || !isNonemptyString(edge.to)) return null
+    if (!isNonEmptyString(edge?.from) || !isNonEmptyString(edge.to)) return null
     if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) return null
-    if (edge.id !== undefined && !isNonemptyString(edge.id)) return null
-    if (edge.condition !== undefined && !isNonemptyString(edge.condition)) return null
+    if (edge.id !== undefined && !isNonEmptyString(edge.id)) return null
+    if (edge.condition !== undefined && !isNonEmptyString(edge.condition)) return null
     if (edge.onError !== undefined && typeof edge.onError !== 'boolean') return null
   }
 

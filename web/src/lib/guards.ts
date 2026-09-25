@@ -49,6 +49,11 @@ export function isOptionalNullableRecord(value: unknown): value is Record<string
   return value == null || isRecord(value)
 }
 
+/** An array whose every item is a string. */
+export function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
 /** A finite number; NaN and infinities are rejected. */
 export function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)

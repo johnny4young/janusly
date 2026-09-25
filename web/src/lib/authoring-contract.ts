@@ -3,16 +3,12 @@ import type {
   WorkflowDefinition,
   WorkflowProposalResponse,
 } from '../types'
-import { hasOnlyKeys, isNonEmptyString, isRecord } from './guards'
+import { hasOnlyKeys, isNonEmptyString, isRecord, isStringArray } from './guards'
 import { isGetWorkflowsVersionsVersionIdResponse } from './api-guards/operations/GetWorkflowsVersionsVersionId'
 import { isPostAiWorkflowProposalsResponse } from './api-guards/operations/PostAiWorkflowProposals'
 
 // Wire shape is checked by the generated guards; this module keeps the workflow
 // document rules the canvas depends on and the authoring binding invariants.
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
-}
 
 function isCanonicalNonemptyString(value: unknown): value is string {
   return isNonEmptyString(value) && value === value.trim()
