@@ -1,16 +1,6 @@
-/**
- * Reject server policy copied into the browser's wire readers.
- *
- * The generated guards own response shape and the server owns policy (length
- * caps, page sizes, counts, numeric ranges). A numeric literal other than 0, 1
- * or -1 in a hand-written wire reader is almost always a copy of a Go limit
- * that turns into a "malformed response" outage when the server changes it.
- * A literal that must stay carries `// wire-policy: <reason>` on its line, or
- * on a line of its own that covers the following lines up to the next blank
- * line.
- *
- * Used by: `pnpm lint` and `scripts/check-wire-policy.test.mjs`.
- */
+// Reject server policy (limits, page sizes, ranges) copied into wire readers:
+// a numeric literal other than 0, 1 or -1 needs `// wire-policy: <reason>` on
+// its own line or alone on the line above.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -56,7 +46,7 @@ function exemptLines(source, comments) {
     const before = lines[line - 1].slice(0, comment.start - (source.lastIndexOf("\n", comment.start - 1) + 1));
     const standalone = /^\s*\{?\s*$/.test(before);
     if (!standalone) continue;
-    for (let next = line + 1; next <= lines.length && lines[next - 1].trim() !== ""; next += 1) exempt.add(next);
+    exempt.add(line + 1);
   }
   return { exempt, errors };
 }

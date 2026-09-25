@@ -1,10 +1,6 @@
 /**
- * Reject a second definition of the shared runtime guards. Every function
- * `src/lib/guards.ts` exports (the record helpers, the nullable/optional
- * string guards, `hasOnlyKeys`, and the primitives the generated guards are
- * composed from) is owned there; a local copy, even with different casing, is
- * how their null handling drifted apart.
- *
+ * Reject a local copy of a guard `src/lib/guards.ts` exports, even with
+ * different casing: that is how their null handling drifted apart.
  * Used by: `pnpm lint` and `scripts/check-duplicate-guards.test.mjs`.
  */
 
@@ -15,9 +11,14 @@ import { fileURLToPath } from 'node:url'
 const OWNER = 'lib/guards.ts'
 const here = path.dirname(fileURLToPath(import.meta.url))
 
-/** The function names a guards module exports. */
+// Combinators (`shape`, `literal`, `isAny`) are ordinary names elsewhere and have no null handling to drift.
+const GENERIC = new Set(['isAny'])
+
+/** The guard-like (`is*`, `as*`, `has*`) function names a guards module exports. */
 export function ownedGuardNames(guardsSource) {
-  const names = [...guardsSource.matchAll(/^export function (\w+)/gm)].map((match) => match[1])
+  const names = [...guardsSource.matchAll(/^export function ((?:is|as|has)[A-Z]\w*)/gm)]
+    .map((match) => match[1])
+    .filter((name) => !GENERIC.has(name))
   if (names.length === 0) throw new Error(`${OWNER} exports no guards`)
   return names
 }

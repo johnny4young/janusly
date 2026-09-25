@@ -50,12 +50,12 @@ type Draft = {
   minimumSuccessRatePercent: number
 }
 
-// wire-policy: form defaults and bounds for operator input mirror internal/engine/rollouts.go.
+// Form defaults for operator input mirror internal/engine/rollouts.go.
 const DEFAULT_DRAFT: Draft = {
   baselineVersionId: '',
-  trafficPercent: 10,
-  minimumSampleSize: 10,
-  minimumSuccessRatePercent: 90,
+  trafficPercent: 10, // wire-policy: form default.
+  minimumSampleSize: 10, // wire-policy: form default.
+  minimumSuccessRatePercent: 90, // wire-policy: form default.
 }
 
 // wire-policy: a rollout compares a baseline with a newer canary version.
@@ -292,11 +292,11 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
             </div>
           </div>
           <div className="we-rollout-panel__fields">
-            {/* wire-policy: form bounds for operator input mirror internal/engine/rollouts.go. */}
+            {/* Form bounds for operator input mirror internal/engine/rollouts.go. */}
             {([
-              ['trafficPercent', 'traffic', 1, 50],
-              ['minimumSampleSize', 'sample', 5, 100],
-              ['minimumSuccessRatePercent', 'successRate', 1, 100],
+              ['trafficPercent', 'traffic', 1, 50], // wire-policy: form bound.
+              ['minimumSampleSize', 'sample', 5, 100], // wire-policy: form bound.
+              ['minimumSuccessRatePercent', 'successRate', 1, 100], // wire-policy: form bound.
             ] as const).map(([field, label, min, max]) => (
               <FormField key={field} label={t(`workflowRollout.${label}`)}>
                 {controlProps => (

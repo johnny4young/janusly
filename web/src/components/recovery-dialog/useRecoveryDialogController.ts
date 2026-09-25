@@ -446,7 +446,7 @@ export function useRecoveryDialogController({
       // replay throws — without this, a save+replay sequence that fails
       // at replay leaves panels stale until a manual refresh.
       bumpPlatformVersion()
-      let applyOutcome: { runId?: string; cluster?: ClusterApplyResult }
+      let applyOutcome: { cluster?: ClusterApplyResult }
       if (isClusterMode) {
         // Bulk replay — one save above + N replays in series. The route
         // re-validates each row's signature server-side so a stale

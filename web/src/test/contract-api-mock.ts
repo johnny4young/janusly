@@ -4,10 +4,8 @@ type ContractOptions = RequestInit & { guard?: (value: unknown) => boolean }
 type Complete = Partial<Record<string, (payload: never) => unknown>>
 
 /**
- * A `contractApi` stand-in over a mocked `api`: the request reaches the mock
- * as the real transport would send it, and the operation's guard still runs.
- * `complete` fills a test's partial payload for an operation to the manifest
- * shape before the guard sees it, so fixtures name only what a test asserts.
+ * A `contractApi` over a mocked `api` that still runs the guard; `complete`
+ * fills a test's partial payload to the manifest shape before the guard sees it.
  */
 export function contractApiOver(api: (path: string, init?: RequestInit) => Promise<unknown>, complete: Complete = {}) {
   return async (operation: string, path: string, request: unknown, { guard, ...init }: ContractOptions = {}) => {

@@ -1794,6 +1794,49 @@
         "type": "object"
       },
       "RecoveryEvidenceJSON": {},
+      "RecoveryHeatmap": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "day": {
+                  "type": "string"
+                },
+                "failures": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "mttrSeconds": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "recovered": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "day",
+                "failures",
+                "recovered",
+                "mttrSeconds"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "windowDays": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "days",
+          "windowDays"
+        ],
+        "type": "object"
+      },
       "RecoveryHome": {
         "additionalProperties": false,
         "properties": {
@@ -1819,67 +1862,7 @@
                         "const": "ok"
                       },
                       "value": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "cases": {
-                            "items": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "action": {
-                                  "type": "string"
-                                },
-                                "createdAt": {
-                                  "type": "string"
-                                },
-                                "detectorId": {
-                                  "type": "string"
-                                },
-                                "detectorKind": {
-                                  "type": "string"
-                                },
-                                "id": {
-                                  "type": "string"
-                                },
-                                "message": {
-                                  "type": "string"
-                                },
-                                "runId": {
-                                  "type": "string"
-                                },
-                                "source": {
-                                  "type": "string"
-                                },
-                                "state": {
-                                  "type": "string"
-                                },
-                                "workflowId": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "runId",
-                                "workflowId",
-                                "source",
-                                "detectorId",
-                                "detectorKind",
-                                "action",
-                                "state",
-                                "message",
-                                "createdAt"
-                              ],
-                              "type": "object"
-                            },
-                            "type": "array"
-                          }
-                        },
-                        "required": [
-                          "cases"
-                        ],
-                        "type": "object"
+                        "$ref": "#/components/schemas/RecoveryHomeCases"
                       }
                     },
                     "required": [
@@ -1943,47 +1926,7 @@
                         "const": "ok"
                       },
                       "value": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "days": {
-                            "items": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "day": {
-                                  "type": "string"
-                                },
-                                "failures": {
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "mttrSeconds": {
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "recovered": {
-                                  "minimum": 0,
-                                  "type": "integer"
-                                }
-                              },
-                              "required": [
-                                "day",
-                                "failures",
-                                "recovered",
-                                "mttrSeconds"
-                              ],
-                              "type": "object"
-                            },
-                            "type": "array"
-                          },
-                          "windowDays": {
-                            "type": "integer"
-                          }
-                        },
-                        "required": [
-                          "days",
-                          "windowDays"
-                        ],
-                        "type": "object"
+                        "$ref": "#/components/schemas/RecoveryHeatmap"
                       }
                     },
                     "required": [
@@ -2079,52 +2022,7 @@
                         "const": "ok"
                       },
                       "value": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "counts": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "open": {
-                                "minimum": 0,
-                                "type": "integer"
-                              },
-                              "replayed": {
-                                "minimum": 0,
-                                "type": "integer"
-                              },
-                              "resolved": {
-                                "minimum": 0,
-                                "type": "integer"
-                              },
-                              "total": {
-                                "minimum": 0,
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "total",
-                              "open",
-                              "replayed",
-                              "resolved"
-                            ],
-                            "type": "object"
-                          },
-                          "oldestOpen": {
-                            "anyOf": [
-                              {
-                                "$ref": "#/components/schemas/DeadLetterSummary"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": [
-                          "counts",
-                          "oldestOpen"
-                        ],
-                        "type": "object"
+                        "$ref": "#/components/schemas/RecoveryHomeQueue"
                       }
                     },
                     "required": [
@@ -2224,6 +2122,117 @@
           "scope",
           "generatedAt",
           "sections"
+        ],
+        "type": "object"
+      },
+      "RecoveryHomeCases": {
+        "additionalProperties": false,
+        "properties": {
+          "cases": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "detectorId": {
+                  "type": "string"
+                },
+                "detectorKind": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "workflowId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "runId",
+                "workflowId",
+                "source",
+                "detectorId",
+                "detectorKind",
+                "action",
+                "state",
+                "message",
+                "createdAt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cases"
+        ],
+        "type": "object"
+      },
+      "RecoveryHomeQueue": {
+        "additionalProperties": false,
+        "properties": {
+          "counts": {
+            "additionalProperties": false,
+            "properties": {
+              "open": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "replayed": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "resolved": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "total",
+              "open",
+              "replayed",
+              "resolved"
+            ],
+            "type": "object"
+          },
+          "oldestOpen": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeadLetterSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "counts",
+          "oldestOpen"
         ],
         "type": "object"
       },

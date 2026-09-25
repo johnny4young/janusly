@@ -89,6 +89,9 @@ var Components = []Component{
 	{"ValidationBreakdown", validationBreakdown},
 	{"NullableCount", nullableCount},
 	{"RecoveryValidationReport", recoveryValidationReport},
+	{"RecoveryHomeQueue", recoveryHomeQueue},
+	{"RecoveryHeatmap", recoveryHeatmap},
+	{"RecoveryHomeCases", recoveryHomeCases},
 	{"RecoveryHome", recoveryHome},
 
 	// Health and rollout

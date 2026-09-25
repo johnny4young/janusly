@@ -89,12 +89,16 @@ describe('recovery case read contract', () => {
     expect(parseRecoveryCaseDetail(detail({ activeApproval }))).toBeNull()
   })
 
-  it('rejects approval outside awaiting_approval or on a failed or stale validation', () => {
+  it('rejects approval outside awaiting_approval or on a failed validation', () => {
     expect(parseRecoveryCaseDetail(detail({}, { state: 'monitoring' }))).toBeNull()
     const failed = { ...validation, payload: { ...validation.payload as object, passed: false } }
     expect(parseRecoveryCaseDetail(detail({ artifacts: [candidate, failed] }))).toBeNull()
-    const stale = { ...validation, payload: { ...validation.payload as object, caseRevision: 3 } }
-    expect(parseRecoveryCaseDetail(detail({ artifacts: [candidate, stale] }))).toBeNull()
+  })
+
+  it('leaves the validate-to-approve revision distance to the server', () => {
+    const earlier = { ...validation, payload: { ...validation.payload as object, caseRevision: 3 } }
+    const parsed = parseRecoveryCaseDetail(detail({ artifacts: [candidate, earlier] }))
+    expect(parsed?.activeApproval).toEqual(approval)
   })
 
   it('treats an expired approval as none', () => {

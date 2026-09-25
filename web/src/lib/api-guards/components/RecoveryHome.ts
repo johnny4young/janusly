@@ -2,9 +2,11 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { anyOf, arrayOf, isInteger, isShape, isString, literal, nullable, shape } from "../../guards"
-import { isDeadLetterSummary } from "./DeadLetterSummary"
+import { anyOf, isShape, isString, literal, shape } from "../../guards"
 import { isFailureClusters } from "./FailureClusters"
+import { isRecoveryHeatmap } from "./RecoveryHeatmap"
+import { isRecoveryHomeCases } from "./RecoveryHomeCases"
+import { isRecoveryHomeQueue } from "./RecoveryHomeQueue"
 import { isRecoveryLedger } from "./RecoveryLedger"
 import { isRecoveryMetrics } from "./RecoveryMetrics"
 import { isRecoveryValidationReport } from "./RecoveryValidationReport"
@@ -23,15 +25,7 @@ export function isRecoveryHome(value: unknown): value is Api.RecoveryHome {
       })),
       queue: anyOf(shape({
         status: literal("ok"),
-        value: shape({
-          counts: shape({
-            open: isInteger,
-            replayed: isInteger,
-            resolved: isInteger,
-            total: isInteger,
-          }),
-          oldestOpen: nullable(isDeadLetterSummary),
-        }),
+        value: isRecoveryHomeQueue,
       }), shape({
         status: literal("unavailable"),
       })),
@@ -44,20 +38,7 @@ export function isRecoveryHome(value: unknown): value is Api.RecoveryHome {
     }, {
       cases: anyOf(shape({
         status: literal("ok"),
-        value: shape({
-          cases: arrayOf(shape({
-            action: isString,
-            createdAt: isString,
-            detectorId: isString,
-            detectorKind: isString,
-            id: isString,
-            message: isString,
-            runId: isString,
-            source: isString,
-            state: isString,
-            workflowId: nullable(isString),
-          })),
-        }),
+        value: isRecoveryHomeCases,
       }), shape({
         status: literal("unavailable"),
       })),
@@ -69,15 +50,7 @@ export function isRecoveryHome(value: unknown): value is Api.RecoveryHome {
       })),
       heatmap: anyOf(shape({
         status: literal("ok"),
-        value: shape({
-          days: arrayOf(shape({
-            day: isString,
-            failures: isInteger,
-            mttrSeconds: isInteger,
-            recovered: isInteger,
-          })),
-          windowDays: isInteger,
-        }),
+        value: isRecoveryHeatmap,
       }), shape({
         status: literal("unavailable"),
       })),

@@ -367,8 +367,8 @@ export function validationPayload(
 
 /**
  * Approve and Apply send the active approval's artifact ids back to the server,
- * so the binding must name a passed validation of exactly that candidate at the
- * revision the case was validated in. An expired approval is no approval.
+ * so the binding must name a passed validation of exactly that candidate. The
+ * server binds the validation revision to the grant. An expired approval is no approval.
  */
 function parseRecoveryActiveApproval(
   value: WireDetail['activeApproval'],
@@ -393,8 +393,6 @@ function parseRecoveryActiveApproval(
     || !validation.passed
     || validation.candidateArtifactId !== candidate.id
     || validation.candidateSha256 !== candidate.sha256
-    // wire-policy: validate and then approve each advance the case revision once.
-    || validation.caseRevision !== recoveryCase.revision - 2
   ) return undefined
   return {
     candidateArtifactId: value.candidateArtifactId,

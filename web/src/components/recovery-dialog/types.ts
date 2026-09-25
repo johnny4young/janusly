@@ -143,7 +143,6 @@ export type Step =
   | { kind: 'applying'; mode: 'single' | 'cluster'; total?: number }
   | {
       kind: 'applied'
-      runId?: string
       cluster?: ClusterApplyResult
       // Threaded through to <RecoveryDeltaCard>. All optional so save-route
       // responses without a parseable shape (defensive — the route's

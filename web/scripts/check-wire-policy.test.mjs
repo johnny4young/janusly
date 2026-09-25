@@ -19,13 +19,11 @@ test('flags numeric literals other than 0, 1 and -1, ignoring comments and strin
   ])
 })
 
-test('honours same-line and standalone wire-policy markers, including JSX block comments', () => {
+test('honours same-line and next-line markers, including JSX block comments', () => {
   const source = [
     'const cap = 512 // wire-policy: amplification bound shared with Go',
-    '// wire-policy: form bounds mirror the engine',
-    'const bounds = [',
-    '  [5, 100],',
-    ']',
+    '// wire-policy: form bound mirrors the engine',
+    'const bound = 5',
     '',
     'const later = 7',
     'const view = (',
@@ -35,7 +33,17 @@ test('honours same-line and standalone wire-policy markers, including JSX block 
     '  </div>',
     ')',
   ].join('\n')
-  assert.deepEqual(wirePolicyLiterals(source, 'view.tsx').map(({ line, literal }) => `${line}:${literal}`), ['7:7'])
+  assert.deepEqual(wirePolicyLiterals(source, 'view.tsx').map(({ line, literal }) => `${line}:${literal}`), ['5:7'])
+})
+
+test('a standalone marker exempts only the next line', () => {
+  const source = [
+    '// wire-policy: form bounds mirror the engine',
+    'const bounds = [',
+    '  [5, 100],',
+    ']',
+  ].join('\n')
+  assert.deepEqual(wirePolicyLiterals(source).map(({ line, literal }) => `${line}:${literal}`), ['3:5', '3:100'])
 })
 
 test('requires a reason on every marker', () => {

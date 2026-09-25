@@ -82,13 +82,15 @@ placeholders, so the only way the browser could validate them was by hand.
   validates shape from the manifest and never policy.
 - Done: ratchet at zero for policy literals; no `Number.isSafeInteger(...) &&
   value <= N` left outside generated code.
-- Landed: the generator emits one module per guard with no barrel, so a lazy
-  panel's guard ships in its own chunk. The readers delegate shape to their
-  generated guard and keep only commented UI invariants; a guard failure raises
+- Landed: the generator emits one module per guard with no barrel, so a guard
+  imported only by a lazy panel ships in that panel's chunk; the Recovery Home
+  section guards stay in `app-workspace.js` because the eager Home controller
+  reads every section. The readers delegate shape to their generated guard and
+  keep only commented UI invariants; a guard failure raises
   `MalformedResponseError`, which panels map back to their own unavailable
-  copy. `check-duplicate-guards` now owns every `guards.ts` export and
-  `check-raw-v1-reads` also rejects raw `api()` calls on manifest operations
-  (older raw mutations sit in a shrinking baseline).
+  copy. `check-duplicate-guards` now owns the guard-like `guards.ts` exports
+  and `check-raw-v1-reads` also rejects raw `api()` calls on manifest
+  operations (older raw mutations sit in a shrinking baseline).
 
 ## Problem 2 — dead code measured by hand
 
@@ -162,14 +164,22 @@ Complete. One PR, one commit series on `codex/contract-truth-program`.
 
 Measured at the end of the program:
 
-- Manifest: closed route responses 11 → 56 of 56, with 99 shared schema
+- Manifest: closed route responses 11 → 56 of 56, with 102 shared schema
   components.
-- Generated guards: 56 operation and 97 component modules (the two envelope
+- Generated guards: 56 operation and 100 component modules (the two envelope
   schemas have no guard).
-- Adoption: operations validated by their generated guard 21 → 35. Wave 3 moved
-  15 call sites from raw `api()` to `contractApi` (12 with a guard, 3 typed
-  mutations that stay unguarded); 11 older raw mutation calls remain in
-  `RAW_OPERATION_BASELINE`, which may only shrink.
+- Adoption: operations validated by their generated guard 21 → 32 (unique
+  `api-guards/operations/*` modules imported from production source).
+  `GET /recovery/home` is not among them: its envelope is read by hand and each
+  of its eight sections runs its generated component guard, so a malformed
+  section degrades alone. Wave 3 moved 15 call sites from raw `api()` to
+  `contractApi` (12 with a guard, of which the two Home reads now validate per
+  section, and 3 typed mutations that stay unguarded); 11 older raw mutation
+  calls remain in `RAW_OPERATION_BASELINE`, which may only shrink.
+- `contractApi` calls without a whole-response guard: 10, the 8
+  tolerated-receipt mutations (the five recovery-case steps, validate-fix, the
+  recovery dialog's save and replay) and the two per-section `/recovery/home`
+  reads.
 - Dead-code allowlist: 2 documented test seams.
 
 Wire-policy literals (numeric literals other than 0, 1 and -1) per reader, at
@@ -178,7 +188,7 @@ the start of Wave 3 and after it. After Wave 3 every remaining literal carries a
 
 | Reader | Before | After (annotated) |
 |---|---:|---:|
-| `recovery-case-contract.ts` | 27 | 1 (validate-then-approve revision step) |
+| `recovery-case-contract.ts` | 27 | 0 |
 | `recovery-patch-contract.ts` | 16 | 1 (pinned playbook confidence) |
 | `authoring-contract.ts` | 12 | 1 (input-schema amplification bound shared with Go) |
 | `list-contract.ts` | 3 | 0 |
@@ -188,7 +198,7 @@ the start of Wave 3 and after it. After Wave 3 every remaining literal carries a
 | `recovery-home-sections.ts` | 0 | 0 |
 | `WorkflowRolloutPanel.tsx` | 18 | 10 (form defaults and bounds, percent, two-version minimum, icon size) |
 | `WorkflowRecoveryQualification.tsx` | 4 | 1 (failures listed on the card) |
-| Total | 84 | 14 annotated, 0 unannotated |
+| Total | 84 | 13 annotated, 0 unannotated |
 
 Bundle (gzip bytes; caps in KiB):
 
@@ -197,9 +207,11 @@ Bundle (gzip bytes; caps in KiB):
 | Before the program | 618,497 | 573,597 | 605 / 560.5 |
 | After Wave 2 | 621,871 | 576,971 | 608.3 / 563.8 |
 | After Wave 3 | 619,475 | 574,575 | 605.9 / 562.0 |
+| After per-section Home guards | 619,370 | 574,481 | 605.9 / 562.0 |
 
 Per-guard modules moved the lazy-only guards out of the eager `app-workspace`
 chunk (−838 B there; `OperationsPage` +515 B and `FailureClustersCard` +129 B
 at that step), and removing the hand-written validators recovered the rest.
-The artifact now carries 35 adopted guards for 978 B more than before the
-program.
+Validating Home per section left every section guard in `app-workspace.js`,
+where the whole-response guard already had them, and dropped the operation
+wrapper. The artifact now ends 873 B above where the program started.

@@ -243,36 +243,42 @@ func homeSection(value Schema) map[string]any {
 	}}
 }
 
+var recoveryHomeQueue = closedObj(map[string]any{
+	"counts": closedObj(map[string]any{
+		"total": countT(), "open": countT(), "replayed": countT(), "resolved": countT(),
+	}, "total", "open", "replayed", "resolved"),
+	"oldestOpen": nullable(deadLetterSummary),
+}, "counts", "oldestOpen")
+
+var recoveryHeatmap = closedObj(map[string]any{
+	"days": arr(closedObj(map[string]any{
+		"day": str(), "failures": countT(), "recovered": countT(), "mttrSeconds": countT(),
+	}, "day", "failures", "recovered", "mttrSeconds")),
+	"windowDays": intT(),
+}, "days", "windowDays")
+
+var recoveryHomeCases = closedObj(map[string]any{
+	"cases": arr(closedObj(map[string]any{
+		"id": str(), "runId": str(), "workflowId": nullableString(), "source": str(),
+		"detectorId": str(), "detectorKind": str(), "action": str(), "state": str(),
+		"message": str(), "createdAt": str(),
+	}, "id", "runId", "workflowId", "source", "detectorId", "detectorKind", "action",
+		"state", "message", "createdAt")),
+}, "cases")
+
 // The impact scope returns ledger, wins and queue only; the full scope adds
 // the remaining sections.
 var recoveryHome = closedObj(map[string]any{
 	"scope":       map[string]any{"type": "string", "enum": []any{"full", "impact"}},
 	"generatedAt": str(),
 	"sections": closedObj(map[string]any{
-		"ledger": homeSection(recoveryLedger),
-		"wins":   homeSection(recoveryWins),
-		"queue": homeSection(closedObj(map[string]any{
-			"counts": closedObj(map[string]any{
-				"total": countT(), "open": countT(), "replayed": countT(), "resolved": countT(),
-			}, "total", "open", "replayed", "resolved"),
-			"oldestOpen": nullable(deadLetterSummary),
-		}, "counts", "oldestOpen")),
-		"metrics":  homeSection(recoveryMetrics),
-		"clusters": homeSection(failureClusters),
-		"heatmap": homeSection(closedObj(map[string]any{
-			"days": arr(closedObj(map[string]any{
-				"day": str(), "failures": countT(), "recovered": countT(), "mttrSeconds": countT(),
-			}, "day", "failures", "recovered", "mttrSeconds")),
-			"windowDays": intT(),
-		}, "days", "windowDays")),
-		"cases": homeSection(closedObj(map[string]any{
-			"cases": arr(closedObj(map[string]any{
-				"id": str(), "runId": str(), "workflowId": nullableString(), "source": str(),
-				"detectorId": str(), "detectorKind": str(), "action": str(), "state": str(),
-				"message": str(), "createdAt": str(),
-			}, "id", "runId", "workflowId", "source", "detectorId", "detectorKind", "action",
-				"state", "message", "createdAt")),
-		}, "cases")),
+		"ledger":     homeSection(recoveryLedger),
+		"wins":       homeSection(recoveryWins),
+		"queue":      homeSection(recoveryHomeQueue),
+		"metrics":    homeSection(recoveryMetrics),
+		"clusters":   homeSection(failureClusters),
+		"heatmap":    homeSection(recoveryHeatmap),
+		"cases":      homeSection(recoveryHomeCases),
 		"validation": homeSection(recoveryValidationReport),
 	}, "ledger", "wins", "queue"),
 }, "scope", "generatedAt", "sections")

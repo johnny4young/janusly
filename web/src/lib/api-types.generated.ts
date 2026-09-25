@@ -434,26 +434,23 @@ export type RecoveryCaseDetail = {
 
 export type RecoveryEvidenceJSON = unknown
 
+export type RecoveryHeatmap = {
+  "days": {
+    "day": string
+    "failures": number
+    "mttrSeconds": number
+    "recovered": number
+  }[]
+  "windowDays": number
+}
+
 export type RecoveryHome = {
   "generatedAt": string
   "scope": "full" | "impact"
   "sections": {
     "cases"?: {
       "status": "ok"
-      "value": {
-        "cases": ({
-          "action": string
-          "createdAt": string
-          "detectorId": string
-          "detectorKind": string
-          "id": string
-          "message": string
-          "runId": string
-          "source": string
-          "state": string
-          "workflowId": string | null
-        })[]
-      }
+      "value": RecoveryHomeCases
     } | {
       "status": "unavailable"
       "value"?: never
@@ -467,15 +464,7 @@ export type RecoveryHome = {
     }
     "heatmap"?: {
       "status": "ok"
-      "value": {
-        "days": {
-          "day": string
-          "failures": number
-          "mttrSeconds": number
-          "recovered": number
-        }[]
-        "windowDays": number
-      }
+      "value": RecoveryHeatmap
     } | {
       "status": "unavailable"
       "value"?: never
@@ -496,15 +485,7 @@ export type RecoveryHome = {
     }
     "queue": {
       "status": "ok"
-      "value": {
-        "counts": {
-          "open": number
-          "replayed": number
-          "resolved": number
-          "total": number
-        }
-        "oldestOpen": DeadLetterSummary | null
-      }
+      "value": RecoveryHomeQueue
     } | {
       "status": "unavailable"
       "value"?: never
@@ -524,6 +505,31 @@ export type RecoveryHome = {
       "value"?: never
     }
   }
+}
+
+export type RecoveryHomeCases = {
+  "cases": ({
+    "action": string
+    "createdAt": string
+    "detectorId": string
+    "detectorKind": string
+    "id": string
+    "message": string
+    "runId": string
+    "source": string
+    "state": string
+    "workflowId": string | null
+  })[]
+}
+
+export type RecoveryHomeQueue = {
+  "counts": {
+    "open": number
+    "replayed": number
+    "resolved": number
+    "total": number
+  }
+  "oldestOpen": DeadLetterSummary | null
 }
 
 export type RecoveryLedger = {

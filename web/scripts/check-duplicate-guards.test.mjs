@@ -6,12 +6,21 @@ import test from 'node:test'
 
 import { collectDuplicateGuards, duplicateGuardDeclarations, ownedGuardNames } from './check-duplicate-guards.mjs'
 
-test('owns every function the real guards module exports', () => {
+test('owns the guard-like exports of the real guards module, not its combinators', () => {
   const names = ownedGuardNames(fs.readFileSync(new URL('../src/lib/guards.ts', import.meta.url), 'utf8'))
   for (const name of ['isRecord', 'asRecord', 'asRecordOrEmpty', 'isNonEmptyString', 'isNullableString',
-    'isOptionalString', 'isOptionalNullableString', 'isFiniteNumber', 'hasOnlyKeys', 'isShape', 'literal']) {
+    'isOptionalString', 'isOptionalNullableString', 'isFiniteNumber', 'hasOnlyKeys', 'isShape', 'isString']) {
     assert.ok(names.includes(name), name)
   }
+  for (const name of ['literal', 'shape', 'nullable', 'anyOf', 'allOf', 'arrayOf', 'recordOf', 'isAny']) {
+    assert.ok(!names.includes(name), name)
+  }
+})
+
+test('ignores generic combinator names in production code but still flags a guard copy', () => {
+  const names = ownedGuardNames(fs.readFileSync(new URL('../src/lib/guards.ts', import.meta.url), 'utf8'))
+  const source = ['const shape = {}', 'const literal = 3', 'function isFiniteNumber(value: unknown) { return true }'].join('\n')
+  assert.deepEqual(duplicateGuardDeclarations(source, names).map(({ name }) => name), ['isFiniteNumber'])
 })
 
 test('flags local guard declarations, including case variants, and ignores imports and other names', () => {

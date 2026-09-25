@@ -887,6 +887,23 @@ describe('<RecoveryCasePanel />', () => {
     expect(screen.queryByTestId('semantic-recovery-apply-case-1')).toBeNull()
   })
 
+  it('keeps approve and apply available after an extra transition since validation', async () => {
+    const earlier = { ...validation, payload: { ...validation.payload as object, caseRevision: 2 } }
+    vi.mocked(api).mockResolvedValue(detail('awaiting_approval', 3, [replacementCandidate, earlier], activeReplacementApproval))
+
+    render(
+      <RecoveryCasePanel
+        caseId="case-1"
+        canResolve
+        onBack={vi.fn()}
+        onOpenRun={vi.fn()}
+        onResolved={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByTestId('semantic-recovery-apply-case-1')).toBeVisible()
+  })
+
   it('treats an approval that expired in transit as inactive', async () => {
     vi.mocked(api).mockResolvedValue(detail('awaiting_approval', 3, [
       replacementCandidate,

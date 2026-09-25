@@ -69,7 +69,6 @@ import {
 } from './recovery-all-clear-bus'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { isGetOperationsBriefResponse } from '../lib/api-guards/operations/GetOperationsBrief'
-import { isGetRecoveryHomeResponse } from '../lib/api-guards/operations/GetRecoveryHome'
 import { MalformedResponseError } from '../lib/malformed-response'
 
 const RECOVERY_CENTER_TAGS = [PLATFORM_TAG, 'recovery', 'runs', 'dlq', 'auto-healing', 'campaigns'] as const
@@ -294,13 +293,13 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       },
     }))
 
-    void contractApi('GET /recovery/home', '/recovery/home', undefined, { signal: controller.signal, guard: isGetRecoveryHomeResponse })
+    // Only the envelope is checked here; each section reader runs its own
+    // generated guard so one malformed projection never erases the others.
+    void contractApi('GET /recovery/home', '/recovery/home', undefined, { signal: controller.signal })
       .then((payload) => {
         if (cancelled) return
         const snapshot = parseRecoveryHomeSnapshot(payload)
-        if (!snapshot || snapshot.scope !== 'full') {
-          throw new Error(runtimeT('recoveryCenter.invalidHomeResponse'))
-        }
+        if (!snapshot || snapshot.scope !== 'full') throw new MalformedResponseError()
 
         const metricsValue = readRecoveryHomeSection(
           snapshot,
@@ -438,7 +437,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     const generation = ++impactReadGeneration.current
     const orgId = resolvedOrgId
     const userId = resolvedUserId
-    void contractApi('GET /recovery/home', '/recovery/home?scope=impact', undefined, { signal: controller.signal, guard: isGetRecoveryHomeResponse })
+    void contractApi('GET /recovery/home', '/recovery/home?scope=impact', undefined, { signal: controller.signal })
       .then((payload) => {
         if (controller.signal.aborted) return
         const snapshot = parseRecoveryHomeSnapshot(payload)

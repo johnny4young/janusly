@@ -332,8 +332,7 @@ export function useRecoveryCaseController({
   )
   const canApprove = Boolean(
     canResolve && recoveryCase?.state === 'awaiting_approval'
-    && selectedCandidate && selectedValidation && selectedValidationPayload?.passed
-    && selectedValidationPayload.caseRevision === recoveryCase.revision - 2,
+    && selectedCandidate && selectedValidation && selectedValidationPayload?.passed,
   )
   const activeApprovalMatchesSelection = Boolean(
     detail?.activeApproval

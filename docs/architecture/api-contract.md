@@ -119,8 +119,11 @@ functions composed from the primitives in `web/src/lib/guards.ts`; each module
 imports only the primitives and component guards it references. There is no
 schema library, no barrel, no aggregate map and no module state, so a guard
 ships in the chunk of the call sites that import it: a guard used only by a lazy
-panel stays in that panel's chunk. The generator rewrites the whole directory,
-so a removed schema leaves no orphan module.
+panel stays in that panel's chunk. A guard the eager Home controller imports
+ships eagerly: all eight `/recovery/home` section guards, including
+`RecoveryMetrics` and `FailureClusters`, land in `app-workspace.js` even though
+the lazy `HomeInsights` chunk renders them. The generator rewrites the whole
+directory, so a removed schema leaves no orphan module.
 
 A guard enforces shape: JSON types, nullability, `enum`/`const`, required keys,
 closed key sets (`additionalProperties: false`), typed map values and integer
@@ -184,9 +187,33 @@ the same payload type accept each other's guard). `contractApi` runs it on the
 unwrapped payload of a 2xx response only; non-2xx responses (including a 429
 that carries a data envelope) still throw `ApiError` before any guard runs, and
 the `/start`/`/resume` field-error envelope is passed through. Without a guard
-the call behaves exactly as before. Mutations whose receipt the UI tolerates
-(the recovery-case ladder, the recovery dialog's save and replay) stay
-unguarded so a committed mutation is never reported as a failure.
+the call behaves exactly as before.
+
+Every manifest route has a wire-conformance row, so a guard checks what the
+server is tested to send. Durable mutations follow one rule:
+
+- Guarded when the receipt drives client state: `POST /workflows/save` from
+  the editor, `POST /workflows/rollback`, rollout create
+  (`POST /workflows/{workflowId}/rollout`), rollout decision
+  (`POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}`), rollout
+  qualification (`POST /workflows/{workflowId}/rollout/qualification`),
+  `POST /dlq/resolve` and `POST /recovery/playbooks/{id}/use`.
+- Unguarded when the receipt is only a tolerated acknowledgement, so a
+  committed mutation is never reported as a failure: the recovery-case ladder
+  (`diagnose`, `candidates`, `validate`, `approve`, `apply`, each followed by a
+  case reload), `POST /dlq/validate-fix`, the recovery dialog's
+  `POST /workflows/save` and `POST /dlq/replay`.
+
+`GET /recovery/home` is read without the whole-response guard because the
+server settles each section independently. `recovery-home-snapshot` checks only
+the envelope (`scope`, `generatedAt`, a `sections` object) and a malformed
+envelope shows `recoveryCenter.invalidHomeResponse`. Each section reader in
+`recovery-home-sections` runs that section's generated component guard
+(`RecoveryLedger`, `RecoveryWins`, `RecoveryHomeQueue`, `RecoveryMetrics`,
+`FailureClusters`, `RecoveryHeatmap`, `RecoveryHomeCases`,
+`RecoveryValidationReport`); a section that fails it degrades alone, exactly
+like a server-side `unavailable`, and a section key the manifest does not name
+is ignored.
 
 `GET /workflows/{workflowId}/rollout` is outside the manifest because it shares
 a mux pattern with the versioned routes; its reader checks the envelope by hand
@@ -197,17 +224,21 @@ around the generated `isWorkflowRollout` component guard.
 `pnpm lint` enforces the rule:
 
 - `scripts/check-wire-policy.mjs` fails on any numeric literal other than 0, 1
-  and -1 in the hand-written readers unless its line, or the paragraph under a
-  standalone marker, carries `// wire-policy: <reason>` (baseline zero).
-- `scripts/check-duplicate-guards.mjs` owns every function `src/lib/guards.ts`
-  exports, including the primitives the generated guards import, and rejects a
-  local re-declaration even with different casing.
+  and -1 in the hand-written readers unless its own line carries
+  `// wire-policy: <reason>` or the line directly above is that marker alone
+  (baseline zero).
+- `scripts/check-duplicate-guards.mjs` owns the guard-like exports of
+  `src/lib/guards.ts` (`is*`, `as*`, `has*`, including the primitives the
+  generated guards import) and rejects a local re-declaration even with
+  different casing. Combinators (`shape`, `literal`, `nullable`, `anyOf`,
+  `isAny`, ...) are ordinary names elsewhere and are not checked.
 - `scripts/check-raw-v1-reads.mjs` rejects a raw `api()` call on a v1 read path
   and on any manifest operation, reads and mutations, literal or templated
   paths, matched by method. A deliberate exception carries `// raw-api: <reason>`;
   calls that predate the check are listed in `RAW_OPERATION_BASELINE`, which may
   only shrink. Its test also pins the variable-path call sites that motivated the
-  check to `contractApi`.
+  check to `contractApi`. Limitation: a variable or concatenated path, or a
+  variable `method`, is not seen.
 
 `make generate` regenerates the guards after the types; the drift gate covers
 the generated directory, including new untracked modules;
