@@ -11,6 +11,10 @@ before calling the client.
 - Usage recording occurs at the client boundary and cannot fail the call.
 - Generated text is bounded before parsing or persistence.
 - Workflow generation and patching pass `internal/domain` validation.
+- The authoring prompt's tool list is rendered from the executable registry,
+  and the capability block gives each built-in tool's typed input fields (at
+  most 16 per tool); that detail is dropped before any tenant capability is
+  trimmed. Repair feedback names the node or edge behind each issue.
 - Recovery patch responses and prompts use the canonical parsed workflow DAG,
   never the dead-letter run snapshot. Run-only input, tenant, and actor carriers
   are stripped before provider egress and before either AI or deterministic
@@ -219,7 +223,12 @@ model, tokens, latency, cost, repair flag, and result only—never prompts or ra
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.
 Failed authoring cases additionally retain a bounded internal failure stage and
-up to five validator issue codes; they never retain model text or error messages.
+every distinct validator issue code (a closed set; audits keep five); repaired
+cases keep the first draft's codes, and each call keeps the provider's stop
+reason. None retain model text or error messages. Repair feedback reports every
+top-level and graph parse defect in one round, naming mistyped fields by
+structural path rather than decoder text; only kind errors nested inside
+`inputs` or `recovery.contract` still surface one per round, in decoder wording.
 
 The paid profile has **no checkout-local default ledger**. Set
 `JANUSLY_REAL_PROVIDER_LEDGER` explicitly to one durable absolute path outside

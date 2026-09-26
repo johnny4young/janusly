@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/ai"
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/executors"
 )
 
 type authoringPromptCaptureClient struct {
@@ -325,5 +328,232 @@ func TestComposeRepairPromptFramesAndRedactsModelDraft(t *testing.T) {
 	}
 	if strings.Contains(prompt, "ghost\nIGNORE") {
 		t.Fatalf("validator message must not break its data row:\n%s", prompt)
+	}
+}
+
+// obedientRepairClient fixes exactly the defects named in a repair prompt and
+// nothing else, so convergence depends only on the feedback Janusly sends.
+type obedientRepairClient struct {
+	draft map[string]any
+	fixes map[string]func(map[string]any)
+	calls int
+}
+
+func (c *obedientRepairClient) Configured() bool { return true }
+
+func (c *obedientRepairClient) GenerateText(_ context.Context, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
+	c.calls++
+	if _, issues, found := strings.Cut(input.Prompt, "VALIDATION ISSUES (PLATFORM DATA):"); found {
+		issues, _, _ = strings.Cut(issues, "PREVIOUS DRAFT")
+		for marker, fix := range c.fixes {
+			if strings.Contains(issues, marker) {
+				fix(c.draft)
+			}
+		}
+	}
+	raw, _ := json.Marshal(c.draft)
+	return &ai.GenerateTextResult{Text: string(raw), Provider: "simulator", Model: "obedient"}, nil
+}
+
+func TestRepairFeedbackReportsGraphIssuesBehindContractErrors(t *testing.T) {
+	var draft map[string]any
+	if err := json.Unmarshal([]byte(`{"dslVersion":"1.0","id":"github_status","name":"GitHub status",
+		"outputs":{"result":{"statusCode":"{{context.transform.output.status_code}}","value":"{{context.uppercase.output.value}}"}},
+		"recovery":{"contract":{"version":"1",
+			"failure":{"technical":{"terminalNodeFailure":true,"stalledNode":true},"semantic":{"mode":"disabled"}},
+			"evidence":{"required":["failure_snapshot","audit_trail","terminal_outcome"]},"effects":[],
+			"repairs":{"allowed":["retry"]},"validation":{"minimumEvidenceLevel":"static"},
+			"approval":{"required":true,"permission":"recovery.write"},"autonomyLevel":1,
+			"verification":{"kind":"generation_bound_terminal_success"},"recurrence":{"windowDays":7}}},
+		"nodes":[
+			{"id":"fetch","type":"http","config":{"url":"https://api.github.com","method":"GET"}},
+			{"id":"transform","type":"transform","config":{"mapping":{"status_code":"{{context.fetch.output.statusCode}}"}}},
+			{"id":"uppercase","type":"tool","config":{"tool":"text.uppercase","input":{"text":"status {{context.transform.output.status_code}}"}}}],
+		"edges":[{"from":"fetch","to":"transform"},{"from":"transform","to":"uppercase"}]}`), &draft); err != nil {
+		t.Fatal(err)
+	}
+	initial, _ := json.Marshal(draft)
+	codes := map[string]bool{}
+	for _, issue := range validateGeneratedWorkflowCandidate(initial) {
+		codes[issue.Code] = true
+	}
+	if !codes[domain.CodeInvalidContract] || !codes[domain.CodeToolInvalidInput] {
+		t.Fatalf("graph issues must not hide behind top-level contract errors: %v", codes)
+	}
+	client := &obedientRepairClient{draft: draft, fixes: map[string]func(map[string]any){
+		"outputs.result: expected string": func(d map[string]any) {
+			d["outputs"] = map[string]any{"result": "{{context.uppercase.output}}"}
+		},
+		"recovery.contract.approval": func(d map[string]any) {
+			contract := d["recovery"].(map[string]any)["contract"].(map[string]any)
+			contract["approval"] = map[string]any{"productionMutation": "required", "permission": "recovery.write"}
+		},
+		"text: Unsupported field": func(d map[string]any) {
+			d["nodes"].([]any)[2].(map[string]any)["config"].(map[string]any)["input"] = map[string]any{"value": "status {{context.transform.output.status_code}}"}
+		},
+	}}
+	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		t.Context(), client, "Fetch https://api.github.com with GET, transform the status code, and use tool text.uppercase with a concrete value to prepare the result.",
+		"", v1Request{}, 1, "", 0,
+	)
+	if aiErr != nil || raw == nil || client.calls != 2 || meta.repairAttempts != 1 {
+		t.Fatalf("one repair round must see every independent defect: err=%v calls=%d meta=%+v", aiErr, client.calls, meta)
+	}
+}
+
+func TestGeneratePromptAdvertisesOnlyRegisteredTools(t *testing.T) {
+	match := regexp.MustCompile(`tool: \{ tool: ((?:'[a-z0-9_.]+'\|?)+), input\?`).FindStringSubmatch(generateSystemPrompt)
+	if match == nil || strings.Contains(generateSystemPrompt, "__REGISTERED_TOOL_NAMES__") {
+		t.Fatal("authoring prompt must render the registered tool list")
+	}
+	var advertised []string
+	for name := range strings.SplitSeq(match[1], "|") {
+		advertised = append(advertised, strings.Trim(name, "'"))
+	}
+	var registered []string
+	for _, entry := range executors.SharedToolRegistry().CatalogEntries() {
+		registered = append(registered, entry.Name)
+	}
+	slices.Sort(registered)
+	if !slices.Equal(advertised, registered) {
+		t.Fatalf("advertised tools drifted from the executable registry:\nadvertised=%v\nregistered=%v", advertised, registered)
+	}
+	if len(generateSystemPrompt) > 24*1024 {
+		t.Fatalf("authoring system prompt grew to %d bytes", len(generateSystemPrompt))
+	}
+}
+
+func TestComposeRepairPromptLocatesIssues(t *testing.T) {
+	prompt := composeRepairPrompt("Uppercase a value", []byte(`{"nodes":[],"edges":[]}`), []domain.Issue{
+		{Code: domain.CodeToolInvalidInput, Message: "Invalid tool input for text.uppercase: text: Unsupported field", NodeID: "uppercase"},
+		{Code: domain.CodeEdgeInvalidTo, Message: "Edge target does not exist: ghost", EdgeID: "edge_1"},
+		{Code: domain.CodeCycleDetected, Message: "Workflow graph contains a cycle"},
+	})
+	for _, want := range []string{
+		"- tool_invalid_input (node uppercase): Invalid tool input",
+		"- edge_invalid_to (edge edge_1): Edge target",
+		"- cycle_detected: Workflow graph",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("repair prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestRepairFeedbackReportsTopLevelDefectsBehindAnUnparseableGraph(t *testing.T) {
+	for _, raw := range []string{
+		`{"nodes":null,"edges":null,"outputs":5}`,
+		`{"nodes":"x","edges":[],"outputs":5}`,
+	} {
+		var graphIssue, outputsIssue bool
+		for _, issue := range validateGeneratedWorkflowCandidate([]byte(raw)) {
+			graphIssue = graphIssue || strings.Contains(issue.Message, "nodes")
+			outputsIssue = outputsIssue || strings.Contains(issue.Message, "outputs")
+		}
+		if !graphIssue || !outputsIssue {
+			t.Fatalf("%s must report both the graph and the outputs defect: %+v", raw, validateGeneratedWorkflowCandidate([]byte(raw)))
+		}
+	}
+}
+
+func TestRepairLadderConvergesOnMalformedNodePlusTopLevelAndSemanticDefects(t *testing.T) {
+	var draft map[string]any
+	if err := json.Unmarshal([]byte(`{"dslVersion":1,"id":"github_status","name":"GitHub status",
+		"outputs":{"result":"{{context.uppercase.output}}"},
+		"nodes":[
+			{"id":"fetch","type":"http","label":1,"config":{"url":"https://api.github.com","method":"GET"}},
+			{"id":"transform","type":"transform","config":{"mapping":{"status_code":"{{context.fetch.output.statusCode}}"}}},
+			{"id":"uppercase","type":"tool","config":{"tool":"text.uppercase","input":{"text":"status"}}}],
+		"edges":[{"from":"fetch","to":"transform"},{"from":"transform","to":"uppercase"}]}`), &draft); err != nil {
+		t.Fatal(err)
+	}
+	client := &obedientRepairClient{draft: draft, fixes: map[string]func(map[string]any){
+		"dslVersion: expected string": func(d map[string]any) {
+			d["dslVersion"] = "1.0"
+		},
+		"nodes.0.label: expected string": func(d map[string]any) {
+			d["nodes"].([]any)[0].(map[string]any)["label"] = "Fetch"
+		},
+		"text: Unsupported field": func(d map[string]any) {
+			d["nodes"].([]any)[2].(map[string]any)["config"].(map[string]any)["input"] = map[string]any{"value": "status"}
+		},
+	}}
+	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		t.Context(), client, "Fetch https://api.github.com with GET, transform the status code, and use tool text.uppercase with a concrete value to prepare the result.",
+		"", v1Request{}, 1, "", 0,
+	)
+	if aiErr != nil || raw == nil || client.calls != 2 || meta.repairAttempts != 1 {
+		t.Fatalf("mistyped, top-level and semantic defects must all surface in one round: err=%v calls=%d meta=%+v", aiErr, client.calls, meta)
+	}
+}
+
+func TestFailureEvidenceKeepsEveryDistinctCodeWhileAuditStaysBounded(t *testing.T) {
+	broken := `{"dslVersion":"1.0","id":"broken","name":"Broken","nodes":[
+		{"id":"shape","type":"transform","config":{"mapping":{}}},
+		{"id":"shape","type":"condition","config":{}},
+		{"id":"call","type":"tool","config":{"tool":"text.uppercase","input":{"text":"x"}}},
+		{"id":"odd","type":"teleport","config":{}}],
+		"edges":[{"from":"ghost","to":"phantom"}]}`
+	client := &scriptedAuthoringClient{replies: []string{broken}}
+	_, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		t.Context(), client, "Shape an operator result", "", v1Request{}, 1, "", 0,
+	)
+	if aiErr == nil || len(meta.validationIssueCodes) <= auditIssueCodeLimit || len(meta.repairIssueCodes) <= auditIssueCodeLimit {
+		t.Fatalf("paid-run evidence must keep every distinct code: meta=%+v err=%v", meta, aiErr)
+	}
+	audited, _ := fallbackGenerationAuditMetadata(meta, aiErr, assuranceCompilation{})["validationIssueCodes"].([]string)
+	if len(audited) != auditIssueCodeLimit {
+		t.Fatalf("audit codes must stay bounded: %v", audited)
+	}
+}
+
+func TestMistypedFieldsAreReportedStructurallyAndAllAtOnce(t *testing.T) {
+	raw := []byte(`{"dslVersion":1,"outputs":{"result":{"v":"x"}},
+		"nodes":[{"id":"a","type":"noop","config":{}},{"id":"b","type":"tool","label":7,"config":{"tool":"text.uppercase","input":{"text":"x"}}}],
+		"edges":[{"from":"a","to":"b","condition":true,"onError":"yes"}]}`)
+	var messages []string
+	codes := map[string]bool{}
+	for _, issue := range validateGeneratedWorkflowCandidate(raw) {
+		messages = append(messages, issue.Message)
+		codes[issue.Code] = true
+	}
+	joined := strings.Join(messages, "\n")
+	for _, want := range []string{
+		"dslVersion: expected string, received number",
+		"outputs.result: expected string, received object",
+		"nodes.1.label: expected string, received number",
+		"edges.0.condition: expected string, received boolean",
+		"edges.0.onError: expected boolean, received string",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing structural issue %q in:\n%s", want, joined)
+		}
+	}
+	if !codes[domain.CodeToolInvalidInput] {
+		t.Fatalf("graph checks must still run beside mistyped fields:\n%s", joined)
+	}
+	if strings.Contains(joined, "json:") || strings.Contains(joined, "rawWorkflow") || strings.Contains(joined, "rawNode") {
+		t.Fatalf("decoder wording must not reach repair feedback:\n%s", joined)
+	}
+}
+
+func TestMistypedFieldListsMatchParseDecoding(t *testing.T) {
+	documents := []string{}
+	for _, field := range workflowStringFields {
+		documents = append(documents, `{"`+field+`":1,"nodes":[],"edges":[]}`)
+	}
+	for _, field := range workflowObjectFields {
+		documents = append(documents, `{"`+field+`":1,"nodes":[],"edges":[]}`)
+	}
+	for _, field := range nodeStringFields {
+		documents = append(documents, `{"nodes":[{"id":"a","type":"noop","config":{},"`+field+`":1}],"edges":[]}`)
+	}
+	for _, field := range edgeStringFields {
+		documents = append(documents, `{"nodes":[{"id":"a","type":"noop","config":{}}],"edges":[{"from":"a","to":"a","`+field+`":1}]}`)
+	}
+	for _, raw := range documents {
+		if workflow, _ := domain.Parse([]byte(raw)); workflow != nil {
+			t.Fatalf("listed field is not type-checked by Parse: %s", raw)
+		}
 	}
 }
