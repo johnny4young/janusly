@@ -268,7 +268,8 @@ var recoveryHeatmap = closedObj(map[string]any{
 var recoveryHomeCases = closedObj(map[string]any{
 	"cases": arr(closedObj(map[string]any{
 		"id": str(), "runId": str(), "workflowId": nullableString(), "source": str(),
-		"detectorId": str(), "detectorKind": str(), "action": str(), "state": str(),
+		"detectorId": str(), "detectorKind": str(),
+		"action": strEnum(domain.RecoveryDetectorActions), "state": recoveryCaseState,
 		"message": str(), "createdAt": str(),
 	}, "id", "runId", "workflowId", "source", "detectorId", "detectorKind", "action",
 		"state", "message", "createdAt")),

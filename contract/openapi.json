@@ -2211,6 +2211,10 @@
               "additionalProperties": false,
               "properties": {
                 "action": {
+                  "enum": [
+                    "observe",
+                    "quarantine"
+                  ],
                   "type": "string"
                 },
                 "createdAt": {
@@ -2235,7 +2239,7 @@
                   "type": "string"
                 },
                 "state": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/RecoveryCaseState"
                 },
                 "workflowId": {
                   "type": [

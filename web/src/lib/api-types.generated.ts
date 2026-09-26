@@ -513,7 +513,7 @@ export type RecoveryHome = {
 
 export type RecoveryHomeCases = {
   "cases": ({
-    "action": string
+    "action": "observe" | "quarantine"
     "createdAt": string
     "detectorId": string
     "detectorKind": string
@@ -521,7 +521,7 @@ export type RecoveryHomeCases = {
     "message": string
     "runId": string
     "source": string
-    "state": string
+    "state": RecoveryCaseState
     "workflowId": string | null
   })[]
 }
