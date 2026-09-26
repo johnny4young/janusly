@@ -1,9 +1,10 @@
 /**
  * Browser-side semantic recovery read contract.
  *
- * The generated guard owns the case envelope's shape; this module keeps the
- * invariants the governed-recovery panel depends on: vocabulary it translates,
- * row identity, candidate and validation hashes, and the approval binding.
+ * The generated guard owns the case envelope's shape, including the state,
+ * actor, artifact and autonomy vocabularies the manifest declares. This module
+ * keeps the invariants the governed-recovery panel depends on: row identity,
+ * candidate and validation hashes, and the approval binding.
  * Artifact payloads are opaque in the manifest, so their structure is narrowed
  * here only as far as the panel renders it. Size and count caps are server policy.
  */
@@ -11,7 +12,6 @@
 import {
   RECOVERY_AUTONOMY_CAPABILITIES,
   RECOVERY_AUTONOMY_CAPABILITY_LEVEL,
-  type RecoveryAutonomyCapability,
   type RecoveryAutonomyProfile,
 } from './recovery-autonomy'
 import type {
@@ -42,24 +42,10 @@ export type RecoveryActiveApproval = {
 
 type WireDetail = ApiResponses['GET /recovery/cases/{caseId}']
 
-// The panel translates these values into state pills, actor labels and step copy.
-const CASE_STATES: ReadonlySet<string> = new Set<RecoveryCase['state']>([
-  'detected', 'contained', 'diagnosed', 'candidates_ready', 'validating', 'awaiting_approval',
-  'publishing', 'monitoring', 'verified_recovered', 'recurred', 'accepted_loss', 'abandoned',
-])
-const CASE_ACTIONS: ReadonlySet<string> = new Set<RecoveryCase['action']>(['observe', 'quarantine'])
-const ACTOR_KINDS: ReadonlySet<string> = new Set<RecoveryCaseTransition['actorKind']>(['system', 'user', 'agent'])
-const ARTIFACT_KINDS: ReadonlySet<string> = new Set<RecoveryCaseArtifact['kind']>([
-  'diagnosis', 'candidate', 'validation', 'publication', 'verification',
-])
-const AUTONOMY_SOURCES: ReadonlySet<string> = new Set<RecoveryAutonomyProfile['source']>([
-  'failure_override', 'workflow_default', 'strictest_failure', 'unavailable',
-])
 // RecoveryCasePanel formats these with Intl, which throws on an unparseable date.
 const isDate = (value: string) => Number.isFinite(Date.parse(value))
-const UNAVAILABLE_REASONS: ReadonlySet<unknown> = new Set([null, 'contract_missing', 'failure_policy_missing'])
+// The autonomy card has copy for each level; levels are integers the manifest does not enumerate.
 const AUTONOMY_LEVELS: ReadonlySet<unknown> = new Set(Object.values(RECOVERY_AUTONOMY_CAPABILITY_LEVEL))
-const CAPABILITIES: ReadonlySet<string> = new Set<RecoveryAutonomyCapability>(RECOVERY_AUTONOMY_CAPABILITIES)
 
 // Approval binds a candidate to its validation by content hash, so both must be comparable digests.
 const SHA256 = /^[a-f0-9]{64}$/
@@ -67,28 +53,20 @@ const SHA256 = /^[a-f0-9]{64}$/
 function isAutonomyProfile(value: WireDetail['autonomy']): boolean {
   // The autonomy card explains every capability exactly once, at a level it has copy for.
   return (value.level === null || AUTONOMY_LEVELS.has(value.level))
-    && AUTONOMY_SOURCES.has(value.source)
-    && UNAVAILABLE_REASONS.has(value.unavailableReason)
-    && value.factors.length === CAPABILITIES.size
-    && new Set(value.factors.map(factor => factor.capability)).size === CAPABILITIES.size
-    && value.factors.every(factor => CAPABILITIES.has(factor.capability) && AUTONOMY_LEVELS.has(factor.requiredLevel))
+    && value.factors.length === RECOVERY_AUTONOMY_CAPABILITIES.length
+    && new Set(value.factors.map(factor => factor.capability)).size === RECOVERY_AUTONOMY_CAPABILITIES.length
+    && value.factors.every(factor => AUTONOMY_LEVELS.has(factor.requiredLevel))
 }
 
 export function parseRecoveryCaseDetail(value: unknown): RecoveryCaseDetail | null {
   if (!isGetRecoveryCasesCaseIdResponse(value)) return null
   const { case: wireCase, transitions, artifacts, autonomy } = value
-  if (!CASE_STATES.has(wireCase.state) || !CASE_ACTIONS.has(wireCase.action) || !isDate(wireCase.createdAt)
-    || !isAutonomyProfile(autonomy)) return null
+  if (!isDate(wireCase.createdAt) || !isAutonomyProfile(autonomy)) return null
   // Transitions and artifacts are receipts for this case only.
   if (transitions.some(transition => (
-    transition.orgId !== wireCase.orgId || transition.caseId !== wireCase.id
-    || !CASE_STATES.has(transition.fromState) || !CASE_STATES.has(transition.toState)
-    || !ACTOR_KINDS.has(transition.actorKind) || !isDate(transition.occurredAt)
+    transition.orgId !== wireCase.orgId || transition.caseId !== wireCase.id || !isDate(transition.occurredAt)
   ))) return null
-  if (artifacts.some(artifact => (
-    artifact.caseId !== wireCase.id || !ARTIFACT_KINDS.has(artifact.kind)
-    || !ACTOR_KINDS.has(artifact.actorKind) || !SHA256.test(artifact.sha256)
-  ))) return null
+  if (artifacts.some(artifact => artifact.caseId !== wireCase.id || !SHA256.test(artifact.sha256))) return null
   const recoveryCase = wireCase as RecoveryCase
   const parsedArtifacts = artifacts as RecoveryCaseArtifact[]
   const candidateArtifacts = parsedArtifacts.filter(artifact => artifact.kind === 'candidate')

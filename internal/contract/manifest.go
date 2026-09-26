@@ -38,6 +38,22 @@ func str() map[string]any   { return map[string]any{"type": "string"} }
 func num() map[string]any   { return map[string]any{"type": "number"} }
 func boolT() map[string]any { return map[string]any{"type": "boolean"} }
 
+// strEnum declares a vocabulary whose single source is a Go list.
+func strEnum(values []string) map[string]any {
+	enum := make([]any, len(values))
+	for i, value := range values {
+		enum[i] = value
+	}
+	return map[string]any{"type": "string", "enum": enum}
+}
+
+func nullableStrEnum(values []string) map[string]any {
+	schema := strEnum(values)
+	schema["type"] = []any{"string", "null"}
+	schema["enum"] = append(schema["enum"].([]any), nil)
+	return schema
+}
+
 func intT() map[string]any   { return map[string]any{"type": "integer"} }
 func countT() map[string]any { return map[string]any{"type": "integer", "minimum": 0} }
 func nullableNum() map[string]any {

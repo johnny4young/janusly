@@ -32,6 +32,14 @@ type Result struct {
 	SuggestedOwner string `json:"suggestedOwner"`
 }
 
+// Categories is the closed Result.Category vocabulary.
+var Categories = []string{
+	"secret_missing", "http_error", "network_timeout", "ai_provider", "parse_error", "tool_input", "unknown",
+}
+
+// Owners is the closed Result.SuggestedOwner vocabulary.
+var Owners = []string{"ops", "workflow_author", "platform"}
+
 // Context carries the failing node's identity into the rules.
 type Context struct {
 	NodeType string

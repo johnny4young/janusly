@@ -18,6 +18,15 @@ var RecoveryCaseStates = []string{
 	"verified_recovered", "recurred", "accepted_loss", "abandoned",
 }
 
+// RecoveryCaseActorKinds names who can author a transition or artifact.
+var RecoveryCaseActorKinds = []string{"system", "user", "agent"}
+
+// RecoveryCaseArtifactKinds is the closed artifact vocabulary, in ladder order.
+var RecoveryCaseArtifactKinds = []string{"diagnosis", "candidate", "validation", "publication", "verification"}
+
+// RecoveryDetectorActions is what a semantic detector, and so its case, may do.
+var RecoveryDetectorActions = []string{"observe", "quarantine"}
+
 // RecoveryCaseTerminalStates never transition again.
 var RecoveryCaseTerminalStates = map[string]bool{
 	"verified_recovered": true, "recurred": true,
@@ -92,14 +101,11 @@ func ValidateRecoveryCaseTransitionReceipt(receipt RecoveryCaseTransitionReceipt
 	} else if !IsLegalRecoveryCaseTransition(receipt.From, receipt.To) {
 		problems = append(problems, "Illegal recovery case transition: "+receipt.From+" -> "+receipt.To)
 	}
-	switch receipt.ActorKind {
-	case "system":
-	case "user", "agent":
-		if receipt.ActorID == "" {
-			problems = append(problems, "User and agent transition actors require an id")
-		}
-	default:
+	switch {
+	case !slices.Contains(RecoveryCaseActorKinds, receipt.ActorKind):
 		problems = append(problems, "unknown transition actor kind")
+	case receipt.ActorKind != "system" && receipt.ActorID == "":
+		problems = append(problems, "User and agent transition actors require an id")
 	}
 	if len(receipt.Evidence) < 1 || len(receipt.Evidence) > 100 {
 		problems = append(problems, "transition receipts require 1..100 evidence references")
