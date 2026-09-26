@@ -4278,6 +4278,10 @@
           "hasEnoughData": {
             "type": "boolean"
           },
+          "minRunsForDelta": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "priorVersion": {
             "anyOf": [
               {
@@ -4372,6 +4376,7 @@
           "afterVersion",
           "windowDays",
           "hasEnoughData",
+          "minRunsForDelta",
           "before",
           "after",
           "delta",

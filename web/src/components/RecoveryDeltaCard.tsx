@@ -9,8 +9,8 @@
  *      not proof that the repair succeeded; monitoring remains necessary.
  *   3. **Health pill** — `before.score → after.score` plus a
  *      severity-tinted arrow and a plain-language sentence
- *      ("Health improved 4 points"). Gated on ≥5 runs against v{N} so
- *      tiny samples don't mislead.
+ *      ("Health improved 4 points"). Gated on the server's
+ *      `minRunsForDelta` runs against v{N} so tiny samples don't mislead.
  *   4. **p95 latency pill** — same shape, lower = better.
  *   5. **Cost/run pill** — same shape, lower = better. Hides entirely
  *      when both sides are zero (no LLM calls).
@@ -46,8 +46,6 @@ import { isGetWorkflowsHealthDeltaResponse } from '../lib/api-guards/operations/
 
 const RECOVERY_DELTA_TAGS = [PLATFORM_TAG, 'workflows', 'recovery', 'dlq', 'runs'] as const
 
-/** Minimum after-side run count for the full delta to render. Mirrors `MIN_RUNS_FOR_DELTA` in the engine. */
-const MIN_RUNS_FOR_DELTA = 5
 /** Threshold below which the card surfaces the regression-rollback affordance. */
 const REGRESSION_THRESHOLD = -3
 
@@ -218,7 +216,7 @@ function ScopedRecoveryDeltaCard({ workflowId, afterVersion, priorFailureSignatu
           <GatheringRow
             currentRuns={data.after.signals.totalRuns}
             afterVersion={afterVersion}
-            threshold={MIN_RUNS_FOR_DELTA}
+            threshold={data.minRunsForDelta}
           />
         )}
 

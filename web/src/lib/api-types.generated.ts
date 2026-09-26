@@ -994,6 +994,7 @@ export type WorkflowHealthDelta = {
     "score": number
   } | null
   "hasEnoughData": boolean
+  "minRunsForDelta": number
   "priorVersion": {
     "version": number
     "versionId": string

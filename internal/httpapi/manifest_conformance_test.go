@@ -184,12 +184,16 @@ func manifestConformanceRows() map[string]conformanceRow {
 			before, after, afterSignals := conformanceHealthScores()
 			complete := workflowHealthDelta{
 				WorkflowID: "workflow", AfterVersion: 2, WindowDays: 30, HasEnoughData: true,
-				Before: before, After: after, Delta: buildRecoveryDelta(before, after, health.Signals{}, afterSignals),
+				MinRunsForDelta: health.MinRunsForDelta,
+				Before:          before, After: after, Delta: buildRecoveryDelta(before, after, health.Signals{}, afterSignals),
 				RecentRunsAgainstAfter: recentRunsAgainstAfter{TotalRuns: 10, Succeeded: 8, Failed: 2},
 				SameFailureSinceApply:  &sameFailureSinceApply{Count: 1, SampleDeadLetterIDs: []string{"letter"}, PriorSignature: "sig"},
 				PriorVersion:           &priorWorkflowVersion{Version: 1, VersionID: "v1"},
 			}
-			gathering := workflowHealthDelta{WorkflowID: "workflow", AfterVersion: 1, WindowDays: 30, Before: before, After: before}
+			gathering := workflowHealthDelta{
+				WorkflowID: "workflow", AfterVersion: 1, WindowDays: 30, MinRunsForDelta: health.MinRunsForDelta,
+				Before: before, After: before,
+			}
 			return []any{listWire(t, complete), listWire(t, gathering)}
 		}},
 		"GET /v1/workflows/versions/{versionId}":                         onlyIntegration(),

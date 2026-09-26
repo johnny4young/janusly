@@ -3,7 +3,7 @@ import { healthDelta } from '../test/health-delta-fixture'
 import { isRecoveryDelta, type RecoveryDelta } from './health-delta'
 
 const fixture = (): RecoveryDelta => healthDelta({
-  workflowId: 'workflow', afterVersion: 2, windowDays: 30, hasEnoughData: true,
+  workflowId: 'workflow', afterVersion: 2, windowDays: 30, hasEnoughData: true, minRunsForDelta: 5,
   before: { score: 80, status: 'healthy', signals: { totalRuns: 8, p95LatencyMs: 10, totalCostUsd: 1 } },
   after: { score: 70, status: 'warn', signals: { totalRuns: 5, p95LatencyMs: 20, totalCostUsd: 1 } },
   delta: { score: -10, p95LatencyMs: 10, costPerRunUsd: .075 },
@@ -32,6 +32,7 @@ describe('recovery health wire boundary', () => {
     expect(accepts(gathering)).toBe(true)
     const tuned = fixture()
     tuned.after.signals.totalRuns = 2
+    tuned.minRunsForDelta = 12
     tuned.windowDays = 0
     tuned.before.score = 101
     tuned.after.signals.totalCostUsd = -1
