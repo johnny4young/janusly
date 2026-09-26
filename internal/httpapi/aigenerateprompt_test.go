@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/ai"
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/executors"
 )
 
 type authoringPromptCaptureClient struct {
@@ -396,5 +398,44 @@ func TestRepairFeedbackReportsGraphIssuesBehindContractErrors(t *testing.T) {
 	)
 	if aiErr != nil || raw == nil || client.calls != 2 || meta.repairAttempts != 1 {
 		t.Fatalf("one repair round must see every independent defect: err=%v calls=%d meta=%+v", aiErr, client.calls, meta)
+	}
+}
+
+func TestGeneratePromptAdvertisesOnlyRegisteredTools(t *testing.T) {
+	match := regexp.MustCompile(`tool: \{ tool: ((?:'[a-z0-9_.]+'\|?)+), input\?`).FindStringSubmatch(generateSystemPrompt)
+	if match == nil || strings.Contains(generateSystemPrompt, "__REGISTERED_TOOL_NAMES__") {
+		t.Fatal("authoring prompt must render the registered tool list")
+	}
+	var advertised []string
+	for name := range strings.SplitSeq(match[1], "|") {
+		advertised = append(advertised, strings.Trim(name, "'"))
+	}
+	var registered []string
+	for _, entry := range executors.SharedToolRegistry().CatalogEntries() {
+		registered = append(registered, entry.Name)
+	}
+	slices.Sort(registered)
+	if !slices.Equal(advertised, registered) {
+		t.Fatalf("advertised tools drifted from the executable registry:\nadvertised=%v\nregistered=%v", advertised, registered)
+	}
+	if len(generateSystemPrompt) > 24*1024 {
+		t.Fatalf("authoring system prompt grew to %d bytes", len(generateSystemPrompt))
+	}
+}
+
+func TestComposeRepairPromptLocatesIssues(t *testing.T) {
+	prompt := composeRepairPrompt("Uppercase a value", []byte(`{"nodes":[],"edges":[]}`), []domain.Issue{
+		{Code: domain.CodeToolInvalidInput, Message: "Invalid tool input for text.uppercase: text: Unsupported field", NodeID: "uppercase"},
+		{Code: domain.CodeEdgeInvalidTo, Message: "Edge target does not exist: ghost", EdgeID: "edge_1"},
+		{Code: domain.CodeCycleDetected, Message: "Workflow graph contains a cycle"},
+	})
+	for _, want := range []string{
+		"- tool_invalid_input (node uppercase): Invalid tool input",
+		"- edge_invalid_to (edge edge_1): Edge target",
+		"- cycle_detected: Workflow graph",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("repair prompt missing %q:\n%s", want, prompt)
+		}
 	}
 }

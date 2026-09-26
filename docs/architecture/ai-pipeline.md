@@ -11,6 +11,9 @@ before calling the client.
 - Usage recording occurs at the client boundary and cannot fail the call.
 - Generated text is bounded before parsing or persistence.
 - Workflow generation and patching pass `internal/domain` validation.
+- The authoring prompt's tool list is rendered from the executable registry,
+  and the capability block gives each built-in tool's typed input fields (at
+  most 16 per tool). Repair feedback names the node or edge behind each issue.
 - Recovery patch responses and prompts use the canonical parsed workflow DAG,
   never the dead-letter run snapshot. Run-only input, tenant, and actor carriers
   are stripped before provider egress and before either AI or deterministic

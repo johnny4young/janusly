@@ -60,3 +60,11 @@ func TestCapabilityPromptBlockTrimsCompleteValidEnvelope(t *testing.T) {
 		t.Fatalf("truncation must be explicit: %s", block)
 	}
 }
+
+func TestCapabilityPromptBlockProjectsTypedBuiltinToolFields(t *testing.T) {
+	block := CapabilityPromptBlock(NewBuilder(nil, nil).Build(t.Context(), "org"))
+	want := `{"name":"text.uppercase","required":["value"],"writeSide":false,"inputFields":[{"name":"value","kind":"string","required":true}]}`
+	if !strings.Contains(block, want) {
+		t.Fatalf("text.uppercase must expose its typed input field:\n%s", block)
+	}
+}

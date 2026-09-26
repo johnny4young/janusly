@@ -38,11 +38,30 @@ import (
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/tools"
 	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 //go:embed ai_generate_prompt.txt
-var generateSystemPrompt string
+var generateSystemPromptTemplate string
+
+// The tool list comes from the executable registry so the model is never
+// offered a tool the validator and binder would reject.
+var generateSystemPrompt = renderGenerateSystemPrompt(generateSystemPromptTemplate, executors.SharedToolRegistry().CatalogEntries())
+
+const maxAdvertisedTools = 64
+
+func renderGenerateSystemPrompt(template string, entries []tools.CatalogEntry) string {
+	names := make([]string, 0, min(len(entries), maxAdvertisedTools))
+	for _, entry := range entries {
+		if len(names) == maxAdvertisedTools {
+			break
+		}
+		names = append(names, "'"+entry.Name+"'")
+	}
+	slices.Sort(names)
+	return strings.Replace(template, "__REGISTERED_TOOL_NAMES__", strings.Join(names, "|"), 1)
+}
 
 const (
 	authoringMaxOutputUnits = 8_192
@@ -540,7 +559,13 @@ func compiledFallbackForPrompt(prompt string) (map[string]any, assuranceCompilat
 func composeRepairPrompt(prompt string, draft []byte, issues []domain.Issue) string {
 	var lines []string
 	for _, issue := range issues {
-		lines = append(lines, "- "+oneLine(string(issue.Code), 120)+": "+oneLine(issue.Message, 800))
+		location := ""
+		if issue.NodeID != "" {
+			location = " (node " + oneLine(issue.NodeID, 120) + ")"
+		} else if issue.EdgeID != "" {
+			location = " (edge " + oneLine(issue.EdgeID, 120) + ")"
+		}
+		lines = append(lines, "- "+oneLine(string(issue.Code), 120)+location+": "+oneLine(issue.Message, 800))
 	}
 	var draftData any
 	if err := json.Unmarshal(draft, &draftData); err != nil {
