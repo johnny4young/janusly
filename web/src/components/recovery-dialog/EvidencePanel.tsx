@@ -19,7 +19,7 @@ import './recovery-dialog.css'
  * category) so the operator can trace the suggestion back to its source.
  *
  * Rows have already passed the untrusted HTTP-boundary parser, including
- * read-time redaction and bounds. An empty list hides the panel entirely.
+ * read-time redaction and display truncation. An empty list hides the panel entirely.
  */
 export function EvidencePanel({ evidence }: { evidence: readonly EvidenceRow[] }) {
   const { t } = useT()

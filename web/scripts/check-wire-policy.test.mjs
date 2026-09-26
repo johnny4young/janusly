@@ -61,5 +61,5 @@ test('scans the listed readers and reports file and line', (t) => {
 
 test('covers every hand-written wire reader of the contract program', () => {
   for (const file of WIRE_READERS) assert.ok(fs.existsSync(new URL(`../${file}`, import.meta.url)), file)
-  assert.equal(WIRE_READERS.length, 10)
+  assert.equal(WIRE_READERS.length, 11)
 })

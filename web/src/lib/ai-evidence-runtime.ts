@@ -1,7 +1,7 @@
-/** Browser runtime guard and redaction for AI evidence side channels. */
+/** Browser read-time redaction for AI evidence side channels; shape is the generated guard's. */
 
+import type { SuggestionEvidence } from './api-types.generated'
 import { scrubSecretShapes } from './error-signature'
-import { isRecord } from './guards'
 
 export const EVIDENCE_KINDS = [
   'recovery_feedback',
@@ -14,10 +14,11 @@ export const EVIDENCE_KINDS = [
 ] as const
 
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number]
-export const MAX_EVIDENCE_ROWS = 24
-export const MAX_SNIPPET_CHARS = 400
-export const MAX_LABEL_CHARS = 120
-export const MAX_SOURCE_REF_CHARS = 200
+// Display bounds: the scrub truncates to these, and a longer response is never rejected.
+export const MAX_EVIDENCE_ROWS = 24 // wire-policy: display bound, same value as aievidence.MaxEvidenceRows
+export const MAX_SNIPPET_CHARS = 400 // wire-policy: display bound, same value as aievidence.MaxSnippetChars
+export const MAX_LABEL_CHARS = 120 // wire-policy: display bound, same value as aievidence.MaxLabelChars
+export const MAX_SOURCE_REF_CHARS = 200 // wire-policy: display bound, same value as aievidence.MaxSourceRefChars
 
 export type EvidenceRow = {
   kind: EvidenceKind
@@ -57,18 +58,16 @@ export function scrubEvidenceRows(rows: readonly EvidenceRow[]): EvidenceRow[] {
   return out
 }
 
-/** Validate, re-scrub and bound an untrusted evidence list at the HTTP boundary. */
-export function parseEvidenceRows(value: unknown): EvidenceRow[] | null {
-  if (!Array.isArray(value) || value.length > MAX_EVIDENCE_ROWS) return null
-  for (const row of value) {
-    if (!isRecord(row)
-      || typeof row.kind !== 'string' || !EVIDENCE_KINDS.includes(row.kind as EvidenceKind)
-      || typeof row.sourceRef !== 'string' || row.sourceRef.length > MAX_SOURCE_REF_CHARS
-      || typeof row.snippet !== 'string' || row.snippet.length > MAX_SNIPPET_CHARS
-      || row.label !== undefined && (typeof row.label !== 'string' || row.label.length > MAX_LABEL_CHARS)
-      || row.weight !== undefined && (typeof row.weight !== 'number' || !Number.isFinite(row.weight)
-        || row.weight < 0 || row.weight > 1)) return null
+/** Re-scrub guarded evidence rows at read time; counts, lengths and weight ranges are the server's. */
+export function parseEvidenceRows(rows: readonly SuggestionEvidence[]): EvidenceRow[] | null {
+  const out: EvidenceRow[] = []
+  for (const row of rows) {
+    // EvidencePanel labels each chip with the kind it translates.
+    if (!EVIDENCE_KINDS.includes(row.kind as EvidenceKind)) return null
+    const scrubbed = scrubEvidenceRow({ ...row, kind: row.kind as EvidenceKind })
+    // Each chip renders a snippet and the source token the operator traces back.
+    if (!scrubbed.snippet || !scrubbed.sourceRef) return null
+    out.push(scrubbed)
   }
-  const rows = scrubEvidenceRows(value as EvidenceRow[])
-  return rows.length === value.length && rows.every((row) => row.sourceRef.length > 0) ? rows : null
+  return out
 }

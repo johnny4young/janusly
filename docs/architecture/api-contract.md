@@ -148,9 +148,10 @@ The browser validates **shape** from the manifest and never re-encodes server
   it, while transport and HTTP errors pass through unchanged.
 - The hand-written readers (`list-contract`, `run-status-contract`,
   `dead-letter-contract`, `recovery-patch-contract`, `recovery-case-contract`,
-  `authoring-contract`, `health-delta`, `recovery-home-sections` and the rollout
-  and qualification parsers) keep only **UI invariants**: cross-field facts a
-  component depends on, each commented with the component that needs it. Examples:
+  `authoring-contract`, `health-delta`, `recovery-home-sections`,
+  `ai-evidence-runtime` and the rollout and qualification parsers) keep only
+  **UI invariants**: cross-field facts a component depends on, each commented
+  with the component that needs it. Examples:
   echoed ids (`run.id === runId`, a rollout of this workflow), unique row ids,
   `eventsCursor` present exactly when `eventsHasMore`, a delta present exactly
   when `hasEnoughData`, fallback and playbook suggestions pinned to their fixed
@@ -161,7 +162,8 @@ The browser validates **shape** from the manifest and never re-encodes server
   and numeric ranges copied from Go become a "malformed response" outage the day
   the server changes them. Form bounds for operator input (the rollout draft) are
   UX, not response validation, and carry a `// wire-policy:` marker naming their
-  Go source.
+  Go source. So do display bounds the browser truncates to (AI evidence chips)
+  without ever rejecting a longer response.
 
 ### Adding a route end to end
 

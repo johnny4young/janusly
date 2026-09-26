@@ -15,6 +15,7 @@ export const WIRE_READERS = [
   "src/lib/recovery-case-contract.ts",
   "src/lib/authoring-contract.ts",
   "src/lib/health-delta.ts",
+  "src/lib/ai-evidence-runtime.ts",
   "src/recovery-home-sections.ts",
   "src/components/WorkflowRolloutPanel.tsx",
   "src/components/WorkflowRecoveryQualification.tsx",
