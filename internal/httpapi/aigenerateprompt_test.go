@@ -381,7 +381,7 @@ func TestRepairFeedbackReportsGraphIssuesBehindContractErrors(t *testing.T) {
 		t.Fatalf("graph issues must not hide behind top-level contract errors: %v", codes)
 	}
 	client := &obedientRepairClient{draft: draft, fixes: map[string]func(map[string]any){
-		"rawWorkflow.outputs.result": func(d map[string]any) {
+		"outputs.result: expected string": func(d map[string]any) {
 			d["outputs"] = map[string]any{"result": "{{context.uppercase.output}}"}
 		},
 		"recovery.contract.approval": func(d map[string]any) {
@@ -458,7 +458,6 @@ func TestRepairFeedbackReportsTopLevelDefectsBehindAnUnparseableGraph(t *testing
 
 func TestRepairLadderConvergesOnMalformedNodePlusTopLevelAndSemanticDefects(t *testing.T) {
 	var draft map[string]any
-	// Drafts are re-marshaled with sorted keys, so dslVersion decodes before nodes.
 	if err := json.Unmarshal([]byte(`{"dslVersion":1,"id":"github_status","name":"GitHub status",
 		"outputs":{"result":"{{context.uppercase.output}}"},
 		"nodes":[
@@ -469,10 +468,10 @@ func TestRepairLadderConvergesOnMalformedNodePlusTopLevelAndSemanticDefects(t *t
 		t.Fatal(err)
 	}
 	client := &obedientRepairClient{draft: draft, fixes: map[string]func(map[string]any){
-		"rawWorkflow.dslVersion": func(d map[string]any) {
+		"dslVersion: expected string": func(d map[string]any) {
 			d["dslVersion"] = "1.0"
 		},
-		"rawWorkflow.nodes.0.label": func(d map[string]any) {
+		"nodes.0.label: expected string": func(d map[string]any) {
 			d["nodes"].([]any)[0].(map[string]any)["label"] = "Fetch"
 		},
 		"text: Unsupported field": func(d map[string]any) {
@@ -483,8 +482,8 @@ func TestRepairLadderConvergesOnMalformedNodePlusTopLevelAndSemanticDefects(t *t
 		t.Context(), client, "Fetch https://api.github.com with GET, transform the status code, and use tool text.uppercase with a concrete value to prepare the result.",
 		"", v1Request{}, 1, "", 0,
 	)
-	if aiErr != nil || raw == nil || client.calls != 3 || meta.repairAttempts != 2 {
-		t.Fatalf("three independent layers must converge within two repairs: err=%v calls=%d meta=%+v", aiErr, client.calls, meta)
+	if aiErr != nil || raw == nil || client.calls != 2 || meta.repairAttempts != 1 {
+		t.Fatalf("mistyped, top-level and semantic defects must all surface in one round: err=%v calls=%d meta=%+v", aiErr, client.calls, meta)
 	}
 }
 
@@ -505,5 +504,56 @@ func TestFailureEvidenceKeepsEveryDistinctCodeWhileAuditStaysBounded(t *testing.
 	audited, _ := fallbackGenerationAuditMetadata(meta, aiErr, assuranceCompilation{})["validationIssueCodes"].([]string)
 	if len(audited) != auditIssueCodeLimit {
 		t.Fatalf("audit codes must stay bounded: %v", audited)
+	}
+}
+
+func TestMistypedFieldsAreReportedStructurallyAndAllAtOnce(t *testing.T) {
+	raw := []byte(`{"dslVersion":1,"outputs":{"result":{"v":"x"}},
+		"nodes":[{"id":"a","type":"noop","config":{}},{"id":"b","type":"tool","label":7,"config":{"tool":"text.uppercase","input":{"text":"x"}}}],
+		"edges":[{"from":"a","to":"b","condition":true,"onError":"yes"}]}`)
+	var messages []string
+	codes := map[string]bool{}
+	for _, issue := range validateGeneratedWorkflowCandidate(raw) {
+		messages = append(messages, issue.Message)
+		codes[issue.Code] = true
+	}
+	joined := strings.Join(messages, "\n")
+	for _, want := range []string{
+		"dslVersion: expected string, received number",
+		"outputs.result: expected string, received object",
+		"nodes.1.label: expected string, received number",
+		"edges.0.condition: expected string, received boolean",
+		"edges.0.onError: expected boolean, received string",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing structural issue %q in:\n%s", want, joined)
+		}
+	}
+	if !codes[domain.CodeToolInvalidInput] {
+		t.Fatalf("graph checks must still run beside mistyped fields:\n%s", joined)
+	}
+	if strings.Contains(joined, "json:") || strings.Contains(joined, "rawWorkflow") || strings.Contains(joined, "rawNode") {
+		t.Fatalf("decoder wording must not reach repair feedback:\n%s", joined)
+	}
+}
+
+func TestMistypedFieldListsMatchParseDecoding(t *testing.T) {
+	documents := []string{}
+	for _, field := range workflowStringFields {
+		documents = append(documents, `{"`+field+`":1,"nodes":[],"edges":[]}`)
+	}
+	for _, field := range workflowObjectFields {
+		documents = append(documents, `{"`+field+`":1,"nodes":[],"edges":[]}`)
+	}
+	for _, field := range nodeStringFields {
+		documents = append(documents, `{"nodes":[{"id":"a","type":"noop","config":{},"`+field+`":1}],"edges":[]}`)
+	}
+	for _, field := range edgeStringFields {
+		documents = append(documents, `{"nodes":[{"id":"a","type":"noop","config":{}}],"edges":[{"from":"a","to":"a","`+field+`":1}]}`)
+	}
+	for _, raw := range documents {
+		if workflow, _ := domain.Parse([]byte(raw)); workflow != nil {
+			t.Fatalf("listed field is not type-checked by Parse: %s", raw)
+		}
 	}
 }

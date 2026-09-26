@@ -655,7 +655,7 @@ func validateGeneratedWorkflowCandidate(raw []byte) []domain.Issue {
 	if wf, parseIssues := domain.Parse(raw); wf != nil {
 		issues = draftBlockingIssues(wf)
 	} else {
-		issues = withIssuesBehindParseErrors(raw, parseIssues)
+		issues = parseFailureIssues(raw, parseIssues)
 	}
 	blocking := make([]domain.Issue, 0, len(issues))
 	for _, issue := range issues {

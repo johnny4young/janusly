@@ -226,8 +226,9 @@ Failed authoring cases additionally retain a bounded internal failure stage and
 every distinct validator issue code (a closed set; audits keep five); repaired
 cases keep the first draft's codes, and each call keeps the provider's stop
 reason. None retain model text or error messages. Repair feedback reports every
-top-level and graph parse defect in one round; an unparseable graph defers only
-its own semantic checks, and only its first mistyped node or edge field shows.
+top-level and graph parse defect in one round, naming mistyped fields by
+structural path rather than decoder text; only kind errors nested inside
+`inputs` or `recovery.contract` still surface one per round, in decoder wording.
 
 The paid profile has **no checkout-local default ledger**. Set
 `JANUSLY_REAL_PROVIDER_LEDGER` explicitly to one durable absolute path outside
