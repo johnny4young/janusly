@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -43,6 +44,8 @@ type qualificationCallEvidence struct {
 	LatencyMs    int64    `json:"latencyMs"`
 	CostUSD      *float64 `json:"costUsd"`
 	Result       string   `json:"result"`
+	// FinishReason is the provider's closed stop enum; max_tokens exposes truncation.
+	FinishReason string `json:"finishReason,omitempty"`
 }
 
 type qualificationCaseEvidence struct {
@@ -58,6 +61,7 @@ type qualificationCaseEvidence struct {
 	Result               string                      `json:"result"`
 	FailureStage         string                      `json:"failureStage,omitempty"`
 	ValidationIssueCodes []string                    `json:"validationIssueCodes,omitempty"`
+	RepairIssueCodes     []string                    `json:"repairIssueCodes,omitempty"`
 }
 
 type qualificationReport struct {
@@ -81,6 +85,8 @@ type qualificationReport struct {
 	SDKRetries      int                         `json:"sdkRetries"`
 	Breakers        map[string]bool             `json:"breakers"`
 }
+
+var finishReasonPattern = regexp.MustCompile(`^[a-z_]{1,32}$`)
 
 type recordedProviderCall struct {
 	caseID, category string
@@ -176,6 +182,9 @@ func (c *boundedProductClient) generateForCase(
 		evidence.TotalTokens = result.Usage.TotalTokens
 		evidence.LatencyMs = result.LatencyMs
 		evidence.CostUSD = result.CostUsd
+		if finishReasonPattern.MatchString(result.FinishReason) {
+			evidence.FinishReason = result.FinishReason
+		}
 	}
 	if aiErr != nil {
 		evidence.Result = "error:" + aiErr.Class
@@ -526,6 +535,9 @@ func evaluateRealAuthoringCase(
 		authoring.CapabilityPromptBlock(catalog), 0,
 	)
 	result.Repaired = meta.attempts > 1 || meta.repairAttempts > 0
+	if meta.repairAttempts > 0 {
+		result.RepairIssueCodes = append([]string(nil), meta.repairIssueCodes...)
+	}
 	if aiErr != nil {
 		recordAuthoringFailure(&result, meta, aiErr)
 		result.Result = "generation_" + aiErr.Class

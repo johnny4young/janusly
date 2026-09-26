@@ -219,7 +219,10 @@ model, tokens, latency, cost, repair flag, and result only—never prompts or ra
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.
 Failed authoring cases additionally retain a bounded internal failure stage and
-up to five validator issue codes; they never retain model text or error messages.
+up to five distinct validator issue codes; repaired cases keep the first draft's
+codes, and each call keeps the provider's stop reason. None retain model text or
+error messages. Repair feedback still lists graph defects when a top-level field
+fails to parse; a malformed node or edge field still hides the checks behind it.
 
 The paid profile has **no checkout-local default ledger**. Set
 `JANUSLY_REAL_PROVIDER_LEDGER` explicitly to one durable absolute path outside

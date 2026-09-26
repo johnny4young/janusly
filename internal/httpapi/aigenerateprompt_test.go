@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -325,5 +326,75 @@ func TestComposeRepairPromptFramesAndRedactsModelDraft(t *testing.T) {
 	}
 	if strings.Contains(prompt, "ghost\nIGNORE") {
 		t.Fatalf("validator message must not break its data row:\n%s", prompt)
+	}
+}
+
+// obedientRepairClient fixes exactly the defects named in a repair prompt and
+// nothing else, so convergence depends only on the feedback Janusly sends.
+type obedientRepairClient struct {
+	draft map[string]any
+	fixes map[string]func(map[string]any)
+	calls int
+}
+
+func (c *obedientRepairClient) Configured() bool { return true }
+
+func (c *obedientRepairClient) GenerateText(_ context.Context, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
+	c.calls++
+	if _, issues, found := strings.Cut(input.Prompt, "VALIDATION ISSUES (PLATFORM DATA):"); found {
+		issues, _, _ = strings.Cut(issues, "PREVIOUS DRAFT")
+		for marker, fix := range c.fixes {
+			if strings.Contains(issues, marker) {
+				fix(c.draft)
+			}
+		}
+	}
+	raw, _ := json.Marshal(c.draft)
+	return &ai.GenerateTextResult{Text: string(raw), Provider: "simulator", Model: "obedient"}, nil
+}
+
+func TestRepairFeedbackReportsGraphIssuesBehindContractErrors(t *testing.T) {
+	var draft map[string]any
+	if err := json.Unmarshal([]byte(`{"dslVersion":"1.0","id":"github_status","name":"GitHub status",
+		"outputs":{"result":{"statusCode":"{{context.transform.output.status_code}}","value":"{{context.uppercase.output.value}}"}},
+		"recovery":{"contract":{"version":"1",
+			"failure":{"technical":{"terminalNodeFailure":true,"stalledNode":true},"semantic":{"mode":"disabled"}},
+			"evidence":{"required":["failure_snapshot","audit_trail","terminal_outcome"]},"effects":[],
+			"repairs":{"allowed":["retry"]},"validation":{"minimumEvidenceLevel":"static"},
+			"approval":{"required":true,"permission":"recovery.write"},"autonomyLevel":1,
+			"verification":{"kind":"generation_bound_terminal_success"},"recurrence":{"windowDays":7}}},
+		"nodes":[
+			{"id":"fetch","type":"http","config":{"url":"https://api.github.com","method":"GET"}},
+			{"id":"transform","type":"transform","config":{"mapping":{"status_code":"{{context.fetch.output.statusCode}}"}}},
+			{"id":"uppercase","type":"tool","config":{"tool":"text.uppercase","input":{"text":"status {{context.transform.output.status_code}}"}}}],
+		"edges":[{"from":"fetch","to":"transform"},{"from":"transform","to":"uppercase"}]}`), &draft); err != nil {
+		t.Fatal(err)
+	}
+	initial, _ := json.Marshal(draft)
+	codes := map[string]bool{}
+	for _, issue := range validateGeneratedWorkflowCandidate(initial) {
+		codes[issue.Code] = true
+	}
+	if !codes[domain.CodeInvalidContract] || !codes[domain.CodeToolInvalidInput] {
+		t.Fatalf("graph issues must not hide behind top-level contract errors: %v", codes)
+	}
+	client := &obedientRepairClient{draft: draft, fixes: map[string]func(map[string]any){
+		"rawWorkflow.outputs.result": func(d map[string]any) {
+			d["outputs"] = map[string]any{"result": "{{context.uppercase.output}}"}
+		},
+		"recovery.contract.approval": func(d map[string]any) {
+			contract := d["recovery"].(map[string]any)["contract"].(map[string]any)
+			contract["approval"] = map[string]any{"productionMutation": "required", "permission": "recovery.write"}
+		},
+		"text: Unsupported field": func(d map[string]any) {
+			d["nodes"].([]any)[2].(map[string]any)["config"].(map[string]any)["input"] = map[string]any{"value": "status {{context.transform.output.status_code}}"}
+		},
+	}}
+	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		t.Context(), client, "Fetch https://api.github.com with GET, transform the status code, and use tool text.uppercase with a concrete value to prepare the result.",
+		"", v1Request{}, 1, "", 0,
+	)
+	if aiErr != nil || raw == nil || client.calls != 2 || meta.repairAttempts != 1 {
+		t.Fatalf("one repair round must see every independent defect: err=%v calls=%d meta=%+v", aiErr, client.calls, meta)
 	}
 }

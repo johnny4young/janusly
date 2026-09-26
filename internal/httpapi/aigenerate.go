@@ -21,6 +21,7 @@ import (
 	"maps"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -353,6 +354,8 @@ type generationMeta struct {
 	recoveryContractAdded bool
 	failureStage          string
 	validationIssueCodes  []string
+	// repairIssueCodes are the first draft's defects, kept even when a repair succeeds.
+	repairIssueCodes []string
 }
 
 func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai.Client, prompt, modelHint string, rc v1Request, candidateTarget int, systemData string, rateLimitPerMin int) ([]byte, generationMeta, *ai.AIError) {
@@ -470,6 +473,7 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 
 	// Repair ladder: feed the REAL validator issues back, bounded.
 	issues := validateGeneratedWorkflowCandidate(workflowJSON)
+	meta.repairIssueCodes = distinctIssueCodes(issues)
 	for repair := 1; len(issues) > 0 && repair <= maxRepairAttempts; repair++ {
 		meta.repairAttempts = repair
 		text, aiErr := generate(composeRepairPrompt(prompt, workflowJSON, issues))
@@ -496,9 +500,7 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 	}
 	if len(issues) > 0 {
 		meta.failureStage = "candidate_validation"
-		for _, issue := range issues[:min(len(issues), 5)] {
-			meta.validationIssueCodes = append(meta.validationIssueCodes, issue.Code)
-		}
+		meta.validationIssueCodes = distinctIssueCodes(issues)
 		return nil, meta, &ai.AIError{Class: "invalid_output",
 			Message: "generated workflow failed validation: " + issueSummary(issues)}
 	}
@@ -551,6 +553,16 @@ func composeRepairPrompt(prompt string, draft []byte, issues []domain.Issue) str
 		"\n\nEND DATA. Fix exactly the listed validation issues and return ONLY the corrected JSON workflow object."
 }
 
+func distinctIssueCodes(issues []domain.Issue) []string {
+	var codes []string
+	for _, issue := range issues {
+		if len(codes) < 5 && !slices.Contains(codes, issue.Code) {
+			codes = append(codes, issue.Code)
+		}
+	}
+	return codes
+}
+
 func issueSummary(issues []domain.Issue) string {
 	var parts []string
 	for i, issue := range issues {
@@ -589,6 +601,10 @@ func validateGeneratedWorkflow(raw []byte) []domain.Issue {
 	if wf == nil {
 		return parseIssues
 	}
+	return draftBlockingIssues(wf)
+}
+
+func draftBlockingIssues(wf *domain.Workflow) []domain.Issue {
 	result := workflowvalidation.ValidateDraft(wf)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
@@ -605,7 +621,12 @@ func validateGeneratedWorkflow(raw []byte) []domain.Issue {
 // avoids wasting repair calls asking a model to guess an identifier while all
 // malformed shapes, missing fields, and invalid input types remain blocking.
 func validateGeneratedWorkflowCandidate(raw []byte) []domain.Issue {
-	issues := validateGeneratedWorkflow(raw)
+	var issues []domain.Issue
+	if wf, parseIssues := domain.Parse(raw); wf != nil {
+		issues = draftBlockingIssues(wf)
+	} else {
+		issues = withIssuesBehindParseErrors(raw, parseIssues)
+	}
 	blocking := make([]domain.Issue, 0, len(issues))
 	for _, issue := range issues {
 		unknownTool := strings.HasPrefix(issue.Message, "Unknown tool: ")
@@ -622,6 +643,53 @@ func validateGeneratedWorkflowCandidate(raw []byte) []domain.Issue {
 		blocking = append(blocking, issue)
 	}
 	return blocking
+}
+
+// withIssuesBehindParseErrors adds the defects Parse never reached. Parse stops
+// at the first malformed top-level field, so without this each repair round
+// sees one layer and a bounded ladder cannot converge on independent defects.
+func withIssuesBehindParseErrors(raw []byte, parseIssues []domain.Issue) []domain.Issue {
+	var document map[string]json.RawMessage
+	if json.Unmarshal(raw, &document) != nil {
+		return parseIssues
+	}
+	graph := map[string]json.RawMessage{"nodes": document["nodes"], "edges": document["edges"]}
+	encodedGraph, err := json.Marshal(graph)
+	if err != nil {
+		return parseIssues
+	}
+	graphWorkflow, _ := domain.Parse(encodedGraph)
+	if graphWorkflow == nil {
+		return parseIssues
+	}
+	issues := slices.Clone(parseIssues)
+	seen := map[domain.Issue]bool{}
+	for _, issue := range issues {
+		seen[issue] = true
+	}
+	add := func(found []domain.Issue) {
+		for _, issue := range found {
+			if !seen[issue] {
+				seen[issue] = true
+				issues = append(issues, issue)
+			}
+		}
+	}
+	// Only fields Parse checks; unknown keys are ignored and must not multiply work.
+	for _, field := range []string{"dslVersion", "id", "name", "metadata", "inputs", "outputs", "templatePolicy", "recovery", "ui"} {
+		if _, present := document[field]; !present {
+			continue
+		}
+		section := maps.Clone(graph)
+		section[field] = document[field]
+		if encoded, err := json.Marshal(section); err == nil {
+			if workflow, sectionIssues := domain.Parse(encoded); workflow == nil {
+				add(sectionIssues)
+			}
+		}
+	}
+	add(draftBlockingIssues(graphWorkflow))
+	return issues
 }
 
 func (s *V1Server) mountAiGenerateRoutes(mux *http.ServeMux) {
