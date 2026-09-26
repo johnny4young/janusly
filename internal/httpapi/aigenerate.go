@@ -49,7 +49,10 @@ var generateSystemPromptTemplate string
 // offered a tool the validator and binder would reject.
 var generateSystemPrompt = renderGenerateSystemPrompt(generateSystemPromptTemplate, executors.SharedToolRegistry().CatalogEntries())
 
-const maxAdvertisedTools = 64
+const (
+	maxAdvertisedTools  = 64
+	auditIssueCodeLimit = 5
+)
 
 func renderGenerateSystemPrompt(template string, entries []tools.CatalogEntry) string {
 	names := make([]string, 0, min(len(entries), maxAdvertisedTools))
@@ -356,7 +359,7 @@ func fallbackGenerationAuditMetadata(meta generationMeta, aiErr *ai.AIError, com
 		metadata["failureStage"] = meta.failureStage
 	}
 	if len(meta.validationIssueCodes) > 0 {
-		metadata["validationIssueCodes"] = meta.validationIssueCodes
+		metadata["validationIssueCodes"] = meta.validationIssueCodes[:min(len(meta.validationIssueCodes), auditIssueCodeLimit)]
 	}
 	return metadata
 }
@@ -578,10 +581,12 @@ func composeRepairPrompt(prompt string, draft []byte, issues []domain.Issue) str
 		"\n\nEND DATA. Fix exactly the listed validation issues and return ONLY the corrected JSON workflow object."
 }
 
+// distinctIssueCodes is bounded by the closed validator code set; audits keep
+// only the first auditIssueCodeLimit.
 func distinctIssueCodes(issues []domain.Issue) []string {
 	var codes []string
 	for _, issue := range issues {
-		if len(codes) < 5 && !slices.Contains(codes, issue.Code) {
+		if !slices.Contains(codes, issue.Code) {
 			codes = append(codes, issue.Code)
 		}
 	}
@@ -671,20 +676,11 @@ func validateGeneratedWorkflowCandidate(raw []byte) []domain.Issue {
 }
 
 // withIssuesBehindParseErrors adds the defects Parse never reached. Parse stops
-// at the first malformed top-level field, so without this each repair round
-// sees one layer and a bounded ladder cannot converge on independent defects.
+// at the first malformed field, so without this each repair round sees one
+// layer and a bounded ladder cannot converge on independent defects.
 func withIssuesBehindParseErrors(raw []byte, parseIssues []domain.Issue) []domain.Issue {
 	var document map[string]json.RawMessage
 	if json.Unmarshal(raw, &document) != nil {
-		return parseIssues
-	}
-	graph := map[string]json.RawMessage{"nodes": document["nodes"], "edges": document["edges"]}
-	encodedGraph, err := json.Marshal(graph)
-	if err != nil {
-		return parseIssues
-	}
-	graphWorkflow, _ := domain.Parse(encodedGraph)
-	if graphWorkflow == nil {
 		return parseIssues
 	}
 	issues := slices.Clone(parseIssues)
@@ -700,12 +696,24 @@ func withIssuesBehindParseErrors(raw []byte, parseIssues []domain.Issue) []domai
 			}
 		}
 	}
+	graph := map[string]json.RawMessage{"nodes": document["nodes"], "edges": document["edges"]}
+	encodedGraph, err := json.Marshal(graph)
+	if err != nil {
+		return parseIssues
+	}
+	graphWorkflow, graphIssues := domain.Parse(encodedGraph)
+	add(graphIssues)
+	// A malformed graph must not hide top-level defects; node ids keep ui checks honest.
+	sectionGraph := graph
+	if graphWorkflow == nil {
+		sectionGraph = standInGraph(document["nodes"])
+	}
 	// Only fields Parse checks; unknown keys are ignored and must not multiply work.
 	for _, field := range []string{"dslVersion", "id", "name", "metadata", "inputs", "outputs", "templatePolicy", "recovery", "ui"} {
 		if _, present := document[field]; !present {
 			continue
 		}
-		section := maps.Clone(graph)
+		section := maps.Clone(sectionGraph)
 		section[field] = document[field]
 		if encoded, err := json.Marshal(section); err == nil {
 			if workflow, sectionIssues := domain.Parse(encoded); workflow == nil {
@@ -713,8 +721,24 @@ func withIssuesBehindParseErrors(raw []byte, parseIssues []domain.Issue) []domai
 			}
 		}
 	}
-	add(draftBlockingIssues(graphWorkflow))
+	if graphWorkflow != nil {
+		add(draftBlockingIssues(graphWorkflow))
+	}
 	return issues
+}
+
+// standInGraph keeps only the string node ids of an unparseable graph.
+func standInGraph(rawNodes json.RawMessage) map[string]json.RawMessage {
+	var nodes []map[string]any
+	_ = json.Unmarshal(rawNodes, &nodes)
+	standIns := make([]map[string]any, 0, len(nodes))
+	for _, node := range nodes {
+		if id, ok := node["id"].(string); ok && id != "" {
+			standIns = append(standIns, map[string]any{"id": id, "type": "noop", "config": map[string]any{}})
+		}
+	}
+	encoded, _ := json.Marshal(standIns)
+	return map[string]json.RawMessage{"nodes": encoded, "edges": json.RawMessage("[]")}
 }
 
 func (s *V1Server) mountAiGenerateRoutes(mux *http.ServeMux) {

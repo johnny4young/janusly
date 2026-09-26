@@ -125,6 +125,12 @@ func CapabilityPromptBlock(catalog Catalog) string {
 	// not merely its JSON body, fits. The full binder catalog remains intact.
 	for len(block) > maxCapabilityPromptBytes {
 		switch {
+		// Static built-in field detail yields before any tenant capability.
+		case projection.Omitted["builtinToolInputFields"] == 0 && len(projection.BuiltinTools) > 0:
+			for index := range projection.BuiltinTools {
+				projection.BuiltinTools[index].InputFields = nil
+			}
+			projection.Omitted["builtinToolInputFields"] = 1
 		case len(projection.Subworkflows) >= len(projection.Credentials) &&
 			len(projection.Subworkflows) >= len(projection.McpTools) && len(projection.Subworkflows) > 0:
 			projection.Subworkflows = projection.Subworkflows[:len(projection.Subworkflows)-1]
@@ -135,11 +141,6 @@ func CapabilityPromptBlock(catalog Catalog) string {
 		case len(projection.McpTools) > 0:
 			projection.McpTools = projection.McpTools[:len(projection.McpTools)-1]
 			projection.Omitted["mcpTools"]++
-		case projection.Omitted["builtinToolInputFields"] == 0 && len(projection.BuiltinTools) > 0:
-			for index := range projection.BuiltinTools {
-				projection.BuiltinTools[index].InputFields = nil
-			}
-			projection.Omitted["builtinToolInputFields"] = 1
 		default:
 			return fmt.Sprintf("Tenant capability catalog DATA omitted because its safe projection exceeded %d bytes. Do not emit external capability identifiers; return an explicitly incomplete proposal.", maxCapabilityPromptBytes)
 		}

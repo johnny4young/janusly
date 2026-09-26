@@ -439,3 +439,71 @@ func TestComposeRepairPromptLocatesIssues(t *testing.T) {
 		}
 	}
 }
+
+func TestRepairFeedbackReportsTopLevelDefectsBehindAnUnparseableGraph(t *testing.T) {
+	for _, raw := range []string{
+		`{"nodes":null,"edges":null,"outputs":5}`,
+		`{"nodes":"x","edges":[],"outputs":5}`,
+	} {
+		var graphIssue, outputsIssue bool
+		for _, issue := range validateGeneratedWorkflowCandidate([]byte(raw)) {
+			graphIssue = graphIssue || strings.Contains(issue.Message, "nodes")
+			outputsIssue = outputsIssue || strings.Contains(issue.Message, "outputs")
+		}
+		if !graphIssue || !outputsIssue {
+			t.Fatalf("%s must report both the graph and the outputs defect: %+v", raw, validateGeneratedWorkflowCandidate([]byte(raw)))
+		}
+	}
+}
+
+func TestRepairLadderConvergesOnMalformedNodePlusTopLevelAndSemanticDefects(t *testing.T) {
+	var draft map[string]any
+	// Drafts are re-marshaled with sorted keys, so dslVersion decodes before nodes.
+	if err := json.Unmarshal([]byte(`{"dslVersion":1,"id":"github_status","name":"GitHub status",
+		"outputs":{"result":"{{context.uppercase.output}}"},
+		"nodes":[
+			{"id":"fetch","type":"http","label":1,"config":{"url":"https://api.github.com","method":"GET"}},
+			{"id":"transform","type":"transform","config":{"mapping":{"status_code":"{{context.fetch.output.statusCode}}"}}},
+			{"id":"uppercase","type":"tool","config":{"tool":"text.uppercase","input":{"text":"status"}}}],
+		"edges":[{"from":"fetch","to":"transform"},{"from":"transform","to":"uppercase"}]}`), &draft); err != nil {
+		t.Fatal(err)
+	}
+	client := &obedientRepairClient{draft: draft, fixes: map[string]func(map[string]any){
+		"rawWorkflow.dslVersion": func(d map[string]any) {
+			d["dslVersion"] = "1.0"
+		},
+		"rawWorkflow.nodes.0.label": func(d map[string]any) {
+			d["nodes"].([]any)[0].(map[string]any)["label"] = "Fetch"
+		},
+		"text: Unsupported field": func(d map[string]any) {
+			d["nodes"].([]any)[2].(map[string]any)["config"].(map[string]any)["input"] = map[string]any{"value": "status"}
+		},
+	}}
+	raw, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		t.Context(), client, "Fetch https://api.github.com with GET, transform the status code, and use tool text.uppercase with a concrete value to prepare the result.",
+		"", v1Request{}, 1, "", 0,
+	)
+	if aiErr != nil || raw == nil || client.calls != 3 || meta.repairAttempts != 2 {
+		t.Fatalf("three independent layers must converge within two repairs: err=%v calls=%d meta=%+v", aiErr, client.calls, meta)
+	}
+}
+
+func TestFailureEvidenceKeepsEveryDistinctCodeWhileAuditStaysBounded(t *testing.T) {
+	broken := `{"dslVersion":"1.0","id":"broken","name":"Broken","nodes":[
+		{"id":"shape","type":"transform","config":{"mapping":{}}},
+		{"id":"shape","type":"condition","config":{}},
+		{"id":"call","type":"tool","config":{"tool":"text.uppercase","input":{"text":"x"}}},
+		{"id":"odd","type":"teleport","config":{}}],
+		"edges":[{"from":"ghost","to":"phantom"}]}`
+	client := &scriptedAuthoringClient{replies: []string{broken}}
+	_, meta, aiErr := (&V1Server{}).generateFreeJsonWithSystemData(
+		t.Context(), client, "Shape an operator result", "", v1Request{}, 1, "", 0,
+	)
+	if aiErr == nil || len(meta.validationIssueCodes) <= auditIssueCodeLimit || len(meta.repairIssueCodes) <= auditIssueCodeLimit {
+		t.Fatalf("paid-run evidence must keep every distinct code: meta=%+v err=%v", meta, aiErr)
+	}
+	audited, _ := fallbackGenerationAuditMetadata(meta, aiErr, assuranceCompilation{})["validationIssueCodes"].([]string)
+	if len(audited) != auditIssueCodeLimit {
+		t.Fatalf("audit codes must stay bounded: %v", audited)
+	}
+}

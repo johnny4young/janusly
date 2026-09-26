@@ -1,6 +1,7 @@
 package authoring
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestCapabilityPromptBlockTrimsCompleteValidEnvelope(t *testing.T) {
 	if len(block) > maxCapabilityPromptBytes || !strings.Contains(block, "END TENANT CAPABILITY DATA") {
 		t.Fatalf("framed prompt was sliced or oversized: bytes=%d", len(block))
 	}
-	if !strings.Contains(block, `"omitted":{"mcpTools":`) {
+	if _, omitted := retainedMcpTools(t, catalog); omitted["mcpTools"] == 0 {
 		t.Fatalf("truncation must be explicit: %s", block)
 	}
 }
@@ -66,5 +67,41 @@ func TestCapabilityPromptBlockProjectsTypedBuiltinToolFields(t *testing.T) {
 	want := `{"name":"text.uppercase","required":["value"],"writeSide":false,"inputFields":[{"name":"value","kind":"string","required":true}]}`
 	if !strings.Contains(block, want) {
 		t.Fatalf("text.uppercase must expose its typed input field:\n%s", block)
+	}
+}
+
+func retainedMcpTools(t *testing.T, catalog Catalog) (int, map[string]int) {
+	t.Helper()
+	lines := strings.Split(CapabilityPromptBlock(catalog), "\n")
+	var projection struct {
+		McpTools []any          `json:"mcpTools"`
+		Omitted  map[string]int `json:"omitted"`
+	}
+	if len(lines) != 3 || json.Unmarshal([]byte(lines[1]), &projection) != nil {
+		t.Fatalf("capability block is not a framed projection: %v", lines)
+	}
+	return len(projection.McpTools), projection.Omitted
+}
+
+func TestCapabilityPromptBlockTrimsBuiltinFieldsBeforeTenantCapabilities(t *testing.T) {
+	catalog := NewBuilder(nil, nil).Build(t.Context(), "org")
+	for index := range 200 {
+		catalog.McpTools = append(catalog.McpTools, mcpclient.ExposedMcpTool{
+			ConnectionAlias: "connection-" + strings.Repeat("a", 120),
+			ToolName:        "tool-" + strings.Repeat("b", 120),
+			InputFields: []mcpclient.ExposedMcpInputField{{
+				Name: strings.Repeat("field", 30), Type: "string", Required: index%2 == 0,
+			}},
+		})
+	}
+	withoutFields := catalog
+	withoutFields.BuiltinTools = append(withoutFields.BuiltinTools[:0:0], catalog.BuiltinTools...)
+	for index := range withoutFields.BuiltinTools {
+		withoutFields.BuiltinTools[index].InputFields = nil
+	}
+	baseline, _ := retainedMcpTools(t, withoutFields)
+	retained, omitted := retainedMcpTools(t, catalog)
+	if retained < baseline || omitted["builtinToolInputFields"] != 1 {
+		t.Fatalf("built-in field detail evicted tenant MCP tools: retained=%d baseline=%d omitted=%v", retained, baseline, omitted)
 	}
 }
