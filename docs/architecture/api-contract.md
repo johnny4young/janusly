@@ -60,8 +60,8 @@ exported Go list (`strEnum` in `internal/contract`): recovery case states,
 actor and artifact kinds, detector actions, autonomy sources, unavailable
 reasons and capabilities (`internal/domain`), rollout statuses
 (`domain.WorkflowRolloutStatuses`), qualification failure datasets and reasons
-(`internal/recovery`), and failure-cluster categories and owners
-(`internal/signature`). `internal/contract/enum_sources_test.go` scans the
+(`internal/recovery`), failure-cluster categories and owners
+(`internal/signature`), and AI evidence kinds (`aievidence.KindList`). `internal/contract/enum_sources_test.go` scans the
 code and SQL that write those values and fails on a literal the list does not
 declare, and pins the lists behind a database `CHECK` to that constraint. The
 generated guard then rejects an unknown value, so readers keep only the
@@ -168,8 +168,8 @@ The browser validates **shape** from the manifest and never re-encodes server
   `eventsCursor` present exactly when `eventsHasMore`, a delta present exactly
   when `hasEnoughData`, fallback and playbook suggestions pinned to their fixed
   confidence, a validation bound to its candidate by SHA-256, a vocabulary the UI
-  translates that the manifest leaves open (AI evidence kinds, patch approach
-  labels), a date `Intl` must format. Extension JSON that the manifest keeps
+  translates that the manifest leaves open (patch approach labels), a date
+  `Intl` must format. Extension JSON that the manifest keeps
   opaque is narrowed only as far as the component reads it.
 - Policy never appears in the browser: maximum lengths, page sizes, item counts
   and numeric ranges copied from Go become a "malformed response" outage the day

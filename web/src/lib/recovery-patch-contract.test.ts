@@ -111,6 +111,10 @@ describe('parseRecoveryPatchSuggestion', () => {
     })()],
     ['feedback health the dialog does not render', { ...currentResponse, feedbackHealth: {} }],
     ['a playbook mode on the patch route', { ...currentResponse, mode: 'playbook' }],
+    ['an evidence kind outside the manifest vocabulary', {
+      ...currentResponse,
+      evidence: [{ kind: 'mystery', sourceRef: 'run-1', snippet: 'x' }],
+    }],
   ])('delegates shape to the generated guard: %s', (_name, payload) => {
     expect(parseRecoveryPatchSuggestion(payload, options)).toBeNull()
   })
@@ -129,10 +133,6 @@ describe('parseRecoveryPatchSuggestion', () => {
       ...currentResponse,
       mode: 'fallback',
       suggestions: [{ ...tab, confidence: 0, calibratedConfidence: 100 }],
-    }],
-    ['an evidence kind the panel cannot label', {
-      ...currentResponse,
-      evidence: [{ kind: 'mystery', sourceRef: 'run-1', snippet: 'x' }],
     }],
     ['evidence without a source token after scrubbing', {
       ...currentResponse,

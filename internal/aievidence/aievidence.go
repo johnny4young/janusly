@@ -26,7 +26,14 @@ const (
 	MaxSourceRefChars = 200
 )
 
-// Kinds is the closed vocabulary.
+// KindList is every kind a response's evidence can carry: the scrubbed
+// kinds below plus recovery_playbook, which a playbook replay emits directly.
+var KindList = []string{
+	"recovery_feedback", "memory_entry", "runbook_excerpt", "recent_error",
+	"signature_rule", "tool_contract", "recovery_playbook",
+}
+
+// Kinds is the closed vocabulary ScrubRows admits.
 var Kinds = map[string]bool{
 	"recovery_feedback": true, "memory_entry": true, "runbook_excerpt": true,
 	"recent_error": true, "signature_rule": true, "tool_contract": true,

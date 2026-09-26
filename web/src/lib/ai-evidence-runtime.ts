@@ -3,17 +3,8 @@
 import type { SuggestionEvidence } from './api-types.generated'
 import { scrubSecretShapes } from './error-signature'
 
-export const EVIDENCE_KINDS = [
-  'recovery_feedback',
-  'memory_entry',
-  'runbook_excerpt',
-  'recent_error',
-  'signature_rule',
-  'tool_contract',
-  'recovery_playbook',
-] as const
-
-export type EvidenceKind = (typeof EVIDENCE_KINDS)[number]
+// The manifest enumerates the kinds from aievidence.KindList.
+export type EvidenceKind = SuggestionEvidence['kind']
 // Display bounds: the scrub truncates to these, and a longer response is never rejected.
 export const MAX_EVIDENCE_ROWS = 24 // wire-policy: display bound, same value as aievidence.MaxEvidenceRows
 export const MAX_SNIPPET_CHARS = 400 // wire-policy: display bound, same value as aievidence.MaxSnippetChars
@@ -63,9 +54,7 @@ export function parseEvidenceRows(rows: readonly SuggestionEvidence[]): Evidence
   const out: EvidenceRow[] = []
   for (const row of rows) {
     if (out.length >= MAX_EVIDENCE_ROWS) break
-    // EvidencePanel labels each chip with the kind it translates.
-    if (!EVIDENCE_KINDS.includes(row.kind as EvidenceKind)) return null
-    const scrubbed = scrubEvidenceRow({ ...row, kind: row.kind as EvidenceKind })
+    const scrubbed = scrubEvidenceRow(row)
     // Each chip renders a snippet and the source token the operator traces back.
     if (!scrubbed.snippet || !scrubbed.sourceRef) return null
     out.push(scrubbed)

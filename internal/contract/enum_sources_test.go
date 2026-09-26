@@ -12,17 +12,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnny4young/janusly/internal/aievidence"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/signature"
 )
 
 // emitSite names where production files write a vocabulary value: keyed
-// fields and assigned variables by name, and function arguments by position.
+// fields and assigned variables by name, JSON map keys, and function
+// arguments by position.
 type emitSite struct {
-	glob  string
-	names []string
-	calls map[string]int
+	glob    string
+	names   []string
+	mapKeys []string
+	calls   map[string]int
 }
 
 // literals returns every string literal the site's production files emit.
@@ -55,6 +58,10 @@ func (site emitSite) literals(t *testing.T) []string {
 			switch node := node.(type) {
 			case *ast.KeyValueExpr:
 				if key, ok := node.Key.(*ast.Ident); ok && slices.Contains(site.names, key.Name) {
+					collect(node.Value)
+				}
+				if key, ok := node.Key.(*ast.BasicLit); ok && key.Kind == token.STRING &&
+					slices.Contains(site.mapKeys, strings.Trim(key.Value, `"`)) {
 					collect(node.Value)
 				}
 			case *ast.AssignStmt:
@@ -100,6 +107,10 @@ func TestEnumListsCoverEmittedValues(t *testing.T) {
 		{"qualification failure reason", recovery.QualificationFailureReasons, []emitSite{{
 			glob: "../recovery/*.go", names: []string{"Reason", "reason"},
 		}}, nil},
+		{"AI evidence kind", aievidence.KindList, []emitSite{
+			{glob: "../aievidence/*.go", names: []string{"Kind"}},
+			{glob: "../httpapi/playbooks.go", mapKeys: []string{"kind"}},
+		}, nil},
 		{"failure cluster category", signature.Categories, []emitSite{{
 			glob: "../signature/*.go", names: []string{"Category"},
 		}}, nil},

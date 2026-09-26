@@ -855,7 +855,7 @@ export type RunView = {
 export type StoredColumnJSON = unknown
 
 export type SuggestionEvidence = {
-  "kind": string
+  "kind": "recovery_feedback" | "memory_entry" | "runbook_excerpt" | "recent_error" | "signature_rule" | "tool_contract" | "recovery_playbook"
   "label"?: string
   "snippet": string
   "sourceRef": string
