@@ -385,14 +385,19 @@ describe('WorkflowCanvas (browser mode)', () => {
 
     await findByText('Inicio')
     const nodeWrapper = container.querySelector('.react-flow__node[data-id="inicio"]') as HTMLElement
-    const edgeWrapper = container.querySelector('.react-flow__edge[aria-label="Camino de Inicio a Final"]') as HTMLElement
-    expect(edgeWrapper).toBeTruthy()
+    // React Flow renders edges and controls after measuring nodes, a tick later on slow runners.
+    const edgeWrapper = await waitFor(() => {
+      const edge = container.querySelector('.react-flow__edge[aria-label="Camino de Inicio a Final"]') as HTMLElement | null
+      expect(edge).toBeTruthy()
+      return edge as HTMLElement
+    })
     expect(nodeWrapper).toHaveAttribute('aria-label', 'Paso: Inicio. Estado: Listo. Solo lectura')
     expect(document.getElementById(edgeWrapper.getAttribute('aria-describedby') ?? '')).toHaveTextContent('Solo lectura')
-    expect(container.querySelector('[aria-label="Instantánea de la ejecución"]')).toBeTruthy()
-    expect(container.querySelector('[aria-label="Acercar"]')).toBeTruthy()
-    expect(container.querySelector('[aria-label="Alejar"]')).toBeTruthy()
-    expect(container.querySelector('[aria-label="Ajustar ejecución a la vista"]')).toBeTruthy()
+    await waitFor(() => {
+      for (const label of ['Instantánea de la ejecución', 'Acercar', 'Alejar', 'Ajustar ejecución a la vista']) {
+        expect(container.querySelector(`[aria-label="${label}"]`)).toBeTruthy()
+      }
+    })
     expect(container.textContent).not.toContain('Press delete')
   })
 
