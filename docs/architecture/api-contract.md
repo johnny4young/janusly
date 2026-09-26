@@ -61,11 +61,20 @@ actor and artifact kinds, detector actions, autonomy sources, unavailable
 reasons and capabilities (`internal/domain`), rollout statuses
 (`domain.WorkflowRolloutStatuses`), qualification failure datasets and reasons
 (`internal/recovery`), failure-cluster categories and owners
-(`internal/signature`), and AI evidence kinds (`aievidence.KindList`). `internal/contract/enum_sources_test.go` scans the
-code and SQL that write those values and fails on a literal the list does not
-declare, and pins the lists behind a database `CHECK` to that constraint. The
-generated guard then rejects an unknown value, so readers keep only the
-translation maps, which typecheck against the generated union.
+(`internal/signature`), and AI evidence kinds (`aievidence.KindList`).
+
+Two fences keep a server-emitted value inside its enum. Columns that persist
+one (case state and action, transition states and actors, artifact kinds and
+actors, rollout status) carry a database `CHECK` that admits exactly the Go
+list. `internal/contract/enum_sources_test.go` type-checks `internal/...` and
+follows every constant that reaches a named destination field or JSON key,
+through package constants, local variables, parameters and function results,
+and scans every `internal/store/queries/*.sql` comparison, `IN` list and `SET`
+on those columns; it fails on a value the list does not declare and pins each
+`CHECK` to its list. Values computed from input (a copied field, a decoded
+body) are the validators' job, not the scan's. The generated guard then
+rejects an unknown value, so readers keep only the translation maps, which
+typecheck against the generated union.
 
 `GET /v1/workflows/versions` is a keyset page of one workflow's history,
 newest first: `limit` (default 50, at most 200), `beforeVersion` as the
