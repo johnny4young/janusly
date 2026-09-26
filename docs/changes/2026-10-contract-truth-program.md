@@ -154,6 +154,12 @@ core and shipped in order, within the same PR and commit series as 4 and 5.
 
 Complete. One PR, one commit series on `codex/contract-truth-program`.
 
+Follow-ups done on `codex/contract-debt-followups`: the health delta serves
+`minRunsForDelta`, AI evidence bounds are display truncation only, lifecycle
+vocabularies are manifest enums built from Go lists, and Claude Opus 5.5 is
+priced; versioning `GET /workflows/{workflowId}/rollout` stays open because it
+collides with `GET /v1/workflows/versions/{versionId}` in the mux.
+
 | Wave | Status | Commits |
 |---|---|---|
 | 4 dead-code gate | done | `a5111ff8`, hardened in `2d30f0a2` |
