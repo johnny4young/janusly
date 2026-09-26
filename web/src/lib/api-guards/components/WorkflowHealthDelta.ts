@@ -16,6 +16,7 @@ export function isWorkflowHealthDelta(value: unknown): value is Api.WorkflowHeal
       score: isInteger,
     })),
     hasEnoughData: isBoolean,
+    minRunsForDelta: isInteger,
     priorVersion: nullable(shape({
       version: isInteger,
       versionId: isString,

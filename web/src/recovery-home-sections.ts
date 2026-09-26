@@ -14,8 +14,6 @@ import { isRecoveryValidationReport } from './lib/api-guards/components/Recovery
 import { isRecoveryWins } from './lib/api-guards/components/RecoveryWins'
 import type { RecoveryValidationReport } from './components/RecoveryValidationSection'
 import type {
-  ClusterCategory,
-  ClusterOwner,
   ClustersResponse,
   HeatmapDay,
   OperatorWins,
@@ -39,17 +37,9 @@ export function decodeRecoveryMetrics(value: unknown): RecoveryMetrics | null {
   return value as RecoveryMetrics
 }
 
-// The cluster tiles translate category and owner; an unknown value has no copy.
-const CLUSTER_CATEGORIES: ReadonlySet<string> = new Set<ClusterCategory>([
-  'secret_missing', 'http_error', 'network_timeout', 'ai_provider', 'parse_error', 'tool_input', 'unknown',
-])
-const CLUSTER_OWNERS: ReadonlySet<string> = new Set<ClusterOwner>(['ops', 'workflow_author', 'platform'])
-
+// The category and owner vocabularies the tiles translate are the guard's enums.
 export function decodeClustersResponse(value: unknown): ClustersResponse | null {
-  if (!isFailureClusters(value) || !value.clusters.every(cluster => (
-    CLUSTER_CATEGORIES.has(cluster.category) && CLUSTER_OWNERS.has(cluster.suggestedOwner)
-  ))) return null
-  return value as ClustersResponse
+  return isFailureClusters(value) ? value : null
 }
 
 export function decodeHeatmap(value: unknown): { days: HeatmapDay[] } | null {

@@ -26,7 +26,7 @@ vi.mock('../api', async () => {
 })
 const initial = useWorkflowStore.getState()
 const signals = { totalRuns: 5, p95LatencyMs: null, totalCostUsd: 0 }
-const delta = { workflowId: 'workflow', afterVersion: 2, windowDays: 30, hasEnoughData: true,
+const delta = { workflowId: 'workflow', afterVersion: 2, windowDays: 30, hasEnoughData: true, minRunsForDelta: 5,
   before: { score: 80, status: 'healthy', signals }, after: { score: 70, status: 'warn', signals },
   delta: { score: -10, p95LatencyMs: null, costPerRunUsd: 0 },
   recentRunsAgainstAfter: { totalRuns: 5, succeeded: 4, failed: 1, running: 0 },

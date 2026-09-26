@@ -12,7 +12,7 @@
  */
 
 import type { Edge, Node } from '@xyflow/react'
-import type { ApiResponses } from './lib/api-types.generated'
+import type { ApiResponses, RecoveryActorKind, RecoveryArtifact, RecoveryCaseState, RecoveryCase as WireRecoveryCase } from './lib/api-types.generated'
 import type { WorkflowRecovery } from './lib/recovery-contract'
 
 export type JsonObject = Record<string, unknown>
@@ -207,23 +207,11 @@ export type RecoveryCase = {
   detectorId: string
   sourceNodeId: string
   detectorKind: 'expression' | 'schema'
-  action: 'observe' | 'quarantine'
+  action: WireRecoveryCase['action']
   message: string
   detailsJson: unknown
   revision: number
-  state:
-    | 'detected'
-    | 'contained'
-    | 'diagnosed'
-    | 'candidates_ready'
-    | 'validating'
-    | 'awaiting_approval'
-    | 'publishing'
-    | 'monitoring'
-    | 'verified_recovered'
-    | 'recurred'
-    | 'accepted_loss'
-    | 'abandoned'
+  state: RecoveryCaseState
   createdBy: string | null
   createdAt: string
   updatedAt: string
@@ -232,10 +220,10 @@ export type RecoveryCase = {
 export type RecoveryCaseArtifact = {
   id: string
   caseId: string
-  kind: 'diagnosis' | 'candidate' | 'validation' | 'publication' | 'verification'
+  kind: RecoveryArtifact['kind']
   payload: unknown
   sha256: string
-  actorKind: 'system' | 'user' | 'agent'
+  actorKind: RecoveryActorKind
   actorId: string | null
   createdAt: string
 }
@@ -243,9 +231,9 @@ export type RecoveryCaseTransition = {
   id: string
   orgId: string
   caseId: string
-  fromState: RecoveryCase['state']
-  toState: RecoveryCase['state']
-  actorKind: 'system' | 'user' | 'agent'
+  fromState: RecoveryCaseState
+  toState: RecoveryCaseState
+  actorKind: RecoveryActorKind
   actorId: string | null
   evidenceJson: unknown
   reason: string | null

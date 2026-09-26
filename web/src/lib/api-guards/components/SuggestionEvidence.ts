@@ -2,11 +2,11 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { isFiniteNumber, isShape, isString } from "../../guards"
+import { isFiniteNumber, isShape, isString, literal } from "../../guards"
 
 export function isSuggestionEvidence(value: unknown): value is Api.SuggestionEvidence {
   return isShape(value, {
-    kind: isString,
+    kind: literal("recovery_feedback", "memory_entry", "runbook_excerpt", "recent_error", "signature_rule", "tool_contract", "recovery_playbook"),
     snippet: isString,
     sourceRef: isString,
   }, {

@@ -184,7 +184,7 @@ export type FailureCluster = {
     "workflowId": string
     "workflowName": string
   }[]
-  "category": string
+  "category": "secret_missing" | "http_error" | "network_timeout" | "ai_provider" | "parse_error" | "tool_input" | "unknown"
   "firstSeen": string
   "frequency": number
   "lastSeen": string
@@ -195,7 +195,7 @@ export type FailureCluster = {
     "source": string
   }[]
   "signature": string
-  "suggestedOwner": string
+  "suggestedOwner": "ops" | "workflow_author" | "platform"
 }
 
 export type FailureClusters = {
@@ -306,12 +306,12 @@ export type QualificationSummary = {
   "datasetDigest": string
   "datasetVersion": string
   "failedCandidateAssertions": number
-  "failures": {
+  "failures": ({
     "actual": string
-    "dataset": string
+    "dataset": "baseline" | "candidate"
     "expected": string
     "fixtureId": string
-    "reason": string
+    "reason": "baseline_dataset_invalid" | "candidate_contract_missing" | "detector_uncovered" | "expected_mismatch"
     "sourceNodeId": string
     "violations"?: {
       "action": string
@@ -321,7 +321,7 @@ export type QualificationSummary = {
       "message": string
       "sourceNodeId": string
     }[]
-  }[]
+  })[]
   "failuresTruncated": boolean
   "mode": string
   "passedCandidateAssertions": number
@@ -362,6 +362,8 @@ export type RecoveryActiveApproval = {
   "validationArtifactId": string
 } | null
 
+export type RecoveryActorKind = "system" | "user" | "agent"
+
 export type RecoveryApprovalBindingRequest = {
   "candidateArtifactId": string
   "expectedRevision": number
@@ -370,11 +372,11 @@ export type RecoveryApprovalBindingRequest = {
 
 export type RecoveryArtifact = {
   "actorId": string | null
-  "actorKind": string
+  "actorKind": RecoveryActorKind
   "caseId": string
   "createdAt": string
   "id": string
-  "kind": string
+  "kind": "diagnosis" | "candidate" | "validation" | "publication" | "verification"
   "payload": RecoveryEvidenceJSON
   "sha256": string
 }
@@ -388,14 +390,14 @@ export type RecoveryAutonomy = {
     "validate": boolean
   }
   "detectorIds": string[]
-  "factors": {
-    "capability": string
+  "factors": ({
+    "capability": "observe" | "recommend" | "validate" | "apply_with_approval" | "autonomous_apply"
     "enabled": boolean
     "requiredLevel": number
-  }[]
+  })[]
   "level": number | null
-  "source": string
-  "unavailableReason": string | null
+  "source": "failure_override" | "workflow_default" | "strictest_failure" | "unavailable"
+  "unavailableReason": "contract_missing" | "failure_policy_missing" | null
 }
 
 export type RecoveryCandidateBindingRequest = {
@@ -404,7 +406,7 @@ export type RecoveryCandidateBindingRequest = {
 }
 
 export type RecoveryCase = {
-  "action": string
+  "action": "observe" | "quarantine"
   "createdAt": string
   "createdBy": string | null
   "detailsJson": RecoveryEvidenceJSON
@@ -418,7 +420,7 @@ export type RecoveryCase = {
   "runId": string
   "source": string
   "sourceNodeId": string
-  "state": string
+  "state": RecoveryCaseState
   "updatedAt": string
   "workflowId": string | null
   "workflowVersionId": string
@@ -431,6 +433,8 @@ export type RecoveryCaseDetail = {
   "case": RecoveryCase
   "transitions": RecoveryTransition[]
 }
+
+export type RecoveryCaseState = "detected" | "contained" | "diagnosed" | "candidates_ready" | "validating" | "awaiting_approval" | "publishing" | "monitoring" | "verified_recovered" | "recurred" | "accepted_loss" | "abandoned"
 
 export type RecoveryEvidenceJSON = unknown
 
@@ -509,7 +513,7 @@ export type RecoveryHome = {
 
 export type RecoveryHomeCases = {
   "cases": ({
-    "action": string
+    "action": "observe" | "quarantine"
     "createdAt": string
     "detectorId": string
     "detectorKind": string
@@ -517,7 +521,7 @@ export type RecoveryHomeCases = {
     "message": string
     "runId": string
     "source": string
-    "state": string
+    "state": RecoveryCaseState
     "workflowId": string | null
   })[]
 }
@@ -671,15 +675,15 @@ export type RecoveryRevisionRequest = {
 
 export type RecoveryTransition = {
   "actorId": string | null
-  "actorKind": string
+  "actorKind": RecoveryActorKind
   "caseId": string
   "evidenceJson": RecoveryEvidenceJSON
-  "fromState": string
+  "fromState": RecoveryCaseState
   "id": string
   "occurredAt": string
   "orgId": string
   "reason": string | null
-  "toState": string
+  "toState": RecoveryCaseState
 }
 
 export type RecoveryValidationReport = {
@@ -851,7 +855,7 @@ export type RunView = {
 export type StoredColumnJSON = unknown
 
 export type SuggestionEvidence = {
-  "kind": string
+  "kind": "recovery_feedback" | "memory_entry" | "runbook_excerpt" | "recent_error" | "signature_rule" | "tool_contract" | "recovery_playbook"
   "label"?: string
   "snippet": string
   "sourceRef": string
@@ -994,6 +998,7 @@ export type WorkflowHealthDelta = {
     "score": number
   } | null
   "hasEnoughData": boolean
+  "minRunsForDelta": number
   "priorVersion": {
     "version": number
     "versionId": string
@@ -1192,7 +1197,7 @@ export type WorkflowRollout = {
   "minimumSampleSize": number
   "minimumSuccessRatePercent": number
   "rolledBackReason": string | null
-  "status": string
+  "status": "active" | "promoted" | "rolled_back" | "cancelled"
   "trafficPercent": number
   "updatedAt": string
   "workflowId": string

@@ -85,19 +85,27 @@ func conformanceHealthScores() (health.Score, health.Score, health.Signals) {
 }
 
 func conformanceQualificationSummary() recovery.QualificationSummary {
+	// One failure per reason, so every value the enum admits reaches the wire check.
+	failures := []recovery.QualificationFailure{}
+	for i, reason := range recovery.QualificationFailureReasons {
+		failures = append(failures, recovery.QualificationFailure{
+			Dataset:   recovery.QualificationFailureDatasets[i%len(recovery.QualificationFailureDatasets)],
+			FixtureID: "fixture-" + reason, SourceNodeID: "node", Expected: "pass", Actual: "uncovered", Reason: reason,
+		})
+	}
 	return recovery.QualificationSummary{
 		DatasetVersion: "1", DatasetDigest: strings.Repeat("b", 64), Mode: "compare", Status: "failed",
 		BaselineCaseCount: 1, CandidateCaseCount: 1, CandidateAssertionCount: 2,
 		PassedCandidateAssertions: 1, FailedCandidateAssertions: 1, RegressionCount: 1,
 		BaselineDatasetValid: true, FailuresTruncated: false,
-		Failures: []recovery.QualificationFailure{{
+		Failures: append([]recovery.QualificationFailure{{
 			Dataset: "baseline", FixtureID: "fixture", SourceNodeID: "node",
-			Expected: "pass", Actual: "violation", Reason: "regression",
+			Expected: "pass", Actual: "violation", Reason: "expected_mismatch",
 			Violations: []recovery.SemanticOutcomeViolation{{
 				DetectorID: "detector", SourceNodeID: "node", Kind: "expression",
 				Action: "quarantine", Message: "violated", Details: []string{"total"},
 			}},
-		}},
+		}}, failures...),
 	}
 }
 
@@ -119,13 +127,17 @@ func manifestConformanceRows() map[string]conformanceRow {
 			TrafficPercent: 10, MinimumSampleSize: 5, MinimumSuccessRatePercent: 90, Status: "active",
 			CreatedAt: conformanceInstant, UpdatedAt: conformanceInstant,
 		}
-		ended := active
-		ended.Status, ended.RolledBackReason = "rolled_back", reason
-		ended.EndedAt, ended.LastOutcomeAt = &conformanceInstant, &conformanceInstant
-		return []any{
-			listWire(t, map[string]any{"rollout": rolloutView(active)}),
-			listWire(t, map[string]any{"rollout": rolloutView(ended)}),
+		wires := []any{listWire(t, map[string]any{"rollout": rolloutView(active)})}
+		for _, status := range domain.WorkflowRolloutStatuses[1:] {
+			ended := active
+			ended.Status = status
+			if status != "promoted" {
+				ended.RolledBackReason = reason
+			}
+			ended.EndedAt, ended.LastOutcomeAt = &conformanceInstant, &conformanceInstant
+			wires = append(wires, listWire(t, map[string]any{"rollout": rolloutView(ended)}))
 		}
+		return wires
 	}}
 	qualificationRow := conformanceRow{integration: true, fixtures: func(t *testing.T) []any {
 		summary := conformanceQualificationSummary()
@@ -184,12 +196,16 @@ func manifestConformanceRows() map[string]conformanceRow {
 			before, after, afterSignals := conformanceHealthScores()
 			complete := workflowHealthDelta{
 				WorkflowID: "workflow", AfterVersion: 2, WindowDays: 30, HasEnoughData: true,
-				Before: before, After: after, Delta: buildRecoveryDelta(before, after, health.Signals{}, afterSignals),
+				MinRunsForDelta: health.MinRunsForDelta,
+				Before:          before, After: after, Delta: buildRecoveryDelta(before, after, health.Signals{}, afterSignals),
 				RecentRunsAgainstAfter: recentRunsAgainstAfter{TotalRuns: 10, Succeeded: 8, Failed: 2},
 				SameFailureSinceApply:  &sameFailureSinceApply{Count: 1, SampleDeadLetterIDs: []string{"letter"}, PriorSignature: "sig"},
 				PriorVersion:           &priorWorkflowVersion{Version: 1, VersionID: "v1"},
 			}
-			gathering := workflowHealthDelta{WorkflowID: "workflow", AfterVersion: 1, WindowDays: 30, Before: before, After: before}
+			gathering := workflowHealthDelta{
+				WorkflowID: "workflow", AfterVersion: 1, WindowDays: 30, MinRunsForDelta: health.MinRunsForDelta,
+				Before: before, After: before,
+			}
 			return []any{listWire(t, complete), listWire(t, gathering)}
 		}},
 		"GET /v1/workflows/versions/{versionId}":                         onlyIntegration(),

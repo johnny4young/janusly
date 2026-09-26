@@ -194,6 +194,7 @@ bump the date, run `make generate`, and add a line to the log below.
 Verification log:
 
 - 2026-09-24 — 14/14 catalog entries match the vendor page; Sonnet 5 keeps the USD 2/10 introductory rate as its standard rate.
+- 2026-09-26 — 15/15 catalog entries match the vendor page after adding Claude Opus 5.5 at USD 4/20; its cache reads cost USD 0.20 (0.05x base, not the standard 0.1x) and five-minute cache writes USD 5 (1.25x).
 
 ## Qualification layers
 

@@ -7,6 +7,7 @@
  * renderers can rely on, or `null` for "not a payload we understand".
  */
 
+import type { FailureCluster as FailureClusterWire } from './api-types.generated'
 import { isRecord } from './guards'
 export type MetricSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
 
@@ -19,16 +20,9 @@ export type RecoveryMetric = {
   rationaleMeta?: Record<string, string | number | boolean>
 }
 
-export type ClusterCategory =
-  | 'secret_missing'
-  | 'http_error'
-  | 'network_timeout'
-  | 'ai_provider'
-  | 'parse_error'
-  | 'tool_input'
-  | 'unknown'
+export type ClusterCategory = FailureClusterWire['category']
 
-export type ClusterOwner = 'ops' | 'workflow_author' | 'platform'
+export type ClusterOwner = FailureClusterWire['suggestedOwner']
 
 export type ClusterWorkflow = { workflowId: string; workflowName: string; count: number }
 export type ClusterSampleRef = { source: 'dead_letter' | 'failed_run_node'; id: string; runId: string }

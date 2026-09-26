@@ -2,7 +2,7 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { arrayOf, isBoolean, isInteger, isShape, isString, shape } from "../../guards"
+import { arrayOf, isBoolean, isInteger, isShape, isString, literal, shape } from "../../guards"
 
 export function isFailureCluster(value: unknown): value is Api.FailureCluster {
   return isShape(value, {
@@ -11,7 +11,7 @@ export function isFailureCluster(value: unknown): value is Api.FailureCluster {
       workflowId: isString,
       workflowName: isString,
     })),
-    category: isString,
+    category: literal("secret_missing", "http_error", "network_timeout", "ai_provider", "parse_error", "tool_input", "unknown"),
     firstSeen: isString,
     frequency: isInteger,
     lastSeen: isString,
@@ -22,6 +22,6 @@ export function isFailureCluster(value: unknown): value is Api.FailureCluster {
       source: isString,
     })),
     signature: isString,
-    suggestedOwner: isString,
+    suggestedOwner: literal("ops", "workflow_author", "platform"),
   })
 }

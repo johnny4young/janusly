@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -473,7 +474,7 @@ func validateSemanticV2(semantic *RecoverySemanticFailure, ceiling int) []string
 		default:
 			push("failure.semantic.detectors.%d.kind: must be expression or schema", i)
 		}
-		if detector.Action != "observe" && detector.Action != "quarantine" {
+		if !slices.Contains(RecoveryDetectorActions, detector.Action) {
 			push("failure.semantic.detectors.%d.action: must be observe or quarantine", i)
 		}
 		if detector.Message == "" || len(detector.Message) > 500 {

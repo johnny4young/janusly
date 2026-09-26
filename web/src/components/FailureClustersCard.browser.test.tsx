@@ -76,6 +76,7 @@ describe('<FailureClustersCard /> recovery lifecycle (browser smoke)', () => {
       afterVersion: 2,
       windowDays: 1,
       hasEnoughData: false,
+      minRunsForDelta: 5,
       before: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
       after: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 2, totalCostUsd: 0 } },
       delta: null,

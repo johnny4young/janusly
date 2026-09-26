@@ -12,6 +12,12 @@ var RecoveryAutonomyCapabilities = []string{
 	"observe", "recommend", "validate", "apply_with_approval", "autonomous_apply",
 }
 
+// RecoveryAutonomySources names where a resolved profile's level came from.
+var RecoveryAutonomySources = []string{"failure_override", "workflow_default", "strictest_failure", "unavailable"}
+
+// RecoveryAutonomyUnavailableReasons explains an unavailable profile.
+var RecoveryAutonomyUnavailableReasons = []string{"contract_missing", "failure_policy_missing"}
+
 // RecoveryAutonomyCapabilityLevel maps each capability to its floor.
 var RecoveryAutonomyCapabilityLevel = map[string]int{
 	"observe": 0, "recommend": 1, "validate": 2,

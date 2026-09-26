@@ -2,7 +2,7 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { arrayOf, isBoolean, isInteger, isShape, isString, shape } from "../../guards"
+import { arrayOf, isBoolean, isInteger, isShape, isString, literal, shape } from "../../guards"
 
 export function isQualificationSummary(value: unknown): value is Api.QualificationSummary {
   return isShape(value, {
@@ -16,10 +16,10 @@ export function isQualificationSummary(value: unknown): value is Api.Qualificati
     failedCandidateAssertions: isInteger,
     failures: arrayOf(shape({
       actual: isString,
-      dataset: isString,
+      dataset: literal("baseline", "candidate"),
       expected: isString,
       fixtureId: isString,
-      reason: isString,
+      reason: literal("baseline_dataset_invalid", "candidate_contract_missing", "detector_uncovered", "expected_mismatch"),
       sourceNodeId: isString,
     }, {
       violations: arrayOf(shape({

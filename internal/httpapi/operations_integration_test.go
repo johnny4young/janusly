@@ -57,9 +57,9 @@ func TestOperatorBriefIsBoundedPermissionAwareAndTenantScoped(t *testing.T) {
 		}
 	}
 	seedCase(h.org, "approval-old-"+suffix, "awaiting_approval", "quarantine", now.Add(-3*time.Hour))
-	seedCase(h.org, "approval-new-"+suffix, "awaiting_approval", "continue", now.Add(-2*time.Hour))
+	seedCase(h.org, "approval-new-"+suffix, "awaiting_approval", "observe", now.Add(-2*time.Hour))
 	seedCase(h.org, "semantic-critical-"+suffix, "contained", "quarantine", now.Add(-time.Hour))
-	seedCase(h.org, "semantic-fourth-"+suffix, "diagnosed", "continue", now)
+	seedCase(h.org, "semantic-fourth-"+suffix, "diagnosed", "observe", now)
 	seedCase(otherOrg, "tenant-secret-"+suffix, "awaiting_approval", "quarantine", now.Add(-24*time.Hour))
 	if _, err := pool.Exec(ctx, `INSERT INTO recovery_cases
 		(id,org_id,run_id,workflow_version_id,source,detector_id,source_node_id,
@@ -216,7 +216,7 @@ func TestOperatorBriefRanksActionableRecoveryBeforeBoundingHistory(t *testing.T)
 		(id,org_id,run_id,workflow_version_id,source,detector_id,source_node_id,
 		 detector_kind,action,message,state,revision,created_at,updated_at,resolved_at)
 		SELECT 'terminal-'||$2||'-'||n, $1, 'terminal-run-'||$2||'-'||n,
-			 'brief-version','semantic_violation','detector-'||n,'source','expression','continue',
+			 'brief-version','semantic_violation','detector-'||n,'source','expression','observe',
 		 'closed history','verified_recovered',4,now()-n*interval '1 second',
 		 now()-n*interval '1 second',now()-n*interval '1 second'
 		FROM generate_series(1,250) AS n`, h.org, suffix); err != nil {

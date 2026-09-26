@@ -18,7 +18,7 @@
 
 import { t as runtimeT } from '../../i18n/runtime'
 import type { RunNode, RunSummary } from '../../types'
-import type { ApiResponse } from '../../lib/api-types.generated'
+import type { ApiResponse, FailureCluster as FailureClusterWire } from '../../lib/api-types.generated'
 import { isOpenRunStatus } from '@/lib/status'
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -93,16 +93,9 @@ export type OperatorWins = {
   windowDays: number
 }
 
-export type ClusterCategory =
-  | 'secret_missing'
-  | 'http_error'
-  | 'network_timeout'
-  | 'ai_provider'
-  | 'parse_error'
-  | 'tool_input'
-  | 'unknown'
+export type ClusterCategory = FailureClusterWire['category']
 
-export type ClusterOwner = 'ops' | 'workflow_author' | 'platform'
+export type ClusterOwner = FailureClusterWire['suggestedOwner']
 
 export type FailureCluster = {
   signature: string

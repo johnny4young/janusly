@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,11 +23,6 @@ import (
 )
 
 const recoveryArtifactMaxBytes = 64_000
-
-var recoveryArtifactKinds = map[string]bool{
-	"diagnosis": true, "candidate": true, "validation": true,
-	"publication": true, "verification": true,
-}
 
 var (
 	ErrRecoveryArtifactTooLarge      = errors.New("recovery case artifact exceeds limit")
@@ -130,7 +126,7 @@ func (e *Engine) AdvanceRecoveryCase(ctx context.Context, input AdvanceRecoveryC
 	}
 	prepared := make([]preparedArtifact, 0, len(input.Artifacts))
 	for _, artifact := range input.Artifacts {
-		if !recoveryArtifactKinds[artifact.Kind] {
+		if !slices.Contains(domain.RecoveryCaseArtifactKinds, artifact.Kind) {
 			return AdvanceRecoveryCaseResult{}, ErrRecoverySemanticInputInvalid
 		}
 		raw, hash, err := boundedRecoveryArtifact(artifact.Payload)
