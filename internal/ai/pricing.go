@@ -29,7 +29,7 @@ type ModelPrice struct {
 // ModelPricingSnapshotDate is the date the static Anthropic price catalog was
 // checked against the vendor's published pricing. Runtime env overrides remain
 // available for changes between source updates.
-const ModelPricingSnapshotDate = "2026-09-24"
+const ModelPricingSnapshotDate = "2026-09-26"
 
 // modelPrices is the completion runtime's single pricing source. Keys are
 // lowercase; cmd/pricing generates the browser copy from this map.
@@ -48,6 +48,7 @@ var modelPrices = map[string]ModelPrice{
 	"claude-opus-4-7":          anthropicModelPrice("claude-opus-4-7", 5.0, 25.0),
 	"claude-opus-4-8":          anthropicModelPrice("claude-opus-4-8", 5.0, 25.0),
 	"claude-opus-5":            anthropicModelPrice("claude-opus-5", 5.0, 25.0),
+	"claude-opus-5-5":          anthropicModelPrice("claude-opus-5-5", 4.0, 20.0),
 	"claude-fable-5":           anthropicModelPrice("claude-fable-5", 10.0, 50.0),
 	"claude-fable-5-1":         anthropicModelPrice("claude-fable-5-1", 10.0, 50.0),
 }
@@ -64,9 +65,16 @@ func anthropicModelPrice(model string, input, output float64) ModelPrice {
 
 func cacheReadMultiplier(model string) float64 {
 	normalized := strings.ToLower(strings.TrimSpace(model))
-	for _, family := range []string{"claude-fable-5-1", "claude-mythos-5-1"} {
-		if normalized == family || strings.HasPrefix(normalized, family+"-") {
-			return 0.025
+	for _, family := range []struct {
+		prefix     string
+		multiplier float64
+	}{
+		{"claude-fable-5-1", 0.025}, {"claude-mythos-5-1", 0.025},
+		// Opus 5.5 reads cache at $0.20 on a $4 base, half the standard 0.1x.
+		{"claude-opus-5-5", 0.05},
+	} {
+		if normalized == family.prefix || strings.HasPrefix(normalized, family.prefix+"-") {
+			return family.multiplier
 		}
 	}
 	return 0.1

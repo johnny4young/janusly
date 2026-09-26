@@ -8,12 +8,13 @@ import (
 
 func TestStaticModelPricesPinsSupportedAnthropicCatalog(t *testing.T) {
 	prices := StaticModelPrices()
-	if len(prices) != 14 {
-		t.Fatalf("static model price count = %d, want 14", len(prices))
+	if len(prices) != 15 {
+		t.Fatalf("static model price count = %d, want 15", len(prices))
 	}
 	tests := map[string]ModelPrice{
 		"claude-sonnet-5":            {InputUsdPer1M: 2, OutputUsdPer1M: 10, CacheWrite5mUsdPer1M: 2.5, CacheReadUsdPer1M: 0.2},
 		"claude-opus-5":              {InputUsdPer1M: 5, OutputUsdPer1M: 25, CacheWrite5mUsdPer1M: 6.25, CacheReadUsdPer1M: 0.5},
+		"claude-opus-5-5":            {InputUsdPer1M: 4, OutputUsdPer1M: 20, CacheWrite5mUsdPer1M: 5, CacheReadUsdPer1M: 0.2},
 		"claude-opus-4-5-20251101":   {InputUsdPer1M: 5, OutputUsdPer1M: 25, CacheWrite5mUsdPer1M: 6.25, CacheReadUsdPer1M: 0.5},
 		"claude-sonnet-4-5-20250929": {InputUsdPer1M: 3, OutputUsdPer1M: 15, CacheWrite5mUsdPer1M: 3.75, CacheReadUsdPer1M: 0.3},
 		"claude-fable-5-1":           {InputUsdPer1M: 10, OutputUsdPer1M: 50, CacheWrite5mUsdPer1M: 12.5, CacheReadUsdPer1M: 0.25},
