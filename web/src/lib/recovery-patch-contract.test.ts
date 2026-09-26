@@ -91,11 +91,11 @@ describe('parseRecoveryPatchSuggestion', () => {
   })
 
   it('leaves evidence counts, lengths and weights to the server and truncates for display', () => {
-    const evidence = Array.from({ length: 30 }, (_, index) => ({
+    const evidence = Array.from({ length: 25 }, (_, index) => ({
       kind: 'recent_error', sourceRef: `run-${index}`, snippet: 's'.repeat(900), label: 'l'.repeat(300), weight: 2,
     }))
     const rows = parseRecoveryPatchSuggestion({ ...currentResponse, evidence }, options)?.evidence
-    expect(rows).toHaveLength(30)
+    expect(rows).toHaveLength(24)
     expect(rows?.[0]?.snippet.length).toBeLessThan(900)
     expect(rows?.[0]?.weight).toBe(1)
   })

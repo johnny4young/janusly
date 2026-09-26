@@ -58,10 +58,11 @@ export function scrubEvidenceRows(rows: readonly EvidenceRow[]): EvidenceRow[] {
   return out
 }
 
-/** Re-scrub guarded evidence rows at read time; counts, lengths and weight ranges are the server's. */
+/** Re-scrub guarded evidence rows at read time; longer lists and rows are truncated for display, never rejected. */
 export function parseEvidenceRows(rows: readonly SuggestionEvidence[]): EvidenceRow[] | null {
   const out: EvidenceRow[] = []
   for (const row of rows) {
+    if (out.length >= MAX_EVIDENCE_ROWS) break
     // EvidencePanel labels each chip with the kind it translates.
     if (!EVIDENCE_KINDS.includes(row.kind as EvidenceKind)) return null
     const scrubbed = scrubEvidenceRow({ ...row, kind: row.kind as EvidenceKind })
