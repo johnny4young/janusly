@@ -1,6 +1,6 @@
 import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
@@ -29,6 +29,11 @@ vi.mock('../api', async () => {
 })
 
 describe('<FailureClustersCard />', () => {
+  // The recovery tests open the lazy dialog; a cold transform can outlast the test timeout.
+  beforeAll(async () => {
+    await import('./RecoveryDialog')
+  }, 30_000)
+
   beforeEach(() => {
     __resetBumpCoalesceForTests()
     useWorkflowStore.setState({ toasts: [] })
