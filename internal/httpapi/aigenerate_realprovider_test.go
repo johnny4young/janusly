@@ -25,12 +25,12 @@ import (
 )
 
 const (
-	realProviderMaxCalls             = 80
+	realProviderMaxCalls             = 160
 	realProviderMaxCallsPerCase      = 4
-	realProviderLifetimeCallsPerCase = 6
+	realProviderLifetimeCallsPerCase = 10
 	realProviderCaseCount            = 20
 	realProviderUsefulMinimum        = 18
-	realProviderDefaultMaxUSD        = 3.0
+	realProviderDefaultMaxUSD        = 6.0
 	realProviderOutputUnits          = 2400
 )
 
@@ -314,19 +314,25 @@ func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	if reservedUSD, lifetimeCalls := global.reservations(); int64(math.Round(reservedUSD*1_000_000)) != 68_552 || lifetimeCalls != 4 {
 		t.Fatalf("durable cache-tier upper bound missing: reserved=%f lifetimeCalls=%d", reservedUSD, lifetimeCalls)
 	}
-	restartedDelegate := &qualificationFakeClient{}
-	restarted := &boundedProductClient{
-		delegate: restartedDelegate, maxCalls: realProviderMaxCalls, maxCallsPerCase: 4, maxUSD: 1,
-		ledger: realProviderLedger{path: ledgerPath}, defaultMaxOutput: realProviderOutputUnits,
+	restart := func() (*qualificationFakeClient, *boundedCaseClient) {
+		restartedDelegate := &qualificationFakeClient{}
+		restarted := &boundedProductClient{
+			delegate: restartedDelegate, maxCalls: realProviderMaxCalls, maxCallsPerCase: 4, maxUSD: 1,
+			ledger: realProviderLedger{path: ledgerPath}, defaultMaxOutput: realProviderOutputUnits,
+		}
+		return restartedDelegate, &boundedCaseClient{global: restarted, caseID: "case"}
 	}
-	replayed := &boundedCaseClient{global: restarted, caseID: "case"}
-	for attempt := range 2 {
-		if _, aiErr := replayed.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr != nil {
-			t.Fatalf("bounded restart attempt %d failed: %v", attempt+1, aiErr)
+	for remaining := realProviderLifetimeCallsPerCase - 4; remaining > 0; remaining -= min(remaining, 4) {
+		_, replayed := restart()
+		for attempt := range min(remaining, 4) {
+			if _, aiErr := replayed.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr != nil {
+				t.Fatalf("bounded restart attempt %d failed: %v", attempt+1, aiErr)
+			}
 		}
 	}
-	if _, aiErr := replayed.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr == nil || restartedDelegate.calls != 2 {
-		t.Fatalf("seventh lifetime case call must remain refused: error=%v delegateCalls=%d", aiErr, restartedDelegate.calls)
+	exhaustedDelegate, exhausted := restart()
+	if _, aiErr := exhausted.GenerateText(t.Context(), ai.GenerateTextInput{}); aiErr == nil || exhaustedDelegate.calls != 0 {
+		t.Fatalf("case call beyond the lifetime cap must remain refused: error=%v delegateCalls=%d", aiErr, exhaustedDelegate.calls)
 	}
 
 	usdBlockedDelegate := &qualificationFakeClient{}
@@ -419,7 +425,7 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 	if raw := os.Getenv("JANUSLY_REAL_PROVIDER_MAX_USD"); raw != "" {
 		parsed, err := strconv.ParseFloat(raw, 64)
 		if err != nil || parsed <= 0 || parsed > realProviderDefaultMaxUSD {
-			t.Fatalf("JANUSLY_REAL_PROVIDER_MAX_USD must be in (0,3], got %q", raw)
+			t.Fatalf("JANUSLY_REAL_PROVIDER_MAX_USD must be in (0,6], got %q", raw)
 		}
 		maxUSD = parsed
 	}

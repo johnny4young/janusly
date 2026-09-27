@@ -36,12 +36,15 @@ type realProviderLedgerTotals struct {
 	ReservedMicros int64
 }
 
-const realProviderLedgerMaxBytes = 1 << 20
+const (
+	realProviderLedgerMaxBytes      = 1 << 20
+	realProviderLedgerCeilingMicros = int64(realProviderDefaultMaxUSD * 1_000_000)
+)
 
 var errRealProviderLedgerLimit = errors.New("qualification lifetime reservation limit reached")
 
 func microUSD(value float64) (int64, error) {
-	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > 3 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > realProviderDefaultMaxUSD {
 		return 0, errors.New("invalid qualification USD amount")
 	}
 	return int64(math.Ceil(value * 1_000_000)), nil
@@ -167,11 +170,11 @@ func parseRealProviderLedger(data []byte, caseID string) (realProviderLedgerTota
 	for line := range bytes.SplitSeq(data[:len(data)-1], []byte{'\n'}) {
 		var entry realProviderReservation
 		if err := json.Unmarshal(line, &entry); err != nil || entry.Version != 1 || entry.CaseID == "" ||
-			entry.ReservedMicros <= 0 || entry.ReservedMicros > 3_000_000 || entry.ReservedAt == "" {
+			entry.ReservedMicros <= 0 || entry.ReservedMicros > realProviderLedgerCeilingMicros || entry.ReservedAt == "" {
 			return realProviderLedgerTotals{}, 0, errors.New("qualification ledger has an invalid reservation")
 		}
-		if totals.ReservedMicros > 3_000_000-entry.ReservedMicros {
-			return realProviderLedgerTotals{}, 0, errors.New("qualification ledger exceeds the absolute USD 3 ceiling")
+		if totals.ReservedMicros > realProviderLedgerCeilingMicros-entry.ReservedMicros {
+			return realProviderLedgerTotals{}, 0, errors.New("qualification ledger exceeds the absolute USD ceiling")
 		}
 		totals.Calls++
 		totals.ReservedMicros += entry.ReservedMicros

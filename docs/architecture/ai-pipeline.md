@@ -213,8 +213,8 @@ The opt-in `make qualify-real-provider` profile is deliberately separate from
 ordinary tests. With explicit consent and `ANTHROPIC_API_KEY`, it replays the
 same 20 cases through the production authoring and diagnosis chokepoints. Hard
 breakers allow at most four calls per case in one run (matching the product's
-generation and repair ladder), six calls per case across bounded reruns, 80
-calls across the ledger's lifetime, USD 3 cumulatively, and zero SDK retries.
+generation and repair ladder), ten calls per case across bounded reruns, 160
+calls across the ledger's lifetime, USD 6 cumulatively, and zero SDK retries.
 The paid corpus caps each provider request at 2,400 output tokens and reserves
 against that actual cap before egress. The gate requires 20/20 valid bounded
 envelopes, 20/20 without invented graph capabilities or authority escalation,
@@ -242,7 +242,7 @@ worktree, including paths reached through a symlink, before provider egress.
 If an earlier profile already created
 reservations under its former checkout-local default, preserve and migrate
 that ledger while no profile is running; never start with an empty ledger as
-another USD 3 allowance. Before egress,
+another USD 6 allowance. Before egress,
 an interprocess file lock serializes a conservative USD reservation and
 lifetime global/per-case call counts. Input is priced as one token per UTF-8
 byte plus a framing allowance at the highest input/cache rate; output is
@@ -252,4 +252,4 @@ ledger fails closed before provider egress. The sanitized summary reports
 measured successful-response cost separately from lifetime reserved USD;
 neither replaces the provider's billing statement. Keep the ledger when
 retrying, changing worktrees, or reviewing a failed run. Do not reset it to
-obtain another USD 3 allowance.
+obtain another USD 6 allowance.
