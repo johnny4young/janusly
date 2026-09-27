@@ -33,24 +33,6 @@ func (q *Queries) ActivateDraftPlaybook(ctx context.Context, arg ActivateDraftPl
 	return result.RowsAffected(), nil
 }
 
-const cancelPendingReplayCampaignItems = `-- name: CancelPendingReplayCampaignItems :execrows
-UPDATE replay_campaign_items SET status = 'cancelled', completed_at = now()
-WHERE org_id = $1 AND campaign_id = $2 AND status = 'pending'
-`
-
-type CancelPendingReplayCampaignItemsParams struct {
-	OrgID      string
-	CampaignID string
-}
-
-func (q *Queries) CancelPendingReplayCampaignItems(ctx context.Context, arg CancelPendingReplayCampaignItemsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, cancelPendingReplayCampaignItems, arg.OrgID, arg.CampaignID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const completeReplayCampaignIfExhausted = `-- name: CompleteReplayCampaignIfExhausted :one
 UPDATE replay_campaigns
 SET status = 'completed', completed_at = now(), updated_at = now()

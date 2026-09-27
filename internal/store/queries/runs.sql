@@ -415,17 +415,21 @@ WHERE r.org_id = $1
 ORDER BY COALESCE(rn.finished_at, r.created_at) DESC
 LIMIT 500;
 
--- Cancellation: pending items flip to cancelled and the campaign records
-
--- the truthful counter in one statement pair (same tx).
-
+-- Cancellation counts the items it actually cancelled: an item a pump claims
+-- mid-cancel is skipped here and counted when it settles.
 -- name: CancelRunningReplayCampaign :one
+WITH cancelled AS (
+  UPDATE replay_campaign_items i
+  SET status = 'cancelled', completed_at = now()
+  WHERE i.org_id = sqlc.arg(org_id) AND i.campaign_id = sqlc.arg(id) AND i.status = 'pending'
+    AND EXISTS (
+      SELECT 1 FROM replay_campaigns c
+      WHERE c.org_id = sqlc.arg(org_id) AND c.id = sqlc.arg(id) AND c.status = 'running')
+  RETURNING i.id)
 UPDATE replay_campaigns
-SET status = 'cancelled', cancelled_by = $3, cancelled_at = now(), updated_at = now(),
-    cancelled_count = cancelled_count + (
-      SELECT count(*) FROM replay_campaign_items i
-      WHERE i.campaign_id = replay_campaigns.id AND i.status = 'pending')
-WHERE replay_campaigns.org_id = $1 AND replay_campaigns.id = $2
+SET status = 'cancelled', cancelled_by = sqlc.arg(cancelled_by), cancelled_at = now(), updated_at = now(),
+    cancelled_count = replay_campaigns.cancelled_count + (SELECT count(*) FROM cancelled)
+WHERE replay_campaigns.org_id = sqlc.arg(org_id) AND replay_campaigns.id = sqlc.arg(id)
   AND replay_campaigns.status = 'running'
 RETURNING *;
 
