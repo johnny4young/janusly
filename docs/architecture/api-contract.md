@@ -55,6 +55,27 @@ unit fixtures from the typed views and pure cores, or live PostgreSQL-backed
 responses in the matching integration test, each also rejecting an
 undeclared key.
 
+A vocabulary the browser translates is a manifest `enum` built from one
+exported Go list (`strEnum` in `internal/contract`): recovery case states,
+actor and artifact kinds, detector actions, autonomy sources, unavailable
+reasons and capabilities (`internal/domain`), rollout statuses
+(`domain.WorkflowRolloutStatuses`), qualification failure datasets and reasons
+(`internal/recovery`), failure-cluster categories and owners
+(`internal/signature`), and AI evidence kinds (`aievidence.KindList`).
+
+Two fences keep a server-emitted value inside its enum. Columns that persist
+one (case state and action, transition states and actors, artifact kinds and
+actors, rollout status) carry a database `CHECK` that admits exactly the Go
+list. `internal/contract/enum_sources_test.go` type-checks `internal/...` and
+follows every constant that reaches a named destination field or JSON key,
+through package constants, local variables, parameters and function results,
+and scans every `internal/store/queries/*.sql` comparison, `IN` list and `SET`
+on those columns; it fails on a value the list does not declare and pins each
+`CHECK` to its list. Values computed from input (a copied field, a decoded
+body) are the validators' job, not the scan's. The generated guard then
+rejects an unknown value, so readers keep only the translation maps, which
+typecheck against the generated union.
+
 `GET /v1/workflows/versions` is a keyset page of one workflow's history,
 newest first: `limit` (default 50, at most 200), `beforeVersion` as the
 cursor below the oldest row shown, and `version` to pin one exact row. Rows
@@ -148,20 +169,23 @@ The browser validates **shape** from the manifest and never re-encodes server
   it, while transport and HTTP errors pass through unchanged.
 - The hand-written readers (`list-contract`, `run-status-contract`,
   `dead-letter-contract`, `recovery-patch-contract`, `recovery-case-contract`,
-  `authoring-contract`, `health-delta`, `recovery-home-sections` and the rollout
-  and qualification parsers) keep only **UI invariants**: cross-field facts a
-  component depends on, each commented with the component that needs it. Examples:
+  `authoring-contract`, `health-delta`, `recovery-home-sections`,
+  `ai-evidence-runtime` and the rollout and qualification parsers) keep only
+  **UI invariants**: cross-field facts a component depends on, each commented
+  with the component that needs it. Examples:
   echoed ids (`run.id === runId`, a rollout of this workflow), unique row ids,
   `eventsCursor` present exactly when `eventsHasMore`, a delta present exactly
   when `hasEnoughData`, fallback and playbook suggestions pinned to their fixed
   confidence, a validation bound to its candidate by SHA-256, a vocabulary the UI
-  translates, a date `Intl` must format. Extension JSON that the manifest keeps
+  translates that the manifest leaves open (patch approach labels), a date
+  `Intl` must format. Extension JSON that the manifest keeps
   opaque is narrowed only as far as the component reads it.
 - Policy never appears in the browser: maximum lengths, page sizes, item counts
   and numeric ranges copied from Go become a "malformed response" outage the day
   the server changes them. Form bounds for operator input (the rollout draft) are
   UX, not response validation, and carry a `// wire-policy:` marker naming their
-  Go source.
+  Go source. So do display bounds the browser truncates to (AI evidence chips)
+  without ever rejecting a longer response.
 
 ### Adding a route end to end
 

@@ -58,6 +58,8 @@ describe('recovery case read contract', () => {
     ['an additive envelope key', { ...detail(), futureField: true }],
     ['a missing autonomy profile', { ...detail(), autonomy: undefined }],
     ['a fractional revision', detail({}, { revision: 1.5 })],
+    ['a state outside the manifest vocabulary', detail({}, { state: 'escalated' })],
+    ['an actor outside the manifest vocabulary', detail({ transitions: [{ ...detail().transitions[0]!, actorKind: 'robot' }] })],
   ])('delegates shape to the generated guard: %s', (_name, value) => {
     expect(parseRecoveryCaseDetail(value)).toBeNull()
   })
@@ -66,8 +68,6 @@ describe('recovery case read contract', () => {
     ['a transition for another org', detail({ transitions: [{ ...detail().transitions[0]!, orgId: 'org-2' }] })],
     ['a transition for another case', detail({ transitions: [{ ...detail().transitions[0]!, caseId: 'case-2' }] })],
     ['an artifact for another case', detail({ artifacts: [{ ...candidate, caseId: 'case-2' }, validation] })],
-    ['a state the panel cannot label', detail({}, { state: 'escalated' })],
-    ['an actor the panel cannot label', detail({ transitions: [{ ...detail().transitions[0]!, actorKind: 'robot' }] })],
     ['a case date Intl cannot format', detail({}, { createdAt: 'not-a-date' })],
     ['a non-digest artifact hash', detail({ artifacts: [{ ...candidate, sha256: 'B'.repeat(64) }, validation] })],
     ['duplicate candidate ids', detail({ artifacts: [candidate, { ...candidate, sha256: hash('d') }, validation], activeApproval: null })],

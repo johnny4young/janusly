@@ -45,6 +45,7 @@ const baseSignals = (overrides: Partial<{ p95LatencyMs: number | null; totalRuns
 
 const baseDelta = (overrides: Partial<{
   hasEnoughData: boolean
+  minRunsForDelta: number
   delta: { score: number; p95LatencyMs: number | null; costPerRunUsd: number | null } | null
   before: { score: number; status: string; signals: ReturnType<typeof baseSignals> }
   after: { score: number; status: string; signals: ReturnType<typeof baseSignals> }
@@ -56,6 +57,7 @@ const baseDelta = (overrides: Partial<{
   afterVersion: 2,
   windowDays: 1,
   hasEnoughData: false,
+  minRunsForDelta: 5,
   before: { score: 80, status: 'healthy', signals: baseSignals() },
   after: { score: 80, status: 'healthy', signals: baseSignals({ totalRuns: 1 }) },
   delta: null,
@@ -110,6 +112,19 @@ describe('<RecoveryDeltaCard />', () => {
     expect(screen.getByText(/3 of 5 completed runs/i)).toBeInTheDocument()
     // Health/p95/cost pills do NOT render in gathering state.
     expect(screen.queryByText(/Health improved/i)).not.toBeInTheDocument()
+  })
+
+  it('measures gathering progress against the floor the server serves', async () => {
+    vi.mocked(api).mockResolvedValueOnce(baseDelta({
+      minRunsForDelta: 8,
+      after: { score: 80, status: 'healthy', signals: baseSignals({ totalRuns: 3 }) },
+      recentRunsAgainstAfter: { totalRuns: 3, succeeded: 3, failed: 0, running: 0 },
+    }))
+
+    render(<RecoveryDeltaCard {...baseProps} />)
+
+    expect(await screen.findByText(/3 of 8 completed runs/i)).toBeInTheDocument()
+    expect((screen.getByRole('progressbar') as HTMLProgressElement).max).toBe(8)
   })
 
   it('renders all pills with plain-language sentences in the ready state', async () => {

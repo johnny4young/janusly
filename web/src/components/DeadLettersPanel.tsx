@@ -206,6 +206,14 @@ export function DeadLettersPanel({
     })
   }, [replayingIds])
 
+  // A settled triage action would otherwise move focus to a row after the
+  // operator started ticking rows, stealing the next checkbox click.
+  const enterSelection = () => {
+    setPendingTriageFocus(null)
+    setPendingKeyboardFocusId(null)
+    setSelectionMode(true)
+  }
+
   const exitSelection = () => {
     setSelectionMode(false)
     setSelectedIds(new Set())
@@ -490,7 +498,7 @@ export function DeadLettersPanel({
   }
 
   useEffect(() => {
-    if (closeRequest || !pendingTriageFocus?.settled || recoveryFilterLoading) return
+    if (selectionMode || closeRequest || !pendingTriageFocus?.settled || recoveryFilterLoading) return
     if (triageQueueSignature(filtered) === pendingTriageFocus.queueSignature) return
 
     const actionIndex = filtered.findIndex((item) => item.id === pendingTriageFocus.actionId)
@@ -510,7 +518,7 @@ export function DeadLettersPanel({
       queueSectionRef.current?.focus({ preventScroll: true })
     }
     setPendingTriageFocus(null)
-  }, [closeRequest, filtered, focusQueueRow, pendingTriageFocus, recoveryFilterLoading])
+  }, [closeRequest, filtered, focusQueueRow, pendingTriageFocus, recoveryFilterLoading, selectionMode])
 
   useEffect(() => {
     if (!pendingTriageFocus?.settled) return
@@ -683,7 +691,7 @@ export function DeadLettersPanel({
         permissions={{ canReplay, canResolve, canStartRuns, canUseRecovery }}
         actions={{
           handleKeyDown: handleQueueKeyDown,
-          toggleSelectionMode: () => (selectionMode ? exitSelection() : setSelectionMode(true)),
+          toggleSelectionMode: () => (selectionMode ? exitSelection() : enterSelection()),
           refresh: handleRefresh,
           toggleSelectAll,
           toggleSelect,

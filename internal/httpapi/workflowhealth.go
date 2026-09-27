@@ -58,6 +58,7 @@ type workflowHealthDelta struct {
 	AfterVersion           int                    `json:"afterVersion"`
 	WindowDays             int                    `json:"windowDays"`
 	HasEnoughData          bool                   `json:"hasEnoughData"`
+	MinRunsForDelta        int                    `json:"minRunsForDelta"`
 	Before                 health.Score           `json:"before"`
 	After                  health.Score           `json:"after"`
 	Delta                  *recoveryDelta         `json:"delta"`
@@ -362,8 +363,9 @@ func (s *V1Server) workflowHealthDeltaCore(r *http.Request, rc v1Request) opResu
 
 	return opOK(workflowHealthDelta{
 		WorkflowID: workflowID, AfterVersion: afterVersion, WindowDays: windowDays,
-		HasEnoughData: afterSignals.TotalRuns >= health.MinRunsForDelta,
-		Before:        before, After: after,
+		HasEnoughData:   afterSignals.TotalRuns >= health.MinRunsForDelta,
+		MinRunsForDelta: health.MinRunsForDelta,
+		Before:          before, After: after,
 		Delta:                  buildRecoveryDelta(before, after, beforeSignals, afterSignals),
 		RecentRunsAgainstAfter: recent, SameFailureSinceApply: sameFailure,
 		PriorVersion: priorVersion,

@@ -1,6 +1,10 @@
 package contract
 
-import "maps"
+import (
+	"maps"
+
+	"github.com/johnny4young/janusly/internal/aievidence"
+)
 
 var suggestionSafety = closedObj(map[string]any{
 	"writeSide": boolT(), "approvalRequired": boolT(), "approvalPresent": boolT(),
@@ -15,7 +19,7 @@ var workflowSuggestion = closedObj(map[string]any{
 }, "workflow", "rationale", "approachLabel", "confidence", "calibratedConfidence", "safety", "consideredAlternatives")
 
 var suggestionEvidence = closedObj(map[string]any{
-	"kind": str(), "sourceRef": str(), "snippet": str(), "label": str(), "weight": num(),
+	"kind": strEnum(aievidence.KindList), "sourceRef": str(), "snippet": str(), "label": str(), "weight": num(),
 }, "kind", "sourceRef", "snippet")
 
 // No prior same-signature outcome is correlated yet; the key is always null.

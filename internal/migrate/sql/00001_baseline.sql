@@ -800,7 +800,10 @@ CREATE TABLE public.recovery_case_transitions (
     actor_id text,
     evidence_json jsonb NOT NULL,
     reason text,
-    occurred_at timestamp with time zone DEFAULT now() NOT NULL
+    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT recovery_case_transitions_actor_check CHECK ((actor_kind = ANY (ARRAY['system'::text, 'user'::text, 'agent'::text]))),
+    CONSTRAINT recovery_case_transitions_from_state_check CHECK ((from_state = ANY (ARRAY['detected'::text, 'contained'::text, 'diagnosed'::text, 'candidates_ready'::text, 'validating'::text, 'awaiting_approval'::text, 'publishing'::text, 'monitoring'::text, 'verified_recovered'::text, 'recurred'::text, 'accepted_loss'::text, 'abandoned'::text]))),
+    CONSTRAINT recovery_case_transitions_to_state_check CHECK ((to_state = ANY (ARRAY['detected'::text, 'contained'::text, 'diagnosed'::text, 'candidates_ready'::text, 'validating'::text, 'awaiting_approval'::text, 'publishing'::text, 'monitoring'::text, 'verified_recovered'::text, 'recurred'::text, 'accepted_loss'::text, 'abandoned'::text])))
 );
 
 
@@ -826,7 +829,9 @@ CREATE TABLE public.recovery_cases (
     created_by text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    resolved_at timestamp with time zone
+    resolved_at timestamp with time zone,
+    CONSTRAINT recovery_cases_action_check CHECK ((action = ANY (ARRAY['observe'::text, 'quarantine'::text]))),
+    CONSTRAINT recovery_cases_state_check CHECK ((state = ANY (ARRAY['detected'::text, 'contained'::text, 'diagnosed'::text, 'candidates_ready'::text, 'validating'::text, 'awaiting_approval'::text, 'publishing'::text, 'monitoring'::text, 'verified_recovered'::text, 'recurred'::text, 'accepted_loss'::text, 'abandoned'::text])))
 );
 
 
@@ -1573,7 +1578,8 @@ CREATE TABLE public.workflow_rollouts (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     ended_at timestamp with time zone,
-    last_outcome_at timestamp with time zone
+    last_outcome_at timestamp with time zone,
+    CONSTRAINT workflow_rollouts_status_check CHECK ((status = ANY (ARRAY['active'::text, 'promoted'::text, 'rolled_back'::text, 'cancelled'::text])))
 );
 
 
