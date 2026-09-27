@@ -28,10 +28,6 @@ WHERE org_id = $1
 ORDER BY created_at DESC
 LIMIT $2;
 
--- name: CancelPendingReplayCampaignItems :execrows
-UPDATE replay_campaign_items SET status = 'cancelled', completed_at = now()
-WHERE org_id = $1 AND campaign_id = $2 AND status = 'pending';
-
 -- Settling an item and counting it commit together, so completion never
 -- observes a settled item its counters miss; a lost claim counts nothing.
 -- name: SettleReplayCampaignItem :execrows

@@ -13,6 +13,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/johnny4young/janusly/internal/store"
 )
 
 // failRun starts a workflow whose http node fails against a blocked target,
@@ -535,5 +539,91 @@ func TestRequireRoleGateOnSave(t *testing.T) {
 	})
 	if ghost.status != 200 {
 		t.Fatalf("dev auto-grant must pass: %d %+v", ghost.status, ghost.body)
+	}
+}
+
+// An item a pump claims while a cancel is in flight is counted once: by its
+// settle, not also as cancelled.
+func TestReplayCampaignCancelSkipsAnItemClaimedMidCancel(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	ctx := context.Background()
+	campaignID := "camp-midcancel-" + h.org
+	if _, err := pool.Exec(ctx, `INSERT INTO replay_campaigns
+		(id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, created_by, next_dispatch_at, started_at)
+		VALUES ($1, $2, 'mid cancel', 'sig', '{}', 0, 'running', 2, 'api-tester', now(), now())`, campaignID, h.org); err != nil {
+		t.Fatalf("campaign: %v", err)
+	}
+	for position := range 2 {
+		if _, err := pool.Exec(ctx, `INSERT INTO replay_campaign_items
+			(id, org_id, campaign_id, dead_letter_id, position) VALUES ($1, $2, $3, $4, $5)`,
+			fmt.Sprintf("%s-item-%d", campaignID, position), h.org, campaignID, fmt.Sprintf("dl-%d", position), position); err != nil {
+			t.Fatalf("item: %v", err)
+		}
+	}
+
+	// The pump's claim holds item 0 uncommitted while the cancel starts.
+	claim, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin claim: %v", err)
+	}
+	defer func() { _ = claim.Rollback(ctx) }()
+	item, err := store.New(claim).ClaimNextReplayCampaignItem(ctx, store.ClaimNextReplayCampaignItemParams{
+		ClaimToken: pgtype.Text{String: "pump", Valid: true}, CampaignID: campaignID,
+	})
+	if err != nil || item.Position != 0 {
+		t.Fatalf("claim: %+v %v", item, err)
+	}
+	cancelled := make(chan int, 1)
+	go func() {
+		req, _ := http.NewRequest("POST", h.server.URL+"/recovery/campaigns/"+campaignID+"/cancel", nil)
+		req.Header.Set("content-type", "application/json")
+		req.Header.Set("x-org-id", h.org)
+		req.Header.Set("x-user-id", "api-tester")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			cancelled <- 0
+			return
+		}
+		_ = res.Body.Close()
+		cancelled <- res.StatusCode
+	}()
+	// Commit the claim only once the cancel is blocked on item 0's lock.
+	for {
+		var waiting bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE datname = current_database() AND pid <> pg_backend_pid()
+			  AND wait_event_type = 'Lock' AND query ILIKE '%replay_campaign_items%')`).Scan(&waiting); err != nil {
+			t.Fatalf("lock probe: %v", err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case status := <-cancelled:
+			t.Fatalf("cancel finished without waiting for the claimed item: %d", status)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if err := claim.Commit(ctx); err != nil {
+		t.Fatalf("commit claim: %v", err)
+	}
+	if status := <-cancelled; status != http.StatusOK {
+		t.Fatalf("cancel status %d", status)
+	}
+
+	q := store.New(pool)
+	if _, err := q.SettleReplayCampaignItem(ctx, store.SettleReplayCampaignItemParams{
+		Status: "replayed", ID: item.ID, ClaimToken: item.ClaimToken,
+	}); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	campaign, err := q.GetReplayCampaign(ctx, store.GetReplayCampaignParams{OrgID: h.org, ID: campaignID})
+	if err != nil {
+		t.Fatalf("read campaign: %v", err)
+	}
+	if campaign.CancelledCount != 1 || campaign.ReplayedCount != 1 || campaign.FailedCount != 0 {
+		t.Fatalf("counters: cancelled=%d replayed=%d failed=%d, want 1/1/0",
+			campaign.CancelledCount, campaign.ReplayedCount, campaign.FailedCount)
 	}
 }

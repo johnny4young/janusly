@@ -64,28 +64,32 @@ func (q *Queries) CancelRunNodes(ctx context.Context, arg CancelRunNodesParams) 
 }
 
 const cancelRunningReplayCampaign = `-- name: CancelRunningReplayCampaign :one
-
-
+WITH cancelled AS (
+  UPDATE replay_campaign_items i
+  SET status = 'cancelled', completed_at = now()
+  WHERE i.org_id = $2 AND i.campaign_id = $3 AND i.status = 'pending'
+    AND EXISTS (
+      SELECT 1 FROM replay_campaigns c
+      WHERE c.org_id = $2 AND c.id = $3 AND c.status = 'running')
+  RETURNING i.id)
 UPDATE replay_campaigns
-SET status = 'cancelled', cancelled_by = $3, cancelled_at = now(), updated_at = now(),
-    cancelled_count = cancelled_count + (
-      SELECT count(*) FROM replay_campaign_items i
-      WHERE i.campaign_id = replay_campaigns.id AND i.status = 'pending')
-WHERE replay_campaigns.org_id = $1 AND replay_campaigns.id = $2
+SET status = 'cancelled', cancelled_by = $1, cancelled_at = now(), updated_at = now(),
+    cancelled_count = replay_campaigns.cancelled_count + (SELECT count(*) FROM cancelled)
+WHERE replay_campaigns.org_id = $2 AND replay_campaigns.id = $3
   AND replay_campaigns.status = 'running'
 RETURNING id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at
 `
 
 type CancelRunningReplayCampaignParams struct {
+	CancelledBy pgtype.Text
 	OrgID       string
 	ID          string
-	CancelledBy pgtype.Text
 }
 
-// Cancellation: pending items flip to cancelled and the campaign records
-// the truthful counter in one statement pair (same tx).
+// Cancellation counts the items it actually cancelled: an item a pump claims
+// mid-cancel is skipped here and counted when it settles.
 func (q *Queries) CancelRunningReplayCampaign(ctx context.Context, arg CancelRunningReplayCampaignParams) (ReplayCampaign, error) {
-	row := q.db.QueryRow(ctx, cancelRunningReplayCampaign, arg.OrgID, arg.ID, arg.CancelledBy)
+	row := q.db.QueryRow(ctx, cancelRunningReplayCampaign, arg.CancelledBy, arg.OrgID, arg.ID)
 	var i ReplayCampaign
 	err := row.Scan(
 		&i.ID,
