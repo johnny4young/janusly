@@ -3,13 +3,21 @@ package contract
 import (
 	"maps"
 	"slices"
+
+	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/signature"
+)
+
+var (
+	recoveryCaseState = strEnum(domain.RecoveryCaseStates)
+	recoveryActorKind = strEnum(domain.RecoveryCaseActorKinds)
 )
 
 var recoveryCase = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "runId": str(), "workflowId": nullableString(),
 	"workflowVersionId": str(), "source": str(), "detectorId": str(),
-	"sourceNodeId": str(), "detectorKind": str(), "action": str(),
-	"message": str(), "detailsJson": recoveryEvidenceJSON, "state": str(),
+	"sourceNodeId": str(), "detectorKind": str(), "action": strEnum(domain.RecoveryDetectorActions),
+	"message": str(), "detailsJson": recoveryEvidenceJSON, "state": recoveryCaseState,
 	"revision": intT(), "createdBy": nullableString(),
 	"createdAt": str(), "updatedAt": str(), "resolvedAt": nullableString(),
 }, "id", "orgId", "runId", "workflowId", "workflowVersionId", "source", "detectorId",
@@ -17,27 +25,27 @@ var recoveryCase = closedObj(map[string]any{
 	"createdBy", "createdAt", "updatedAt", "resolvedAt")
 
 var recoveryArtifact = closedObj(map[string]any{
-	"id": str(), "caseId": str(), "kind": str(), "payload": recoveryEvidenceJSON,
-	"sha256": str(), "actorKind": str(), "actorId": nullableString(), "createdAt": str(),
+	"id": str(), "caseId": str(), "kind": strEnum(domain.RecoveryCaseArtifactKinds), "payload": recoveryEvidenceJSON,
+	"sha256": str(), "actorKind": recoveryActorKind, "actorId": nullableString(), "createdAt": str(),
 }, "id", "caseId", "kind", "payload", "sha256", "actorKind", "actorId", "createdAt")
 
 var recoveryTransition = closedObj(map[string]any{
-	"id": str(), "orgId": str(), "caseId": str(), "fromState": str(), "toState": str(),
-	"actorKind": str(), "actorId": nullableString(), "evidenceJson": recoveryEvidenceJSON,
+	"id": str(), "orgId": str(), "caseId": str(), "fromState": recoveryCaseState, "toState": recoveryCaseState,
+	"actorKind": recoveryActorKind, "actorId": nullableString(), "evidenceJson": recoveryEvidenceJSON,
 	"reason": nullableString(), "occurredAt": str(),
 }, "id", "orgId", "caseId", "fromState", "toState", "actorKind", "actorId", "evidenceJson", "reason", "occurredAt")
 
 var recoveryAutonomy = closedObj(map[string]any{
 	"level":             map[string]any{"type": []any{"integer", "null"}},
-	"source":            str(),
+	"source":            strEnum(domain.RecoveryAutonomySources),
 	"detectorIds":       arr(str()),
-	"unavailableReason": nullableString(),
+	"unavailableReason": nullableStrEnum(domain.RecoveryAutonomyUnavailableReasons),
 	"capabilities": closedObj(map[string]any{
 		"observe": boolT(), "recommend": boolT(), "validate": boolT(),
 		"applyWithApproval": boolT(), "autonomousApply": boolT(),
 	}, "observe", "recommend", "validate", "applyWithApproval", "autonomousApply"),
 	"factors": arr(closedObj(map[string]any{
-		"capability": str(), "requiredLevel": intT(), "enabled": boolT(),
+		"capability": strEnum(domain.RecoveryAutonomyCapabilities), "requiredLevel": intT(), "enabled": boolT(),
 	}, "capability", "requiredLevel", "enabled")),
 }, "level", "source", "detectorIds", "unavailableReason", "capabilities", "factors")
 
@@ -147,11 +155,11 @@ var recoveryMetrics = closedObj(map[string]any{
 	"windowDays", "costByProvider")
 
 var failureCluster = closedObj(map[string]any{
-	"signature": str(), "category": str(), "frequency": countT(),
+	"signature": str(), "category": strEnum(signature.Categories), "frequency": countT(),
 	"affectedWorkflows": arr(closedObj(map[string]any{
 		"workflowId": str(), "workflowName": str(), "count": countT(),
 	}, "workflowId", "workflowName", "count")),
-	"firstSeen": str(), "lastSeen": str(), "suggestedOwner": str(),
+	"firstSeen": str(), "lastSeen": str(), "suggestedOwner": strEnum(signature.Owners),
 	"samples": arr(closedObj(map[string]any{
 		"source": str(), "id": str(), "runId": str(),
 	}, "source", "id", "runId")),
@@ -260,7 +268,8 @@ var recoveryHeatmap = closedObj(map[string]any{
 var recoveryHomeCases = closedObj(map[string]any{
 	"cases": arr(closedObj(map[string]any{
 		"id": str(), "runId": str(), "workflowId": nullableString(), "source": str(),
-		"detectorId": str(), "detectorKind": str(), "action": str(), "state": str(),
+		"detectorId": str(), "detectorKind": str(),
+		"action": strEnum(domain.RecoveryDetectorActions), "state": recoveryCaseState,
 		"message": str(), "createdAt": str(),
 	}, "id", "runId", "workflowId", "source", "detectorId", "detectorKind", "action",
 		"state", "message", "createdAt")),

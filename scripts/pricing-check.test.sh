@@ -27,6 +27,9 @@ grep -E '^claude-opus-4-5-20251101 +5 / 25 +5 / 25 +ok$' "$tmp/out" >/dev/null
 grep -F 'catalog entries match the page' "$tmp/out" >/dev/null
 # Only the first pricing table counts: the later table lists Sonnet 5 at 4/20.
 grep -E '^claude-sonnet-5 +2 / 10 +2 / 10 +ok$' "$tmp/out" >/dev/null
+# "Claude Opus 5.5" is its own row, not the "Claude Opus 5" family.
+grep -E '^claude-opus-5-5 +4 / 20 +4 / 20 +ok$' "$tmp/out" >/dev/null
+grep -E '^claude-opus-5 +5 / 25 +5 / 25 +ok$' "$tmp/out" >/dev/null
 
 # Sonnet 5's first $10 cell is its output rate (input is $2).
 sed "/Claude Sonnet 5</ s/[\$]10</\$12</" "$fixture" >"$tmp/mismatch.html"

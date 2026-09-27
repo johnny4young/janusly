@@ -2,7 +2,7 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { isInteger, isShape, isString, nullable } from "../../guards"
+import { isInteger, isShape, isString, literal, nullable } from "../../guards"
 
 export function isWorkflowRollout(value: unknown): value is Api.WorkflowRollout {
   return isShape(value, {
@@ -19,7 +19,7 @@ export function isWorkflowRollout(value: unknown): value is Api.WorkflowRollout 
     minimumSampleSize: isInteger,
     minimumSuccessRatePercent: isInteger,
     rolledBackReason: nullable(isString),
-    status: isString,
+    status: literal("active", "promoted", "rolled_back", "cancelled"),
     trafficPercent: isInteger,
     updatedAt: isString,
     workflowId: isString,

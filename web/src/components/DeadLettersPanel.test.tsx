@@ -1206,6 +1206,33 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     expect(remaining).toHaveFocus()
   })
 
+  it('drops a pending triage focus jump once selection mode starts', async () => {
+    let rows = [mockDeadLetter('a'), mockDeadLetter('b')]
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return countsFromRows(rows)
+      if (path.startsWith('/dlq/queue')) return { items: rows, nextCursor: null, hasMore: false }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const onReplay = vi.fn(async () => true)
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={vi.fn()} />)
+    const first = await screen.findByTestId('dlq-row-a')
+    first.focus()
+    fireEvent.keyDown(first, { key: 'r' })
+    await waitFor(() => expect(onReplay).toHaveBeenCalledOnce())
+    await act(async () => {})
+
+    const toggle = screen.getByTestId('dlq-select-toggle')
+    fireEvent.click(toggle)
+    toggle.focus()
+    rows = [mockDeadLetter('b')]
+    act(() => {
+      invalidateTags([PLATFORM_TAG])
+    })
+
+    await waitFor(() => expect(screen.queryByTestId('dlq-row-a')).toBeNull())
+    expect(toggle).toHaveFocus()
+  })
+
   it('does not reserve action shortcuts when the queue has no selected failure', async () => {
     const onReplay = vi.fn()
     const onResolve = vi.fn()

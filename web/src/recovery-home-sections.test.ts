@@ -42,7 +42,7 @@ describe('Recovery Home section readers', () => {
     expect(decodeRecoveryValidationReport(null)).toBeNull()
   })
 
-  it('rejects cluster categories and owners the tiles cannot label', () => {
+  it('delegates the category and owner vocabulary the tiles translate to the guard', () => {
     expect(decodeClustersResponse({ clusters: [cluster], totalSamples: 2, windowDays: 30 })).not.toBeNull()
     expect(decodeClustersResponse({ clusters: [{ ...cluster, category: 'quota' }], totalSamples: 2, windowDays: 30 })).toBeNull()
     expect(decodeClustersResponse({ clusters: [{ ...cluster, suggestedOwner: 'finance' }], totalSamples: 2, windowDays: 30 })).toBeNull()

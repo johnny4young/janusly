@@ -7,11 +7,20 @@
  * and web projections can share without granting mutation authority itself.
  */
 
+import type { RecoveryAutonomy } from "./api-types.generated";
 import type {
   RecoveryAutonomyLevel,
   RecoveryContract,
 } from "./recovery-contract";
 export type { RecoveryAutonomyLevel } from "./recovery-contract";
+
+// The manifest enumerates these from the Go lists, so drift fails typecheck here.
+export type RecoveryAutonomyCapability =
+  RecoveryAutonomy["factors"][number]["capability"];
+export type RecoveryAutonomyPolicySource = RecoveryAutonomy["source"];
+export type RecoveryAutonomyUnavailableReason = NonNullable<
+  RecoveryAutonomy["unavailableReason"]
+>;
 
 export const RECOVERY_AUTONOMY_CAPABILITIES = [
   "observe",
@@ -19,9 +28,7 @@ export const RECOVERY_AUTONOMY_CAPABILITIES = [
   "validate",
   "apply_with_approval",
   "autonomous_apply",
-] as const;
-export type RecoveryAutonomyCapability =
-  (typeof RECOVERY_AUTONOMY_CAPABILITIES)[number];
+] as const satisfies readonly RecoveryAutonomyCapability[];
 
 export const RECOVERY_AUTONOMY_CAPABILITY_LEVEL = {
   observe: 0,
@@ -32,16 +39,6 @@ export const RECOVERY_AUTONOMY_CAPABILITY_LEVEL = {
 } as const satisfies Readonly<
   Record<RecoveryAutonomyCapability, RecoveryAutonomyLevel>
 >;
-
-export type RecoveryAutonomyPolicySource =
-  | "failure_override"
-  | "workflow_default"
-  | "strictest_failure"
-  | "unavailable";
-
-export type RecoveryAutonomyUnavailableReason =
-  | "contract_missing"
-  | "failure_policy_missing";
 
 export type RecoveryAutonomyFactor = {
   capability: RecoveryAutonomyCapability;

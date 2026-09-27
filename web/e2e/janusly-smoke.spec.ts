@@ -478,6 +478,8 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     await expect.poll(() => readClosedStatus(singleId)).toBe('resolved')
     await waitStatus(runIds[3], 'failed')
     await expect(page.getByRole('alertdialog')).toBeHidden()
+    // The refreshed queue shows the closure before selection starts, so no late focus jump lands mid-selection.
+    await expect(singleRow).toHaveAttribute('aria-label', /Accepted loss/)
 
     await page.getByTestId('dlq-select-toggle').click()
     for (const runId of runIds.slice(4)) {

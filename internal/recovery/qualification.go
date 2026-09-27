@@ -26,6 +26,14 @@ const RecoveryQualificationDatasetVersion = "1"
 // RecoveryQualificationFailureLimit bounds the durable failure list.
 const RecoveryQualificationFailureLimit = 20
 
+// QualificationFailureDatasets names the fixture set a failure came from.
+var QualificationFailureDatasets = []string{"baseline", "candidate"}
+
+// QualificationFailureReasons says why a fixture failed qualification.
+var QualificationFailureReasons = []string{
+	"baseline_dataset_invalid", "candidate_contract_missing", "detector_uncovered", "expected_mismatch",
+}
+
 // QualificationFailure is one bounded actionable failure identity.
 type QualificationFailure struct {
 	Dataset      string                     `json:"dataset"`

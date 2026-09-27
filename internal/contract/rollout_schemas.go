@@ -1,9 +1,14 @@
 package contract
 
+import (
+	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/recovery"
+)
+
 var workflowRollout = closedObj(map[string]any{
 	"id": str(), "workflowId": str(), "baselineVersionId": str(), "canaryVersionId": str(),
 	"trafficPercent": countT(), "minimumSampleSize": countT(), "minimumSuccessRatePercent": countT(),
-	"status":            str(),
+	"status":            strEnum(domain.WorkflowRolloutStatuses),
 	"baselineSucceeded": countT(), "baselineFailed": countT(),
 	"canarySucceeded": countT(), "canaryFailed": countT(),
 	"rolledBackReason": nullableString(),
@@ -23,8 +28,8 @@ var qualificationSummary = closedObj(map[string]any{
 	"failedCandidateAssertions": countT(), "regressionCount": countT(),
 	"coverageFailureCount": countT(), "baselineDatasetValid": boolT(),
 	"failures": arr(closedObj(map[string]any{
-		"dataset": str(), "fixtureId": str(), "sourceNodeId": str(),
-		"expected": str(), "actual": str(), "reason": str(),
+		"dataset": strEnum(recovery.QualificationFailureDatasets), "fixtureId": str(), "sourceNodeId": str(),
+		"expected": str(), "actual": str(), "reason": strEnum(recovery.QualificationFailureReasons),
 		"violations": arr(closedObj(map[string]any{
 			"detectorId": str(), "sourceNodeId": str(), "kind": str(),
 			"action": str(), "message": str(), "details": arr(str()),

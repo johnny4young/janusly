@@ -4,7 +4,7 @@ import { contractApi } from '../api'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { Button } from '@/components/ui/Button'
-import type { QualificationEnvelope } from '../lib/api-types.generated'
+import type { QualificationEnvelope, QualificationSummary } from '../lib/api-types.generated'
 import { isGetWorkflowsWorkflowIdRolloutQualificationResponse } from '../lib/api-guards/operations/GetWorkflowsWorkflowIdRolloutQualification'
 import { isPostWorkflowsWorkflowIdRolloutQualificationResponse } from '../lib/api-guards/operations/PostWorkflowsWorkflowIdRolloutQualification'
 import { MalformedResponseError } from '../lib/malformed-response'
@@ -20,16 +20,7 @@ export type RecoveryQualification = {
     passedCandidateAssertions: number
     regressionCount: number
     coverageFailureCount: number
-    failures: Array<{
-      dataset: 'baseline' | 'candidate'
-      fixtureId: string
-      sourceNodeId: string
-      reason:
-        | 'baseline_dataset_invalid'
-        | 'candidate_contract_missing'
-        | 'detector_uncovered'
-        | 'expected_mismatch'
-    }>
+    failures: Array<Pick<QualificationSummary['failures'][number], 'dataset' | 'fixtureId' | 'sourceNodeId' | 'reason'>>
     failuresTruncated: boolean
   }
 }
@@ -49,18 +40,14 @@ export type RecoveryQualificationGate = {
 
 const STATUSES: ReadonlySet<string> = new Set<RecoveryQualification['status']>(['passed', 'failed'])
 const MODES: ReadonlySet<string> = new Set<RecoveryQualification['mode']>(['bootstrap', 'compare'])
-type Failure = RecoveryQualification['summary']['failures'][number]
-const DATASETS: ReadonlySet<string> = new Set<Failure['dataset']>(['baseline', 'candidate'])
-const REASONS: ReadonlySet<string> = new Set<Failure['reason']>([
-  'baseline_dataset_invalid', 'candidate_contract_missing', 'detector_uncovered', 'expected_mismatch',
-])
 // wire-policy: how many failures the card lists, not a wire bound.
 const VISIBLE_FAILURES = 5
 
 /**
- * Shape is the generated guard's. The rollout gate must describe the exact
- * workflow and version pair the form selected, and the card translates the
- * status, mode, dataset and failure reason.
+ * Shape, including the failure dataset and reason vocabularies, is the
+ * generated guard's. The rollout gate must describe the exact workflow and
+ * version pair the form selected, and the card translates only a passed or
+ * failed qualification in bootstrap or compare mode.
  */
 function parseRecoveryQualification(
   payload: QualificationEnvelope,
@@ -72,8 +59,7 @@ function parseRecoveryQualification(
   if (row === null) return { required: payload.required, qualification: null }
   if (row.workflowId !== workflowId || row.baselineVersionId !== baselineVersionId
     || row.candidateVersionId !== candidateVersionId
-    || !STATUSES.has(row.status) || !MODES.has(row.mode)
-    || !row.summary.failures.every(failure => DATASETS.has(failure.dataset) && REASONS.has(failure.reason))) return null
+    || !STATUSES.has(row.status) || !MODES.has(row.mode)) return null
   const summary = row.summary
   return {
     required: payload.required,
@@ -87,11 +73,8 @@ function parseRecoveryQualification(
         passedCandidateAssertions: summary.passedCandidateAssertions,
         regressionCount: summary.regressionCount,
         coverageFailureCount: summary.coverageFailureCount,
-        failures: summary.failures.map(failure => ({
-          dataset: failure.dataset as Failure['dataset'],
-          fixtureId: failure.fixtureId,
-          sourceNodeId: failure.sourceNodeId,
-          reason: failure.reason as Failure['reason'],
+        failures: summary.failures.map(({ dataset, fixtureId, sourceNodeId, reason }) => ({
+          dataset, fixtureId, sourceNodeId, reason,
         })),
         failuresTruncated: summary.failuresTruncated,
       },

@@ -2,7 +2,7 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { arrayOf, isBoolean, isInteger, isShape, isString, nullable, shape } from "../../guards"
+import { arrayOf, isBoolean, isInteger, isShape, isString, literal, nullable, shape } from "../../guards"
 
 export function isRecoveryAutonomy(value: unknown): value is Api.RecoveryAutonomy {
   return isShape(value, {
@@ -15,12 +15,12 @@ export function isRecoveryAutonomy(value: unknown): value is Api.RecoveryAutonom
     }),
     detectorIds: arrayOf(isString),
     factors: arrayOf(shape({
-      capability: isString,
+      capability: literal("observe", "recommend", "validate", "apply_with_approval", "autonomous_apply"),
       enabled: isBoolean,
       requiredLevel: isInteger,
     })),
     level: nullable(isInteger),
-    source: isString,
-    unavailableReason: nullable(isString),
+    source: literal("failure_override", "workflow_default", "strictest_failure", "unavailable"),
+    unavailableReason: literal("contract_missing", "failure_policy_missing", null),
   })
 }
