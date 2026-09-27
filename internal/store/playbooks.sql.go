@@ -33,25 +33,6 @@ func (q *Queries) ActivateDraftPlaybook(ctx context.Context, arg ActivateDraftPl
 	return result.RowsAffected(), nil
 }
 
-const bumpReplayCampaignCounter = `-- name: BumpReplayCampaignCounter :exec
-UPDATE replay_campaigns
-SET replayed_count = replayed_count + $2::int,
-    failed_count = failed_count + $3::int,
-    updated_at = now()
-WHERE id = $1
-`
-
-type BumpReplayCampaignCounterParams struct {
-	ID       string
-	Replayed int32
-	Failed   int32
-}
-
-func (q *Queries) BumpReplayCampaignCounter(ctx context.Context, arg BumpReplayCampaignCounterParams) error {
-	_, err := q.db.Exec(ctx, bumpReplayCampaignCounter, arg.ID, arg.Replayed, arg.Failed)
-	return err
-}
-
 const cancelPendingReplayCampaignItems = `-- name: CancelPendingReplayCampaignItems :execrows
 UPDATE replay_campaign_items SET status = 'cancelled', completed_at = now()
 WHERE org_id = $1 AND campaign_id = $2 AND status = 'pending'
@@ -734,9 +715,17 @@ func (q *Queries) RetireRecoveryPlaybook(ctx context.Context, arg RetireRecovery
 }
 
 const settleReplayCampaignItem = `-- name: SettleReplayCampaignItem :execrows
-UPDATE replay_campaign_items
-SET status = $1, error = $2, completed_at = now()
-WHERE id = $3 AND claim_token = $4 AND status = 'processing'
+WITH settled AS (
+  UPDATE replay_campaign_items i
+  SET status = $1, error = $2, completed_at = now()
+  WHERE i.id = $3 AND i.claim_token = $4 AND i.status = 'processing'
+  RETURNING i.campaign_id, i.status)
+UPDATE replay_campaigns c
+SET replayed_count = c.replayed_count + (s.status = 'replayed')::int,
+    failed_count = c.failed_count + (s.status = 'failed')::int,
+    updated_at = now()
+FROM settled s
+WHERE c.id = s.campaign_id
 `
 
 type SettleReplayCampaignItemParams struct {
@@ -746,6 +735,8 @@ type SettleReplayCampaignItemParams struct {
 	ClaimToken pgtype.Text
 }
 
+// Settling an item and counting it commit together, so completion never
+// observes a settled item its counters miss; a lost claim counts nothing.
 func (q *Queries) SettleReplayCampaignItem(ctx context.Context, arg SettleReplayCampaignItemParams) (int64, error) {
 	result, err := q.db.Exec(ctx, settleReplayCampaignItem,
 		arg.Status,
