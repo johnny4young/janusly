@@ -14,9 +14,9 @@ if JANUSLY_REAL_PROVIDER_CONSENT=1 JANUSLY_REAL_PROVIDER_SELFTEST=1 "$script" >/
   exit 1
 fi
 if ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 \
-  JANUSLY_REAL_PROVIDER_MAX_USD=3.01 JANUSLY_REAL_PROVIDER_SELFTEST=1 \
+  JANUSLY_REAL_PROVIDER_MAX_USD=6.01 JANUSLY_REAL_PROVIDER_SELFTEST=1 \
   "$script" >/dev/null 2>&1; then
-  echo "real-provider selftest accepted a cap above USD 3" >&2
+  echo "real-provider selftest accepted a cap above USD 6" >&2
   exit 1
 fi
 if ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 \
@@ -32,9 +32,9 @@ if ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 \
   exit 1
 fi
 if ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 \
-  JANUSLY_REAL_PROVIDER_MAX_CALLS=81 JANUSLY_REAL_PROVIDER_SELFTEST=1 \
+  JANUSLY_REAL_PROVIDER_MAX_CALLS=161 JANUSLY_REAL_PROVIDER_SELFTEST=1 \
   "$script" >/dev/null 2>&1; then
-  echo "real-provider selftest accepted more than 80 lifetime calls" >&2
+  echo "real-provider selftest accepted more than 160 lifetime calls" >&2
   exit 1
 fi
 if ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 \
@@ -52,7 +52,7 @@ fi
 ledger_dir=$(mktemp -d "${TMPDIR:-/tmp}/janusly-real-provider-ledger-test.XXXXXX")
 trap 'rm -f -- "$ledger_dir/inside"; rmdir "$ledger_dir" 2>/dev/null || true' EXIT
 ledger_path="$ledger_dir/ledger.jsonl"
-ln -s "$root/output/qualification" "$ledger_dir/inside"
+ln -s "$root" "$ledger_dir/inside"
 if ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 \
   JANUSLY_REAL_PROVIDER_LEDGER="$ledger_dir/inside/ledger.jsonl" \
   JANUSLY_REAL_PROVIDER_SELFTEST=1 "$script" >/dev/null 2>&1; then
@@ -64,7 +64,7 @@ rm -f -- "$ledger_dir/inside"
 result=$(ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 \
   JANUSLY_REAL_PROVIDER_MAX_USD=3 JANUSLY_REAL_PROVIDER_LEDGER="$ledger_path" \
   JANUSLY_REAL_PROVIDER_SELFTEST=1 "$script")
-jq -e '.caseCount == 0 and .calls == 0 and .maxCalls == 80 and .maxCallsPerCase == 4 and
+jq -e '.caseCount == 0 and .calls == 0 and .maxCalls == 160 and .maxCallsPerCase == 4 and
   .costUsd == 0 and .maxUsd == 3 and .providerInvoked == false and .sdkRetries == 0' <<<"$result" >/dev/null
 
 remaining=$(ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 \

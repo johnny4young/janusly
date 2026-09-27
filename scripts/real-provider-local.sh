@@ -5,8 +5,8 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 evidence_dir=${JANUSLY_REAL_PROVIDER_EVIDENCE_DIR:-$root/output/qualification/$stamp/real_provider}
 ledger_path=${JANUSLY_REAL_PROVIDER_LEDGER:-}
-max_usd=${JANUSLY_REAL_PROVIDER_MAX_USD:-3}
-max_calls=${JANUSLY_REAL_PROVIDER_MAX_CALLS:-80}
+max_usd=${JANUSLY_REAL_PROVIDER_MAX_USD:-6}
+max_calls=${JANUSLY_REAL_PROVIDER_MAX_CALLS:-160}
 max_calls_per_case=${JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE:-4}
 status=failed
 # A failed or interrupted provider process may have completed a call without
@@ -29,8 +29,8 @@ die() {
   exit 2
 }
 
-is_positive_number_at_most_three() {
-  awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value > 0 && value <= 3) }'
+is_positive_number_at_most_six() {
+  awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value > 0 && value <= 6) }'
 }
 
 is_integer_between() {
@@ -90,10 +90,10 @@ write_summary() {
 [[ ${JANUSLY_REAL_PROVIDER_CONSENT:-} == 1 ]] ||
   die 'set JANUSLY_REAL_PROVIDER_CONSENT=1 to authorize the bounded paid test'
 [[ -n ${ANTHROPIC_API_KEY:-} ]] || die 'ANTHROPIC_API_KEY is required'
-is_positive_number_at_most_three "$max_usd" ||
-  die 'JANUSLY_REAL_PROVIDER_MAX_USD must be a positive number no greater than 3'
-is_integer_between "$max_calls" 20 80 ||
-  die 'JANUSLY_REAL_PROVIDER_MAX_CALLS must be an integer in 20..80'
+is_positive_number_at_most_six "$max_usd" ||
+  die 'JANUSLY_REAL_PROVIDER_MAX_USD must be a positive number no greater than 6'
+is_integer_between "$max_calls" 20 160 ||
+  die 'JANUSLY_REAL_PROVIDER_MAX_CALLS must be an integer in 20..160'
 is_integer_between "$max_calls_per_case" 1 4 ||
   die 'JANUSLY_REAL_PROVIDER_MAX_CALLS_PER_CASE must be an integer in 1..4'
 [[ "$ledger_path" == /* ]] ||
@@ -134,9 +134,9 @@ trap write_summary EXIT INT TERM
 
 # Deliberately one process, one 20-case product test, one attempt. Go owns the
 # configured call/USD global and per-case breakers and sets SDK retries to
-# zero; this shell never retries the qualification. The 80-call lifetime
-# envelope covers one bounded requalification after a failed first profile;
-# the durable USD 3 ledger is never reset between attempts.
+# zero; this shell never retries the qualification. The 160-call lifetime
+# envelope covers bounded requalifications after failed profiles;
+# the durable USD 6 ledger is never reset between attempts.
 test_status=0
 JANUSLY_REAL_PROVIDER_CONSENT=1 \
 JANUSLY_REAL_PROVIDER_MAX_USD="$max_usd" \

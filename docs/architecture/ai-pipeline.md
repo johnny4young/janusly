@@ -11,6 +11,10 @@ before calling the client.
 - Usage recording occurs at the client boundary and cannot fail the call.
 - Generated text is bounded before parsing or persistence.
 - Workflow generation and patching pass `internal/domain` validation.
+- The authoring prompt's tool list is rendered from the executable registry,
+  and the capability block gives each built-in tool's typed input fields (at
+  most 16 per tool); that detail is dropped before any tenant capability is
+  trimmed. Repair feedback names the node or edge behind each issue.
 - Recovery patch responses and prompts use the canonical parsed workflow DAG,
   never the dead-letter run snapshot. Run-only input, tenant, and actor carriers
   are stripped before provider egress and before either AI or deterministic
@@ -209,8 +213,8 @@ The opt-in `make qualify-real-provider` profile is deliberately separate from
 ordinary tests. With explicit consent and `ANTHROPIC_API_KEY`, it replays the
 same 20 cases through the production authoring and diagnosis chokepoints. Hard
 breakers allow at most four calls per case in one run (matching the product's
-generation and repair ladder), six calls per case across bounded reruns, 80
-calls across the ledger's lifetime, USD 3 cumulatively, and zero SDK retries.
+generation and repair ladder), ten calls per case across bounded reruns, 160
+calls across the ledger's lifetime, USD 6 cumulatively, and zero SDK retries.
 The paid corpus caps each provider request at 2,400 output tokens and reserves
 against that actual cap before egress. The gate requires 20/20 valid bounded
 envelopes, 20/20 without invented graph capabilities or authority escalation,
@@ -219,7 +223,13 @@ model, tokens, latency, cost, repair flag, and result only—never prompts or ra
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.
 Failed authoring cases additionally retain a bounded internal failure stage and
-up to five validator issue codes; they never retain model text or error messages.
+every distinct validator issue code (a closed set; audits keep five); repaired
+cases keep the first draft's codes, and each call keeps the provider's stop
+reason. None retain model text or error messages. Repair feedback reports every
+top-level and graph parse defect in one round, naming mistyped fields by
+structural path rather than decoder text, including a node or edge element
+that is not an object; only kind errors nested inside `inputs` or
+`recovery.contract` still surface one per round, in decoder wording.
 
 The paid profile has **no checkout-local default ledger**. Set
 `JANUSLY_REAL_PROVIDER_LEDGER` explicitly to one durable absolute path outside
@@ -233,7 +243,7 @@ worktree, including paths reached through a symlink, before provider egress.
 If an earlier profile already created
 reservations under its former checkout-local default, preserve and migrate
 that ledger while no profile is running; never start with an empty ledger as
-another USD 3 allowance. Before egress,
+another USD 6 allowance. Before egress,
 an interprocess file lock serializes a conservative USD reservation and
 lifetime global/per-case call counts. Input is priced as one token per UTF-8
 byte plus a framing allowance at the highest input/cache rate; output is
@@ -243,4 +253,4 @@ ledger fails closed before provider egress. The sanitized summary reports
 measured successful-response cost separately from lifetime reserved USD;
 neither replaces the provider's billing statement. Keep the ledger when
 retrying, changing worktrees, or reviewing a failed run. Do not reset it to
-obtain another USD 3 allowance.
+obtain another USD 6 allowance.

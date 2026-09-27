@@ -55,7 +55,7 @@ func vectorTools() []Definition {
 			Description: "Search the org's vector memory (workflow_vector kind) by semantic similarity.",
 			Required:    []string{"query"},
 			Fields: []Field{
-				{Name: "query", Type: "string"},
+				{Name: "query", Type: "string", Required: true},
 			},
 			InputExample: map[string]any{"query": "prior fixes for the billing webhook"},
 			Validate:     validateVectorSearchInput,
@@ -66,7 +66,7 @@ func vectorTools() []Definition {
 			Description: "Store one entry in the org's vector memory (workflow_vector kind). Consent-gated.",
 			Required:    []string{"content"},
 			Fields: []Field{
-				{Name: "content", Type: "string"},
+				{Name: "content", Type: "string", Required: true},
 				{Name: "metadata", Type: "object"},
 			},
 			InputExample: map[string]any{"content": "retries with backoff fixed the timeout"},
