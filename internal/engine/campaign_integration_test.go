@@ -5,6 +5,7 @@ package engine
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -123,7 +124,8 @@ func TestReplayCampaignStepYieldsALostClaim(t *testing.T) {
 	for {
 		var blocked bool
 		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-			WHERE wait_event_type = 'Lock' AND wait_event = 'advisory')`).Scan(&blocked); err != nil {
+			WHERE datname = current_database() AND pid <> pg_backend_pid()
+			  AND wait_event_type = 'Lock' AND wait_event = 'advisory')`).Scan(&blocked); err != nil {
 			t.Fatalf("lock probe: %v", err)
 		}
 		if blocked {
@@ -132,7 +134,7 @@ func TestReplayCampaignStepYieldsALostClaim(t *testing.T) {
 		select {
 		case err := <-stepped:
 			t.Fatalf("step finished before blocking on the replay: %v", err)
-		default:
+		case <-time.After(5 * time.Millisecond):
 		}
 	}
 	// Another pump reclaims the item while this replay is still running.

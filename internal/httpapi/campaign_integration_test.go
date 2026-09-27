@@ -592,7 +592,8 @@ func TestReplayCampaignCancelSkipsAnItemClaimedMidCancel(t *testing.T) {
 	for {
 		var waiting bool
 		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-			WHERE wait_event_type = 'Lock' AND query ILIKE '%replay_campaign_items%')`).Scan(&waiting); err != nil {
+			WHERE datname = current_database() AND pid <> pg_backend_pid()
+			  AND wait_event_type = 'Lock' AND query ILIKE '%replay_campaign_items%')`).Scan(&waiting); err != nil {
 			t.Fatalf("lock probe: %v", err)
 		}
 		if waiting {
@@ -601,7 +602,7 @@ func TestReplayCampaignCancelSkipsAnItemClaimedMidCancel(t *testing.T) {
 		select {
 		case status := <-cancelled:
 			t.Fatalf("cancel finished without waiting for the claimed item: %d", status)
-		default:
+		case <-time.After(5 * time.Millisecond):
 		}
 	}
 	if err := claim.Commit(ctx); err != nil {
