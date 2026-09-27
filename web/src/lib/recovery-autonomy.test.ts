@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import en from "../i18n/locales/en/common.json";
+import es from "../i18n/locales/es/common.json";
 import {
   combineRecoveryAutonomyProfiles,
   resolveRecoveryAutonomyProfile,
+  type RecoveryAutonomyCapability,
+  type RecoveryAutonomyPolicySource,
+  type RecoveryAutonomyUnavailableReason,
 } from "./recovery-autonomy";
 import { RecoveryContractV2Schema } from "./recovery-contract";
 
@@ -157,5 +162,29 @@ describe("resolveRecoveryAutonomyProfile", () => {
       source: "strictest_failure",
       capabilities: { applyWithApproval: false },
     });
+  });
+});
+
+// Keyed by the manifest unions: a value Go adds fails typecheck until it has copy.
+const SOURCES: Record<RecoveryAutonomyPolicySource, true> = {
+  failure_override: true, workflow_default: true, strictest_failure: true, unavailable: true,
+};
+const REASONS: Record<RecoveryAutonomyUnavailableReason, true> = {
+  contract_missing: true, failure_policy_missing: true,
+};
+const CAPABILITIES: Record<RecoveryAutonomyCapability, true> = {
+  observe: true, recommend: true, validate: true, apply_with_approval: true, autonomous_apply: true,
+};
+
+describe("recovery autonomy copy", () => {
+  it("translates every source, unavailable reason and capability the manifest admits", () => {
+    const keys = [
+      ...Object.keys(SOURCES).map((value) => `recoveryCase.autonomy.source.${value}`),
+      ...Object.keys(REASONS).map((value) => `recoveryCase.autonomy.reason.${value}`),
+      ...Object.keys(CAPABILITIES).map((value) => `recoveryCase.autonomy.capability.${value}`),
+    ];
+    for (const catalog of [en, es] as Record<string, string>[]) {
+      expect(keys.filter((key) => !catalog[key])).toEqual([]);
+    }
   });
 });

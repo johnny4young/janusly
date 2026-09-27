@@ -118,8 +118,20 @@ type valueIndex struct {
 	assigns map[types.Object][]ast.Expr
 	params  map[types.Object]paramSlot
 	calls   map[string][]*ast.CallExpr
-	returns map[string][]ast.Expr
-	fileOf  map[ast.Node]*ast.File
+	returns map[resultSlot][]ast.Expr
+	// tuples binds a variable to one result of a multi-value call.
+	tuples map[types.Object][]resultOf
+	fileOf map[ast.Node]*ast.File
+}
+
+type resultSlot struct {
+	fn    string
+	index int
+}
+
+type resultOf struct {
+	call  *ast.CallExpr
+	index int
 }
 
 type paramSlot struct {
@@ -179,15 +191,29 @@ func (index *valueIndex) add(file *ast.File, info *types.Info) {
 					if _, nested := inner.(*ast.FuncLit); nested {
 						return false
 					}
-					if ret, ok := inner.(*ast.ReturnStmt); ok && len(ret.Results) > 0 {
-						index.returns[key] = append(index.returns[key], ret.Results[0])
-						index.fileOf[ret.Results[0]] = file
+					if ret, ok := inner.(*ast.ReturnStmt); ok {
+						for i, result := range ret.Results {
+							slot := resultSlot{key, i}
+							index.returns[slot] = append(index.returns[slot], result)
+							index.fileOf[result] = file
+						}
 					}
 					return true
 				})
 			}
 			enclosing = append(enclosing, key)
 		case *ast.AssignStmt:
+			if call, ok := tupleCall(node.Lhs, node.Rhs); ok {
+				for i, lhs := range node.Lhs {
+					if ident, ok := lhs.(*ast.Ident); ok {
+						if obj := info.ObjectOf(ident); obj != nil {
+							index.tuples[obj] = append(index.tuples[obj], resultOf{call, i})
+							index.fileOf[call] = file
+						}
+					}
+				}
+				return true
+			}
 			if len(node.Lhs) != len(node.Rhs) {
 				return true
 			}
@@ -207,6 +233,15 @@ func (index *valueIndex) add(file *ast.File, info *types.Info) {
 				}
 			}
 		case *ast.ValueSpec:
+			if call, ok := tupleCall(identExprs(node.Names), node.Values); ok {
+				for i, name := range node.Names {
+					if obj := info.Defs[name]; obj != nil {
+						index.tuples[obj] = append(index.tuples[obj], resultOf{call, i})
+						index.fileOf[call] = file
+					}
+				}
+				return true
+			}
 			for i, name := range node.Names {
 				if i < len(node.Values) {
 					obj := info.Defs[name]
@@ -223,6 +258,32 @@ func (index *valueIndex) add(file *ast.File, info *types.Info) {
 		}
 		return true
 	})
+}
+
+// tupleCall reports the call of a multi-value assignment such as `a, b := f()`.
+func tupleCall(lhs, rhs []ast.Expr) (*ast.CallExpr, bool) {
+	if len(lhs) < 2 || len(rhs) != 1 {
+		return nil, false
+	}
+	call, ok := ast.Unparen(rhs[0]).(*ast.CallExpr)
+	return call, ok
+}
+
+func identExprs(names []*ast.Ident) []ast.Expr {
+	out := make([]ast.Expr, len(names))
+	for i, name := range names {
+		out[i] = name
+	}
+	return out
+}
+
+// resolveResult returns the constant strings one result of call can hold.
+func (index *valueIndex) resolveResult(file *ast.File, call *ast.CallExpr, result int, seen map[ast.Node]bool) []string {
+	var out []string
+	for _, expr := range index.returns[resultSlot{funcKey(index.callee(index.info[file], call)), result}] {
+		out = append(out, index.resolve(index.fileOf[expr], expr, seen)...)
+	}
+	return out
 }
 
 // resolve returns the constant strings expr can hold; unknown sources (field
@@ -243,6 +304,9 @@ func (index *valueIndex) resolve(file *ast.File, expr ast.Expr, seen map[ast.Nod
 		for _, value := range index.assigns[obj] {
 			out = append(out, index.resolve(index.fileOf[value], value, seen)...)
 		}
+		for _, tuple := range index.tuples[obj] {
+			out = append(out, index.resolveResult(index.fileOf[tuple.call], tuple.call, tuple.index, seen)...)
+		}
 		if slot, ok := index.params[obj]; ok {
 			for _, call := range index.calls[slot.fn] {
 				if slot.index < len(call.Args) {
@@ -255,11 +319,7 @@ func (index *valueIndex) resolve(file *ast.File, expr ast.Expr, seen map[ast.Nod
 		if builtin, ok := index.callee(info, expr).(*types.Builtin); ok && builtin.Name() == "new" && len(expr.Args) == 1 {
 			return index.resolve(file, expr.Args[0], seen)
 		}
-		var out []string
-		for _, result := range index.returns[funcKey(index.callee(info, expr))] {
-			out = append(out, index.resolve(index.fileOf[result], result, seen)...)
-		}
-		return out
+		return index.resolveResult(file, expr, 0, seen)
 	case *ast.UnaryExpr:
 		if expr.Op == token.AND {
 			return index.resolve(file, expr.X, seen)
@@ -309,7 +369,8 @@ func emittedValues(t *testing.T, vocabs []vocabulary) map[string][]emitted {
 	index := &valueIndex{
 		info: map[*ast.File]*types.Info{}, assigns: map[types.Object][]ast.Expr{},
 		params: map[types.Object]paramSlot{}, calls: map[string][]*ast.CallExpr{},
-		returns: map[string][]ast.Expr{}, fileOf: map[ast.Node]*ast.File{},
+		returns: map[resultSlot][]ast.Expr{}, tuples: map[types.Object][]resultOf{},
+		fileOf: map[ast.Node]*ast.File{},
 	}
 	pkgs := loadInternal(t)
 	for _, pkg := range pkgs {
@@ -368,7 +429,8 @@ func emittedValues(t *testing.T, vocabs []vocabulary) map[string][]emitted {
 						}
 					}
 				case *ast.AssignStmt:
-					if len(node.Lhs) != len(node.Rhs) {
+					call, tuple := tupleCall(node.Lhs, node.Rhs)
+					if !tuple && len(node.Lhs) != len(node.Rhs) {
 						return true
 					}
 					for i, lhs := range node.Lhs {
@@ -380,8 +442,16 @@ func emittedValues(t *testing.T, vocabs []vocabulary) map[string][]emitted {
 						if selection == nil || selection.Kind() != types.FieldVal {
 							continue
 						}
-						if dest, ok := structField(selection.Recv(), selector.Sel.Name); ok && owner[dest] != "" {
+						dest, ok := structField(selection.Recv(), selector.Sel.Name)
+						if !ok || owner[dest] == "" {
+							continue
+						}
+						if !tuple {
 							record(pkg, file, owner[dest], node.Rhs[i])
+							continue
+						}
+						for _, text := range index.resolveResult(file, call, i, map[ast.Node]bool{}) {
+							found[owner[dest]] = append(found[owner[dest]], emitted{text, pkg.Fset.Position(call.Pos())})
 						}
 					}
 				}

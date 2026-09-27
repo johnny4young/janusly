@@ -127,15 +127,19 @@ func manifestConformanceRows() map[string]conformanceRow {
 			TrafficPercent: 10, MinimumSampleSize: 5, MinimumSuccessRatePercent: 90, Status: "active",
 			CreatedAt: conformanceInstant, UpdatedAt: conformanceInstant,
 		}
-		wires := []any{listWire(t, map[string]any{"rollout": rolloutView(active)})}
-		for _, status := range domain.WorkflowRolloutStatuses[1:] {
-			ended := active
-			ended.Status = status
-			if status != "promoted" {
-				ended.RolledBackReason = reason
+		var wires []any
+		for _, status := range domain.WorkflowRolloutStatuses {
+			row := active
+			row.Status = status
+			switch status {
+			case "active":
+			case "promoted":
+				row.EndedAt, row.LastOutcomeAt = &conformanceInstant, &conformanceInstant
+			default:
+				row.RolledBackReason = reason
+				row.EndedAt, row.LastOutcomeAt = &conformanceInstant, &conformanceInstant
 			}
-			ended.EndedAt, ended.LastOutcomeAt = &conformanceInstant, &conformanceInstant
-			wires = append(wires, listWire(t, map[string]any{"rollout": rolloutView(ended)}))
+			wires = append(wires, listWire(t, map[string]any{"rollout": rolloutView(row)}))
 		}
 		return wires
 	}}
