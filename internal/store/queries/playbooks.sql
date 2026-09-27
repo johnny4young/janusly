@@ -32,17 +32,20 @@ LIMIT $2;
 UPDATE replay_campaign_items SET status = 'cancelled', completed_at = now()
 WHERE org_id = $1 AND campaign_id = $2 AND status = 'pending';
 
+-- Settling an item and counting it commit together, so completion never
+-- observes a settled item its counters miss; a lost claim counts nothing.
 -- name: SettleReplayCampaignItem :execrows
-UPDATE replay_campaign_items
-SET status = sqlc.arg(status), error = sqlc.arg(error), completed_at = now()
-WHERE id = sqlc.arg(id) AND claim_token = sqlc.arg(claim_token) AND status = 'processing';
-
--- name: BumpReplayCampaignCounter :exec
-UPDATE replay_campaigns
-SET replayed_count = replayed_count + sqlc.arg(replayed)::int,
-    failed_count = failed_count + sqlc.arg(failed)::int,
+WITH settled AS (
+  UPDATE replay_campaign_items i
+  SET status = sqlc.arg(status), error = sqlc.arg(error), completed_at = now()
+  WHERE i.id = sqlc.arg(id) AND i.claim_token = sqlc.arg(claim_token) AND i.status = 'processing'
+  RETURNING i.campaign_id, i.status)
+UPDATE replay_campaigns c
+SET replayed_count = c.replayed_count + (s.status = 'replayed')::int,
+    failed_count = c.failed_count + (s.status = 'failed')::int,
     updated_at = now()
-WHERE id = $1;
+FROM settled s
+WHERE c.id = s.campaign_id;
 
 -- name: CompleteReplayCampaignIfExhausted :one
 UPDATE replay_campaigns

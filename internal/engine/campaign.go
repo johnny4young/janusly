@@ -88,11 +88,16 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 		status = "failed"
 		itemError = pgtype.Text{String: err.Error(), Valid: true}
 	}
-	if _, err := q.SettleReplayCampaignItem(ctx, store.SettleReplayCampaignItemParams{
+	settled, err := q.SettleReplayCampaignItem(ctx, store.SettleReplayCampaignItemParams{
 		Status: status, Error: itemError, ID: item.ID,
 		ClaimToken: pgtype.Text{String: claimToken, Valid: true},
-	}); err != nil {
+	})
+	if err != nil {
 		return true, err
+	}
+	// A stale claim was reclaimed; the new claimant settles and counts the item.
+	if settled == 0 {
+		return true, nil
 	}
 	itemAction := audit.Action("recovery.campaign.item_replayed")
 	itemMetadata := map[string]any{"campaignId": campaign.ID, "position": item.Position}
@@ -103,17 +108,6 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 	e.audit.SystemWrite(ctx, e.pool, campaign.OrgID, campaign.CreatedBy, itemAction, audit.Options{
 		TargetType: "dlq", TargetID: item.DeadLetterID, Metadata: itemMetadata,
 	})
-	replayed, failed := int32(0), int32(0)
-	if status == "replayed" {
-		replayed = 1
-	} else {
-		failed = 1
-	}
-	if err := q.BumpReplayCampaignCounter(ctx, store.BumpReplayCampaignCounterParams{
-		Replayed: replayed, Failed: failed, ID: campaign.ID,
-	}); err != nil {
-		return true, err
-	}
 	// A drained cohort completes without waiting one extra pacing period.
 	completed, err := q.CompleteReplayCampaignIfExhausted(ctx, campaign.ID)
 	if err != nil {
