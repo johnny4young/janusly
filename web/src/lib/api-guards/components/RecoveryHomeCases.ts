@@ -2,12 +2,13 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { arrayOf, isShape, isString, nullable, shape } from "../../guards"
+import { arrayOf, isShape, isString, literal, nullable, shape } from "../../guards"
+import { isRecoveryCaseState } from "./RecoveryCaseState"
 
 export function isRecoveryHomeCases(value: unknown): value is Api.RecoveryHomeCases {
   return isShape(value, {
     cases: arrayOf(shape({
-      action: isString,
+      action: literal("observe", "quarantine"),
       createdAt: isString,
       detectorId: isString,
       detectorKind: isString,
@@ -15,7 +16,7 @@ export function isRecoveryHomeCases(value: unknown): value is Api.RecoveryHomeCa
       message: isString,
       runId: isString,
       source: isString,
-      state: isString,
+      state: isRecoveryCaseState,
       workflowId: nullable(isString),
     })),
   })

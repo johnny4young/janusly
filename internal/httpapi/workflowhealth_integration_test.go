@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/health"
 )
 
 // Health rollup + delta: real runs feed the reliability signals, the
@@ -74,14 +76,14 @@ func TestWorkflowHealthAndDelta(t *testing.T) {
 		t.Fatalf("delta: %d %+v", res.status, res.body)
 	}
 	wantDeltaKeys := []string{
-		"after", "afterVersion", "before", "delta", "hasEnoughData", "priorVersion",
+		"after", "afterVersion", "before", "delta", "hasEnoughData", "minRunsForDelta", "priorVersion",
 		"recentRunsAgainstAfter", "sameFailureSinceApply", "windowDays", "workflowId",
 	}
 	if got := keysOf(res.body); !slices.Equal(got, wantDeltaKeys) {
 		t.Fatalf("delta key contract: got %v want %v", got, wantDeltaKeys)
 	}
-	if res.body["hasEnoughData"] != false {
-		t.Fatalf("fresh after-side must gather data: %+v", res.body)
+	if res.body["hasEnoughData"] != false || res.body["minRunsForDelta"] != float64(health.MinRunsForDelta) {
+		t.Fatalf("fresh after-side must gather data against the served floor: %+v", res.body)
 	}
 	if res.body["delta"] != nil || res.body["sameFailureSinceApply"] != nil {
 		t.Fatalf("fresh delta/signature blocks must be null: %+v", res.body)

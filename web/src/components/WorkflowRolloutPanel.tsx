@@ -20,7 +20,7 @@ import type {
 import { Button } from '@/components/ui/Button'
 import { FormField } from '@/components/ui/Form'
 import { isRecord } from '../lib/guards'
-import type { WorkflowRollout as WireRollout } from '../lib/api-types.generated'
+import type { WorkflowRollout } from '../lib/api-types.generated'
 import { isWorkflowRollout } from '../lib/api-guards/components/WorkflowRollout'
 import { isPostWorkflowsWorkflowIdRolloutResponse } from '../lib/api-guards/operations/PostWorkflowsWorkflowIdRollout'
 import { isPostWorkflowsWorkflowIdRolloutRolloutIdDecisionResponse } from '../lib/api-guards/operations/PostWorkflowsWorkflowIdRolloutRolloutIdDecision'
@@ -40,8 +40,6 @@ const WorkflowRolloutStatus = lazy(() => import('./WorkflowRolloutStatus').then(
 })))
 
 type VersionRow = { id: string; version: number }
-type RolloutStatus = 'active' | 'promoted' | 'rolled_back' | 'cancelled'
-type WorkflowRollout = Omit<WireRollout, 'status'> & { status: RolloutStatus }
 
 type Draft = {
   baselineVersionId: string
@@ -63,12 +61,10 @@ const MIN_ROLLOUT_VERSIONS = 2
 
 const ICON_SIZE = 13 // wire-policy: presentation, not a wire bound.
 
-const ROLLOUT_STATUSES: ReadonlySet<string> = new Set<RolloutStatus>(['active', 'promoted', 'rolled_back', 'cancelled'])
-
-// Shape is the generated guard's. The status pill translates the status, and
-// the panel only ever shows a rollout of the workflow it is scoped to.
-function acceptRollout(row: WireRollout, workflowId: string): WorkflowRollout | null {
-  return row.workflowId === workflowId && ROLLOUT_STATUSES.has(row.status) ? row as WorkflowRollout : null
+// Shape, including the status vocabulary, is the generated guard's; the panel
+// only ever shows a rollout of the workflow it is scoped to.
+function acceptRollout(row: WorkflowRollout, workflowId: string): WorkflowRollout | null {
+  return row.workflowId === workflowId ? row : null
 }
 
 function successRate(succeeded: number, failed: number): number | null {
@@ -162,7 +158,7 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
     && qualificationGate.baselineVersionId === draft.baselineVersionId && qualificationGate.candidateVersionId === latest.id
     && (!qualificationGate.required || qualificationGate.status === 'passed'))
 
-  const mutate = async (request: AbortController, send: () => Promise<{ rollout: WireRollout }>, success: string,
+  const mutate = async (request: AbortController, send: () => Promise<{ rollout: WorkflowRollout }>, success: string,
     accepts: (value: WorkflowRollout) => boolean) => {
     setMutating(true)
     try {

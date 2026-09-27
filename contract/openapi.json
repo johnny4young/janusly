@@ -801,6 +801,15 @@
             "type": "array"
           },
           "category": {
+            "enum": [
+              "secret_missing",
+              "http_error",
+              "network_timeout",
+              "ai_provider",
+              "parse_error",
+              "tool_input",
+              "unknown"
+            ],
             "type": "string"
           },
           "firstSeen": {
@@ -843,6 +852,11 @@
             "type": "string"
           },
           "suggestedOwner": {
+            "enum": [
+              "ops",
+              "workflow_author",
+              "platform"
+            ],
             "type": "string"
           }
         },
@@ -1274,6 +1288,10 @@
                   "type": "string"
                 },
                 "dataset": {
+                  "enum": [
+                    "baseline",
+                    "candidate"
+                  ],
                   "type": "string"
                 },
                 "expected": {
@@ -1283,6 +1301,12 @@
                   "type": "string"
                 },
                 "reason": {
+                  "enum": [
+                    "baseline_dataset_invalid",
+                    "candidate_contract_missing",
+                    "detector_uncovered",
+                    "expected_mismatch"
+                  ],
                   "type": "string"
                 },
                 "sourceNodeId": {
@@ -1503,6 +1527,14 @@
           "null"
         ]
       },
+      "RecoveryActorKind": {
+        "enum": [
+          "system",
+          "user",
+          "agent"
+        ],
+        "type": "string"
+      },
       "RecoveryApprovalBindingRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1534,7 +1566,7 @@
             ]
           },
           "actorKind": {
-            "type": "string"
+            "$ref": "#/components/schemas/RecoveryActorKind"
           },
           "caseId": {
             "type": "string"
@@ -1546,6 +1578,13 @@
             "type": "string"
           },
           "kind": {
+            "enum": [
+              "diagnosis",
+              "candidate",
+              "validation",
+              "publication",
+              "verification"
+            ],
             "type": "string"
           },
           "payload": {
@@ -1609,6 +1648,13 @@
               "additionalProperties": false,
               "properties": {
                 "capability": {
+                  "enum": [
+                    "observe",
+                    "recommend",
+                    "validate",
+                    "apply_with_approval",
+                    "autonomous_apply"
+                  ],
                   "type": "string"
                 },
                 "enabled": {
@@ -1634,9 +1680,20 @@
             ]
           },
           "source": {
+            "enum": [
+              "failure_override",
+              "workflow_default",
+              "strictest_failure",
+              "unavailable"
+            ],
             "type": "string"
           },
           "unavailableReason": {
+            "enum": [
+              "contract_missing",
+              "failure_policy_missing",
+              null
+            ],
             "type": [
               "string",
               "null"
@@ -1674,6 +1731,10 @@
         "additionalProperties": false,
         "properties": {
           "action": {
+            "enum": [
+              "observe",
+              "quarantine"
+            ],
             "type": "string"
           },
           "createdAt": {
@@ -1722,7 +1783,7 @@
             "type": "string"
           },
           "state": {
-            "type": "string"
+            "$ref": "#/components/schemas/RecoveryCaseState"
           },
           "updatedAt": {
             "type": "string"
@@ -1792,6 +1853,23 @@
           "activeApproval"
         ],
         "type": "object"
+      },
+      "RecoveryCaseState": {
+        "enum": [
+          "detected",
+          "contained",
+          "diagnosed",
+          "candidates_ready",
+          "validating",
+          "awaiting_approval",
+          "publishing",
+          "monitoring",
+          "verified_recovered",
+          "recurred",
+          "accepted_loss",
+          "abandoned"
+        ],
+        "type": "string"
       },
       "RecoveryEvidenceJSON": {},
       "RecoveryHeatmap": {
@@ -2133,6 +2211,10 @@
               "additionalProperties": false,
               "properties": {
                 "action": {
+                  "enum": [
+                    "observe",
+                    "quarantine"
+                  ],
                   "type": "string"
                 },
                 "createdAt": {
@@ -2157,7 +2239,7 @@
                   "type": "string"
                 },
                 "state": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/RecoveryCaseState"
                 },
                 "workflowId": {
                   "type": [
@@ -2858,7 +2940,7 @@
             ]
           },
           "actorKind": {
-            "type": "string"
+            "$ref": "#/components/schemas/RecoveryActorKind"
           },
           "caseId": {
             "type": "string"
@@ -2867,7 +2949,7 @@
             "$ref": "#/components/schemas/RecoveryEvidenceJSON"
           },
           "fromState": {
-            "type": "string"
+            "$ref": "#/components/schemas/RecoveryCaseState"
           },
           "id": {
             "type": "string"
@@ -2885,7 +2967,7 @@
             ]
           },
           "toState": {
-            "type": "string"
+            "$ref": "#/components/schemas/RecoveryCaseState"
           }
         },
         "required": [
@@ -3682,6 +3764,15 @@
         "additionalProperties": false,
         "properties": {
           "kind": {
+            "enum": [
+              "recovery_feedback",
+              "memory_entry",
+              "runbook_excerpt",
+              "recent_error",
+              "signature_rule",
+              "tool_contract",
+              "recovery_playbook"
+            ],
             "type": "string"
           },
           "label": {
@@ -4278,6 +4369,10 @@
           "hasEnoughData": {
             "type": "boolean"
           },
+          "minRunsForDelta": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "priorVersion": {
             "anyOf": [
               {
@@ -4372,6 +4467,7 @@
           "afterVersion",
           "windowDays",
           "hasEnoughData",
+          "minRunsForDelta",
           "before",
           "after",
           "delta",
@@ -5150,6 +5246,12 @@
             ]
           },
           "status": {
+            "enum": [
+              "active",
+              "promoted",
+              "rolled_back",
+              "cancelled"
+            ],
             "type": "string"
           },
           "trafficPercent": {

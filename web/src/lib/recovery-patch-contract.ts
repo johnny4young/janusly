@@ -58,7 +58,6 @@ function suggestion(value: WirePatch, options: RecoveryPatchParseOptions): Patch
   if (options.expectedFailureSignature && passport.failureSignature !== options.expectedFailureSignature) return null
 
   const evidence = parseEvidenceRows(value.evidence)
-  if (!evidence) return null
 
   let playbook: PatchSuggestion['playbook']
   if (value.mode === 'playbook') {

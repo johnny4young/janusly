@@ -10,9 +10,9 @@ export type HealthSnapshot = {
 export type RecoveryDelta = ApiResponses['GET /workflows/health/delta']
 
 /**
- * Shape is the generated guard's; sample floors, sample caps, score ranges and
- * window bounds are server policy. The rules below are what RecoveryDeltaCard
- * renders from.
+ * Shape is the generated guard's; the sample floor is served as
+ * `minRunsForDelta`, and it, sample caps, score ranges and window bounds are
+ * server policy. The rules below are what RecoveryDeltaCard renders from.
  */
 export function isRecoveryDelta(value: unknown, workflowId: string, afterVersion: number, signature: string | null): value is RecoveryDelta {
   if (!isGetWorkflowsHealthDeltaResponse(value)) return false

@@ -1,36 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
+import en from '../i18n/locales/en/common.json'
+import es from '../i18n/locales/es/common.json'
 import {
-  EvidenceRowSchema,
-  EvidenceListSchema,
   MAX_EVIDENCE_ROWS,
   MAX_SNIPPET_CHARS,
   scrubEvidenceRow,
   scrubEvidenceRows,
+  type EvidenceKind,
   type EvidenceRow,
-} from './ai-evidence'
-
-describe('ai-evidence shape', () => {
-  it('validates a minimal row', () => {
-    const parsed = EvidenceRowSchema.safeParse({
-      kind: 'signature_rule',
-      sourceRef: 'http_error',
-      snippet: 'HTTP 401 on http node',
-    })
-    expect(parsed.success).toBe(true)
-  })
-
-  it('rejects an unknown kind', () => {
-    const parsed = EvidenceRowSchema.safeParse({ kind: 'mystery', sourceRef: 'x', snippet: 'y' })
-    expect(parsed.success).toBe(false)
-  })
-
-  it('accepts an empty evidence list (empty is valid)', () => {
-    const parsed = EvidenceListSchema.safeParse([])
-    expect(parsed.success).toBe(true)
-    if (parsed.success) expect(parsed.data).toEqual([])
-  })
-})
+} from './ai-evidence-runtime'
 
 describe('scrubEvidenceRow — redaction at read', () => {
   it('redacts an OpenAI-shaped secret in the snippet', () => {
@@ -116,5 +95,20 @@ describe('scrubEvidenceRows — list bounding', () => {
       { kind: 'memory_entry', sourceRef: 'c', snippet: 'third' },
     ]
     expect(scrubEvidenceRows(rows).map((r) => r.snippet)).toEqual(['first', 'second', 'third'])
+  })
+})
+
+// Keyed by the manifest union: a kind Go adds fails typecheck until it has a chip label.
+const EVIDENCE_KINDS: Record<EvidenceKind, true> = {
+  recovery_feedback: true, memory_entry: true, runbook_excerpt: true, recent_error: true,
+  signature_rule: true, tool_contract: true, recovery_playbook: true,
+}
+
+describe('evidence kind copy', () => {
+  it('labels every kind the manifest admits', () => {
+    const keys = Object.keys(EVIDENCE_KINDS).map((kind) => `recoveryDialog.evidence.kind.${kind}`)
+    for (const catalog of [en, es] as Record<string, string>[]) {
+      expect(keys.filter((key) => !catalog[key])).toEqual([])
+    }
   })
 })

@@ -65,6 +65,8 @@ var Components = []Component{
 	{"StoredColumnJSON", storedColumnJSON},
 
 	// Recovery
+	{"RecoveryCaseState", recoveryCaseState},
+	{"RecoveryActorKind", recoveryActorKind},
 	{"RecoveryCase", recoveryCase},
 	{"RecoveryArtifact", recoveryArtifact},
 	{"RecoveryTransition", recoveryTransition},

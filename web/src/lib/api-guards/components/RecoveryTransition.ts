@@ -3,18 +3,20 @@
 
 import type * as Api from "../../api-types.generated"
 import { isAny, isShape, isString, nullable } from "../../guards"
+import { isRecoveryActorKind } from "./RecoveryActorKind"
+import { isRecoveryCaseState } from "./RecoveryCaseState"
 
 export function isRecoveryTransition(value: unknown): value is Api.RecoveryTransition {
   return isShape(value, {
     actorId: nullable(isString),
-    actorKind: isString,
+    actorKind: isRecoveryActorKind,
     caseId: isString,
     evidenceJson: isAny,
-    fromState: isString,
+    fromState: isRecoveryCaseState,
     id: isString,
     occurredAt: isString,
     orgId: isString,
     reason: nullable(isString),
-    toState: isString,
+    toState: isRecoveryCaseState,
   })
 }

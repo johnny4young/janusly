@@ -1,6 +1,7 @@
 package aievidence
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -44,5 +45,14 @@ func TestScrubRowsCapsAndScrubs(t *testing.T) {
 	}
 	if scrubbed.Weight != 1 {
 		t.Fatalf("weight must clamp to [0,1]: %f", scrubbed.Weight)
+	}
+}
+
+// Every kind ScrubRows admits reaches the wire, so the manifest enum must list it.
+func TestKindListCoversScrubbedKinds(t *testing.T) {
+	for kind := range Kinds {
+		if !slices.Contains(KindList, kind) {
+			t.Errorf("KindList lacks %q", kind)
+		}
 	}
 }

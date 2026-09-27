@@ -2,16 +2,17 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { isAny, isShape, isString, nullable } from "../../guards"
+import { isAny, isShape, isString, literal, nullable } from "../../guards"
+import { isRecoveryActorKind } from "./RecoveryActorKind"
 
 export function isRecoveryArtifact(value: unknown): value is Api.RecoveryArtifact {
   return isShape(value, {
     actorId: nullable(isString),
-    actorKind: isString,
+    actorKind: isRecoveryActorKind,
     caseId: isString,
     createdAt: isString,
     id: isString,
-    kind: isString,
+    kind: literal("diagnosis", "candidate", "validation", "publication", "verification"),
     payload: isAny,
     sha256: isString,
   })

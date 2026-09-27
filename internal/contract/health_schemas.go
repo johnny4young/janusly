@@ -42,7 +42,8 @@ var workflowHealthScore = closedObj(map[string]any{
 
 var workflowHealthDelta = closedObj(map[string]any{
 	"workflowId": str(), "afterVersion": intT(), "windowDays": intT(), "hasEnoughData": boolT(),
-	"before": workflowHealthScore, "after": workflowHealthScore,
+	"minRunsForDelta": map[string]any{"type": "integer", "minimum": 1},
+	"before":          workflowHealthScore, "after": workflowHealthScore,
 	"delta": nullable(closedObj(map[string]any{
 		"score": intT(), "p95LatencyMs": nullableNum(), "costPerRunUsd": nullableNum(),
 	}, "score", "p95LatencyMs", "costPerRunUsd")),
@@ -55,5 +56,5 @@ var workflowHealthDelta = closedObj(map[string]any{
 	"priorVersion": nullable(closedObj(map[string]any{
 		"version": intT(), "versionId": str(),
 	}, "version", "versionId")),
-}, "workflowId", "afterVersion", "windowDays", "hasEnoughData", "before", "after", "delta",
+}, "workflowId", "afterVersion", "windowDays", "hasEnoughData", "minRunsForDelta", "before", "after", "delta",
 	"recentRunsAgainstAfter", "sameFailureSinceApply", "priorVersion")

@@ -2,11 +2,12 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { isAny, isInteger, isShape, isString, nullable } from "../../guards"
+import { isAny, isInteger, isShape, isString, literal, nullable } from "../../guards"
+import { isRecoveryCaseState } from "./RecoveryCaseState"
 
 export function isRecoveryCase(value: unknown): value is Api.RecoveryCase {
   return isShape(value, {
-    action: isString,
+    action: literal("observe", "quarantine"),
     createdAt: isString,
     createdBy: nullable(isString),
     detailsJson: isAny,
@@ -20,7 +21,7 @@ export function isRecoveryCase(value: unknown): value is Api.RecoveryCase {
     runId: isString,
     source: isString,
     sourceNodeId: isString,
-    state: isString,
+    state: isRecoveryCaseState,
     updatedAt: isString,
     workflowId: nullable(isString),
     workflowVersionId: isString,
