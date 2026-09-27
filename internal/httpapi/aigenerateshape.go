@@ -78,8 +78,8 @@ func checkFields(object map[string]any, prefix string, fields []string, want str
 	}
 }
 
-// checkElements leaves a non-object element in place: Parse then reports it
-// under the same structural path, without any kind text of its own.
+// checkElements swaps a non-object element for an empty object, keeping indices
+// stable; Parse's reports about that element are then filtered as derived.
 func checkElements(document map[string]any, field string, stringFields []string,
 	report func(string, string, any), extra func(map[string]any, string)) {
 	value, present := document[field]
@@ -92,16 +92,21 @@ func checkElements(document map[string]any, field string, stringFields []string,
 		delete(document, field)
 		return
 	}
-	elements = append([]any(nil), elements...)
+	elements = slices.Clone(elements)
 	document[field] = elements
 	for index, raw := range elements {
+		path := field + "." + strconv.Itoa(index)
 		element, ok := raw.(map[string]any)
 		if !ok {
+			if raw != nil {
+				report(path, "object", raw)
+				elements[index] = map[string]any{}
+			}
 			continue
 		}
 		element = maps.Clone(element)
 		elements[index] = element
-		prefix := field + "." + strconv.Itoa(index) + "."
+		prefix := path + "."
 		checkFields(element, prefix, stringFields, "string", report)
 		extra(element, prefix)
 	}
@@ -154,7 +159,7 @@ func jsonKind(value any) string {
 	switch value.(type) {
 	case string:
 		return "string"
-	case float64, json.Number:
+	case float64:
 		return "number"
 	case bool:
 		return "boolean"

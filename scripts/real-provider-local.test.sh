@@ -52,7 +52,7 @@ fi
 ledger_dir=$(mktemp -d "${TMPDIR:-/tmp}/janusly-real-provider-ledger-test.XXXXXX")
 trap 'rm -f -- "$ledger_dir/inside"; rmdir "$ledger_dir" 2>/dev/null || true' EXIT
 ledger_path="$ledger_dir/ledger.jsonl"
-ln -s "$root/output/qualification" "$ledger_dir/inside"
+ln -s "$root" "$ledger_dir/inside"
 if ANTHROPIC_API_KEY=fake JANUSLY_REAL_PROVIDER_CONSENT=1 \
   JANUSLY_REAL_PROVIDER_LEDGER="$ledger_dir/inside/ledger.jsonl" \
   JANUSLY_REAL_PROVIDER_SELFTEST=1 "$script" >/dev/null 2>&1; then

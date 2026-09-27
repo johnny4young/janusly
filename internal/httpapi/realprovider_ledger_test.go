@@ -38,13 +38,13 @@ type realProviderLedgerTotals struct {
 
 const (
 	realProviderLedgerMaxBytes      = 1 << 20
-	realProviderLedgerCeilingMicros = int64(realProviderDefaultMaxUSD * 1_000_000)
+	realProviderLedgerCeilingMicros = int64(realProviderMaxUSD * 1_000_000)
 )
 
 var errRealProviderLedgerLimit = errors.New("qualification lifetime reservation limit reached")
 
 func microUSD(value float64) (int64, error) {
-	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > realProviderDefaultMaxUSD {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > realProviderMaxUSD {
 		return 0, errors.New("invalid qualification USD amount")
 	}
 	return int64(math.Ceil(value * 1_000_000)), nil

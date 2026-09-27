@@ -30,7 +30,7 @@ const (
 	realProviderLifetimeCallsPerCase = 10
 	realProviderCaseCount            = 20
 	realProviderUsefulMinimum        = 18
-	realProviderDefaultMaxUSD        = 6.0
+	realProviderMaxUSD               = 6.0
 	realProviderOutputUnits          = 2400
 )
 
@@ -381,7 +381,7 @@ func TestRealProviderQualificationRejectsPriceOverrideAndWrongModelBeforeEgress(
 			}
 			delegate := &qualificationFakeClient{}
 			global := &boundedProductClient{
-				delegate: delegate, maxCalls: realProviderMaxCalls, maxUSD: realProviderDefaultMaxUSD,
+				delegate: delegate, maxCalls: realProviderMaxCalls, maxUSD: realProviderMaxUSD,
 				ledger:           realProviderLedger{path: t.TempDir() + "/ledger.jsonl"},
 				defaultMaxOutput: realProviderOutputUnits,
 			}
@@ -421,10 +421,10 @@ func TestWorkflowAssuranceRealAnthropicEvaluation(t *testing.T) {
 	if key == "" {
 		t.Fatal("ANTHROPIC_API_KEY is required for the explicit realprovider profile")
 	}
-	maxUSD := realProviderDefaultMaxUSD
+	maxUSD := realProviderMaxUSD
 	if raw := os.Getenv("JANUSLY_REAL_PROVIDER_MAX_USD"); raw != "" {
 		parsed, err := strconv.ParseFloat(raw, 64)
-		if err != nil || parsed <= 0 || parsed > realProviderDefaultMaxUSD {
+		if err != nil || parsed <= 0 || parsed > realProviderMaxUSD {
 			t.Fatalf("JANUSLY_REAL_PROVIDER_MAX_USD must be in (0,6], got %q", raw)
 		}
 		maxUSD = parsed

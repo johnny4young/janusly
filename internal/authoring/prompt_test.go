@@ -105,3 +105,11 @@ func TestCapabilityPromptBlockTrimsBuiltinFieldsBeforeTenantCapabilities(t *test
 		t.Fatalf("built-in field detail evicted tenant MCP tools: retained=%d baseline=%d omitted=%v", retained, baseline, omitted)
 	}
 }
+
+func TestEveryBuiltinToolFieldFitsThePromptProjection(t *testing.T) {
+	for _, entry := range NewBuilder(nil, nil).Build(t.Context(), "org").BuiltinTools {
+		if len(entry.InputFields) > maxToolPromptFields {
+			t.Fatalf("%s declares %d input fields; the prompt keeps only %d", entry.Name, len(entry.InputFields), maxToolPromptFields)
+		}
+	}
+}

@@ -537,6 +537,40 @@ func TestMistypedFieldsAreReportedStructurallyAndAllAtOnce(t *testing.T) {
 	}
 }
 
+func TestMistypedFieldsLeaveEmptyGraphArraysIntact(t *testing.T) {
+	for _, raw := range []string{
+		`{"name":7,"nodes":[{"id":"a","type":"noop","config":{}}],"edges":[]}`,
+		`{"name":7,"nodes":[],"edges":[]}`,
+	} {
+		for _, issue := range validateGeneratedWorkflowCandidate([]byte(raw)) {
+			if strings.HasPrefix(issue.Message, "nodes:") || strings.HasPrefix(issue.Message, "edges:") {
+				t.Fatalf("empty array reported as a defect for %s: %s", raw, issue.Message)
+			}
+		}
+	}
+}
+
+func TestNonObjectGraphElementsAreReportedStructurally(t *testing.T) {
+	raw := []byte(`{"name":7,"nodes":[5,{"id":"b","type":"noop","config":{}}],"edges":["x"]}`)
+	var messages []string
+	for _, issue := range validateGeneratedWorkflowCandidate(raw) {
+		messages = append(messages, issue.Message)
+	}
+	joined := strings.Join(messages, "\n")
+	for _, want := range []string{
+		"name: expected string, received number",
+		"nodes.0: expected object, received number",
+		"edges.0: expected object, received string",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing structural issue %q in:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "json:") || strings.Contains(joined, "nodes.0.") || strings.Contains(joined, "edges.0.") {
+		t.Fatalf("a replaced element must not leak decoder text or derived reports:\n%s", joined)
+	}
+}
+
 func TestMistypedFieldListsMatchParseDecoding(t *testing.T) {
 	documents := []string{}
 	for _, field := range workflowStringFields {
