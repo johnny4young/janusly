@@ -50,14 +50,13 @@ export function scrubEvidenceRows(rows: readonly EvidenceRow[]): EvidenceRow[] {
 }
 
 /** Re-scrub guarded evidence rows at read time; longer lists and rows are truncated for display, never rejected. */
-export function parseEvidenceRows(rows: readonly SuggestionEvidence[]): EvidenceRow[] | null {
+export function parseEvidenceRows(rows: readonly SuggestionEvidence[]): EvidenceRow[] {
   const out: EvidenceRow[] = []
   for (const row of rows) {
     if (out.length >= MAX_EVIDENCE_ROWS) break
     const scrubbed = scrubEvidenceRow(row)
-    // Each chip renders a snippet and the source token the operator traces back.
-    if (!scrubbed.snippet || !scrubbed.sourceRef) return null
-    out.push(scrubbed)
+    // Each chip renders a snippet and the source token the operator traces back; a row without one is hidden.
+    if (scrubbed.snippet && scrubbed.sourceRef) out.push(scrubbed)
   }
   return out
 }

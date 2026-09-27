@@ -90,6 +90,16 @@ describe('parseRecoveryPatchSuggestion', () => {
     expect(parseRecoveryPatchSuggestion({ ...currentResponse, suggestions, aiError: 'e'.repeat(900) }, options)?.suggestions).toHaveLength(4)
   })
 
+  it('hides an evidence row that has no snippet or source token after scrubbing', () => {
+    const evidence = [
+      { kind: 'recent_error', sourceRef: ' \u0000 ', snippet: 'x' },
+      { kind: 'recent_error', sourceRef: 'run-1', snippet: '\u0000\u0001' },
+      { kind: 'recent_error', sourceRef: 'run-2', snippet: 'timeout' },
+    ]
+    const suggestion = parseRecoveryPatchSuggestion({ ...currentResponse, evidence }, options)
+    expect(suggestion?.evidence).toEqual([{ kind: 'recent_error', sourceRef: 'run-2', snippet: 'timeout' }])
+  })
+
   it('leaves evidence counts, lengths and weights to the server and truncates for display', () => {
     const evidence = Array.from({ length: 25 }, (_, index) => ({
       kind: 'recent_error', sourceRef: `run-${index}`, snippet: 's'.repeat(900), label: 'l'.repeat(300), weight: 2,
@@ -133,10 +143,6 @@ describe('parseRecoveryPatchSuggestion', () => {
       ...currentResponse,
       mode: 'fallback',
       suggestions: [{ ...tab, confidence: 0, calibratedConfidence: 100 }],
-    }],
-    ['evidence without a source token after scrubbing', {
-      ...currentResponse,
-      evidence: [{ kind: 'recent_error', sourceRef: ' \u0000 ', snippet: 'x' }],
     }],
     ['a mismatched recovery passport', {
       ...currentResponse,
