@@ -549,7 +549,7 @@ describe('<DeadLettersPanel />', () => {
     act(() => requestRecoveryQueueFocus('first'))
     await waitFor(() => expect(detailNode()).toBe('node-first'))
     expect(screen.getByTestId('dlq-select-toggle')).toHaveAttribute('aria-pressed', 'false')
-    expect(document.querySelector('section.detail-box')).toHaveFocus()
+    await waitFor(() => expect(document.querySelector('section.detail-box')).toHaveFocus())
     expect(screen.getByTestId('recovery-queue')).not.toHaveFocus()
 
     act(() => requestRecoveryQueueFocus('second'))
@@ -557,7 +557,7 @@ describe('<DeadLettersPanel />', () => {
     expect(detailNode()).toBeUndefined()
     await act(async () => resolveSecond(mockDeadLetter('second')))
     await waitFor(() => expect(detailNode()).toBe('node-second'))
-    expect(document.querySelector('section.detail-box')).toHaveFocus()
+    await waitFor(() => expect(document.querySelector('section.detail-box')).toHaveFocus())
 
     fireEvent.click(screen.getByTestId('dlq-row-unrelated'))
     await waitFor(() => expect(detailNode()).toBe('node-unrelated'))
