@@ -22,9 +22,9 @@ func FuzzParseJSONValueBounded(f *testing.F) {
 			}
 			return
 		}
-		again, againOK := ParseJSONValueBounded(text, limit)
-		if ok != againOK || !reflect.DeepEqual(value, again) {
-			t.Fatal("bounded parsing must be deterministic")
+		unbounded, unboundedOK := ParseJSONValue(text)
+		if ok != unboundedOK || !reflect.DeepEqual(value, unbounded) {
+			t.Fatal("within its byte limit, bounded parsing must match ParseJSONValue")
 		}
 		if !ok {
 			if value != nil {
