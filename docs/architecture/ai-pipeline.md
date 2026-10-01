@@ -6,6 +6,16 @@ before calling the client.
 
 ## Invariants
 
+Workflow generation audits preserve `repairIssueCodes` from the first draft,
+including when a repair succeeds. Both AI success and provider fallback record
+at most five codes and omit the field when there are none. Fallback's final
+`validationIssueCodes` are separately capped at five; qualification keeps the
+complete internal code sets. These fields contain validator codes only, never
+prompts or model drafts. Audit writes remain best-effort.
+
+The client's `ResponseFormat` is a hint: it currently uses free-JSON extraction
+and domain validation rather than configuring provider-native structured output.
+
 - Anthropic is the supported completion provider.
 - Every call catches provider errors and returns a deterministic fallback.
 - Usage recording occurs at the client boundary and cannot fail the call.
