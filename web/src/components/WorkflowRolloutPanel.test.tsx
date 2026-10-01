@@ -129,7 +129,9 @@ describe('<WorkflowRolloutPanel />', () => {
       else if (change === 'unmount') view.rerender(<ConfirmProvider><div>Another destination</div></ConfirmProvider>)
       else act(() => useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'workflow-2' }
         : change === 'organization' ? { orgId: 'org-2' } : { userId: 'user-2' }))
+      await act(async () => {
       fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
+    })
       await act(async () => {})
       expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
     },
@@ -316,7 +318,9 @@ describe('<WorkflowRolloutPanel />', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Return to baseline' }))
     expect(screen.getByRole('alertdialog')).toHaveTextContent('In-flight runs are not interrupted.')
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
+    })
 
     expect(await screen.findByText('Rolled back')).toBeInTheDocument()
     expect(screen.getByText('New production traffic is using the baseline version.')).toBeInTheDocument()
@@ -363,10 +367,14 @@ describe('<WorkflowRolloutPanel />', () => {
     expect(comparison).toHaveTextContent('Outcome dataset comparison')
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Run comparison' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Run comparison' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Run comparison' }))
+    })
 
-    expect(await screen.findByText('4/4', {}, { timeout: 5_000 })).toBeInTheDocument()
-    await waitFor(() => expect(comparison).toHaveTextContent('Passed'), { timeout: 5_000 })
+    // The mutation invalidates the parent and remounts the comparison panel.
+    // Assert against the connected document, not a pre-mutation element.
+    await waitFor(() => expect(screen.getByText('4/4')).toBeInTheDocument(), { timeout: 5_000 })
+    await waitFor(() => expect(screen.getByTestId('workflow-recovery-qualification')).toHaveTextContent('Passed'), { timeout: 5_000 })
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: 'Start canary' }))
 
