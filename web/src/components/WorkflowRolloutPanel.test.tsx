@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -88,6 +88,11 @@ type QualificationPayload = {
 }
 
 describe('<WorkflowRolloutPanel />', () => {
+  beforeAll(async () => {
+    // Cold Vite transforms belong to fixture setup, not the control deadline.
+    await Promise.all([import('./WorkflowRolloutStatus'), import('./WorkflowRecoveryQualification')])
+  })
+
   beforeEach(() => {
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({
@@ -274,7 +279,7 @@ describe('<WorkflowRolloutPanel />', () => {
     fireEvent.change(screen.getByLabelText('Min. outcomes'), { target: { value: '5' } })
     const startButton = screen.getByRole('button', { name: 'Start canary' })
     await waitFor(() => expect(startButton).toBeEnabled())
-    fireEvent.click(startButton)
+    await act(async () => { fireEvent.click(startButton) })
 
     await waitFor(() => expect(vi.mocked(api).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true))
     const createOptions = vi.mocked(api).mock.calls.find(([, options]) => options?.method === 'POST')?.[1]
@@ -314,14 +319,21 @@ describe('<WorkflowRolloutPanel />', () => {
       return { rollout }
     })
 
-    render(<ConfirmProvider><WorkflowRolloutPanel /></ConfirmProvider>)
+    await act(async () => {
+      render(<ConfirmProvider><WorkflowRolloutPanel /></ConfirmProvider>)
+    })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Return to baseline' }))
+    const rollbackButton = await screen.findByRole('button', { name: 'Return to baseline' })
+    await act(async () => { fireEvent.click(rollbackButton) })
     expect(screen.getByRole('alertdialog')).toHaveTextContent('In-flight runs are not interrupted.')
     await act(async () => {
       fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
     })
 
+    await waitFor(() => expect(api).toHaveBeenCalledWith(
+      '/workflows/workflow-1/rollout/rollout-1/rollback',
+      expect.objectContaining({ method: 'POST' }),
+    ))
     expect(await screen.findByText('Rolled back')).toBeInTheDocument()
     expect(screen.getByText('New production traffic is using the baseline version.')).toBeInTheDocument()
   })

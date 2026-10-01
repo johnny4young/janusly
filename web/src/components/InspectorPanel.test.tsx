@@ -271,17 +271,23 @@ describe('<InspectorPanel /> step-kind changes', () => {
 
   it('keeps the current kind and restores focus when the operator cancels', async () => {
     const onUpdateNodeType = vi.fn()
-    renderPanelWithConfirm({ selectedNode: makeNode('node-a'), onUpdateNodeType })
+    await act(async () => {
+      renderPanelWithConfirm({ selectedNode: makeNode('node-a'), onUpdateNodeType })
+    })
     const select = screen.getByLabelText('Step kind') as HTMLSelectElement
-    select.focus()
-
-    fireEvent.change(select, { target: { value: 'approval' } })
+    await act(async () => {
+      select.focus()
+      fireEvent.change(select, { target: { value: 'approval' } })
+    })
 
     expect(await screen.findByRole('alertdialog', { name: 'Change step kind?' })).toHaveTextContent(
       'Change Do nothing to Ask approval?',
     )
     expect(onUpdateNodeType).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByTestId('confirm-dialog-cancel'))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('confirm-dialog-cancel'))
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    })
 
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(select.value).toBe('noop')
