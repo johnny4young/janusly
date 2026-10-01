@@ -112,6 +112,8 @@ type V1ServerOptions struct {
 	// StartRateLimitPerMinute bounds POST /v1/start per organization; 0
 	// resolves JANUSLY_START_RATE_LIMIT_PER_MIN or the default.
 	StartRateLimitPerMinute int
+	// rateLimitNow is the package-local fixed-window clock seam for tests.
+	rateLimitNow func() time.Time
 }
 
 // NewV1HandlerWithOptions builds the production surface with explicitly
@@ -155,6 +157,9 @@ func newV1HandlerWithWorkOS(
 	server.limiter = ratelimit.New(pool, ratelimit.Hooks{
 		OnError: server.limiterTracker.RecordError, OnSuccess: server.limiterTracker.RecordRecovery,
 	})
+	if options.rateLimitNow != nil {
+		server.limiter.SetNow(options.rateLimitNow)
+	}
 	server.queueCache = &queueHealthCache{read: server.readQueueSnapshot}
 	server.mcp = mcpclient.New(pool, server.limiter)
 	// The hub reconnects on connection loss itself; supervision is what turns

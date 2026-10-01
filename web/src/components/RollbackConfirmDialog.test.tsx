@@ -3,7 +3,7 @@ import { useInvalidationNonce } from '../lib/query-cache'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
-import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
+import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 
@@ -39,9 +39,6 @@ const target = {
 
 describe('<RollbackConfirmDialog />', () => {
   beforeEach(() => {
-    // Cancel any pending bumpPlatformVersion timer left by a prior
-    // test so the 100ms debounce can't bleed across cases.
-    __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({ ...initialState, currentWorkflowId: 'wf_rollback', toasts: [], identityContext: {
       identity: { userId: 'dev-user', email: null, mode: 'dev-headers', source: 'dev' },

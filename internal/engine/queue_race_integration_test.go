@@ -210,6 +210,8 @@ func TestShutdownDrainsClaimedWorkAndResumes(t *testing.T) {
 	}
 
 	counter := newExecCounter()
+	claimedSlow := make(chan struct{}, 2)
+	releaseSlow := make(chan struct{})
 	slowExec := func(_ context.Context, claim ClaimedNode, _ domain.Node, _ *domain.Workflow, _ map[string]any) (any, error) {
 		if claim.RunID != runID {
 			return nil, nil
@@ -218,7 +220,11 @@ func TestShutdownDrainsClaimedWorkAndResumes(t *testing.T) {
 			return nil, fmt.Errorf("node %s executed %d times", claim.NodeID, n)
 		}
 		if strings.HasPrefix(claim.NodeID, "slow_") {
-			time.Sleep(200 * time.Millisecond)
+			select {
+			case claimedSlow <- struct{}{}:
+			default:
+			}
+			<-releaseSlow
 		}
 		return nil, nil
 	}
@@ -229,10 +235,20 @@ func TestShutdownDrainsClaimedWorkAndResumes(t *testing.T) {
 		defer close(firstDone)
 		_ = eng.RunWorkers(firstCtx, 2, 50*time.Millisecond, slowExec, quietLogger())
 	}()
-	// Give the pool time to finish the root and claim slow nodes, then pull
-	// the plug mid-flight.
-	time.Sleep(350 * time.Millisecond)
+	// Cancel while both workers own a slow node, not while an arbitrary
+	// wall-clock delay may leave one of them inside a claim transaction.
+	for range 2 {
+		select {
+		case <-claimedSlow:
+		case <-time.After(5 * time.Second):
+			cancelFirst()
+			close(releaseSlow)
+			<-firstDone
+			t.Fatal("workers must claim slow nodes before testing drain")
+		}
+	}
 	cancelFirst()
+	close(releaseSlow)
 	select {
 	case <-firstDone:
 	case <-time.After(5 * time.Second):

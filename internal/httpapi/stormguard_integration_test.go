@@ -5,6 +5,7 @@ package httpapi
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 // The per-trigger storm guard end to end proves the compatibility contract:
@@ -12,7 +13,13 @@ import (
 // audits trigger.event.skipped, and answers 429 with the contract's
 // exact body — while a distinct trigger keeps its own budget.
 func TestWebhookStormGuardSkipsOverLimit(t *testing.T) {
-	h := newAPIHarness(t)
+	// Keep all three requests in one logical minute, even at its last
+	// millisecond. Real wall-clock rollover must not reset this fixture.
+	now := time.Now().UTC().Truncate(time.Minute).Add(3*time.Minute - time.Millisecond)
+	options := defaultV1ServerOptionsForTest()
+	options.Logger = quietTestLogger()
+	options.rateLimitNow = func() time.Time { return now }
+	h := newAPIHarnessWithOptions(t, true, options)
 	pool := testPool(t)
 	wfID := "wf-storm-" + h.org
 

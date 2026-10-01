@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -106,7 +106,7 @@ describe('<PermissionGrantsPanel />', () => {
     fireEvent.change(screen.getByPlaceholderText('compliance'), { target: { value: 'release-manager' } })
     // Toggle one permission for the new role
     fireEvent.click(screen.getByLabelText('new-role-workflows.read'))
-    fireEvent.click(screen.getByText(/Create role/))
+    await act(async () => { fireEvent.click(screen.getByText(/Create role/)) })
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith(
         '/org/roles',
@@ -126,7 +126,7 @@ describe('<PermissionGrantsPanel />', () => {
     })
     const saveButtons = screen.getAllByRole('button', { name: /^Save$/ })
     expect(saveButtons.length).toBeGreaterThan(0)
-    fireEvent.click(saveButtons[0])
+    await act(async () => { fireEvent.click(saveButtons[0]) })
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith(
         expect.stringMatching(/^\/org\/roles\//),
@@ -173,7 +173,7 @@ describe('<PermissionGrantsPanel />', () => {
     await waitFor(() => {
       expect(screen.getByText('override')).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByText(/Revert to defaults/))
+    await act(async () => { fireEvent.click(screen.getByText(/Revert to defaults/)) })
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/org/roles/editor', { method: 'DELETE' })
     })

@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
-import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
+import { useWorkflowStore } from '../store'
 import { ConfirmProvider } from './ConfirmDialog'
 import { MembersPanel } from './MembersPanel'
 
@@ -39,9 +39,6 @@ function setupApi(opts: { roles?: unknown; members?: unknown[]; invitations?: un
 
 describe('<MembersPanel /> dynamic role list', () => {
   beforeEach(() => {
-    // Cancel any pending bumpPlatformVersion timer left by a prior
-    // test so the 100ms debounce can't bleed across cases.
-    __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({
       ...initialState,

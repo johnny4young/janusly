@@ -85,9 +85,9 @@ func (e *AIError) Error() string { return e.Class + ": " + e.Message }
 type GenerateTextInput struct {
 	System string
 	Prompt string
-	// ResponseFormat is the provider-agnostic JSON hint. Anthropic has no
-	// native JSON mode (the contract's registry entry is a no-op there
-	// too); free_json extraction happens above this layer.
+	// ResponseFormat is the provider-agnostic JSON hint. This client does not
+	// configure native structured output; free_json extraction and workflow
+	// validation happen above this layer.
 	ResponseFormat string
 	// ModelHint overrides the resolved model for one call: a bare model id
 	// keeps the configured provider; "<provider>/<model>" names both.

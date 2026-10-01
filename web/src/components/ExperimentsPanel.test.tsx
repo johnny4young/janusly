@@ -1,9 +1,9 @@
 import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { changeAppLanguage } from '../i18n'
-import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
+import { useWorkflowStore } from '../store'
 import { ExperimentsPanel } from './ExperimentsPanel'
 import { useInvalidationNonce } from '../lib/query-cache'
 
@@ -38,13 +38,10 @@ const experiment = {
 }
 
 beforeEach(() => {
-  __resetBumpCoalesceForTests()
   changeAppLanguage('en')
   vi.mocked(api).mockReset()
   useWorkflowStore.setState({ toasts: [] })
 })
-
-afterEach(() => __resetBumpCoalesceForTests())
 
 describe('<ExperimentsPanel />', () => {
   it('loads a selected experiment and renders aggregate control/candidate metrics', async () => {

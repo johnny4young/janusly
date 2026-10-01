@@ -321,14 +321,7 @@ func (s *V1Server) generateWorkflowFromPrompt(
 	_ = json.Unmarshal(workflowJSON, &workflowDoc)
 	s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 		TargetType: "ai", TargetID: stringField(workflowDoc, "id"),
-		Metadata: map[string]any{
-			"mode": "ai", "generationMode": "free_json",
-			"model": meta.model, "provider": meta.provider,
-			"modelCallCount": meta.modelCalls,
-			"attempts":       meta.attempts, "repairAttempts": meta.repairAttempts,
-			"candidateCount": meta.candidateCount, "validCandidates": meta.validCandidates,
-			"intentContractAdded": meta.intentContractAdded, "recoveryContractAdded": meta.recoveryContractAdded,
-		},
+		Metadata: generationAuditMetadata(meta),
 	})
 	return opOK(withMode(workflowDoc, "ai", ""))
 }
@@ -347,19 +340,31 @@ func budgetExceededResult(gate aibudget.CheckResult) opResult {
 	}}
 }
 
-func fallbackGenerationAuditMetadata(meta generationMeta, aiErr *ai.AIError, compilation assuranceCompilation) map[string]any {
+func generationAuditMetadata(meta generationMeta) map[string]any {
 	metadata := map[string]any{
-		"mode": "fallback", "error": aiErr.Error(), "generationMode": "free_json",
+		"mode": "ai", "generationMode": "free_json",
 		"model": meta.model, "provider": meta.provider, "modelCallCount": meta.modelCalls,
 		"attempts": meta.attempts, "repairAttempts": meta.repairAttempts,
 		"candidateCount": meta.candidateCount, "validCandidates": meta.validCandidates,
-		"intentContractAdded": compilation.AddedOutputs, "recoveryContractAdded": compilation.AddedRecoveryContract,
+		"intentContractAdded": meta.intentContractAdded, "recoveryContractAdded": meta.recoveryContractAdded,
 	}
+	if len(meta.repairIssueCodes) > 0 {
+		metadata["repairIssueCodes"] = slices.Clone(meta.repairIssueCodes[:min(len(meta.repairIssueCodes), auditIssueCodeLimit)])
+	}
+	return metadata
+}
+
+func fallbackGenerationAuditMetadata(meta generationMeta, aiErr *ai.AIError, compilation assuranceCompilation) map[string]any {
+	metadata := generationAuditMetadata(meta)
+	metadata["mode"] = "fallback"
+	metadata["error"] = aiErr.Error()
+	metadata["intentContractAdded"] = compilation.AddedOutputs
+	metadata["recoveryContractAdded"] = compilation.AddedRecoveryContract
 	if meta.failureStage != "" {
 		metadata["failureStage"] = meta.failureStage
 	}
 	if len(meta.validationIssueCodes) > 0 {
-		metadata["validationIssueCodes"] = meta.validationIssueCodes[:min(len(meta.validationIssueCodes), auditIssueCodeLimit)]
+		metadata["validationIssueCodes"] = slices.Clone(meta.validationIssueCodes[:min(len(meta.validationIssueCodes), auditIssueCodeLimit)])
 	}
 	return metadata
 }

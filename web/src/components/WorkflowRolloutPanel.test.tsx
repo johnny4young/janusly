@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -88,6 +88,11 @@ type QualificationPayload = {
 }
 
 describe('<WorkflowRolloutPanel />', () => {
+  beforeAll(async () => {
+    // Cold Vite transforms belong to fixture setup, not the control deadline.
+    await Promise.all([import('./WorkflowRolloutStatus'), import('./WorkflowRecoveryQualification')])
+  })
+
   beforeEach(() => {
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({
@@ -129,7 +134,9 @@ describe('<WorkflowRolloutPanel />', () => {
       else if (change === 'unmount') view.rerender(<ConfirmProvider><div>Another destination</div></ConfirmProvider>)
       else act(() => useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'workflow-2' }
         : change === 'organization' ? { orgId: 'org-2' } : { userId: 'user-2' }))
-      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
+      await act(async () => {
+        fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
+      })
       await act(async () => {})
       expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
     },
@@ -272,7 +279,7 @@ describe('<WorkflowRolloutPanel />', () => {
     fireEvent.change(screen.getByLabelText('Min. outcomes'), { target: { value: '5' } })
     const startButton = screen.getByRole('button', { name: 'Start canary' })
     await waitFor(() => expect(startButton).toBeEnabled())
-    fireEvent.click(startButton)
+    await act(async () => { fireEvent.click(startButton) })
 
     await waitFor(() => expect(vi.mocked(api).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true))
     const createOptions = vi.mocked(api).mock.calls.find(([, options]) => options?.method === 'POST')?.[1]
@@ -312,12 +319,21 @@ describe('<WorkflowRolloutPanel />', () => {
       return { rollout }
     })
 
-    render(<ConfirmProvider><WorkflowRolloutPanel /></ConfirmProvider>)
+    await act(async () => {
+      render(<ConfirmProvider><WorkflowRolloutPanel /></ConfirmProvider>)
+    })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Return to baseline' }))
+    const rollbackButton = await screen.findByRole('button', { name: 'Return to baseline' })
+    await act(async () => { fireEvent.click(rollbackButton) })
     expect(screen.getByRole('alertdialog')).toHaveTextContent('In-flight runs are not interrupted.')
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
+    })
 
+    await waitFor(() => expect(api).toHaveBeenCalledWith(
+      '/workflows/workflow-1/rollout/rollout-1/rollback',
+      expect.objectContaining({ method: 'POST' }),
+    ))
     expect(await screen.findByText('Rolled back')).toBeInTheDocument()
     expect(screen.getByText('New production traffic is using the baseline version.')).toBeInTheDocument()
   })
@@ -363,10 +379,14 @@ describe('<WorkflowRolloutPanel />', () => {
     expect(comparison).toHaveTextContent('Outcome dataset comparison')
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Run comparison' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Run comparison' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Run comparison' }))
+    })
 
-    expect(await screen.findByText('4/4', {}, { timeout: 5_000 })).toBeInTheDocument()
-    await waitFor(() => expect(comparison).toHaveTextContent('Passed'), { timeout: 5_000 })
+    // The mutation invalidates the parent and remounts the comparison panel.
+    // Assert against the connected document, not a pre-mutation element.
+    await waitFor(() => expect(screen.getByText('4/4')).toBeInTheDocument(), { timeout: 5_000 })
+    await waitFor(() => expect(screen.getByTestId('workflow-recovery-qualification')).toHaveTextContent('Passed'), { timeout: 5_000 })
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: 'Start canary' }))
 

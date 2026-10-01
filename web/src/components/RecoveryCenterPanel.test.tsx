@@ -979,7 +979,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     />)
 
     expect(await screen.findByTestId('home-priority-inbox')).toBeInTheDocument()
-    expect(screen.getByTestId('recovery-center-action-resolve_approvals')).toBeInTheDocument()
+    // The inbox shell exists before its asynchronously fetched actions.
+    expect(await screen.findByTestId('recovery-center-action-resolve_approvals')).toBeInTheDocument()
     expect(await screen.findByTestId('recovery-center-action-recover_cluster')).toBeInTheDocument()
     expect(screen.queryByTestId('recovery-center-metric-strip')).not.toBeInTheDocument()
 

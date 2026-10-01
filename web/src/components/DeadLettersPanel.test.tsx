@@ -5,7 +5,7 @@ import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { copyText } from '../clipboard'
-import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
+import { useWorkflowStore } from '../store'
 import { DeadLettersPanel, type DeadLetter, type DeadLetterRecovery } from './DeadLettersPanel'
 import { consumeRecoveryAllClear } from './recovery-all-clear-bus'
 import { rotateApiRequestLifecycle } from '../api-request-lifecycle'
@@ -148,7 +148,6 @@ function lastDlqParams(): URLSearchParams | null {
 
 describe('<DeadLettersPanel />', () => {
   beforeEach(() => {
-    __resetBumpCoalesceForTests()
     localStorage.clear()
     sessionStorage.clear()
     vi.mocked(api).mockClear()
@@ -549,7 +548,7 @@ describe('<DeadLettersPanel />', () => {
     act(() => requestRecoveryQueueFocus('first'))
     await waitFor(() => expect(detailNode()).toBe('node-first'))
     expect(screen.getByTestId('dlq-select-toggle')).toHaveAttribute('aria-pressed', 'false')
-    expect(document.querySelector('section.detail-box')).toHaveFocus()
+    await waitFor(() => expect(document.querySelector('section.detail-box')).toHaveFocus())
     expect(screen.getByTestId('recovery-queue')).not.toHaveFocus()
 
     act(() => requestRecoveryQueueFocus('second'))
@@ -557,7 +556,7 @@ describe('<DeadLettersPanel />', () => {
     expect(detailNode()).toBeUndefined()
     await act(async () => resolveSecond(mockDeadLetter('second')))
     await waitFor(() => expect(detailNode()).toBe('node-second'))
-    expect(document.querySelector('section.detail-box')).toHaveFocus()
+    await waitFor(() => expect(document.querySelector('section.detail-box')).toHaveFocus())
 
     fireEvent.click(screen.getByTestId('dlq-row-unrelated'))
     await waitFor(() => expect(detailNode()).toBe('node-unrelated'))
@@ -634,7 +633,6 @@ describe('<DeadLettersPanel />', () => {
 
 describe('<DeadLettersPanel /> — severity filter', () => {
   beforeEach(() => {
-    __resetBumpCoalesceForTests()
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
@@ -723,7 +721,6 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
   const FILTERS_KEY = 'janusly:recoveryQueueFilters'
 
   beforeEach(() => {
-    __resetBumpCoalesceForTests()
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
@@ -791,7 +788,6 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
 
 describe('<DeadLettersPanel /> — sort', () => {
   beforeEach(() => {
-    __resetBumpCoalesceForTests()
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
@@ -900,7 +896,6 @@ describe('<DeadLettersPanel /> — sort', () => {
 
 describe('<DeadLettersPanel /> — bulk replay', () => {
   beforeEach(() => {
-    __resetBumpCoalesceForTests()
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
@@ -1007,7 +1002,6 @@ describe('<DeadLettersPanel /> — bulk replay', () => {
 
 describe('<DeadLettersPanel /> — search', () => {
   beforeEach(() => {
-    __resetBumpCoalesceForTests()
     localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
@@ -1043,7 +1037,6 @@ describe('<DeadLettersPanel /> — search', () => {
 
 describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
   beforeEach(() => {
-    __resetBumpCoalesceForTests()
     localStorage.clear()
     sessionStorage.clear()
     vi.mocked(api).mockClear()
