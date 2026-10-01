@@ -3,22 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BuilderSidebar } from './BuilderSidebar'
 import { changeRuntimeLocale } from '../i18n'
-
-type Deferred<T = void> = {
-  promise: Promise<T>
-  resolve: (value: T | PromiseLike<T>) => void
-  reject: (reason?: unknown) => void
-}
-
-function deferred<T = void>(): Deferred<T> {
-  let resolve!: (value: T | PromiseLike<T>) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
-}
+import { deferred } from '../test/deferred'
 
 function renderSidebar(overrides: Partial<ComponentProps<typeof BuilderSidebar>> = {}) {
   const props: ComponentProps<typeof BuilderSidebar> = {

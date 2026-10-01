@@ -5,19 +5,13 @@ import { changeAppLanguage } from '../i18n'
 import { useWorkflowStore } from '../store'
 import type { WorkflowBriefCompilation, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import { catalog, compilation, workflowProposal } from './ai-studio-fixtures'
+import { deferred } from './deferred'
 
 const initialState = useWorkflowStore.getState()
 const copy = {
   en: { input: 'Business intent', compile: 'Compile intent brief', propose: 'Build proposal', apply: 'Apply proposal to draft' },
   es: { input: 'Intención de negocio', compile: 'Compilar brief de intención', propose: 'Construir propuesta', apply: 'Aplicar propuesta al borrador' },
 } as const
-
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason: Error) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise })
-  return { promise, resolve, reject }
-}
 
 function testProps(): Parameters<typeof AiStudioPanel>[0] {
   return {

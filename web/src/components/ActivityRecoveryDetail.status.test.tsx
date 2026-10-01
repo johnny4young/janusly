@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 import type { DeadLetter } from './dead-letter-types'
 import { ActivityRecoveryDetail } from './ActivityRecoveryDetail'
+import { deferred } from '../test/deferred'
 
 vi.mock('../lib/dead-letter-contract', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/dead-letter-contract')>()),
@@ -23,12 +24,6 @@ function detail(status: 'open' | 'resolved', message: string): Detail {
     createdAt: null, replayedAt: null, replayClaimedAt: null,
     suspectVersion: null, drill: null, drillOutcome: null,
   }
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => { resolve = done })
-  return { promise, resolve }
 }
 
 const handlers = {

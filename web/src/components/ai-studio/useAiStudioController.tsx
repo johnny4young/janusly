@@ -127,7 +127,6 @@ export function useAiStudioController({
     const nextStarter = starterPrompts[selectedStarterIndex]
     if (selectedStarterIndex < 0 || !nextStarter || nextStarter === prompt) return
     replacePrompt(nextStarter)
-    setAuthoringLoading(null)
   }, [authoringLoading, prompt, starterPrompts])
 
   useLayoutEffect(() => {
