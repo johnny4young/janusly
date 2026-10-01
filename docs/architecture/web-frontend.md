@@ -321,6 +321,14 @@ Malformed deployment or qualification payloads fail closed with an inline retry,
 not an empty deployment or permission to start. The numeric controls retain
 native range validation and visible localized labels.
 
+Contextual authoring prefills never submit work. Replacing an intent invalidates
+pending compilation/proposal results and releases their loading state; late
+responses cannot clear a newer request's loading or restore the old proposal.
+Focus returns after the input is enabled. An in-flight Apply retains its exact
+snapshot and stays pending until it settles; a prefill does not cancel it or
+start another operation. Identity and unrelated canvas changes discard pending
+focus alongside the old authoring state.
+
 ## Bundle budgets
 
 `performance-budgets.json` is a ratchet, not a target: the total artifact,

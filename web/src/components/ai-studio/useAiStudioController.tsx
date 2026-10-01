@@ -61,6 +61,7 @@ export function useAiStudioController({
   const [currentLoading, setCurrentLoading] = useState<CurrentWorkflowLoading | null>(null)
   const [result, setResult] = useState<ResultState | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
+  const pendingPromptFocusRef = useRef(false)
   const starterPromptsRef = useRef(starterPrompts)
   const authoringRequestRef = useRef(0)
   const applyRequestRef = useRef(0)
@@ -84,6 +85,10 @@ export function useAiStudioController({
   // they described a prompt that no longer exists.
   const replacePrompt = (next: string) => {
     authoringRequestRef.current += 1
+    pendingPromptFocusRef.current = false
+    // An invalidated compile/propose cannot clear its old loading in finally.
+    // Apply owns a separate snapshot and must remain pending until it settles.
+    setAuthoringLoading((loading) => loading === 'apply' ? loading : null)
     setPrompt(next)
     setBriefCompilation(null)
     setClarificationAnswers({})
@@ -151,7 +156,10 @@ export function useAiStudioController({
     expectedAppliedWorkflowIDRef.current = null
     authoringRequestRef.current += 1
     currentRequestRef.current += 1
-    if (!isExpectedApply) applyRequestRef.current += 1
+    if (!isExpectedApply) {
+      applyRequestRef.current += 1
+      pendingPromptFocusRef.current = false
+    }
     setAuthoringLoading((loading) => isExpectedApply && loading === 'apply' ? loading : null)
     setCurrentLoading(null)
     setResult(null)
@@ -161,6 +169,12 @@ export function useAiStudioController({
     setAuthoringError(null)
     if (!isExpectedApply) setApplied(false)
   }, [currentWorkflowId, workflowRevision])
+
+  useLayoutEffect(() => {
+    if (authoringLoading !== null || !pendingPromptFocusRef.current) return
+    pendingPromptFocusRef.current = false
+    promptRef.current?.focus()
+  }, [authoringLoading, prompt])
 
   const compileBrief = async () => {
     const questions = briefCompilation?.clarifyingQuestions.slice(0, 3) ?? []
@@ -359,7 +373,8 @@ export function useAiStudioController({
     if (actionRequest.action === 'generate') {
       const prefill = actionRequest.prompt?.trim()
       if (prefill) replacePrompt(prefill.slice(0, MAX_AUTHORING_PROMPT_CHARS))
-      promptRef.current?.focus()
+      if (promptRef.current?.disabled) pendingPromptFocusRef.current = true
+      else promptRef.current?.focus()
       return
     }
     void requestedActionHandlersRef.current?.[actionRequest.action]()

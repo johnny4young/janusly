@@ -24,7 +24,8 @@ jq -e '.project == "janusly-e2e-selftest-1" and .ports.application == 33001 and 
 jq -e --arg commit "$expected_commit" --arg tree "$expected_tree" --arg id "$expected_id" \
   '.build == {commit:$commit,tree:$tree,id:$id}' <<<"$result" >/dev/null
 jq -e '.specs == [
-  "e2e/janusly-smoke.spec.ts", "e2e/text-search.spec.ts",
+  "e2e/janusly-smoke.spec.ts", "e2e/guided-authoring.spec.ts",
+  "e2e/durable-authoring.spec.ts", "e2e/text-search.spec.ts",
   "e2e/operator-velocity.spec.ts", "e2e/workflow-rollouts.spec.ts",
   "e2e/recovery-confidence-passport.spec.ts", "e2e/responsive.spec.ts",
   "e2e/usability-study-readiness.spec.ts"
