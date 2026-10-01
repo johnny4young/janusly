@@ -1,8 +1,8 @@
 import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
-import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
+import { useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
 
 vi.mock('../api', async () => {
@@ -35,13 +35,8 @@ describe('<FailureClustersCard />', () => {
   }, 30_000)
 
   beforeEach(() => {
-    __resetBumpCoalesceForTests()
     useWorkflowStore.setState({ toasts: [] })
     vi.mocked(api).mockReset()
-  })
-
-  afterEach(() => {
-    __resetBumpCoalesceForTests()
   })
 
   it('renders cluster rows and expands workflow details', async () => {

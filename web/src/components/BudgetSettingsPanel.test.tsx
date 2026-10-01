@@ -2,7 +2,7 @@ import { useInvalidationNonce } from '../lib/query-cache'
 import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
-import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
+import { useWorkflowStore } from '../store'
 import { BudgetSettingsPanel } from './BudgetSettingsPanel'
 
 vi.mock('../api', () => {
@@ -55,9 +55,6 @@ function mockBudgetApi() {
 
 describe('<BudgetSettingsPanel />', () => {
   beforeEach(() => {
-    // Cancel any pending bumpPlatformVersion timer left by a prior
-    // test so the 100ms debounce can't bleed across cases.
-    __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({ ...initialState, toasts: [], budgetBlocked: null }, true)
   })

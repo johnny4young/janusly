@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Workflow generation audits retain bounded first-draft issue codes even when
+  a repair succeeds, without storing model drafts or prompts.
+
 - Local and hosted acceptance now share the frontend vulnerability audit;
   `make verify` uses a fresh, isolated PostgreSQL 18 project, applies the
   baseline twice, and cleans only resources it owns.

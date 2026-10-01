@@ -235,15 +235,18 @@ func TestShutdownDrainsClaimedWorkAndResumes(t *testing.T) {
 		defer close(firstDone)
 		_ = eng.RunWorkers(firstCtx, 2, 50*time.Millisecond, slowExec, quietLogger())
 	}()
-	// Cancel while both workers own a slow node, not while an arbitrary
-	// wall-clock delay may leave one of them inside a claim transaction.
+	// Cancel only once both workers own a slow node, outside any claim
+	// transaction.
 	for range 2 {
 		select {
 		case <-claimedSlow:
 		case <-time.After(5 * time.Second):
 			cancelFirst()
 			close(releaseSlow)
-			<-firstDone
+			select {
+			case <-firstDone:
+			case <-time.After(5 * time.Second):
+			}
 			t.Fatal("workers must claim slow nodes before testing drain")
 		}
 	}

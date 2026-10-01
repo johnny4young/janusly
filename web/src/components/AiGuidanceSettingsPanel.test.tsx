@@ -3,7 +3,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-li
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
-import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
+import { useWorkflowStore } from '../store'
 import { AiGuidanceSettingsPanel } from './AiGuidanceSettingsPanel'
 import { PLATFORM_TAG, invalidateTags } from '@/lib/query-cache'
 
@@ -14,7 +14,6 @@ const initialState = useWorkflowStore.getState()
 
 describe('<AiGuidanceSettingsPanel />', () => {
   beforeEach(() => {
-    __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
   })
