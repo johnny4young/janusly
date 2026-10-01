@@ -59,6 +59,9 @@ func TestEnforceFixedWindow(t *testing.T) {
 		!strings.HasSuffix(limited.Error(), "s.") {
 		t.Fatalf("Node message shape: %q", limited.Error())
 	}
+	if limited.RetryAfterSec != 61 {
+		t.Fatalf("Retry-After must follow the limiter clock: %d", limited.RetryAfterSec)
+	}
 
 	// A different KEY (other tenant) and a different BUCKET are unaffected.
 	if err := limiter.Enforce(ctx, key+"-other", opts); err != nil {
