@@ -225,6 +225,14 @@ AI Studio route, so the review context remains available. A blank writable canva
 has one primary assisted start and keeps Add step as the manual, provider-free
 path. The teaching overlay still passes palette drops through outside its action.
 
+Contextual authoring prefills never submit work. Replacing an intent invalidates
+pending compilation/proposal results and releases their loading state; late
+responses cannot clear a newer request's loading or restore the old proposal.
+Focus returns after the input is enabled. An in-flight Apply retains its exact
+snapshot and stays pending until it settles; a prefill does not cancel it or
+start another operation. Identity and unrelated canvas changes discard pending
+focus alongside the old authoring state.
+
 The Home hero is a named region inside workspace main, not a second page banner.
 The authoring canvas is an explicitly named programmatic focus target, JSON
 feedback uses status/alert semantics, and decorative edge badges do not duplicate

@@ -10,14 +10,7 @@ vi.mock('../api', () => ({
 
 import { useBootstrapData } from './useBootstrapData'
 import { useWorkflowStore } from '../store'
-
-type Deferred = { promise: Promise<unknown>; resolve: (value: unknown) => void }
-
-function deferred(): Deferred {
-  let resolve!: (value: unknown) => void
-  const promise = new Promise<unknown>((done) => { resolve = done })
-  return { promise, resolve }
-}
+import { deferred } from '../test/deferred'
 
 describe('useBootstrapData tenant boundary', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -25,7 +18,7 @@ describe('useBootstrapData tenant boundary', () => {
   it('drops late responses from the previously selected organization', async () => {
     // An authoring tab is open, so the wave includes the catalogs.
     useWorkflowStore.setState({ activeTab: 'ai-studio' })
-    const firstRequests = Array.from({ length: 9 }, deferred)
+    const firstRequests = Array.from({ length: 9 }, () => deferred<unknown>())
     let firstIndex = 0
     let secondScope = false
     apiMock.mockImplementation((path: string) => {
@@ -62,7 +55,7 @@ describe('useBootstrapData tenant boundary', () => {
     const tool = { name: 'noop', description: '', required: [], inputFields: [], writeSide: false }
     const template = { id: 'template-a', name: '', description: '', category: '', nameCode: '', descriptionCode: '', categoryCode: '', workflow: { nodes: [], edges: [] } }
     let invalid = false
-    const badRuns = deferred()
+    const badRuns = deferred<unknown>()
     apiMock.mockImplementation(async (path: string) => {
       if (path === '/runs') return invalid ? badRuns.promise : [run]
       if (path === '/workflows') return invalid ? [null] : [saved]

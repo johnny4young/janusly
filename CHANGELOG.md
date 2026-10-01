@@ -22,6 +22,9 @@
   checksummed BuildKit provenance metadata, a saved image, and an SPDX 2.3 SBOM
   using digest-pinned generators. The evidence remains unsigned and local.
 
+- Contextual authoring prefills release obsolete compilation/proposal loading
+  and restore input focus without interrupting an in-flight Apply.
+
 ## New baseline — 2026-08-03
 
 - Janusly is now a root-level Go module with a standalone React frontend in

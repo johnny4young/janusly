@@ -27,7 +27,7 @@ describe('<AiGuidanceSettingsPanel />', () => {
     })
     render(<AiGuidanceSettingsPanel />)
     const field = await screen.findByTestId('ai-guidance-org-input')
-    expect(field).toHaveValue('Prefer approval gates.')
+    await waitFor(() => expect(field).toHaveValue('Prefer approval gates.'))
     fireEvent.change(field, { target: { value: 'Prefer bounded retries.' } })
     fireEvent.click(screen.getByTestId('ai-guidance-org-save'))
     await waitFor(() => expect(api).toHaveBeenCalledWith('/org/config', expect.objectContaining({
@@ -85,7 +85,7 @@ describe('<AiGuidanceSettingsPanel />', () => {
     }))
     expect(field).toBeDisabled()
     expect(screen.getByTestId('ai-guidance-org-save')).toBeDisabled()
-    expect(screen.getByRole('alert')).toHaveTextContent("Couldn't load AI guidance.")
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load AI guidance.")
 
     fireEvent.click(screen.getByTestId('ai-guidance-org-retry'))
     await waitFor(() => expect(field).toBeEnabled())

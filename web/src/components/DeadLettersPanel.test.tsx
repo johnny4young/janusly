@@ -1277,7 +1277,7 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     const search = await screen.findByTestId('dlq-search')
     fireEvent.keyDown(search, { key: 'r' })
     fireEvent.keyDown(search, { key: 'Enter', ctrlKey: true })
-    fireEvent.keyDown(screen.getByTestId('dlq-row-a'), { key: 'r', repeat: true })
+    fireEvent.keyDown(await screen.findByTestId('dlq-row-a'), { key: 'r', repeat: true })
 
     expect(onReplay).not.toHaveBeenCalled()
     expect(onResolve).not.toHaveBeenCalled()
