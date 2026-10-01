@@ -259,6 +259,6 @@ describe('<RunInputDialog /> presets', () => {
     fireEvent.change(screen.getByTestId('run-input-preset-select'), { target: { value: 'VIP refund' } })
     fireEvent.click(screen.getByTestId('run-input-preset-delete'))
     await waitFor(() => expect(onDeletePreset).toHaveBeenCalledWith('VIP refund'))
-    expect(screen.getByTestId('run-input-preset-select')).toHaveValue('')
+    await waitFor(() => expect(screen.getByTestId('run-input-preset-select')).toHaveValue(''))
   })
 })
