@@ -135,8 +135,8 @@ describe('<WorkflowRolloutPanel />', () => {
       else act(() => useWorkflowStore.setState(change === 'workflow' ? { currentWorkflowId: 'workflow-2' }
         : change === 'organization' ? { orgId: 'org-2' } : { userId: 'user-2' }))
       await act(async () => {
-      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
-    })
+        fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Return to baseline' }))
+      })
       await act(async () => {})
       expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
     },

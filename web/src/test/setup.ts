@@ -8,7 +8,6 @@ await bootstrapTestCatalogs()
 const { __resetBumpCoalesceForTests } = await import('../store')
 
 beforeEach(() => {
-  __resetBumpCoalesceForTests()
   // Reset to English between tests so locale-mutating tests don't leak.
   initI18n('en')
 })

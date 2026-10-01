@@ -7,10 +7,18 @@ before calling the client.
 ## Invariants
 
 - Anthropic is the supported completion provider.
+- `ResponseFormat` is a hint only; the client does not configure
+  provider-native structured output.
 - Every call catches provider errors and returns a deterministic fallback.
 - Usage recording occurs at the client boundary and cannot fail the call.
 - Generated text is bounded before parsing or persistence.
 - Workflow generation and patching pass `internal/domain` validation.
+- Workflow generation audits preserve the first draft's `repairIssueCodes`,
+  including when a repair succeeds. Success and fallback record at most five
+  codes and omit the field when there are none; fallback's final
+  `validationIssueCodes` are capped separately. Qualification keeps the
+  complete internal code sets. These fields hold validator codes only, never
+  prompts or model drafts, and audit writes remain best-effort.
 - The authoring prompt's tool list is rendered from the executable registry,
   and the capability block gives each built-in tool's typed input fields (at
   most 16 per tool); that detail is dropped before any tenant capability is
