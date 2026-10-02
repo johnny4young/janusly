@@ -18,12 +18,12 @@ import { AlertCircle } from 'lucide-react'
 import {
   RECOVERY_ITEM_SEVERITIES,
   type RecoveryItemSeverity,
-} from '@/lib/recovery-item'
+} from '@/lib/recovery-item-values'
 import {
   WorkflowMetadataSchema,
   WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES,
   WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
-} from '@/lib/workflow-metadata'
+} from '@/lib/workflow-metadata-schema'
 import { containsOperatorGuidanceSecret } from '@/lib/operator-guidance'
 import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'

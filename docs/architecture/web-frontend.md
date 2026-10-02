@@ -111,8 +111,12 @@ current server route produces.
 Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
 They must preserve the same strict-object, bound, default, transform, and
 refinement semantics as the API contract; do not trade validation coverage for
-bundle size. Top-level schema factories are marked pure so unused request-body
-schemas do not execute merely because a module also exports a shared enum.
+bundle size. Read-only UI imports shared enums, constants and pure insertion helpers from
+separate `*-values` modules; the original contract modules retain and re-export
+those values alongside their unchanged validators. Type-only references do not
+initialize validators. The metadata editor imports its own `workflow-metadata-schema`
+validator without the unrelated collection-write bodies. A pure annotation on an outer schema factory does not
+prevent evaluation of effectful argument expressions such as `.check(...)`.
 Semantic recovery response parsing lives in
 `web/src/lib/recovery-case-contract.ts` and shares the lazy
 `recovery-contract` chunk with the workflow recovery validator. It keeps the

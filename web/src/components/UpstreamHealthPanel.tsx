@@ -23,7 +23,7 @@ import {
   UPSTREAM_HEALTH_KINDS,
   type UpstreamComponentStatus,
   type UpstreamHealthKind,
-} from '@/lib/upstream-health'
+} from '@/lib/upstream-health-values'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'

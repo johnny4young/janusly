@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ExternalLink, Send } from 'lucide-react'
-import { RECOVERY_HANDOFF_DESTINATIONS, type RecoveryHandoffDestination } from '@/lib/recovery-handoff'
+import { RECOVERY_HANDOFF_DESTINATIONS, type RecoveryHandoffDestination } from '@/lib/recovery-handoff-values'
 import { api } from '../../api'
 import { useWorkflowStore } from '../../store'
 import { getResolvedLocale, tApiError, useT } from '../../i18n'

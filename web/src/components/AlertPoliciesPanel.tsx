@@ -19,7 +19,7 @@ import {
   ALERT_TRIGGERS,
   type AlertDestination,
   type AlertTrigger,
-} from '@/lib/alert-policy'
+} from '@/lib/alert-policy-values'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
