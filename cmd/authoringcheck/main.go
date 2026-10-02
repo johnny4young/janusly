@@ -1,10 +1,12 @@
-// Command authoringcheck verifies a frozen, synthetic authoring decision corpus
-// offline. It cannot retrieve a workflow, call a model or execute a proposal.
+// Command authoringcheck checks frozen synthetic authoring mechanics offline.
+// It predicts rules and can copy fixture graphs, but cannot retrieve a live
+// workflow, contact a provider, save a draft or execute a proposal.
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,29 +14,72 @@ import (
 	"github.com/johnny4young/janusly/internal/authoring"
 )
 
+type checkReport struct {
+	Mechanics authoring.DecisionMechanicsReport `json:"mechanics"`
+	Rules     authoring.RulesMechanicsReport    `json:"rules"`
+	Replay    *authoring.ExperienceReplayReport `json:"replay,omitempty"`
+}
+
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: authoringcheck <mechanics-corpus.json>")
+	if len(os.Args) < 2 || len(os.Args) > 3 {
+		fmt.Fprintln(os.Stderr, "usage: authoringcheck <mechanics-corpus.json> [replay-corpus.json]")
 		os.Exit(2)
 	}
-	file, err := os.Open(os.Args[1])
-	if err != nil {
+	if err := runCheck(context.Background(), os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	raw, readErr := io.ReadAll(io.LimitReader(file, 4*1024*1024+1))
+}
+
+func readCorpus(path string, limit int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, errors.New("cannot open corpus")
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(file, limit+1))
 	closeErr := file.Close()
 	if readErr != nil || closeErr != nil {
-		fmt.Fprintln(os.Stderr, "cannot read mechanics corpus")
-		os.Exit(1)
+		return nil, errors.New("cannot read corpus")
 	}
-	report, err := authoring.CheckDecisionMechanicsCorpus(context.Background(), raw)
+	if int64(len(raw)) > limit {
+		return nil, errors.New("corpus exceeds limit")
+	}
+	return raw, nil
+}
+
+func runCheck(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) < 1 || len(args) > 2 {
+		return errors.New("invalid corpus arguments")
+	}
+	raw, err := readCorpus(args[0], 4*1024*1024)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
-	if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	var report checkReport
+	report.Mechanics, err = authoring.CheckDecisionMechanicsCorpus(ctx, raw)
+	if err != nil {
+		return err
 	}
+	report.Rules, err = authoring.CheckRulesMechanicsCorpus(ctx, raw)
+	if err != nil {
+		return err
+	}
+	if len(args) == 2 {
+		replayRaw, err := readCorpus(args[1], 8*1024*1024)
+		if err != nil {
+			return err
+		}
+		replay, err := authoring.ReplayExperienceCorpus(ctx, replayRaw)
+		if err != nil {
+			return err
+		}
+		report.Replay = &replay
+	}
+	if err := json.NewEncoder(out).Encode(report); err != nil {
+		return err
+	}
+	if report.Rules.Correct != report.Rules.Cases || (report.Replay != nil && report.Replay.Correct != report.Replay.Cases) {
+		return errors.New("offline case expectations did not match")
+	}
+	return ctx.Err()
 }

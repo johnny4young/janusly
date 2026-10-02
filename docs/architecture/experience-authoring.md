@@ -88,24 +88,60 @@ loop, inference process, embedding call or provider completion is introduced.
 This registry does not select proposals or enable automatic reuse. Stored sources
 still require re-reading and current consent, binding and review before use.
 
-## Offline contract evidence
+## Local decisions and exact copies
 
-Run the frozen synthetic corpus with:
+`RulesProvider` predicts the closed mode from the bounded projection without
+receiving expected labels or making network calls. Policy admission remains a
+separate snapshot/recomputation. A copied source passes receipt/reference checks,
+canonical parsing, current capability/intent binding and workflow validation.
+The new unsaved draft has a fresh identity and only an explicitly requested
+workflow-name edit; graph identities, configuration, effects, approvals, timing,
+outputs and child pins are not repaired or changed. Incompatible sources are
+rejected rather than silently upgraded. Source bytes remain unchanged.
+
+The copy primitive consumes a privately supplied exact artifact, not provider
+output. It does not itself grant read authority or query the registry: a live
+caller must still re-read the source and fence current consent/deletion. HTTP
+selection and editor integration are not connected to these local mechanisms.
+
+## Offline mechanical evidence
+
+Run the frozen synthetic corpora with:
 
 ```sh
-go run ./cmd/authoringcheck internal/authoring/testdata/experience-mechanics.json
-go test -race -count=20 ./internal/authoring
+go run ./cmd/authoringcheck internal/authoring/testdata/experience-mechanics.json internal/authoring/testdata/experience-replay.json
+go test -race -count=20 ./internal/authoring ./cmd/authoringcheck
 go test ./internal/authoring -run '^$' -fuzz '^FuzzDecisionProposalContract$' -fuzztime=5m -parallel=2
 go test ./internal/authoring -run '^$' -fuzz '^FuzzDecisionEligibilityProjection$' -fuzztime=5m -parallel=2
 ```
 
-The 240 cases are balanced across four modes and English/Spanish, with entire
-workflow families held out in the qualification split. The manifest freezes
-payloads and the [rubric](../../internal/authoring/testdata/experience-mechanics-rubric.md)
-defines explicit mechanical labels. The checker validates fixture proposals,
-not a rules-provider prediction or semantic model. Tests separately poison
-references and permute eligibility. No graph is retrieved, generated, mutated,
-saved or run, and no network or database is contacted. Passing does not prove
-real-world precision, utility, human acceptance or independently verified effects.
+The original 240 cases are balanced across four modes and English/Spanish,
+with entire workflow families held out in the qualification split. Their
+manifest and [rubric](../../internal/authoring/testdata/experience-mechanics-rubric.md)
+remain frozen. Fixture-proposal contract validation is reported separately from
+actual RulesProvider prediction. The same cases also exercise the real legacy
+recipe/template selection and binder, and an exact-policy ablation without
+experiences. Template binding is not evidence of fulfilling a human objective.
+
+A second [rubric](../../internal/authoring/testdata/experience-replay-rubric.md)
+defines 42 frozen EN/ES chronological/source-copy cases. Explicit historical
+consent snapshots and registration/version/retention/revocation/deletion facts
+are filtered before stable top-K. Later evidence cannot consume the historical
+limit or grant past consent. Missing snapshots fail closed. Readability and
+compatibility are frozen for each case's catalog/as-of instant, not inferred
+from present mutable configuration. Physically purged records cannot reconstruct
+history; these replay inputs are independent frozen fixtures.
+
+Reports preserve every outcome and denominator, including invalidated reuse,
+cancellations and escalation. Generation requests avoided by selecting a source
+are counted separately from requests deferred to review. Actual logical model
+calls and SDK transport requests are both zero: this runner has no provider
+client. No real calls avoided, probability, semantic-model accuracy, successful
+business effects or time saved are inferred from synthetic decisions.
+
+The runner privately copies fixture graphs through current validation; it never
+contacts a network/database, retrieves a live workflow, saves or runs a draft.
+Passing does not prove real-world precision, utility, human acceptance or
+independently verified effects.
 
 See [AI pipeline](ai-pipeline.md) for the existing authoring authority boundary.
