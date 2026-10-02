@@ -336,89 +336,68 @@ export function useAiStudioController({
     }
   }
 
-  const explain = async () => {
+  const currentAction = async <Response,>(
+    kind: CurrentWorkflowLoading,
+    request: () => Promise<Response>,
+    success: (response: Response) => ResultState,
+    failure: (error: unknown) => ResultState,
+  ) => {
     const requestID = ++currentRequestRef.current
-    setCurrentLoading('explain')
+    setCurrentLoading(kind)
     try {
-      const response = await onExplainWorkflow()
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'explanation',
-        mode: response.mode,
-        title: response.aiError
-          ? t('aiStudio.explanationLocal', { name: workflowName })
-          : t('aiStudio.explanationOk', { name: workflowName }),
-        body: response.explanation,
-        aiError: response.aiError,
-      })
+      const response = await request()
+      if (currentRequestRef.current === requestID) setResult(success(response))
     } catch (error) {
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'explanation',
-        mode: 'error',
-        title: t('aiStudio.explanationFailed'),
-        body: error instanceof Error ? error.message : t('aiStudio.explanationFailedBody'),
-      })
+      if (currentRequestRef.current === requestID) setResult(failure(error))
     } finally {
       if (currentRequestRef.current === requestID) setCurrentLoading(null)
     }
   }
 
-  const review = async () => {
-    const requestID = ++currentRequestRef.current
-    setCurrentLoading('review')
-    try {
-      const response = await onReviewWorkflow()
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'review',
-        mode: response.mode,
-        title: response.aiError
-          ? t('aiStudio.reviewLocal', { name: workflowName })
-          : t('aiStudio.reviewOk', { name: workflowName }),
-        review: response.review,
-        aiError: response.aiError,
-      })
-    } catch (error) {
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'review',
-        mode: 'error',
-        title: t('aiStudio.reviewFailed'),
-        review: { status: 'fail', issues: [] },
-        aiError: error instanceof Error ? error.message : t('aiStudio.reviewFailedBody'),
-      })
-    } finally {
-      if (currentRequestRef.current === requestID) setCurrentLoading(null)
-    }
-  }
+  const explain = () => currentAction('explain', onExplainWorkflow, response => ({
+    kind: 'explanation',
+    mode: response.mode,
+    title: response.aiError
+      ? t('aiStudio.explanationLocal', { name: workflowName })
+      : t('aiStudio.explanationOk', { name: workflowName }),
+    body: response.explanation,
+    aiError: response.aiError,
+  }), error => ({
+    kind: 'explanation',
+    mode: 'error',
+    title: t('aiStudio.explanationFailed'),
+    body: error instanceof Error ? error.message : t('aiStudio.explanationFailedBody'),
+  }))
 
-  const fix = async () => {
-    const requestID = ++currentRequestRef.current
-    setCurrentLoading('fix')
-    try {
-      const response = await onSuggestWorkflowImprovement()
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'fix',
-        mode: response.mode,
-        title: response.mode === 'ai' ? t('aiStudio.fixReady') : t('aiStudio.fixUnavailable'),
-        suggestions: response.mode === 'ai' ? response.suggestions : [],
-        aiError: response.aiError,
-      })
-    } catch (error) {
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'fix',
-        mode: 'error',
-        title: t('aiStudio.fixFailed'),
-        suggestions: [],
-        aiError: error instanceof Error ? error.message : t('aiStudio.fixFailedBody'),
-      })
-    } finally {
-      if (currentRequestRef.current === requestID) setCurrentLoading(null)
-    }
-  }
+  const review = () => currentAction('review', onReviewWorkflow, response => ({
+    kind: 'review',
+    mode: response.mode,
+    title: response.aiError
+      ? t('aiStudio.reviewLocal', { name: workflowName })
+      : t('aiStudio.reviewOk', { name: workflowName }),
+    review: response.review,
+    aiError: response.aiError,
+  }), error => ({
+    kind: 'review',
+    mode: 'error',
+    title: t('aiStudio.reviewFailed'),
+    review: { status: 'fail', issues: [] },
+    aiError: error instanceof Error ? error.message : t('aiStudio.reviewFailedBody'),
+  }))
+
+  const fix = () => currentAction('fix', onSuggestWorkflowImprovement, response => ({
+    kind: 'fix',
+    mode: response.mode,
+    title: response.mode === 'ai' ? t('aiStudio.fixReady') : t('aiStudio.fixUnavailable'),
+    suggestions: response.mode === 'ai' ? response.suggestions : [],
+    aiError: response.aiError,
+  }), error => ({
+    kind: 'fix',
+    mode: 'error',
+    title: t('aiStudio.fixFailed'),
+    suggestions: [],
+    aiError: error instanceof Error ? error.message : t('aiStudio.fixFailedBody'),
+  }))
 
   requestedActionHandlersRef.current = { explain, review, fix }
 

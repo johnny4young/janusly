@@ -49,6 +49,44 @@ export function registerExperienceControllerOwnershipCases() {
     beforeEach(() => useWorkflowStore.setState({ ...initial, orgId: 'tenant', userId: 'operator', identityContext: identity(),
       currentWorkflowId: 'current', activeTab: 'ai-studio' }, true))
     for (const locale of ['en', 'es'] as const) {
+      for (const action of ['explain', 'review', 'fix'] as const) {
+        for (const boundary of boundaries) {
+          for (const outcome of ['resolve', 'reject'] as const) {
+            it(`${locale} old ${action} ${outcome} after ${boundary} ABA cannot release a new action`, async () => {
+              await changeAppLanguage(locale)
+              const response = { mode: 'ai' as const, explanation: 'Current explanation',
+                review: { status: 'pass' as const, issues: [] }, suggestions: [] }
+              const old = deferred<typeof response>()
+              const next = deferred<typeof response>()
+              const execute = vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise)
+              const callbacks = props({ onExplainWorkflow: execute, onReviewWorkflow: execute,
+                onSuggestWorkflowImprovement: execute })
+              const { result } = renderHook(() => useAiStudioController(callbacks))
+              await waitFor(() => expect(result.current.catalog).toEqual(catalog))
+              let previous!: Promise<void>
+              let current!: Promise<void>
+              act(() => { previous = result.current[action]() })
+              expect(result.current.currentLoading).toBe(action)
+              act(() => transientBoundary(boundary))
+              expect(result.current.currentLoading).toBeNull()
+              expect(result.current.result).toBeNull()
+              act(() => { current = result.current[action]() })
+              await act(async () => {
+                if (outcome === 'resolve') old.resolve(response); else old.reject(new Error('STALE_CURRENT_ERROR'))
+                await previous
+              })
+              expect(result.current.currentLoading).toBe(action)
+              expect(result.current.result).toBeNull()
+              await act(async () => { next.resolve(response); await current })
+              expect(result.current.currentLoading).toBeNull()
+              expect(result.current.result).toMatchObject({ kind: action === 'explain' ? 'explanation' : action, mode: 'ai' })
+              expect(execute).toHaveBeenCalledTimes(2)
+              expect(callbacks.onApplyWorkflowProposal).not.toHaveBeenCalled()
+              expect(callbacks.onApplyWorkflowImprovement).not.toHaveBeenCalled()
+            })
+          }
+        }
+      }
       for (const stage of ['compile', 'propose'] as const) {
         for (const boundary of boundaries) {
           for (const outcome of ['resolve', 'reject'] as const) {

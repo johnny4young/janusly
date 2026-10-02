@@ -64,6 +64,45 @@ export function registerExperienceRegistryCases() {
         currentWorkflowId: 'saved-source', currentWorkflowSaved: true, activeTab: 'inspector', toasts: [] }, true)
     })
     for (const locale of ['en', 'es'] as const) {
+      const invalidLists = {
+        'six entries': Array.from({ length: 6 }, (_, index) => ({ ...entry, id: `example-${index}` })),
+        'duplicate identities': [entry, { ...entry }],
+        'foreign workflow': [{ ...entry, workflowId: 'another-tenant-source' }],
+        'empty identity': [{ ...entry, id: '' }],
+        'padded identity': [{ ...entry, versionId: ' version-3' }],
+        'control character': [{ ...entry, id: 'example\u007f' }],
+        '129 UTF-8 bytes': [{ ...entry, id: '🧭'.repeat(32) + 'a' }],
+        'zero source version': [{ ...entry, version: 0 }],
+        'invalid registration date': [{ ...entry, registeredAt: 'not-a-date' }],
+        'invalid retention date': [{ ...entry, retainUntil: 'not-a-date' }],
+        'equal retention date': [{ ...entry, retainUntil: entry.registeredAt }],
+        'earlier retention date': [{ ...entry, retainUntil: '2026-10-01T12:00:00Z' }],
+      }
+      for (const [boundary, entries] of Object.entries(invalidLists)) {
+        it(`${locale} rejects registry ${boundary} without enabling a mutation`, async () => {
+          await changeAppLanguage(locale)
+          setup(operation => operation === 'GET /authoring/experiences'
+            ? Promise.resolve({ entries, truncated: false }) : undefined)
+          render(<VersionHistoryPanel />)
+          await screen.findByText(copy[locale].failed)
+          expect(screen.queryByRole('button', { name: copy[locale].register })).not.toBeInTheDocument()
+          expect(screen.queryByRole('button', { name: copy[locale].withdraw })).not.toBeInTheDocument()
+          expect(vi.mocked(contractApi).mock.calls.filter(([operation]) => operation.startsWith('POST'))).toHaveLength(0)
+          expect(useWorkflowStore.getState()).toMatchObject({ currentWorkflowId: 'saved-source', workflowDirty: false, toasts: [] })
+        })
+      }
+      it(`${locale} accepts five distinct entries and the exact 128-byte identity boundary`, async () => {
+        await changeAppLanguage(locale)
+        const entries = Array.from({ length: 5 }, (_, index) => ({ ...entry,
+          id: index === 0 ? '🧭'.repeat(32) : `example-${index}` }))
+        setup(operation => operation === 'GET /authoring/experiences'
+          ? Promise.resolve({ entries, truncated: true }) : undefined)
+        render(<VersionHistoryPanel />)
+        expect(await screen.findAllByRole('button', { name: copy[locale].withdraw })).toHaveLength(5)
+        expect(screen.getByRole('button', { name: copy[locale].register })).toBeDisabled()
+        expect(screen.queryByText(copy[locale].failed)).not.toBeInTheDocument()
+        expect(vi.mocked(contractApi).mock.calls.filter(([operation]) => operation.startsWith('POST'))).toHaveLength(0)
+      })
       for (const denied of ['ai.authoringExperienceEnabled', 'memory.enabled', 'memory.allowedKinds', 'missing', 'malformed'] as const) {
         it(`${locale} tenant admission ${denied} never probes the protected registry`, async () => {
           await changeAppLanguage(locale)
