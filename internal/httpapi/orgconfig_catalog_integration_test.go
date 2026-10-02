@@ -22,19 +22,26 @@ import (
 // generation mode, the retired alternate-provider model, and the unused per-surface model map;
 // governed agent-write consent adds one real executable control; the fictitious
 // embedding-provider selector was then retired because only Ollama's protocol
-// is implemented. Dead-letter retention adds one real executable control.
+// is implemented. Dead-letter retention adds one real executable control. Explicit experience
+// registration adds one default-off, tenant-only consent control.
 func TestOrgConfigCatalogSurface(t *testing.T) {
-	if len(orgconfig.Definitions) != 68 {
-		t.Fatalf("catalog must pin at 68 definitions, got %d", len(orgconfig.Definitions))
+	if len(orgconfig.Definitions) != 69 {
+		t.Fatalf("catalog must pin at 69 definitions, got %d", len(orgconfig.Definitions))
 	}
 	for _, key := range []string{"ai.anthropic.model", "http.timeoutMs", "runs.requireSavedWorkflow",
-		"mcp.writeConsent", "retention.deletedWorkflowsDays", "onboarding.enabled"} {
+		"mcp.writeConsent", "retention.deletedWorkflowsDays", "onboarding.enabled", "ai.authoringExperienceEnabled"} {
 		if orgconfig.Get(key) == nil {
 			t.Fatalf("expected reference key missing: %s", key)
 		}
 	}
 	if orgconfig.Get("memory.embeddingProvider") != nil {
 		t.Fatal("catalog must not advertise an embedding provider the runtime cannot speak")
+	}
+	// A process opt-in must not substitute for explicit tenant consent.
+	t.Setenv("JANUSLY_AUTHORING_EXPERIENCE_ENABLED", "true")
+	experience := orgconfig.Get("ai.authoringExperienceEnabled")
+	if experience.ValueType != "boolean" || experience.Default != false || len(experience.EnvKeys) != 0 {
+		t.Fatalf("experience consent must remain a default-off tenant boolean without env fallback: %+v", experience)
 	}
 	// The catalog itself must never admit a credential-shaped name.
 	for _, def := range orgconfig.Definitions {
@@ -57,6 +64,9 @@ func TestOrgConfigCatalogSurface(t *testing.T) {
 		if entry["source"] == "tenant" {
 			t.Fatalf("fresh org cannot have tenant rows: %+v", entry)
 		}
+		if entry["key"] == "ai.authoringExperienceEnabled" && (entry["value"] != false || entry["source"] != "default") {
+			t.Fatalf("process opt-in leaked into tenant consent: %+v", entry)
+		}
 	}
 
 	// Validation ladder.
@@ -72,6 +82,7 @@ func TestOrgConfigCatalogSurface(t *testing.T) {
 		}
 	}
 	reject(map[string]any{"key": "made.up", "value": 1}, "Unknown org config key")
+	reject(map[string]any{"key": "ai.authoringExperienceEnabled", "value": "true"}, "must be a boolean")
 	reject(map[string]any{"key": "http.timeoutMs", "value": "fast"}, "must be a finite number")
 	reject(map[string]any{"key": "http.timeoutMs", "value": float64(0)}, "must be >=")
 	for _, key := range []string{"http.timeoutMs", "http.maxResponseBytes", "http.maxRedirects", "http.streamPreviewBytes"} {
