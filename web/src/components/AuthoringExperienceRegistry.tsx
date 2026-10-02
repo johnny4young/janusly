@@ -1,12 +1,13 @@
 import { BriefFacts } from './BriefFacts'
 import { ownAuthoringExperience } from '../lib/experience-authority'
 import { useEffect, useRef, useState } from 'react'
-import { apiErrorStatus, contractApi } from '../api'
+import { api, apiErrorStatus, contractApi } from '../api'
 import { useT } from '../i18n'
 import { sessionCan } from '../identity-context'
 import { useWorkflowStore } from '../store'
 import { currentAuthoringAuthority } from '../lib/canvas-authority'
 import { invalidateTags } from '../lib/query-cache'
+import { parseOrgConfigEntries } from '../lib/org-config-model'
 import type { AuthoringExperienceList, AuthoringExperienceRecord } from '../lib/api-types.generated'
 import type { WorkflowVersionRow } from '../lib/list-contract'
 import type { WorkflowBriefCompilation } from '../types'
@@ -53,14 +54,22 @@ function ScopedRegistry({ workflowId, versions }: { workflowId: string; versions
     const request = ownAuthoringExperience(invalidate, registryAuthority)
     owner.current = request
     setList(null); setCompiled(null); setBusy(null); setPrompt(''); setError(false)
-    void contractApi('GET /authoring/experiences', `/v1/authoring/experiences?workflowId=${encodeURIComponent(workflowId)}`, undefined,
-      { signal: request.signal, guard: isGetAuthoringExperiencesResponse })
-      .then(result => {
-        if (request.signal.aborted) return
-        if (result.entries.length > 5 || new Set(result.entries.map(row => row.id)).size !== result.entries.length
-          || !result.entries.every(row => boundedSource(row, workflowId))) throw new Error('Invalid example list')
-        setList(result)
-      })
+    const load = async () => {
+      const config = parseOrgConfigEntries(await api('/org/config', { signal: request.signal }))
+      if (request.signal.aborted) return
+      const value = (key: string) => config.find(entry => entry.key === key)?.value
+      const kinds = value('memory.allowedKinds')
+      // Consent absence is normal default-off posture, not a failed protected read.
+      if (value('ai.authoringExperienceEnabled') !== true || value('memory.enabled') !== true
+        || typeof kinds !== 'string' || !kinds.split(',').some(kind => kind.trim() === 'workflow_vector')) return
+      const result = await contractApi('GET /authoring/experiences', `/v1/authoring/experiences?workflowId=${encodeURIComponent(workflowId)}`, undefined,
+        { signal: request.signal, guard: isGetAuthoringExperiencesResponse })
+      if (request.signal.aborted) return
+      if (result.entries.length > 5 || new Set(result.entries.map(row => row.id)).size !== result.entries.length
+        || !result.entries.every(row => boundedSource(row, workflowId))) throw new Error('Invalid example list')
+      setList(result)
+    }
+    void load()
       .catch(failure => { if (!request.signal.aborted && apiErrorStatus(failure) !== 403) setError(true) })
     return () => { request.abort(); operation.current?.abort(); generation.current += 1 }
   }, [workflowId, retry])

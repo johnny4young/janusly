@@ -54,6 +54,12 @@ server cancelled work. Save and Run remain separate actions.
 
 Saved-version history offers an optional example registry only after a consented,
 scoped read succeeds and the operator has AI and workflow read/write grants.
+Before that protected read, the UI reads the existing public org-config surface
+with the same ownership signal and requires explicit tenant authoring/memory
+consent plus the workflow-vector kind. Missing, malformed or disabled consent
+hides the registry without making a denied registry request during ordinary
+history use. This is UI admission only: the server still independently checks
+process gates, permissions and transactional consent on every registry command.
 Registration selects an exact immutable history version and explicitly compiles
 and reviews an example brief; neither the current draft nor a prompt/graph is
 sent to the registration endpoint. Register and Withdraw are explicit mutations.

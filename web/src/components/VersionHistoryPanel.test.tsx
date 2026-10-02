@@ -260,9 +260,12 @@ describe('<VersionHistoryPanel />', () => {
 
   it('retains loaded versions and the cursor after rejecting an invalid older page', async () => {
     const firstPage = Array.from({ length: 50 }, (_, i) => ({ workflowId: 'wf_compare', createdAt: null, id: `v${60 - i}`, version: 60 - i, dagJson: makeWorkflow('https://example.test') }))
-    vi.mocked(api).mockResolvedValueOnce(firstPage).mockResolvedValueOnce([
-      { ...firstPage[0], id: 'bad-cursor', version: 11 },
-    ]).mockResolvedValueOnce([{ ...firstPage[0], id: 'v10', version: 10 }])
+    const pages = [firstPage, [{ ...firstPage[0], id: 'bad-cursor', version: 11 }], [{ ...firstPage[0], id: 'v10', version: 10 }]]
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === '/org/config') return { config: [] }
+      if (path.startsWith('/workflows/versions')) return pages.shift()
+      throw new Error(`Unexpected API call: ${path}`)
+    })
     render(<VersionHistoryPanel />)
     await screen.findByText('v60')
     fireEvent.click(screen.getByTestId('version-history-load-more'))

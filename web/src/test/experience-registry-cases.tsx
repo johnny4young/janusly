@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, contractApi } from '../api'
+import { ApiError, api, contractApi } from '../api'
 import { changeAppLanguage } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { VersionHistoryPanel } from '../components/VersionHistoryPanel'
@@ -30,8 +30,14 @@ const copy = {
   en: { intent: 'Example intent', version: 'Saved source version', compile: 'Compile example intent', register: 'Register example', withdraw: 'Withdraw example v3', unknown: 'Outcome evidence is unknown. Registration grants no approval and does not save or run a workflow.', failed: 'The example is unavailable. Check consent and the saved source, then try again.' },
   es: { intent: 'Intención del ejemplo', version: 'Versión guardada de origen', compile: 'Compilar intención del ejemplo', register: 'Registrar ejemplo', withdraw: 'Retirar ejemplo v3', unknown: 'La evidencia del resultado es desconocida. Registrar no otorga aprobación ni guarda o ejecuta un workflow.', failed: 'El ejemplo no está disponible. Revisa el consentimiento y el origen guardado e inténtalo de nuevo.' },
 } as const
+const consent = [
+  { key: 'ai.authoringExperienceEnabled', value: true },
+  { key: 'memory.enabled', value: true },
+  { key: 'memory.allowedKinds', value: 'workflow_vector' },
+]
 function setup(extra?: (operation: string, request: unknown) => Promise<unknown> | undefined) {
   let registered = false
+  vi.mocked(api).mockResolvedValue({ config: consent })
   vi.mocked(contractApi).mockImplementation(async (operation, _path, request) => {
     const overridden = extra?.(operation, request)
     if (overridden) return await overridden as never
@@ -53,10 +59,42 @@ export function registerExperienceRegistryCases() {
   describe('explicit saved-version example registry', () => {
     beforeEach(() => {
       vi.mocked(contractApi).mockReset()
+      vi.mocked(api).mockReset()
       useWorkflowStore.setState({ ...initial, orgId: 'tenant', userId: 'operator', identityContext: identity(),
         currentWorkflowId: 'saved-source', currentWorkflowSaved: true, activeTab: 'inspector', toasts: [] }, true)
     })
     for (const locale of ['en', 'es'] as const) {
+      for (const denied of ['ai.authoringExperienceEnabled', 'memory.enabled', 'memory.allowedKinds', 'missing', 'malformed'] as const) {
+        it(`${locale} tenant admission ${denied} never probes the protected registry`, async () => {
+          await changeAppLanguage(locale)
+          setup()
+          const config = denied === 'missing' ? [] : consent.map(row => row.key === denied
+            ? { ...row, value: row.key === 'memory.allowedKinds' ? 'run_summary' : false } : row)
+          vi.mocked(api).mockResolvedValue(denied === 'malformed' ? { config: [{ key: 'ai.authoringExperienceEnabled', value: 'true' }] } : { config })
+          render(<VersionHistoryPanel />)
+          await waitFor(() => expect(api).toHaveBeenCalledWith('/org/config', expect.objectContaining({ signal: expect.any(AbortSignal) })))
+          await act(async () => {})
+          expect(vi.mocked(contractApi).mock.calls.some(([operation]) => operation === 'GET /authoring/experiences')).toBe(false)
+          expect(screen.queryByRole('button', { name: copy[locale].register })).not.toBeInTheDocument()
+          expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+        })
+      }
+      for (const outcome of ['resolve', 'reject'] as const) {
+        it(`${locale} tenant admission discards late ${outcome} after identity ABA`, async () => {
+          await changeAppLanguage(locale)
+          setup()
+          const pending = deferred<unknown>()
+          vi.mocked(api).mockResolvedValue({ config: [] }).mockReturnValueOnce(pending.promise)
+          render(<VersionHistoryPanel />)
+          await waitFor(() => expect(api).toHaveBeenCalled())
+          act(() => { useWorkflowStore.setState({ userId: 'other' }); useWorkflowStore.setState({ userId: 'operator' }) })
+          await act(async () => { if (outcome === 'resolve') pending.resolve({ config: consent }); else pending.reject(new Error('STALE_CONSENT_ERROR')) })
+          expect(vi.mocked(contractApi).mock.calls.some(([operation]) => operation === 'GET /authoring/experiences')).toBe(false)
+          expect(screen.queryByRole('button', { name: copy[locale].register })).not.toBeInTheDocument()
+          expect(screen.queryByText('STALE_CONSENT_ERROR')).not.toBeInTheDocument()
+          expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+        })
+      }
       it(`${locale} registers only the reviewed exact saved version and explicitly withdraws it`, async () => {
         await changeAppLanguage(locale)
         setup()
