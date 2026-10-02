@@ -7,16 +7,20 @@ import { ConfirmProvider } from './ConfirmDialog'
 import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 
-vi.mock('../api', () => {
-  const module = ({
-  api: vi.fn(),
-})
+vi.mock('../api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../api')>()
+  const module = { api: vi.fn() }
   return {
+    ...actual,
     ...module,
-    // Typed reads route through contractApi; delegate to the same mock so the
-    // path-keyed expectations below keep working.
-    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
-      options === undefined ? module.api(path) : module.api(path, options),
+    // These history fixtures model the default-off optional registry. Its read
+    // must not consume responses intended for version pagination or suggestions.
+    contractApi: (operation: string, path: string, _request: unknown, options?: RequestInit) => {
+      if (operation === 'GET /authoring/experiences') {
+        return Promise.reject(new actual.ApiError('disabled', { statusCode: 403 }))
+      }
+      return options === undefined ? module.api(path) : module.api(path, options)
+    },
   }
 })
 

@@ -13,7 +13,7 @@ export const PLATFORM_TAG = 'platform'
 /** Resources a panel can depend on and a mutation can name. */
 export type ResourceTag =
   | typeof PLATFORM_TAG
-  | 'alert-policies' | 'auth-policy' | 'auto-healing' | 'billing' | 'campaigns'
+  | 'authoring-experiences' | 'alert-policies' | 'auth-policy' | 'auto-healing' | 'billing' | 'campaigns'
   | 'credentials' | 'dlq' | 'experiments' | 'external-runtimes' | 'health'
   | 'mcp' | 'members' | 'memory' | 'onboarding' | 'org-config' | 'packs'
   | 'recovery' | 'roles' | 'rollouts' | 'runs' | 'schedules' | 'scim'

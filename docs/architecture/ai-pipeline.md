@@ -53,6 +53,15 @@ the already-reviewed receipt and graph, preserving the draft identity; stale
 source, context, consent, identity or canvas changes prevent copying. Apply does
 not save, run, or grant tool approval.
 
+The browser registers examples from exact saved-version history through the
+v1-only register/list/revoke routes. Registration compiles and reviews a local
+Intent Brief first; it never grants tenant consent or submits the active canvas
+as the saved source. EN/ES review exposes the rules classification and unknown
+outcome rather than describing a source copy as a generated local template.
+Name-only adaptations need a new explicit preview before Apply; an optional
+name is not evidence that the requested edit was accepted. The reviewed graph
+and receipt, not the editable name field, are the authority for Apply.
+
 Decision audit metadata contains only closed classification/policy/stage and
 aggregate call-accounting facts. It does not contain source IDs, matching hashes,
 prompts, briefs, graphs, drafts, secrets or raw reader errors. Decision model-call

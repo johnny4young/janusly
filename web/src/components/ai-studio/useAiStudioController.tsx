@@ -52,6 +52,11 @@ export function useAiStudioController({
   const [briefCompilation, setBriefCompilation] = useState<CompiledBriefState | null>(null)
   const [clarificationAnswers, setClarificationAnswers] = useState<Record<number, string>>({})
   const [proposal, setProposal] = useState<WorkflowProposalResponse | null>(null)
+  const [experienceAvailable, setExperienceAvailable] = useState(false)
+  const [experienceName, setExperienceName] = useState('')
+  const normalizedExperienceName = experienceName.trim()
+  const experienceNameValid = !normalizedExperienceName || (new TextEncoder().encode(normalizedExperienceName).length <= 200
+    && !normalizedExperienceName.includes('\0'))
   const [authoringError, setAuthoringError] = useState<string | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [authoringLoading, setAuthoringLoading] = useState<AuthoringLoading | null>(null)
@@ -90,10 +95,23 @@ export function useAiStudioController({
     // Apply owns a separate snapshot and must remain pending until it settles.
     setAuthoringLoading((loading) => loading === 'apply' ? loading : null)
     setPrompt(next)
+    setExperienceName('')
+    setExperienceAvailable(false)
     setBriefCompilation(null)
     setClarificationAnswers({})
     setProposal(null)
     setBriefCompileMs(null)
+    setProposalBuildMs(null)
+    setApplied(false)
+    setAuthoringError(null)
+  }
+
+  const replaceExperienceName = (next: string) => {
+    authoringRequestRef.current += 1
+    setAuthoringLoading(loading => loading === 'apply' ? loading : null)
+    setExperienceName(next)
+    setProposal(null)
+    proposalSourceRef.current = null
     setProposalBuildMs(null)
     setApplied(false)
     setAuthoringError(null)
@@ -203,7 +221,7 @@ export function useAiStudioController({
   }
 
   const buildProposal = async () => {
-    if (!briefCompilation || !catalog) return
+    if (!briefCompilation || !catalog || !experienceNameValid) return
     const source = useWorkflowStore.getState()
     const sourceWorkflow = { workflowId: source.currentWorkflowId, revision: source.workflowRevision }
     const requestID = ++authoringRequestRef.current
@@ -214,16 +232,18 @@ export function useAiStudioController({
     setProposalBuildMs(null)
     setApplied(false)
     try {
-      const nextProposal = await onProposeWorkflow(
-        briefCompilation.brief,
-        catalog.version,
-        briefCompilation.sourcePrompt,
-      )
+      const args = [briefCompilation.brief, catalog.version, briefCompilation.sourcePrompt] as const
+      // Legacy requests keep their original wire shape. Only an explicit,
+      // reviewed name edit asks for the closed descriptive adaptation path.
+      const nextProposal = await (experienceAvailable && normalizedExperienceName
+        ? onProposeWorkflow(...args, [{ field: 'workflow_name', value: normalizedExperienceName }])
+        : onProposeWorkflow(...args))
       if (authoringRequestRef.current !== requestID) return
       const current = useWorkflowStore.getState()
       if (current.currentWorkflowId !== sourceWorkflow.workflowId || current.workflowRevision !== sourceWorkflow.revision) return
       proposalSourceRef.current = sourceWorkflow
       setProposal(nextProposal)
+      setExperienceAvailable(nextProposal.experienceDecision?.mode === 'REUSE' || nextProposal.experienceDecision?.mode === 'ADAPT')
       setProposalBuildMs(Math.max(0, Math.round(performance.now() - startedAt)))
     } catch (error) {
       if (authoringRequestRef.current !== requestID) return
@@ -397,6 +417,10 @@ export function useAiStudioController({
     clarificationAnswers,
     answerClarification,
     proposal,
+    experienceAvailable,
+    experienceName,
+    experienceNameValid,
+    replaceExperienceName,
     authoringError,
     authoringLoading,
     applied,

@@ -6,9 +6,17 @@ import { initI18n } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 
-vi.mock('../api', () => {
+vi.mock('../api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../api')>()
   const api = vi.fn()
-  return { api, contractApi: (_op: string, path: string, _body: unknown, options?: RequestInit) => api(path, options) }
+  return { ...actual, api,
+    contractApi: (operation: string, path: string, _body: unknown, options?: RequestInit) => {
+      if (operation === 'GET /authoring/experiences') {
+        return Promise.reject(new actual.ApiError('disabled', { statusCode: 403 }))
+      }
+      return api(path, options)
+    },
+  }
 })
 const initialState = useWorkflowStore.getState()
 

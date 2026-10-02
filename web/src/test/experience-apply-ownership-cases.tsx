@@ -1,3 +1,4 @@
+import { invalidateTags } from '../lib/query-cache'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, contractApi } from '../api'
@@ -113,6 +114,34 @@ export function registerExperienceApplyOwnershipCases() {
               expect(contractApi).toHaveBeenCalledTimes(2)
             })
           }
+        }
+      }
+      for (const tag of ['authoring-experiences', 'memory', 'org-config', 'versions', 'workflows'] as const) {
+        for (const outcome of ['resolve', 'reject'] as const) {
+          it(`${locale} source resource ${tag} invalidation discards late Apply ${outcome}`, async () => {
+            await changeAppLanguage(locale)
+            const pending = deferred<WorkflowProposalResponse>()
+            vi.mocked(contractApi).mockImplementation(async operation => (
+              operation === 'GET /authoring/capabilities' ? catalog as never : pending.promise as never
+            ))
+            const { result } = renderHook(() => useWorkflowCommands(options()))
+            const reviewed = proposal()
+            let applying!: Promise<WorkflowProposalApplyOutcome>
+            act(() => { applying = result.current.applyWorkflowProposal(reviewed) })
+            await waitFor(() => expect(contractApi).toHaveBeenCalledTimes(2))
+            const canvas = useWorkflowStore.getState().getWorkflowJson()
+            act(() => invalidateTags([tag]))
+            let actual: WorkflowProposalApplyOutcome | undefined
+            await act(async () => {
+              if (outcome === 'resolve') pending.resolve(structuredClone(reviewed))
+              else pending.reject(new Error('STALE_RESOURCE_ERROR'))
+              actual = await applying
+            })
+            expect(actual).toEqual({ status: 'canvas_changed' })
+            expect(useWorkflowStore.getState().getWorkflowJson()).toEqual(canvas)
+            expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+            expect(api).not.toHaveBeenCalled()
+          })
         }
       }
       it(`${locale} explicit Apply copies only the reviewed unsaved snapshot without Save or Run`, async () => {

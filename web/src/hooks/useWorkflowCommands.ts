@@ -1,4 +1,6 @@
-import { currentCanvasAuthority, canvasAuthorityMatches, currentAuthoringAuthority, ownCanvas } from '../lib/canvas-authority'
+import { ownAuthoringExperience } from '../lib/experience-authority'
+import type { AuthoringExperienceEdits } from '../lib/api-types.generated'
+import { currentCanvasAuthority, canvasAuthorityMatches } from '../lib/canvas-authority'
 import { useCallback } from 'react'
 import { api, contractApi } from '../api'
 import { useConfirm } from '../components/ConfirmDialog'
@@ -316,6 +318,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     brief: WorkflowIntentBrief,
     catalogVersion: string,
     sourcePrompt: string,
+    experienceEdits?: AuthoringExperienceEdits,
   ): Promise<WorkflowProposalResponse> => {
     const [result, { isWorkflowProposalResponse }] = await Promise.all([
       contractApi(
@@ -326,6 +329,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
           brief,
           catalogVersion,
           currentWorkflow: getWorkflowJson(),
+          ...(experienceEdits?.length ? { experienceEdits } : {}),
         },
         { guard: isPostAiWorkflowProposalsResponse },
       ).catch(malformedAs(t('toasts.aiResponseInvalid'))),
@@ -363,7 +367,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     // A source review cannot regain authority after an intervening navigation
     // or permission change, even when the store returns to its old values.
     // This is local result ownership, not cancellation of a delivered request.
-    const owner = comparisonSnapshot ? ownCanvas(() => {}, currentAuthoringAuthority) : null
+    const owner = comparisonSnapshot ? ownAuthoringExperience(() => {}) : null
     const stillOwns = () => !owner?.signal.aborted && canvasAuthorityMatches(sourceAuthority)
     try {
       if (!proposalSnapshot.proposal.applicable || !proposalSnapshot.bindings.complete) {
@@ -417,11 +421,13 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
         // Source-specific review matching is needed only for opt-in source Apply.
         const { jsonEquivalent } = await import('../lib/json-envelope-equality')
         if (!stillOwns()) return { status: 'canvas_changed' }
-        if (!isWorkflowProposalResponse(revalidated)
-          || !revalidated.proposal.applicable
-          || !await isWorkflowProposalApplySafe(revalidated)
-          || !jsonEquivalent(decision, revalidated.experienceDecision)
-          || !jsonEquivalent(proposalSnapshot.proposal.workflow, revalidated.proposal.workflow)) {
+        const revalidatedSafe = isWorkflowProposalResponse(revalidated)
+          && revalidated.proposal.applicable
+          && await isWorkflowProposalApplySafe(revalidated)
+          && jsonEquivalent(decision, revalidated.experienceDecision)
+          && jsonEquivalent(proposalSnapshot.proposal.workflow, revalidated.proposal.workflow)
+        if (!stillOwns()) return { status: 'canvas_changed' }
+        if (!revalidatedSafe) {
           addToast(t('toasts.aiResponseInvalid'), 'error')
           return { status: 'blocked' }
         }

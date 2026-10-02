@@ -12,7 +12,7 @@
  * Used by `RightPanel.tsx` (Inspector tab → version history).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
 import { readWorkflowVersionPage, type WorkflowVersionRow } from '../lib/list-contract'
@@ -28,6 +28,8 @@ import { sessionCan } from '../identity-context'
 import './VersionHistoryPanel.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { Button } from './ui/Button'
+
+const AuthoringExperienceRegistry = lazy(() => import('./AuthoringExperienceRegistry'))
 
 const VERSION_HISTORY_TAGS = [PLATFORM_TAG, 'workflows', 'versions', 'rollouts'] as const
 
@@ -355,6 +357,10 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
         >
           {t('versionHistory.loadMore')}
         </Button>
+      )}
+
+      {loadState === 'ready' && versions.length > 0 && canRollback && canSuggest && (
+        <Suspense fallback={null}><AuthoringExperienceRegistry versions={versions} /></Suspense>
       )}
 
       {compareMode && comparePair && (

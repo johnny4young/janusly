@@ -49,6 +49,27 @@ consent or canvas blocks copying instead of accepting a new proposal or requesti
 generation. Legacy proposals without a source-bearing receipt keep their existing
 Apply path. Save and Run remain separate actions.
 
+Saved-version history offers an optional example registry only after a consented,
+scoped read succeeds and the operator has AI and workflow read/write grants.
+Registration selects an exact immutable history version and explicitly compiles
+and reviews an example brief; neither the current draft nor a prompt/graph is
+sent to the registration endpoint. Register and Withdraw are explicit mutations.
+Disabled consent stays hidden, and failures never grant consent or report success.
+
+Experience review labels REUSE, ADAPT, GENERATE and ESCALATE separately from the
+completion/fallback status. It shows the closed reason/policy, exact source
+workflow/version for copies, and unknown outcome evidence. The optional name
+field requests only `workflow_name`, bounded to 200 UTF-8 bytes; editing it
+invalidates the previous proposal and requires a new explicit preview. It never
+changes executable graph authority, automatically proposes, or applies work.
+An in-flight Apply disables the name input and keeps its detached snapshot.
+
+Source Apply and registry results lose ownership on the first identity,
+organization, canvas, navigation or grant change, even if the store returns to
+its original values before React paints. Consent/source resource invalidations
+also expire that ownership. Leases are disposed on terminal paths; this is local
+result invalidation, not a claim that an already-delivered mutation was cancelled.
+
 Successful HTTP responses with unreadable bodies are errors, not empty success
 objects; cancellation remains `AbortError`. A genuinely empty body remains
 compatible with bodyless endpoints. Non-success responses retain their HTTP
