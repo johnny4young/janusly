@@ -115,6 +115,12 @@ model. The manifest no longer admits the legacy envelope without `suggestions`,
 so there is no legacy projection. Do not add UI for response fields that no
 current server route produces.
 
+Snippet insertion imports only the pure insertion helpers and ID prefix; the
+built-in recipe catalog and lookup are separate. The menu reads actual built-in
+and tenant snippets from the existing API; importing it does not construct a
+second unused recipe index. The original library exports and recipes remain
+available to explicit catalog consumers.
+
 Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
 They must preserve the same strict-object, bound, default, transform, and
 refinement semantics as the API contract; do not trade validation coverage for

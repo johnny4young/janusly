@@ -3,7 +3,7 @@
  * drops into a workflow being edited.
  *
  * Two flavours share one shape:
- *  1. **Built-in snippets** live in CODE (`BUILTIN_SNIPPETS` in the values module), are
+ *  1. **Built-in snippets** live in CODE (`BUILTIN_SNIPPETS` in the catalog module), are
  *     read-only, ship with every install, and carry EN/ES display copy.
  *  2. **Custom snippets** live in the `snippets` table per org and are
  *     authored through `POST /snippets` (admin only). The DB row matches
@@ -46,6 +46,7 @@ import * as z from 'zod/mini'
 
 import { SNIPPET_CATEGORIES, SNIPPET_MAX_NODES, SNIPPET_MAX_EDGES, SNIPPET_MAX_TAGS } from './workflow-snippets-values'
 export * from './workflow-snippets-values'
+export * from './workflow-snippets-catalog'
 
 // ---------- category ----------
 
