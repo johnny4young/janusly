@@ -158,7 +158,7 @@ func rollbackExperienceTx(ctx context.Context, tx pgx.Tx) {
 	_ = tx.Rollback(cleanup)
 }
 
-func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string) (pgx.Tx, *store.Queries, int, error) {
+func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string, resolving bool) (pgx.Tx, *store.Queries, int, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, 0, err
 	}
@@ -173,18 +173,29 @@ func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string) (pgx.T
 		return nil, nil, 0, err
 	}
 	q := store.New(tx)
-	rows, err := q.LockAuthoringExperienceConsent(ctx, orgID)
-	if err != nil {
-		_ = tx.Rollback(ctx)
-		return nil, nil, 0, err
-	}
-	values := make(map[string]json.RawMessage, len(rows))
-	for _, row := range rows {
-		values[row.Key] = row.ValueJson
+	values := make(map[string]json.RawMessage, 4)
+	if resolving {
+		rows, readErr := q.LockAuthoringExperienceResolveConsent(ctx, orgID)
+		if readErr != nil {
+			rollbackExperienceTx(ctx, tx)
+			return nil, nil, 0, readErr
+		}
+		for _, row := range rows {
+			values[row.Key] = row.ValueJson
+		}
+	} else {
+		rows, readErr := q.LockAuthoringExperienceConsent(ctx, orgID)
+		if readErr != nil {
+			rollbackExperienceTx(ctx, tx)
+			return nil, nil, 0, readErr
+		}
+		for _, row := range rows {
+			values[row.Key] = row.ValueJson
+		}
 	}
 	days, err := experienceConsentDays(values)
 	if err != nil {
-		_ = tx.Rollback(ctx)
+		rollbackExperienceTx(ctx, tx)
 		return nil, nil, 0, err
 	}
 	return tx, q, days, nil
@@ -198,7 +209,7 @@ func (r *ExperienceRegistry) Register(ctx context.Context, input ExperienceRegis
 	if err != nil {
 		return ExperienceRecord{}, err
 	}
-	tx, q, days, err := r.consentTx(ctx, input.OrganizationID)
+	tx, q, days, err := r.consentTx(ctx, input.OrganizationID, false)
 	if err != nil {
 		return ExperienceRecord{}, err
 	}
@@ -237,7 +248,7 @@ func (r *ExperienceRegistry) List(ctx context.Context, orgID, workflowID string)
 	if !validExperienceID(workflowID) {
 		return ExperienceList{}, ErrExperienceBriefInvalid
 	}
-	tx, q, _, err := r.consentTx(ctx, orgID)
+	tx, q, _, err := r.consentTx(ctx, orgID, false)
 	if err != nil {
 		return ExperienceList{}, err
 	}

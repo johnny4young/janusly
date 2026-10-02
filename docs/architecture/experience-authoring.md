@@ -104,6 +104,35 @@ output. It does not itself grant read authority or query the registry: a live
 caller must still re-read the source and fence current consent/deletion. HTTP
 selection and editor integration are not connected to these local mechanisms.
 
+## Live registered-version boundary
+
+The private registry reader derives consent and its current instant from the
+server, not caller/model projection bits. The supplied catalog and organization
+must come from the centralized authorized caller. Temporal, tenant, brief-key,
+policy, retention and source-size predicates precede a bounded source-work scan.
+Current reads reject any tombstone; historical SQL applies explicit as-of dates
+but cannot infer historical consent from mutable configuration. The offline
+replay therefore consumes independently frozen consent snapshots.
+
+The reader scans at most six exact source graphs plus one sentinel, without
+N+1 queries or an unbounded history walk. Compatibility is checked using the
+current binder and workflow validator before the final five-candidate top-K.
+If the source horizon cannot establish completeness, `truncated` requires
+review; it never fabricates an empty match or chooses an arbitrary first row.
+Historical matching has an organization/key/time index and explicit C-collation
+identity ordering, consistent with the frozen replay across database locales.
+
+Resolution re-reads all matching candidates and the exact source. New ambiguity,
+revocation, deletion, expiration, catalog/brief drift or unsupported edits
+invalidate the prior receipt instead of substituting the latest version. Sorted
+exclusive consent-row locks are acquired initially for resolution, avoiding
+lock upgrades and fencing both registration and consent writers. Source/version
+row locks fence mutation through the copy's admission point. Registration and
+ordinary provenance listing retain their shared consent locks. The stage remains
+bounded to 200 ms with caller cancellation terminal; no failure launches a model
+call, saves a draft or grants Apply/Run permission. HTTP selection and the editor
+are still not connected to this boundary.
+
 ## Offline mechanical evidence
 
 Run the frozen synthetic corpora with:
@@ -147,3 +176,39 @@ Passing does not prove real-world precision, utility, human acceptance or
 independently verified effects.
 
 See [AI pipeline](ai-pipeline.md) for the existing authoring authority boundary.
+
+## PostgreSQL fixture qualification
+
+The optional developer command exercises the live reader only against a fresh,
+UUID-named database it creates and removes using a loopback PostgreSQL 18 test
+role with `CREATEDB`. It refuses remote hosts and connection-routing overrides,
+checks the owned database identity before migration, migrates twice and checks
+registration, exact copy, descriptive adaptation, tenant isolation, new
+ambiguity, revocation, cancellation and default-off behavior. It does not
+read/register real tenant workflows or contact a completion provider.
+
+```sh
+JANUSLY_DATABASE_URL='postgres://janusly:janusly-local@127.0.0.1:15473/janusly?sslmode=disable' \
+  JANUSLY_MEMORY_ENABLED=true go run ./cmd/authoringcheck --registry-fixture
+```
+
+The feature is enabled only in the command's synthetic registry instance and
+synthetic consent rows. This does not enable authoring experiences in another
+process or existing organization. Success is emitted only after its owned
+fixture database has been removed; counters report zero logical/SDK model calls.
+
+## Rules component performance screen
+
+`TestExperienceRulesPerformanceUnderAuthoringWorkload` measures a first rules
+call and 1,000 warm rules/copy admissions with 200 credential and 200 subworkflow
+catalog entries. Concurrent work uses the existing brief compiler, deterministic
+proposal construction, workflow validator and binder. Cancelled calls remain
+terminal, and the 200 ms decision-stage ceiling is not enlarged.
+
+For independent cold samples, compile the test binary once and run only this
+test in 30 separate processes; ordinary repetition inside one process is not a
+cold sample. The logged report separates first-decision latency from warm
+percentiles. First-decision latency does not include process startup or catalog
+construction. This component screen is not HTTP throughput, database latency,
+real-model quality or a production capacity claim. Database contention and
+in-flight cancellation are covered separately by PostgreSQL integration tests.

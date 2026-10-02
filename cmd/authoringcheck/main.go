@@ -1,6 +1,7 @@
 // Command authoringcheck checks frozen synthetic authoring mechanics offline.
 // It predicts rules and can copy fixture graphs, but cannot retrieve a live
-// workflow, contact a provider, save a draft or execute a proposal.
+// workflow, contact a provider, save a draft or execute a proposal. The explicit
+// registry-fixture lane owns a fresh loopback PostgreSQL database only.
 package main
 
 import (
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/johnny4young/janusly/internal/authoring"
 )
@@ -21,8 +23,18 @@ type checkReport struct {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--registry-fixture" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := runRegistryFixture(ctx, os.Getenv("JANUSLY_DATABASE_URL"), os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if len(os.Args) < 2 || len(os.Args) > 3 {
-		fmt.Fprintln(os.Stderr, "usage: authoringcheck <mechanics-corpus.json> [replay-corpus.json]")
+		fmt.Fprintln(os.Stderr, "usage: authoringcheck <mechanics-corpus.json> [replay-corpus.json] | --registry-fixture")
 		os.Exit(2)
 	}
 	if err := runCheck(context.Background(), os.Args[1:], os.Stdout); err != nil {

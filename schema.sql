@@ -2463,6 +2463,13 @@ CREATE INDEX authoring_experiences_expiry_idx ON public.authoring_experiences US
 
 
 --
+-- Name: authoring_experiences_history_match_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX authoring_experiences_history_match_idx ON public.authoring_experiences USING btree (org_id, brief_key, registered_at DESC, id COLLATE "C" DESC);
+
+
+--
 -- Name: authoring_experiences_list_idx; Type: INDEX; Schema: public; Owner: -
 --
 
