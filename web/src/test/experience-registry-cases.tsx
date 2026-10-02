@@ -8,6 +8,7 @@ import type { SessionContext } from '../identity-context'
 import type { AuthoringExperienceRecord } from '../lib/api-types.generated'
 import type { WorkflowBriefCompilation } from '../types'
 import { deferred } from './deferred'
+import { invalidateTags, type ResourceTag } from '../lib/query-cache'
 
 const initial = useWorkflowStore.getState()
 const grants = ['workflows.read', 'workflows.write', 'ai.write']
@@ -64,6 +65,75 @@ export function registerExperienceRegistryCases() {
         currentWorkflowId: 'saved-source', currentWorkflowSaved: true, activeTab: 'inspector', toasts: [] }, true)
     })
     for (const locale of ['en', 'es'] as const) {
+      const contexts = ['organization', 'user', 'workflow', 'navigation', 'saved', ...grants] as const
+      const resources: ResourceTag[] = ['authoring-experiences', 'memory', 'org-config', 'versions', 'workflows', 'credentials', 'mcp']
+      for (const boundary of [...contexts, ...resources]) {
+        for (const mutation of ['register', 'revoke'] as const) {
+          for (const outcome of ['resolve', 'reject'] as const) {
+            it(`${locale} pending ${mutation} ${outcome} across ${boundary} cannot release a new compilation`, async () => {
+              await changeAppLanguage(locale)
+              const previous = deferred<unknown>()
+              const next = deferred<WorkflowBriefCompilation>()
+              let retired = false
+              const write = `POST /authoring/experiences/${mutation}`
+              setup(operation => {
+                if (operation === write) return previous.promise
+                if (operation === 'GET /authoring/experiences') return Promise.resolve({
+                  entries: !retired && mutation === 'revoke' ? [entry] : [], truncated: false,
+                })
+                if (retired && operation === 'POST /ai/workflow-briefs/compile') return next.promise
+                return undefined
+              })
+              render(<VersionHistoryPanel />)
+              if (mutation === 'register') await compileExample(locale)
+              fireEvent.click(await screen.findByRole('button', { name: copy[locale][mutation === 'register' ? 'register' : 'withdraw'] }))
+              await waitFor(() => expect(vi.mocked(contractApi).mock.calls.some(([operation]) => operation === write)).toBe(true))
+              const submitted = vi.mocked(contractApi).mock.calls.find(([operation]) => operation === write)!
+              expect(submitted[2]).toEqual(mutation === 'register'
+                ? { workflowId: 'saved-source', versionId: 'version-3', brief: compiled.brief } : { id: entry.id })
+              if (mutation === 'register') expect((submitted[2] as { brief: unknown }).brief).not.toBe(compiled.brief)
+              expect(screen.getByLabelText(copy[locale].intent)).toBeDisabled()
+              expect(screen.getByLabelText(copy[locale].version)).toBeDisabled()
+              const reads = vi.mocked(contractApi).mock.calls.filter(([operation]) => operation === 'GET /authoring/experiences').length
+              retired = true
+              act(() => {
+                const state = useWorkflowStore.getState()
+                if (resources.includes(boundary as ResourceTag)) invalidateTags([boundary as ResourceTag])
+                else {
+                  if (boundary === 'organization') useWorkflowStore.setState({ orgId: 'other' })
+                  else if (boundary === 'user') useWorkflowStore.setState({ userId: 'other' })
+                  else if (boundary === 'workflow') useWorkflowStore.setState({ currentWorkflowId: 'other' })
+                  else if (boundary === 'navigation') useWorkflowStore.setState({ activeTab: 'operations' })
+                  else if (boundary === 'saved') useWorkflowStore.setState({ currentWorkflowSaved: false })
+                  else useWorkflowStore.setState({ identityContext: identity(grants.filter(grant => grant !== boundary)) })
+                  useWorkflowStore.setState({ orgId: state.orgId, userId: state.userId, currentWorkflowId: state.currentWorkflowId,
+                    currentWorkflowSaved: state.currentWorkflowSaved, activeTab: state.activeTab, identityContext: state.identityContext })
+                }
+              })
+              await waitFor(() => expect(vi.mocked(contractApi).mock.calls.filter(([operation]) => operation === 'GET /authoring/experiences').length).toBeGreaterThan(reads))
+              const input = await screen.findByLabelText(copy[locale].intent)
+              expect(input).toBeEnabled()
+              fireEvent.change(input, { target: { value: 'New owner intent' } })
+              fireEvent.click(screen.getByRole('button', { name: copy[locale].compile }))
+              await waitFor(() => expect(screen.getByRole('button', { name: copy[locale].compile })).toBeDisabled())
+              await act(async () => {
+                if (outcome === 'resolve') previous.resolve(mutation === 'register' ? entry : { id: entry.id, revoked: true })
+                else previous.reject(new Error('STALE_MUTATION_ERROR'))
+              })
+              expect(screen.getByRole('button', { name: copy[locale].compile })).toBeDisabled()
+              expect(screen.getByRole('button', { name: copy[locale].register })).toBeDisabled()
+              expect(screen.queryByRole('button', { name: copy[locale].withdraw })).not.toBeInTheDocument()
+              expect(screen.queryByText(copy[locale].failed)).not.toBeInTheDocument()
+              expect(input).toHaveValue('New owner intent')
+              await act(async () => next.resolve({ ...compiled, brief: { ...compiled.brief, expectedOutcome: 'New owner compilation' } }))
+              await waitFor(() => expect(screen.getByRole('button', { name: copy[locale].register })).toBeEnabled())
+              expect(screen.getByText('New owner compilation')).toBeInTheDocument()
+              expect(vi.mocked(contractApi).mock.calls.filter(([operation]) => operation === write)).toHaveLength(1)
+              expect(useWorkflowStore.getState()).toMatchObject({ currentWorkflowId: 'saved-source', workflowDirty: false, toasts: [] })
+            })
+          }
+        }
+      }
       const invalidLists = {
         'six entries': Array.from({ length: 6 }, (_, index) => ({ ...entry, id: `example-${index}` })),
         'duplicate identities': [entry, { ...entry }],
