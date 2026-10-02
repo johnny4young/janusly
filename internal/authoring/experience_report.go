@@ -15,10 +15,11 @@ import (
 // OfflineDecisionCounts separates requested generation from real traffic.
 // The offline runner has no provider admission or completion client.
 type OfflineDecisionCounts struct {
-	Modes                map[DecisionMode]int `json:"modes"`
-	GenerationRequested  int                  `json:"generationRequested"`
-	ActualLogicalCalls   int                  `json:"actualLogicalCalls"`
-	SDKTransportRequests int                  `json:"sdkTransportRequests"`
+	Modes                    map[DecisionMode]int `json:"modes"`
+	GenerationRequested      int                  `json:"generationRequested"`
+	CanonicalRecipeRequested int                  `json:"canonicalRecipeRequested"`
+	ActualLogicalCalls       int                  `json:"actualLogicalCalls"`
+	SDKTransportRequests     int                  `json:"sdkTransportRequests"`
 }
 
 type OfflineTemplateCounts struct {
@@ -67,10 +68,14 @@ type RulesMechanicsReport struct {
 func offlineCounts() OfflineDecisionCounts {
 	return OfflineDecisionCounts{Modes: map[DecisionMode]int{}}
 }
-func (c *OfflineDecisionCounts) record(mode DecisionMode) {
+func (c *OfflineDecisionCounts) record(mode DecisionMode, reason DecisionReason) {
 	c.Modes[mode]++
 	if mode == DecisionGenerate {
-		c.GenerationRequested++
+		if reason == DecisionCanonicalRecipe {
+			c.CanonicalRecipeRequested++
+		} else {
+			c.GenerationRequested++
+		}
 	}
 }
 func corpusHash(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
@@ -153,8 +158,8 @@ func CheckRulesMechanicsCorpus(ctx context.Context, raw []byte) (RulesMechanicsR
 				report.GenerationRequestsDeferredToReview++
 			}
 		}
-		report.ExperienceRules.record(predicted.Mode)
-		report.ExactRulesWithoutExperience.record(control.Mode)
+		report.ExperienceRules.record(predicted.Mode, predicted.Reason)
+		report.ExactRulesWithoutExperience.record(control.Mode, control.Reason)
 		report.Outcomes = append(report.Outcomes, RulesMechanicsOutcome{ID: c.ID, Family: c.Family, Split: c.Split, Language: c.Request.Brief.Language, Expected: c.Expected, Predicted: predicted, Correct: correct, WithoutExperienceMode: control.Mode, LegacyTemplateID: templateID, LegacyBindingComplete: bound})
 	}
 	report.GenerationRequestDelta = report.ExactRulesWithoutExperience.GenerationRequested - report.ExperienceRules.GenerationRequested

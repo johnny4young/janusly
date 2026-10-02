@@ -133,7 +133,9 @@ from present mutable configuration. Physically purged records cannot reconstruct
 history; these replay inputs are independent frozen fixtures.
 
 Reports preserve every outcome and denominator, including invalidated reuse,
-cancellations and escalation. Generation requests avoided by selecting a source
+cancellations and escalation. Canonical recipe construction is counted separately
+from requests for the generative path; neither grants provider admission.
+Generation requests avoided by selecting a source
 are counted separately from requests deferred to review. Actual logical model
 calls and SDK transport requests are both zero: this runner has no provider
 client. No real calls avoided, probability, semantic-model accuracy, successful

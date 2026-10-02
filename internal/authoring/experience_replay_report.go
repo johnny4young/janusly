@@ -117,7 +117,7 @@ func ReplayExperienceCorpus(ctx context.Context, raw []byte) (ExperienceReplayRe
 			outcome.Predicted = &predicted
 			outcome.SelectedCandidates = len(projected.Candidates)
 			outcome.Truncated = projected.Truncated
-			report.Decisions.record(predicted.Mode)
+			report.Decisions.record(predicted.Mode, predicted.Reason)
 			if receipt.Source != nil {
 				outcome.ArtifactStatus = "invalidated"
 				var selected *ExperienceArtifact

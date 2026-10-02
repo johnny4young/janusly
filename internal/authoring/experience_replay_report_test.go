@@ -28,7 +28,7 @@ func TestChronologicalReplayCorpusIsFrozenAndSourceValidated(t *testing.T) {
 	if err != nil || report.Cases != 42 || report.Correct != 42 || len(report.Outcomes) != 42 {
 		t.Fatalf("replay: cases=%d correct=%d err=%v", report.Cases, report.Correct, err)
 	}
-	if report.ArtifactCopies != 10 || report.ReuseInvalidated != 4 || report.Cancellations != 2 || report.Decisions.GenerationRequested != 16 || report.Decisions.ActualLogicalCalls != 0 || report.Decisions.SDKTransportRequests != 0 {
+	if report.ArtifactCopies != 10 || report.ReuseInvalidated != 4 || report.Cancellations != 2 || report.Decisions.GenerationRequested != 14 || report.Decisions.CanonicalRecipeRequested != 2 || report.Decisions.ActualLogicalCalls != 0 || report.Decisions.SDKTransportRequests != 0 {
 		t.Fatalf("accounting: copies=%d invalidated=%d cancelled=%d counts=%+v", report.ArtifactCopies, report.ReuseInvalidated, report.Cancellations, report.Decisions)
 	}
 	if report.Languages["en"] != 21 || report.Languages["es"] != 21 {
