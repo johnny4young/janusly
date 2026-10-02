@@ -22,11 +22,13 @@ func init() {
 }
 
 type workflowProposalRequest struct {
-	Prompt          string                `json:"prompt"`
-	Brief           authoring.IntentBrief `json:"brief"`
-	CurrentWorkflow map[string]any        `json:"currentWorkflow"`
-	CatalogVersion  string                `json:"catalogVersion"`
-	Model           string                `json:"model"`
+	Prompt            string                      `json:"prompt"`
+	Brief             authoring.IntentBrief       `json:"brief"`
+	CurrentWorkflow   map[string]any              `json:"currentWorkflow"`
+	CatalogVersion    string                      `json:"catalogVersion"`
+	Model             string                      `json:"model"`
+	ExperienceEdits   []authoring.DescriptiveEdit `json:"experienceEdits"`
+	ExperienceReceipt *experienceWorkflowDecision `json:"experienceReceipt"`
 }
 
 // Authoring request fields are optional so a partially described intent can
@@ -40,11 +42,13 @@ type compileWorkflowBriefWire struct {
 }
 
 type workflowProposalWire struct {
-	Prompt          json.RawMessage `json:"prompt"`
-	Brief           json.RawMessage `json:"brief"`
-	CurrentWorkflow json.RawMessage `json:"currentWorkflow"`
-	CatalogVersion  json.RawMessage `json:"catalogVersion"`
-	Model           json.RawMessage `json:"model"`
+	Prompt            json.RawMessage `json:"prompt"`
+	Brief             json.RawMessage `json:"brief"`
+	CurrentWorkflow   json.RawMessage `json:"currentWorkflow"`
+	CatalogVersion    json.RawMessage `json:"catalogVersion"`
+	Model             json.RawMessage `json:"model"`
+	ExperienceEdits   json.RawMessage `json:"experienceEdits"`
+	ExperienceReceipt json.RawMessage `json:"experienceReceipt"`
 }
 
 func decodeStrictAuthoringObject(raw json.RawMessage, target any) error {
@@ -67,6 +71,11 @@ func decodeAuthoringWire(r *http.Request, target any) error {
 	var raw json.RawMessage
 	if err := decodeBody(r, &raw); err != nil {
 		return err
+	}
+	if _, proposal := target.(*workflowProposalWire); proposal {
+		if err := validateExperienceProposalMemberNames(raw); err != nil {
+			return err
+		}
 	}
 	return decodeStrictAuthoringObject(raw, target)
 }
@@ -141,6 +150,10 @@ func decodeWorkflowProposalRequest(r *http.Request) (workflowProposalRequest, er
 		return workflowProposalRequest{}, err
 	}
 	request.Brief = brief
+	request.ExperienceEdits, request.ExperienceReceipt, err = decodeExperienceProposalFields(wire.ExperienceEdits, wire.ExperienceReceipt)
+	if err != nil {
+		return workflowProposalRequest{}, err
+	}
 	if len(wire.CurrentWorkflow) > 0 {
 		if bytes.Equal(bytes.TrimSpace(wire.CurrentWorkflow), []byte("null")) {
 			return workflowProposalRequest{}, errors.New("currentWorkflow cannot be null")
@@ -362,6 +375,14 @@ func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult 
 	proposalPrompt := authoring.ProposalGenerationPrompt(compiled, request.Prompt)
 	catalogChanged := request.CatalogVersion != "" && request.CatalogVersion != catalog.Version
 	var wire map[string]any
+	var experience experienceProposalAttempt
+	if !catalogChanged {
+		experience = s.experienceProposal(r, rc, request, compiled, catalog, proposalPrompt)
+		if experience.Failure != nil {
+			return *experience.Failure
+		}
+		wire = experience.Wire
+	}
 	if catalogChanged {
 		// The caller reviewed a different capability snapshot. Do not spend AI
 		// budget, consume the AI rate bucket, or synthesize an executable graph
@@ -374,7 +395,7 @@ func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult 
 		}
 		wire = maps.Clone(workflowDoc)
 		wire["mode"] = "fallback"
-	} else {
+	} else if wire == nil {
 		generated := s.generateWorkflowFromPrompt(
 			r.Context(), rc, proposalPrompt, request.Model, catalog, compiled.Brief,
 		)
@@ -408,6 +429,10 @@ func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult 
 		})
 		bindings.Complete = false
 	}
+	if experience.GuardReason != "" {
+		bindings.Missing = append(bindings.Missing, authoring.Binding{Kind: "authoring_experience", Field: "experienceDecision", Alternatives: []string{}, Reason: experience.GuardReason})
+		bindings.Complete = false
+	}
 	readiness := proposalReadiness{Status: "fail", Issues: []domain.ReadinessIssue{}}
 	if workflow != nil {
 		readiness = proposalWorkflowReadiness(workflow, parseIssues)
@@ -439,6 +464,9 @@ func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult 
 		"mode": mode, "brief": compiled.Brief,
 		"clarifyingQuestions": compiled.ClarifyingQuestions,
 		"bindings":            bindings, "proposal": proposal,
+	}
+	if experience.Decision != nil {
+		response["experienceDecision"] = experience.Decision
 	}
 	if finalized.ProviderGuarded {
 		response["providerGuarded"] = true

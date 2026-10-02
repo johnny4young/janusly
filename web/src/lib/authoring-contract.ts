@@ -223,6 +223,42 @@ function proposalContractsAreBound(value: WorkflowProposalResponse): boolean {
     && value.proposal.qualification.semantic === hasSemanticContract
 }
 
+function experienceDecisionIsBound(value: import('./api-types.generated').ApiResponse<'POST /ai/workflow-proposals'>): boolean {
+  const decision = value.experienceDecision
+  if (!decision) return true
+  const validId = (id: string) => isCanonicalNonemptyString(id)
+    // wire-policy: receipt identifiers share the server's UTF-8 byte bound, not JSON Schema code-point length.
+    && !/[\0\r\n\t]/.test(id) && new TextEncoder().encode(id).length <= 128
+  if (!validId(decision.contextRevision) || !validId(decision.catalogVersion)
+    || decision.catalogVersion !== value.bindings.catalogVersion) return false
+  if (decision.mode === 'ESCALATE') return !value.proposal.applicable
+  if (decision.mode === 'GENERATE') return true
+  const source = decision.source
+  if (!validId(decision.draftId) || decision.draftId !== value.proposal.workflow.id
+    || !validId(source.candidateId) || !validId(source.workflowId) || !validId(source.versionId)
+    || source.workflowId === decision.draftId || !Number.isSafeInteger(source.version)
+    || source.version < 1) return false
+  if (decision.mode === 'REUSE') return true
+  const edit = decision.edits[0]
+  return decision.edits.length === 1 && edit.field === 'workflow_name'
+    && isCanonicalNonemptyString(edit.value) && !edit.value.includes('\0')
+    // wire-policy: descriptive edits share the server's UTF-8 byte bound before matching the reviewed name.
+    && new TextEncoder().encode(edit.value).length <= 200
+    && edit.value === value.proposal.workflow.name
+}
+
+/** Revalidation may authorize only the exact receipt and graph already reviewed. */
+export function experienceProposalMatchesReview(
+  reviewed: WorkflowProposalResponse,
+  revalidated: unknown,
+): revalidated is WorkflowProposalResponse {
+  const decision = reviewed.experienceDecision
+  return !!decision && (decision.mode === 'REUSE' || decision.mode === 'ADAPT')
+    && isWorkflowProposalResponse(revalidated) && revalidated.proposal.applicable
+    && jsonEquivalent(decision, revalidated.experienceDecision)
+    && jsonEquivalent(reviewed.proposal.workflow, revalidated.proposal.workflow)
+}
+
 /**
  * Runtime guard for the proposal boundary. The generated guard checks the wire
  * shape; Apply additionally needs a workflow the canvas can open and never an
@@ -232,6 +268,7 @@ export function isWorkflowProposalResponse(value: unknown): value is WorkflowPro
   return isPostAiWorkflowProposalsResponse(value)
     && isWorkflowDefinition(value.proposal.workflow)
     && (!value.proposal.applicable || value.bindings.complete)
+    && experienceDecisionIsBound(value)
 }
 
 /**

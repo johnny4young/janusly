@@ -250,3 +250,27 @@ describe('authoring contract runtime guards', () => {
     expect(await isWorkflowProposalApplySafe(strictOnlyInvalid)).toBe(false)
   })
 })
+
+describe('experience receipt binding to reviewed workflow', () => {
+  const decision = {
+    provider: 'rules', mode: 'REUSE', reason: 'exact_match',
+    policyVersion: 'authoring-experience-v1', contextRevision: 'context-v1',
+    catalogVersion: 'catalog-v1', truncated: false, outcomeEvidence: 'unknown',
+    draftId: 'pagerduty-example',
+    source: { candidateId: 'experience', workflowId: 'saved-source', versionId: 'source-version', version: 1 },
+  }
+  it('accepts the receipt bound to the reviewed draft and catalog', () => {
+    expect(isWorkflowProposalResponse({ ...validProposal(), experienceDecision: decision })).toBe(true)
+  })
+  it.each([
+    ['different draft', { ...decision, draftId: 'other-draft' }],
+    ['different catalog', { ...decision, catalogVersion: 'other-catalog' }],
+    ['source as draft', { ...decision, source: { ...decision.source, workflowId: decision.draftId } }],
+    ['empty identity', { ...decision, contextRevision: '' }],
+    ['invalid version', { ...decision, source: { ...decision.source, version: 0 } }],
+    ['unbound adaptation', { ...decision, mode: 'ADAPT', reason: 'descriptive_adaptation', edits: [{ field: 'workflow_name', value: 'New name' }] }],
+    ['applicable escalation', { provider: 'rules', mode: 'ESCALATE', reason: 'ambiguous_match', policyVersion: decision.policyVersion, contextRevision: decision.contextRevision, catalogVersion: decision.catalogVersion, truncated: false, outcomeEvidence: 'unknown' }],
+  ])('rejects %s', (_label, experienceDecision) => {
+    expect(isWorkflowProposalResponse({ ...validProposal(), experienceDecision })).toBe(false)
+  })
+})

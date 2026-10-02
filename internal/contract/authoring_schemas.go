@@ -34,9 +34,10 @@ var workflowBindingReport = closedObj(map[string]any{
 // not parse: the unparsed document is then returned with Apply closed, so the
 // property keeps the request-side workflow shape.
 var workflowProposalResponse = closedObj(map[string]any{
-	"mode":            map[string]any{"type": "string", "enum": []any{"ai", "fallback", "error"}},
-	"aiError":         str(),
-	"providerGuarded": boolT(),
+	"mode":               map[string]any{"type": "string", "enum": []any{"ai", "fallback", "error"}},
+	"aiError":            str(),
+	"providerGuarded":    boolT(),
+	"experienceDecision": authoringExperienceDecision,
 	"bonBackoff": closedObj(map[string]any{
 		"from": map[string]any{"type": "integer", "minimum": 1},
 		"to":   map[string]any{"type": "integer", "minimum": 1},
@@ -134,3 +135,52 @@ var authoringExperienceRegistration = closedObj(map[string]any{
 var authoringExperienceRevocation = closedObj(map[string]any{
 	"id": authoringExperienceID, "revoked": boolT(),
 }, "id", "revoked")
+
+// Source-bearing receipts require both the exact version and reviewed draft
+// identity. Other classifications cannot acquire either field via the wire.
+var authoringExperienceEdit = closedObj(map[string]any{
+	"field": map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+	"value": map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
+}, "field", "value")
+var authoringExperienceEdits = map[string]any{"type": "array", "items": authoringExperienceEdit, "maxItems": 1}
+var authoringExperienceReference = closedObj(map[string]any{
+	"candidateId": authoringExperienceID, "workflowId": authoringExperienceID,
+	"versionId": authoringExperienceID, "version": map[string]any{"type": "integer", "minimum": 1},
+}, "candidateId", "workflowId", "versionId", "version")
+
+func authoringExperienceDecisionVariant(mode string, reasons []any, source bool) map[string]any {
+	properties := map[string]any{
+		"provider":        map[string]any{"type": "string", "const": "rules"},
+		"mode":            map[string]any{"type": "string", "const": mode},
+		"reason":          map[string]any{"type": "string", "enum": reasons},
+		"policyVersion":   map[string]any{"type": "string", "const": "authoring-experience-v1"},
+		"contextRevision": authoringExperienceID, "catalogVersion": authoringExperienceID,
+		"truncated": boolT(), "outcomeEvidence": map[string]any{"type": "string", "const": "unknown"},
+	}
+	required := []string{"provider", "mode", "reason", "policyVersion", "contextRevision", "catalogVersion", "truncated", "outcomeEvidence"}
+	if source {
+		properties["source"] = authoringExperienceReference
+		properties["draftId"] = authoringExperienceID
+		properties["truncated"] = map[string]any{"type": "boolean", "const": false}
+		required = append(required, "source", "draftId")
+		if mode == "ADAPT" {
+			properties["edits"] = map[string]any{"type": "array", "items": closedObj(map[string]any{
+				"field": map[string]any{"type": "string", "const": "workflow_name"},
+				"value": map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
+			}, "field", "value"), "minItems": 1, "maxItems": 1}
+			required = append(required, "edits")
+		}
+	}
+	return closedObj(properties, required...)
+}
+
+var authoringExperienceCopyReceipt = map[string]any{"oneOf": []any{
+	authoringExperienceDecisionVariant("REUSE", []any{"exact_match"}, true),
+	authoringExperienceDecisionVariant("ADAPT", []any{"descriptive_adaptation"}, true),
+}}
+var authoringExperienceDecision = map[string]any{"oneOf": []any{
+	authoringExperienceDecisionVariant("REUSE", []any{"exact_match"}, true),
+	authoringExperienceDecisionVariant("ADAPT", []any{"descriptive_adaptation"}, true),
+	authoringExperienceDecisionVariant("GENERATE", []any{"no_exact_match", "canonical_recipe"}, false),
+	authoringExperienceDecisionVariant("ESCALATE", []any{"incomplete_intent", "consent_unavailable", "ambiguous_match", "candidates_truncated", "unsupported_adaptation"}, false),
+}}

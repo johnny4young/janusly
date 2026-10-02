@@ -324,6 +324,7 @@ var Routes = []Route{
 		Request: closedObj(map[string]any{
 			"prompt": str(), "brief": workflowIntentBriefInput,
 			"currentWorkflow": workflowComparisonSnapshot, "catalogVersion": str(), "model": str(),
+			"experienceEdits": authoringExperienceEdits, "experienceReceipt": authoringExperienceCopyReceipt,
 		}),
 		Response: workflowProposalResponse},
 	{Method: "GET", Path: "/v1/operations/brief", Summary: "Bounded deterministic Operator Brief shared by UI and MCP",

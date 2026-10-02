@@ -41,7 +41,13 @@ binds the duplicated intent/recovery contracts and qualification flags to the
 exact workflow snapshot, dynamically loading the full strict Recovery Contract
 validator only when a reviewed proposal carries recovery policy. The validated
 snapshot is cloned before confirmation and catalog refresh so shared UI state
-cannot change the object copied into the canvas.
+cannot change the object copied into the canvas. Optional experience provenance is
+also bound to the draft/catalog and exact source version. A REUSE/ADAPT Apply
+revalidates the reviewed receipt and comparison snapshot through the existing
+proposal endpoint after confirmation/catalog refresh. A changed source, graph,
+consent or canvas blocks copying instead of accepting a new proposal or requesting
+generation. Legacy proposals without a source-bearing receipt keep their existing
+Apply path. Save and Run remain separate actions.
 
 Successful HTTP responses with unreadable bodies are errors, not empty success
 objects; cancellation remains `AbortError`. A genuinely empty body remains
