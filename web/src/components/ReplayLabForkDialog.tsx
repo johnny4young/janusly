@@ -22,6 +22,7 @@
  * Used by `RightPanel.tsx`'s `RunsPanel` per-node fork buttons.
  */
 
+import { utf8ByteLength } from '../lib/utf8'
 import { useEffect, useState, useRef } from 'react'
 import { useAliveRef } from '../hooks/useAliveRef'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
@@ -89,7 +90,7 @@ export function ReplayLabForkDialog({
       // Pre-flight the 64 KiB cap the route enforces so an over-cap
       // submit doesn't burn an AI rate-limit token. Byte-accurate via
       // TextEncoder (UTF-8), not UTF-16 code units.
-      const overrideBytes = new TextEncoder().encode(trimmed).byteLength
+      const overrideBytes = utf8ByteLength(trimmed)
       if (overrideBytes > 64_000) {
         setParseError(t('replayLab.fork.overrideTooLarge', { bytes: overrideBytes }))
         return

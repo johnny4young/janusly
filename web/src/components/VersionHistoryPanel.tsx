@@ -27,7 +27,7 @@ import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
 import { AUTHORING_PERMISSIONS, ownCanvas } from '../lib/canvas-authority'
 import './VersionHistoryPanel.css'
-import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { PLATFORM_TAG, useResourceRefresh } from '../lib/query-cache'
 import { Button } from './ui/Button'
 
 const AuthoringExperienceRegistry = lazy(() => import('./AuthoringExperienceRegistry'))
@@ -99,7 +99,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
   const confirm = useConfirm()
   // The keyed wrapper subscribes to every contextual value used here.
   const { currentWorkflowId, currentWorkflowSaved, identityContext, hydrateWorkflow, addToast } = useWorkflowStore.getState()
-  const platformVersion = useInvalidationNonce(VERSION_HISTORY_TAGS)
+  const [refreshNonce, refresh] = useResourceRefresh(VERSION_HISTORY_TAGS)
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [hasMoreVersions, setHasMoreVersions] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -109,7 +109,6 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
   const [rollbackPair, setRollbackPair] = useState<{ current: VersionRow; target: VersionRow } | null>(null)
   const [improvement, setImprovement] = useState<ImprovementState>({ kind: 'idle' })
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [retry, setRetry] = useState(0)
   const owner = useRef<AbortController | null>(null)
   const suggestion = useRef<AbortController | null>(null)
   const current = useCallback((request: AbortController | null): request is AbortController =>
@@ -117,7 +116,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
 
   useEffect(() => {
     // Expire at the first change, including a batched return before React paints.
-    const request = ownCanvas(() => setRetry(value => value + 1), historyScope)
+    const request = ownCanvas(refresh, historyScope)
     owner.current = request
     setVersions([])
     setHasMoreVersions(false)
@@ -149,19 +148,18 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
       request.abort()
       suggestion.current?.abort()
     }
-  }, [addToast, current, currentWorkflowId, currentWorkflowSaved, platformVersion, retry, t])
+  }, [addToast, current, currentWorkflowId, currentWorkflowSaved, refresh, refreshNonce, t])
 
   const canRollback = sessionCan(identityContext, 'workflows.write')
   const canSuggest = sessionCan(identityContext, 'ai.write')
 
   // Resolve the two selected rows; sort by version asc so the older one
   // is always on the left regardless of click order.
-  const [left, right] = selectedIds.map(id => versions.find(version => version.id === id))
-  const comparePair = left && right
-    ? (left.version < right.version ? [left, right] as const : [right, left] as const)
-    : null
+  const selectedVersions = versions.filter(version => selectedIds.includes(version.id))
+    .sort((left, right) => left.version - right.version)
+  const comparePair = selectedVersions.length === 2 ? selectedVersions as [VersionRow, VersionRow] : null
 
-  const onRowClick = (version: VersionRow) => {
+  const onRowClick = async (version: VersionRow) => {
     if (compareMode) {
       toggleSelected(version.id)
       return
@@ -169,22 +167,20 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     const request = owner.current
     const revision = useWorkflowStore.getState().workflowRevision
     if (!current(request)) return
-    void (async () => {
-      // Loading an old version replaces the canvas — same unsaved-work guard
-      // as the App-level hydrate paths.
-      if (useWorkflowStore.getState().workflowDirty) {
-        const proceed = await confirm({
-          title: t('unsavedGuard.title'),
-          body: t('unsavedGuard.body'),
-          confirmLabel: t('unsavedGuard.discard'),
-          tone: 'danger',
-        })
-        if (!proceed) return
-      }
-      if (!current(request) || useWorkflowStore.getState().workflowRevision !== revision) return
-      hydrateWorkflow({ ...version.dagJson, id: currentWorkflowId }, { version: { id: version.id, version: version.version } })
-      addToast(t('versionHistory.loaded', { version: version.version }), 'success')
-    })()
+    // Loading an old version replaces the canvas — same unsaved-work guard
+    // as the App-level hydrate paths.
+    if (useWorkflowStore.getState().workflowDirty) {
+      const proceed = await confirm({
+        title: t('unsavedGuard.title'),
+        body: t('unsavedGuard.body'),
+        confirmLabel: t('unsavedGuard.discard'),
+        tone: 'danger',
+      })
+      if (!proceed) return
+    }
+    if (!current(request) || useWorkflowStore.getState().workflowRevision !== revision) return
+    hydrateWorkflow({ ...version.dagJson, id: currentWorkflowId }, { version: { id: version.id, version: version.version } })
+    addToast(t('versionHistory.loaded', { version: version.version }), 'success')
   }
 
   const toggleSelected = (id: string) => {
@@ -214,10 +210,10 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     }
   }
 
-  const onResetImprovement = () => {
+  const onResetImprovement = useCallback(() => {
     suggestion.current?.abort()
     setImprovement({ kind: 'idle' })
-  }
+  }, [])
 
   const onToggleCompare = () => {
     onResetImprovement()
@@ -225,10 +221,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     setCompareMode(!compareMode)
   }
 
-  useEffect(() => {
-    suggestion.current?.abort()
-    setImprovement({ kind: 'idle' })
-  }, [selectedIds])
+  useEffect(onResetImprovement, [onResetImprovement, selectedIds])
 
   const onSuggestImprovement = async () => {
     const history = owner.current
@@ -299,7 +292,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
 
       {loadState === 'loading' && <p role="status">{t('common.loading')}</p>}
       {loadState === 'error' && <div role="alert"><p>{t('versionHistory.loadFailed')}</p>
-        <Button onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</Button></div>}
+        <Button onClick={refresh}>{t('common.retry')}</Button></div>}
       {loadState === 'ready' && versions.length === 0 && (
         <EmptyState
           icon={<History />}

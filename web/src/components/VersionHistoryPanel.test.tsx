@@ -205,7 +205,7 @@ describe('<VersionHistoryPanel />', () => {
     expect(useWorkflowStore.getState().toasts).toHaveLength(0)
   })
 
-  it('renders a structural diff after selecting two versions in compare mode', async () => {
+  it.each([[2, 1], [1, 2]])('renders a chronological diff after selection %j', async (first, second) => {
     mockVersionHistoryApi({
       wf_compare: [
         { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
@@ -216,10 +216,14 @@ describe('<VersionHistoryPanel />', () => {
     render(<VersionHistoryPanel />)
 
     fireEvent.click(await screen.findByRole('button', { name: /Compare/i }))
-    fireEvent.click(screen.getByRole('button', { name: /v2/i }))
-    fireEvent.click(screen.getByRole('button', { name: /v1/i }))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`v${first}`, 'i') }))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`v${second}`, 'i') }))
 
-    expect(screen.getByLabelText('Structural workflow diff')).toBeInTheDocument()
+    const diff = screen.getByLabelText('Structural workflow diff')
+    expect(diff).toBeInTheDocument()
+    const [older, newer] = within(diff).getAllByText(/^v[12]$/)
+    expect(older).toHaveTextContent('v1')
+    expect(newer).toHaveTextContent('v2')
     expect(screen.getAllByText(/v1/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/v2/).length).toBeGreaterThan(0)
     expect(screen.getByText(/1 node.*changed/i)).toBeInTheDocument()

@@ -314,8 +314,10 @@ measured operator need.
 ## Data invalidation
 
 Panel reads subscribe to the resources they depend on through
-`src/lib/query-cache.ts` (`useInvalidationNonce(tags)`, tags typed as
-`ResourceTag`), and mutations name what they changed: the store action
+`src/lib/query-cache.ts` (tags typed as `ResourceTag`). Resource-only readers
+use `useInvalidationNonce(tags)`; readers with explicit retry use
+`useResourceRefresh(tags)` for one local nonce and a stable refresh action,
+without a second retry counter. Mutations name what they changed: the store action
 `bumpPlatformVersion(tags)` invalidates only those tags, while the bare
 `bumpPlatformVersion()` still broadcasts through the `platform` bridge tag.
 Every panel subscribes to `[PLATFORM_TAG, ...its tags]`, so a same-domain

@@ -1,3 +1,4 @@
+import { utf8ByteLength } from './utf8'
 import type { WorkflowVersionIdentity } from '../store'
 import { jsonEquivalent } from './json-envelope-equality'
 import type {
@@ -188,7 +189,7 @@ function experienceDecisionIsBound(value: import('./api-types.generated').ApiRes
   if (!decision) return true
   const validId = (id: string) => isCanonicalNonemptyString(id)
     // wire-policy: receipt identifiers share the server's UTF-8 byte bound, not JSON Schema code-point length.
-    && !/[\0\r\n\t]/.test(id) && new TextEncoder().encode(id).length <= 128
+    && !/[\0\r\n\t]/.test(id) && utf8ByteLength(id) <= 128
   if (![decision.contextRevision, decision.catalogVersion].every(validId)
     || decision.catalogVersion !== value.bindings.catalogVersion) return false
   if (decision.mode === 'ESCALATE') return !value.proposal.applicable
@@ -203,7 +204,7 @@ function experienceDecisionIsBound(value: import('./api-types.generated').ApiRes
   return decision.edits.length === 1 && edit.value === value.proposal.workflow.name
     && !edit.value.includes('\0')
     // wire-policy: descriptive edits share the server's UTF-8 byte bound before matching the reviewed name.
-    && new TextEncoder().encode(edit.value).length <= 200
+    && utf8ByteLength(edit.value) <= 200
 }
 
 /**

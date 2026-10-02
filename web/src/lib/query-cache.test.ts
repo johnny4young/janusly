@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { invalidateTags, subscribeToTags, useInvalidationNonce, type ResourceTag } from './query-cache'
+import { invalidateTags, subscribeToTags, useInvalidationNonce, useResourceRefresh, type ResourceTag } from './query-cache'
 
 describe('tagged invalidation', () => {
   it('notifies only the subscribers whose tags intersect, once each', () => {
@@ -46,4 +46,29 @@ describe('tagged invalidation', () => {
     act(() => invalidateTags(['roles']))
     expect(result.current).toBe(1)
   })
+
+  it('shares explicit retry and deduplicated resource invalidation in one stable counter', () => {
+    const { result, rerender, unmount } = renderHook(
+      ({ tags }: { tags: readonly ResourceTag[] }) => useResourceRefresh(tags),
+      { initialProps: { tags: ['versions', 'workflows'] } },
+    )
+    const refresh = result.current[1]
+    expect(result.current[0]).toBe(0)
+    act(() => refresh())
+    expect(result.current[0]).toBe(1)
+    expect(result.current[1]).toBe(refresh)
+    act(() => invalidateTags(['versions', 'workflows']))
+    expect(result.current[0]).toBe(2)
+    act(() => { refresh(); refresh() })
+    expect(result.current[0]).toBe(4)
+    rerender({ tags: ['rollouts'] })
+    expect(result.current[1]).toBe(refresh)
+    act(() => invalidateTags(['versions', 'workflows']))
+    expect(result.current[0]).toBe(4)
+    act(() => invalidateTags(['rollouts']))
+    expect(result.current[0]).toBe(5)
+    unmount()
+    expect(() => invalidateTags(['rollouts'])).not.toThrow()
+  })
+
 })

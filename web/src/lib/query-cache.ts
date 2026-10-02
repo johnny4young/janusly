@@ -6,7 +6,7 @@
  * `PLATFORM_TAG` lets cross-domain mutations request a full refresh:
  * panels subscribe to `[PLATFORM_TAG, ...their own tags]`.
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 export const PLATFORM_TAG = 'platform'
 
@@ -49,12 +49,15 @@ export function invalidateTags(tags: readonly ResourceTag[]): void {
   for (const listener of pending) listener()
 }
 
-/**
- * A counter that advances when any of `tags` is invalidated: put it in a
- * fetch effect's dependency list. Pass a stable array to avoid resubscribing.
- */
-export function useInvalidationNonce(tags: readonly ResourceTag[]): number {
+/** One local counter for resource invalidation and an explicit retry or ownership refresh. */
+export function useResourceRefresh(tags: readonly ResourceTag[]): readonly [number, () => void] {
   const [nonce, setNonce] = useState(0)
-  useEffect(() => subscribeToTags(tags, () => setNonce((current) => current + 1)), [tags])
-  return nonce
+  const refresh = useCallback(() => setNonce(current => current + 1), [])
+  useEffect(() => subscribeToTags(tags, refresh), [tags, refresh])
+  return [nonce, refresh]
+}
+
+/** Resource-only readers retain the nonce interface; pass a stable tag array. */
+export function useInvalidationNonce(tags: readonly ResourceTag[]): number {
+  return useResourceRefresh(tags)[0]
 }

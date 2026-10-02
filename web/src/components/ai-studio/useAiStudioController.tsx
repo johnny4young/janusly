@@ -1,3 +1,4 @@
+import { utf8ByteLength } from '../../lib/utf8'
 import { sessionCan } from '../../identity-context'
 import { AUTHORING_PERMISSIONS, currentAuthoringAuthority } from '../../lib/canvas-authority'
 import { AUTHORING_EXPERIENCE_TAGS } from '../../lib/experience-authority'
@@ -59,7 +60,7 @@ export function useAiStudioController({
   const [experienceAvailable, setExperienceAvailable] = useState(false)
   const [experienceName, setExperienceName] = useState('')
   const normalizedExperienceName = experienceName.trim()
-  const experienceNameValid = !normalizedExperienceName || (new TextEncoder().encode(normalizedExperienceName).length <= 200
+  const experienceNameValid = !normalizedExperienceName || (utf8ByteLength(normalizedExperienceName) <= 200
     && !normalizedExperienceName.includes('\0'))
   const [authoringError, setAuthoringError] = useState<string | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(true)

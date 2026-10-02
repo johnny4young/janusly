@@ -73,6 +73,16 @@ export function registerExperienceReviewCases() {
             expect(within(view).queryByText(locale === 'en' ? 'Local template' : 'Plantilla local')).not.toBeInTheDocument()
           } else expect(within(receipt).queryByText('immutable-version-3')).not.toBeInTheDocument()
           if (mode === 'ADAPT') expect(within(receipt).getByText('Reviewed rename')).toBeInTheDocument()
+          const terms = within(receipt).getAllByRole('term').map(term => term.textContent)
+          const values = within(receipt).getAllByRole('definition').map(definition => definition.textContent)
+          const policy = locale === 'en' ? 'Rules policy' : 'Política de reglas'
+          expect(terms[0]).toBe(policy)
+          expect(values).toEqual(['authoring-experience-v1',
+            ...(mode === 'REUSE' || mode === 'ADAPT' ? ['saved-workflow', 'v3 · immutable-version-3'] : []),
+            ...(mode === 'ADAPT' ? ['Reviewed rename'] : []),
+          ])
+          expect(terms).toHaveLength(values.length)
+
           if (mode === 'ESCALATE') expect(screen.getByRole('button', { name: copy[locale].apply })).toBeDisabled()
           expect(props.onApplyWorkflowProposal).not.toHaveBeenCalled()
           expect(useWorkflowStore.getState().currentWorkflowId).toBe('current')

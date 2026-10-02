@@ -1,3 +1,4 @@
+import { utf8ByteLength } from '../lib/utf8'
 import { BriefFacts } from './BriefFacts'
 import { ownAuthoringExperience } from '../lib/experience-authority'
 import { useEffect, useRef, useState } from 'react'
@@ -25,7 +26,7 @@ function registryAuthority(state = useWorkflowStore.getState()): string {
 function boundedSource(row: AuthoringExperienceRecord, workflowId: string): boolean {
   return row.workflowId === workflowId && row.version > 0
     && [row.id, row.workflowId, row.versionId].every(value => value.trim() === value && value.length > 0
-      && new TextEncoder().encode(value).length <= 128 && !/[\x00-\x1f\x7f]/.test(value))
+      && utf8ByteLength(value) <= 128 && !/[\x00-\x1f\x7f]/.test(value))
     && Number.isFinite(Date.parse(row.registeredAt)) && Date.parse(row.retainUntil) > Date.parse(row.registeredAt)
 }
 export default function AuthoringExperienceRegistry({ versions }: { versions: readonly WorkflowVersionRow[] }) {
