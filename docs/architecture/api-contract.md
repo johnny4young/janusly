@@ -30,7 +30,11 @@ payload. Both aliases execute the same core operation and the same `ai.write`
 authorization gate. React uses generated `contractApi` operation keys, so the
 static parity gate crosses the browser call, real Go route, central
 authorization registry, OpenAPI, and generated request, response, and status
-maps.
+maps. Operation keys omit the OpenAPI server base `/v1`; a literal concrete
+URL may include it explicitly. The static guard checks that URL against both
+the operation template and the real transport route, including Vite proxying,
+without requiring a compatibility alias for a v1-only endpoint. Computed URLs
+retain operation-key coverage and runtime template validation.
 
 The manifest describes response envelopes exactly as the handlers serve them:
 `GET /v1/dlq/clusters` is an object with `clusters`, `totalSamples`, and

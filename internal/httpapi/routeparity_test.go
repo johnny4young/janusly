@@ -18,7 +18,8 @@
 // contractApi operation. A fully dynamic api(someVariable) cannot be resolved
 // statically and is skipped; contractApi remains resolvable because its first
 // argument is the generated operation key even if its concrete path is held in
-// a variable.
+// a variable. Literal second arguments additionally exercise the actual transport
+// route, which may explicitly include /v1 without a legacy alias.
 
 package httpapi
 
@@ -68,6 +69,10 @@ var (
 	apiCallPattern = regexp.MustCompile(`\b(?:api|downloadFromApi)\(\s*([` + "`" + `'"])(/[^` + "`" + `'"]*)`)
 	// contractApi('POST /path/{id}', concretePath, body)
 	contractAPICallPattern = regexp.MustCompile(`\bcontractApi\(\s*['"](GET|POST|PUT|PATCH|DELETE)\s+(/[^'"]*)['"]`)
+	// The literal second argument is the transport path, not the operation key.
+	// Each quote kind is parsed independently so quotes inside template
+	// expressions do not truncate the path. Computed paths retain key coverage.
+	contractPathPattern = regexp.MustCompile(`^\s*,\s*(?:'([^']*)'|"([^"]*)"|` + "`([^`]*)`" + `)\s*,`)
 	// method: 'POST' appearing shortly after the path
 	methodPattern = regexp.MustCompile(`method:\s*['"` + "`" + `](GET|POST|PUT|PATCH|DELETE)`)
 	// `${...}` template segments and their surrounding path segment
@@ -77,11 +82,13 @@ var (
 )
 
 type webCall struct {
-	method     string
-	path       string
-	file       string
-	line       int
-	contracted bool
+	method          string
+	path            string
+	file            string
+	line            int
+	contracted      bool
+	concretePath    string
+	hasConcretePath bool
 }
 
 type centralAuthRegistration struct {
@@ -173,15 +180,7 @@ func collectWebCalls(t *testing.T) []webCall {
 				line:   1 + strings.Count(source[:match[0]], "\n"),
 			})
 		}
-		for _, match := range contractAPICallPattern.FindAllStringSubmatchIndex(source, -1) {
-			calls = append(calls, webCall{
-				method:     source[match[2]:match[3]],
-				path:       source[match[4]:match[5]],
-				file:       path,
-				line:       1 + strings.Count(source[:match[0]], "\n"),
-				contracted: true,
-			})
-		}
+		calls = append(calls, contractWebCalls(source, path)...)
 		return nil
 	})
 	if err != nil {
@@ -189,6 +188,35 @@ func collectWebCalls(t *testing.T) []webCall {
 	}
 	if len(calls) == 0 {
 		t.Fatal("no api() calls found — the extractor is broken, not the frontend")
+	}
+	return calls
+}
+
+// contractWebCalls retains the operation key even when the concrete path is
+// dynamic; literal transport paths are inspected separately from that key.
+func contractWebCalls(source, file string) []webCall {
+	var calls []webCall
+	for _, match := range contractAPICallPattern.FindAllStringSubmatchIndex(source, -1) {
+		call := webCall{
+			method:     source[match[2]:match[3]],
+			path:       source[match[4]:match[5]],
+			file:       file,
+			line:       1 + strings.Count(source[:match[0]], "\n"),
+			contracted: true,
+		}
+		if literal := contractPathPattern.FindStringSubmatchIndex(source[match[1]:]); literal != nil {
+			for group := 2; group < len(literal); group += 2 {
+				if literal[group] >= 0 {
+					call.concretePath = source[match[1]+literal[group] : match[1]+literal[group+1]]
+					// A template starting with an expression (such as
+					// `${rolloutPath}/...`) has no statically known prefix.
+					// Preserve operation coverage just as for a variable.
+					call.hasConcretePath = group != 6 || !strings.HasPrefix(call.concretePath, "${")
+					break
+				}
+			}
+		}
+		calls = append(calls, call)
 	}
 	return calls
 }
@@ -231,12 +259,18 @@ func TestEveryContractClientOperationMatchesAllSources(t *testing.T) {
 		}
 		contractedCalls++
 		operation := call.method + " " + call.path
-		if seen[operation] {
+		if !contractPathMatchesOperation(call) {
+			failures = append(failures, operation+": concrete path does not match operation at "+call.file+":"+itoa(call.line))
 			continue
 		}
-		seen[operation] = true
-
 		wire := wirePath(call, versioned)
+		// The same operation may be called through different transports. A
+		// valid /v1 call must not hide a broken compatibility call elsewhere.
+		key := operation + " " + wire
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		request := httptest.NewRequest(call.method, wire, nil)
 		_, pattern := mux.Handler(request)
 		if pattern == "" {
@@ -283,6 +317,9 @@ func TestEveryContractClientOperationMatchesAllSources(t *testing.T) {
 // and versioned GET reads gain their /v1 prefix.
 func wirePath(call webCall, versioned map[string]bool) string {
 	path := call.path
+	if call.hasConcretePath {
+		path = call.concretePath
+	}
 	if index := strings.Index(path, "?"); index >= 0 {
 		path = path[:index]
 	}
@@ -294,6 +331,24 @@ func wirePath(call webCall, versioned map[string]bool) string {
 		return "/v1" + path
 	}
 	return path
+}
+
+// contractPathMatchesOperation mirrors the client's runtime contract check for
+// statically resolvable paths. The operation key stays unversioned in OpenAPI;
+// an explicit /v1 transport is allowed, but a different operation is not.
+func contractPathMatchesOperation(call webCall) bool {
+	if !call.hasConcretePath {
+		return true // Dynamic values are still checked by contractApi at runtime.
+	}
+	path := strings.SplitN(call.concretePath, "?", 2)[0]
+	if !strings.HasPrefix(path, "/") || strings.Contains(path, "#") {
+		return false
+	}
+	path = templateSegment.ReplaceAllString(path, "x")
+	if strings.HasPrefix(path, "/v1/") {
+		path = path[3:]
+	}
+	return matchesCatalogPath(map[string]bool{call.path: true}, path)
 }
 
 // matchesCatalogPath mirrors web/src/lib/api-contract.ts: literal entries
