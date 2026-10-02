@@ -25,6 +25,7 @@ import { useConfirm } from './ConfirmDialog'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
+import { ownCanvas } from '../lib/canvas-authority'
 import './VersionHistoryPanel.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { Button } from './ui/Button'
@@ -88,9 +89,9 @@ export function VersionHistoryPanel() {
   return <ScopedVersionHistory key={scope} scope={scope} />
 }
 
-function historyScope(state: ReturnType<typeof useWorkflowStore.getState>): string {
-  return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.currentWorkflowSaved,
-    sessionCan(state.identityContext, 'workflows.write'), sessionCan(state.identityContext, 'ai.write')])
+function historyScope(state = useWorkflowStore.getState()): string {
+  return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.currentWorkflowSaved, state.activeTab,
+    sessionCan(state.identityContext, 'workflows.read'), sessionCan(state.identityContext, 'workflows.write'), sessionCan(state.identityContext, 'ai.write')])
 }
 
 function ScopedVersionHistory({ scope }: { scope: string }) {
@@ -115,7 +116,11 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     request !== null && !request.signal.aborted && historyScope(useWorkflowStore.getState()) === scope, [scope])
 
   useEffect(() => {
-    const request = new AbortController()
+    // Expire at the first change, including a batched return before React paints.
+    const request = ownCanvas(() => {
+      suggestion.current?.abort()
+      setRetry(value => value + 1)
+    }, historyScope)
     owner.current = request
     setVersions([])
     setHasMoreVersions(false)

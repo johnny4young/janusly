@@ -73,6 +73,13 @@ invalidates the previous proposal and requires a new explicit preview. It never
 changes executable graph authority, automatically proposes, or applies work.
 An in-flight Apply disables the name input and keeps its detached snapshot.
 
+Saved-version history also observes context changes synchronously. A transient
+identity, workflow, saved-state, navigation or authoring grant change aborts its
+old page and suggestions and starts a fresh read, even if React batches a return
+to the same visible scope. Old success/error paths cannot populate or unlock the
+new history snapshot. Client abort remains local result invalidation, not proof
+of remote cancellation.
+
 The authoring controller, source Apply and registry results lose ownership on the first identity,
 organization, canvas, navigation or grant change, even if the store returns to
 its original values before React paints. Consent/source resource invalidations
