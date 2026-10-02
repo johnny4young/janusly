@@ -93,6 +93,12 @@ func decodeExperienceProposalFields(editsRaw, receiptRaw json.RawMessage) ([]aut
 	if err != nil || (receipt.Mode == authoring.DecisionReuse && len(receipt.Edits) != 0) || (receipt.Mode == authoring.DecisionAdapt && (len(receipt.Edits) != 1 || receipt.Edits[0].Field != "workflow_name")) {
 		return nil, nil, authoring.ErrExperienceBriefInvalid
 	}
+	// Canonical encoding can expand HTML and Unicode separators. Bound the
+	// receipt we retain and later echo, not only its original wire bytes.
+	canonical, err := json.Marshal(receipt)
+	if err != nil || len(canonical) > authoring.MaxDecisionResultBytes {
+		return nil, nil, authoring.ErrExperienceBriefInvalid
+	}
 	return edits, &receipt, nil
 }
 

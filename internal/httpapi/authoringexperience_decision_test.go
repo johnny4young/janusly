@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -62,6 +63,68 @@ func TestExperienceProposalExtensionRejectsTopLevelAliasesAndDuplicates(t *testi
 			request := httptest.NewRequest("POST", "/ai/workflow-proposals", strings.NewReader(test.raw))
 			if _, err := decodeWorkflowProposalRequest(request); err == nil {
 				t.Fatal("noncanonical experience extension accepted")
+			}
+		})
+	}
+}
+
+func TestExperienceReceiptCanonicalByteLimit(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		escaped        int
+		version        int
+		extra          int
+		canonicalBytes int
+		wantError      bool
+	}{
+		{"bounded HTML escaping", 10, 1, 0, 0, false},
+		{"exact canonical boundary", 106, 100, 2, 4096, false},
+		{"one-byte canonical overflow", 106, 1000, 2, 4097, true},
+		{"canonical HTML escaping overflow", 128, 1, 0, 4874, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			value := strings.Repeat("<", test.escaped)
+			input := map[string]any{
+				"provider": "rules", "mode": "REUSE", "reason": "exact_match",
+				"policyVersion": "authoring-experience-v1", "contextRevision": value + strings.Repeat("<", test.extra),
+				"catalogVersion": value, "draftId": "d" + value[:len(value)-1],
+				"source":    map[string]any{"candidateId": value, "workflowId": value, "versionId": value, "version": test.version},
+				"truncated": false, "outcomeEvidence": "unknown",
+			}
+			fixtureCanonical, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.canonicalBytes != 0 && len(fixtureCanonical) != test.canonicalBytes {
+				t.Fatalf("fixture canonical size: got %d want %d", len(fixtureCanonical), test.canonicalBytes)
+			}
+			var raw bytes.Buffer
+			encoder := json.NewEncoder(&raw)
+			encoder.SetEscapeHTML(false)
+			if err := encoder.Encode(input); err != nil {
+				t.Fatal(err)
+			}
+			if raw.Len() > 4096 {
+				t.Fatalf("fixture exceeds raw boundary: %d", raw.Len())
+			}
+			_, receipt, err := decodeExperienceProposalFields(nil, raw.Bytes())
+			if test.wantError {
+				if err == nil {
+					canonical, _ := json.Marshal(receipt)
+					t.Fatalf("accepted receipt expands from %d to %d bytes beyond canonical limit", raw.Len(), len(canonical))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonical, err := json.Marshal(receipt)
+			if err != nil || len(canonical) > 4096 {
+				t.Fatalf("canonical receipt: bytes=%d error=%v", len(canonical), err)
+			}
+			_, again, err := decodeExperienceProposalFields(nil, canonical)
+			if err != nil || again.DraftID != receipt.DraftID {
+				t.Fatalf("round trip changed receipt: %+v %v", again, err)
 			}
 		})
 	}

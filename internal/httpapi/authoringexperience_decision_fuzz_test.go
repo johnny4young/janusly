@@ -23,6 +23,9 @@ func FuzzExperienceProposalWire(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
+	// Raw HTML may fit the wire bound but expand beyond it on canonical echo.
+	htmlID := strings.Repeat("<", 128)
+	f.Add(`{"experienceReceipt":{"provider":"rules","mode":"REUSE","reason":"exact_match","policyVersion":"authoring-experience-v1","contextRevision":"` + htmlID + `","catalogVersion":"` + htmlID + `","source":{"candidateId":"` + htmlID + `","workflowId":"` + htmlID + `","versionId":"` + htmlID + `","version":1},"truncated":false,"outcomeEvidence":"unknown","draftId":"d` + htmlID[:127] + `"}}`)
 	f.Fuzz(func(t *testing.T, raw string) {
 		// Exercise the bounded experience extension, not multi-megabyte canvas
 		// throughput. Directed HTTP tests cover the independent body limit.
