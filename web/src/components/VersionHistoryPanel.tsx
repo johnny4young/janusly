@@ -25,7 +25,7 @@ import { useConfirm } from './ConfirmDialog'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
-import { ownCanvas } from '../lib/canvas-authority'
+import { AUTHORING_PERMISSIONS, ownCanvas } from '../lib/canvas-authority'
 import './VersionHistoryPanel.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { Button } from './ui/Button'
@@ -89,9 +89,9 @@ export function VersionHistoryPanel() {
   return <ScopedVersionHistory key={scope} scope={scope} />
 }
 
-function historyScope(state = useWorkflowStore.getState()): string {
+function historyScope(state: ReturnType<typeof useWorkflowStore.getState>): string {
   return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.currentWorkflowSaved, state.activeTab,
-    sessionCan(state.identityContext, 'workflows.read'), sessionCan(state.identityContext, 'workflows.write'), sessionCan(state.identityContext, 'ai.write')])
+    ...AUTHORING_PERMISSIONS.map(permission => sessionCan(state.identityContext, permission))])
 }
 
 function ScopedVersionHistory({ scope }: { scope: string }) {
@@ -117,10 +117,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
 
   useEffect(() => {
     // Expire at the first change, including a batched return before React paints.
-    const request = ownCanvas(() => {
-      suggestion.current?.abort()
-      setRetry(value => value + 1)
-    }, historyScope)
+    const request = ownCanvas(() => setRetry(value => value + 1), historyScope)
     owner.current = request
     setVersions([])
     setHasMoreVersions(false)
@@ -279,6 +276,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     canSuggest &&
     improvement.kind !== 'ai' &&
     improvement.kind !== 'fallback'
+  const activeSuggestion = improvement.kind === 'ai' ? improvement.suggestions[improvement.activeIdx] : undefined
 
   return (
     <div className="we-card">
@@ -399,46 +397,43 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
         </div>
       )}
 
-      {improvement.kind === 'ai' && comparePair && improvement.suggestions[improvement.activeIdx] && (() => {
-        const active = improvement.suggestions[improvement.activeIdx]!
-        return (
-          <div className="we-suggest-result" aria-label={t('versionHistory.aiSuggestionsAria')}>
-            <div className="we-suggest-header">
-              <span className="section-kicker">
-                <Sparkles size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
-                {t('versionHistory.aiHeader', { baseLabel: `v${improvement.base.version}` })}
-              </span>
-              <Button size="icon" variant="ghost"
-                onClick={onResetImprovement}
-                aria-label={t('versionHistory.dismissAi')}
-                title={t('versionHistory.dismissShort')}
-              >
-                <X size={12} aria-hidden="true" />
-              </Button>
-            </div>
-            {improvement.suggestions.length > 1 && (
-              <div className="we-suggest-chips" role="group" aria-label={t('versionHistory.anglesAria')}>
-                {improvement.suggestions.map((suggestion, idx) => (
-                  <Button size="sm"
-                    key={`${suggestion.approachLabel}:${idx}`}
-                    aria-pressed={idx === improvement.activeIdx}
-                    onClick={() => setImprovement({ ...improvement, activeIdx: idx })}
-                  >
-                    {approachLabelText(suggestion.approachLabel)} · {improvementConfidencePercent(suggestion.confidence)}%
-                  </Button>
-                ))}
-              </div>
-            )}
-            <WorkflowDiffView
-              before={improvement.base.dagJson}
-              after={active.workflow}
-              beforeLabel={`v${improvement.base.version}`}
-              afterLabel={t('versionHistory.suggested', { approach: approachLabelText(active.approachLabel) })}
-              aiPatchRationale={active.rationale}
-            />
+      {improvement.kind === 'ai' && comparePair && activeSuggestion && (
+        <div className="we-suggest-result" aria-label={t('versionHistory.aiSuggestionsAria')}>
+          <div className="we-suggest-header">
+            <span className="section-kicker">
+              <Sparkles size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
+              {t('versionHistory.aiHeader', { baseLabel: `v${improvement.base.version}` })}
+            </span>
+            <Button size="icon" variant="ghost"
+              onClick={onResetImprovement}
+              aria-label={t('versionHistory.dismissAi')}
+              title={t('versionHistory.dismissShort')}
+            >
+              <X size={12} aria-hidden="true" />
+            </Button>
           </div>
-        )
-      })()}
+          {improvement.suggestions.length > 1 && (
+            <div className="we-suggest-chips" role="group" aria-label={t('versionHistory.anglesAria')}>
+              {improvement.suggestions.map((suggestion, idx) => (
+                <Button size="sm"
+                  key={`${suggestion.approachLabel}:${idx}`}
+                  aria-pressed={idx === improvement.activeIdx}
+                  onClick={() => setImprovement({ ...improvement, activeIdx: idx })}
+                >
+                  {approachLabelText(suggestion.approachLabel)} · {improvementConfidencePercent(suggestion.confidence)}%
+                </Button>
+              ))}
+            </div>
+        )}
+        <WorkflowDiffView
+          before={improvement.base.dagJson}
+          after={activeSuggestion.workflow}
+          beforeLabel={`v${improvement.base.version}`}
+          afterLabel={t('versionHistory.suggested', { approach: approachLabelText(activeSuggestion.approachLabel) })}
+          aiPatchRationale={activeSuggestion.rationale}
+        />
+      </div>
+      )}
 
       {improvement.kind === 'fallback' && (
         <div className="we-suggest-fallback" role="status" aria-live="polite">

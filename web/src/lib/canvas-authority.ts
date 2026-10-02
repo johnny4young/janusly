@@ -1,6 +1,8 @@
 import { useWorkflowStore } from '../store'
 import { sessionCan } from '../identity-context'
 
+export const AUTHORING_PERMISSIONS = ['workflows.read', 'workflows.write', 'ai.write'] as const
+
 /** Stable ownership token for async operations that may replace the canvas. */
 export function currentCanvasAuthority(state = useWorkflowStore.getState()): string {
   return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.workflowRevision,
@@ -17,13 +19,15 @@ export function currentAuthoringAuthority(state = useWorkflowStore.getState()): 
     sessionCan(state.identityContext, 'ai.write')])
 }
 
+export type CanvasAuthoritySelector = (state: ReturnType<typeof useWorkflowStore.getState>) => string
+
 /** An ownership lease ends at the first context change, even if React batches a return to the old context. */
 export function ownCanvas(
   onInvalidated: () => void,
-  authorityForState = currentCanvasAuthority,
+  authorityForState: CanvasAuthoritySelector = currentCanvasAuthority,
 ): AbortController {
   const controller = new AbortController()
-  const authority = authorityForState()
+  const authority = authorityForState(useWorkflowStore.getState())
   const unsubscribe = useWorkflowStore.subscribe(state => {
     if (authorityForState(state) === authority) return
     controller.abort()

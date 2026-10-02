@@ -1,5 +1,5 @@
 import { sessionCan } from '../../identity-context'
-import { currentAuthoringAuthority } from '../../lib/canvas-authority'
+import { AUTHORING_PERMISSIONS, currentAuthoringAuthority } from '../../lib/canvas-authority'
 import { AUTHORING_EXPERIENCE_TAGS } from '../../lib/experience-authority'
 import { subscribeToTags } from '../../lib/query-cache'
 // The AI Studio controller: every piece of authoring state, the request
@@ -152,7 +152,7 @@ export function useAiStudioController({
     const unsubscribe = useWorkflowStore.subscribe((next, previous) => {
       if (currentAuthoringAuthority(next) === currentAuthoringAuthority(previous)) return
       const identityChanged = next.orgId !== previous.orgId || next.userId !== previous.userId
-        || ['ai.write', 'workflows.read', 'workflows.write'].some(permission =>
+        || AUTHORING_PERMISSIONS.some(permission =>
           sessionCan(next.identityContext, permission) !== sessionCan(previous.identityContext, permission))
       const isExpectedApply = expectedAppliedWorkflowIDRef.current !== null
         && next.currentWorkflowId === expectedAppliedWorkflowIDRef.current

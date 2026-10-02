@@ -1,4 +1,4 @@
-import { currentAuthoringAuthority, ownCanvas } from './canvas-authority'
+import { currentAuthoringAuthority, ownCanvas, type CanvasAuthoritySelector } from './canvas-authority'
 import { PLATFORM_TAG, subscribeToTags } from './query-cache'
 
 export const AUTHORING_EXPERIENCE_TAGS = [PLATFORM_TAG, 'authoring-experiences', 'memory', 'org-config',
@@ -7,7 +7,7 @@ export const AUTHORING_EXPERIENCE_TAGS = [PLATFORM_TAG, 'authoring-experiences',
 /** Local source review also expires when consent or saved resources change. */
 export function ownAuthoringExperience(
   onInvalidated: () => void,
-  authorityForState = currentAuthoringAuthority,
+  authorityForState: CanvasAuthoritySelector = currentAuthoringAuthority,
 ): AbortController {
   const owner = ownCanvas(onInvalidated, authorityForState)
   const unsubscribe = subscribeToTags(

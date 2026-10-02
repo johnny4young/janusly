@@ -5,7 +5,7 @@ import { api, apiErrorStatus, contractApi } from '../api'
 import { useT } from '../i18n'
 import { sessionCan } from '../identity-context'
 import { useWorkflowStore } from '../store'
-import { currentAuthoringAuthority } from '../lib/canvas-authority'
+import { AUTHORING_PERMISSIONS, currentAuthoringAuthority } from '../lib/canvas-authority'
 import { invalidateTags } from '../lib/query-cache'
 import { parseOrgConfigEntries } from '../lib/org-config-model'
 import type { AuthoringExperienceList, AuthoringExperienceRecord } from '../lib/api-types.generated'
@@ -32,7 +32,7 @@ export default function AuthoringExperienceRegistry({ versions }: { versions: re
   const scope = useWorkflowStore(registryAuthority)
   const state = useWorkflowStore.getState()
   if (!state.currentWorkflowSaved || !state.currentWorkflowId
-    || !['ai.write', 'workflows.read', 'workflows.write'].every(permission => sessionCan(state.identityContext, permission))) return null
+    || !AUTHORING_PERMISSIONS.every(permission => sessionCan(state.identityContext, permission))) return null
   return <ScopedRegistry key={scope} workflowId={state.currentWorkflowId} versions={versions} />
 }
 function ScopedRegistry({ workflowId, versions }: { workflowId: string; versions: readonly WorkflowVersionRow[] }) {
