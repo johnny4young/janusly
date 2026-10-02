@@ -11,12 +11,21 @@ export function canvasAuthorityMatches(expected: string): boolean {
   return currentCanvasAuthority() === expected
 }
 
+/** Authoring results also belong to one visible workspace and AI grant. */
+export function currentAuthoringAuthority(state = useWorkflowStore.getState()): string {
+  return JSON.stringify([currentCanvasAuthority(state), state.activeTab,
+    sessionCan(state.identityContext, 'ai.write')])
+}
+
 /** An ownership lease ends at the first context change, even if React batches a return to the old context. */
-export function ownCanvas(onInvalidated: () => void): AbortController {
+export function ownCanvas(
+  onInvalidated: () => void,
+  authorityForState = currentCanvasAuthority,
+): AbortController {
   const controller = new AbortController()
-  const authority = currentCanvasAuthority()
+  const authority = authorityForState()
   const unsubscribe = useWorkflowStore.subscribe(state => {
-    if (currentCanvasAuthority(state) === authority) return
+    if (authorityForState(state) === authority) return
     controller.abort()
     onInvalidated()
   })
