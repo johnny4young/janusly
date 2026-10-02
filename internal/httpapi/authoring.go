@@ -577,6 +577,7 @@ func proposalGraphParts(document map[string]any) (map[string]string, int) {
 }
 
 func (s *V1Server) mountAuthoringRoutes(mux *http.ServeMux) {
+	s.mountAuthoringExperienceRoutes(mux)
 	gate := routeGate{role: auth.RoleViewer, permission: "ai.write"}
 	s.route(mux, "GET /v1/authoring/capabilities", gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.authoringCapabilitiesCore(r, rc))

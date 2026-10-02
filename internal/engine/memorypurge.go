@@ -56,7 +56,14 @@ func (e *Engine) SweepMemoryConsentPurges(ctx context.Context) (int, error) {
 			}
 			continue
 		}
-		if deleted == 0 {
+		experiences, err := q.PurgeAuthoringExperiencesForOrg(ctx, row.OrgID)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if deleted == 0 && experiences == 0 {
 			continue
 		}
 		purged++
@@ -64,7 +71,7 @@ func (e *Engine) SweepMemoryConsentPurges(ctx context.Context) (int, error) {
 			"memory.bulk.purged", audit.Options{
 				TargetType: "org", TargetID: row.OrgID,
 				Metadata: map[string]any{
-					"entries": deleted, "reason": "consent_revoked",
+					"entries": deleted, "authoringExperiences": experiences, "reason": "consent_revoked",
 					"revokedAt": row.UpdatedAt.UTC().Format(time.RFC3339),
 				},
 			})

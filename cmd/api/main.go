@@ -292,6 +292,7 @@ func run() error {
 	defer runner.Shutdown()
 
 	publicAPI, shutdownPublicAPI, err := httpapi.NewV1HandlerWithOptions(eng, pool, httpapi.V1ServerOptions{
+		AuthoringExperienceEnabled:  cfg.AuthoringExperienceEnabled,
 		Audit:                       auditWriter,
 		FeedbackMemoryWorkers:       cfg.FeedbackMemoryWorkers,
 		FeedbackMemoryQueueCapacity: cfg.FeedbackMemoryQueueCapacity,

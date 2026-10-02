@@ -51,6 +51,33 @@ export type AuthoringCapabilities = {
   "warnings": string[]
 }
 
+export type AuthoringExperienceList = {
+  "entries": AuthoringExperienceRecord[]
+  "truncated": boolean
+}
+
+export type AuthoringExperienceRecord = {
+  "id": string
+  "outcomeEvidence": "unknown"
+  "policyVersion": "authoring-experience-v1"
+  "registeredAt": string
+  "retainUntil": string
+  "version": number
+  "versionId": string
+  "workflowId": string
+}
+
+export type AuthoringExperienceRegistration = {
+  "brief": WorkflowIntentBrief
+  "versionId": string
+  "workflowId": string
+}
+
+export type AuthoringExperienceRevocation = {
+  "id": string
+  "revoked": boolean
+}
+
 export type AuthoringMCPInputField = {
   "name": string
   "required": boolean
@@ -1258,6 +1285,8 @@ export type WorkflowVersionSnapshot = {
 export interface ApiRequests {
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": undefined
+  /** Bounded registered experience provenance for a saved workflow */
+  "GET /authoring/experiences": undefined
   /** Dead-letter list with server-side filters */
   "GET /dlq": undefined
   /** Failure clusters over open dead letters */
@@ -1327,6 +1356,12 @@ export interface ApiRequests {
     "currentWorkflow"?: WorkflowComparisonSnapshot
     "model"?: string
     "prompt"?: string
+  }
+  /** Explicitly register an immutable authoring experience */
+  "POST /authoring/experiences/register": AuthoringExperienceRegistration
+  /** Withdraw a same-tenant authoring experience registration */
+  "POST /authoring/experiences/revoke": {
+    "id": string
   }
   /** Redrive one dead letter */
   "POST /dlq/redrive": {
@@ -1475,6 +1510,8 @@ export interface ApiRequests {
 export interface ApiResponses {
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": AuthoringCapabilities
+  /** Bounded registered experience provenance for a saved workflow */
+  "GET /authoring/experiences": AuthoringExperienceList
   /** Dead-letter list with server-side filters */
   "GET /dlq": DeadLetterSummary[]
   /** Failure clusters over open dead letters */
@@ -1541,6 +1578,10 @@ export interface ApiResponses {
   "POST /ai/workflow-briefs/compile": WorkflowBriefCompilation
   /** Build a capability-bound workflow proposal without applying it */
   "POST /ai/workflow-proposals": WorkflowProposalResponse
+  /** Explicitly register an immutable authoring experience */
+  "POST /authoring/experiences/register": AuthoringExperienceRecord
+  /** Withdraw a same-tenant authoring experience registration */
+  "POST /authoring/experiences/revoke": AuthoringExperienceRevocation
   /** Redrive one dead letter */
   "POST /dlq/redrive": {
     "redriven": true
@@ -1662,6 +1703,8 @@ export interface ApiResponses {
 export interface ApiSuccessStatuses {
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": 200
+  /** Bounded registered experience provenance for a saved workflow */
+  "GET /authoring/experiences": 200
   /** Dead-letter list with server-side filters */
   "GET /dlq": 200
   /** Failure clusters over open dead letters */
@@ -1720,6 +1763,10 @@ export interface ApiSuccessStatuses {
   "POST /ai/workflow-briefs/compile": 200
   /** Build a capability-bound workflow proposal without applying it */
   "POST /ai/workflow-proposals": 200
+  /** Explicitly register an immutable authoring experience */
+  "POST /authoring/experiences/register": 200
+  /** Withdraw a same-tenant authoring experience registration */
+  "POST /authoring/experiences/revoke": 200
   /** Redrive one dead letter */
   "POST /dlq/redrive": 200
   /** Replay one dead letter, or one run node by exact identity */
