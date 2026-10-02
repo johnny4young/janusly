@@ -1,4 +1,5 @@
 import type { WorkflowVersionIdentity } from '../store'
+import { jsonEquivalent } from './json-envelope-equality'
 import type {
   WorkflowDefinition,
   WorkflowProposalResponse,
@@ -170,47 +171,6 @@ export function parseWorkflowVersionSnapshot(
   return { id: value.id, workflowId: value.workflowId, version: value.version, dagJson: value.dagJson }
 }
 
-// Compare JSON envelopes without recursion or key-order assumptions. Cyclic
-// objects supplied directly by a plugin/test are rejected; network JSON can
-// never contain them.
-function jsonEquivalent(left: unknown, right: unknown): boolean {
-  const pending: Array<[unknown, unknown]> = [[left, right]]
-  const compared = new WeakMap<object, WeakSet<object>>()
-  while (pending.length > 0) {
-    const pair = pending.pop()
-    if (!pair) return false
-    const [currentLeft, currentRight] = pair
-    if (currentLeft === currentRight) {
-      if (currentLeft === null || typeof currentLeft !== 'object') continue
-      return false
-    }
-    if (currentLeft !== null && currentRight !== null
-      && typeof currentLeft === 'object' && typeof currentRight === 'object') {
-      let rightObjects = compared.get(currentLeft)
-      if (rightObjects?.has(currentRight)) return false
-      if (!rightObjects) {
-        rightObjects = new WeakSet<object>()
-        compared.set(currentLeft, rightObjects)
-      }
-      rightObjects.add(currentRight)
-    }
-    if (Array.isArray(currentLeft) || Array.isArray(currentRight)) {
-      if (!Array.isArray(currentLeft) || !Array.isArray(currentRight)
-        || currentLeft.length !== currentRight.length) return false
-      for (let index = 0; index < currentLeft.length; index += 1) {
-        pending.push([currentLeft[index], currentRight[index]])
-      }
-      continue
-    }
-    if (!isRecord(currentLeft) || !isRecord(currentRight)) return false
-    const leftKeys = Object.keys(currentLeft)
-    const rightKeys = Object.keys(currentRight)
-    if (leftKeys.length !== rightKeys.length || leftKeys.some((key) => !Object.hasOwn(currentRight, key))) return false
-    for (const key of leftKeys) pending.push([currentLeft[key], currentRight[key]])
-  }
-  return true
-}
-
 function proposalContractsAreBound(value: WorkflowProposalResponse): boolean {
   const outputs = value.proposal.workflow.outputs ?? {}
   const workflowRecoveryContract = value.proposal.workflow.recovery?.contract ?? null
@@ -229,34 +189,21 @@ function experienceDecisionIsBound(value: import('./api-types.generated').ApiRes
   const validId = (id: string) => isCanonicalNonemptyString(id)
     // wire-policy: receipt identifiers share the server's UTF-8 byte bound, not JSON Schema code-point length.
     && !/[\0\r\n\t]/.test(id) && new TextEncoder().encode(id).length <= 128
-  if (!validId(decision.contextRevision) || !validId(decision.catalogVersion)
+  if (![decision.contextRevision, decision.catalogVersion].every(validId)
     || decision.catalogVersion !== value.bindings.catalogVersion) return false
   if (decision.mode === 'ESCALATE') return !value.proposal.applicable
   if (decision.mode === 'GENERATE') return true
   const source = decision.source
-  if (!validId(decision.draftId) || decision.draftId !== value.proposal.workflow.id
-    || !validId(source.candidateId) || !validId(source.workflowId) || !validId(source.versionId)
+  if (![decision.draftId, source.candidateId, source.workflowId, source.versionId].every(validId)
+    || decision.draftId !== value.proposal.workflow.id
     || source.workflowId === decision.draftId || !Number.isSafeInteger(source.version)
     || source.version < 1) return false
   if (decision.mode === 'REUSE') return true
   const edit = decision.edits[0]
-  return decision.edits.length === 1 && edit.field === 'workflow_name'
-    && isCanonicalNonemptyString(edit.value) && !edit.value.includes('\0')
+  return decision.edits.length === 1 && edit.value === value.proposal.workflow.name
+    && !edit.value.includes('\0')
     // wire-policy: descriptive edits share the server's UTF-8 byte bound before matching the reviewed name.
     && new TextEncoder().encode(edit.value).length <= 200
-    && edit.value === value.proposal.workflow.name
-}
-
-/** Revalidation may authorize only the exact receipt and graph already reviewed. */
-export function experienceProposalMatchesReview(
-  reviewed: WorkflowProposalResponse,
-  revalidated: unknown,
-): revalidated is WorkflowProposalResponse {
-  const decision = reviewed.experienceDecision
-  return !!decision && (decision.mode === 'REUSE' || decision.mode === 'ADAPT')
-    && isWorkflowProposalResponse(revalidated) && revalidated.proposal.applicable
-    && jsonEquivalent(decision, revalidated.experienceDecision)
-    && jsonEquivalent(reviewed.proposal.workflow, revalidated.proposal.workflow)
 }
 
 /**

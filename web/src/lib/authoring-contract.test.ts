@@ -269,6 +269,9 @@ describe('experience receipt binding to reviewed workflow', () => {
     ['empty identity', { ...decision, contextRevision: '' }],
     ['invalid version', { ...decision, source: { ...decision.source, version: 0 } }],
     ['unbound adaptation', { ...decision, mode: 'ADAPT', reason: 'descriptive_adaptation', edits: [{ field: 'workflow_name', value: 'New name' }] }],
+    ['empty adaptation', { ...decision, mode: 'ADAPT', reason: 'descriptive_adaptation', edits: [] }],
+    ['multiple adaptations', { ...decision, mode: 'ADAPT', reason: 'descriptive_adaptation', edits: [{ field: 'workflow_name', value: 'A' }, { field: 'workflow_name', value: 'B' }] }],
+    ['semantic adaptation field', { ...decision, mode: 'ADAPT', reason: 'descriptive_adaptation', edits: [{ field: 'credential', value: 'New reference' }] }],
     ['applicable escalation', { provider: 'rules', mode: 'ESCALATE', reason: 'ambiguous_match', policyVersion: decision.policyVersion, contextRevision: decision.contextRevision, catalogVersion: decision.catalogVersion, truncated: false, outcomeEvidence: 'unknown' }],
   ])('rejects %s', (_label, experienceDecision) => {
     expect(isWorkflowProposalResponse({ ...validProposal(), experienceDecision })).toBe(false)
