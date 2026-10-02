@@ -296,12 +296,12 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     t,
   ])
 
-  const loadAuthoringCapabilities = useCallback(async (): Promise<AuthoringCapabilityCatalog> => {
+  const loadAuthoringCapabilities = useCallback(async (signal?: AbortSignal): Promise<AuthoringCapabilityCatalog> => {
     return await contractApi(
       'GET /authoring/capabilities',
       '/authoring/capabilities',
       undefined,
-      { guard: isGetAuthoringCapabilitiesResponse },
+      { guard: isGetAuthoringCapabilitiesResponse, ...(signal ? { signal } : {}) },
     )
   }, [])
 
@@ -389,7 +389,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
       // Capability membership can change after Proposal or while the unsaved
       // canvas confirmation is open. Re-read it after confirmation and then
       // re-check the canvas again at the final synchronous copy boundary.
-      const currentCatalog = await loadAuthoringCapabilities()
+      const currentCatalog = await loadAuthoringCapabilities(owner?.signal)
       if (!stillOwns()) return { status: 'canvas_changed' }
       if (currentCatalog.version !== proposalSnapshot.bindings.catalogVersion) {
         return { status: 'catalog_changed', catalog: currentCatalog }
@@ -410,7 +410,9 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
               experienceEdits: decision.mode === 'ADAPT' ? decision.edits : [],
               experienceReceipt: decision,
             },
-            { guard: isPostAiWorkflowProposalsResponse },
+            // A caller signal skips the API wrapper's short dedup window:
+            // source Apply must make a fresh read, not replay an earlier receipt.
+            { guard: isPostAiWorkflowProposalsResponse, signal: owner?.signal },
           )
         } catch {
           if (!stillOwns()) return { status: 'canvas_changed' }
@@ -438,6 +440,9 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
       setAiReviewIssues([])
       addToast(t('toasts.aiProposalApplied'), 'success')
       return { status: 'applied' }
+    } catch (error) {
+      if (owner?.signal.aborted) return { status: 'canvas_changed' }
+      throw error
     } finally {
       owner?.abort()
     }

@@ -47,7 +47,10 @@ revalidates the reviewed receipt and comparison snapshot through the existing
 proposal endpoint after confirmation/catalog refresh. A changed source, graph,
 consent or canvas blocks copying instead of accepting a new proposal or requesting
 generation. Legacy proposals without a source-bearing receipt keep their existing
-Apply path. Save and Run remain separate actions.
+Apply path. Source Apply supplies its ownership signal to catalog and receipt
+reads, bypassing the API wrapper's short dedup window. An expired owner discards
+read errors as well as results; aborting the client request does not prove the
+server cancelled work. Save and Run remain separate actions.
 
 Saved-version history offers an optional example registry only after a consented,
 scoped read succeeds and the operator has AI and workflow read/write grants.
@@ -64,11 +67,16 @@ invalidates the previous proposal and requires a new explicit preview. It never
 changes executable graph authority, automatically proposes, or applies work.
 An in-flight Apply disables the name input and keeps its detached snapshot.
 
-Source Apply and registry results lose ownership on the first identity,
+The authoring controller, source Apply and registry results lose ownership on the first identity,
 organization, canvas, navigation or grant change, even if the store returns to
 its original values before React paints. Consent/source resource invalidations
 also expire that ownership. Leases are disposed on terminal paths; this is local
 result invalidation, not a claim that an already-delivered mutation was cancelled.
+The controller observes store transitions synchronously, so a transient identity
+change cannot restore an old proposal or capability read. A generation-owned
+catalog refresh cannot be populated or unlocked by an older response. Expected
+Apply hydration remains valid; resource refresh never substitutes an Apply snapshot
+or releases its loading early. Unmount disposes both store and tag observers.
 
 Successful HTTP responses with unreadable bodies are errors, not empty success
 objects; cancellation remains `AbortError`. A genuinely empty body remains

@@ -116,7 +116,7 @@ export function registerExperienceApplyOwnershipCases() {
           }
         }
       }
-      for (const tag of ['authoring-experiences', 'memory', 'org-config', 'versions', 'workflows'] as const) {
+      for (const tag of ['authoring-experiences', 'memory', 'org-config', 'versions', 'workflows', 'credentials', 'mcp'] as const) {
         for (const outcome of ['resolve', 'reject'] as const) {
           it(`${locale} source resource ${tag} invalidation discards late Apply ${outcome}`, async () => {
             await changeAppLanguage(locale)
@@ -144,6 +144,30 @@ export function registerExperienceApplyOwnershipCases() {
           })
         }
       }
+      for (const outcome of ['resolve', 'reject'] as const) {
+        it(`${locale} stale catalog ${outcome} during source Apply cannot copy or propagate an error`, async () => {
+          await changeAppLanguage(locale)
+          const pending = deferred<AuthoringCapabilityCatalog>()
+          vi.mocked(contractApi).mockImplementation(async operation => (
+            operation === 'GET /authoring/capabilities' ? pending.promise as never : proposal() as never
+          ))
+          const { result } = renderHook(() => useWorkflowCommands(options()))
+          let applying!: Promise<WorkflowProposalApplyOutcome>
+          act(() => { applying = result.current.applyWorkflowProposal(proposal()) })
+          await waitFor(() => expect(contractApi).toHaveBeenCalledTimes(1))
+          const canvas = useWorkflowStore.getState().getWorkflowJson()
+          act(() => invalidateTags(['credentials']))
+          let actual: unknown
+          await act(async () => {
+            if (outcome === 'resolve') pending.resolve(catalog); else pending.reject(new Error('STALE_CATALOG_ERROR'))
+            try { actual = await applying } catch (error) { actual = error }
+          })
+          expect(actual).toEqual({ status: 'canvas_changed' })
+          expect(useWorkflowStore.getState().getWorkflowJson()).toEqual(canvas)
+          expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+          expect(contractApi).toHaveBeenCalledTimes(1)
+        })
+      }
       it(`${locale} explicit Apply copies only the reviewed unsaved snapshot without Save or Run`, async () => {
         await changeAppLanguage(locale)
         const reviewed = proposal()
@@ -157,6 +181,10 @@ export function registerExperienceApplyOwnershipCases() {
         expect(useWorkflowStore.getState()).toMatchObject({ currentWorkflowId: 'reviewed-draft', currentWorkflowSaved: false, workflowDirty: true })
         expect(api).not.toHaveBeenCalled()
         expect(contractApi).toHaveBeenCalledTimes(2)
+        const [catalogRead, sourceRead] = vi.mocked(contractApi).mock.calls
+        expect(catalogRead[3]?.signal).toBeInstanceOf(AbortSignal)
+        expect(sourceRead[3]?.signal).toBe(catalogRead[3]?.signal)
+        expect(sourceRead[3]?.signal?.aborted).toBe(true)
       })
     }
   })

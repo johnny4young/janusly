@@ -43,7 +43,7 @@ export function composeAuthoringPrompt(
 export type AiStudioPanelProps = {
   health: AiHealth | null
   workflowName: string
-  onLoadAuthoringCapabilities: () => Promise<AuthoringCapabilityCatalog>
+  onLoadAuthoringCapabilities: (signal?: AbortSignal) => Promise<AuthoringCapabilityCatalog>
   onCompileWorkflowBrief: (prompt: string) => Promise<WorkflowBriefCompilation>
   onProposeWorkflow: (brief: WorkflowIntentBrief, catalogVersion: string, sourcePrompt: string, experienceEdits?: AuthoringExperienceEdits) => Promise<WorkflowProposalResponse>
   onApplyWorkflowProposal: (proposal: WorkflowProposalResponse) => Promise<WorkflowProposalApplyOutcome>

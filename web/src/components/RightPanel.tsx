@@ -61,7 +61,7 @@ import { isGetRunUsageResponse } from '../lib/api-guards/operations/GetRunUsage'
 export type RightPanelAuthoring = AuthoringPanelModel & {
   aiHealth: AiHealth | null
   aiActionRequest: AiAuthoringActionRequest | null
-  onLoadAuthoringCapabilities: () => Promise<AuthoringCapabilityCatalog>
+  onLoadAuthoringCapabilities: (signal?: AbortSignal) => Promise<AuthoringCapabilityCatalog>
   onCompileWorkflowBrief: (prompt: string) => Promise<WorkflowBriefCompilation>
   onProposeWorkflow: (brief: WorkflowIntentBrief, catalogVersion: string, sourcePrompt: string) => Promise<WorkflowProposalResponse>
   onApplyWorkflowProposal: (proposal: WorkflowProposalResponse) => Promise<WorkflowProposalApplyOutcome>

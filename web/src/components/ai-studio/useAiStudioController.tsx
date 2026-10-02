@@ -1,3 +1,7 @@
+import { sessionCan } from '../../identity-context'
+import { currentAuthoringAuthority } from '../../lib/canvas-authority'
+import { AUTHORING_EXPERIENCE_TAGS } from '../../lib/experience-authority'
+import { subscribeToTags } from '../../lib/query-cache'
 // The AI Studio controller: every piece of authoring state, the request
 // generations that discard stale responses, and the derived facts the views
 // render. Views receive the returned model and stay presentational.
@@ -59,6 +63,7 @@ export function useAiStudioController({
     && !normalizedExperienceName.includes('\0'))
   const [authoringError, setAuthoringError] = useState<string | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(true)
+  const [catalogEpoch, setCatalogEpoch] = useState(0)
   const [authoringLoading, setAuthoringLoading] = useState<AuthoringLoading | null>(null)
   const [applied, setApplied] = useState(false)
   const [briefCompileMs, setBriefCompileMs] = useState<number | null>(null)
@@ -69,6 +74,9 @@ export function useAiStudioController({
   const pendingPromptFocusRef = useRef(false)
   const starterPromptsRef = useRef(starterPrompts)
   const authoringRequestRef = useRef(0)
+  const catalogRequestRef = useRef(0)
+  const primaryStarterPromptRef = useRef(primaryStarterPrompt)
+  primaryStarterPromptRef.current = primaryStarterPrompt
   const applyRequestRef = useRef(0)
   const currentRequestRef = useRef(0)
   const processedRequestRef = useRef<number | null>(null)
@@ -79,12 +87,9 @@ export function useAiStudioController({
     review: () => Promise<void>
     fix: () => Promise<void>
   } | null>(null)
-  const currentWorkflowId = useWorkflowStore((state) => state.currentWorkflowId)
-  const workflowRevision = useWorkflowStore((state) => state.workflowRevision)
   const orgId = useWorkflowStore((state) => state.orgId)
   const userId = useWorkflowStore((state) => state.userId)
   const identityScope = `${orgId ?? ''}\u0000${userId ?? ''}`
-  const previousIdentityScopeRef = useRef(identityScope)
 
   // Any edit to the intent discards the brief, the proposal and their timings:
   // they described a prompt that no longer exists.
@@ -121,21 +126,71 @@ export function useAiStudioController({
     setClarificationAnswers((current) => ({ ...current, [index]: value }))
   }
 
-  // AI authoring state can contain tenant capability names and operator prose.
-  // Clear it synchronously before paint when the authenticated identity or org
-  // changes so neither data nor an actionable old catalog crosses the boundary.
+  // Store subscriptions observe the first authority change, including a
+  // transient change batched back to the original values before React paints.
   useLayoutEffect(() => {
-    if (previousIdentityScopeRef.current === identityScope) return
-    previousIdentityScopeRef.current = identityScope
-    applyRequestRef.current += 1
-    currentRequestRef.current += 1
-    expectedAppliedWorkflowIDRef.current = null
-    proposalSourceRef.current = null
-    replacePrompt(primaryStarterPrompt)
-    setResult(null)
-    setAuthoringLoading(null)
-    setCurrentLoading(null)
-  }, [identityScope, primaryStarterPrompt])
+    const clearReview = () => {
+      authoringRequestRef.current += 1
+      currentRequestRef.current += 1
+      proposalSourceRef.current = null
+      setProposal(null)
+      setProposalBuildMs(null)
+      setExperienceAvailable(false)
+      setExperienceName('')
+      setClarificationAnswers({})
+      setAuthoringError(null)
+      setResult(null)
+      setCurrentLoading(null)
+    }
+    const reloadCatalog = () => {
+      catalogRequestRef.current += 1
+      setCatalog(null)
+      setCatalogError(null)
+      setCatalogLoading(true)
+      setCatalogEpoch(epoch => epoch + 1)
+    }
+    const unsubscribe = useWorkflowStore.subscribe((next, previous) => {
+      if (currentAuthoringAuthority(next) === currentAuthoringAuthority(previous)) return
+      const identityChanged = next.orgId !== previous.orgId || next.userId !== previous.userId
+        || ['ai.write', 'workflows.read', 'workflows.write'].some(permission =>
+          sessionCan(next.identityContext, permission) !== sessionCan(previous.identityContext, permission))
+      const isExpectedApply = expectedAppliedWorkflowIDRef.current !== null
+        && next.currentWorkflowId === expectedAppliedWorkflowIDRef.current
+        && currentAuthoringAuthority({ ...next, currentWorkflowId: previous.currentWorkflowId,
+          workflowRevision: previous.workflowRevision }) === currentAuthoringAuthority(previous)
+      clearReview()
+      setAuthoringLoading(loading => isExpectedApply && loading === 'apply' ? loading : null)
+      if (!isExpectedApply) {
+        applyRequestRef.current += 1
+        expectedAppliedWorkflowIDRef.current = null
+        pendingPromptFocusRef.current = false
+        setApplied(false)
+      }
+      if (identityChanged) {
+        // Prose and capability identities may not cross tenant/grant boundaries.
+        setPrompt(primaryStarterPromptRef.current)
+        setBriefCompilation(null)
+        setBriefCompileMs(null)
+        reloadCatalog()
+      }
+    })
+    const unsubscribeTags = subscribeToTags(AUTHORING_EXPERIENCE_TAGS, () => {
+      clearReview()
+      // A resource change expires review, not an in-flight Apply's snapshot.
+      // Its command boundary owns the result and the loading ends on settlement.
+      setAuthoringLoading(loading => loading === 'apply' ? loading : null)
+      reloadCatalog()
+    })
+    return () => {
+      unsubscribe()
+      unsubscribeTags()
+      authoringRequestRef.current += 1
+      catalogRequestRef.current += 1
+      currentRequestRef.current += 1
+      applyRequestRef.current += 1
+      pendingPromptFocusRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     if (authoringLoading !== null) return
@@ -149,43 +204,24 @@ export function useAiStudioController({
 
   useLayoutEffect(() => {
     let active = true
+    const owner = new AbortController()
+    const requestID = ++catalogRequestRef.current
+    const ownsCatalog = () => !owner.signal.aborted && active && catalogRequestRef.current === requestID
     setCatalog(null)
     setCatalogLoading(true)
     setCatalogError(null)
-    void onLoadAuthoringCapabilities()
+    void onLoadAuthoringCapabilities(owner.signal)
       .then((nextCatalog) => {
-        if (active) setCatalog(nextCatalog)
+        if (ownsCatalog()) setCatalog(nextCatalog)
       })
       .catch((error: unknown) => {
-        if (active) setCatalogError(error instanceof Error ? error.message : t('aiStudio.catalog.loadFailed'))
+        if (ownsCatalog()) setCatalogError(error instanceof Error ? error.message : t('aiStudio.catalog.loadFailed'))
       })
       .finally(() => {
-        if (active) setCatalogLoading(false)
+        if (ownsCatalog()) setCatalogLoading(false)
       })
-    return () => { active = false }
-  }, [identityScope, onLoadAuthoringCapabilities, t])
-
-  // Proposals include a diff against the active canvas. Switching workflows or
-  // editing the current canvas invalidates that diff and every prior analysis.
-  useEffect(() => {
-    const expectedAppliedWorkflowID = expectedAppliedWorkflowIDRef.current
-    const isExpectedApply = expectedAppliedWorkflowID !== null && expectedAppliedWorkflowID === currentWorkflowId
-    expectedAppliedWorkflowIDRef.current = null
-    authoringRequestRef.current += 1
-    currentRequestRef.current += 1
-    if (!isExpectedApply) {
-      applyRequestRef.current += 1
-      pendingPromptFocusRef.current = false
-    }
-    setAuthoringLoading((loading) => isExpectedApply && loading === 'apply' ? loading : null)
-    setCurrentLoading(null)
-    setResult(null)
-    setProposal(null)
-    setClarificationAnswers({})
-    proposalSourceRef.current = null
-    setAuthoringError(null)
-    if (!isExpectedApply) setApplied(false)
-  }, [currentWorkflowId, workflowRevision])
+    return () => { active = false; owner.abort() }
+  }, [catalogEpoch, identityScope, onLoadAuthoringCapabilities, t])
 
   useLayoutEffect(() => {
     if (authoringLoading !== null || !pendingPromptFocusRef.current) return
