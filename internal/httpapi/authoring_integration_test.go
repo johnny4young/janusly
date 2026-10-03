@@ -102,6 +102,9 @@ func TestAuthoringContractFirstVersionedAliases(t *testing.T) {
 		t.Fatalf("versioned proposal: %d %+v", proposal.status, proposal.body)
 	}
 	proposalData, _ := proposal.body["data"].(map[string]any)
+	if _, present := proposalData["authoringDecision"]; present {
+		t.Fatal("ordinary authoring must not emit an experience receipt")
+	}
 	bindings, _ := proposalData["bindings"].(map[string]any)
 	proposed, _ := proposalData["proposal"].(map[string]any)
 	if proposalData["mode"] != "fallback" || bindings["complete"] != true || proposed["applicable"] != true {

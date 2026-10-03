@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1",
+  "evidence": "synthetic_contract_mechanics_only",
+  "cases": 240,
+  "modes": {
+    "REUSE": 60,
+    "ADAPT": 60,
+    "GENERATE": 60,
+    "ESCALATE": 60
+  },
+  "languages": {
+    "en": 120,
+    "es": 120
+  },
+  "splits": {
+    "development": 144,
+    "qualification": 96
+  },
+  "families": [
+    "text_transform",
+    "local_report",
+    "read_lookup",
+    "approval_draft",
+    "incident_summary"
+  ],
+  "files": {
+    "experience-mechanics.json": "8641c69d344941faddb4b8e52e39bc51bee7b2c2104c37a7102a71ec6c5efc21"
+  }
+}
