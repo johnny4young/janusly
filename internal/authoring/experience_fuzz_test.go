@@ -116,6 +116,22 @@ func FuzzDecisionEligibilityProjection(f *testing.F) {
 		r.Candidates = append(r.Candidates[shift:], r.Candidates[:shift]...)
 		before, _ := json.Marshal(r)
 		receipt, err := ValidateDecision(r, p)
+
+		prediction, predictionErr := (RulesProvider{}).Propose(t.Context(), r)
+		if validateDecisionRequest(r) == nil {
+			if predictionErr != nil {
+				t.Fatalf("rules rejected valid projection: %v", predictionErr)
+			}
+			accepted, policyErr := ProposeDecision(t.Context(), RulesProvider{}, r)
+			if policyErr != nil || accepted.Mode != prediction.Mode {
+				t.Fatalf("rules/policy disagreement: %v", policyErr)
+			}
+			if accepted.Source != nil && (bits&2047 != 0 || outcome != "Local text") {
+				t.Fatalf("rules admitted ineligible source: bits=%d", bits)
+			}
+		} else if predictionErr == nil {
+			t.Fatal("rules accepted invalid projection")
+		}
 		after, _ := json.Marshal(r)
 		if string(before) != string(after) {
 			t.Fatal("policy mutated input")

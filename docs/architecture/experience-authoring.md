@@ -88,24 +88,127 @@ loop, inference process, embedding call or provider completion is introduced.
 This registry does not select proposals or enable automatic reuse. Stored sources
 still require re-reading and current consent, binding and review before use.
 
-## Offline contract evidence
+## Local decisions and exact copies
 
-Run the frozen synthetic corpus with:
+`RulesProvider` predicts the closed mode from the bounded projection without
+receiving expected labels or making network calls. Policy admission remains a
+separate snapshot/recomputation. A copied source passes receipt/reference checks,
+canonical parsing, current capability/intent binding and workflow validation.
+The new unsaved draft has a fresh identity and only an explicitly requested
+workflow-name edit; graph identities, configuration, effects, approvals, timing,
+outputs and child pins are not repaired or changed. Incompatible sources are
+rejected rather than silently upgraded. Source bytes remain unchanged.
+
+The copy primitive consumes a privately supplied exact artifact, not provider
+output. It does not itself grant read authority or query the registry: a live
+caller must still re-read the source and fence current consent/deletion. HTTP
+selection and editor integration are not connected to these local mechanisms.
+
+## Live registered-version boundary
+
+The private registry reader derives consent and its current instant from the
+server, not caller/model projection bits. The supplied catalog and organization
+must come from the centralized authorized caller. Temporal, tenant, brief-key,
+policy, retention and source-size predicates precede a bounded source-work scan.
+Current reads reject any tombstone; historical SQL applies explicit as-of dates
+but cannot infer historical consent from mutable configuration. The offline
+replay therefore consumes independently frozen consent snapshots.
+
+The reader scans at most six exact source graphs plus one sentinel, without
+N+1 queries or an unbounded history walk. Compatibility is checked using the
+current binder and workflow validator before the final five-candidate top-K.
+If the source horizon cannot establish completeness, `truncated` requires
+review; it never fabricates an empty match or chooses an arbitrary first row.
+Historical matching has an organization/key/time index and explicit C-collation
+identity ordering, consistent with the frozen replay across database locales.
+
+Resolution re-reads all matching candidates and the exact source. New ambiguity,
+revocation, deletion, expiration, catalog/brief drift or unsupported edits
+invalidate the prior receipt instead of substituting the latest version. Sorted
+exclusive consent-row locks are acquired initially for resolution, avoiding
+lock upgrades and fencing both registration and consent writers. Source/version
+row locks fence mutation through the copy's admission point. Registration and
+ordinary provenance listing retain their shared consent locks. The stage remains
+bounded to 200 ms with caller cancellation terminal; no failure launches a model
+call, saves a draft or grants Apply/Run permission. HTTP selection and the editor
+are still not connected to this boundary.
+
+## Offline mechanical evidence
+
+Run the frozen synthetic corpora with:
 
 ```sh
-go run ./cmd/authoringcheck internal/authoring/testdata/experience-mechanics.json
-go test -race -count=20 ./internal/authoring
+go run ./cmd/authoringcheck internal/authoring/testdata/experience-mechanics.json internal/authoring/testdata/experience-replay.json
+go test -race -count=20 ./internal/authoring ./cmd/authoringcheck
 go test ./internal/authoring -run '^$' -fuzz '^FuzzDecisionProposalContract$' -fuzztime=5m -parallel=2
 go test ./internal/authoring -run '^$' -fuzz '^FuzzDecisionEligibilityProjection$' -fuzztime=5m -parallel=2
 ```
 
-The 240 cases are balanced across four modes and English/Spanish, with entire
-workflow families held out in the qualification split. The manifest freezes
-payloads and the [rubric](../../internal/authoring/testdata/experience-mechanics-rubric.md)
-defines explicit mechanical labels. The checker validates fixture proposals,
-not a rules-provider prediction or semantic model. Tests separately poison
-references and permute eligibility. No graph is retrieved, generated, mutated,
-saved or run, and no network or database is contacted. Passing does not prove
-real-world precision, utility, human acceptance or independently verified effects.
+The original 240 cases are balanced across four modes and English/Spanish,
+with entire workflow families held out in the qualification split. Their
+manifest and [rubric](../../internal/authoring/testdata/experience-mechanics-rubric.md)
+remain frozen. Fixture-proposal contract validation is reported separately from
+actual RulesProvider prediction. The same cases also exercise the real legacy
+recipe/template selection and binder, and an exact-policy ablation without
+experiences. Template binding is not evidence of fulfilling a human objective.
+
+A second [rubric](../../internal/authoring/testdata/experience-replay-rubric.md)
+defines 42 frozen EN/ES chronological/source-copy cases. Explicit historical
+consent snapshots and registration/version/retention/revocation/deletion facts
+are filtered before stable top-K. Later evidence cannot consume the historical
+limit or grant past consent. Missing snapshots fail closed. Readability and
+compatibility are frozen for each case's catalog/as-of instant, not inferred
+from present mutable configuration. Physically purged records cannot reconstruct
+history; these replay inputs are independent frozen fixtures.
+
+Reports preserve every outcome and denominator, including invalidated reuse,
+cancellations and escalation. Canonical recipe construction is counted separately
+from requests for the generative path; neither grants provider admission.
+Generation requests avoided by selecting a source
+are counted separately from requests deferred to review. Actual logical model
+calls and SDK transport requests are both zero: this runner has no provider
+client. No real calls avoided, probability, semantic-model accuracy, successful
+business effects or time saved are inferred from synthetic decisions.
+
+The runner privately copies fixture graphs through current validation; it never
+contacts a network/database, retrieves a live workflow, saves or runs a draft.
+Passing does not prove real-world precision, utility, human acceptance or
+independently verified effects.
 
 See [AI pipeline](ai-pipeline.md) for the existing authoring authority boundary.
+
+## PostgreSQL fixture qualification
+
+The optional developer command exercises the live reader only against a fresh,
+UUID-named database it creates and removes using a loopback PostgreSQL 18 test
+role with `CREATEDB`. It refuses remote hosts and connection-routing overrides,
+checks the owned database identity before migration, migrates twice and checks
+registration, exact copy, descriptive adaptation, tenant isolation, new
+ambiguity, revocation, cancellation and default-off behavior. It does not
+read/register real tenant workflows or contact a completion provider.
+
+```sh
+JANUSLY_DATABASE_URL='postgres://janusly:janusly-local@127.0.0.1:15473/janusly?sslmode=disable' \
+  JANUSLY_MEMORY_ENABLED=true go run ./cmd/authoringcheck --registry-fixture
+```
+
+The feature is enabled only in the command's synthetic registry instance and
+synthetic consent rows. This does not enable authoring experiences in another
+process or existing organization. Success is emitted only after its owned
+fixture database has been removed; counters report zero logical/SDK model calls.
+
+## Rules component performance screen
+
+`TestExperienceRulesPerformanceUnderAuthoringWorkload` measures a first rules
+call and 1,000 warm rules/copy admissions with 200 credential and 200 subworkflow
+catalog entries. Concurrent work uses the existing brief compiler, deterministic
+proposal construction, workflow validator and binder. Cancelled calls remain
+terminal, and the 200 ms decision-stage ceiling is not enlarged.
+
+For independent cold samples, compile the test binary once and run only this
+test in 30 separate processes; ordinary repetition inside one process is not a
+cold sample. The logged report separates first-decision latency from warm
+percentiles. First-decision latency does not include process startup or catalog
+construction. This component screen is not HTTP throughput, database latency,
+real-model quality or a production capacity claim. Database contention and
+in-flight cancellation are covered separately by PostgreSQL integration tests.

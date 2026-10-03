@@ -1,0 +1,14 @@
+{
+  "version": "1",
+  "evidence": "synthetic_chronology_and_copy_mechanics_only",
+  "cases": 42,
+  "languages": {
+    "en": 21,
+    "es": 21
+  },
+  "files": {
+    "experience-replay.json": "37da0d3cff0e80f5b0fb0aea2599f62c86c43d15215dc56479f247092b873805"
+  },
+  "policyVersion": "authoring-experience-v1",
+  "sourceCatalog": "builtin_builder_snapshot_no_tenant_credentials"
+}

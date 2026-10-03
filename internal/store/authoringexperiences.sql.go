@@ -38,6 +38,89 @@ func (q *Queries) DeleteExpiredAuthoringExperienceSource(ctx context.Context, ar
 	return err
 }
 
+const findAuthoringExperienceCandidates = `-- name: FindAuthoringExperienceCandidates :many
+SELECT e.id,e.org_id,e.workflow_id,e.workflow_version_id,v.version,e.brief_key,e.policy_version,
+       e.registered_at,v.created_at AS version_created_at,e.retain_until,e.revoked_at,w.deleted_at,v.dag_json
+FROM authoring_experiences e
+JOIN workflow_versions v ON v.org_id=e.org_id AND v.workflow_id=e.workflow_id AND v.id=e.workflow_version_id
+JOIN workflows w ON w.org_id=e.org_id AND w.id=e.workflow_id
+WHERE e.org_id=$1 AND e.brief_key=$2
+  AND e.schema_version='1' AND e.policy_version='authoring-experience-v1'
+  AND e.registered_at <= $3::timestamptz AND v.created_at <= $3::timestamptz
+  AND e.retain_until > $3::timestamptz
+  AND (e.revoked_at IS NULL OR ($4::boolean AND e.revoked_at > $3::timestamptz))
+  AND (w.deleted_at IS NULL OR ($4::boolean AND w.deleted_at > $3::timestamptz))
+  AND octet_length(v.dag_json::text) <= 2097152
+ORDER BY e.registered_at DESC,e.id COLLATE "C" DESC
+LIMIT 7
+FOR SHARE OF e,w,v
+`
+
+type FindAuthoringExperienceCandidatesParams struct {
+	OrgID      string
+	BriefKey   string
+	AsOf       time.Time
+	Historical bool
+}
+
+type FindAuthoringExperienceCandidatesRow struct {
+	ID                string
+	OrgID             string
+	WorkflowID        string
+	WorkflowVersionID string
+	Version           int32
+	BriefKey          string
+	PolicyVersion     string
+	RegisteredAt      time.Time
+	VersionCreatedAt  *time.Time
+	RetainUntil       time.Time
+	RevokedAt         *time.Time
+	DeletedAt         *time.Time
+	DagJson           json.RawMessage
+}
+
+// Temporal eligibility precedes the bounded source-work horizon. Historical
+// reads consume an explicit frozen consent snapshot at the caller; current
+// config is not proof of past consent. Live reads reject any tombstone.
+func (q *Queries) FindAuthoringExperienceCandidates(ctx context.Context, arg FindAuthoringExperienceCandidatesParams) ([]FindAuthoringExperienceCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, findAuthoringExperienceCandidates,
+		arg.OrgID,
+		arg.BriefKey,
+		arg.AsOf,
+		arg.Historical,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FindAuthoringExperienceCandidatesRow
+	for rows.Next() {
+		var i FindAuthoringExperienceCandidatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.WorkflowID,
+			&i.WorkflowVersionID,
+			&i.Version,
+			&i.BriefKey,
+			&i.PolicyVersion,
+			&i.RegisteredAt,
+			&i.VersionCreatedAt,
+			&i.RetainUntil,
+			&i.RevokedAt,
+			&i.DeletedAt,
+			&i.DagJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAuthoringExperienceVersion = `-- name: GetAuthoringExperienceVersion :one
 SELECT v.id, v.version, v.dag_json, v.created_at
 FROM workflow_versions v JOIN workflows w ON w.org_id=v.org_id AND w.id=v.workflow_id
@@ -217,6 +300,39 @@ func (q *Queries) LockAuthoringExperienceConsent(ctx context.Context, orgID stri
 	var items []LockAuthoringExperienceConsentRow
 	for rows.Next() {
 		var i LockAuthoringExperienceConsentRow
+		if err := rows.Scan(&i.Key, &i.ValueJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockAuthoringExperienceResolveConsent = `-- name: LockAuthoringExperienceResolveConsent :many
+SELECT key, value_json FROM org_configs
+WHERE org_id = $1 AND key IN ('ai.authoringExperienceEnabled','memory.enabled','memory.allowedKinds','memory.retentionDaysByKind')
+ORDER BY key FOR UPDATE
+`
+
+type LockAuthoringExperienceResolveConsentRow struct {
+	Key       string
+	ValueJson json.RawMessage
+}
+
+// Resolution serializes against registration as well as consent writers.
+// Taking this mode initially avoids lock-upgrade deadlocks between resolvers.
+func (q *Queries) LockAuthoringExperienceResolveConsent(ctx context.Context, orgID string) ([]LockAuthoringExperienceResolveConsentRow, error) {
+	rows, err := q.db.Query(ctx, lockAuthoringExperienceResolveConsent, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LockAuthoringExperienceResolveConsentRow
+	for rows.Next() {
+		var i LockAuthoringExperienceResolveConsentRow
 		if err := rows.Scan(&i.Key, &i.ValueJson); err != nil {
 			return nil, err
 		}
