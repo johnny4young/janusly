@@ -27,6 +27,21 @@ describe('canvas operation authority', () => {
     expect(lease.signal.aborted).toBe(true)
     expect(invalidated).toHaveBeenCalledTimes(1)
   })
+  it('supplies a state snapshot to selectors at admission and subsequent transitions', () => {
+    const invalidated = vi.fn()
+    const selector = vi.fn((state: typeof initial) => JSON.stringify([state.orgId, state.userId]))
+    const admitted = useWorkflowStore.getState()
+    const lease = ownCanvas(invalidated, selector)
+    expect(selector).toHaveBeenNthCalledWith(1, admitted)
+    useWorkflowStore.getState().addToast('Unrelated', 'info')
+    expect(selector).toHaveBeenLastCalledWith(useWorkflowStore.getState())
+    expect(lease.signal.aborted).toBe(false)
+    const original = useWorkflowStore.getState().userId
+    useWorkflowStore.setState({ userId: 'other' })
+    useWorkflowStore.setState({ userId: original })
+    expect(lease.signal.aborted).toBe(true)
+    expect(invalidated).toHaveBeenCalledTimes(1)
+  })
   it('disposes an unused lease without treating disposal as context invalidation', () => {
     const invalidated = vi.fn()
     const lease = ownCanvas(invalidated)

@@ -36,6 +36,21 @@ independent and may use self-hosted Ollama.
 The React AI Studio consumes these routes and clearly labels provider-backed
 and fallback results.
 
+## Registered authoring examples
+
+The optional, default-off experience layer can reuse an exact registered saved
+version or adapt only its name. It requires explicit process and tenant consent;
+registration is not approval or proof of a successful business effect. The
+existing contract-first proposal path returns a source-bearing review receipt,
+and Apply revalidates that receipt before copying to an unsaved canvas. No source
+is harvested automatically, and Save/Run remain separate.
+
+Use [registering and reviewing authoring examples](runbooks/authoring-experiences.md)
+for the operator procedure. [Experience authoring](architecture/experience-authoring.md)
+and the [AI pipeline](architecture/ai-pipeline.md#experience-assisted-authoring)
+describe exact-match policy, default-off/shadow/review modes, fallback and privacy
+limits. REUSE/ADAPT need no new model; GENERATE uses existing provider admission.
+
 ## Engine surfaces
 
 The `ai`, `agent`, and `multi_agent` workflow task types resolve tenant-safe AI

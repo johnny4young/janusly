@@ -526,3 +526,26 @@ describe('contractApi response guards', () => {
     void (() => contractApi('GET /recovery/my-wins', '/recovery/my-wins', undefined, { guard: isGetRecoveryMetricsResponse }))
   })
 })
+
+describe('contractApi explicit versioned operations', () => {
+  afterEach(() => { __resetInFlightForTests(); vi.unstubAllGlobals() })
+  it('uses the exact versioned-only mutation without creating a legacy alias', async () => {
+    mockJsonResponse(200, { apiVersion: 'v1', requestId: 'versioned-revoke', data: { id: 'experience', revoked: true } })
+    await expect(contractApi('POST /authoring/experiences/revoke', '/v1/authoring/experiences/revoke', { id: 'experience' }))
+      .resolves.toEqual({ id: 'experience', revoked: true })
+    expect(fetch).toHaveBeenCalledWith('/v1/authoring/experiences/revoke', expect.objectContaining({ method: 'POST', body: '{"id":"experience"}' }))
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+  it('preserves an explicit versioned read and its scoped query without a second prefix', async () => {
+    mockJsonResponse(200, { apiVersion: 'v1', requestId: 'versioned-list', data: { entries: [], truncated: false } })
+    await expect(contractApi('GET /authoring/experiences', '/v1/authoring/experiences?workflowId=workflow-7', undefined))
+      .resolves.toEqual({ entries: [], truncated: false })
+    expect(fetch).toHaveBeenCalledWith('/v1/authoring/experiences?workflowId=workflow-7', expect.objectContaining({ method: 'GET' }))
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+  it.each(['/v1/authoring/experiences/register', '/v1/v1/authoring/experiences/revoke', '/v1x/authoring/experiences/revoke', 'https://external.test/v1/authoring/experiences/revoke'])('rejects a mismatched explicit route %s before transport', async path => {
+    mockJsonResponse(200, {})
+    await expect(contractApi('POST /authoring/experiences/revoke', path, { id: 'experience' })).rejects.toThrow('does not match contract operation')
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})

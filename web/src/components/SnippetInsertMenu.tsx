@@ -28,7 +28,7 @@ import {
   isBuiltinSnippetId,
   type SnippetCategory,
   type SnippetDefinition,
-} from '@/lib/workflow-snippets'
+} from '@/lib/workflow-snippets-values'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'

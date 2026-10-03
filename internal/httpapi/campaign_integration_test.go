@@ -128,6 +128,18 @@ func TestReplayCampaignLifecycle(t *testing.T) {
 	// one item row per replayed entry (the pump replays via the engine, so
 	// no dlq.replayed rows — item_replayed is that path's identity).
 	pool := testPool(t)
+	// The terminal transition commits before the pump writes its completion
+	// audit. Observe both before cleanup can cancel that still-running step.
+	for {
+		got := countAudit(t, pool, h.org, "recovery.campaign.completed")
+		if got == 1 {
+			break
+		}
+		if got > 1 || time.Now().After(deadline) {
+			t.Fatalf("recovery.campaign.completed: want 1 rows, got %d", got)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	for action, want := range map[string]int{
 		"recovery.campaign.created":       1,
 		"recovery.campaign.completed":     1,

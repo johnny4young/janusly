@@ -7,16 +7,20 @@ import { ConfirmProvider } from './ConfirmDialog'
 import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 
-vi.mock('../api', () => {
-  const module = ({
-  api: vi.fn(),
-})
+vi.mock('../api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../api')>()
+  const module = { api: vi.fn() }
   return {
+    ...actual,
     ...module,
-    // Typed reads route through contractApi; delegate to the same mock so the
-    // path-keyed expectations below keep working.
-    contractApi: (_operation: string, path: string, _request: unknown, options?: RequestInit) =>
-      options === undefined ? module.api(path) : module.api(path, options),
+    // These history fixtures model the default-off optional registry. Its read
+    // must not consume responses intended for version pagination or suggestions.
+    contractApi: (operation: string, path: string, _request: unknown, options?: RequestInit) => {
+      if (operation === 'GET /authoring/experiences') {
+        return Promise.reject(new actual.ApiError('disabled', { statusCode: 403 }))
+      }
+      return options === undefined ? module.api(path) : module.api(path, options)
+    },
   }
 })
 
@@ -201,7 +205,7 @@ describe('<VersionHistoryPanel />', () => {
     expect(useWorkflowStore.getState().toasts).toHaveLength(0)
   })
 
-  it('renders a structural diff after selecting two versions in compare mode', async () => {
+  it.each([[2, 1], [1, 2]])('renders a chronological diff after selection %j', async (first, second) => {
     mockVersionHistoryApi({
       wf_compare: [
         { workflowId: 'wf_compare', createdAt: null, id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
@@ -212,10 +216,14 @@ describe('<VersionHistoryPanel />', () => {
     render(<VersionHistoryPanel />)
 
     fireEvent.click(await screen.findByRole('button', { name: /Compare/i }))
-    fireEvent.click(screen.getByRole('button', { name: /v2/i }))
-    fireEvent.click(screen.getByRole('button', { name: /v1/i }))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`v${first}`, 'i') }))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`v${second}`, 'i') }))
 
-    expect(screen.getByLabelText('Structural workflow diff')).toBeInTheDocument()
+    const diff = screen.getByLabelText('Structural workflow diff')
+    expect(diff).toBeInTheDocument()
+    const [older, newer] = within(diff).getAllByText(/^v[12]$/)
+    expect(older).toHaveTextContent('v1')
+    expect(newer).toHaveTextContent('v2')
     expect(screen.getAllByText(/v1/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/v2/).length).toBeGreaterThan(0)
     expect(screen.getByText(/1 node.*changed/i)).toBeInTheDocument()
@@ -256,9 +264,12 @@ describe('<VersionHistoryPanel />', () => {
 
   it('retains loaded versions and the cursor after rejecting an invalid older page', async () => {
     const firstPage = Array.from({ length: 50 }, (_, i) => ({ workflowId: 'wf_compare', createdAt: null, id: `v${60 - i}`, version: 60 - i, dagJson: makeWorkflow('https://example.test') }))
-    vi.mocked(api).mockResolvedValueOnce(firstPage).mockResolvedValueOnce([
-      { ...firstPage[0], id: 'bad-cursor', version: 11 },
-    ]).mockResolvedValueOnce([{ ...firstPage[0], id: 'v10', version: 10 }])
+    const pages = [firstPage, [{ ...firstPage[0], id: 'bad-cursor', version: 11 }], [{ ...firstPage[0], id: 'v10', version: 10 }]]
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === '/org/config') return { config: [] }
+      if (path.startsWith('/workflows/versions')) return pages.shift()
+      throw new Error(`Unexpected API call: ${path}`)
+    })
     render(<VersionHistoryPanel />)
     await screen.findByText('v60')
     fireEvent.click(screen.getByTestId('version-history-load-more'))

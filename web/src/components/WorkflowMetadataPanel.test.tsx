@@ -42,6 +42,7 @@ const LOADED_METADATA = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  apiMock.mockReset()
   storeState.currentWorkflowId = null
   storeState.currentWorkflowSaved = true
 })
@@ -58,6 +59,7 @@ describe('WorkflowMetadataPanel', () => {
     render(<WorkflowMetadataPanel workflowId="wf-1" />)
 
     const guidance = await screen.findByTestId('workflow-metadata-ai-guidance')
+    await waitFor(() => expect(guidance).toHaveValue('Prefer explicit approval gates.'))
     expect(guidance).toHaveValue('Prefer explicit approval gates.')
     expect(apiMock).toHaveBeenNthCalledWith(1, '/workflows/wf-1/metadata', expect.objectContaining({
       signal: expect.any(AbortSignal),
@@ -85,7 +87,7 @@ describe('WorkflowMetadataPanel', () => {
     const { rerender } = render(<WorkflowMetadataPanel workflowId="wf-1" />)
 
     const owners = await screen.findByTestId('workflow-metadata-owners')
-    expect(owners).toHaveValue('alice')
+    await waitFor(() => expect(owners).toHaveValue('alice'))
     expect(screen.getByTestId('workflow-metadata-ai-guidance')).toHaveValue('Prefer explicit approval gates.')
 
     rerender(<WorkflowMetadataPanel workflowId="wf-2" />)
@@ -132,6 +134,7 @@ describe('WorkflowMetadataPanel', () => {
 
     render(<WorkflowMetadataPanel workflowId="wf-1" />)
     const guidance = await screen.findByTestId('workflow-metadata-ai-guidance')
+    await waitFor(() => expect(guidance).toHaveValue('Prefer explicit approval gates.'))
     fireEvent.change(guidance, { target: { value: 'Unsaved workflow draft.' } })
 
     act(() => invalidateTags(['workflows']))
@@ -155,6 +158,7 @@ describe('WorkflowMetadataPanel', () => {
 
     render(<WorkflowMetadataPanel workflowId="wf-1" />)
     const guidance = await screen.findByTestId('workflow-metadata-ai-guidance')
+    await waitFor(() => expect(guidance).toHaveValue('Prefer explicit approval gates.'))
 
     act(() => invalidateTags(['workflows']))
     await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2))
@@ -172,6 +176,7 @@ describe('WorkflowMetadataPanel', () => {
     render(<WorkflowMetadataPanel workflowId="wf-1" />)
 
     const guidance = await screen.findByTestId('workflow-metadata-ai-guidance')
+    await waitFor(() => expect(guidance).toHaveValue('Prefer explicit approval gates.'))
     fireEvent.change(guidance, {
       target: { value: 'Use postgres://operator:super-secret@db.internal/acme' },
     })

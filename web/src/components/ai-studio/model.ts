@@ -1,3 +1,4 @@
+import type { AuthoringExperienceEdits } from '../../lib/api-types.generated'
 // Types, limits and pure helpers shared by the AI Studio controller and views.
 import type {
   AiAuthoringActionRequest,
@@ -42,9 +43,9 @@ export function composeAuthoringPrompt(
 export type AiStudioPanelProps = {
   health: AiHealth | null
   workflowName: string
-  onLoadAuthoringCapabilities: () => Promise<AuthoringCapabilityCatalog>
+  onLoadAuthoringCapabilities: (signal?: AbortSignal) => Promise<AuthoringCapabilityCatalog>
   onCompileWorkflowBrief: (prompt: string) => Promise<WorkflowBriefCompilation>
-  onProposeWorkflow: (brief: WorkflowIntentBrief, catalogVersion: string, sourcePrompt: string) => Promise<WorkflowProposalResponse>
+  onProposeWorkflow: (brief: WorkflowIntentBrief, catalogVersion: string, sourcePrompt: string, experienceEdits?: AuthoringExperienceEdits) => Promise<WorkflowProposalResponse>
   onApplyWorkflowProposal: (proposal: WorkflowProposalResponse) => Promise<WorkflowProposalApplyOutcome>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string; aiError?: string }>
   onReviewWorkflow: () => Promise<{ mode: AiMode; review: ReviewFindings; model?: string; aiError?: string }>

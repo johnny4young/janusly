@@ -8,6 +8,11 @@ postgres_port=${JANUSLY_E2E_POSTGRES_PORT:-35432}
 pnpm_command=${PNPM:-pnpm --ignore-workspace}
 docker_bin=${JANUSLY_E2E_DOCKER_BIN:-docker}
 attempted=0
+experience_spec=e2e/authoring-experience.spec.ts
+experience_profiles=(review shadow off disabled)
+experience_enabled=false
+experience_mode=off
+memory_enabled=false
 zero_commit=0000000000000000000000000000000000000000
 build_commit=$zero_commit
 build_tree=$zero_commit
@@ -80,6 +85,10 @@ compose() {
   ALLOW_PRIVATE_HTTP_TARGETS=true \
   JANUSLY_CREDENTIAL_MASTER_KEY="$e2e_master_key" \
   ANTHROPIC_API_KEY='' \
+  JANUSLY_AUTHORING_EXPERIENCE_ENABLED="$experience_enabled" \
+  JANUSLY_AUTHORING_EXPERIENCE_MODE="$experience_mode" \
+  JANUSLY_MEMORY_ENABLED="$memory_enabled" \
+  OLLAMA_BASE_URL=http://127.0.0.1:1 \
   JANUSLY_BUILD_COMMIT="$build_commit" \
   JANUSLY_BUILD_TREE="$build_tree" \
   JANUSLY_BUILD_ID="$build_id" \
@@ -107,7 +116,10 @@ if [[ ${1:-} == selftest ]]; then
   [[ $# == 1 ]] || { usage >&2; die "unexpected arguments"; }
   jq -n --arg project "$project" --argjson appPort "$app_port" --argjson postgresPort "$postgres_port" \
     --arg commit "$build_commit" --arg tree "$build_tree" --arg id "$build_id" \
-    --args '{project:$project,ports:{application:$appPort,postgres:$postgresPort},build:{commit:$commit,tree:$tree,id:$id},specs:$ARGS.positional}' "${specs[@]}"
+    --arg experienceSpec "$experience_spec" \
+    --argjson profiles "$(jq -n --args '$ARGS.positional' "${experience_profiles[@]}")" \
+    --argjson enabled "$experience_enabled" --arg mode "$experience_mode" --argjson memoryEnabled "$memory_enabled" \
+    --args '{project:$project,ports:{application:$appPort,postgres:$postgresPort},build:{commit:$commit,tree:$tree,id:$id},specs:$ARGS.positional,experience:{specs:[$experienceSpec],profiles:$profiles,baseline:{enabled:$enabled,mode:$mode,memoryEnabled:$memoryEnabled}}}' "${specs[@]}"
   exit 0
 fi
 [[ $# == 0 ]] || { usage >&2; die "unexpected arguments"; }
@@ -127,13 +139,18 @@ compose run --rm janusly migrate
 compose up -d janusly
 
 origin="http://127.0.0.1:$app_port"
-for _ in $(seq 1 120); do
-  if curl --fail --silent "$origin/healthz" >/dev/null; then
-    break
-  fi
-  sleep 1
-done
-curl --fail --silent "$origin/healthz" >/dev/null
+wait_ready() {
+  for _ in $(seq 1 120); do
+    if curl --fail --silent "$origin/healthz" >/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  curl --fail --silent "$origin/healthz" >/dev/null
+  curl --fail --silent -H 'x-org-id: default' -H 'x-user-id: dev-user' "$origin/ai/health" |
+    jq -e '(.data // .).enabled == false' >/dev/null
+}
+wait_ready
 
 # The seeder IS the documented first-run path; running it here means a
 # regression in it fails CI instead of the next fresh install. Idempotent
@@ -155,3 +172,25 @@ E2E_API_URL="$origin" \
 E2E_UPSTREAM_HOST=host.docker.internal \
 E2E_UPSTREAM_BIND=0.0.0.0 \
   "${playwright[@]}" test "${specs[@]}" --project=chromium
+
+# Keep the default-off smoke lane separate from the opted-in history journeys.
+# Each profile replaces only this harness's executable; PostgreSQL and all
+# source registrations stay inside its uniquely owned Compose project.
+for profile in "${experience_profiles[@]}"; do
+  compose stop janusly
+  experience_enabled=true
+  experience_mode=$profile
+  memory_enabled=true
+  if [[ $profile == disabled ]]; then
+    experience_enabled=false
+    experience_mode=review
+  fi
+  compose up -d --force-recreate janusly
+  wait_ready
+  PLAYWRIGHT_SKIP_WEB_SERVER=1 \
+  JANUSLY_EXPERIENCE_E2E_PROFILE="$profile" \
+  JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
+  E2E_API_URL="$origin" \
+    "${playwright[@]}" test "$experience_spec" --project=chromium --workers=1 --retries=0 \
+      --output "../output/playwright/authoring-experience-$profile"
+done

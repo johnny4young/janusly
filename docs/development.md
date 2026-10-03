@@ -62,6 +62,17 @@ The same lane runs `usability-study-readiness.spec.ts` against real failures
 and routes in both locales; it verifies affordances only, not interviews or
 unassisted participant completion.
 
+It also runs `authoring-experience.spec.ts` in EN/ES against the same embedded
+application and fresh PostgreSQL stack, replacing only its owned executable
+between review, shadow, off, and process-disabled profiles. The ordinary smoke
+selection fixes experience and memory flags off; profile journeys explicitly opt
+in their isolated organizations. Provider credentials are blank and the AI health
+probe must report disabled before browser authoring. These checks cover exact
+older-version registration, name-only adaptation, unsaved Apply, withdrawal,
+source deletion, tenant consent changes, and legacy-envelope parity. Expected
+HTTP denials are asserted by exact endpoint/status; page errors and unrelated
+console errors remain failures. They do not qualify a model or human usability.
+
 A throwaway database for local integration runs, isolated from the dev one:
 
 ```bash

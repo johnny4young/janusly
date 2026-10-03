@@ -13,7 +13,7 @@ import { Clock, User } from 'lucide-react'
 import type {
   RecoveryItemSeverity,
   RecoveryItemStatus,
-} from '@/lib/recovery-item'
+} from '@/lib/recovery-item-values'
 import { getResolvedLocale, useT } from '../i18n'
 import './RecoveryItemBadge.css'
 

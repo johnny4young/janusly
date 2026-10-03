@@ -1,3 +1,8 @@
+import { utf8ByteLength } from '../../lib/utf8'
+import { sessionCan } from '../../identity-context'
+import { AUTHORING_PERMISSIONS, currentAuthoringAuthority } from '../../lib/canvas-authority'
+import { AUTHORING_EXPERIENCE_TAGS } from '../../lib/experience-authority'
+import { subscribeToTags } from '../../lib/query-cache'
 // The AI Studio controller: every piece of authoring state, the request
 // generations that discard stale responses, and the derived facts the views
 // render. Views receive the returned model and stay presentational.
@@ -52,8 +57,14 @@ export function useAiStudioController({
   const [briefCompilation, setBriefCompilation] = useState<CompiledBriefState | null>(null)
   const [clarificationAnswers, setClarificationAnswers] = useState<Record<number, string>>({})
   const [proposal, setProposal] = useState<WorkflowProposalResponse | null>(null)
+  const [experienceAvailable, setExperienceAvailable] = useState(false)
+  const [experienceName, setExperienceName] = useState('')
+  const normalizedExperienceName = experienceName.trim()
+  const experienceNameValid = !normalizedExperienceName || (utf8ByteLength(normalizedExperienceName) <= 200
+    && !normalizedExperienceName.includes('\0'))
   const [authoringError, setAuthoringError] = useState<string | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(true)
+  const [catalogEpoch, setCatalogEpoch] = useState(0)
   const [authoringLoading, setAuthoringLoading] = useState<AuthoringLoading | null>(null)
   const [applied, setApplied] = useState(false)
   const [briefCompileMs, setBriefCompileMs] = useState<number | null>(null)
@@ -64,6 +75,9 @@ export function useAiStudioController({
   const pendingPromptFocusRef = useRef(false)
   const starterPromptsRef = useRef(starterPrompts)
   const authoringRequestRef = useRef(0)
+  const catalogRequestRef = useRef(0)
+  const primaryStarterPromptRef = useRef(primaryStarterPrompt)
+  primaryStarterPromptRef.current = primaryStarterPrompt
   const applyRequestRef = useRef(0)
   const currentRequestRef = useRef(0)
   const processedRequestRef = useRef<number | null>(null)
@@ -74,12 +88,9 @@ export function useAiStudioController({
     review: () => Promise<void>
     fix: () => Promise<void>
   } | null>(null)
-  const currentWorkflowId = useWorkflowStore((state) => state.currentWorkflowId)
-  const workflowRevision = useWorkflowStore((state) => state.workflowRevision)
   const orgId = useWorkflowStore((state) => state.orgId)
   const userId = useWorkflowStore((state) => state.userId)
   const identityScope = `${orgId ?? ''}\u0000${userId ?? ''}`
-  const previousIdentityScopeRef = useRef(identityScope)
 
   // Any edit to the intent discards the brief, the proposal and their timings:
   // they described a prompt that no longer exists.
@@ -90,6 +101,8 @@ export function useAiStudioController({
     // Apply owns a separate snapshot and must remain pending until it settles.
     setAuthoringLoading((loading) => loading === 'apply' ? loading : null)
     setPrompt(next)
+    setExperienceName('')
+    setExperienceAvailable(false)
     setBriefCompilation(null)
     setClarificationAnswers({})
     setProposal(null)
@@ -99,25 +112,86 @@ export function useAiStudioController({
     setAuthoringError(null)
   }
 
+  const replaceExperienceName = (next: string) => {
+    authoringRequestRef.current += 1
+    setAuthoringLoading(loading => loading === 'apply' ? loading : null)
+    setExperienceName(next)
+    setProposal(null)
+    proposalSourceRef.current = null
+    setProposalBuildMs(null)
+    setApplied(false)
+    setAuthoringError(null)
+  }
+
   const answerClarification = (index: number, value: string) => {
     setClarificationAnswers((current) => ({ ...current, [index]: value }))
   }
 
-  // AI authoring state can contain tenant capability names and operator prose.
-  // Clear it synchronously before paint when the authenticated identity or org
-  // changes so neither data nor an actionable old catalog crosses the boundary.
+  // Store subscriptions observe the first authority change, including a
+  // transient change batched back to the original values before React paints.
   useLayoutEffect(() => {
-    if (previousIdentityScopeRef.current === identityScope) return
-    previousIdentityScopeRef.current = identityScope
-    applyRequestRef.current += 1
-    currentRequestRef.current += 1
-    expectedAppliedWorkflowIDRef.current = null
-    proposalSourceRef.current = null
-    replacePrompt(primaryStarterPrompt)
-    setResult(null)
-    setAuthoringLoading(null)
-    setCurrentLoading(null)
-  }, [identityScope, primaryStarterPrompt])
+    const clearReview = () => {
+      authoringRequestRef.current += 1
+      currentRequestRef.current += 1
+      proposalSourceRef.current = null
+      setProposal(null)
+      setProposalBuildMs(null)
+      setExperienceAvailable(false)
+      setExperienceName('')
+      setClarificationAnswers({})
+      setAuthoringError(null)
+      setResult(null)
+      setCurrentLoading(null)
+    }
+    const reloadCatalog = () => {
+      catalogRequestRef.current += 1
+      setCatalog(null)
+      setCatalogError(null)
+      setCatalogLoading(true)
+      setCatalogEpoch(epoch => epoch + 1)
+    }
+    const unsubscribe = useWorkflowStore.subscribe((next, previous) => {
+      if (currentAuthoringAuthority(next) === currentAuthoringAuthority(previous)) return
+      const identityChanged = next.orgId !== previous.orgId || next.userId !== previous.userId
+        || AUTHORING_PERMISSIONS.some(permission =>
+          sessionCan(next.identityContext, permission) !== sessionCan(previous.identityContext, permission))
+      const isExpectedApply = expectedAppliedWorkflowIDRef.current !== null
+        && next.currentWorkflowId === expectedAppliedWorkflowIDRef.current
+        && currentAuthoringAuthority({ ...next, currentWorkflowId: previous.currentWorkflowId,
+          workflowRevision: previous.workflowRevision }) === currentAuthoringAuthority(previous)
+      clearReview()
+      setAuthoringLoading(loading => isExpectedApply && loading === 'apply' ? loading : null)
+      if (!isExpectedApply) {
+        applyRequestRef.current += 1
+        expectedAppliedWorkflowIDRef.current = null
+        pendingPromptFocusRef.current = false
+        setApplied(false)
+      }
+      if (identityChanged) {
+        // Prose and capability identities may not cross tenant/grant boundaries.
+        setPrompt(primaryStarterPromptRef.current)
+        setBriefCompilation(null)
+        setBriefCompileMs(null)
+        reloadCatalog()
+      }
+    })
+    const unsubscribeTags = subscribeToTags(AUTHORING_EXPERIENCE_TAGS, () => {
+      clearReview()
+      // A resource change expires review, not an in-flight Apply's snapshot.
+      // Its command boundary owns the result and the loading ends on settlement.
+      setAuthoringLoading(loading => loading === 'apply' ? loading : null)
+      reloadCatalog()
+    })
+    return () => {
+      unsubscribe()
+      unsubscribeTags()
+      authoringRequestRef.current += 1
+      catalogRequestRef.current += 1
+      currentRequestRef.current += 1
+      applyRequestRef.current += 1
+      pendingPromptFocusRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     if (authoringLoading !== null) return
@@ -131,43 +205,24 @@ export function useAiStudioController({
 
   useLayoutEffect(() => {
     let active = true
+    const owner = new AbortController()
+    const requestID = ++catalogRequestRef.current
+    const ownsCatalog = () => !owner.signal.aborted && active && catalogRequestRef.current === requestID
     setCatalog(null)
     setCatalogLoading(true)
     setCatalogError(null)
-    void onLoadAuthoringCapabilities()
+    void onLoadAuthoringCapabilities(owner.signal)
       .then((nextCatalog) => {
-        if (active) setCatalog(nextCatalog)
+        if (ownsCatalog()) setCatalog(nextCatalog)
       })
       .catch((error: unknown) => {
-        if (active) setCatalogError(error instanceof Error ? error.message : t('aiStudio.catalog.loadFailed'))
+        if (ownsCatalog()) setCatalogError(error instanceof Error ? error.message : t('aiStudio.catalog.loadFailed'))
       })
       .finally(() => {
-        if (active) setCatalogLoading(false)
+        if (ownsCatalog()) setCatalogLoading(false)
       })
-    return () => { active = false }
-  }, [identityScope, onLoadAuthoringCapabilities, t])
-
-  // Proposals include a diff against the active canvas. Switching workflows or
-  // editing the current canvas invalidates that diff and every prior analysis.
-  useEffect(() => {
-    const expectedAppliedWorkflowID = expectedAppliedWorkflowIDRef.current
-    const isExpectedApply = expectedAppliedWorkflowID !== null && expectedAppliedWorkflowID === currentWorkflowId
-    expectedAppliedWorkflowIDRef.current = null
-    authoringRequestRef.current += 1
-    currentRequestRef.current += 1
-    if (!isExpectedApply) {
-      applyRequestRef.current += 1
-      pendingPromptFocusRef.current = false
-    }
-    setAuthoringLoading((loading) => isExpectedApply && loading === 'apply' ? loading : null)
-    setCurrentLoading(null)
-    setResult(null)
-    setProposal(null)
-    setClarificationAnswers({})
-    proposalSourceRef.current = null
-    setAuthoringError(null)
-    if (!isExpectedApply) setApplied(false)
-  }, [currentWorkflowId, workflowRevision])
+    return () => { active = false; owner.abort() }
+  }, [catalogEpoch, identityScope, onLoadAuthoringCapabilities, t])
 
   useLayoutEffect(() => {
     if (authoringLoading !== null || !pendingPromptFocusRef.current) return
@@ -203,7 +258,7 @@ export function useAiStudioController({
   }
 
   const buildProposal = async () => {
-    if (!briefCompilation || !catalog) return
+    if (!briefCompilation || !catalog || !experienceNameValid) return
     const source = useWorkflowStore.getState()
     const sourceWorkflow = { workflowId: source.currentWorkflowId, revision: source.workflowRevision }
     const requestID = ++authoringRequestRef.current
@@ -214,16 +269,18 @@ export function useAiStudioController({
     setProposalBuildMs(null)
     setApplied(false)
     try {
-      const nextProposal = await onProposeWorkflow(
-        briefCompilation.brief,
-        catalog.version,
-        briefCompilation.sourcePrompt,
-      )
+      const args = [briefCompilation.brief, catalog.version, briefCompilation.sourcePrompt] as const
+      // Legacy requests keep their original wire shape. Only an explicit,
+      // reviewed name edit asks for the closed descriptive adaptation path.
+      const nextProposal = await (experienceAvailable && normalizedExperienceName
+        ? onProposeWorkflow(...args, [{ field: 'workflow_name', value: normalizedExperienceName }])
+        : onProposeWorkflow(...args))
       if (authoringRequestRef.current !== requestID) return
       const current = useWorkflowStore.getState()
       if (current.currentWorkflowId !== sourceWorkflow.workflowId || current.workflowRevision !== sourceWorkflow.revision) return
       proposalSourceRef.current = sourceWorkflow
       setProposal(nextProposal)
+      setExperienceAvailable(nextProposal.experienceDecision?.mode === 'REUSE' || nextProposal.experienceDecision?.mode === 'ADAPT')
       setProposalBuildMs(Math.max(0, Math.round(performance.now() - startedAt)))
     } catch (error) {
       if (authoringRequestRef.current !== requestID) return
@@ -280,89 +337,68 @@ export function useAiStudioController({
     }
   }
 
-  const explain = async () => {
+  const currentAction = async <Response,>(
+    kind: CurrentWorkflowLoading,
+    request: () => Promise<Response>,
+    success: (response: Response) => ResultState,
+    failure: (error: unknown) => ResultState,
+  ) => {
     const requestID = ++currentRequestRef.current
-    setCurrentLoading('explain')
+    setCurrentLoading(kind)
     try {
-      const response = await onExplainWorkflow()
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'explanation',
-        mode: response.mode,
-        title: response.aiError
-          ? t('aiStudio.explanationLocal', { name: workflowName })
-          : t('aiStudio.explanationOk', { name: workflowName }),
-        body: response.explanation,
-        aiError: response.aiError,
-      })
+      const response = await request()
+      if (currentRequestRef.current === requestID) setResult(success(response))
     } catch (error) {
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'explanation',
-        mode: 'error',
-        title: t('aiStudio.explanationFailed'),
-        body: error instanceof Error ? error.message : t('aiStudio.explanationFailedBody'),
-      })
+      if (currentRequestRef.current === requestID) setResult(failure(error))
     } finally {
       if (currentRequestRef.current === requestID) setCurrentLoading(null)
     }
   }
 
-  const review = async () => {
-    const requestID = ++currentRequestRef.current
-    setCurrentLoading('review')
-    try {
-      const response = await onReviewWorkflow()
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'review',
-        mode: response.mode,
-        title: response.aiError
-          ? t('aiStudio.reviewLocal', { name: workflowName })
-          : t('aiStudio.reviewOk', { name: workflowName }),
-        review: response.review,
-        aiError: response.aiError,
-      })
-    } catch (error) {
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'review',
-        mode: 'error',
-        title: t('aiStudio.reviewFailed'),
-        review: { status: 'fail', issues: [] },
-        aiError: error instanceof Error ? error.message : t('aiStudio.reviewFailedBody'),
-      })
-    } finally {
-      if (currentRequestRef.current === requestID) setCurrentLoading(null)
-    }
-  }
+  const explain = () => currentAction('explain', onExplainWorkflow, response => ({
+    kind: 'explanation',
+    mode: response.mode,
+    title: response.aiError
+      ? t('aiStudio.explanationLocal', { name: workflowName })
+      : t('aiStudio.explanationOk', { name: workflowName }),
+    body: response.explanation,
+    aiError: response.aiError,
+  }), error => ({
+    kind: 'explanation',
+    mode: 'error',
+    title: t('aiStudio.explanationFailed'),
+    body: error instanceof Error ? error.message : t('aiStudio.explanationFailedBody'),
+  }))
 
-  const fix = async () => {
-    const requestID = ++currentRequestRef.current
-    setCurrentLoading('fix')
-    try {
-      const response = await onSuggestWorkflowImprovement()
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'fix',
-        mode: response.mode,
-        title: response.mode === 'ai' ? t('aiStudio.fixReady') : t('aiStudio.fixUnavailable'),
-        suggestions: response.mode === 'ai' ? response.suggestions : [],
-        aiError: response.aiError,
-      })
-    } catch (error) {
-      if (currentRequestRef.current !== requestID) return
-      setResult({
-        kind: 'fix',
-        mode: 'error',
-        title: t('aiStudio.fixFailed'),
-        suggestions: [],
-        aiError: error instanceof Error ? error.message : t('aiStudio.fixFailedBody'),
-      })
-    } finally {
-      if (currentRequestRef.current === requestID) setCurrentLoading(null)
-    }
-  }
+  const review = () => currentAction('review', onReviewWorkflow, response => ({
+    kind: 'review',
+    mode: response.mode,
+    title: response.aiError
+      ? t('aiStudio.reviewLocal', { name: workflowName })
+      : t('aiStudio.reviewOk', { name: workflowName }),
+    review: response.review,
+    aiError: response.aiError,
+  }), error => ({
+    kind: 'review',
+    mode: 'error',
+    title: t('aiStudio.reviewFailed'),
+    review: { status: 'fail', issues: [] },
+    aiError: error instanceof Error ? error.message : t('aiStudio.reviewFailedBody'),
+  }))
+
+  const fix = () => currentAction('fix', onSuggestWorkflowImprovement, response => ({
+    kind: 'fix',
+    mode: response.mode,
+    title: response.mode === 'ai' ? t('aiStudio.fixReady') : t('aiStudio.fixUnavailable'),
+    suggestions: response.mode === 'ai' ? response.suggestions : [],
+    aiError: response.aiError,
+  }), error => ({
+    kind: 'fix',
+    mode: 'error',
+    title: t('aiStudio.fixFailed'),
+    suggestions: [],
+    aiError: error instanceof Error ? error.message : t('aiStudio.fixFailedBody'),
+  }))
 
   requestedActionHandlersRef.current = { explain, review, fix }
 
@@ -397,6 +433,10 @@ export function useAiStudioController({
     clarificationAnswers,
     answerClarification,
     proposal,
+    experienceAvailable,
+    experienceName,
+    experienceNameValid,
+    replaceExperienceName,
     authoringError,
     authoringLoading,
     applied,

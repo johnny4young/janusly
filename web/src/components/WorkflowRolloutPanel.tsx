@@ -26,7 +26,7 @@ import { isPostWorkflowsWorkflowIdRolloutResponse } from '../lib/api-guards/oper
 import { isPostWorkflowsWorkflowIdRolloutRolloutIdDecisionResponse } from '../lib/api-guards/operations/PostWorkflowsWorkflowIdRolloutRolloutIdDecision'
 import { MalformedResponseError } from '../lib/malformed-response'
 import './WorkflowRolloutPanel.css'
-import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { PLATFORM_TAG, useResourceRefresh } from '../lib/query-cache'
 
 const WORKFLOW_ROLLOUT_MUTATION_TAGS = ['workflows', 'rollouts', 'versions'] as const
 
@@ -89,7 +89,7 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
   const current = useCallback((request: AbortController | null): request is AbortController =>
     request !== null && !request.signal.aborted && rolloutScope(useWorkflowStore.getState()) === scope, [scope])
   const rolloutPath = `/workflows/${encodeURIComponent(workflowId)}/rollout`
-  const platformVersion = useInvalidationNonce(WORKFLOW_ROLLOUT_TAGS)
+  const [refreshNonce, refresh] = useResourceRefresh(WORKFLOW_ROLLOUT_TAGS)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const addToast = useWorkflowStore(state => state.addToast)
   const [versions, setVersions] = useState<VersionRow[]>([])
@@ -99,7 +99,6 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
   const [loadState, setLoadState] = useState<'loading' | 'error' | 'ready'>('loading')
   const loading = loadState === 'loading'
   const loadError = loadState === 'error'
-  const [retry, setRetry] = useState(0)
   const [mutating, setMutating] = useState(false)
 
   useEffect(() => {
@@ -137,7 +136,7 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
         : tApiError(error) || t('workflowRollout.loadFailed'), 'error')
     })
     return () => { request.abort() }
-  }, [addToast, current, platformVersion, retry, rolloutPath, t, workflowId])
+  }, [addToast, current, refreshNonce, rolloutPath, t, workflowId])
 
   const latest = versions[0]
   const baseline = versions.find(version => version.id === rollout?.baselineVersionId)
@@ -241,7 +240,7 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
       )}
 
       {loadError && <div role="alert"><p>{t('workflowRollout.loadFailed')}</p>
-        <Button onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</Button></div>}
+        <Button onClick={refresh}>{t('common.retry')}</Button></div>}
 
       {!loading && !loadError && versions.length < MIN_ROLLOUT_VERSIONS && (
         <p className="we-rollout-panel__empty">{t('workflowRollout.needsVersions')}</p>
@@ -253,7 +252,7 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
         && qualificationCandidateVersionId && (
         <Suspense fallback={<p className="helper-text" role="status">{t('workflowRollout.qualification.loading')}</p>}>
           <WorkflowRecoveryQualification
-            key={`${platformVersion}:${retry}:${qualificationBaselineVersionId}:${qualificationCandidateVersionId}`}
+            key={`${refreshNonce}:${qualificationBaselineVersionId}:${qualificationCandidateVersionId}`}
             workflowId={workflowId}
             baselineVersionId={qualificationBaselineVersionId}
             candidateVersionId={qualificationCandidateVersionId}

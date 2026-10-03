@@ -21,6 +21,18 @@
 
 import * as z from 'zod/mini'
 
+import {
+  ALERT_TRIGGERS,
+  ALERT_DESTINATIONS,
+  ALERT_COOLDOWN_SECONDS_MIN,
+  ALERT_COOLDOWN_SECONDS_MAX,
+  ALERT_COOLDOWN_SECONDS_DEFAULT,
+  ALERT_POLICY_NAME_MAX,
+  ALERT_POLICY_CHANNELS_MIN,
+  ALERT_POLICY_CHANNELS_MAX,
+} from './alert-policy-values'
+export * from './alert-policy-values'
+
 const boundedString = (minimum: number, maximum: number) =>
   z.string().check(z.minLength(minimum), z.maxLength(maximum))
 
@@ -31,20 +43,6 @@ const boundedInt = (minimum: number, maximum: number) =>
   z.int().check(z.minimum(minimum), z.maximum(maximum))
 
 // ---------- triggers ----------
-
-export const ALERT_TRIGGERS = [
-  'dlq.entry_created',
-  'failure_cluster.threshold',
-  'budget.blocked',
-  'limiter.degraded',
-  'workflow.slo_breach',
-  'approval.stalled',
-  'recovery_item.created',
-  'recovery_item.sla_breached',
-  'workflow.schedule_anomaly',
-  'credential.expiring',
-  'workflow.circuit_breaker_tripped',
-] as const
 
 export const AlertTriggerSchema = /* @__PURE__ */ z.enum(ALERT_TRIGGERS)
 export type AlertTrigger = z.infer<typeof AlertTriggerSchema>
@@ -134,7 +132,6 @@ export const ALERT_PARAMS_SCHEMAS = {
 
 // ---------- channels ----------
 
-export const ALERT_DESTINATIONS = ['slack', 'webhook', 'email', 'github'] as const
 export const AlertDestinationSchema = /* @__PURE__ */ z.enum(ALERT_DESTINATIONS)
 export type AlertDestination = z.infer<typeof AlertDestinationSchema>
 
@@ -185,17 +182,6 @@ export const AlertChannelSchema = /* @__PURE__ */ z.strictObject({
 
 // ---------- policy base ----------
 
-/**
- * Per-policy cooldown bounds. Lower bound prevents alert storms; upper bound
- * keeps cooldowns from outliving an operator's mental model (24h max).
- */
-export const ALERT_COOLDOWN_SECONDS_MIN = 60
-export const ALERT_COOLDOWN_SECONDS_MAX = 86_400
-export const ALERT_COOLDOWN_SECONDS_DEFAULT = 900
-
-export const ALERT_POLICY_NAME_MAX = 120
-export const ALERT_POLICY_CHANNELS_MIN = 1
-export const ALERT_POLICY_CHANNELS_MAX = 5
 
 export const AlertPolicyConfigSchema = /* @__PURE__ */ z.strictObject({
     name: boundedString(1, ALERT_POLICY_NAME_MAX),

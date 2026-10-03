@@ -1,3 +1,5 @@
+import { BriefFacts } from '../BriefFacts'
+import { ExperienceReview } from './ExperienceReview'
 import { AlertTriangle, CheckCircle2, Sparkles, Workflow } from 'lucide-react'
 import { formatAiModeLabel } from '../../constants'
 import { useT } from '../../i18n'
@@ -37,6 +39,10 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
     catalogLoading,
     catalogError,
     proposal,
+    experienceAvailable,
+    experienceName,
+    experienceNameValid,
+    replaceExperienceName,
     buildProposal,
     briefCompileMs,
     proposalBuildMs,
@@ -84,7 +90,8 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
     ? null
     : briefCompileMs + proposalBuildMs
   const zeroCallLocalProposal = Boolean(
-    proposal?.mode === 'fallback' && !proposal.aiError && !proposal.providerGuarded,
+    proposal?.mode === 'fallback' && !proposal.aiError && !proposal.providerGuarded
+      && (!proposal.experienceDecision || proposal.experienceDecision.mode === 'GENERATE'),
   )
   return (
     <>
@@ -146,12 +153,7 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
 
         {briefCompilation && (
           <div className="ai-brief-summary" data-testid="intent-brief">
-            <dl>
-              <div><dt>{t('aiStudio.brief.objective')}</dt><dd>{briefCompilation.brief.objective}</dd></div>
-              <div><dt>{t('aiStudio.brief.trigger')}</dt><dd>{briefCompilation.brief.trigger}</dd></div>
-              <div><dt>{t('aiStudio.brief.outcome')}</dt><dd>{briefCompilation.brief.expectedOutcome}</dd></div>
-              <div><dt>{t('aiStudio.brief.failurePolicy')}</dt><dd>{briefCompilation.brief.failurePolicy}</dd></div>
-            </dl>
+            <BriefFacts brief={briefCompilation.brief} />
             {briefCompilation.clarifyingQuestions.length > 0 && (
               <StatusSummary
                 tone="info"
@@ -189,12 +191,7 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
               />
             )}
             <FormDisclosure summary={t('aiStudio.brief.details')}>
-              <dl>
-                <div><dt>{t('aiStudio.brief.inputs')}</dt><dd>{briefCompilation.brief.inputs.join(', ') || t('common.none')}</dd></div>
-                <div><dt>{t('aiStudio.brief.effects')}</dt><dd>{briefCompilation.brief.externalEffects.join(', ') || t('common.none')}</dd></div>
-                <div><dt>{t('aiStudio.brief.approvals')}</dt><dd>{briefCompilation.brief.approvals.join(', ') || t('common.none')}</dd></div>
-                <div><dt>{t('aiStudio.brief.examples')}</dt><dd>{briefCompilation.brief.examples.join(', ') || t('common.none')}</dd></div>
-              </dl>
+              <BriefFacts brief={briefCompilation.brief} details />
             </FormDisclosure>
           </div>
         )}
@@ -294,19 +291,23 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
           </div>
           {proposal && (
             <span className={'mode-pill mode-pill-' + proposal.mode}>
-              {formatAiModeLabel(proposal.mode)}
+              {proposal.experienceDecision ? t(`aiStudio.experience.mode.${proposal.experienceDecision.mode}`) : formatAiModeLabel(proposal.mode)}
             </span>
           )}
         </div>
 
         <p className="helper-text">{t('aiStudio.proposal.body')}</p>
+        {experienceAvailable && <FormField label={t('aiStudio.experience.name')} hint={t('aiStudio.experience.nameHint')}>
+          {props => <TextInput {...props} value={experienceName} maxLength={200} disabled={authoringLoading === 'apply'}
+            onChange={event => replaceExperienceName(event.target.value)} />}
+        </FormField>}
         <FormActions>
           <Button
             variant="primary"
             leadingIcon={<Workflow size={16} />}
             loading={authoringLoading === 'propose'}
             loadingLabel={t('aiStudio.proposal.building')}
-            disabled={!briefCompilation?.complete || !catalog || authoringLoading !== null}
+            disabled={!briefCompilation?.complete || !catalog || !experienceNameValid || authoringLoading !== null}
             onClick={() => { void buildProposal() }}
             trailingIcon={<CostEstimateChip action="proposal" model={health?.model} />}
           >
@@ -316,6 +317,7 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
 
         {proposal && (
           <div className="ai-proposal" data-testid="workflow-proposal">
+            {proposal.experienceDecision && <ExperienceReview decision={proposal.experienceDecision} />}
             {proposal.providerGuarded ? (
               <div data-testid="provider-output-guarded">
                 <StatusSummary
@@ -325,7 +327,7 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
                   description={t('aiStudio.proposal.guardedBody')}
                 />
               </div>
-            ) : proposal.mode === 'fallback' && (
+            ) : proposal.mode === 'fallback' && (!proposal.experienceDecision || proposal.experienceDecision.mode === 'GENERATE') && (
               <StatusSummary
                 role="status"
                 tone="info"
@@ -352,6 +354,7 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
               </div>
             )}
             <dl className="ai-proposal-facts">
+              <div><dt>{t('sidebar.field.name')}</dt><dd>{proposal.proposal.workflow.name}</dd></div>
               <div><dt>{t('aiStudio.proposal.readiness')}</dt><dd>{proposal.proposal.readiness.status}</dd></div>
               <div><dt>{t('aiStudio.proposal.nodes')}</dt><dd>{proposal.proposal.workflow.nodes.length}</dd></div>
               <div><dt>{t('aiStudio.proposal.edges')}</dt><dd>{proposal.proposal.workflow.edges.length}</dd></div>

@@ -12,7 +12,7 @@
  * Used by `RightPanel.tsx` (Inspector tab → version history).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
 import { readWorkflowVersionPage, type WorkflowVersionRow } from '../lib/list-contract'
@@ -25,9 +25,12 @@ import { useConfirm } from './ConfirmDialog'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
+import { AUTHORING_PERMISSIONS, ownCanvas } from '../lib/canvas-authority'
 import './VersionHistoryPanel.css'
-import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { PLATFORM_TAG, useResourceRefresh } from '../lib/query-cache'
 import { Button } from './ui/Button'
+
+const AuthoringExperienceRegistry = lazy(() => import('./AuthoringExperienceRegistry'))
 
 const VERSION_HISTORY_TAGS = [PLATFORM_TAG, 'workflows', 'versions', 'rollouts'] as const
 
@@ -87,8 +90,8 @@ export function VersionHistoryPanel() {
 }
 
 function historyScope(state: ReturnType<typeof useWorkflowStore.getState>): string {
-  return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.currentWorkflowSaved,
-    sessionCan(state.identityContext, 'workflows.write'), sessionCan(state.identityContext, 'ai.write')])
+  return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.currentWorkflowSaved, state.activeTab,
+    ...AUTHORING_PERMISSIONS.map(permission => sessionCan(state.identityContext, permission))])
 }
 
 function ScopedVersionHistory({ scope }: { scope: string }) {
@@ -96,7 +99,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
   const confirm = useConfirm()
   // The keyed wrapper subscribes to every contextual value used here.
   const { currentWorkflowId, currentWorkflowSaved, identityContext, hydrateWorkflow, addToast } = useWorkflowStore.getState()
-  const platformVersion = useInvalidationNonce(VERSION_HISTORY_TAGS)
+  const [refreshNonce, refresh] = useResourceRefresh(VERSION_HISTORY_TAGS)
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [hasMoreVersions, setHasMoreVersions] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -106,14 +109,14 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
   const [rollbackPair, setRollbackPair] = useState<{ current: VersionRow; target: VersionRow } | null>(null)
   const [improvement, setImprovement] = useState<ImprovementState>({ kind: 'idle' })
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [retry, setRetry] = useState(0)
   const owner = useRef<AbortController | null>(null)
   const suggestion = useRef<AbortController | null>(null)
   const current = useCallback((request: AbortController | null): request is AbortController =>
     request !== null && !request.signal.aborted && historyScope(useWorkflowStore.getState()) === scope, [scope])
 
   useEffect(() => {
-    const request = new AbortController()
+    // Expire at the first change, including a batched return before React paints.
+    const request = ownCanvas(refresh, historyScope)
     owner.current = request
     setVersions([])
     setHasMoreVersions(false)
@@ -145,19 +148,18 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
       request.abort()
       suggestion.current?.abort()
     }
-  }, [addToast, current, currentWorkflowId, currentWorkflowSaved, platformVersion, retry, t])
+  }, [addToast, current, currentWorkflowId, currentWorkflowSaved, refresh, refreshNonce, t])
 
   const canRollback = sessionCan(identityContext, 'workflows.write')
   const canSuggest = sessionCan(identityContext, 'ai.write')
 
   // Resolve the two selected rows; sort by version asc so the older one
   // is always on the left regardless of click order.
-  const [left, right] = selectedIds.map(id => versions.find(version => version.id === id))
-  const comparePair = left && right
-    ? (left.version < right.version ? [left, right] as const : [right, left] as const)
-    : null
+  const selectedVersions = versions.filter(version => selectedIds.includes(version.id))
+    .sort((left, right) => left.version - right.version)
+  const comparePair = selectedVersions.length === 2 ? selectedVersions as [VersionRow, VersionRow] : null
 
-  const onRowClick = (version: VersionRow) => {
+  const onRowClick = async (version: VersionRow) => {
     if (compareMode) {
       toggleSelected(version.id)
       return
@@ -165,22 +167,20 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     const request = owner.current
     const revision = useWorkflowStore.getState().workflowRevision
     if (!current(request)) return
-    void (async () => {
-      // Loading an old version replaces the canvas — same unsaved-work guard
-      // as the App-level hydrate paths.
-      if (useWorkflowStore.getState().workflowDirty) {
-        const proceed = await confirm({
-          title: t('unsavedGuard.title'),
-          body: t('unsavedGuard.body'),
-          confirmLabel: t('unsavedGuard.discard'),
-          tone: 'danger',
-        })
-        if (!proceed) return
-      }
-      if (!current(request) || useWorkflowStore.getState().workflowRevision !== revision) return
-      hydrateWorkflow({ ...version.dagJson, id: currentWorkflowId }, { version: { id: version.id, version: version.version } })
-      addToast(t('versionHistory.loaded', { version: version.version }), 'success')
-    })()
+    // Loading an old version replaces the canvas — same unsaved-work guard
+    // as the App-level hydrate paths.
+    if (useWorkflowStore.getState().workflowDirty) {
+      const proceed = await confirm({
+        title: t('unsavedGuard.title'),
+        body: t('unsavedGuard.body'),
+        confirmLabel: t('unsavedGuard.discard'),
+        tone: 'danger',
+      })
+      if (!proceed) return
+    }
+    if (!current(request) || useWorkflowStore.getState().workflowRevision !== revision) return
+    hydrateWorkflow({ ...version.dagJson, id: currentWorkflowId }, { version: { id: version.id, version: version.version } })
+    addToast(t('versionHistory.loaded', { version: version.version }), 'success')
   }
 
   const toggleSelected = (id: string) => {
@@ -210,10 +210,10 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     }
   }
 
-  const onResetImprovement = () => {
+  const onResetImprovement = useCallback(() => {
     suggestion.current?.abort()
     setImprovement({ kind: 'idle' })
-  }
+  }, [])
 
   const onToggleCompare = () => {
     onResetImprovement()
@@ -221,10 +221,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     setCompareMode(!compareMode)
   }
 
-  useEffect(() => {
-    suggestion.current?.abort()
-    setImprovement({ kind: 'idle' })
-  }, [selectedIds])
+  useEffect(onResetImprovement, [onResetImprovement, selectedIds])
 
   const onSuggestImprovement = async () => {
     const history = owner.current
@@ -272,6 +269,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     canSuggest &&
     improvement.kind !== 'ai' &&
     improvement.kind !== 'fallback'
+  const activeSuggestion = improvement.kind === 'ai' ? improvement.suggestions[improvement.activeIdx] : undefined
 
   return (
     <div className="we-card">
@@ -294,7 +292,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
 
       {loadState === 'loading' && <p role="status">{t('common.loading')}</p>}
       {loadState === 'error' && <div role="alert"><p>{t('versionHistory.loadFailed')}</p>
-        <Button onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</Button></div>}
+        <Button onClick={refresh}>{t('common.retry')}</Button></div>}
       {loadState === 'ready' && versions.length === 0 && (
         <EmptyState
           icon={<History />}
@@ -357,6 +355,10 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
         </Button>
       )}
 
+      {loadState === 'ready' && versions.length > 0 && canRollback && canSuggest && (
+        <Suspense fallback={null}><AuthoringExperienceRegistry versions={versions} /></Suspense>
+      )}
+
       {compareMode && comparePair && (
         <WorkflowDiffView
           before={comparePair[0].dagJson}
@@ -388,46 +390,43 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
         </div>
       )}
 
-      {improvement.kind === 'ai' && comparePair && improvement.suggestions[improvement.activeIdx] && (() => {
-        const active = improvement.suggestions[improvement.activeIdx]!
-        return (
-          <div className="we-suggest-result" aria-label={t('versionHistory.aiSuggestionsAria')}>
-            <div className="we-suggest-header">
-              <span className="section-kicker">
-                <Sparkles size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
-                {t('versionHistory.aiHeader', { baseLabel: `v${improvement.base.version}` })}
-              </span>
-              <Button size="icon" variant="ghost"
-                onClick={onResetImprovement}
-                aria-label={t('versionHistory.dismissAi')}
-                title={t('versionHistory.dismissShort')}
-              >
-                <X size={12} aria-hidden="true" />
-              </Button>
-            </div>
-            {improvement.suggestions.length > 1 && (
-              <div className="we-suggest-chips" role="group" aria-label={t('versionHistory.anglesAria')}>
-                {improvement.suggestions.map((suggestion, idx) => (
-                  <Button size="sm"
-                    key={`${suggestion.approachLabel}:${idx}`}
-                    aria-pressed={idx === improvement.activeIdx}
-                    onClick={() => setImprovement({ ...improvement, activeIdx: idx })}
-                  >
-                    {approachLabelText(suggestion.approachLabel)} · {improvementConfidencePercent(suggestion.confidence)}%
-                  </Button>
-                ))}
-              </div>
-            )}
-            <WorkflowDiffView
-              before={improvement.base.dagJson}
-              after={active.workflow}
-              beforeLabel={`v${improvement.base.version}`}
-              afterLabel={t('versionHistory.suggested', { approach: approachLabelText(active.approachLabel) })}
-              aiPatchRationale={active.rationale}
-            />
+      {improvement.kind === 'ai' && comparePair && activeSuggestion && (
+        <div className="we-suggest-result" aria-label={t('versionHistory.aiSuggestionsAria')}>
+          <div className="we-suggest-header">
+            <span className="section-kicker">
+              <Sparkles size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
+              {t('versionHistory.aiHeader', { baseLabel: `v${improvement.base.version}` })}
+            </span>
+            <Button size="icon" variant="ghost"
+              onClick={onResetImprovement}
+              aria-label={t('versionHistory.dismissAi')}
+              title={t('versionHistory.dismissShort')}
+            >
+              <X size={12} aria-hidden="true" />
+            </Button>
           </div>
-        )
-      })()}
+          {improvement.suggestions.length > 1 && (
+            <div className="we-suggest-chips" role="group" aria-label={t('versionHistory.anglesAria')}>
+              {improvement.suggestions.map((suggestion, idx) => (
+                <Button size="sm"
+                  key={`${suggestion.approachLabel}:${idx}`}
+                  aria-pressed={idx === improvement.activeIdx}
+                  onClick={() => setImprovement({ ...improvement, activeIdx: idx })}
+                >
+                  {approachLabelText(suggestion.approachLabel)} · {improvementConfidencePercent(suggestion.confidence)}%
+                </Button>
+              ))}
+            </div>
+        )}
+        <WorkflowDiffView
+          before={improvement.base.dagJson}
+          after={activeSuggestion.workflow}
+          beforeLabel={`v${improvement.base.version}`}
+          afterLabel={t('versionHistory.suggested', { approach: approachLabelText(activeSuggestion.approachLabel) })}
+          aiPatchRationale={activeSuggestion.rationale}
+        />
+      </div>
+      )}
 
       {improvement.kind === 'fallback' && (
         <div className="we-suggest-fallback" role="status" aria-live="polite">
