@@ -112,7 +112,22 @@ for (const locale of ['en', 'es'] as const) {
     const name = `Saved source ${locale} ${stamp}`
     const { older, source } = await seed(request, org, workflowId, name)
     const observed = monitor(page)
+    const disabledListResponse = profile === 'disabled'
+      ? page.waitForResponse(response => response.request().method() === 'GET'
+        && response.url() === `${API_URL}/v1/authoring/experiences?workflowId=${workflowId}`)
+      : undefined
     await open(page, org, locale, workflowId)
+    if (disabledListResponse) {
+      // The history rows can appear before the lazy registry read finishes.
+      // Complete the denied read before leaving history can abort its fetch.
+      const denied = await disabledListResponse
+      expect(denied.status()).toBe(403)
+      expect(await denied.finished()).toBeNull()
+      await expect.poll(() => observed.errors).toEqual([{
+        text: 'Failed to load resource: the server responded with a status of 403 (Forbidden)',
+        url: `${API_URL}/v1/authoring/experiences?workflowId=${workflowId}`,
+      }])
+    }
     if (profile !== 'disabled') {
       await registerExample(page, request, org, locale, workflowId, older.versionId)
       const unconsented = await request.get(`${API_URL}/v1/authoring/experiences?workflowId=${workflowId}`, { headers: headers(`peer-${org}`) })
