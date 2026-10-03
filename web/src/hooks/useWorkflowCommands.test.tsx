@@ -402,3 +402,74 @@ describe('useWorkflowCommands save authority', () => {
     })
   })
 })
+
+describe('useWorkflowCommands experience Apply revalidation', () => {
+  function reviewedExperience(): WorkflowProposalResponse {
+    return {
+      ...validProposal(),
+      experienceDecision: {
+        provider: 'rules', mode: 'REUSE', reason: 'exact_match',
+        policyVersion: 'authoring-experience-v1', contextRevision: 'context-v1',
+        catalogVersion: authoringCatalog.version, truncated: false, outcomeEvidence: 'unknown',
+        draftId: 'proposal-workflow',
+        source: { candidateId: 'experience', workflowId: 'saved-source', versionId: 'version-1', version: 1 },
+      },
+    }
+  }
+
+  it('revalidates the exact receipt before copying the reviewed draft', async () => {
+    const proposal = reviewedExperience()
+    vi.mocked(contractApi).mockImplementation(async (operation) => (
+      operation === 'POST /ai/workflow-proposals' ? structuredClone(proposal) : authoringCatalog
+    ) as never)
+    const { result } = renderHook(() => useWorkflowCommands(options()))
+    await act(async () => {
+      expect(await result.current.applyWorkflowProposal(proposal)).toEqual({ status: 'applied' })
+    })
+    expect(contractApi).toHaveBeenCalledWith(
+      'POST /ai/workflow-proposals', '/ai/workflow-proposals',
+      expect.objectContaining({ brief: proposal.brief, experienceReceipt: proposal.experienceDecision, experienceEdits: [] }),
+      expect.anything(),
+    )
+    expect(useWorkflowStore.getState().currentWorkflowId).toBe('proposal-workflow')
+  })
+
+  it.each(['changed source', 'changed graph', 'no longer applicable', 'failed revalidation'])('does not apply after %s', async (change) => {
+    const proposal = reviewedExperience()
+    vi.mocked(contractApi).mockImplementation(async (operation) => {
+      if (operation !== 'POST /ai/workflow-proposals') return authoringCatalog as never
+      if (change === 'failed revalidation') throw new Error('revoked')
+      const fresh = structuredClone(proposal)
+      if (change === 'changed source' && fresh.experienceDecision?.mode === 'REUSE') fresh.experienceDecision.source.versionId = 'different-version'
+      if (change === 'changed graph') fresh.proposal.workflow.name = 'Unexpected replacement'
+      if (change === 'no longer applicable') fresh.proposal.applicable = false
+      return fresh as never
+    })
+    const { result } = renderHook(() => useWorkflowCommands(options()))
+    await act(async () => {
+      expect(await result.current.applyWorkflowProposal(proposal)).toEqual({ status: 'blocked' })
+    })
+    expect(useWorkflowStore.getState().currentWorkflowId).toBe('current-workflow')
+  })
+
+  it('does not replace a canvas edited while source revalidation is pending', async () => {
+    let resolve!: (value: never) => void
+    const pending = new Promise<never>((done) => { resolve = done })
+    vi.mocked(contractApi).mockImplementation(async (operation) => (
+      operation === 'POST /ai/workflow-proposals' ? pending : authoringCatalog as never
+    ))
+    const { result } = renderHook(() => useWorkflowCommands(options()))
+    const proposal = reviewedExperience()
+    let apply!: ReturnType<typeof result.current.applyWorkflowProposal>
+    act(() => { apply = result.current.applyWorkflowProposal(proposal) })
+    await waitFor(() => expect(contractApi).toHaveBeenCalledWith(
+      'POST /ai/workflow-proposals', expect.anything(), expect.anything(), expect.anything(),
+    ))
+    act(() => {
+      useWorkflowStore.getState().setWorkflowName('Edited during source revalidation')
+      resolve(structuredClone(proposal) as never)
+    })
+    await act(async () => { expect(await apply).toEqual({ status: 'canvas_changed' }) })
+    expect(useWorkflowStore.getState().currentWorkflowName).toBe('Edited during source revalidation')
+  })
+})

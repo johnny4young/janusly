@@ -52,4 +52,15 @@ for value in 2 128 256000 9223372036854775807 invalid; do
 done
 JANUSLY_PERSIST_MAX_BYTES='' render |
   jq -e '.services.janusly.environment.JANUSLY_PERSIST_MAX_BYTES == "256000"' >/dev/null
+for value in false true invalid; do
+  JANUSLY_AUTHORING_EXPERIENCE_ENABLED="$value" render |
+    jq -e --arg value "$value" '.services.janusly.environment.JANUSLY_AUTHORING_EXPERIENCE_ENABLED == $value' >/dev/null
+done
+for value in off shadow review invalid; do
+  JANUSLY_AUTHORING_EXPERIENCE_MODE="$value" render |
+    jq -e --arg value "$value" '.services.janusly.environment.JANUSLY_AUTHORING_EXPERIENCE_MODE == $value' >/dev/null
+done
+JANUSLY_AUTHORING_EXPERIENCE_ENABLED='' JANUSLY_AUTHORING_EXPERIENCE_MODE='' render |
+  jq -e '.services.janusly.environment |
+    .JANUSLY_AUTHORING_EXPERIENCE_ENABLED == "false" and .JANUSLY_AUTHORING_EXPERIENCE_MODE == "off"' >/dev/null
 printf 'Process configuration forwarding passed\n'

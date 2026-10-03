@@ -360,6 +360,7 @@ export type WorkflowProposalReadiness = {
 }
 
 export type WorkflowProposalResponse = {
+  experienceDecision?: import('./lib/api-types.generated').ApiResponse<'POST /ai/workflow-proposals'>['experienceDecision']
   mode: AiMode
   aiError?: string
   providerGuarded?: boolean

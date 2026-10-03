@@ -3,6 +3,7 @@
 
 import type * as Api from "../../api-types.generated"
 import { arrayOf, isAny, isBoolean, isInteger, isShape, isString, literal, recordOf, shape } from "../../guards"
+import { isAuthoringExperienceDecision } from "./AuthoringExperienceDecision"
 import { isReadinessResult } from "./ReadinessResult"
 import { isWorkflowBindingReport } from "./WorkflowBindingReport"
 import { isWorkflowDoc } from "./WorkflowDoc"
@@ -41,6 +42,7 @@ export function isWorkflowProposalResponse(value: unknown): value is Api.Workflo
       from: isInteger,
       to: isInteger,
     }),
+    experienceDecision: isAuthoringExperienceDecision,
     providerGuarded: isBoolean,
   })
 }

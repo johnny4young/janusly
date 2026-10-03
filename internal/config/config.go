@@ -35,6 +35,7 @@ type Config struct {
 	Production bool
 	// AuthoringExperienceEnabled opens only the optional registry process gate.
 	AuthoringExperienceEnabled bool
+	AuthoringExperienceMode    AuthoringExperienceMode
 	// DatabaseURL points at the PostgreSQL database owned by Janusly.
 	DatabaseURL string
 	// Port serves the public API.
@@ -118,6 +119,10 @@ func Load(getenv func(string) string) (Config, error) {
 			experienceEnabled = raw == "true"
 		}
 	}
+	experienceMode, modeErr := ResolveAuthoringExperienceMode(getenv("JANUSLY_AUTHORING_EXPERIENCE_MODE"))
+	if modeErr != nil {
+		problems = append(problems, modeErr.Error())
+	}
 	production := IsProduction(getenv)
 	reaperDefaults := DefaultReaper()
 
@@ -132,6 +137,7 @@ func Load(getenv func(string) string) (Config, error) {
 		},
 		Production:                  production,
 		AuthoringExperienceEnabled:  experienceEnabled,
+		AuthoringExperienceMode:     experienceMode,
 		DatabaseURL:                 str("JANUSLY_DATABASE_URL", defaultDatabaseURL),
 		Port:                        num("JANUSLY_PORT", 3001, 1, 65535),
 		InternalPort:                num("JANUSLY_INTERNAL_PORT", 9464, 1, 65535),

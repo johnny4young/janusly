@@ -23,6 +23,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/boot"
 	"github.com/johnny4young/janusly/internal/buildinfo"
 	"github.com/johnny4young/janusly/internal/config"
@@ -293,6 +294,8 @@ func run() error {
 
 	publicAPI, shutdownPublicAPI, err := httpapi.NewV1HandlerWithOptions(eng, pool, httpapi.V1ServerOptions{
 		AuthoringExperienceEnabled:  cfg.AuthoringExperienceEnabled,
+		AuthoringExperienceMode:     cfg.AuthoringExperienceMode,
+		ExperienceReader:            &authoring.ExperienceRegistry{Pool: pool, Enabled: cfg.AuthoringExperienceEnabled},
 		Audit:                       auditWriter,
 		FeedbackMemoryWorkers:       cfg.FeedbackMemoryWorkers,
 		FeedbackMemoryQueueCapacity: cfg.FeedbackMemoryQueueCapacity,
