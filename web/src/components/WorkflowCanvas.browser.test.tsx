@@ -305,8 +305,12 @@ describe('WorkflowCanvas (browser mode)', () => {
     expect(getComputedStyle(node).animationName).toContain('we-running-node-pulse')
     expect(getComputedStyle(container.querySelector('.workflow-handle') as HTMLElement).display).toBe('none')
     expect(container.querySelector('.react-flow__controls-interactive')).toBeNull()
+    // Node labels mount before React Flow's ResizeObserver supplies the handle
+    // dimensions needed to render edges. Wait for that observable layout state.
+    await waitFor(() => {
+      expect(container.querySelector('.react-flow__edge[aria-label="Path from Running step to Waiting step"]')).toBeInTheDocument()
+    })
     const edgeWrapper = container.querySelector('.react-flow__edge[aria-label="Path from Running step to Waiting step"]') as HTMLElement
-    expect(edgeWrapper).toBeTruthy()
     expect(nodeWrapper).toHaveAttribute('aria-label', 'Step: Running step. Status: Running. Read only')
     expect(document.getElementById(edgeWrapper.getAttribute('aria-describedby') ?? '')).toHaveTextContent('Read only')
     expect(container.querySelector('[aria-label="Zoom in"]')).toBeTruthy()
