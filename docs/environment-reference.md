@@ -68,6 +68,7 @@ key to the host `.env` does not automatically forward it into a container.
 | `JANUSLY_AGENT_WRITES_ENABLED` | Process | exact `true`; default false; also needs tenant consent, workflow opt-in and dominating approval | `engine/dispatch.go` |
 | `JANUSLY_MCP_WRITES_ENABLED` | Process | exact `true`; default false; also needs tenant consent and explicit permission | `mcpserver/guard.go` |
 | `JANUSLY_MCP_CLIENT_WRITES_ENABLED` | Process | exact `true`; default false; also needs tenant client-write consent | `mcpclient/mcpclient.go` |
+| `JANUSLY_AUTHORING_EXPERIENCE_ENABLED` | Process | strict true/false; default false; registry also requires tenant opt-in and workflow_vector memory consent | `config/config.go`, `authoring/experience_registry.go` |
 | `JANUSLY_MEMORY_ENABLED` | Process | exact `true`; default false; also needs tenant memory consent | `memory/memory.go` |
 | `JANUSLY_AUTO_HEALING_ENABLED` | Process | exact `true`; default false; also needs tenant auto-healing consent; proposals remain operator-applied | `engine/autohealing.go` |
 | `JANUSLY_CIRCUIT_BREAKER_ENABLED` | Process | enabled unless exact `false`; workflow opt-out and workflow/tenant thresholds remain independent | `recovery/circuitbreaker.go` |

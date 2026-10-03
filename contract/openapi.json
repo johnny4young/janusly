@@ -189,6 +189,117 @@
         ],
         "type": "object"
       },
+      "AuthoringExperienceList": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/AuthoringExperienceRecord"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "AuthoringExperienceRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "outcomeEvidence": {
+            "const": "unknown",
+            "type": "string"
+          },
+          "policyVersion": {
+            "const": "authoring-experience-v1",
+            "type": "string"
+          },
+          "registeredAt": {
+            "type": "string"
+          },
+          "retainUntil": {
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "versionId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "workflowId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workflowId",
+          "versionId",
+          "version",
+          "policyVersion",
+          "registeredAt",
+          "retainUntil",
+          "outcomeEvidence"
+        ],
+        "type": "object"
+      },
+      "AuthoringExperienceRegistration": {
+        "additionalProperties": false,
+        "properties": {
+          "brief": {
+            "$ref": "#/components/schemas/WorkflowIntentBrief"
+          },
+          "versionId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "workflowId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflowId",
+          "versionId",
+          "brief"
+        ],
+        "type": "object"
+      },
+      "AuthoringExperienceRevocation": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "revoked"
+        ],
+        "type": "object"
+      },
       "AuthoringMCPInputField": {
         "additionalProperties": false,
         "properties": {
@@ -5722,6 +5833,157 @@
           }
         },
         "summary": "Exact tenant-safe capability catalog for workflow authoring"
+      }
+    },
+    "/authoring/experiences": {
+      "get": {
+        "operationId": "get_v1_authoring_experiences",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/AuthoringExperienceList"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Bounded registered experience provenance for a saved workflow"
+      }
+    },
+    "/authoring/experiences/register": {
+      "post": {
+        "operationId": "post_v1_authoring_experiences_register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthoringExperienceRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/AuthoringExperienceRecord"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Explicitly register an immutable authoring experience"
+      }
+    },
+    "/authoring/experiences/revoke": {
+      "post": {
+        "operationId": "post_v1_authoring_experiences_revoke",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/AuthoringExperienceRevocation"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Withdraw a same-tenant authoring experience registration"
       }
     },
     "/dlq": {

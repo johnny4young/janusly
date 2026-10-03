@@ -77,6 +77,40 @@ $$;
 
 
 --
+-- Name: revoke_authoring_experience_consent(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.revoke_authoring_experience_consent() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $_$
+DECLARE
+    target_org text;
+    consent_key text;
+    consent_value jsonb;
+BEGIN
+    IF TG_OP = 'DELETE' OR (TG_OP = 'UPDATE' AND (OLD.org_id <> NEW.org_id OR OLD.key <> NEW.key)) THEN
+        IF OLD.key IN ('memory.enabled', 'memory.allowedKinds', 'ai.authoringExperienceEnabled') THEN
+            UPDATE public.authoring_experiences SET revoked_at = clock_timestamp()
+            WHERE org_id = OLD.org_id AND revoked_at IS NULL;
+        END IF;
+    END IF;
+    IF TG_OP <> 'DELETE' THEN
+        target_org := NEW.org_id;
+        consent_key := NEW.key;
+        consent_value := NEW.value_json;
+        IF (consent_key IN ('memory.enabled', 'ai.authoringExperienceEnabled') AND consent_value IS DISTINCT FROM 'true'::jsonb)
+            OR (consent_key = 'memory.allowedKinds' AND
+                (jsonb_typeof(consent_value) <> 'string' OR NOT (consent_value #>> '{}') ~ '(^|,)[[:space:]]*workflow_vector[[:space:]]*(,|$)')) THEN
+            UPDATE public.authoring_experiences SET revoked_at = clock_timestamp()
+            WHERE org_id = target_org AND revoked_at IS NULL;
+        END IF;
+    END IF;
+    RETURN NULL;
+END;
+$_$;
+
+
+--
 -- Name: stamp_run_row_org(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -161,6 +195,36 @@ CREATE TABLE public.auth_sessions (
     revoked_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now()
+);
+
+
+--
+-- Name: authoring_experiences; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.authoring_experiences (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    workflow_id text NOT NULL,
+    workflow_version_id text NOT NULL,
+    brief_key text NOT NULL,
+    brief_json jsonb NOT NULL,
+    schema_version text DEFAULT '1'::text NOT NULL,
+    policy_version text NOT NULL,
+    registered_at timestamp with time zone DEFAULT now() NOT NULL,
+    retain_until timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    created_by text NOT NULL,
+    CONSTRAINT authoring_experiences_brief_json_check CHECK (((jsonb_typeof(brief_json) = 'object'::text) AND (octet_length((brief_json)::text) <= 8192))),
+    CONSTRAINT authoring_experiences_brief_key_check CHECK ((brief_key ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT authoring_experiences_check CHECK (((retain_until > registered_at) AND (retain_until <= (registered_at + '730 days'::interval)))),
+    CONSTRAINT authoring_experiences_created_by_check CHECK (((length(created_by) >= 1) AND (length(created_by) <= 128))),
+    CONSTRAINT authoring_experiences_id_check CHECK (((length(id) >= 1) AND (length(id) <= 128))),
+    CONSTRAINT authoring_experiences_org_id_check CHECK (((length(org_id) >= 1) AND (length(org_id) <= 128))),
+    CONSTRAINT authoring_experiences_policy_version_check CHECK ((policy_version = 'authoring-experience-v1'::text)),
+    CONSTRAINT authoring_experiences_schema_version_check CHECK ((schema_version = '1'::text)),
+    CONSTRAINT authoring_experiences_workflow_id_check CHECK (((length(workflow_id) >= 1) AND (length(workflow_id) <= 128))),
+    CONSTRAINT authoring_experiences_workflow_version_id_check CHECK (((length(workflow_version_id) >= 1) AND (length(workflow_version_id) <= 128)))
 );
 
 
@@ -1681,6 +1745,14 @@ ALTER TABLE ONLY public.auth_sessions
 
 
 --
+-- Name: authoring_experiences authoring_experiences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.authoring_experiences
+    ADD CONSTRAINT authoring_experiences_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: auto_healing_runs auto_healing_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2289,11 +2361,27 @@ ALTER TABLE ONLY public.workflow_status_pages
 
 
 --
+-- Name: workflow_versions workflow_versions_org_source_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workflow_versions
+    ADD CONSTRAINT workflow_versions_org_source_unique UNIQUE (org_id, workflow_id, id);
+
+
+--
 -- Name: workflow_versions workflow_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.workflow_versions
     ADD CONSTRAINT workflow_versions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: workflows workflows_org_identity_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workflows
+    ADD CONSTRAINT workflows_org_identity_unique UNIQUE (org_id, id);
 
 
 --
@@ -2358,6 +2446,41 @@ CREATE INDEX audit_logs_org_target_created_id_idx ON public.audit_logs USING btr
 --
 
 CREATE INDEX auth_sessions_user_expiry_idx ON public.auth_sessions USING btree (user_id, expires_at);
+
+
+--
+-- Name: authoring_experiences_active_source_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX authoring_experiences_active_source_idx ON public.authoring_experiences USING btree (org_id, workflow_id, workflow_version_id, brief_key, policy_version) WHERE (revoked_at IS NULL);
+
+
+--
+-- Name: authoring_experiences_expiry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX authoring_experiences_expiry_idx ON public.authoring_experiences USING btree (retain_until, id);
+
+
+--
+-- Name: authoring_experiences_list_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX authoring_experiences_list_idx ON public.authoring_experiences USING btree (org_id, workflow_id, registered_at DESC, id DESC) WHERE (revoked_at IS NULL);
+
+
+--
+-- Name: authoring_experiences_match_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX authoring_experiences_match_idx ON public.authoring_experiences USING btree (org_id, brief_key, registered_at DESC, id DESC) WHERE (revoked_at IS NULL);
+
+
+--
+-- Name: authoring_experiences_revocation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX authoring_experiences_revocation_idx ON public.authoring_experiences USING btree (revoked_at, id) WHERE (revoked_at IS NOT NULL);
 
 
 --
@@ -3502,6 +3625,13 @@ CREATE INDEX workflows_org_deleted_idx ON public.workflows USING btree (org_id, 
 
 
 --
+-- Name: org_configs authoring_experience_consent_revocation; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER authoring_experience_consent_revocation AFTER INSERT OR DELETE OR UPDATE ON public.org_configs FOR EACH ROW EXECUTE FUNCTION public.revoke_authoring_experience_consent();
+
+
+--
 -- Name: org_members protect_organization_owner_membership_delete; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3527,6 +3657,22 @@ CREATE TRIGGER run_events_stamp_org BEFORE INSERT ON public.run_events FOR EACH 
 --
 
 CREATE TRIGGER run_nodes_stamp_org BEFORE INSERT ON public.run_nodes FOR EACH ROW EXECUTE FUNCTION public.stamp_run_row_org();
+
+
+--
+-- Name: authoring_experiences authoring_experiences_version_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.authoring_experiences
+    ADD CONSTRAINT authoring_experiences_version_fk FOREIGN KEY (org_id, workflow_id, workflow_version_id) REFERENCES public.workflow_versions(org_id, workflow_id, id) ON DELETE CASCADE;
+
+
+--
+-- Name: authoring_experiences authoring_experiences_workflow_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.authoring_experiences
+    ADD CONSTRAINT authoring_experiences_workflow_fk FOREIGN KEY (org_id, workflow_id) REFERENCES public.workflows(org_id, id) ON DELETE CASCADE;
 
 
 --

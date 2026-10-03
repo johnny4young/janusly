@@ -33,6 +33,8 @@ type Config struct {
 	// Production enables the fail-closed boot posture for authentication,
 	// external integrations, and immutable build provenance.
 	Production bool
+	// AuthoringExperienceEnabled opens only the optional registry process gate.
+	AuthoringExperienceEnabled bool
 	// DatabaseURL points at the PostgreSQL database owned by Janusly.
 	DatabaseURL string
 	// Port serves the public API.
@@ -108,6 +110,14 @@ func Load(getenv func(string) string) (Config, error) {
 	millis := func(name string, def time.Duration) time.Duration {
 		return time.Duration(integer(name, int64(def/time.Millisecond), 1, maxReaperMilliseconds)) * time.Millisecond
 	}
+	experienceEnabled := false
+	if raw := strings.TrimSpace(getenv("JANUSLY_AUTHORING_EXPERIENCE_ENABLED")); raw != "" {
+		if raw != "true" && raw != "false" {
+			problems = append(problems, "JANUSLY_AUTHORING_EXPERIENCE_ENABLED must be true or false")
+		} else {
+			experienceEnabled = raw == "true"
+		}
+	}
 	production := IsProduction(getenv)
 	reaperDefaults := DefaultReaper()
 
@@ -121,6 +131,7 @@ func Load(getenv func(string) string) (Config, error) {
 			FloorOverridden: strings.TrimSpace(getenv("JANUSLY_REAPER_THRESHOLD_FLOOR_MS")) != "",
 		},
 		Production:                  production,
+		AuthoringExperienceEnabled:  experienceEnabled,
 		DatabaseURL:                 str("JANUSLY_DATABASE_URL", defaultDatabaseURL),
 		Port:                        num("JANUSLY_PORT", 3001, 1, 65535),
 		InternalPort:                num("JANUSLY_INTERNAL_PORT", 9464, 1, 65535),

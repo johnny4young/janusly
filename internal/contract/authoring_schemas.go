@@ -116,3 +116,21 @@ var operatorBrief = closedObj(map[string]any{
 	}, "id", "kind", "priority", "severity", "titleKey", "bodyKey", "ctaKey", "params", "evidence", "target", "allowedActions", "createdAt")),
 	"warnings": arr(str()),
 }, "version", "generatedAt", "actions", "warnings")
+
+var authoringExperienceID = map[string]any{"type": "string", "minLength": 1, "maxLength": 128}
+var authoringExperienceRecord = closedObj(map[string]any{
+	"id": authoringExperienceID, "workflowId": authoringExperienceID, "versionId": authoringExperienceID,
+	"version":       map[string]any{"type": "integer", "minimum": 1},
+	"policyVersion": map[string]any{"type": "string", "const": "authoring-experience-v1"},
+	"registeredAt":  str(), "retainUntil": str(),
+	"outcomeEvidence": map[string]any{"type": "string", "const": "unknown"},
+}, "id", "workflowId", "versionId", "version", "policyVersion", "registeredAt", "retainUntil", "outcomeEvidence")
+var authoringExperienceList = closedObj(map[string]any{
+	"entries": map[string]any{"type": "array", "items": authoringExperienceRecord, "maxItems": 5}, "truncated": boolT(),
+}, "entries", "truncated")
+var authoringExperienceRegistration = closedObj(map[string]any{
+	"workflowId": authoringExperienceID, "versionId": authoringExperienceID, "brief": workflowIntentBrief,
+}, "workflowId", "versionId", "brief")
+var authoringExperienceRevocation = closedObj(map[string]any{
+	"id": authoringExperienceID, "revoked": boolT(),
+}, "id", "revoked")

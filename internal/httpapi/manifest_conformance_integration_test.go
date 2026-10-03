@@ -402,6 +402,14 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 	rec.record("GET /v1/recovery/ledger", h.call("GET", "/v1/recovery/ledger", nil, ""), http.StatusOK)
 	rec.record("GET /v1/recovery/my-wins", h.call("GET", "/v1/recovery/my-wins", nil, ""), http.StatusOK)
 
+	// Exercise the explicit registry separately from legacy authoring defaults.
+	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
+	experienceHarness := authoringExperienceHarness(t)
+	experienceRequest := authoringExperienceSource(t, experienceHarness)
+	authoringExperienceGrant(t, experienceHarness)
+	registered := rec.record("POST /v1/authoring/experiences/register", experienceHarness.call("POST", "/v1/authoring/experiences/register", experienceRequest, ""), http.StatusOK)
+	rec.record("GET /v1/authoring/experiences", experienceHarness.call("GET", "/v1/authoring/experiences?workflowId="+experienceRequest["workflowId"].(string), nil, ""), http.StatusOK)
+	rec.record("POST /v1/authoring/experiences/revoke", experienceHarness.call("POST", "/v1/authoring/experiences/revoke", map[string]any{"id": registered["id"]}, ""), http.StatusOK)
 	rows := manifestConformanceRows()
 	for key, row := range rows {
 		if !row.integration {

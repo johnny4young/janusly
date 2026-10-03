@@ -181,3 +181,18 @@ func TestPoolSizesDefaultAndDerive(t *testing.T) {
 		t.Fatalf("derived worker pool must scale with concurrency: %d", derived.WorkerPoolSize)
 	}
 }
+
+func TestAuthoringExperienceProcessFlagIsStrictAndDefaultOff(t *testing.T) {
+	for _, value := range []string{"", " ", "false", "true", " true "} {
+		cfg, err := Load(env(map[string]string{"JANUSLY_AUTHORING_EXPERIENCE_ENABLED": value}))
+		if err != nil || cfg.AuthoringExperienceEnabled != (strings.TrimSpace(value) == "true") {
+			t.Fatalf("flag %q: %v %v", value, cfg.AuthoringExperienceEnabled, err)
+		}
+	}
+	for _, value := range []string{"TRUE", "1", "yes", "PRIVATE_SECRET_VALUE"} {
+		_, err := Load(env(map[string]string{"JANUSLY_AUTHORING_EXPERIENCE_ENABLED": value}))
+		if err == nil || !strings.Contains(err.Error(), "JANUSLY_AUTHORING_EXPERIENCE_ENABLED") || strings.Contains(err.Error(), value) {
+			t.Fatalf("unsafe invalid flag response: %v", err)
+		}
+	}
+}
