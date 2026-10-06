@@ -2477,13 +2477,6 @@ CREATE INDEX authoring_experiences_list_idx ON public.authoring_experiences USIN
 
 
 --
--- Name: authoring_experiences_match_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX authoring_experiences_match_idx ON public.authoring_experiences USING btree (org_id, brief_key, registered_at DESC, id DESC) WHERE (revoked_at IS NULL);
-
-
---
 -- Name: authoring_experiences_revocation_idx; Type: INDEX; Schema: public; Owner: -
 --
 
