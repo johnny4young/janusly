@@ -90,3 +90,47 @@ func TestAuthoringExperienceBaselineReferenceAndStorageBoundaries(t *testing.T) 
 		t.Fatalf("orphaned registrations remain: %d", remaining)
 	}
 }
+
+func TestAuthoringExperienceRetentionBoundIgnoresSessionTimeZone(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	dsn := createMigrationTestDatabase(t)
+	if err := Up(ctx, dsn); err != nil {
+		t.Fatal(err)
+	}
+	db, err := open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	// A DST session zone must not shorten the maximum 730 x 24 h deadline the
+	// registry computes in UTC (standard time at registration, daylight time
+	// at the deadline moves calendar-day arithmetic one hour earlier).
+	for _, stmt := range []string{
+		`SET TIME ZONE 'America/New_York'`,
+		`INSERT INTO workflows(id,org_id,name) VALUES ('wf-tz','org-tz','TZ')`,
+		`INSERT INTO workflow_versions(id,org_id,workflow_id,version,dag_json) VALUES ('ver-tz','org-tz','wf-tz',1,'{"id":"wf-tz","nodes":[],"edges":[]}')`,
+	} {
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	registered := time.Date(2026, time.November, 2, 12, 0, 0, 0, time.UTC)
+	insert := func(id, key string, retainUntil time.Time) error {
+		_, err := conn.ExecContext(ctx, `INSERT INTO authoring_experiences
+   (id,org_id,workflow_id,workflow_version_id,brief_key,brief_json,policy_version,registered_at,retain_until,created_by)
+   VALUES ($1,'org-tz','wf-tz','ver-tz',$2,'{}'::jsonb,'authoring-experience-v1',$3,$4,'operator')`, id, key, registered, retainUntil)
+		return err
+	}
+	if err := insert("tz-max", strings.Repeat("d", 64), registered.AddDate(0, 0, 730)); err != nil {
+		t.Fatalf("maximum UTC retention rejected under a DST session zone: %v", err)
+	}
+	if err := insert("tz-over", strings.Repeat("e", 64), registered.AddDate(0, 0, 730).Add(time.Second)); err == nil {
+		t.Fatal("retention beyond 730 x 24 h accepted")
+	}
+}
