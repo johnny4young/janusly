@@ -162,7 +162,7 @@ func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string) (pgx.T
 	if err := ctx.Err(); err != nil {
 		return nil, nil, 0, err
 	}
-	if !r.Enabled || os.Getenv("JANUSLY_MEMORY_ENABLED") != "true" {
+	if !r.ProcessEnabled() {
 		return nil, nil, 0, ErrExperienceDisabled
 	}
 	if !validExperienceID(orgID) || r.Pool == nil {
@@ -257,11 +257,27 @@ func (r *ExperienceRegistry) List(ctx context.Context, orgID, workflowID string)
 }
 
 // Revoke remains available after process or tenant consent is disabled so an
-// authorized operator can always withdraw a same-tenant registration.
-func (r *ExperienceRegistry) Revoke(ctx context.Context, orgID, id string) (bool, error) {
+// authorized operator can always withdraw a same-tenant registration. It is
+// idempotent: revoked reports that the same-tenant row is withdrawn, while
+// changed is true only for the call that performed the transition.
+func (r *ExperienceRegistry) Revoke(ctx context.Context, orgID, id string) (revoked, changed bool, err error) {
 	if !validExperienceID(orgID) || !validExperienceID(id) || r.Pool == nil {
-		return false, ErrExperienceBriefInvalid
+		return false, false, ErrExperienceBriefInvalid
 	}
-	count, err := store.New(r.Pool).RevokeAuthoringExperience(ctx, store.RevokeAuthoringExperienceParams{OrgID: orgID, ID: id, AsOf: r.now()})
-	return count > 0, err
+	q := store.New(r.Pool)
+	count, err := q.RevokeAuthoringExperience(ctx, store.RevokeAuthoringExperienceParams{OrgID: orgID, ID: id, AsOf: r.now()})
+	if err != nil {
+		return false, false, err
+	}
+	if count > 0 {
+		return true, true, nil
+	}
+	exists, err := q.AuthoringExperienceExists(ctx, store.AuthoringExperienceExistsParams{OrgID: orgID, ID: id})
+	return exists && err == nil, false, err
+}
+
+// ProcessEnabled reports whether both process gates admit registry reads and
+// registration, so callers can skip catalog work before any tenant lookup.
+func (r *ExperienceRegistry) ProcessEnabled() bool {
+	return r.Enabled && os.Getenv("JANUSLY_MEMORY_ENABLED") == "true"
 }
