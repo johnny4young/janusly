@@ -63,7 +63,7 @@ func runCheck(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) < 1 || len(args) > 2 {
 		return errors.New("invalid corpus arguments")
 	}
-	raw, err := readCorpus(args[0], 4*1024*1024)
+	raw, err := readCorpus(args[0], authoring.MaxMechanicsCorpusBytes)
 	if err != nil {
 		return err
 	}

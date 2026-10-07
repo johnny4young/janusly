@@ -41,9 +41,14 @@ WHERE e.org_id=$1 AND e.workflow_id=$2 AND e.revoked_at IS NULL AND w.deleted_at
 ORDER BY e.registered_at DESC,e.id DESC
 LIMIT sqlc.arg(row_limit);
 
+-- Only an active row transitions; repeat withdrawals keep the first timestamp
+-- and report no transition so callers audit a revocation exactly once.
 -- name: RevokeAuthoringExperience :execrows
-UPDATE authoring_experiences SET revoked_at=COALESCE(revoked_at,sqlc.arg(as_of)::timestamptz)
-WHERE org_id=$1 AND id=$2;
+UPDATE authoring_experiences SET revoked_at=sqlc.arg(as_of)::timestamptz
+WHERE org_id=$1 AND id=$2 AND revoked_at IS NULL;
+
+-- name: AuthoringExperienceExists :one
+SELECT EXISTS (SELECT 1 FROM authoring_experiences WHERE org_id=$1 AND id=$2);
 
 -- One bounded batch rides the existing retention loop. Physical removal is
 -- independent of the immediate eligibility/consent fence.

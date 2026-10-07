@@ -56,7 +56,7 @@ func TestExperienceReaderExactVersionAndCurrentConsentFences(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `SELECT dag_json->>'id' FROM workflow_versions WHERE id='ver-a1'`).Scan(&id); err != nil || id != "wf-a" {
 		t.Fatalf("source mutated: %s %v", id, err)
 	}
-	if _, err := registry.Revoke(t.Context(), "org-a", "exp-a"); err != nil {
+	if _, _, err := registry.Revoke(t.Context(), "org-a", "exp-a"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := registry.Resolve(t.Context(), request, selected.Receipt, catalog, "another-draft"); !errors.Is(err, ErrExperienceSourceUnavailable) {
@@ -143,7 +143,7 @@ func TestExperienceReaderRechecksNewAmbiguityDeletionAndCancellation(t *testing.
 	if _, err := registry.Resolve(t.Context(), request, selected.Receipt, catalog, "draft"); !errors.Is(err, ErrExperienceSourceUnavailable) {
 		t.Fatalf("new ambiguity missed by resolve: %v", err)
 	}
-	if _, err := registry.Revoke(t.Context(), "org-a", "second"); err != nil {
+	if _, _, err := registry.Revoke(t.Context(), "org-a", "second"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE workflows SET deleted_at=now() WHERE id='wf-a'`); err != nil {

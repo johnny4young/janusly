@@ -8,6 +8,9 @@ import (
 	"io"
 )
 
+// MaxMechanicsCorpusBytes bounds the offline corpus accepted by the checker.
+const MaxMechanicsCorpusBytes = 4 * 1024 * 1024
+
 // DecisionMechanicsCase is synthetic offline evidence only. Labels follow a
 // published deterministic rubric, not a model judge or a human acceptance test.
 type DecisionMechanicsCase struct {
@@ -42,7 +45,7 @@ func (p mechanicsFixtureProvider) Propose(ctx context.Context, _ DecisionRequest
 // policy. It is intentionally not a generation/retrieval/real-model benchmark.
 func CheckDecisionMechanicsCorpus(ctx context.Context, raw []byte) (DecisionMechanicsReport, error) {
 	report := DecisionMechanicsReport{Modes: make(map[DecisionMode]int), Languages: make(map[string]int), PolicyVersion: AuthoringExperiencePolicyVersion, Evidence: "synthetic_contract_mechanics_only"}
-	if len(raw) > 4*1024*1024 {
+	if len(raw) > MaxMechanicsCorpusBytes {
 		return report, fmt.Errorf("mechanics corpus exceeds limit")
 	}
 	var cases []DecisionMechanicsCase
@@ -51,14 +54,25 @@ func CheckDecisionMechanicsCorpus(ctx context.Context, raw []byte) (DecisionMech
 	if err := decoder.Decode(&cases); err != nil {
 		return report, fmt.Errorf("invalid mechanics corpus")
 	}
-	if decoder.Decode(new(any)) != io.EOF || len(cases) != 240 {
+	if decoder.Decode(new(any)) != io.EOF {
+		return report, fmt.Errorf("invalid mechanics corpus")
+	}
+	if len(cases) != 240 {
 		return report, fmt.Errorf("mechanics corpus must contain exactly 240 cases")
 	}
 	ids := map[string]bool{}
+	families := map[string]string{}
+	splits := map[string]int{}
 	for _, c := range cases {
 		if !validDecisionID(c.ID) || ids[c.ID] || c.Family == "" || c.Scenario == "" || (c.Split != "development" && c.Split != "qualification") {
 			return report, fmt.Errorf("invalid mechanics case identity")
 		}
+		// Whole families are held out: a family never spans both splits.
+		if previous, seen := families[c.Family]; seen && previous != c.Split {
+			return report, fmt.Errorf("mechanics family %s leaks across splits", c.Family)
+		}
+		families[c.Family] = c.Split
+		splits[c.Split]++
 		ids[c.ID] = true
 		proposalRaw, err := json.Marshal(c.Expected)
 		if err != nil {
@@ -79,6 +93,9 @@ func CheckDecisionMechanicsCorpus(ctx context.Context, raw []byte) (DecisionMech
 	}
 	if report.Languages["en"] != 120 || report.Languages["es"] != 120 {
 		return report, fmt.Errorf("unbalanced mechanics languages")
+	}
+	if splits["development"] != 144 || splits["qualification"] != 96 || len(families) != 5 {
+		return report, fmt.Errorf("unbalanced mechanics splits")
 	}
 	return report, nil
 }

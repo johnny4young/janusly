@@ -118,7 +118,7 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		if _, err := store.New(e.pool).PurgeAuthoringExperiencesBatch(ctx, store.PurgeAuthoringExperiencesBatchParams{AsOf: now, RevokedBefore: now.Add(-MemoryPurgeDelay()), BatchSize: 1000}); err != nil {
 			passErr = errors.Join(passErr, err)
 			if ctx.Err() == nil {
-				logger.Error("authoring experience retention failed")
+				logger.Error("authoring experience retention failed", "error", err)
 			}
 		}
 		// Per-org data retention (run_events / audit_logs / usage_events).
