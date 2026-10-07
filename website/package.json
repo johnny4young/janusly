@@ -29,5 +29,11 @@
     "@types/node": "^26.1.0",
     "typescript": "^6.0.3",
     "wrangler": "4.136.1"
+  },
+  "overrides": {
+    "sharp": "0.35.5",
+    "miniflare": {
+      "undici": "7.29.1"
+    }
   }
 }
