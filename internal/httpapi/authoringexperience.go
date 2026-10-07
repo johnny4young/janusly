@@ -109,7 +109,8 @@ func (s *V1Server) registerAuthoringExperienceCore(r *http.Request, rc v1Request
 		return *denied
 	}
 	// Keep disabled registration out of catalog reads as well as provider work.
-	if !s.authoringExperienceEnabled {
+	registry := s.experienceRegistry()
+	if !registry.ProcessEnabled() {
 		return experienceError(authoring.ErrExperienceDisabled)
 	}
 	var wire authoringExperienceRegisterWire
@@ -128,9 +129,14 @@ func (s *V1Server) registerAuthoringExperienceCore(r *http.Request, rc v1Request
 	// Build before the registry transaction: catalog readers share the bounded
 	// API pool and must not acquire a second connection while holding consent.
 	input.Catalog = s.authoringCatalog(rc, r)
-	entry, err := s.experienceRegistry().Register(r.Context(), input)
+	entry, err := registry.Register(r.Context(), input)
 	if err != nil {
 		return experienceError(err)
+	}
+	// A duplicate explicit request returns the original active registration
+	// (a different identity than the fresh ID); only a new row is audited.
+	if entry.ID != input.ID {
+		return opOK(entry)
 	}
 	s.audit.Write(r.Context(), s.pool, rc.authContext, "authoring.experience.registered", audit.Options{
 		TargetType: "authoring_experience", TargetID: entry.ID, Metadata: map[string]any{"policyVersion": authoring.AuthoringExperiencePolicyVersion, "outcomeEvidence": "unknown"},
@@ -173,11 +179,11 @@ func (s *V1Server) revokeAuthoringExperienceCore(r *http.Request, rc v1Request) 
 	if decodeOptionalAuthoringValue(wire.ID, &id) != nil {
 		return experienceError(authoring.ErrExperienceBriefInvalid)
 	}
-	revoked, err := s.experienceRegistry().Revoke(r.Context(), rc.orgID, id)
+	revoked, changed, err := s.experienceRegistry().Revoke(r.Context(), rc.orgID, id)
 	if err != nil {
 		return experienceError(err)
 	}
-	if revoked {
+	if changed {
 		s.audit.Write(r.Context(), s.pool, rc.authContext, "authoring.experience.revoked", audit.Options{TargetType: "authoring_experience", TargetID: id, Metadata: map[string]any{"policyVersion": authoring.AuthoringExperiencePolicyVersion}})
 	}
 	return opOK(map[string]any{"id": id, "revoked": revoked})

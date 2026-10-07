@@ -34,7 +34,12 @@ func TestInitTracingPreservesOTLPEnvironmentPaths(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			paths := make(chan string, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				paths <- r.URL.Path
+				// Never block the handler: a retry or second export would
+				// otherwise hang server.Close once the buffer is full.
+				select {
+				case paths <- r.URL.Path:
+				default:
+				}
 				w.Header().Set("Content-Type", "application/x-protobuf")
 				w.WriteHeader(http.StatusOK)
 			}))

@@ -217,7 +217,7 @@ CREATE TABLE public.authoring_experiences (
     created_by text NOT NULL,
     CONSTRAINT authoring_experiences_brief_json_check CHECK (((jsonb_typeof(brief_json) = 'object'::text) AND (octet_length((brief_json)::text) <= 8192))),
     CONSTRAINT authoring_experiences_brief_key_check CHECK ((brief_key ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT authoring_experiences_check CHECK (((retain_until > registered_at) AND (retain_until <= (registered_at + '730 days'::interval)))),
+    CONSTRAINT authoring_experiences_check CHECK (((retain_until > registered_at) AND (retain_until <= (registered_at + '17520:00:00'::interval)))),
     CONSTRAINT authoring_experiences_created_by_check CHECK (((length(created_by) >= 1) AND (length(created_by) <= 128))),
     CONSTRAINT authoring_experiences_id_check CHECK (((length(id) >= 1) AND (length(id) <= 128))),
     CONSTRAINT authoring_experiences_org_id_check CHECK (((length(org_id) >= 1) AND (length(org_id) <= 128))),
@@ -2474,13 +2474,6 @@ CREATE INDEX authoring_experiences_history_match_idx ON public.authoring_experie
 --
 
 CREATE INDEX authoring_experiences_list_idx ON public.authoring_experiences USING btree (org_id, workflow_id, registered_at DESC, id DESC) WHERE (revoked_at IS NULL);
-
-
---
--- Name: authoring_experiences_match_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX authoring_experiences_match_idx ON public.authoring_experiences USING btree (org_id, brief_key, registered_at DESC, id DESC) WHERE (revoked_at IS NULL);
 
 
 --

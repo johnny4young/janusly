@@ -11,6 +11,22 @@ import (
 	"time"
 )
 
+const authoringExperienceExists = `-- name: AuthoringExperienceExists :one
+SELECT EXISTS (SELECT 1 FROM authoring_experiences WHERE org_id=$1 AND id=$2)
+`
+
+type AuthoringExperienceExistsParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) AuthoringExperienceExists(ctx context.Context, arg AuthoringExperienceExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, authoringExperienceExists, arg.OrgID, arg.ID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const deleteExpiredAuthoringExperienceSource = `-- name: DeleteExpiredAuthoringExperienceSource :exec
 DELETE FROM authoring_experiences
 WHERE org_id=$1 AND workflow_id=$2 AND workflow_version_id=$3 AND brief_key=$4
@@ -52,7 +68,7 @@ WHERE e.org_id=$1 AND e.brief_key=$2
   AND (w.deleted_at IS NULL OR ($4::boolean AND w.deleted_at > $3::timestamptz))
   AND octet_length(v.dag_json::text) <= 2097152
 ORDER BY e.registered_at DESC,e.id COLLATE "C" DESC
-LIMIT 7
+LIMIT $5
 FOR SHARE OF e,w,v
 `
 
@@ -61,6 +77,7 @@ type FindAuthoringExperienceCandidatesParams struct {
 	BriefKey   string
 	AsOf       time.Time
 	Historical bool
+	RowLimit   int32
 }
 
 type FindAuthoringExperienceCandidatesRow struct {
@@ -88,6 +105,7 @@ func (q *Queries) FindAuthoringExperienceCandidates(ctx context.Context, arg Fin
 		arg.BriefKey,
 		arg.AsOf,
 		arg.Historical,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -382,8 +400,8 @@ func (q *Queries) PurgeAuthoringExperiencesForOrg(ctx context.Context, orgID str
 }
 
 const revokeAuthoringExperience = `-- name: RevokeAuthoringExperience :execrows
-UPDATE authoring_experiences SET revoked_at=COALESCE(revoked_at,$3::timestamptz)
-WHERE org_id=$1 AND id=$2
+UPDATE authoring_experiences SET revoked_at=$3::timestamptz
+WHERE org_id=$1 AND id=$2 AND revoked_at IS NULL
 `
 
 type RevokeAuthoringExperienceParams struct {
@@ -392,6 +410,8 @@ type RevokeAuthoringExperienceParams struct {
 	AsOf  time.Time
 }
 
+// Only an active row transitions; repeat withdrawals keep the first timestamp
+// and report no transition so callers audit a revocation exactly once.
 func (q *Queries) RevokeAuthoringExperience(ctx context.Context, arg RevokeAuthoringExperienceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeAuthoringExperience, arg.OrgID, arg.ID, arg.AsOf)
 	if err != nil {

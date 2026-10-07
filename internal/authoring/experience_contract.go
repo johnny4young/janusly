@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -306,7 +307,9 @@ func validateDecisionRequest(r DecisionRequest) error {
 		if !validDecisionID(c.ID) || !validDecisionID(c.OrganizationID) || !validDecisionID(c.WorkflowID) || !validDecisionID(c.VersionID) || c.Version < 1 || len(c.BriefKey) != 64 || c.PolicyVersion == "" || len(c.PolicyVersion) > 128 || c.RegisteredAt.IsZero() || c.VersionCreatedAt.IsZero() || c.RetainUntil.IsZero() || seen[c.ID] {
 			return errDecisionRequest
 		}
-		if _, err := hex.DecodeString(c.BriefKey); err != nil {
+		// Keys are lowercase hex as CanonicalExperienceKey emits them; an
+		// uppercase projection would validate but silently never match.
+		if _, err := hex.DecodeString(c.BriefKey); err != nil || strings.ToLower(c.BriefKey) != c.BriefKey {
 			return errDecisionRequest
 		}
 		seen[c.ID] = true
@@ -338,7 +341,8 @@ func supportedDescriptiveEdits(edits []DescriptiveEdit) bool {
 		return false
 	}
 	for _, edit := range edits {
-		if edit.Field != "workflow_name" || !validDecisionText(edit.Value, 200) || strings.TrimSpace(edit.Value) == "" {
+		// A workflow name is a single trimmed line without control characters.
+		if edit.Field != "workflow_name" || !validDecisionText(edit.Value, 200) || strings.TrimSpace(edit.Value) != edit.Value || edit.Value == "" || strings.ContainsFunc(edit.Value, unicode.IsControl) {
 			return false
 		}
 	}

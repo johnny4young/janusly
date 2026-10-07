@@ -56,7 +56,7 @@ func TestExperienceReaderExactVersionAndCurrentConsentFences(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `SELECT dag_json->>'id' FROM workflow_versions WHERE id='ver-a1'`).Scan(&id); err != nil || id != "wf-a" {
 		t.Fatalf("source mutated: %s %v", id, err)
 	}
-	if _, err := registry.Revoke(t.Context(), "org-a", "exp-a"); err != nil {
+	if _, _, err := registry.Revoke(t.Context(), "org-a", "exp-a"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := registry.Resolve(t.Context(), request, selected.Receipt, catalog, "another-draft"); !errors.Is(err, ErrExperienceSourceUnavailable) {
@@ -143,7 +143,7 @@ func TestExperienceReaderRechecksNewAmbiguityDeletionAndCancellation(t *testing.
 	if _, err := registry.Resolve(t.Context(), request, selected.Receipt, catalog, "draft"); !errors.Is(err, ErrExperienceSourceUnavailable) {
 		t.Fatalf("new ambiguity missed by resolve: %v", err)
 	}
-	if _, err := registry.Revoke(t.Context(), "org-a", "second"); err != nil {
+	if _, _, err := registry.Revoke(t.Context(), "org-a", "second"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE workflows SET deleted_at=now() WHERE id='wf-a'`); err != nil {
@@ -173,7 +173,7 @@ func TestExperienceHistoricalReaderFiltersBeforeLimitWithoutCurrentConsentInfere
 		t.Fatal(err)
 	}
 	q := store.New(pool)
-	params := store.FindAuthoringExperienceCandidatesParams{OrgID: request.OrganizationID, BriefKey: key, AsOf: stamp, Historical: true}
+	params := store.FindAuthoringExperienceCandidatesParams{OrgID: request.OrganizationID, BriefKey: key, AsOf: stamp, Historical: true, RowLimit: maxExperienceSourceScan + 1}
 	rows, err := q.FindAuthoringExperienceCandidates(t.Context(), params)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("future tombstone erased past: rows=%d err=%v", len(rows), err)
@@ -256,7 +256,7 @@ func TestExperienceReaderHistoricalVersionAndUnicodeOrderingBeforeHorizon(t *tes
 			t.Fatal(err)
 		}
 	}
-	rows, err := store.New(pool).FindAuthoringExperienceCandidates(t.Context(), store.FindAuthoringExperienceCandidatesParams{OrgID: request.OrganizationID, BriefKey: key, AsOf: now, Historical: true})
+	rows, err := store.New(pool).FindAuthoringExperienceCandidates(t.Context(), store.FindAuthoringExperienceCandidatesParams{OrgID: request.OrganizationID, BriefKey: key, AsOf: now, Historical: true, RowLimit: maxExperienceSourceScan + 1})
 	if err != nil || len(rows) != 3 || rows[0].ID != "界" || rows[1].ID != "é" || rows[2].ID != "z" {
 		t.Fatalf("future version or locale-dependent order changed past horizon: rows=%+v err=%v", rows, err)
 	}
@@ -291,9 +291,9 @@ func TestExperienceCandidateQueryUsesScopedHistoryIndexAtScale(t *testing.T) {
 		t.Fatal("canonical candidate query missing")
 	}
 	query, _, _ = strings.Cut(query, "-- name:")
-	query = strings.NewReplacer("sqlc.arg(as_of)", "$3", "sqlc.arg(historical)", "$4").Replace(query)
+	query = strings.NewReplacer("sqlc.arg(as_of)", "$3", "sqlc.arg(historical)", "$4", "sqlc.arg(row_limit)", "$5").Replace(query)
 	var plan []byte
-	if err := pool.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+query, "org-0", "cfcd208495d565ef66e7dff9f98764dacfcd208495d565ef66e7dff9f98764da", time.Now().UTC(), true).Scan(&plan); err != nil {
+	if err := pool.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+query, "org-0", "cfcd208495d565ef66e7dff9f98764dacfcd208495d565ef66e7dff9f98764da", time.Now().UTC(), true, maxExperienceSourceScan+1).Scan(&plan); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(plan), "authoring_experiences_history_match_idx") {
@@ -346,5 +346,25 @@ func TestExperienceReaderStageBudgetAndInFlightCancellation(t *testing.T) {
 	}
 	if current, err := registry.Decide(t.Context(), request, catalog); err != nil || current.Receipt.Mode != DecisionReuse {
 		t.Fatalf("cancelled resolution retained consent/source locks: %+v %v", current, err)
+	}
+}
+
+func TestExperienceReaderOversizedProjectionRequiresReview(t *testing.T) {
+	registry, request, catalog, pool := registeredDecisionFixture(t)
+	// Fits the request bound alone but overflows once one exact candidate is
+	// disclosed; the decision must escalate rather than fail opaquely.
+	request.Brief.Examples = []string{strings.Repeat("a", 1190), strings.Repeat("b", 1190), strings.Repeat("c", 1190), strings.Repeat("d", 1190), strings.Repeat("e", 1190), strings.Repeat("f", 1190), strings.Repeat("g", 300)}
+	seedExperienceSource(t, pool, "org-a", "wf-large", "ver-large", 1)
+	if _, err := registry.Register(t.Context(), ExperienceRegistration{ID: "exp-large", OrganizationID: "org-a", ActorID: "operator", WorkflowID: "wf-large", VersionID: "ver-large", Brief: request.Brief, Catalog: catalog}); err != nil {
+		t.Fatal(err)
+	}
+	bounded := request
+	bounded.AsOf = registry.now()
+	if validateDecisionRequest(bounded) != nil {
+		t.Fatal("fixture brief must fit the request bound before candidates")
+	}
+	selected, err := registry.Decide(t.Context(), request, catalog)
+	if err != nil || selected.Receipt.Mode != DecisionEscalate || selected.Receipt.Reason != DecisionCandidatesTruncated || selected.Receipt.Source != nil || len(selected.Request.Candidates) != 0 {
+		t.Fatalf("oversized exact projection: %+v %v", selected.Receipt, err)
 	}
 }

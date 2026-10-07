@@ -204,3 +204,44 @@ func TestAuthoringExperienceRequiresAllExistingPermissions(t *testing.T) {
 		t.Fatalf("denied request changed registry: %d %v", count, err)
 	}
 }
+
+func TestAuthoringExperienceRepeatCommandsAuditOnlyTransitions(t *testing.T) {
+	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	h := authoringExperienceHarness(t)
+	request := authoringExperienceSource(t, h)
+	authoringExperienceGrant(t, h)
+	pool := testPool(t)
+	auditCount := func(action string) int {
+		t.Helper()
+		var count int
+		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action=$2`, h.org, action).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	var id string
+	for attempt := range 2 {
+		res := h.call("POST", "/v1/authoring/experiences/register", request, "")
+		if res.status != http.StatusOK {
+			t.Fatalf("register %d: %d %+v", attempt, res.status, res.body)
+		}
+		got := res.body["data"].(map[string]any)["id"].(string)
+		if id != "" && got != id {
+			t.Fatalf("duplicate registration changed identity: %s != %s", got, id)
+		}
+		id = got
+	}
+	if count := auditCount("authoring.experience.registered"); count != 1 {
+		t.Fatalf("duplicate registration audited %d times", count)
+	}
+	for attempt := range 2 {
+		res := h.call("POST", "/v1/authoring/experiences/revoke", map[string]any{"id": id}, "")
+		if res.status != http.StatusOK || res.body["data"].(map[string]any)["revoked"] != true {
+			t.Fatalf("revoke %d not idempotent: %d %+v", attempt, res.status, res.body)
+		}
+	}
+	if count := auditCount("authoring.experience.revoked"); count != 1 {
+		t.Fatalf("repeat revocation audited %d times", count)
+	}
+}
