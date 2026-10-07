@@ -49,6 +49,7 @@ func TestDeterministicWorkflowEmitsCompleteSafePrimitives(t *testing.T) {
 			workflow, issues := domain.Parse(raw)
 			if workflow == nil || len(issues) > 0 {
 				t.Fatalf("parse: %+v", issues)
+				return // t.Fatalf never returns; keeps nil analysis independent of linter facts
 			}
 			found := false
 			for _, node := range workflow.Nodes {
