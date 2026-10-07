@@ -154,6 +154,11 @@ func (s *V1Server) experienceProposal(r *http.Request, rc v1Request, request wor
 		}
 		return experienceProposalAttempt{}
 	}
+	if receipt := request.ExperienceReceipt; receipt != nil && (receipt.CatalogVersion != catalog.Version || (request.CatalogVersion != "" && request.CatalogVersion != catalog.Version)) {
+		// A receipt reviewed against another capability snapshot is stale.
+		// Refuse it without reading sources or drafting a replacement.
+		return s.experienceAttemptError(r, rc, request, authoring.ErrExperienceSourceUnavailable)
+	}
 	stage, cancel := context.WithTimeout(r.Context(), authoring.DecisionStageTimeout)
 	defer cancel()
 	input := authoring.DecisionRequest{OrganizationID: rc.orgID, ContextRevision: experienceContextRevision(rc, request, compiled.Brief, catalog.Version), CatalogVersion: catalog.Version, Brief: compiled.Brief, Complete: compiled.Complete, CanonicalRecipe: authoring.IsCanonicalPagerDutyWorkflow(prompt, &compiled.Brief), Edits: request.ExperienceEdits}

@@ -138,15 +138,16 @@ func TestAuthoringExperienceAuditFailureDoesNotBreakSourceCopy(t *testing.T) {
 	h, request, _, calls := experienceProposalIntegrationFixture(t, config.AuthoringExperienceReview)
 	pool := testPool(t)
 	// This fault applies to one test tenant/action in its isolated database;
+	// OR REPLACE and IF EXISTS let a run killed before cleanup not poison the next.
 	// other request writes and the source registry retain normal behavior.
-	ddl := fmt.Sprintf(`CREATE FUNCTION reject_experience_decision_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.org_id='%s' AND NEW.action='authoring.experience.decision' THEN RAISE EXCEPTION 'fixture audit unavailable'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_experience_decision_fixture BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_experience_decision_fixture()`, h.org)
+	ddl := fmt.Sprintf(`CREATE OR REPLACE FUNCTION reject_experience_decision_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.org_id='%s' AND NEW.action='authoring.experience.decision' THEN RAISE EXCEPTION 'fixture audit unavailable'; END IF; RETURN NEW; END $$; DROP TRIGGER IF EXISTS reject_experience_decision_fixture ON audit_logs; CREATE TRIGGER reject_experience_decision_fixture BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_experience_decision_fixture()`, h.org)
 	if _, err := pool.Exec(t.Context(), ddl); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
 		defer cancel()
-		if _, err := pool.Exec(cleanup, `DROP TRIGGER reject_experience_decision_fixture ON audit_logs; DROP FUNCTION reject_experience_decision_fixture()`); err != nil {
+		if _, err := pool.Exec(cleanup, `DROP TRIGGER IF EXISTS reject_experience_decision_fixture ON audit_logs; DROP FUNCTION IF EXISTS reject_experience_decision_fixture()`); err != nil {
 			t.Errorf("remove audit fixture: %v", err)
 		}
 	})
@@ -176,6 +177,38 @@ func TestAuthoringExperienceProcessDisableStopsPendingReceiptAdmission(t *testin
 	stale := disabled.call("POST", "/v1/ai/workflow-proposals", request, "")
 	if stale.status != http.StatusForbidden || calls.Load() != 1 {
 		t.Fatalf("disabled process admitted an old review: calls=%d response=%+v", calls.Load(), stale.body)
+	}
+	request["catalogVersion"] = "stale-catalog"
+	staleCatalog := disabled.call("POST", "/v1/ai/workflow-proposals", request, "")
+	if staleCatalog.status != http.StatusForbidden || calls.Load() != 1 {
+		t.Fatalf("a changed catalog bypassed the disabled receipt gate: calls=%d response=%+v", calls.Load(), staleCatalog.body)
+	}
+}
+
+func TestAuthoringExperienceRevalidationAgainstChangedCatalogRefuses(t *testing.T) {
+	h, request, _, calls := experienceProposalIntegrationFixture(t, config.AuthoringExperienceReview)
+	first := h.call("POST", "/v1/ai/workflow-proposals", request, "")
+	if first.status != http.StatusOK {
+		t.Fatal(first.body)
+	}
+	request["experienceReceipt"] = first.body["data"].(map[string]any)["experienceDecision"]
+	request["catalogVersion"] = "stale-catalog"
+	response := h.call("POST", "/v1/ai/workflow-proposals", request, "")
+	if response.status != http.StatusOK || calls.Load() != 0 {
+		t.Fatalf("stale catalog revalidation: calls=%d response=%+v", calls.Load(), response.body)
+	}
+	data := response.body["data"].(map[string]any)
+	if data["experienceDecision"] != nil || data["proposal"].(map[string]any)["applicable"] != false {
+		t.Fatalf("stale catalog receipt remained admissible: %+v", data)
+	}
+	found := false
+	for _, binding := range data["bindings"].(map[string]any)["missing"].([]any) {
+		if binding.(map[string]any)["reason"] == "authoring_experience_source_changed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("stale catalog receipt was replaced without an experience refusal: %+v", data["bindings"])
 	}
 }
 
