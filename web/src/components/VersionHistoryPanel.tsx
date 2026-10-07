@@ -25,7 +25,7 @@ import { useConfirm } from './ConfirmDialog'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { sessionCan } from '../identity-context'
-import { AUTHORING_PERMISSIONS, ownCanvas } from '../lib/canvas-authority'
+import { currentSavedHistoryAuthority, ownCanvas } from '../lib/canvas-authority'
 import './VersionHistoryPanel.css'
 import { PLATFORM_TAG, useResourceRefresh } from '../lib/query-cache'
 import { Button } from './ui/Button'
@@ -89,10 +89,7 @@ export function VersionHistoryPanel() {
   return <ScopedVersionHistory key={scope} scope={scope} />
 }
 
-function historyScope(state: ReturnType<typeof useWorkflowStore.getState>): string {
-  return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.currentWorkflowSaved, state.activeTab,
-    ...AUTHORING_PERMISSIONS.map(permission => sessionCan(state.identityContext, permission))])
-}
+const historyScope = currentSavedHistoryAuthority
 
 function ScopedVersionHistory({ scope }: { scope: string }) {
   const { t } = useT()

@@ -6,7 +6,7 @@ import { api, apiErrorStatus, contractApi } from '../api'
 import { useT } from '../i18n'
 import { sessionCan } from '../identity-context'
 import { useWorkflowStore } from '../store'
-import { AUTHORING_PERMISSIONS, currentAuthoringAuthority } from '../lib/canvas-authority'
+import { AUTHORING_PERMISSIONS, currentSavedHistoryAuthority } from '../lib/canvas-authority'
 import { invalidateTags } from '../lib/query-cache'
 import { parseOrgConfigEntries } from '../lib/org-config-model'
 import type { AuthoringExperienceList, AuthoringExperienceRecord } from '../lib/api-types.generated'
@@ -20,9 +20,9 @@ import { MAX_AUTHORING_PROMPT_CHARS } from './ai-studio/model'
 import { Button } from './ui/Button'
 import { FormActions, FormDisclosure, FormField, SelectControl, TextAreaControl } from './ui/Form'
 
-function registryAuthority(state = useWorkflowStore.getState()): string {
-  return JSON.stringify([currentAuthoringAuthority(state), state.currentWorkflowSaved])
-}
+// Registration targets an immutable saved version and compiles only the
+// operator's example intent, so draft edits must not discard that review.
+const registryAuthority = currentSavedHistoryAuthority
 function boundedSource(row: AuthoringExperienceRecord, workflowId: string): boolean {
   return row.workflowId === workflowId && row.version > 0
     && [row.id, row.workflowId, row.versionId].every(value => value.trim() === value && value.length > 0

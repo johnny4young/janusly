@@ -142,6 +142,41 @@ export function registerExperienceControllerOwnershipCases() {
           })
         }
       }
+      for (const tag of ['platform', 'versions', 'credentials'] as const) {
+        it(`${locale} ${tag} invalidation keeps an ordinary proposal and current-workflow result`, async () => {
+          await changeAppLanguage(locale)
+          const ordinary = workflowProposal()
+          const callbacks = props({ onProposeWorkflow: vi.fn(async () => ordinary),
+            onExplainWorkflow: vi.fn(async () => ({ mode: 'ai' as const, explanation: 'Current explanation' })) })
+          const { result } = renderHook(() => useAiStudioController(callbacks))
+          await waitFor(() => expect(result.current.catalog).toEqual(catalog))
+          await act(async () => result.current.compileBrief())
+          await act(async () => result.current.buildProposal())
+          await act(async () => result.current.explain())
+          expect(result.current.proposal).toEqual(ordinary)
+          act(() => invalidateTags([tag]))
+          expect(result.current.proposal).toEqual(ordinary)
+          expect(result.current.result).toMatchObject({ kind: 'explanation', mode: 'ai' })
+          await waitFor(() => expect(result.current.catalog).toEqual(catalog))
+          expect(callbacks.onLoadAuthoringCapabilities).toHaveBeenCalledTimes(2)
+          await act(async () => result.current.applyProposal())
+          expect(callbacks.onApplyWorkflowProposal).toHaveBeenCalledWith(ordinary)
+        })
+        it(`${locale} ${tag} invalidation expires a completed source proposal`, async () => {
+          await changeAppLanguage(locale)
+          const callbacks = props()
+          const { result } = renderHook(() => useAiStudioController(callbacks))
+          await waitFor(() => expect(result.current.catalog).toEqual(catalog))
+          await act(async () => result.current.compileBrief())
+          await act(async () => result.current.buildProposal())
+          expect(result.current.experienceAvailable).toBe(true)
+          act(() => invalidateTags([tag]))
+          expect(result.current.proposal).toBeNull()
+          expect(result.current.experienceAvailable).toBe(false)
+          await act(async () => result.current.applyProposal())
+          expect(callbacks.onApplyWorkflowProposal).not.toHaveBeenCalled()
+        })
+      }
       for (const outcome of ['resolve', 'reject'] as const) {
         it(`${locale} old catalog ${outcome} cannot populate identity ABA or release the new catalog read`, async () => {
           await changeAppLanguage(locale)

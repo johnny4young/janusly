@@ -277,6 +277,22 @@ export function registerExperienceRegistryCases() {
           expect(useWorkflowStore.getState().toasts).toHaveLength(0)
         })
       }
+      it(`${locale} draft canvas edits keep the reviewed example for an immutable saved version`, async () => {
+        await changeAppLanguage(locale)
+        setup()
+        render(<VersionHistoryPanel />)
+        await compileExample(locale)
+        const reads = vi.mocked(contractApi).mock.calls.filter(([operation]) => operation === 'GET /authoring/experiences').length
+        act(() => useWorkflowStore.getState().setWorkflowName('Edited draft name'))
+        expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+        expect(screen.getByLabelText(copy[locale].intent)).toHaveValue('Explicit local example intent')
+        expect(screen.getByRole('button', { name: copy[locale].register })).toBeEnabled()
+        expect(vi.mocked(contractApi).mock.calls.filter(([operation]) => operation === 'GET /authoring/experiences')).toHaveLength(reads)
+        fireEvent.click(screen.getByRole('button', { name: copy[locale].register }))
+        await screen.findByRole('button', { name: copy[locale].withdraw })
+        expect(contractApi).toHaveBeenCalledWith('POST /authoring/experiences/register', '/v1/authoring/experiences/register',
+          { workflowId: 'saved-source', versionId: 'version-3', brief: compiled.brief }, expect.anything())
+      })
       it(`${locale} a deleted or withdrawn source cannot produce a successful registration`, async () => {
         await changeAppLanguage(locale)
         setup(operation => operation === 'POST /authoring/experiences/register' ? Promise.reject(new ApiError('source unavailable', { statusCode: 404 })) : undefined)

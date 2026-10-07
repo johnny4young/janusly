@@ -19,6 +19,16 @@ export function currentAuthoringAuthority(state = useWorkflowStore.getState()): 
     sessionCan(state.identityContext, 'ai.write')])
 }
 
+/**
+ * Saved-history work targets immutable versions, not the editable canvas: it
+ * follows identity, workflow, saved state, navigation and authoring grants,
+ * but survives draft edits (workflowRevision).
+ */
+export function currentSavedHistoryAuthority(state = useWorkflowStore.getState()): string {
+  return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.currentWorkflowSaved, state.activeTab,
+    ...AUTHORING_PERMISSIONS.map(permission => sessionCan(state.identityContext, permission))])
+}
+
 export type CanvasAuthoritySelector = (state: ReturnType<typeof useWorkflowStore.getState>) => string
 
 /** An ownership lease ends at the first context change, even if React batches a return to the old context. */

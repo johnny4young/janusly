@@ -56,7 +56,7 @@ export function useAiStudioController({
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [briefCompilation, setBriefCompilation] = useState<CompiledBriefState | null>(null)
   const [clarificationAnswers, setClarificationAnswers] = useState<Record<number, string>>({})
-  const [proposal, setProposal] = useState<WorkflowProposalResponse | null>(null)
+  const [proposal, setProposalState] = useState<WorkflowProposalResponse | null>(null)
   const [experienceAvailable, setExperienceAvailable] = useState(false)
   const [experienceName, setExperienceName] = useState('')
   const normalizedExperienceName = experienceName.trim()
@@ -83,6 +83,13 @@ export function useAiStudioController({
   const processedRequestRef = useRef<number | null>(null)
   const expectedAppliedWorkflowIDRef = useRef<string | null>(null)
   const proposalSourceRef = useRef<{ workflowId: string; revision: number } | null>(null)
+  // Synchronous mirrors let resource observers expire only experience review.
+  const proposalRef = useRef<WorkflowProposalResponse | null>(null)
+  const proposalRequestRef = useRef<number | null>(null)
+  const setProposal = (next: WorkflowProposalResponse | null) => {
+    proposalRef.current = next
+    setProposalState(next)
+  }
   const requestedActionHandlersRef = useRef<{
     explain: () => Promise<void>
     review: () => Promise<void>
@@ -134,7 +141,8 @@ export function useAiStudioController({
       authoringRequestRef.current += 1
       currentRequestRef.current += 1
       proposalSourceRef.current = null
-      setProposal(null)
+      proposalRef.current = null
+      setProposalState(null)
       setProposalBuildMs(null)
       setExperienceAvailable(false)
       setExperienceName('')
@@ -176,10 +184,24 @@ export function useAiStudioController({
       }
     })
     const unsubscribeTags = subscribeToTags(AUTHORING_EXPERIENCE_TAGS, () => {
-      clearReview()
-      // A resource change expires review, not an in-flight Apply's snapshot.
-      // Its command boundary owns the result and the loading ends on settlement.
-      setAuthoringLoading(loading => loading === 'apply' ? loading : null)
+      // Consent and saved-source resources back experience review only. An
+      // ordinary proposal and current-workflow results keep their canvas-owned
+      // lifecycle; a pending preview cannot know its mode yet, so it expires.
+      const previewPending = proposalRequestRef.current === authoringRequestRef.current
+      if (previewPending || proposalRef.current?.experienceDecision) {
+        authoringRequestRef.current += 1
+        proposalRequestRef.current = null
+        proposalSourceRef.current = null
+        proposalRef.current = null
+        setProposalState(null)
+        setProposalBuildMs(null)
+        setExperienceAvailable(false)
+        setExperienceName('')
+        setAuthoringError(null)
+        // A resource change expires review, not an in-flight Apply's snapshot.
+        // Its command boundary owns the result and the loading ends on settlement.
+        setAuthoringLoading(loading => loading === 'apply' ? loading : null)
+      }
       reloadCatalog()
     })
     return () => {
@@ -262,6 +284,7 @@ export function useAiStudioController({
     const source = useWorkflowStore.getState()
     const sourceWorkflow = { workflowId: source.currentWorkflowId, revision: source.workflowRevision }
     const requestID = ++authoringRequestRef.current
+    proposalRequestRef.current = requestID
     const startedAt = performance.now()
     setAuthoringLoading('propose')
     setAuthoringError(null)
@@ -286,6 +309,7 @@ export function useAiStudioController({
       if (authoringRequestRef.current !== requestID) return
       setAuthoringError(error instanceof Error ? error.message : t('aiStudio.proposal.failed'))
     } finally {
+      if (proposalRequestRef.current === requestID) proposalRequestRef.current = null
       if (authoringRequestRef.current === requestID) setAuthoringLoading(null)
     }
   }

@@ -80,10 +80,14 @@ to the same visible scope. Old success/error paths cannot populate or unlock the
 new history snapshot. Client abort remains local result invalidation, not proof
 of remote cancellation.
 
-The authoring controller, source Apply and registry results lose ownership on the first identity,
+The authoring controller and source Apply lose ownership on the first identity,
 organization, canvas, navigation or grant change, even if the store returns to
-its original values before React paints. Consent/source resource invalidations
-also expire that ownership. Leases are disposed on terminal paths; this is local
+its original values before React paints. Registry results use the saved-history
+scope instead: they target immutable versions, so draft canvas edits do not
+discard a typed or compiled example. Consent/source resource invalidations expire
+registry results, source Apply, a pending preview and an experience-bearing
+proposal; an ordinary proposal and Explain/Review/Fix results keep their
+canvas-owned lifecycle, and the capability catalog is re-read. Leases are disposed on terminal paths; this is local
 result invalidation, not a claim that an already-delivered mutation was cancelled.
 The controller observes store transitions synchronously, so a transient identity
 change cannot restore an old proposal or capability read. A generation-owned
