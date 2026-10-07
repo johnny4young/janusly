@@ -76,6 +76,15 @@ func TestExperienceContractRejectsUntrustedProposals(t *testing.T) {
 		{"unrequested change", func(r *DecisionRequest, p *DecisionProposal) {
 			p.Edits = []DescriptiveEdit{{Field: "workflow_name", Value: "Rename"}}
 		}},
+		{"non-canonical key", func(r *DecisionRequest, p *DecisionProposal) {
+			r.Candidates[0].BriefKey = strings.ToUpper(r.Candidates[0].BriefKey)
+		}},
+		{"multiline name edit", func(r *DecisionRequest, p *DecisionProposal) {
+			r.Edits = []DescriptiveEdit{{Field: "workflow_name", Value: "Rename\nInjected"}}
+			p.Mode = DecisionAdapt
+			p.Reason = DecisionDescriptiveAdapt
+			p.Edits = r.Edits
+		}},
 		{"unsupported edit", func(r *DecisionRequest, p *DecisionProposal) {
 			r.Edits = []DescriptiveEdit{{Field: "config", Value: "new"}}
 			p.Mode = DecisionAdapt
