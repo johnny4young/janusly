@@ -38,6 +38,7 @@ func TestParseAcceptsTheWordNullInsideStrings(t *testing.T) {
 	wf, issues := Parse([]byte(doc))
 	if wf == nil {
 		t.Fatalf("a string containing the word null is not a null: %+v", issues)
+		return // t.Fatalf never returns; keeps nil analysis independent of linter facts
 	}
 	if wf.Nodes[0].Label != "null handling" || wf.Nodes[0].Config["note"] != "null" {
 		t.Fatalf("string values must round-trip: %+v", wf.Nodes[0])
