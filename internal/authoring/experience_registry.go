@@ -14,11 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/johnny4young/janusly/internal/aiguidance"
-	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/memorypolicy"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
-	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 var (
@@ -173,25 +171,25 @@ func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string, resolv
 		return nil, nil, 0, err
 	}
 	q := store.New(tx)
-	values := make(map[string]json.RawMessage, 4)
+	// Both lock modes read the same key set; only the row-lock strength differs.
+	var rows []store.LockAuthoringExperienceConsentRow
+	var readErr error
 	if resolving {
-		rows, readErr := q.LockAuthoringExperienceResolveConsent(ctx, orgID)
-		if readErr != nil {
-			rollbackExperienceTx(ctx, tx)
-			return nil, nil, 0, readErr
-		}
-		for _, row := range rows {
-			values[row.Key] = row.ValueJson
+		var exclusive []store.LockAuthoringExperienceResolveConsentRow
+		exclusive, readErr = q.LockAuthoringExperienceResolveConsent(ctx, orgID)
+		for _, row := range exclusive {
+			rows = append(rows, store.LockAuthoringExperienceConsentRow(row))
 		}
 	} else {
-		rows, readErr := q.LockAuthoringExperienceConsent(ctx, orgID)
-		if readErr != nil {
-			rollbackExperienceTx(ctx, tx)
-			return nil, nil, 0, readErr
-		}
-		for _, row := range rows {
-			values[row.Key] = row.ValueJson
-		}
+		rows, readErr = q.LockAuthoringExperienceConsent(ctx, orgID)
+	}
+	if readErr != nil {
+		rollbackExperienceTx(ctx, tx)
+		return nil, nil, 0, readErr
+	}
+	values := make(map[string]json.RawMessage, len(rows))
+	for _, row := range rows {
+		values[row.Key] = row.ValueJson
 	}
 	days, err := experienceConsentDays(values)
 	if err != nil {
@@ -222,8 +220,7 @@ func (r *ExperienceRegistry) Register(ctx context.Context, input ExperienceRegis
 	if err != nil {
 		return ExperienceRecord{}, err
 	}
-	workflow, issues := domain.Parse(source.DagJson)
-	if workflow == nil || len(issues) > 0 || source.Version < 1 || workflow.ID != input.WorkflowID || !workflowvalidation.Validate(workflow).Valid || !BindProposal(input.Catalog, input.Brief, workflow).Complete {
+	if source.Version < 1 || compatibleExperienceSource(input.Catalog, input.Brief, input.WorkflowID, source.DagJson) == nil {
 		return ExperienceRecord{}, ErrExperienceSourceIncompatible
 	}
 	if err := q.DeleteExpiredAuthoringExperienceSource(ctx, store.DeleteExpiredAuthoringExperienceSourceParams{OrgID: input.OrganizationID, WorkflowID: input.WorkflowID, WorkflowVersionID: input.VersionID, BriefKey: key, AsOf: now}); err != nil {

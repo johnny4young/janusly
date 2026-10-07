@@ -4,9 +4,7 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/store"
-	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 // The source-work horizon is separate from eligible top-K. Incomplete scans
@@ -52,6 +50,11 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 	if previous != nil && (previous.Source == nil || previous.Provider != DecisionRulesProvider || (previous.Mode != DecisionReuse && previous.Mode != DecisionAdapt)) {
 		return ExperienceSelection{}, nil, ErrExperienceSourceUnavailable
 	}
+	// A draft identity CopyExperienceProposal will reject never takes the
+	// exclusive consent locks or reads source graphs.
+	if previous != nil && (!validExperienceID(draftID) || draftID == previous.Source.WorkflowID) {
+		return ExperienceSelection{}, nil, ErrExperienceSourceIncompatible
+	}
 	stage, cancel := context.WithTimeout(ctx, DecisionStageTimeout)
 	defer cancel()
 	tx, q, _, err := r.consentTx(stage, input.OrganizationID, previous != nil)
@@ -66,7 +69,7 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 	sources := []ExperienceArtifact{}
 	if projection.Complete && !projection.CanonicalRecipe && supportedDescriptiveEdits(projection.Edits) {
 		key, _ := CanonicalExperienceKey(projection.Brief)
-		rows, err := q.FindAuthoringExperienceCandidates(stage, store.FindAuthoringExperienceCandidatesParams{OrgID: projection.OrganizationID, BriefKey: key, AsOf: projection.AsOf, Historical: false})
+		rows, err := q.FindAuthoringExperienceCandidates(stage, store.FindAuthoringExperienceCandidatesParams{OrgID: projection.OrganizationID, BriefKey: key, AsOf: projection.AsOf, Historical: false, RowLimit: maxExperienceSourceScan + 1})
 		if err != nil {
 			if stage.Err() != nil {
 				return ExperienceSelection{}, nil, stage.Err()
@@ -78,8 +81,7 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 			if err := stage.Err(); err != nil {
 				return ExperienceSelection{}, nil, err
 			}
-			workflow, issues := domain.Parse(row.DagJson)
-			if row.VersionCreatedAt == nil || workflow == nil || len(issues) > 0 || row.Version < 1 || workflow.ID != row.WorkflowID || !workflowvalidation.Validate(workflow).Valid || !BindProposal(catalog, projection.Brief, workflow).Complete {
+			if row.VersionCreatedAt == nil || row.Version < 1 || compatibleExperienceSource(catalog, projection.Brief, row.WorkflowID, row.DagJson) == nil {
 				continue
 			}
 			candidate := ExperienceCandidate{ID: row.ID, OrganizationID: row.OrgID, WorkflowID: row.WorkflowID, VersionID: row.WorkflowVersionID, Version: int(row.Version), BriefKey: row.BriefKey, PolicyVersion: row.PolicyVersion, RegisteredAt: row.RegisteredAt, VersionCreatedAt: *row.VersionCreatedAt, RetainUntil: row.RetainUntil, RevokedAt: row.RevokedAt, Readable: true, Compatible: true}
@@ -88,6 +90,13 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 		}
 		projection.Truncated = projection.Truncated || len(projection.Candidates) > MaxExperienceCandidates
 		projection.Candidates = projection.Candidates[:min(len(projection.Candidates), MaxExperienceCandidates)]
+		// A brief that fits the request bound alone can overflow it once exact
+		// candidates are disclosed. Completeness is then unprovable: require
+		// review instead of failing the whole decision with an opaque error.
+		if validateDecisionRequest(projection) != nil {
+			projection.Candidates, sources = nil, nil
+			projection.Truncated = true
+		}
 	}
 	// All graph compatibility checks precede eligible top-K. Recompute retention
 	// after parsing/binding too, while row and consent locks still fence mutation.
@@ -95,15 +104,23 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 	if err != nil {
 		return ExperienceSelection{}, nil, err
 	}
-	if receipt.Source != nil {
+	// recheck recomputes the decision at a later instant so retention expiry
+	// during parsing, binding or copying cannot admit a stale source.
+	recheck := func() error {
 		check := cloneDecisionRequest(projection)
 		check.AsOf = r.now()
 		final, err := ProposeDecision(stage, RulesProvider{}, check)
 		if err != nil {
-			return ExperienceSelection{}, nil, err
+			return err
 		}
 		if !reflect.DeepEqual(final, receipt) {
-			return ExperienceSelection{}, nil, ErrExperienceSourceUnavailable
+			return ErrExperienceSourceUnavailable
+		}
+		return nil
+	}
+	if previous == nil && receipt.Source != nil {
+		if err := recheck(); err != nil {
+			return ExperienceSelection{}, nil, err
 		}
 	}
 	var draft []byte
@@ -125,14 +142,8 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 		if err != nil {
 			return ExperienceSelection{}, nil, err
 		}
-		check := cloneDecisionRequest(projection)
-		check.AsOf = r.now()
-		final, err := ProposeDecision(stage, RulesProvider{}, check)
-		if err != nil {
+		if err := recheck(); err != nil {
 			return ExperienceSelection{}, nil, err
-		}
-		if !reflect.DeepEqual(final, receipt) {
-			return ExperienceSelection{}, nil, ErrExperienceSourceUnavailable
 		}
 	}
 	if err := stage.Err(); err != nil {

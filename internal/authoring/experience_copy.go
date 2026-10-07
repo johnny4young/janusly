@@ -9,6 +9,21 @@ import (
 	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
+// maxExperienceSourceBytes mirrors the octet_length bound the registry SQL
+// applies to source graphs, so offline fixtures cannot copy larger documents.
+const maxExperienceSourceBytes = 2 * 1024 * 1024
+
+// compatibleExperienceSource parses an exact saved graph and checks it against
+// the current workflow validator and capability/intent binder. A nil result
+// means the source cannot be registered, offered or copied.
+func compatibleExperienceSource(catalog Catalog, brief IntentBrief, workflowID string, document []byte) *domain.Workflow {
+	workflow, issues := domain.Parse(document)
+	if workflow == nil || len(issues) > 0 || workflow.ID != workflowID || !workflowvalidation.Validate(workflow).Valid || !BindProposal(catalog, brief, workflow).Complete {
+		return nil
+	}
+	return workflow
+}
+
 // ExperienceArtifact is privately re-read by an authorized, scoped source
 // reader. These facts and bytes are never accepted from a provider proposal.
 // Offline replay supplies a frozen source instead; neither grants read authority.
@@ -41,11 +56,11 @@ func CopyExperienceProposal(ctx context.Context, request DecisionRequest, receip
 	if c.ID != receipt.Source.CandidateID || c.WorkflowID != receipt.Source.WorkflowID || c.VersionID != receipt.Source.VersionID || c.Version != receipt.Source.Version || c.BriefKey != key || !eligibleExperience(request, c) {
 		return nil, ErrExperienceSourceUnavailable
 	}
-	if len(source.Document) > 2*1024*1024 {
+	if len(source.Document) > maxExperienceSourceBytes {
 		return nil, ErrExperienceSourceIncompatible
 	}
-	workflow, issues := domain.Parse(source.Document)
-	if workflow == nil || len(issues) > 0 || workflow.ID != c.WorkflowID || !workflowvalidation.Validate(workflow).Valid || !BindProposal(catalog, request.Brief, workflow).Complete {
+	workflow := compatibleExperienceSource(catalog, request.Brief, c.WorkflowID, source.Document)
+	if workflow == nil {
 		return nil, ErrExperienceSourceIncompatible
 	}
 	workflow.ID = draftID

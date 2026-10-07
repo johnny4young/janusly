@@ -28,4 +28,10 @@ func TestExperienceReaderRejectsCallerFactsAndCancelledRequestsBeforeIO(t *testi
 	if _, err := registry.Decide(t.Context(), r, catalog); !errors.Is(err, ErrExperienceDisabled) {
 		t.Fatalf("default off admitted IO: %v", err)
 	}
+	receipt := DecisionReceipt{Provider: DecisionRulesProvider, Mode: DecisionReuse, Reason: DecisionExactMatch, Source: &ExperienceReference{CandidateID: "exp", WorkflowID: "workflow", VersionID: "version", Version: 1}}
+	for _, draftID := range []string{"", " padded", "workflow"} {
+		if _, err := registry.Resolve(t.Context(), r, receipt, catalog, draftID); !errors.Is(err, ErrExperienceSourceIncompatible) {
+			t.Fatalf("unusable draft identity %q reached IO: %v", draftID, err)
+		}
+	}
 }

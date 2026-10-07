@@ -80,7 +80,7 @@ WHERE e.org_id=$1 AND e.brief_key=$2
   AND (w.deleted_at IS NULL OR (sqlc.arg(historical)::boolean AND w.deleted_at > sqlc.arg(as_of)::timestamptz))
   AND octet_length(v.dag_json::text) <= 2097152
 ORDER BY e.registered_at DESC,e.id COLLATE "C" DESC
-LIMIT 7
+LIMIT sqlc.arg(row_limit)
 FOR SHARE OF e,w,v;
 
 -- Resolution serializes against registration as well as consent writers.

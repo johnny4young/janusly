@@ -121,6 +121,9 @@ N+1 queries or an unbounded history walk. Compatibility is checked using the
 current binder and workflow validator before the final five-candidate top-K.
 If the source horizon cannot establish completeness, `truncated` requires
 review; it never fabricates an empty match or chooses an arbitrary first row.
+A brief whose matching candidates would overflow the bounded decision request
+is treated the same way: the candidates are withheld and `truncated` requires
+review instead of failing the decision.
 Historical matching has an organization/key/time index and explicit C-collation
 identity ordering, consistent with the frozen replay across database locales.
 

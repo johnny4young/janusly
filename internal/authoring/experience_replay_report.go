@@ -82,7 +82,7 @@ func ReplayExperienceCorpus(ctx context.Context, raw []byte) (ExperienceReplayRe
 		}
 		seen[c.ID] = true
 		for _, artifact := range c.Artifacts {
-			if len(artifact.Document) > 2*1024*1024 {
+			if len(artifact.Document) > maxExperienceSourceBytes {
 				return report, fmt.Errorf("replay artifact exceeds limit")
 			}
 		}

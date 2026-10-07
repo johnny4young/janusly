@@ -68,7 +68,7 @@ WHERE e.org_id=$1 AND e.brief_key=$2
   AND (w.deleted_at IS NULL OR ($4::boolean AND w.deleted_at > $3::timestamptz))
   AND octet_length(v.dag_json::text) <= 2097152
 ORDER BY e.registered_at DESC,e.id COLLATE "C" DESC
-LIMIT 7
+LIMIT $5
 FOR SHARE OF e,w,v
 `
 
@@ -77,6 +77,7 @@ type FindAuthoringExperienceCandidatesParams struct {
 	BriefKey   string
 	AsOf       time.Time
 	Historical bool
+	RowLimit   int32
 }
 
 type FindAuthoringExperienceCandidatesRow struct {
@@ -104,6 +105,7 @@ func (q *Queries) FindAuthoringExperienceCandidates(ctx context.Context, arg Fin
 		arg.BriefKey,
 		arg.AsOf,
 		arg.Historical,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
