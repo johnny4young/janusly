@@ -22,7 +22,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	raw, readErr := io.ReadAll(io.LimitReader(file, 4*1024*1024+1))
+	raw, readErr := io.ReadAll(io.LimitReader(file, authoring.MaxMechanicsCorpusBytes+1))
 	closeErr := file.Close()
 	if readErr != nil || closeErr != nil {
 		fmt.Fprintln(os.Stderr, "cannot read mechanics corpus")
