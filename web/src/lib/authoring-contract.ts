@@ -8,9 +8,6 @@ import { hasOnlyKeys, isNonEmptyString, isRecord, isStringArray } from './guards
 import { isGetWorkflowsVersionsVersionIdResponse } from './api-guards/operations/GetWorkflowsVersionsVersionId'
 import { isPostAiWorkflowProposalsResponse } from './api-guards/operations/PostAiWorkflowProposals'
 
-// Apply's source revalidation shares this module's lazily loaded comparison.
-export { jsonEquivalent }
-
 // Wire shape is checked by the generated guards; this module keeps the workflow
 // document rules the canvas depends on and the authoring binding invariants.
 

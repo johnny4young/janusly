@@ -363,7 +363,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     if (!proposalSnapshot.proposal.applicable || !proposalSnapshot.bindings.complete) {
       return { status: 'blocked' }
     }
-    const { isWorkflowProposalApplySafe, isWorkflowProposalResponse, jsonEquivalent } = await loadAuthoringContract()
+    const { isWorkflowProposalApplySafe, isWorkflowProposalResponse } = await loadAuthoringContract()
     if (!await isWorkflowProposalApplySafe(proposalSnapshot)) {
       addToast(t('toasts.aiResponseInvalid'), 'error')
       return { status: 'blocked' }
@@ -405,6 +405,9 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
         addToast(t('toasts.aiResponseInvalid'), 'error')
         return { status: 'blocked' }
       }
+      if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+      // Source-specific review matching is needed only for opt-in source Apply.
+      const { jsonEquivalent } = await import('../lib/json-envelope-equality')
       if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
       if (!isWorkflowProposalResponse(revalidated)
         || !revalidated.proposal.applicable
