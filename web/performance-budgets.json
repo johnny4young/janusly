@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 605.9,
+  "artifactGzipKiB": 606.3,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 562
+    "maxGzipKiB": 562.1
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {

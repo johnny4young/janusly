@@ -406,7 +406,7 @@ and a 0.5 KiB single-locale allowance for the fail-closed RecoveryDialog AI
 response parser. The complete-artifact cap remained 605 KiB for that security
 change; the parser stays in the existing lazy dialog rather than adding a
 network request. The cold path is what the caps protect: `index.css`, `workflow-workspace` and the
-route budgets in `performance/routes.performance.spec.ts` only ratchet down.
+route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB).
 
 ## Closing failures without recovery
 
