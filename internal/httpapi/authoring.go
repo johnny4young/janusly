@@ -376,12 +376,17 @@ func (s *V1Server) workflowProposalCore(r *http.Request, rc v1Request) opResult 
 	catalogChanged := request.CatalogVersion != "" && request.CatalogVersion != catalog.Version
 	var wire map[string]any
 	var experience experienceProposalAttempt
-	if !catalogChanged {
+	if !catalogChanged || request.ExperienceReceipt != nil {
+		// A reviewed receipt always crosses the experience gates, even against
+		// a changed catalog: revalidation refuses (403 or a guarded binding)
+		// and never lets the catalog path draft a replacement in its place.
 		experience = s.experienceProposal(r, rc, request, compiled, catalog, proposalPrompt)
 		if experience.Failure != nil {
 			return *experience.Failure
 		}
-		wire = experience.Wire
+		if !catalogChanged {
+			wire = experience.Wire
+		}
 	}
 	if catalogChanged {
 		// The caller reviewed a different capability snapshot. Do not spend AI

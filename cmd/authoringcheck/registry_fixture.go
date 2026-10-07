@@ -207,11 +207,11 @@ func checkRegistryFixture(ctx context.Context, dsn string) (report registryFixtu
 	if _, err := registry.Resolve(ctx, request, selected.Receipt, catalog, "ambiguous-draft"); !errors.Is(err, authoring.ErrExperienceSourceUnavailable) {
 		return report, errors.New("registry fixture stale ambiguity failed")
 	}
-	if _, err := registry.Revoke(ctx, "fixture-a", "experience-a-second"); err != nil {
+	if _, _, err := registry.Revoke(ctx, "fixture-a", "experience-a-second"); err != nil {
 		return report, errors.New("registry fixture revoke failed")
 	}
 	report.Checks = append(report.Checks, "new_ambiguity_invalidates_receipt")
-	if _, err := registry.Revoke(ctx, "fixture-a", "experience-a"); err != nil {
+	if _, _, err := registry.Revoke(ctx, "fixture-a", "experience-a"); err != nil {
 		return report, errors.New("registry fixture revoke failed")
 	}
 	if _, err := registry.Resolve(ctx, request, selected.Receipt, catalog, "revoked-draft"); !errors.Is(err, authoring.ErrExperienceSourceUnavailable) {

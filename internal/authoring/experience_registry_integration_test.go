@@ -136,8 +136,8 @@ func TestExperienceRegistryImmutableScopedConsentAndRevocation(t *testing.T) {
 	if err != nil || len(other.Entries) != 0 {
 		t.Fatalf("list tenant leak: %+v %v", other, err)
 	}
-	if revoked, err := registry.Revoke(t.Context(), "org-b", entry.ID); err != nil || revoked {
-		t.Fatalf("cross tenant revoke: %v %v", revoked, err)
+	if revoked, changed, err := registry.Revoke(t.Context(), "org-b", entry.ID); err != nil || revoked || changed {
+		t.Fatalf("cross tenant revoke: %v %v %v", revoked, changed, err)
 	}
 	// Every writer observes atomic consent revocation, including a rollback.
 	tx, err := pool.Begin(t.Context())
@@ -179,11 +179,11 @@ func TestExperienceRegistryImmutableScopedConsentAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry.Enabled = false
-	if revoked, err := registry.Revoke(t.Context(), "org-a", entry.ID); err != nil || !revoked {
-		t.Fatalf("disable prevented privacy withdrawal: %v %v", revoked, err)
+	if revoked, changed, err := registry.Revoke(t.Context(), "org-a", entry.ID); err != nil || !revoked || !changed {
+		t.Fatalf("disable prevented privacy withdrawal: %v %v %v", revoked, changed, err)
 	}
-	if revoked, err := registry.Revoke(t.Context(), "org-a", entry.ID); err != nil || !revoked {
-		t.Fatalf("revoke not idempotent: %v %v", revoked, err)
+	if revoked, changed, err := registry.Revoke(t.Context(), "org-a", entry.ID); err != nil || !revoked || changed {
+		t.Fatalf("revoke not idempotent: %v %v %v", revoked, changed, err)
 	}
 	registry.Enabled = true
 	if _, err := pool.Exec(t.Context(), `UPDATE workflows SET deleted_at=now() WHERE org_id='org-a' AND id='wf-a'`); err != nil {

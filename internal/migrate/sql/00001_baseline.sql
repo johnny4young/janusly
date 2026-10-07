@@ -3506,7 +3506,10 @@ CREATE TABLE public.authoring_experiences (
     schema_version text NOT NULL DEFAULT '1' CHECK (schema_version = '1'),
     policy_version text NOT NULL CHECK (policy_version = 'authoring-experience-v1'),
     registered_at timestamptz NOT NULL DEFAULT now(),
-    retain_until timestamptz NOT NULL CHECK (retain_until > registered_at AND retain_until <= registered_at + interval '730 days'),
+    -- Absolute hours keep the bound independent of the session TimeZone:
+    -- calendar-day interval arithmetic shifts by an hour across DST, while the
+    -- writer computes the deadline as whole 24-hour UTC days.
+    retain_until timestamptz NOT NULL CHECK (retain_until > registered_at AND retain_until <= registered_at + interval '17520 hours'),
     revoked_at timestamptz,
     created_by text NOT NULL CHECK (length(created_by) BETWEEN 1 AND 128),
     CONSTRAINT authoring_experiences_workflow_fk FOREIGN KEY (org_id, workflow_id)
@@ -3518,8 +3521,8 @@ CREATE UNIQUE INDEX authoring_experiences_active_source_idx ON public.authoring_
     (org_id, workflow_id, workflow_version_id, brief_key, policy_version) WHERE revoked_at IS NULL;
 CREATE INDEX authoring_experiences_list_idx ON public.authoring_experiences
     (org_id, workflow_id, registered_at DESC, id DESC) WHERE revoked_at IS NULL;
-CREATE INDEX authoring_experiences_match_idx ON public.authoring_experiences
-    (org_id, brief_key, registered_at DESC, id DESC) WHERE revoked_at IS NULL;
+-- Exact-key matching (live and as-of) reads this one non-partial index; the
+-- tombstone predicate cannot prove a revoked_at IS NULL partial index.
 CREATE INDEX authoring_experiences_history_match_idx ON public.authoring_experiences
   (org_id, brief_key, registered_at DESC, id COLLATE "C" DESC);
 CREATE INDEX authoring_experiences_expiry_idx ON public.authoring_experiences (retain_until, id);

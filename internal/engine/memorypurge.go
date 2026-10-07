@@ -56,12 +56,14 @@ func (e *Engine) SweepMemoryConsentPurges(ctx context.Context) (int, error) {
 			}
 			continue
 		}
+		// Memory rows are already gone; a registry failure must not drop
+		// their audit record. The next pass retries the registry purge.
 		experiences, err := q.PurgeAuthoringExperiencesForOrg(ctx, row.OrgID)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
-			continue
+			experiences = 0
 		}
 		if deleted == 0 && experiences == 0 {
 			continue

@@ -69,6 +69,9 @@ process/tenant consent and exact allowed kind `workflow_vector`, plus default-of
 authoring gates. It stores no vector or duplicate DAG and makes no embedding call.
 Registration is explicit on an immutable saved version, not a successful-outcome
 label. Disabling/deleting the relevant tenant consent atomically revokes existing
-registrations; re-granting requires fresh explicit registration. Existing maintenance
+registrations; re-granting requires fresh explicit registration. The process gates
+(`JANUSLY_MEMORY_ENABLED`, `JANUSLY_AUTHORING_EXPERIENCE_ENABLED`) only suspend
+reads and registration: unexpired, unrevoked rows become eligible again when a
+gate is restored, so withdraw tenant consent to revoke. Existing maintenance
 sweeps physically remove expired/revoked rows; request-time eligibility closes first.
 The list and audit surfaces omit briefs, matching keys and graphs.

@@ -76,7 +76,9 @@ saved version, rejects deleted parents and checks the current workflow validator
 and capability/intent binder. It never substitutes the latest version. List and
 command responses contain provenance only, with `outcomeEvidence: "unknown"`.
 Audits record registration identity and closed policy/outcome metadata, not briefs,
-content hashes, source graphs or provider errors.
+content hashes, source graphs or provider errors. Only a new registration or
+an active-to-revoked transition is audited; duplicate registrations and repeat
+withdrawals return the existing state without another audit event.
 
 Sorted consent-row locks fence insertion against concurrent revocation. A database
 trigger invalidates active registrations atomically when tenant consent is disabled,
@@ -126,6 +128,9 @@ N+1 queries or an unbounded history walk. Compatibility is checked using the
 current binder and workflow validator before the final five-candidate top-K.
 If the source horizon cannot establish completeness, `truncated` requires
 review; it never fabricates an empty match or chooses an arbitrary first row.
+A brief whose matching candidates would overflow the bounded decision request
+is treated the same way: the candidates are withheld and `truncated` requires
+review instead of failing the decision.
 Historical matching has an organization/key/time index and explicit C-collation
 identity ordering, consistent with the frozen replay across database locales.
 

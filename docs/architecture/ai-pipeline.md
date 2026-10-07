@@ -34,7 +34,10 @@ with at most five eligible candidates, an 8 KiB decision projection and a 4 KiB
 receipt. An initial operational lookup failure preserves the existing admitted
 generation path once while the parent request is alive. Source incompatibility
 or a failed revalidation of a reviewed receipt remains guarded; it never requests
-a replacement generation. Parent cancellation is terminal.
+a replacement generation. A receipt submitted against a changed capability
+catalog still crosses the mode, process and permission gates and is refused with
+an `authoring_experience_source_changed` binding instead of the catalog-change
+placeholder alone. Parent cancellation is terminal.
 
 A REUSE/ADAPT result is a new unsaved draft. It preserves the immutable source's
 topology, configuration, approvals, outputs, recovery policy and child pins;
