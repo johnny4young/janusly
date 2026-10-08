@@ -53,8 +53,10 @@ reviewed draft identity for REUSE/ADAPT only. Outcome evidence is `unknown`.
 The browser's explicit Apply re-reads the catalog and submits the exact receipt
 and detached comparison snapshot for source/consent revalidation. It accepts only
 the already-reviewed receipt and graph, preserving the draft identity; stale
-source, context, consent, identity or canvas changes prevent copying. Apply does
-not save, run, or grant tool approval.
+source, context, consent, identity or canvas changes prevent copying. The
+context revision hashes the canvas without its layout-only `ui` positions, so
+moving a node does not invalidate a reviewed receipt. Apply does not save, run,
+or grant tool approval.
 
 Decision audit metadata contains only closed classification/policy/stage and
 aggregate call-accounting facts. It does not contain source IDs, matching hashes,

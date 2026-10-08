@@ -122,7 +122,7 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 		if err != nil {
 			return err
 		}
-		if !sameDecisionReceipt(final, receipt) {
+		if !SameDecisionReceipt(final, receipt) {
 			return ErrExperienceSourceUnavailable
 		}
 		return nil
@@ -134,7 +134,7 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 	}
 	var draft []byte
 	if previous != nil {
-		if !sameDecisionReceipt(*previous, receipt) {
+		if !SameDecisionReceipt(*previous, receipt) {
 			return ExperienceSelection{}, nil, ErrExperienceSourceUnavailable
 		}
 		var source *ExperienceArtifact
