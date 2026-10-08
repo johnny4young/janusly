@@ -3526,8 +3526,10 @@ CREATE INDEX authoring_experiences_source_idx ON public.authoring_experiences
     (org_id, workflow_id, workflow_version_id);
 CREATE INDEX authoring_experiences_list_idx ON public.authoring_experiences
     (org_id, workflow_id, registered_at DESC, id DESC) WHERE revoked_at IS NULL;
-CREATE INDEX authoring_experiences_match_idx ON public.authoring_experiences
-    (org_id, brief_key, registered_at DESC, id DESC) WHERE revoked_at IS NULL;
+-- Exact-key matching (live and as-of) reads this one non-partial index; the
+-- tombstone predicate cannot prove a revoked_at IS NULL partial index.
+CREATE INDEX authoring_experiences_history_match_idx ON public.authoring_experiences
+  (org_id, brief_key, registered_at DESC, id COLLATE "C" DESC);
 CREATE INDEX authoring_experiences_expiry_idx ON public.authoring_experiences (retain_until, id);
 CREATE INDEX authoring_experiences_revocation_idx ON public.authoring_experiences (revoked_at, id) WHERE revoked_at IS NOT NULL;
 

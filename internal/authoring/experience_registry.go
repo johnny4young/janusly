@@ -14,11 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/johnny4young/janusly/internal/aiguidance"
-	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/memorypolicy"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
-	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 var (
@@ -166,7 +164,7 @@ func rollbackExperienceTx(ctx context.Context, tx pgx.Tx) {
 	_ = tx.Rollback(cleanup)
 }
 
-func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string) (pgx.Tx, *store.Queries, int, error) {
+func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string, resolving bool) (pgx.Tx, *store.Queries, int, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, 0, err
 	}
@@ -181,10 +179,21 @@ func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string) (pgx.T
 		return nil, nil, 0, err
 	}
 	q := store.New(tx)
-	rows, err := q.LockAuthoringExperienceConsent(ctx, orgID)
-	if err != nil {
+	// Both lock modes read the same key set; only the row-lock strength differs.
+	var rows []store.LockAuthoringExperienceConsentRow
+	var readErr error
+	if resolving {
+		var exclusive []store.LockAuthoringExperienceResolveConsentRow
+		exclusive, readErr = q.LockAuthoringExperienceResolveConsent(ctx, orgID)
+		for _, row := range exclusive {
+			rows = append(rows, store.LockAuthoringExperienceConsentRow(row))
+		}
+	} else {
+		rows, readErr = q.LockAuthoringExperienceConsent(ctx, orgID)
+	}
+	if readErr != nil {
 		rollbackExperienceTx(ctx, tx)
-		return nil, nil, 0, err
+		return nil, nil, 0, readErr
 	}
 	values := make(map[string]json.RawMessage, len(rows))
 	for _, row := range rows {
@@ -206,7 +215,7 @@ func (r *ExperienceRegistry) Register(ctx context.Context, input ExperienceRegis
 	if err != nil {
 		return ExperienceRecord{}, err
 	}
-	tx, q, days, err := r.consentTx(ctx, input.OrganizationID)
+	tx, q, days, err := r.consentTx(ctx, input.OrganizationID, false)
 	if err != nil {
 		return ExperienceRecord{}, err
 	}
@@ -219,8 +228,7 @@ func (r *ExperienceRegistry) Register(ctx context.Context, input ExperienceRegis
 	if err != nil {
 		return ExperienceRecord{}, err
 	}
-	workflow, issues := domain.Parse(source.DagJson)
-	if workflow == nil || len(issues) > 0 || source.Version < 1 || workflow.ID != input.WorkflowID || !workflowvalidation.Validate(workflow).Valid || !BindProposal(input.Catalog, input.Brief, workflow).Complete {
+	if source.Version < 1 || compatibleExperienceSource(input.Catalog, input.Brief, input.WorkflowID, source.DagJson) == nil {
 		return ExperienceRecord{}, ErrExperienceSourceIncompatible
 	}
 	if err := q.DeleteExpiredAuthoringExperienceSource(ctx, store.DeleteExpiredAuthoringExperienceSourceParams{OrgID: input.OrganizationID, WorkflowID: input.WorkflowID, WorkflowVersionID: input.VersionID, BriefKey: key, AsOf: now}); err != nil {
@@ -245,7 +253,7 @@ func (r *ExperienceRegistry) List(ctx context.Context, orgID, workflowID string)
 	if !validExperienceID(workflowID) {
 		return ExperienceList{}, ErrExperienceBriefInvalid
 	}
-	tx, q, _, err := r.consentTx(ctx, orgID)
+	tx, q, _, err := r.consentTx(ctx, orgID, false)
 	if err != nil {
 		return ExperienceList{}, err
 	}
