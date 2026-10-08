@@ -245,6 +245,19 @@ func TestExperienceRegistryListFiltersBeforeBoundedSentinelAndPurges(t *testing.
 	if err != nil || count != 1 {
 		t.Fatalf("second bounded batch: %d %v", count, err)
 	}
+	// The consent purge removes withdrawn rows only: an active registration
+	// admitted after consent was re-granted must survive a racing sweep.
+	var active int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM authoring_experiences WHERE org_id='org-a' AND revoked_at IS NULL`).Scan(&active); err != nil || active == 0 {
+		t.Fatalf("fixture needs active rows: %d %v", active, err)
+	}
+	if _, err := q.PurgeAuthoringExperiencesForOrg(t.Context(), "org-a"); err != nil {
+		t.Fatal(err)
+	}
+	var survivors int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM authoring_experiences WHERE org_id='org-a' AND revoked_at IS NULL`).Scan(&survivors); err != nil || survivors != active {
+		t.Fatalf("consent purge deleted active registrations: %d of %d %v", survivors, active, err)
+	}
 	if _, err := pool.Exec(t.Context(), `DELETE FROM workflow_versions WHERE id='ver-5'`); err != nil {
 		t.Fatal(err)
 	}

@@ -105,5 +105,7 @@ uniqueness preserves idempotent identity and retention; explicit revocation allo
 a new registration without reviving history. A consent trigger on `org_configs`
 revokes registrations in the same transaction as withdrawal. Scoped, ordered list
 indexes support a five-row result plus truncation sentinel; all availability and
-retention predicates precede LIMIT. Expiry/revocation indexes support the existing
-bounded maintenance sweep. See [experience authoring](experience-authoring.md).
+retention predicates precede LIMIT. A full (non-partial) source index serves the
+workflow/version cascades and the per-org consent purge, which partial active-row
+indexes cannot. Expiry/revocation indexes support the existing bounded maintenance
+sweep. See [experience authoring](experience-authoring.md).

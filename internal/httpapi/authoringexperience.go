@@ -126,6 +126,9 @@ func (s *V1Server) registerAuthoringExperienceCore(r *http.Request, rc v1Request
 		return experienceError(authoring.ErrExperienceBriefInvalid)
 	}
 	input.Brief = strictBrief
+	if err := authoring.ValidateExperienceRegistration(input); err != nil {
+		return experienceError(err)
+	}
 	// Build before the registry transaction: catalog readers share the bounded
 	// API pool and must not acquire a second connection while holding consent.
 	input.Catalog = s.authoringCatalog(rc, r)

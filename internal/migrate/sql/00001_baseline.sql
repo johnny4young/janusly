@@ -3519,6 +3519,11 @@ CREATE TABLE public.authoring_experiences (
 );
 CREATE UNIQUE INDEX authoring_experiences_active_source_idx ON public.authoring_experiences
     (org_id, workflow_id, workflow_version_id, brief_key, policy_version) WHERE revoked_at IS NULL;
+-- Full (non-partial) source index: FK cascades from workflows/workflow_versions
+-- and the per-org consent purge filter without revoked_at, so partial indexes
+-- cannot serve them and would otherwise scan the whole registry.
+CREATE INDEX authoring_experiences_source_idx ON public.authoring_experiences
+    (org_id, workflow_id, workflow_version_id);
 CREATE INDEX authoring_experiences_list_idx ON public.authoring_experiences
     (org_id, workflow_id, registered_at DESC, id DESC) WHERE revoked_at IS NULL;
 CREATE INDEX authoring_experiences_match_idx ON public.authoring_experiences
