@@ -2,7 +2,6 @@ package authoring
 
 import (
 	"context"
-	"reflect"
 
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -86,7 +85,10 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 			}
 			candidate := ExperienceCandidate{ID: row.ID, OrganizationID: row.OrgID, WorkflowID: row.WorkflowID, VersionID: row.WorkflowVersionID, Version: int(row.Version), BriefKey: row.BriefKey, PolicyVersion: row.PolicyVersion, RegisteredAt: row.RegisteredAt, VersionCreatedAt: *row.VersionCreatedAt, RetainUntil: row.RetainUntil, RevokedAt: row.RevokedAt, Readable: true, Compatible: true}
 			projection.Candidates = append(projection.Candidates, candidate)
-			sources = append(sources, ExperienceArtifact{Candidate: candidate, Document: row.DagJson})
+			// Only resolution copies a source; a decision keeps no graph bytes.
+			if previous != nil {
+				sources = append(sources, ExperienceArtifact{Candidate: candidate, Document: row.DagJson})
+			}
 		}
 		projection.Truncated = projection.Truncated || len(projection.Candidates) > MaxExperienceCandidates
 		projection.Candidates = projection.Candidates[:min(len(projection.Candidates), MaxExperienceCandidates)]
@@ -113,7 +115,7 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 		if err != nil {
 			return err
 		}
-		if !reflect.DeepEqual(final, receipt) {
+		if !sameDecisionReceipt(final, receipt) {
 			return ErrExperienceSourceUnavailable
 		}
 		return nil
@@ -125,7 +127,7 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 	}
 	var draft []byte
 	if previous != nil {
-		if !reflect.DeepEqual(*previous, receipt) {
+		if !sameDecisionReceipt(*previous, receipt) {
 			return ExperienceSelection{}, nil, ErrExperienceSourceUnavailable
 		}
 		var source *ExperienceArtifact

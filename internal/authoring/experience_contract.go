@@ -185,6 +185,15 @@ func ProposeDecision(ctx context.Context, provider DecisionProvider, request Dec
 	return receipt, nil
 }
 
+// sameDecisionReceipt compares receipts by their canonical wire form, so an
+// omitted and an empty edit list (which encode identically) remain the same
+// receipt after a caller round-trips it through JSON.
+func sameDecisionReceipt(a, b DecisionReceipt) bool {
+	left, leftErr := json.Marshal(a)
+	right, rightErr := json.Marshal(b)
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
+}
+
 func cloneDecisionRequest(r DecisionRequest) DecisionRequest {
 	r.Brief.Inputs = slices.Clone(r.Brief.Inputs)
 	r.Brief.ExternalEffects = slices.Clone(r.Brief.ExternalEffects)
