@@ -137,17 +137,20 @@ export function useAiStudioController({
   // Store subscriptions observe the first authority change, including a
   // transient change batched back to the original values before React paints.
   useLayoutEffect(() => {
-    const clearReview = () => {
+    const expireProposal = () => {
       authoringRequestRef.current += 1
-      currentRequestRef.current += 1
       proposalSourceRef.current = null
       proposalRef.current = null
       setProposalState(null)
       setProposalBuildMs(null)
       setExperienceAvailable(false)
       setExperienceName('')
-      setClarificationAnswers({})
       setAuthoringError(null)
+    }
+    const clearReview = () => {
+      expireProposal()
+      currentRequestRef.current += 1
+      setClarificationAnswers({})
       setResult(null)
       setCurrentLoading(null)
     }
@@ -189,15 +192,8 @@ export function useAiStudioController({
       // lifecycle; a pending preview cannot know its mode yet, so it expires.
       const previewPending = proposalRequestRef.current === authoringRequestRef.current
       if (previewPending || proposalRef.current?.experienceDecision) {
-        authoringRequestRef.current += 1
+        expireProposal()
         proposalRequestRef.current = null
-        proposalSourceRef.current = null
-        proposalRef.current = null
-        setProposalState(null)
-        setProposalBuildMs(null)
-        setExperienceAvailable(false)
-        setExperienceName('')
-        setAuthoringError(null)
         // A resource change expires review, not an in-flight Apply's snapshot.
         // Its command boundary owns the result and the loading ends on settlement.
         setAuthoringLoading(loading => loading === 'apply' ? loading : null)

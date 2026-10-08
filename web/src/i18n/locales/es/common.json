@@ -4226,7 +4226,7 @@
   "home.evidence.unavailable": "No se pudo confirmar la salud actual. Reintenta para cargar la evidencia.",
   "home.evidence.stale": "Se muestran datos anteriores; la salud actual no está confirmada. Actualiza antes de tomar decisiones.",
   "recoveryCenter.greeting.subline.needsReview": "La salud está en {{score}}. Revisa los resultados recientes antes de asumir una recuperación.",
-  "versionHistory.experience.heading": "Ejemplos registrados de authoring",
+  "versionHistory.experience.heading": "Ejemplos registrados de autoría",
   "versionHistory.experience.version": "Versión guardada de origen",
   "versionHistory.experience.intent": "Intención del ejemplo",
   "versionHistory.experience.compile": "Compilar intención del ejemplo",

@@ -110,7 +110,7 @@ function ScopedRegistry({ workflowId, versions }: { workflowId: string; versions
     } catch { if (current(request, id)) setError(true) }
     finally { if (current(request, id)) setBusy(null) }
   }
-  if (!list) return error ? <div role="status"><p>{t('versionHistory.experience.failed')}</p><Button size="sm" onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</Button></div> : null
+  if (!list) return error ? <div role="alert"><p>{t('versionHistory.experience.failed')}</p><Button size="sm" onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</Button></div> : null
   const mutating = busy === 'register' || busy === 'revoke'
   return <FormDisclosure summary={t('versionHistory.experience.heading')} open>
     <p>{t('versionHistory.experience.unknown')}</p>

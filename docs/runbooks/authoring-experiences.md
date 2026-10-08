@@ -39,7 +39,7 @@ the ordinary permissions, budget, provider and deterministic fallback path.
 
 1. In AI Studio, describe the same complete structured intent and select
    **Compile intent brief**. Review capability bindings, then select
-   **Build proposal preview** explicitly. Matching is exact, not semantic search;
+   **Build proposal** explicitly. Matching is exact, not semantic search;
    a different intent need not select the saved example.
 2. Review the classification, reason/policy and exact source version. REUSE copies
    an eligible source; ADAPT only changes its explicitly requested name. GENERATE

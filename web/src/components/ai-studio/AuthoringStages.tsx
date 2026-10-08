@@ -89,9 +89,10 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
   const authoringElapsedMs = briefCompileMs === null || proposalBuildMs === null
     ? null
     : briefCompileMs + proposalBuildMs
+  // Only an ordinary generated proposal carries the local-fallback notices.
+  const generatedProposal = !proposal?.experienceDecision || proposal.experienceDecision.mode === 'GENERATE'
   const zeroCallLocalProposal = Boolean(
-    proposal?.mode === 'fallback' && !proposal.aiError && !proposal.providerGuarded
-      && (!proposal.experienceDecision || proposal.experienceDecision.mode === 'GENERATE'),
+    proposal?.mode === 'fallback' && !proposal.aiError && !proposal.providerGuarded && generatedProposal,
   )
   return (
     <>
@@ -297,7 +298,9 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
         </div>
 
         <p className="helper-text">{t('aiStudio.proposal.body')}</p>
-        {experienceAvailable && <FormField label={t('aiStudio.experience.name')} hint={t('aiStudio.experience.nameHint')}>
+        {experienceAvailable && <FormField label={t('aiStudio.experience.name')}
+          hint={experienceNameValid ? t('aiStudio.experience.nameHint') : undefined}
+          error={experienceNameValid ? undefined : t('aiStudio.experience.nameHint')}>
           {props => <TextInput {...props} value={experienceName} maxLength={200} disabled={authoringLoading === 'apply'}
             onChange={event => replaceExperienceName(event.target.value)} />}
         </FormField>}
@@ -327,7 +330,7 @@ export function AuthoringStages({ model }: { model: AiStudioModel }) {
                   description={t('aiStudio.proposal.guardedBody')}
                 />
               </div>
-            ) : proposal.mode === 'fallback' && (!proposal.experienceDecision || proposal.experienceDecision.mode === 'GENERATE') && (
+            ) : proposal.mode === 'fallback' && generatedProposal && (
               <StatusSummary
                 role="status"
                 tone="info"

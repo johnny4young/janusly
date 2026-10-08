@@ -414,15 +414,15 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
                 </Button>
               ))}
             </div>
-        )}
-        <WorkflowDiffView
-          before={improvement.base.dagJson}
-          after={activeSuggestion.workflow}
-          beforeLabel={`v${improvement.base.version}`}
-          afterLabel={t('versionHistory.suggested', { approach: approachLabelText(activeSuggestion.approachLabel) })}
-          aiPatchRationale={activeSuggestion.rationale}
-        />
-      </div>
+          )}
+          <WorkflowDiffView
+            before={improvement.base.dagJson}
+            after={activeSuggestion.workflow}
+            beforeLabel={`v${improvement.base.version}`}
+            afterLabel={t('versionHistory.suggested', { approach: approachLabelText(activeSuggestion.approachLabel) })}
+            aiPatchRationale={activeSuggestion.rationale}
+          />
+        </div>
       )}
 
       {improvement.kind === 'fallback' && (
