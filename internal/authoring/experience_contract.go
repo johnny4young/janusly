@@ -219,6 +219,11 @@ func DecodeDecisionProposal(raw []byte) (DecisionProposal, error) {
 	if !validProposalShape(proposal) {
 		return DecisionProposal{}, errDecisionProposal
 	}
+	// "edits":[] and an omitted field are the same proposal; keep one form so
+	// the decoded value is stable across an encode/decode round trip.
+	if len(proposal.Edits) == 0 {
+		proposal.Edits = nil
+	}
 	return proposal, nil
 }
 
@@ -254,7 +259,7 @@ func ValidateDecision(r DecisionRequest, p DecisionProposal) (DecisionReceipt, e
 }
 
 func requiredDecision(r DecisionRequest) (DecisionMode, DecisionReason, *ExperienceCandidate) {
-	if !r.Complete || r.Brief.Objective == "" || r.Brief.Trigger == "" || r.Brief.ExpectedOutcome == "" {
+	if !r.Complete || strings.TrimSpace(r.Brief.Objective) == "" || strings.TrimSpace(r.Brief.Trigger) == "" || strings.TrimSpace(r.Brief.ExpectedOutcome) == "" {
 		return DecisionEscalate, DecisionIncompleteIntent, nil
 	}
 	if r.CanonicalRecipe {

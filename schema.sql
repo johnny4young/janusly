@@ -2484,6 +2484,13 @@ CREATE INDEX authoring_experiences_revocation_idx ON public.authoring_experience
 
 
 --
+-- Name: authoring_experiences_source_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX authoring_experiences_source_idx ON public.authoring_experiences USING btree (org_id, workflow_id, workflow_version_id);
+
+
+--
 -- Name: auto_healing_runs_dead_letter_key; Type: INDEX; Schema: public; Owner: -
 --
 
