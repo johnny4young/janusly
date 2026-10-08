@@ -17,6 +17,13 @@ type ExperienceSelection struct {
 	Receipt DecisionReceipt
 }
 
+// ExperienceReader is explicitly composed at the API boundary. It resolves
+// current scoped registrations; it is not a completion provider or a writer.
+type ExperienceReader interface {
+	Decide(context.Context, DecisionRequest, Catalog) (ExperienceSelection, error)
+	Resolve(context.Context, DecisionRequest, DecisionReceipt, Catalog, string) ([]byte, error)
+}
+
 // Decide reads only current, consented, same-tenant exact registrations. The
 // caller supplies centralized read/AI authority and a current server-built
 // catalog. No graph, consent bit or as-of instant comes from a model/body.
@@ -115,7 +122,7 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 		if err != nil {
 			return err
 		}
-		if !sameDecisionReceipt(final, receipt) {
+		if !SameDecisionReceipt(final, receipt) {
 			return ErrExperienceSourceUnavailable
 		}
 		return nil
@@ -127,7 +134,7 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 	}
 	var draft []byte
 	if previous != nil {
-		if !sameDecisionReceipt(*previous, receipt) {
+		if !SameDecisionReceipt(*previous, receipt) {
 			return ExperienceSelection{}, nil, ErrExperienceSourceUnavailable
 		}
 		var source *ExperienceArtifact

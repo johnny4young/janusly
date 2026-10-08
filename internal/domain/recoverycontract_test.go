@@ -282,6 +282,7 @@ func TestWorkflowParseRejectsRecoveryWireDriftAndNormalizesStrings(t *testing.T)
 	workflow, issues := Parse([]byte(document))
 	if workflow == nil || len(issues) != 0 {
 		t.Fatalf("normalizable recovery rejected: %v", issues)
+		return // t.Fatalf never returns; keeps nil analysis independent of linter facts
 	}
 	detector := workflow.Recovery.Contract.Failure.Semantic.Detectors[0]
 	if workflow.Recovery.Contract.Effects[0].NodeID != "calc" || detector.ID != "det-1" ||

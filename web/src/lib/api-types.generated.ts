@@ -51,6 +51,113 @@ export type AuthoringCapabilities = {
   "warnings": string[]
 }
 
+export type AuthoringExperienceCopyReceipt = {
+  "catalogVersion": string
+  "contextRevision": string
+  "draftId": string
+  "mode": "REUSE"
+  "outcomeEvidence": "unknown"
+  "policyVersion": "authoring-experience-v1"
+  "provider": "rules"
+  "reason": "exact_match"
+  "source": {
+    "candidateId": string
+    "version": number
+    "versionId": string
+    "workflowId": string
+  }
+  "truncated": false
+  "edits"?: never
+} | {
+  "catalogVersion": string
+  "contextRevision": string
+  "draftId": string
+  "edits": {
+    "field": "workflow_name"
+    "value": string
+  }[]
+  "mode": "ADAPT"
+  "outcomeEvidence": "unknown"
+  "policyVersion": "authoring-experience-v1"
+  "provider": "rules"
+  "reason": "descriptive_adaptation"
+  "source": {
+    "candidateId": string
+    "version": number
+    "versionId": string
+    "workflowId": string
+  }
+  "truncated": false
+}
+
+export type AuthoringExperienceDecision = {
+  "catalogVersion": string
+  "contextRevision": string
+  "draftId": string
+  "mode": "REUSE"
+  "outcomeEvidence": "unknown"
+  "policyVersion": "authoring-experience-v1"
+  "provider": "rules"
+  "reason": "exact_match"
+  "source": {
+    "candidateId": string
+    "version": number
+    "versionId": string
+    "workflowId": string
+  }
+  "truncated": false
+  "edits"?: never
+} | {
+  "catalogVersion": string
+  "contextRevision": string
+  "draftId": string
+  "edits": {
+    "field": "workflow_name"
+    "value": string
+  }[]
+  "mode": "ADAPT"
+  "outcomeEvidence": "unknown"
+  "policyVersion": "authoring-experience-v1"
+  "provider": "rules"
+  "reason": "descriptive_adaptation"
+  "source": {
+    "candidateId": string
+    "version": number
+    "versionId": string
+    "workflowId": string
+  }
+  "truncated": false
+} | {
+  "catalogVersion": string
+  "contextRevision": string
+  "mode": "GENERATE"
+  "outcomeEvidence": "unknown"
+  "policyVersion": "authoring-experience-v1"
+  "provider": "rules"
+  "reason": "no_exact_match" | "canonical_recipe"
+  "truncated": boolean
+  "draftId"?: never
+  "source"?: never
+  "edits"?: never
+} | {
+  "catalogVersion": string
+  "contextRevision": string
+  "mode": "ESCALATE"
+  "outcomeEvidence": "unknown"
+  "policyVersion": "authoring-experience-v1"
+  "provider": "rules"
+  "reason": "incomplete_intent" | "consent_unavailable" | "ambiguous_match" | "candidates_truncated" | "unsupported_adaptation"
+  "truncated": boolean
+  "draftId"?: never
+  "source"?: never
+  "edits"?: never
+}
+
+export type AuthoringExperienceEdits = {
+  "field": string
+  "value": string
+}[]
+
 export type AuthoringExperienceList = {
   "entries": AuthoringExperienceRecord[]
   "truncated": boolean
@@ -1168,6 +1275,7 @@ export type WorkflowProposalResponse = {
   }
   "brief": WorkflowIntentBrief
   "clarifyingQuestions": string[]
+  "experienceDecision"?: AuthoringExperienceDecision
   "mode": "ai" | "fallback" | "error"
   "proposal": {
     "applicable": boolean
@@ -1354,6 +1462,8 @@ export interface ApiRequests {
     "brief"?: WorkflowIntentBriefInput
     "catalogVersion"?: string
     "currentWorkflow"?: WorkflowComparisonSnapshot
+    "experienceEdits"?: AuthoringExperienceEdits
+    "experienceReceipt"?: AuthoringExperienceCopyReceipt
     "model"?: string
     "prompt"?: string
   }

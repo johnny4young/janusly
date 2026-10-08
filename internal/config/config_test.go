@@ -196,3 +196,25 @@ func TestAuthoringExperienceProcessFlagIsStrictAndDefaultOff(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthoringExperienceModeIsExplicitStrictAndDefaultOff(t *testing.T) {
+	for _, input := range []string{"", " ", "off", "shadow", "review", " review "} {
+		cfg, err := Load(env(map[string]string{"JANUSLY_AUTHORING_EXPERIENCE_MODE": input}))
+		want := strings.TrimSpace(input)
+		if want == "" {
+			want = "off"
+		}
+		if err != nil || string(cfg.AuthoringExperienceMode) != want {
+			t.Fatalf("mode %q: got=%q error=%v", input, cfg.AuthoringExperienceMode, err)
+		}
+		if cfg.AuthoringExperienceEnabled {
+			t.Fatal("choosing a mode silently enabled the independent registry gate")
+		}
+	}
+	for _, input := range []string{"REVIEW", "true", "1", "adaptive", "PRIVATE_MODE_VALUE"} {
+		_, err := Load(env(map[string]string{"JANUSLY_AUTHORING_EXPERIENCE_MODE": input}))
+		if err == nil || !strings.Contains(err.Error(), "JANUSLY_AUTHORING_EXPERIENCE_MODE") || strings.Contains(err.Error(), input) {
+			t.Fatalf("unsafe invalid mode response: %v", err)
+		}
+	}
+}

@@ -21,8 +21,10 @@ import (
 	contractdoc "github.com/johnny4young/janusly/contract"
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/authoring"
 	"github.com/johnny4young/janusly/internal/authpolicy"
 	"github.com/johnny4young/janusly/internal/browsersession"
+	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/httpapi/externalruntime"
@@ -76,6 +78,8 @@ func readyzHandler(timeout time.Duration, probe readinessProbe) http.HandlerFunc
 // V1Server owns the /v1 route surface over one engine and pool.
 type V1Server struct {
 	authoringExperienceEnabled bool
+	authoringExperienceMode    config.AuthoringExperienceMode
+	experienceReader           authoring.ExperienceReader
 	audit                      audit.Writer
 	engine                     *engine.Engine
 	pool                       *pgxpool.Pool
@@ -101,6 +105,10 @@ type V1Server struct {
 type V1ServerOptions struct {
 	// AuthoringExperienceEnabled is an explicit process gate, disabled by default.
 	AuthoringExperienceEnabled bool
+	// AuthoringExperienceMode defaults to off and does not enable the registry.
+	AuthoringExperienceMode config.AuthoringExperienceMode
+	// ExperienceReader is a process-owned scoped source reader, not a provider.
+	ExperienceReader authoring.ExperienceReader
 	// Audit carries the immutable process serialization policy.
 	Audit                       audit.Writer
 	FeedbackMemoryWorkers       int
@@ -136,6 +144,10 @@ func newV1HandlerWithWorkOS(
 	client workosClient,
 	options V1ServerOptions,
 ) (http.Handler, func(context.Context) error, error) {
+	experienceMode, modeErr := config.ResolveAuthoringExperienceMode(string(options.AuthoringExperienceMode))
+	if modeErr != nil {
+		return nil, nil, modeErr
+	}
 	feedbackMemory, err := newFeedbackMemoryPool(feedbackMemoryPoolOptions{
 		workers:       options.FeedbackMemoryWorkers,
 		queueCapacity: options.FeedbackMemoryQueueCapacity,
@@ -148,8 +160,13 @@ func newV1HandlerWithWorkOS(
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	server := &V1Server{
 		authoringExperienceEnabled: options.AuthoringExperienceEnabled,
+		authoringExperienceMode:    experienceMode,
+		experienceReader:           options.ExperienceReader,
 		engine:                     eng, pool: pool, audit: options.Audit, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
 		newID: uuid.NewString, hub: newStreamHub(), workos: client, feedbackMemory: feedbackMemory,
+	}
+	if server.experienceReader == nil {
+		server.experienceReader = server.experienceRegistry()
 	}
 	server.authPolicy = authpolicy.New(pool, options.Audit)
 	server.resolver.SetPolicyEvaluator(func(ctx context.Context, input auth.PolicyInput) bool {

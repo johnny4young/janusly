@@ -47,7 +47,7 @@ func CopyExperienceProposal(ctx context.Context, request DecisionRequest, receip
 		return nil, ErrExperienceSourceIncompatible
 	}
 	validated.Provider = receipt.Provider
-	if !sameDecisionReceipt(validated, receipt) {
+	if !SameDecisionReceipt(validated, receipt) {
 		return nil, ErrExperienceSourceIncompatible
 	}
 	key, _ := CanonicalExperienceKey(request.Brief)

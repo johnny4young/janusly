@@ -388,18 +388,21 @@ func pagerDutyFlowID(newID func() string) (string, error) {
 	return "pagerduty_off_hours_" + suffix.String(), nil
 }
 
+// IsCanonicalPagerDutyWorkflow shares recipe recognition with proposal
+// selection so registered examples cannot override the governed recipe.
+func IsCanonicalPagerDutyWorkflow(prompt string, brief *IntentBrief) bool {
+	return (brief == nil || brief.Trigger == "pagerduty") && IsPagerDutyWorkflowPrompt(pagerDutyRequirementText(prompt, brief))
+}
+
 // CompilePagerDutyWorkflow turns a recognized prompt into one canonical,
 // auditable graph. It returns recognized=false for every other intent. Missing
 // tenant identities stay empty so the capability binder can expose exact
 // alternatives instead of persisting invented placeholders.
 func CompilePagerDutyWorkflow(prompt string, options DeterministicWorkflowOptions) (document map[string]any, recognized bool, err error) {
-	if options.Brief != nil && options.Brief.Trigger != "pagerduty" {
+	if !IsCanonicalPagerDutyWorkflow(prompt, options.Brief) {
 		return nil, false, nil
 	}
 	requirementText := pagerDutyRequirementText(prompt, options.Brief)
-	if !IsPagerDutyWorkflowPrompt(requirementText) {
-		return nil, false, nil
-	}
 	now := time.Now
 	if options.Now != nil {
 		now = options.Now

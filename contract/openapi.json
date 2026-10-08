@@ -189,6 +189,555 @@
         ],
         "type": "object"
       },
+      "AuthoringExperienceCopyReceipt": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "catalogVersion": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "contextRevision": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "draftId": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "mode": {
+                "const": "REUSE",
+                "type": "string"
+              },
+              "outcomeEvidence": {
+                "const": "unknown",
+                "type": "string"
+              },
+              "policyVersion": {
+                "const": "authoring-experience-v1",
+                "type": "string"
+              },
+              "provider": {
+                "const": "rules",
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "exact_match"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "additionalProperties": false,
+                "properties": {
+                  "candidateId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "versionId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "workflowId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "candidateId",
+                  "workflowId",
+                  "versionId",
+                  "version"
+                ],
+                "type": "object"
+              },
+              "truncated": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider",
+              "mode",
+              "reason",
+              "policyVersion",
+              "contextRevision",
+              "catalogVersion",
+              "truncated",
+              "outcomeEvidence",
+              "source",
+              "draftId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "catalogVersion": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "contextRevision": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "draftId": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "edits": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "field": {
+                      "const": "workflow_name",
+                      "type": "string"
+                    },
+                    "value": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 1,
+                "minItems": 1,
+                "type": "array"
+              },
+              "mode": {
+                "const": "ADAPT",
+                "type": "string"
+              },
+              "outcomeEvidence": {
+                "const": "unknown",
+                "type": "string"
+              },
+              "policyVersion": {
+                "const": "authoring-experience-v1",
+                "type": "string"
+              },
+              "provider": {
+                "const": "rules",
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "descriptive_adaptation"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "additionalProperties": false,
+                "properties": {
+                  "candidateId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "versionId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "workflowId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "candidateId",
+                  "workflowId",
+                  "versionId",
+                  "version"
+                ],
+                "type": "object"
+              },
+              "truncated": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider",
+              "mode",
+              "reason",
+              "policyVersion",
+              "contextRevision",
+              "catalogVersion",
+              "truncated",
+              "outcomeEvidence",
+              "source",
+              "draftId",
+              "edits"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "AuthoringExperienceDecision": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "catalogVersion": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "contextRevision": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "draftId": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "mode": {
+                "const": "REUSE",
+                "type": "string"
+              },
+              "outcomeEvidence": {
+                "const": "unknown",
+                "type": "string"
+              },
+              "policyVersion": {
+                "const": "authoring-experience-v1",
+                "type": "string"
+              },
+              "provider": {
+                "const": "rules",
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "exact_match"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "additionalProperties": false,
+                "properties": {
+                  "candidateId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "versionId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "workflowId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "candidateId",
+                  "workflowId",
+                  "versionId",
+                  "version"
+                ],
+                "type": "object"
+              },
+              "truncated": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider",
+              "mode",
+              "reason",
+              "policyVersion",
+              "contextRevision",
+              "catalogVersion",
+              "truncated",
+              "outcomeEvidence",
+              "source",
+              "draftId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "catalogVersion": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "contextRevision": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "draftId": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "edits": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "field": {
+                      "const": "workflow_name",
+                      "type": "string"
+                    },
+                    "value": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 1,
+                "minItems": 1,
+                "type": "array"
+              },
+              "mode": {
+                "const": "ADAPT",
+                "type": "string"
+              },
+              "outcomeEvidence": {
+                "const": "unknown",
+                "type": "string"
+              },
+              "policyVersion": {
+                "const": "authoring-experience-v1",
+                "type": "string"
+              },
+              "provider": {
+                "const": "rules",
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "descriptive_adaptation"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "additionalProperties": false,
+                "properties": {
+                  "candidateId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "versionId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "workflowId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "candidateId",
+                  "workflowId",
+                  "versionId",
+                  "version"
+                ],
+                "type": "object"
+              },
+              "truncated": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider",
+              "mode",
+              "reason",
+              "policyVersion",
+              "contextRevision",
+              "catalogVersion",
+              "truncated",
+              "outcomeEvidence",
+              "source",
+              "draftId",
+              "edits"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "catalogVersion": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "contextRevision": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "mode": {
+                "const": "GENERATE",
+                "type": "string"
+              },
+              "outcomeEvidence": {
+                "const": "unknown",
+                "type": "string"
+              },
+              "policyVersion": {
+                "const": "authoring-experience-v1",
+                "type": "string"
+              },
+              "provider": {
+                "const": "rules",
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "no_exact_match",
+                  "canonical_recipe"
+                ],
+                "type": "string"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider",
+              "mode",
+              "reason",
+              "policyVersion",
+              "contextRevision",
+              "catalogVersion",
+              "truncated",
+              "outcomeEvidence"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "catalogVersion": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "contextRevision": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "mode": {
+                "const": "ESCALATE",
+                "type": "string"
+              },
+              "outcomeEvidence": {
+                "const": "unknown",
+                "type": "string"
+              },
+              "policyVersion": {
+                "const": "authoring-experience-v1",
+                "type": "string"
+              },
+              "provider": {
+                "const": "rules",
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "incomplete_intent",
+                  "consent_unavailable",
+                  "ambiguous_match",
+                  "candidates_truncated",
+                  "unsupported_adaptation"
+                ],
+                "type": "string"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider",
+              "mode",
+              "reason",
+              "policyVersion",
+              "contextRevision",
+              "catalogVersion",
+              "truncated",
+              "outcomeEvidence"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "AuthoringExperienceEdits": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "value": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        "maxItems": 1,
+        "type": "array"
+      },
       "AuthoringExperienceList": {
         "additionalProperties": false,
         "properties": {
@@ -5112,6 +5661,9 @@
             },
             "type": "array"
           },
+          "experienceDecision": {
+            "$ref": "#/components/schemas/AuthoringExperienceDecision"
+          },
           "mode": {
             "enum": [
               "ai",
@@ -5744,6 +6296,12 @@
                   },
                   "currentWorkflow": {
                     "$ref": "#/components/schemas/WorkflowComparisonSnapshot"
+                  },
+                  "experienceEdits": {
+                    "$ref": "#/components/schemas/AuthoringExperienceEdits"
+                  },
+                  "experienceReceipt": {
+                    "$ref": "#/components/schemas/AuthoringExperienceCopyReceipt"
                   },
                   "model": {
                     "type": "string"

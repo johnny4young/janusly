@@ -349,8 +349,13 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     // snapshot validated below, not a later mutation of shared UI state, is
     // the only object that may eventually be copied to the canvas.
     let proposalSnapshot: WorkflowProposalResponse
+    let comparisonSnapshot: WorkflowDefinition | undefined
     try {
       proposalSnapshot = structuredClone(response)
+      const decision = proposalSnapshot.experienceDecision
+      if (decision?.mode === 'REUSE' || decision?.mode === 'ADAPT') {
+        comparisonSnapshot = structuredClone(getWorkflowJson())
+      }
     } catch {
       addToast(t('toasts.aiResponseInvalid'), 'error')
       return { status: 'blocked' }
@@ -358,7 +363,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     if (!proposalSnapshot.proposal.applicable || !proposalSnapshot.bindings.complete) {
       return { status: 'blocked' }
     }
-    const { isWorkflowProposalApplySafe } = await loadAuthoringContract()
+    const { isWorkflowProposalApplySafe, isWorkflowProposalResponse } = await loadAuthoringContract()
     if (!await isWorkflowProposalApplySafe(proposalSnapshot)) {
       addToast(t('toasts.aiResponseInvalid'), 'error')
       return { status: 'blocked' }
@@ -377,6 +382,43 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     if (currentCatalog.version !== proposalSnapshot.bindings.catalogVersion) {
       return { status: 'catalog_changed', catalog: currentCatalog }
     }
+    const decision = proposalSnapshot.experienceDecision
+    if (decision?.mode === 'REUSE' || decision?.mode === 'ADAPT') {
+      // Re-read consent and the exact immutable source at the explicit Apply
+      // boundary. A stale receipt is never a request to generate a replacement.
+      let revalidated: unknown
+      try {
+        revalidated = await contractApi(
+          'POST /ai/workflow-proposals',
+          '/ai/workflow-proposals',
+          {
+            brief: proposalSnapshot.brief,
+            catalogVersion: proposalSnapshot.bindings.catalogVersion,
+            currentWorkflow: comparisonSnapshot,
+            experienceEdits: decision.mode === 'ADAPT' ? decision.edits : [],
+            experienceReceipt: decision,
+          },
+          { guard: isPostAiWorkflowProposalsResponse },
+        )
+      } catch {
+        if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+        addToast(t('toasts.aiResponseInvalid'), 'error')
+        return { status: 'blocked' }
+      }
+      if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+      // Source-specific review matching is needed only for opt-in source Apply.
+      const { jsonEquivalent } = await import('../lib/json-envelope-equality')
+      if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+      if (!isWorkflowProposalResponse(revalidated)
+        || !revalidated.proposal.applicable
+        || !await isWorkflowProposalApplySafe(revalidated)
+        || !jsonEquivalent(decision, revalidated.experienceDecision)
+        || !jsonEquivalent(proposalSnapshot.proposal.workflow, revalidated.proposal.workflow)) {
+        addToast(t('toasts.aiResponseInvalid'), 'error')
+        return { status: 'blocked' }
+      }
+      if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+    }
     hydrateWorkflow(proposalSnapshot.proposal.workflow, { saved: false, dirty: true })
     setValidationIssues([])
     setAiReviewIssues([])
@@ -385,6 +427,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
   }, [
     addToast,
     confirmReplaceCanvas,
+    getWorkflowJson,
     hydrateWorkflow,
     loadAuthoringCapabilities,
     setAiReviewIssues,

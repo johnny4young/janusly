@@ -4,6 +4,66 @@ All completion traffic passes through `internal/ai`. API handlers and workflow
 executors resolve tenant-safe configuration, budget, model, and output limits
 before calling the client.
 
+## Experience-assisted authoring
+
+The optional experience layer uses deterministic rules and explicitly registered
+immutable workflow versions from the same organization. It does not call an
+embedding/completion provider, harvest saved workflows, or treat registration as
+approval or evidence that an effect succeeded.
+
+`JANUSLY_AUTHORING_EXPERIENCE_ENABLED` defaults to false. Independently,
+`JANUSLY_AUTHORING_EXPERIENCE_MODE` accepts only `off` (default), `shadow`, or
+`review`; selecting a mode never enables the process gate. Registration and
+selection additionally require explicit tenant `ai.authoringExperienceEnabled`,
+`memory.enabled`, and `workflow_vector` allowed-kind consent, plus the existing
+process memory gate. Selection/revalidation requires both authoring and workflow
+read permission. Registration/withdrawal retain the workflow-write route gate.
+
+- **off:** preserve the existing proposal envelope and generation admission.
+- **shadow:** inspect the decision only; never resolve a source, change the
+  returned proposal, or add provider calls. Audit classification is hypothetical,
+  not a claim that shadow avoided generation.
+- **review:** one eligible exact structured intent selects REUSE; one explicit
+  `workflow_name` edit selects ADAPT. Ambiguity, disclosed truncation and
+  unsupported semantic edits return a non-applicable ESCALATE proposal. GENERATE
+  enters only the existing budget/rate/provider/fallback ladder; recognized
+  canonical PagerDuty intent still takes the governed recipe before paid calls.
+
+The whole optional selection/policy/source-read stage has a 200 ms deadline,
+with at most five eligible candidates, an 8 KiB decision projection and a 4 KiB
+receipt. An initial operational lookup failure preserves the existing admitted
+generation path once while the parent request is alive. Source incompatibility
+or a failed revalidation of a reviewed receipt remains guarded; it never requests
+a replacement generation. A receipt submitted against a changed capability
+catalog still crosses the mode, process and permission gates and is refused with
+an `authoring_experience_source_changed` binding instead of the catalog-change
+placeholder alone. Parent cancellation is terminal.
+
+A REUSE/ADAPT result is a new unsaved draft. It preserves the immutable source's
+topology, configuration, approvals, outputs, recovery policy and child pins;
+ADAPT changes only the explicitly supplied name. Existing parse, canonicalization,
+binding and readiness/qualification projection inspect that graph. The assurance
+compiler's contract-*addition* stage is not applied to a source copy: synthesizing
+new outputs or recovery policy would silently alter the registered artifact.
+Save, validation and execution keep their independent strict validators.
+
+Review responses include optional `experienceDecision` provenance: a closed mode,
+reason and policy, context/catalog revision, and an exact immutable source plus
+reviewed draft identity for REUSE/ADAPT only. Outcome evidence is `unknown`.
+The browser's explicit Apply re-reads the catalog and submits the exact receipt
+and detached comparison snapshot for source/consent revalidation. It accepts only
+the already-reviewed receipt and graph, preserving the draft identity; stale
+source, context, consent, identity or canvas changes prevent copying. The
+context revision hashes the canvas without its layout-only `ui` positions, so
+moving a node does not invalidate a reviewed receipt. Apply does not save, run,
+or grant tool approval.
+
+Decision audit metadata contains only closed classification/policy/stage and
+aggregate call-accounting facts. It does not contain source IDs, matching hashes,
+prompts, briefs, graphs, drafts, secrets or raw reader errors. Decision model-call
+count is zero; existing generation's logical-call count remains separate from SDK
+transport retries. Best-effort audit failures never fail an otherwise valid copy.
+
 ## Invariants
 
 - Anthropic is the supported completion provider.
