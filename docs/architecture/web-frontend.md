@@ -47,7 +47,53 @@ revalidates the reviewed receipt and comparison snapshot through the existing
 proposal endpoint after confirmation/catalog refresh. A changed source, graph,
 consent or canvas blocks copying instead of accepting a new proposal or requesting
 generation. Legacy proposals without a source-bearing receipt keep their existing
-Apply path. Save and Run remain separate actions.
+Apply path. Source Apply supplies its ownership signal to catalog and receipt
+reads, bypassing the API wrapper's short dedup window. An expired owner discards
+read errors as well as results; aborting the client request does not prove the
+server cancelled work. Save and Run remain separate actions.
+
+Saved-version history offers an optional example registry only after a consented,
+scoped read succeeds and the operator has AI and workflow read/write grants.
+Before that protected read, the UI reads the existing public org-config surface
+with the same ownership signal and requires explicit tenant authoring/memory
+consent plus the workflow-vector kind. Missing, malformed or disabled consent
+hides the registry without making a denied registry request during ordinary
+history use. This is UI admission only: the server still independently checks
+process gates, permissions and transactional consent on every registry command.
+Registration selects an exact immutable history version and explicitly compiles
+and reviews an example brief; neither the current draft nor a prompt/graph is
+sent to the registration endpoint. Register and Withdraw are explicit mutations.
+Disabled consent stays hidden, and failures never grant consent or report success.
+
+Experience review labels REUSE, ADAPT, GENERATE and ESCALATE separately from the
+completion/fallback status. It shows the closed reason/policy, exact source
+workflow/version for copies, and unknown outcome evidence. The optional name
+field requests only `workflow_name`, bounded to 200 UTF-8 bytes; editing it
+invalidates the previous proposal and requires a new explicit preview. It never
+changes executable graph authority, automatically proposes, or applies work.
+An in-flight Apply disables the name input and keeps its detached snapshot.
+
+Saved-version history also observes context changes synchronously. A transient
+identity, workflow, saved-state, navigation or authoring grant change aborts its
+old page and suggestions and starts a fresh read, even if React batches a return
+to the same visible scope. Old success/error paths cannot populate or unlock the
+new history snapshot. Client abort remains local result invalidation, not proof
+of remote cancellation.
+
+The authoring controller and source Apply lose ownership on the first identity,
+organization, canvas, navigation or grant change, even if the store returns to
+its original values before React paints. Registry results use the saved-history
+scope instead: they target immutable versions, so draft canvas edits do not
+discard a typed or compiled example. Consent/source resource invalidations expire
+registry results, source Apply, a pending preview and an experience-bearing
+proposal; an ordinary proposal and Explain/Review/Fix results keep their
+canvas-owned lifecycle, and the capability catalog is re-read. Leases are disposed on terminal paths; this is local
+result invalidation, not a claim that an already-delivered mutation was cancelled.
+The controller observes store transitions synchronously, so a transient identity
+change cannot restore an old proposal or capability read. A generation-owned
+catalog refresh cannot be populated or unlocked by an older response. Expected
+Apply hydration remains valid; resource refresh never substitutes an Apply snapshot
+or releases its loading early. Unmount disposes both store and tag observers.
 
 Successful HTTP responses with unreadable bodies are errors, not empty success
 objects; cancellation remains `AbortError`. A genuinely empty body remains
@@ -73,11 +119,21 @@ model. The manifest no longer admits the legacy envelope without `suggestions`,
 so there is no legacy projection. Do not add UI for response fields that no
 current server route produces.
 
+Snippet insertion imports only the pure insertion helpers and ID prefix; the
+built-in recipe catalog and lookup are separate. The menu reads actual built-in
+and tenant snippets from the existing API; importing it does not construct a
+second unused recipe index. The original library exports and recipes remain
+available to explicit catalog consumers.
+
 Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
 They must preserve the same strict-object, bound, default, transform, and
 refinement semantics as the API contract; do not trade validation coverage for
-bundle size. Top-level schema factories are marked pure so unused request-body
-schemas do not execute merely because a module also exports a shared enum.
+bundle size. Read-only UI imports shared enums, constants and pure insertion helpers from
+separate `*-values` modules; the original contract modules retain and re-export
+those values alongside their unchanged validators. Type-only references do not
+initialize validators. The metadata editor imports its own `workflow-metadata-schema`
+validator without the unrelated collection-write bodies. A pure annotation on an outer schema factory does not
+prevent evaluation of effectful argument expressions such as `.check(...)`.
 Semantic recovery response parsing lives in
 `web/src/lib/recovery-case-contract.ts` and shares the lazy
 `recovery-contract` chunk with the workflow recovery validator. It keeps the
@@ -262,8 +318,10 @@ measured operator need.
 ## Data invalidation
 
 Panel reads subscribe to the resources they depend on through
-`src/lib/query-cache.ts` (`useInvalidationNonce(tags)`, tags typed as
-`ResourceTag`), and mutations name what they changed: the store action
+`src/lib/query-cache.ts` (tags typed as `ResourceTag`). Resource-only readers
+use `useInvalidationNonce(tags)`; readers with explicit retry use
+`useResourceRefresh(tags)` for one local nonce and a stable refresh action,
+without a second retry counter. Mutations name what they changed: the store action
 `bumpPlatformVersion(tags)` invalidates only those tags, while the bare
 `bumpPlatformVersion()` still broadcasts through the `platform` bridge tag.
 Every panel subscribes to `[PLATFORM_TAG, ...its tags]`, so a same-domain
@@ -348,7 +406,7 @@ and a 0.5 KiB single-locale allowance for the fail-closed RecoveryDialog AI
 response parser. The complete-artifact cap remained 605 KiB for that security
 change; the parser stays in the existing lazy dialog rather than adding a
 network request. The cold path is what the caps protect: `index.css`, `workflow-workspace` and the
-route budgets in `performance/routes.performance.spec.ts` only ratchet down.
+route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB).
 
 ## Closing failures without recovery
 

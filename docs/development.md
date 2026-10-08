@@ -62,6 +62,17 @@ The same lane runs `usability-study-readiness.spec.ts` against real failures
 and routes in both locales; it verifies affordances only, not interviews or
 unassisted participant completion.
 
+It also runs `authoring-experience.spec.ts` in EN/ES against the same embedded
+application and fresh PostgreSQL stack, replacing only its owned executable
+between review, shadow, off, and process-disabled profiles. The ordinary smoke
+selection fixes experience and memory flags off; profile journeys explicitly opt
+in their isolated organizations. Provider credentials are blank and the AI health
+probe must report disabled before browser authoring. These checks cover exact
+older-version registration, name-only adaptation, unsaved Apply, withdrawal,
+source deletion, tenant consent changes, and legacy-envelope parity. Expected
+HTTP denials are asserted by exact endpoint/status; page errors and unrelated
+console errors remain failures. They do not qualify a model or human usability.
+
 A throwaway database for local integration runs, isolated from the dev one:
 
 ```bash
@@ -234,7 +245,7 @@ measured 3.3 KiB of the generated response guards (605 → 608.3 and
 560.5 → 563.8 KiB); guards compose shared primitives so each new adoption costs
 only its own shape. Once the hand-written readers shrank to UI invariants and
 each guard became its own module (a lazy panel's guard ships in its chunk), the
-caps were lowered to the measured size plus about 1 KiB (605.9 and 562.0 KiB).
+caps were lowered to the measured size plus about 1 KiB (605.9 and 562.0 KiB). The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB).
 
 ## Marketing site (`website/`)
 

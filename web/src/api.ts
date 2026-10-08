@@ -233,7 +233,9 @@ function matchesContractPath(template: string, actualPath: string): boolean {
   const pathname = queryIndex === -1 ? actualPath : actualPath.slice(0, queryIndex)
   if (!pathname.startsWith('/') || pathname.includes('#')) return false
   const expected = template.split('/')
-  const actual = pathname.split('/')
+  // Operation templates omit the version prefix; explicit v1-only routes
+  // still match the same closed template without inventing a legacy alias.
+  const actual = (pathname.startsWith('/v1/') ? pathname.slice(3) : pathname).split('/')
   return expected.length === actual.length && expected.every((segment, index) => {
     if (/^\{[^/{}]+\}$/.test(segment)) return (actual[index]?.length ?? 0) > 0
     return segment === actual[index]

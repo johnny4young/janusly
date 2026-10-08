@@ -19,7 +19,7 @@ import {
   type RecoveryItemSeverity,
   type RecoveryItemStatus,
   isSeverityEscalation,
-} from '@/lib/recovery-item'
+} from '@/lib/recovery-item-values'
 import { api, downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'

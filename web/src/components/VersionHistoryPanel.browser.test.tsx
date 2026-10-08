@@ -1,14 +1,22 @@
 import { act, render, screen } from '@testing-library/react'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { api } from '../api'
 import { initI18n } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 
-vi.mock('../api', () => {
-  const api = vi.fn()
-  return { api, contractApi: (_op: string, path: string, _body: unknown, options?: RequestInit) => api(path, options) }
+const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }))
+
+vi.mock('../api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../api')>()
+  return { ...actual, api: apiMock,
+    contractApi: (operation: string, path: string, _body: unknown, options?: RequestInit) => {
+      if (operation === 'GET /authoring/experiences') {
+        return Promise.reject(new actual.ApiError('disabled', { statusCode: 403 }))
+      }
+      return apiMock(path, options)
+    },
+  }
 })
 const initialState = useWorkflowStore.getState()
 
@@ -22,7 +30,7 @@ beforeEach(() => {
     invitations: [], currentOrganizationId: 'default', selectionRequired: false, needsOrganization: false,
     truncated: false, invitationsTruncated: false,
   } })
-  vi.mocked(api).mockReset()
+  apiMock.mockReset()
 })
 
 describe('Version history in Chromium', () => {
@@ -32,7 +40,7 @@ describe('Version history in Chromium', () => {
       organizations: context.organizations.map(org => ({ ...org, permissions: [...org.permissions, 'ai.write'] })),
     } })
     const workflow = { id: 'history', name: 'History', nodes: [], edges: [] }
-    vi.mocked(api).mockImplementation(async path => path.startsWith('/workflows/versions')
+    apiMock.mockImplementation(async path => path.startsWith('/workflows/versions')
       ? [2, 1].map(version => ({ workflowId: 'history', id: `snapshot-${version}`, version, createdAt: null, dagJson: workflow }))
       : { mode: 'ai', suggestions: [
         { workflow: { ...workflow, name: 'First proposal' }, rationale: 'FIRST rationale', approachLabel: 'add_retry', confidence: 0.8 },
@@ -70,7 +78,7 @@ describe('Version history in Chromium', () => {
   ] as const)('retries by keyboard and loads the exact immutable version in $locale', async ({ locale, retry, compare, cancel, error }) => {
     initI18n(locale)
     let reject: (reason: Error) => void = () => { throw new Error('not requested') }
-    vi.mocked(api).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+    apiMock.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
     await page.viewport(390, 844)
     const view = render(<VersionHistoryPanel />)
     try {
@@ -79,7 +87,7 @@ describe('Version history in Chromium', () => {
       await act(async () => reject(new Error('offline')))
       await expect.element(page.getByRole('alert')).toHaveTextContent(error)
       expect(screen.queryByTestId('version-history-empty')).not.toBeInTheDocument()
-      vi.mocked(api).mockResolvedValue([2, 1].map(version => ({
+      apiMock.mockResolvedValue([2, 1].map(version => ({
         workflowId: 'history', id: `snapshot-${version}`, version, createdAt: null,
         dagJson: { id: 'history', name: `History ${version}`, nodes: [], edges: [] },
       })))
@@ -99,7 +107,7 @@ describe('Version history in Chromium', () => {
       await userEvent.keyboard('{Enter}')
       expect(useWorkflowStore.getState().currentWorkflowVersion).toEqual({ id: 'snapshot-1', version: 1 })
       expect(useWorkflowStore.getState().currentWorkflowName).toBe('History 1')
-      expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
+      expect(apiMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
     } finally {
       view.unmount()
       await page.viewport(1024, 768)

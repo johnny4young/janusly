@@ -31,6 +31,12 @@ jq -e '.specs == [
   "e2e/usability-study-readiness.spec.ts"
 ]' <<<"$result" >/dev/null
 
+jq -e '.experience == {
+  specs:["e2e/authoring-experience.spec.ts"],
+  profiles:["review","shadow","off","disabled"],
+  baseline:{enabled:false,mode:"off",memoryEnabled:false}
+}' <<<"$result" >/dev/null
+
 if JANUSLY_E2E_PROJECT=janusly-e2e bash "$script" selftest >/dev/null 2>&1; then
   echo "historical shared project was accepted" >&2
   exit 1

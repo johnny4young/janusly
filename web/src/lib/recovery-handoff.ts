@@ -17,11 +17,15 @@
 
 import * as z from 'zod/mini'
 
+import {
+  RECOVERY_HANDOFF_DESTINATIONS,
+} from './recovery-handoff-values'
+export * from './recovery-handoff-values'
+
 import { scrubSecretShapes } from './error-signature'
 
 // ---------- destinations ----------
 
-export const RECOVERY_HANDOFF_DESTINATIONS = ['slack', 'linear', 'github', 'webhook'] as const
 export const RecoveryHandoffDestinationSchema = /* @__PURE__ */ z.enum(RECOVERY_HANDOFF_DESTINATIONS)
 export type RecoveryHandoffDestination = z.infer<typeof RecoveryHandoffDestinationSchema>
 

@@ -29,6 +29,16 @@
 
 import * as z from 'zod/mini'
 
+import {
+  UPSTREAM_HEALTH_KINDS,
+  UPSTREAM_COMPONENT_STATUSES,
+  MIN_CHECK_INTERVAL_SECONDS,
+  MAX_CHECK_INTERVAL_SECONDS,
+  DEFAULT_CHECK_INTERVAL_SECONDS,
+  MAX_EXPECTED_COMPONENTS,
+} from './upstream-health-values'
+export * from './upstream-health-values'
+
 // ---------- provider kind ----------
 
 /**
@@ -42,12 +52,6 @@ import * as z from 'zod/mini'
  *  - `custom_feed` — a generic JSON feed exposing a top-level `status` string
  *    (or `{ status }` object) using the Statuspage status vocabulary.
  */
-export const UPSTREAM_HEALTH_KINDS = [
-  'statuspage_io',
-  'atlassian_statuspage',
-  'http_probe',
-  'custom_feed',
-] as const
 export const UpstreamHealthKindSchema = /* @__PURE__ */ z.enum(UPSTREAM_HEALTH_KINDS)
 export type UpstreamHealthKind = z.infer<typeof UpstreamHealthKindSchema>
 
@@ -64,14 +68,6 @@ export type UpstreamHealthKind = z.infer<typeof UpstreamHealthKindSchema>
  *  - `under_maintenance` — planned maintenance; treated as healthy for pause.
  *  - `unknown` — the feed did not report a status we recognise.
  */
-export const UPSTREAM_COMPONENT_STATUSES = [
-  'operational',
-  'degraded_performance',
-  'partial_outage',
-  'major_outage',
-  'under_maintenance',
-  'unknown',
-] as const
 export const UpstreamComponentStatusSchema = /* @__PURE__ */ z.enum(UPSTREAM_COMPONENT_STATUSES)
 export type UpstreamComponentStatus = z.infer<typeof UpstreamComponentStatusSchema>
 
@@ -92,16 +88,6 @@ export function isDegradedStatus(status: UpstreamComponentStatus): boolean {
 
 // ---------- config schema ----------
 
-/** Min/max poll interval. Floor of 30s avoids hammering a status page; ceiling
- *  of 1h keeps the derived state meaningfully fresh. */
-export const MIN_CHECK_INTERVAL_SECONDS = 30
-export const MAX_CHECK_INTERVAL_SECONDS = 60 * 60
-export const DEFAULT_CHECK_INTERVAL_SECONDS = 60
-
-/** Cap on the declared component-name list per source. Statuspage components
- *  rarely exceed a handful; the cap bounds the parse work and the persisted
- *  row size. */
-export const MAX_EXPECTED_COMPONENTS = 50
 
 /**
  * Operator-supplied config for one upstream health source. `name` is the join

@@ -1,6 +1,8 @@
 import { useWorkflowStore } from '../store'
 import { sessionCan } from '../identity-context'
 
+export const AUTHORING_PERMISSIONS = ['workflows.read', 'workflows.write', 'ai.write'] as const
+
 /** Stable ownership token for async operations that may replace the canvas. */
 export function currentCanvasAuthority(state = useWorkflowStore.getState()): string {
   return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.workflowRevision,
@@ -11,12 +13,33 @@ export function canvasAuthorityMatches(expected: string): boolean {
   return currentCanvasAuthority() === expected
 }
 
+/** Authoring results also belong to one visible workspace and AI grant. */
+export function currentAuthoringAuthority(state = useWorkflowStore.getState()): string {
+  return JSON.stringify([currentCanvasAuthority(state), state.activeTab,
+    sessionCan(state.identityContext, 'ai.write')])
+}
+
+/**
+ * Saved-history work targets immutable versions, not the editable canvas: it
+ * follows identity, workflow, saved state, navigation and authoring grants,
+ * but survives draft edits (workflowRevision).
+ */
+export function currentSavedHistoryAuthority(state = useWorkflowStore.getState()): string {
+  return JSON.stringify([state.orgId, state.userId, state.currentWorkflowId, state.currentWorkflowSaved, state.activeTab,
+    ...AUTHORING_PERMISSIONS.map(permission => sessionCan(state.identityContext, permission))])
+}
+
+export type CanvasAuthoritySelector = (state: ReturnType<typeof useWorkflowStore.getState>) => string
+
 /** An ownership lease ends at the first context change, even if React batches a return to the old context. */
-export function ownCanvas(onInvalidated: () => void): AbortController {
+export function ownCanvas(
+  onInvalidated: () => void,
+  authorityForState: CanvasAuthoritySelector = currentCanvasAuthority,
+): AbortController {
   const controller = new AbortController()
-  const authority = currentCanvasAuthority()
+  const authority = authorityForState(useWorkflowStore.getState())
   const unsubscribe = useWorkflowStore.subscribe(state => {
-    if (currentCanvasAuthority(state) === authority) return
+    if (authorityForState(state) === authority) return
     controller.abort()
     onInvalidated()
   })

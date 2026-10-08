@@ -12,18 +12,19 @@
  * limits as the operator types.
  */
 
+import { utf8ByteLength } from '../lib/utf8'
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle } from 'lucide-react'
 
 import {
   RECOVERY_ITEM_SEVERITIES,
   type RecoveryItemSeverity,
-} from '@/lib/recovery-item'
+} from '@/lib/recovery-item-values'
 import {
   WorkflowMetadataSchema,
   WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES,
   WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
-} from '@/lib/workflow-metadata'
+} from '@/lib/workflow-metadata-schema'
 import { containsOperatorGuidanceSecret } from '@/lib/operator-guidance'
 import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
@@ -31,7 +32,7 @@ import { useWorkflowStore } from '../store'
 import { Button } from './ui/Button'
 import { FormActions, FormField } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
-import { PLATFORM_TAG, useInvalidationNonce, type ResourceTag } from '../lib/query-cache'
+import { PLATFORM_TAG, useResourceRefresh, type ResourceTag } from '../lib/query-cache'
 
 const WORKFLOW_METADATA_TAGS = [PLATFORM_TAG, 'workflows'] as const
 
@@ -127,7 +128,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
   const { t } = useT()
   const addToast = useWorkflowStore((s) => s.addToast)
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
-  const invalidationNonce = useInvalidationNonce(WORKFLOW_METADATA_TAGS)
+  const [refreshNonce, refresh] = useResourceRefresh(WORKFLOW_METADATA_TAGS)
   const storeWorkflowId = useWorkflowStore((s) => s.currentWorkflowId)
   const storeWorkflowSaved = useWorkflowStore((s) => s.currentWorkflowSaved)
   // With no explicit id this panel targets the current draft — but only once
@@ -140,7 +141,6 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
   const [tagsRaw, setTagsRaw] = useState('')
   const [loadState, setLoadState] = useState<WorkflowMetadataLoadState>('idle')
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [reloadNonce, setReloadNonce] = useState(0)
   const [saving, setSaving] = useState(false)
   const activeWorkflowRef = useRef<string | null>(null)
   const readyWorkflowRef = useRef<string | null>(null)
@@ -204,7 +204,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
       cancelled = true
       controller.abort()
     }
-  }, [workflowId, invalidationNonce, reloadNonce, t])
+  }, [workflowId, refreshNonce, t])
 
   if (!workflowId) return null
 
@@ -252,9 +252,9 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
     }
   }
 
-  const runbookByteLength = new TextEncoder().encode(form.runbookMarkdown).length
+  const runbookByteLength = utf8ByteLength(form.runbookMarkdown)
   const runbookOverCap = runbookByteLength > WORKFLOW_METADATA_RUNBOOK_MAX_BYTES
-  const aiGuidanceByteLength = new TextEncoder().encode(form.aiGuidanceMarkdown).length
+  const aiGuidanceByteLength = utf8ByteLength(form.aiGuidanceMarkdown)
   const aiGuidanceOverCap = aiGuidanceByteLength > WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES
   const aiGuidanceHasSecret = containsOperatorGuidanceSecret(form.aiGuidanceMarkdown)
   const loading = loadState === 'loading'
@@ -281,7 +281,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
             actions={(
               <Button
                 size="sm"
-                onClick={() => setReloadNonce((value) => value + 1)}
+                onClick={refresh}
                 disabled={saving || loading}
                 data-testid="workflow-metadata-retry"
               >

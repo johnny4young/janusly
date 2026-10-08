@@ -28,7 +28,7 @@ import { ValidationEvidencePill } from './ValidationEvidencePill'
 import { SemanticOutcomePill } from './SemanticOutcomePill'
 import { SelectControl } from '@/components/ui/Form'
 import './RunHistoryList.css'
-import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { PLATFORM_TAG, useResourceRefresh } from '../lib/query-cache'
 import { Button } from './ui/Button'
 
 const RUN_HISTORY_TAGS = [PLATFORM_TAG, 'runs', 'dlq', 'recovery'] as const
@@ -72,10 +72,9 @@ export function RunHistoryList({
 }) {
   const { t, i18n } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
-  const platformVersion = useInvalidationNonce(RUN_HISTORY_TAGS)
+  const [refreshNonce, refresh] = useResourceRefresh(RUN_HISTORY_TAGS)
   const [workflowId, setWorkflowId] = useState('')
   const [status, setStatus] = useState<RunStatus | ''>('')
-  const [retryNonce, setRetryNonce] = useState(0)
   const [remote, setRemote] = useState<RemoteHistoryState>({ key: '', kind: 'loading', runs: [] })
   const [comparisonRun, setComparisonRun] = useState<ComparableRun | null>(null)
   const filterKey = `${workflowId}|${status}`
@@ -103,7 +102,7 @@ export function RunHistoryList({
       })
 
     return () => controller.abort()
-  }, [filterKey, hasActiveFilters, platformVersion, retryNonce, status, workflowId])
+  }, [filterKey, hasActiveFilters, refreshNonce, status, workflowId])
 
   const remoteForCurrentFilter = remote.key === filterKey ? remote : null
   const loading = hasActiveFilters && (!remoteForCurrentFilter || remoteForCurrentFilter.kind === 'loading')
@@ -200,7 +199,7 @@ export function RunHistoryList({
         <div className="we-run-history-state we-run-history-state--error" role="alert">
           <AlertCircle size={15} aria-hidden="true" />
           <span>{t('rightPanel.runs.historyLoadError')}</span>
-          <Button size="sm" onClick={() => setRetryNonce(value => value + 1)}>
+          <Button size="sm" onClick={refresh}>
             <RefreshCcw size={12} aria-hidden="true" /> {t('common.retry')}
           </Button>
         </div>

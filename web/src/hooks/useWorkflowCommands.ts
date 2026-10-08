@@ -1,3 +1,5 @@
+import { ownAuthoringExperience } from '../lib/experience-authority'
+import type { AuthoringExperienceEdits } from '../lib/api-types.generated'
 import { currentCanvasAuthority, canvasAuthorityMatches } from '../lib/canvas-authority'
 import { useCallback } from 'react'
 import { api, contractApi } from '../api'
@@ -294,12 +296,12 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     t,
   ])
 
-  const loadAuthoringCapabilities = useCallback(async (): Promise<AuthoringCapabilityCatalog> => {
+  const loadAuthoringCapabilities = useCallback(async (signal?: AbortSignal): Promise<AuthoringCapabilityCatalog> => {
     return await contractApi(
       'GET /authoring/capabilities',
       '/authoring/capabilities',
       undefined,
-      { guard: isGetAuthoringCapabilitiesResponse },
+      { guard: isGetAuthoringCapabilitiesResponse, ...(signal ? { signal } : {}) },
     )
   }, [])
 
@@ -316,6 +318,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     brief: WorkflowIntentBrief,
     catalogVersion: string,
     sourcePrompt: string,
+    experienceEdits?: AuthoringExperienceEdits,
   ): Promise<WorkflowProposalResponse> => {
     const [result, { isWorkflowProposalResponse }] = await Promise.all([
       contractApi(
@@ -326,6 +329,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
           brief,
           catalogVersion,
           currentWorkflow: getWorkflowJson(),
+          ...(experienceEdits?.length ? { experienceEdits } : {}),
         },
         { guard: isPostAiWorkflowProposalsResponse },
       ).catch(malformedAs(t('toasts.aiResponseInvalid'))),
@@ -360,70 +364,88 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
       addToast(t('toasts.aiResponseInvalid'), 'error')
       return { status: 'blocked' }
     }
-    if (!proposalSnapshot.proposal.applicable || !proposalSnapshot.bindings.complete) {
-      return { status: 'blocked' }
-    }
-    const { isWorkflowProposalApplySafe, isWorkflowProposalResponse } = await loadAuthoringContract()
-    if (!await isWorkflowProposalApplySafe(proposalSnapshot)) {
-      addToast(t('toasts.aiResponseInvalid'), 'error')
-      return { status: 'blocked' }
-    }
-    if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
-    if (!await confirmReplaceCanvas()) return { status: 'cancelled' }
-    // The confirmation is asynchronous. Never replace a different or newly
-    // edited canvas if the operator navigated while the dialog was open.
-    if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+    // A source review cannot regain authority after an intervening navigation
+    // or permission change, even when the store returns to its old values.
+    // This is local result ownership, not cancellation of a delivered request.
+    const owner = comparisonSnapshot ? ownAuthoringExperience(() => {}) : null
+    const stillOwns = () => !owner?.signal.aborted && canvasAuthorityMatches(sourceAuthority)
+    try {
+      if (!proposalSnapshot.proposal.applicable || !proposalSnapshot.bindings.complete) {
+        return { status: 'blocked' }
+      }
+      const { isWorkflowProposalApplySafe, isWorkflowProposalResponse } = await loadAuthoringContract()
+      const applySafe = await isWorkflowProposalApplySafe(proposalSnapshot)
+      if (!stillOwns()) return { status: 'canvas_changed' }
+      if (!applySafe) {
+        addToast(t('toasts.aiResponseInvalid'), 'error')
+        return { status: 'blocked' }
+      }
+      if (!stillOwns()) return { status: 'canvas_changed' }
+      if (!await confirmReplaceCanvas()) return { status: 'cancelled' }
+      // The confirmation is asynchronous. Never replace a different or newly
+      // edited canvas if the operator navigated while the dialog was open.
+      if (!stillOwns()) return { status: 'canvas_changed' }
 
-    // Capability membership can change after Proposal or while the unsaved
-    // canvas confirmation is open. Re-read it after confirmation and then
-    // re-check the canvas again at the final synchronous copy boundary.
-    const currentCatalog = await loadAuthoringCapabilities()
-    if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
-    if (currentCatalog.version !== proposalSnapshot.bindings.catalogVersion) {
-      return { status: 'catalog_changed', catalog: currentCatalog }
-    }
-    const decision = proposalSnapshot.experienceDecision
-    if (decision?.mode === 'REUSE' || decision?.mode === 'ADAPT') {
-      // Re-read consent and the exact immutable source at the explicit Apply
-      // boundary. A stale receipt is never a request to generate a replacement.
-      let revalidated: unknown
-      try {
-        revalidated = await contractApi(
-          'POST /ai/workflow-proposals',
-          '/ai/workflow-proposals',
-          {
-            brief: proposalSnapshot.brief,
-            catalogVersion: proposalSnapshot.bindings.catalogVersion,
-            currentWorkflow: comparisonSnapshot,
-            experienceEdits: decision.mode === 'ADAPT' ? decision.edits : [],
-            experienceReceipt: decision,
-          },
-          { guard: isPostAiWorkflowProposalsResponse },
-        )
-      } catch {
-        if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
-        addToast(t('toasts.aiResponseInvalid'), 'error')
-        return { status: 'blocked' }
+      // Capability membership can change after Proposal or while the unsaved
+      // canvas confirmation is open. Re-read it after confirmation and then
+      // re-check the canvas again at the final synchronous copy boundary.
+      const currentCatalog = await loadAuthoringCapabilities(owner?.signal)
+      if (!stillOwns()) return { status: 'canvas_changed' }
+      if (currentCatalog.version !== proposalSnapshot.bindings.catalogVersion) {
+        return { status: 'catalog_changed', catalog: currentCatalog }
       }
-      if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
-      // Source-specific review matching is needed only for opt-in source Apply.
-      const { jsonEquivalent } = await import('../lib/json-envelope-equality')
-      if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
-      if (!isWorkflowProposalResponse(revalidated)
-        || !revalidated.proposal.applicable
-        || !await isWorkflowProposalApplySafe(revalidated)
-        || !jsonEquivalent(decision, revalidated.experienceDecision)
-        || !jsonEquivalent(proposalSnapshot.proposal.workflow, revalidated.proposal.workflow)) {
-        addToast(t('toasts.aiResponseInvalid'), 'error')
-        return { status: 'blocked' }
+      const decision = proposalSnapshot.experienceDecision
+      if (decision?.mode === 'REUSE' || decision?.mode === 'ADAPT') {
+        // Re-read consent and the exact immutable source at the explicit Apply
+        // boundary. A stale receipt is never a request to generate a replacement.
+        let revalidated: unknown
+        try {
+          revalidated = await contractApi(
+            'POST /ai/workflow-proposals',
+            '/ai/workflow-proposals',
+            {
+              brief: proposalSnapshot.brief,
+              catalogVersion: proposalSnapshot.bindings.catalogVersion,
+              currentWorkflow: comparisonSnapshot,
+              experienceEdits: decision.mode === 'ADAPT' ? decision.edits : [],
+              experienceReceipt: decision,
+            },
+            // A caller signal skips the API wrapper's short dedup window:
+            // source Apply must make a fresh read, not replay an earlier receipt.
+            { guard: isPostAiWorkflowProposalsResponse, signal: owner?.signal },
+          )
+        } catch {
+          if (!stillOwns()) return { status: 'canvas_changed' }
+          addToast(t('toasts.aiResponseInvalid'), 'error')
+          return { status: 'blocked' }
+        }
+        if (!stillOwns()) return { status: 'canvas_changed' }
+        // Source-specific review matching is needed only for opt-in source Apply.
+        const { jsonEquivalent } = await import('../lib/json-envelope-equality')
+        if (!stillOwns()) return { status: 'canvas_changed' }
+        const revalidatedSafe = isWorkflowProposalResponse(revalidated)
+          && revalidated.proposal.applicable
+          && await isWorkflowProposalApplySafe(revalidated)
+          && jsonEquivalent(decision, revalidated.experienceDecision)
+          && jsonEquivalent(proposalSnapshot.proposal.workflow, revalidated.proposal.workflow)
+        if (!stillOwns()) return { status: 'canvas_changed' }
+        if (!revalidatedSafe) {
+          addToast(t('toasts.aiResponseInvalid'), 'error')
+          return { status: 'blocked' }
+        }
+        if (!stillOwns()) return { status: 'canvas_changed' }
       }
-      if (!canvasAuthorityMatches(sourceAuthority)) return { status: 'canvas_changed' }
+      hydrateWorkflow(proposalSnapshot.proposal.workflow, { saved: false, dirty: true })
+      setValidationIssues([])
+      setAiReviewIssues([])
+      addToast(t('toasts.aiProposalApplied'), 'success')
+      return { status: 'applied' }
+    } catch (error) {
+      if (owner?.signal.aborted) return { status: 'canvas_changed' }
+      throw error
+    } finally {
+      owner?.abort()
     }
-    hydrateWorkflow(proposalSnapshot.proposal.workflow, { saved: false, dirty: true })
-    setValidationIssues([])
-    setAiReviewIssues([])
-    addToast(t('toasts.aiProposalApplied'), 'success')
-    return { status: 'applied' }
   }, [
     addToast,
     confirmReplaceCanvas,

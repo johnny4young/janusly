@@ -1,5 +1,6 @@
 /** Organization-wide janusly.md guidance editor for AI authoring/recovery. */
 
+import { utf8ByteLength } from '../lib/utf8'
 import { useEffect, useRef, useState } from 'react'
 import { RefreshCw, Save } from 'lucide-react'
 import {
@@ -15,7 +16,7 @@ import { FormActions, FormField } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
 import { isRecord } from '../lib/guards'
 import { orgConfigValue } from '../lib/org-config-model'
-import { PLATFORM_TAG, useInvalidationNonce } from '@/lib/query-cache'
+import { PLATFORM_TAG, useResourceRefresh } from '@/lib/query-cache'
 
 type GuidanceLoadState = 'loading' | 'ready' | 'error'
 
@@ -31,10 +32,9 @@ export function AiGuidanceSettingsPanel() {
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
-  const platformVersion = useInvalidationNonce(GUIDANCE_TAGS)
+  const [refreshNonce, refresh] = useResourceRefresh(GUIDANCE_TAGS)
   const [guidance, setGuidance] = useState('')
   const [loadState, setLoadState] = useState<GuidanceLoadState>('loading')
-  const [reloadNonce, setReloadNonce] = useState(0)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const dirtyRef = useRef(false)
@@ -76,9 +76,9 @@ export function AiGuidanceSettingsPanel() {
       cancelled = true
       controller.abort()
     }
-  }, [platformVersion, reloadNonce, t])
+  }, [refreshNonce, t])
 
-  const byteLength = new TextEncoder().encode(guidance).byteLength
+  const byteLength = utf8ByteLength(guidance)
   const overCap = byteLength > AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES
   const hasSecret = containsOperatorGuidanceSecret(guidance)
   const validationError = overCap || hasSecret ? (
@@ -127,7 +127,7 @@ export function AiGuidanceSettingsPanel() {
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => setReloadNonce(value => value + 1)}
+              onClick={refresh}
               disabled={saving || loadState === 'loading'}
               leadingIcon={<RefreshCw size={14} />}
               data-testid="ai-guidance-org-retry"

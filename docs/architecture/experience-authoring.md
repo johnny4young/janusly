@@ -1,10 +1,14 @@
 # Experience authoring
 
-Janusly has an authoring-owned, local `DecisionProvider` contract for considering
-explicit prior-version experiences. The contract is not connected to HTTP
-proposal selection, memory retrieval or the editor. Explicit registration is
-implemented separately; ordinary
-contract-first authoring, routing and recovery are unchanged.
+Janusly integrates an authoring-owned, local `DecisionProvider` with the existing
+HTTP proposal pipeline and explicit editor review behind default-off gates.
+Sources are opt-in, immutable versions from the same organization, not generic
+semantic-memory hits. The ordinary authoring path remains unchanged when disabled;
+routing and recovery keep their independent authority boundaries.
+
+See [registering and reviewing examples](../runbooks/authoring-experiences.md)
+for the operator procedure, and [AI pipeline](ai-pipeline.md#experience-assisted-authoring)
+for process modes, admission, fallback and receipt revalidation.
 
 ## Policy and authority
 
@@ -87,8 +91,9 @@ and memory-consent sweeps remove expired/revoked references. Version/workflow ha
 deletion cascades; soft-deleted parents are excluded immediately. No new worker,
 loop, inference process, embedding call or provider completion is introduced.
 
-This registry does not select proposals or enable automatic reuse. Stored sources
-still require re-reading and current consent, binding and review before use.
+The registry itself does not select proposals or grant automatic reuse. The
+review pipeline separately re-reads stored sources and checks current consent,
+binding and policy before returning a proposal for explicit review.
 
 ## Local decisions and exact copies
 
@@ -103,8 +108,10 @@ rejected rather than silently upgraded. Source bytes remain unchanged.
 
 The copy primitive consumes a privately supplied exact artifact, not provider
 output. It does not itself grant read authority or query the registry: a live
-caller must still re-read the source and fence current consent/deletion. HTTP
-selection and editor integration are not connected to these local mechanisms.
+caller must still re-read the source and fence current consent/deletion. The HTTP
+review pipeline uses this primitive after admission; editor Apply revalidates the
+exact reviewed receipt and detached graph before copying to an unsaved canvas.
+Save, validation and Run retain their independent checks.
 
 ## Live registered-version boundary
 
@@ -134,9 +141,14 @@ exclusive consent-row locks are acquired initially for resolution, avoiding
 lock upgrades and fencing both registration and consent writers. Source/version
 row locks fence mutation through the copy's admission point. Registration and
 ordinary provenance listing retain their shared consent locks. The stage remains
-bounded to 200 ms with caller cancellation terminal; no failure launches a model
-call, saves a draft or grants Apply/Run permission. HTTP selection and the editor
-are still not connected to this boundary.
+bounded to 200 ms with caller cancellation terminal. The reader itself never
+calls a provider, saves a draft or grants Apply/Run permission. At HTTP admission,
+an initial operational lookup failure may preserve the existing generation path
+once while the parent request is alive. Source incompatibility or failed
+revalidation of a reviewed receipt instead blocks the copy without requesting
+replacement generation. The [AI pipeline](ai-pipeline.md#experience-assisted-authoring)
+defines these distinct failure paths; the [frontend boundary](web-frontend.md)
+fences deferred results and pending Apply snapshots.
 
 ## Offline mechanical evidence
 
