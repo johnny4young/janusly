@@ -81,7 +81,7 @@ func checkRegistryFixture(ctx context.Context, dsn string) (report registryFixtu
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if _, dropErr := admin.Exec(cleanup, "DROP DATABASE "+quoted+" WITH (FORCE)"); dropErr != nil {
-			err = errors.New("registry fixture could not remove owned database")
+			err = errors.Join(err, errors.New("registry fixture could not remove owned database"))
 		}
 	}()
 	u, parseErr := url.Parse(dsn)

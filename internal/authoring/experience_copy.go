@@ -3,7 +3,6 @@ package authoring
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/workflowvalidation"
@@ -48,7 +47,7 @@ func CopyExperienceProposal(ctx context.Context, request DecisionRequest, receip
 		return nil, ErrExperienceSourceIncompatible
 	}
 	validated.Provider = receipt.Provider
-	if !reflect.DeepEqual(validated, receipt) {
+	if !sameDecisionReceipt(validated, receipt) {
 		return nil, ErrExperienceSourceIncompatible
 	}
 	key, _ := CanonicalExperienceKey(request.Brief)

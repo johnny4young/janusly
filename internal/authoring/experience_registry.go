@@ -106,6 +106,14 @@ func validateExperienceRegistration(input ExperienceRegistration) (string, []byt
 	return key, raw, nil
 }
 
+// ValidateExperienceRegistration is the pure input check Register repeats.
+// Callers run it before building the tenant catalog so malformed requests
+// do no catalog or MCP work.
+func ValidateExperienceRegistration(input ExperienceRegistration) error {
+	_, _, err := validateExperienceRegistration(input)
+	return err
+}
+
 func experienceConsentDays(values map[string]json.RawMessage) (int, error) {
 	normalized := map[string]any{}
 	for _, key := range []string{"ai.authoringExperienceEnabled", "memory.enabled", "memory.allowedKinds"} {

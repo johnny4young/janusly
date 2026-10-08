@@ -60,8 +60,11 @@ DELETE FROM authoring_experiences WHERE id IN (
  ORDER BY retain_until,id FOR UPDATE SKIP LOCKED LIMIT sqlc.arg(batch_size)
 );
 
+-- Consent withdrawal revokes every active row in the same transaction, so a
+-- revoked-only purge cannot delete a fresh registration admitted after consent
+-- was re-granted between the sweep's org listing and this delete.
 -- name: PurgeAuthoringExperiencesForOrg :execrows
-DELETE FROM authoring_experiences WHERE org_id=$1;
+DELETE FROM authoring_experiences WHERE org_id=$1 AND revoked_at IS NOT NULL;
 
 -- Temporal eligibility precedes the bounded source-work horizon. Historical
 -- reads consume an explicit frozen consent snapshot at the caller; current

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"os"
 	"testing"
 )
@@ -18,7 +19,12 @@ func TestExperienceMechanicsCorpusIsFrozenAndBalanced(t *testing.T) {
 		t.Fatal(err)
 	}
 	var manifest struct {
-		Files map[string]string `json:"files"`
+		Cases     int                  `json:"cases"`
+		Modes     map[DecisionMode]int `json:"modes"`
+		Languages map[string]int       `json:"languages"`
+		Splits    map[string]int       `json:"splits"`
+		Families  []string             `json:"families"`
+		Files     map[string]string    `json:"files"`
 	}
 	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
 		t.Fatal(err)
@@ -51,6 +57,15 @@ func TestExperienceMechanicsCorpusIsFrozenAndBalanced(t *testing.T) {
 	}
 	if splits["development"] != 144 || splits["qualification"] != 96 || len(families) != 5 {
 		t.Fatalf("split drift: %+v %+v", splits, families)
+	}
+	// The manifest's declared counts and families must describe the frozen corpus.
+	if manifest.Cases != report.Cases || !maps.Equal(manifest.Modes, report.Modes) || !maps.Equal(manifest.Languages, report.Languages) || !maps.Equal(manifest.Splits, splits) || len(manifest.Families) != len(families) {
+		t.Fatalf("manifest drift: %+v", manifest)
+	}
+	for _, family := range manifest.Families {
+		if families[family] == "" {
+			t.Fatalf("manifest family %s absent from corpus", family)
+		}
 	}
 	for mode, languages := range counts {
 		if languages["en"] != 30 || languages["es"] != 30 {
