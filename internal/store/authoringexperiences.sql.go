@@ -388,9 +388,12 @@ func (q *Queries) PurgeAuthoringExperiencesBatch(ctx context.Context, arg PurgeA
 }
 
 const purgeAuthoringExperiencesForOrg = `-- name: PurgeAuthoringExperiencesForOrg :execrows
-DELETE FROM authoring_experiences WHERE org_id=$1
+DELETE FROM authoring_experiences WHERE org_id=$1 AND revoked_at IS NOT NULL
 `
 
+// Consent withdrawal revokes every active row in the same transaction, so a
+// revoked-only purge cannot delete a fresh registration admitted after consent
+// was re-granted between the sweep's org listing and this delete.
 func (q *Queries) PurgeAuthoringExperiencesForOrg(ctx context.Context, orgID string) (int64, error) {
 	result, err := q.db.Exec(ctx, purgeAuthoringExperiencesForOrg, orgID)
 	if err != nil {

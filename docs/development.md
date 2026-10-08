@@ -114,9 +114,9 @@ owner action; changing the workflow does not enable branch protection.
 | `web/` | Frontend, route parity, single-runtime E2E | skipped |
 | Go/API/database | Backend, integration, HA, route parity, E2E | skipped |
 | OpenAPI/contract | Both product sets | skipped |
-| `website/` or website workflows | skipped | npm check/build |
+| `website/` or website workflows | skipped | npm audit/check/build |
 | Documentation only | skipped; CI gate still runs | skipped |
-| Shared/unknown inputs or missing base | All | npm check/build |
+| Shared/unknown inputs or missing base | All | npm audit/check/build |
 
 The classifier reads a NUL-delimited complete diff with renames treated as
 removal plus addition, so deleted inputs and unusual filenames retain ownership.

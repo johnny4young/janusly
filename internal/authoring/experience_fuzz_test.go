@@ -34,7 +34,7 @@ func TestExperienceContractExactByteBoundaries(t *testing.T) {
 func FuzzDecisionProposalContract(f *testing.F) {
 	f.Add([]byte(`{"mode":"GENERATE","reason":"no_exact_match","contextRevision":"r","catalogVersion":"c"}`))
 	f.Add([]byte(`{"mode":"REUSE","reason":"exact_match","contextRevision":"r","catalogVersion":"c","candidateId":"e","versionId":"v"}`))
-	for _, seed := range []string{"null", "[]", `{"mode":1}`, `{"mode":"REUSE"`, "界", strings.Repeat(" ", MaxDecisionResultBytes+1)} {
+	for _, seed := range []string{"null", "[]", `{"mode":1}`, `{"mode":"REUSE"`, "界", strings.Repeat(" ", MaxDecisionResultBytes+1), `{"mode":"GENERATE","reason":"no_exact_match","contextRevision":"r","catalogVersion":"c","edits":[]}`} {
 		f.Add([]byte(seed))
 	}
 	f.Fuzz(func(t *testing.T, raw []byte) {

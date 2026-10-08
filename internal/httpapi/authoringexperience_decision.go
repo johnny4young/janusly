@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"reflect"
 	"strings"
@@ -105,12 +106,19 @@ func decodeExperienceProposalFields(editsRaw, receiptRaw json.RawMessage) ([]aut
 func experienceContextRevision(rc v1Request, request workflowProposalRequest, brief authoring.IntentBrief, catalogVersion string) string {
 	// No matching hash or canvas content is copied into telemetry. Including
 	// identity and the comparison snapshot fences replay across authoring contexts.
+	// Layout-only `ui` positions are excluded: dragging a node is not a semantic
+	// canvas revision, so it must not silently invalidate a reviewed receipt.
+	comparison := request.CurrentWorkflow
+	if _, present := comparison["ui"]; present {
+		comparison = maps.Clone(comparison)
+		delete(comparison, "ui")
+	}
 	raw, _ := json.Marshal(struct {
 		OrganizationID, UserID, CatalogVersion string
 		Brief                                  authoring.IntentBrief
 		Edits                                  []authoring.DescriptiveEdit
 		CurrentWorkflow                        map[string]any
-	}{rc.orgID, rc.userID, catalogVersion, brief, request.ExperienceEdits, request.CurrentWorkflow})
+	}{rc.orgID, rc.userID, catalogVersion, brief, request.ExperienceEdits, comparison})
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:])
 }
@@ -169,7 +177,7 @@ func (s *V1Server) experienceProposal(r *http.Request, rc v1Request, request wor
 	if err == nil {
 		projection := selection.Request
 		verified, checkErr := authoring.ProposeDecision(stage, authoring.RulesProvider{}, projection)
-		if checkErr != nil || !reflect.DeepEqual(verified, selection.Receipt) || projection.OrganizationID != input.OrganizationID || projection.ContextRevision != input.ContextRevision || projection.CatalogVersion != input.CatalogVersion || projection.Complete != input.Complete || projection.CanonicalRecipe != input.CanonicalRecipe || !projection.Consent || !reflect.DeepEqual(projection.Brief, input.Brief) || !reflect.DeepEqual(projection.Edits, input.Edits) {
+		if checkErr != nil || !authoring.SameDecisionReceipt(verified, selection.Receipt) || projection.OrganizationID != input.OrganizationID || projection.ContextRevision != input.ContextRevision || projection.CatalogVersion != input.CatalogVersion || projection.Complete != input.Complete || projection.CanonicalRecipe != input.CanonicalRecipe || !projection.Consent || !reflect.DeepEqual(projection.Brief, input.Brief) || !reflect.DeepEqual(projection.Edits, input.Edits) {
 			err = authoring.ErrExperienceSourceUnavailable
 		}
 	}
@@ -182,7 +190,7 @@ func (s *V1Server) experienceProposal(r *http.Request, rc v1Request, request wor
 		return experienceProposalAttempt{}
 	}
 	decision := &experienceWorkflowDecision{DecisionReceipt: receipt, OutcomeEvidence: "unknown"}
-	if request.ExperienceReceipt != nil && !reflect.DeepEqual(request.ExperienceReceipt.DecisionReceipt, receipt) {
+	if request.ExperienceReceipt != nil && !authoring.SameDecisionReceipt(request.ExperienceReceipt.DecisionReceipt, receipt) {
 		return s.experienceAttemptError(r, rc, request, authoring.ErrExperienceSourceUnavailable)
 	}
 	attempt := experienceProposalAttempt{Decision: decision}

@@ -185,6 +185,15 @@ func ProposeDecision(ctx context.Context, provider DecisionProvider, request Dec
 	return receipt, nil
 }
 
+// SameDecisionReceipt compares receipts by their canonical wire form, so an
+// omitted and an empty edit list (which encode identically) remain the same
+// receipt after a caller round-trips it through JSON.
+func SameDecisionReceipt(a, b DecisionReceipt) bool {
+	left, leftErr := json.Marshal(a)
+	right, rightErr := json.Marshal(b)
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
+}
+
 func cloneDecisionRequest(r DecisionRequest) DecisionRequest {
 	r.Brief.Inputs = slices.Clone(r.Brief.Inputs)
 	r.Brief.ExternalEffects = slices.Clone(r.Brief.ExternalEffects)
@@ -218,6 +227,11 @@ func DecodeDecisionProposal(raw []byte) (DecisionProposal, error) {
 	}
 	if !validProposalShape(proposal) {
 		return DecisionProposal{}, errDecisionProposal
+	}
+	// "edits":[] and an omitted field are the same proposal; keep one form so
+	// the decoded value is stable across an encode/decode round trip.
+	if len(proposal.Edits) == 0 {
+		proposal.Edits = nil
 	}
 	return proposal, nil
 }
@@ -254,7 +268,7 @@ func ValidateDecision(r DecisionRequest, p DecisionProposal) (DecisionReceipt, e
 }
 
 func requiredDecision(r DecisionRequest) (DecisionMode, DecisionReason, *ExperienceCandidate) {
-	if !r.Complete || r.Brief.Objective == "" || r.Brief.Trigger == "" || r.Brief.ExpectedOutcome == "" {
+	if !r.Complete || strings.TrimSpace(r.Brief.Objective) == "" || strings.TrimSpace(r.Brief.Trigger) == "" || strings.TrimSpace(r.Brief.ExpectedOutcome) == "" {
 		return DecisionEscalate, DecisionIncompleteIntent, nil
 	}
 	if r.CanonicalRecipe {

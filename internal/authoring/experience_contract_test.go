@@ -60,6 +60,11 @@ func TestExperienceContractRejectsUntrustedProposals(t *testing.T) {
 		{"incompatible", func(r *DecisionRequest, p *DecisionProposal) { r.Candidates[0].Compatible = false }},
 		{"unconsented", func(r *DecisionRequest, p *DecisionProposal) { r.Consent = false }},
 		{"incomplete", func(r *DecisionRequest, p *DecisionProposal) { r.Complete = false }},
+		{"blank objective", func(r *DecisionRequest, p *DecisionProposal) {
+			// Keep the key exact so only the incomplete-intent veto can reject it.
+			r.Brief.Objective = "   "
+			r.Candidates[0].BriefKey, _ = CanonicalExperienceKey(r.Brief)
+		}},
 		{"policy drift", func(r *DecisionRequest, p *DecisionProposal) { r.Candidates[0].PolicyVersion = "unknown" }},
 		{"brief drift", func(r *DecisionRequest, p *DecisionProposal) {
 			r.Brief.Approvals = []string{"human_approval_before_external_effect"}

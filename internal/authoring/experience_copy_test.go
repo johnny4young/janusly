@@ -166,3 +166,30 @@ func TestCopyExperiencePreservesWriteApprovalTimingAndOlderChildPin(t *testing.T
 		t.Fatal("missing child version repaired instead of rejected")
 	}
 }
+
+func TestCopyExperienceProposalAcceptsJSONRoundTrippedReceipt(t *testing.T) {
+	r, _, source, catalog := experienceCopyFixture(t)
+	for _, edits := range [][]DescriptiveEdit{nil, {}} {
+		r.Edits = edits
+		receipt, err := ProposeDecision(t.Context(), RulesProvider{}, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, wire := range []string{"", `"edits":[],`} {
+			raw, err := json.Marshal(receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if wire != "" {
+				raw = append([]byte(`{`+wire), raw[1:]...)
+			}
+			var decoded DecisionReceipt
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := CopyExperienceProposal(t.Context(), r, decoded, source, "draft-new", catalog); err != nil {
+				t.Fatalf("round-tripped receipt %s rejected: %v", raw, err)
+			}
+		}
+	}
+}

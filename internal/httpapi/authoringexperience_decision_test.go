@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/johnny4young/janusly/internal/authoring"
 )
 
 func TestExperienceProposalFieldsRejectNonCanonicalReceipts(t *testing.T) {
@@ -127,5 +129,27 @@ func TestExperienceReceiptCanonicalByteLimit(t *testing.T) {
 				t.Fatalf("round trip changed receipt: %+v %v", again, err)
 			}
 		})
+	}
+}
+
+func TestExperienceContextRevisionIgnoresLayoutOnly(t *testing.T) {
+	rc := v1Request{orgID: "org", userID: "user"}
+	canvas := func(ui map[string]any, label string) workflowProposalRequest {
+		workflow := map[string]any{"nodes": []any{map[string]any{"id": "a", "label": label}}, "edges": []any{}}
+		if ui != nil {
+			workflow["ui"] = ui
+		}
+		return workflowProposalRequest{CurrentWorkflow: workflow}
+	}
+	base := experienceContextRevision(rc, canvas(nil, "A"), authoring.IntentBrief{}, "catalog")
+	moved := canvas(map[string]any{"positions": map[string]any{"a": map[string]any{"x": 10, "y": 20}}}, "A")
+	if got := experienceContextRevision(rc, moved, authoring.IntentBrief{}, "catalog"); got != base {
+		t.Fatal("a layout-only drag invalidated the reviewed context")
+	}
+	if _, present := moved.CurrentWorkflow["ui"]; !present {
+		t.Fatal("context revision mutated the caller's comparison snapshot")
+	}
+	if experienceContextRevision(rc, canvas(nil, "B"), authoring.IntentBrief{}, "catalog") == base {
+		t.Fatal("a semantic canvas edit kept the reviewed context")
 	}
 }
