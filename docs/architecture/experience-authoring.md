@@ -1,8 +1,9 @@
-# Experience authoring contracts
+# Experience authoring
 
 Janusly has an authoring-owned, local `DecisionProvider` contract for considering
 explicit prior-version experiences. The contract is not connected to HTTP
-proposal selection, memory retrieval, registration or the editor. Ordinary
+proposal selection, memory retrieval or the editor. Explicit registration is
+implemented separately; ordinary
 contract-first authoring, routing and recovery are unchanged.
 
 ## Policy and authority
@@ -36,6 +37,58 @@ Receipts use closed reasons, rules/fixture provenance and a versioned policy;
 they do not expose confidence, verified outcomes or execution permission. Brief
 keys are internal matching data, not audit or metric dimensions. There is no
 new paid provider, model, embedding process, worker or execution callback.
+
+## Explicit saved-version registry
+
+Registration is an opt-in command, never an automatic consequence of Save,
+Apply, a successful run or a model-created memory row. The process gate
+`JANUSLY_AUTHORING_EXPERIENCE_ENABLED` is a strict boolean and defaults to false.
+Registration and listing also require `JANUSLY_MEMORY_ENABLED=true`, tenant
+`ai.authoringExperienceEnabled=true`, `memory.enabled=true`, and exact allowed
+kind `workflow_vector`. Malformed or absent required tenant consent is closed.
+
+The same-origin versioned commands are:
+
+- `POST /v1/authoring/experiences/register`: exact `workflowId`, saved `versionId`
+  and a complete structured `brief` with all fields/arrays present.
+- `GET /v1/authoring/experiences?workflowId=...`: at most five active provenance
+  records in registration-time/identity descending order, plus `truncated`.
+- `POST /v1/authoring/experiences/revoke`: exact registration `id`; idempotent and
+  still available when consent/process gates are closed.
+
+All three require existing `ai.write` and `workflows.read`; mutations additionally
+require editor rank and `workflows.write`. Organization and actor come only from
+centralized authentication, never the body. Requests reject unknown, duplicate
+or differently cased keys, explicit nulls, invalid UTF-8 and lossy normalization.
+Briefs are bounded to 8 KiB in both canonical JSON and stored jsonb text;
+command objects allow only 512 additional bytes for
+reference fields/framing. Secret-shaped material is rejected rather than changed
+into a redacted key that could match a different authoritative intent.
+
+The registry stores a validated canonical brief and references, not a duplicate
+DAG, credential value, prompt or run snapshot. Composite foreign keys enforce
+organization/workflow/version identity. Registration privately parses the exact
+saved version, rejects deleted parents and checks the current workflow validator
+and capability/intent binder. It never substitutes the latest version. List and
+command responses contain provenance only, with `outcomeEvidence: "unknown"`.
+Audits record registration identity and closed policy/outcome metadata, not briefs,
+content hashes, source graphs or provider errors. Only a new registration or
+an active-to-revoked transition is audited; duplicate registrations and repeat
+withdrawals return the existing state without another audit event.
+
+Sorted consent-row locks fence insertion against concurrent revocation. A database
+trigger invalidates active registrations atomically when tenant consent is disabled,
+deleted or no longer includes `workflow_vector`; rollback also rolls back revocation.
+Re-granting never resurrects old registrations. Duplicate explicit requests preserve
+the original identity/deadline. Retention follows `workflow_vector` policy (180 days
+by default, validated tenant override up to 730); expired registrations may be
+explicitly registered anew, never silently renewed. Existing supervised retention
+and memory-consent sweeps remove expired/revoked references. Version/workflow hard
+deletion cascades; soft-deleted parents are excluded immediately. No new worker,
+loop, inference process, embedding call or provider completion is introduced.
+
+This registry does not select proposals or enable automatic reuse. Stored sources
+still require re-reading and current consent, binding and review before use.
 
 ## Offline contract evidence
 

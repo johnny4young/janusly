@@ -322,7 +322,10 @@ func manifestConformanceRows() map[string]conformanceRow {
 				postToCore(t, compile, "/v1/ai/workflow-briefs/compile", `{}`),
 			}
 		}},
-		"POST /v1/ai/workflow-proposals": onlyIntegration(),
+		"POST /v1/ai/workflow-proposals":          onlyIntegration(),
+		"GET /v1/authoring/experiences":           onlyIntegration(),
+		"POST /v1/authoring/experiences/register": onlyIntegration(),
+		"POST /v1/authoring/experiences/revoke":   onlyIntegration(),
 		"GET /v1/operations/brief": {integration: true, fixtures: func(t *testing.T) []any {
 			action := func(id string, params map[string]any) operations.Action {
 				return operations.Action{

@@ -59,6 +59,21 @@ type AuthSession struct {
 	UpdatedAt *time.Time
 }
 
+type AuthoringExperience struct {
+	ID                string
+	OrgID             string
+	WorkflowID        string
+	WorkflowVersionID string
+	BriefKey          string
+	BriefJson         json.RawMessage
+	SchemaVersion     string
+	PolicyVersion     string
+	RegisteredAt      time.Time
+	RetainUntil       time.Time
+	RevokedAt         *time.Time
+	CreatedBy         string
+}
+
 type AutoHealingRun struct {
 	ID                      string
 	OrgID                   string

@@ -75,22 +75,23 @@ func readyzHandler(timeout time.Duration, probe readinessProbe) http.HandlerFunc
 
 // V1Server owns the /v1 route surface over one engine and pool.
 type V1Server struct {
-	audit          audit.Writer
-	engine         *engine.Engine
-	pool           *pgxpool.Pool
-	newID          func() string
-	hub            *streamHub
-	routeAuthz     map[string]routeGate
-	startRunLimit  ratelimit.Options
-	statusPages    statusPageCache
-	resolver       *auth.Resolver
-	authPolicy     *authpolicy.Evaluator
-	limiter        *ratelimit.Limiter
-	limiterTracker *ratelimit.Tracker
-	queueCache     *queueHealthCache
-	mcp            *mcpclient.Client
-	workos         workosClient
-	feedbackMemory *feedbackMemoryPool
+	authoringExperienceEnabled bool
+	audit                      audit.Writer
+	engine                     *engine.Engine
+	pool                       *pgxpool.Pool
+	newID                      func() string
+	hub                        *streamHub
+	routeAuthz                 map[string]routeGate
+	startRunLimit              ratelimit.Options
+	statusPages                statusPageCache
+	resolver                   *auth.Resolver
+	authPolicy                 *authpolicy.Evaluator
+	limiter                    *ratelimit.Limiter
+	limiterTracker             *ratelimit.Tracker
+	queueCache                 *queueHealthCache
+	mcp                        *mcpclient.Client
+	workos                     workosClient
+	feedbackMemory             *feedbackMemoryPool
 }
 
 // V1ServerOptions describes process-owned audit policy and feedback-memory work.
@@ -98,6 +99,8 @@ type V1Server struct {
 // repeated at the HTTP construction boundary so tests and future embedders
 // cannot accidentally bypass the bounded runtime configuration.
 type V1ServerOptions struct {
+	// AuthoringExperienceEnabled is an explicit process gate, disabled by default.
+	AuthoringExperienceEnabled bool
 	// Audit carries the immutable process serialization policy.
 	Audit                       audit.Writer
 	FeedbackMemoryWorkers       int
@@ -144,7 +147,8 @@ func newV1HandlerWithWorkOS(
 	}
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	server := &V1Server{
-		engine: eng, pool: pool, audit: options.Audit, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
+		authoringExperienceEnabled: options.AuthoringExperienceEnabled,
+		engine:                     eng, pool: pool, audit: options.Audit, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
 		newID: uuid.NewString, hub: newStreamHub(), workos: client, feedbackMemory: feedbackMemory,
 	}
 	server.authPolicy = authpolicy.New(pool, options.Audit)

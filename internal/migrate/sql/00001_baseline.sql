@@ -3492,4 +3492,75 @@ CREATE TRIGGER run_nodes_stamp_org BEFORE INSERT ON public.run_nodes FOR EACH RO
 
 CREATE TRIGGER run_events_stamp_org BEFORE INSERT ON public.run_events FOR EACH ROW EXECUTE FUNCTION public.stamp_run_row_org();
 
+-- Authoring examples reference immutable versions; graphs stay in their owner.
+ALTER TABLE public.workflows ADD CONSTRAINT workflows_org_identity_unique UNIQUE (org_id, id);
+ALTER TABLE public.workflow_versions ADD CONSTRAINT workflow_versions_org_source_unique UNIQUE (org_id, workflow_id, id);
+
+CREATE TABLE public.authoring_experiences (
+    id text PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
+    org_id text NOT NULL CHECK (length(org_id) BETWEEN 1 AND 128),
+    workflow_id text NOT NULL CHECK (length(workflow_id) BETWEEN 1 AND 128),
+    workflow_version_id text NOT NULL CHECK (length(workflow_version_id) BETWEEN 1 AND 128),
+    brief_key text NOT NULL CHECK (brief_key ~ '^[0-9a-f]{64}$'),
+    brief_json jsonb NOT NULL CHECK (jsonb_typeof(brief_json) = 'object' AND octet_length(brief_json::text) <= 8192),
+    schema_version text NOT NULL DEFAULT '1' CHECK (schema_version = '1'),
+    policy_version text NOT NULL CHECK (policy_version = 'authoring-experience-v1'),
+    registered_at timestamptz NOT NULL DEFAULT now(),
+    -- Absolute hours keep the bound independent of the session TimeZone:
+    -- calendar-day interval arithmetic shifts by an hour across DST, while the
+    -- writer computes the deadline as whole 24-hour UTC days.
+    retain_until timestamptz NOT NULL CHECK (retain_until > registered_at AND retain_until <= registered_at + interval '17520 hours'),
+    revoked_at timestamptz,
+    created_by text NOT NULL CHECK (length(created_by) BETWEEN 1 AND 128),
+    CONSTRAINT authoring_experiences_workflow_fk FOREIGN KEY (org_id, workflow_id)
+        REFERENCES public.workflows (org_id, id) ON DELETE CASCADE,
+    CONSTRAINT authoring_experiences_version_fk FOREIGN KEY (org_id, workflow_id, workflow_version_id)
+        REFERENCES public.workflow_versions (org_id, workflow_id, id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX authoring_experiences_active_source_idx ON public.authoring_experiences
+    (org_id, workflow_id, workflow_version_id, brief_key, policy_version) WHERE revoked_at IS NULL;
+-- Full (non-partial) source index: FK cascades from workflows/workflow_versions
+-- and the per-org consent purge filter without revoked_at, so partial indexes
+-- cannot serve them and would otherwise scan the whole registry.
+CREATE INDEX authoring_experiences_source_idx ON public.authoring_experiences
+    (org_id, workflow_id, workflow_version_id);
+CREATE INDEX authoring_experiences_list_idx ON public.authoring_experiences
+    (org_id, workflow_id, registered_at DESC, id DESC) WHERE revoked_at IS NULL;
+CREATE INDEX authoring_experiences_match_idx ON public.authoring_experiences
+    (org_id, brief_key, registered_at DESC, id DESC) WHERE revoked_at IS NULL;
+CREATE INDEX authoring_experiences_expiry_idx ON public.authoring_experiences (retain_until, id);
+CREATE INDEX authoring_experiences_revocation_idx ON public.authoring_experiences (revoked_at, id) WHERE revoked_at IS NOT NULL;
+
+-- Consent reduction and invalidation commit together through every config
+-- writer. Re-granting consent cannot revive a previously revoked example.
+CREATE FUNCTION public.revoke_authoring_experience_consent() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    target_org text;
+    consent_key text;
+    consent_value jsonb;
+BEGIN
+    IF TG_OP = 'DELETE' OR (TG_OP = 'UPDATE' AND (OLD.org_id <> NEW.org_id OR OLD.key <> NEW.key)) THEN
+        IF OLD.key IN ('memory.enabled', 'memory.allowedKinds', 'ai.authoringExperienceEnabled') THEN
+            UPDATE public.authoring_experiences SET revoked_at = clock_timestamp()
+            WHERE org_id = OLD.org_id AND revoked_at IS NULL;
+        END IF;
+    END IF;
+    IF TG_OP <> 'DELETE' THEN
+        target_org := NEW.org_id;
+        consent_key := NEW.key;
+        consent_value := NEW.value_json;
+        IF (consent_key IN ('memory.enabled', 'ai.authoringExperienceEnabled') AND consent_value IS DISTINCT FROM 'true'::jsonb)
+            OR (consent_key = 'memory.allowedKinds' AND
+                (jsonb_typeof(consent_value) <> 'string' OR NOT (consent_value #>> '{}') ~ '(^|,)[[:space:]]*workflow_vector[[:space:]]*(,|$)')) THEN
+            UPDATE public.authoring_experiences SET revoked_at = clock_timestamp()
+            WHERE org_id = target_org AND revoked_at IS NULL;
+        END IF;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+CREATE TRIGGER authoring_experience_consent_revocation AFTER INSERT OR UPDATE OR DELETE ON public.org_configs
+FOR EACH ROW EXECUTE FUNCTION public.revoke_authoring_experience_consent();
+
 -- +goose StatementEnd

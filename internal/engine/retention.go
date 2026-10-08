@@ -112,6 +112,15 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		if err := e.runEvalDatasetRetention(ctx, logger); err != nil {
 			passErr = errors.Join(passErr, err)
 		}
+		// Explicit authoring registrations expire or remain revoked even if
+		// tenant consent is later restored. Reuse the supervised cadence.
+		now := e.now().UTC()
+		if _, err := store.New(e.pool).PurgeAuthoringExperiencesBatch(ctx, store.PurgeAuthoringExperiencesBatchParams{AsOf: now, RevokedBefore: now.Add(-MemoryPurgeDelay()), BatchSize: 1000}); err != nil {
+			passErr = errors.Join(passErr, err)
+			if ctx.Err() == nil {
+				logger.Error("authoring experience retention failed", "error", err)
+			}
+		}
 		// Per-org data retention (run_events / audit_logs / usage_events).
 		e.runDataRetention(ctx, logger)
 		// Weekly digests ride the same cadence; the state-row claim keeps

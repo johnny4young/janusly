@@ -60,3 +60,18 @@ entries, while the retention sweep continues to honor each existing deadline.
 
 See `internal/memory`, `internal/engine/memorypurge.go`, and
 `internal/httpapi` memory routes.
+
+## Explicit authoring experiences
+
+The separate reference registry described in
+[experience authoring](architecture/experience-authoring.md) shares the memory
+process/tenant consent and exact allowed kind `workflow_vector`, plus default-off
+authoring gates. It stores no vector or duplicate DAG and makes no embedding call.
+Registration is explicit on an immutable saved version, not a successful-outcome
+label. Disabling/deleting the relevant tenant consent atomically revokes existing
+registrations; re-granting requires fresh explicit registration. The process gates
+(`JANUSLY_MEMORY_ENABLED`, `JANUSLY_AUTHORING_EXPERIENCE_ENABLED`) only suspend
+reads and registration: unexpired, unrevoked rows become eligible again when a
+gate is restored, so withdraw tenant consent to revoke. Existing maintenance
+sweeps physically remove expired/revoked rows; request-time eligibility closes first.
+The list and audit surfaces omit briefs, matching keys and graphs.
