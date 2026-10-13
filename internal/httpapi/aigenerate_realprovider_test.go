@@ -620,6 +620,12 @@ func evaluateRealDiagnosisCase(
 		Context:  ai.CallContext{OrgID: "evaluation-org", UserID: "evaluation-user"},
 	})
 	result.Repaired = generated.Repaired
+	if generated.FirstIssueCode != "" {
+		result.RepairIssueCodes = []string{generated.FirstIssueCode}
+	}
+	if generated.RepairIssueCode != "" {
+		result.ValidationIssueCodes = []string{generated.RepairIssueCode}
+	}
 	if aiErr != nil {
 		result.Result = "diagnosis_" + aiErr.Class
 		return finishQualificationCase(global, result)

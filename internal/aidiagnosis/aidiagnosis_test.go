@@ -2,6 +2,7 @@ package aidiagnosis
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -108,6 +109,28 @@ func TestGenerateFailsClosedAfterSecondInvalidEnvelope(t *testing.T) {
 	result, aiErr := Generate(context.Background(), client, GenerateInput{Evidence: Evidence{Message: "mismatch"}})
 	if aiErr == nil || aiErr.Class != "invalid_output" || len(client.calls) != 2 || len(result.Calls) != 0 {
 		t.Fatalf("invalid output must fail after two calls: %+v %v calls=%d", result, aiErr, len(client.calls))
+	}
+	if result.FirstIssueCode != "response_not_json" || result.RepairIssueCode != "hypotheses_count" {
+		t.Fatalf("failure must keep only closed issue codes: %+v", result)
+	}
+}
+
+func TestParseIssueCodesStayClosed(t *testing.T) {
+	for raw, want := range map[string]string{
+		`{"summary":"s","hypotheses":[],"note":"model text"}`:                                                                         "unknown_field",
+		`{"summary":"s","hypotheses":"many"}`:                                                                                         "field_type",
+		`{"summary":"","hypotheses":[]}`:                                                                                              "summary_bounds",
+		strings.Replace(validResponse("ok"), `"contract_violation"`, `"Bad ID"`, 1):                                                   "hypothesis_id",
+		strings.Replace(validResponse("ok"), `"confidence":0.8`, `"confidence":1.5`, 1):                                               "confidence_range",
+		strings.Replace(validResponse("ok"), `"evidence":["The bounded detector evidence reports a violation."]`, `"evidence":[]`, 1): "evidence_count",
+	} {
+		_, err := Parse(raw)
+		if got := IssueCode(err); got != want {
+			t.Errorf("IssueCode(%s) = %q, want %q (err %v)", raw, got, want, err)
+		}
+	}
+	if IssueCode(errors.New("foreign")) != "unknown" {
+		t.Fatal("foreign errors must map to unknown")
 	}
 }
 
