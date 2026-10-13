@@ -302,8 +302,10 @@ model, tokens, latency, cost, repair flag, and result only—never prompts or ra
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.
 Failed authoring cases additionally retain a bounded internal failure stage and
-every distinct validator issue code (a closed set; audits keep five); repaired
-cases keep the first draft's codes, and each call keeps the provider's stop
+every distinct validator issue code (a closed set; audits keep five), plus the
+schema field each `invalid_contract` issue points at, mapped onto a closed
+field list with indexes and model-authored keys dropped; repaired
+cases keep the first draft's codes and fields, and each call keeps the provider's stop
 reason. None retain model text or error messages. Repair feedback reports every
 top-level and graph parse defect in one round, naming mistyped fields by
 structural path rather than decoder text, including a node or edge element

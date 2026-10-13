@@ -5,7 +5,44 @@ import (
 	"testing"
 
 	"github.com/johnny4young/janusly/internal/ai"
+	"github.com/johnny4young/janusly/internal/domain"
 )
+
+func TestContractIssueFieldsStayInClosedSet(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{name: "not json", raw: `{`, want: []string{"workflow"}},
+		{name: "top level", raw: `{"name":"","nodes":[],"edges":[]}`, want: []string{"name"}},
+		{name: "indexed node field", raw: `{"nodes":[{"id":"a","type":"noop","label":""}],"edges":[]}`, want: []string{"nodes.label"}},
+		{name: "model-authored key", raw: `{"nodes":[],"edges":[],"ui":{"positions":{"secret.name: x":{"x":"n","y":0}}}}`, want: []string{"ui.positions"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, issues := domain.Parse([]byte(tc.raw))
+			if got := contractIssueFields(issues); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("fields = %#v, want %#v (issues %#v)", got, tc.want, issues)
+			}
+		})
+	}
+	issues := []domain.Issue{
+		{Code: domain.CodeInvalidContract, Message: "mystery.field: bad"},
+		{Code: "dangling_edge", Message: "nodes: ignored"},
+	}
+	if got := contractIssueFields(issues); !reflect.DeepEqual(got, []string{"other"}) {
+		t.Fatalf("unknown paths must collapse to other and non-contract codes must be skipped: %#v", got)
+	}
+}
+
+func TestGenerationAuditRetainsContractFields(t *testing.T) {
+	meta := generationMeta{repairContractFields: []string{"recovery.contract"}, validationContractFields: []string{"nodes.config"}}
+	metadata := fallbackGenerationAuditMetadata(meta, &ai.AIError{Class: "parse"}, assuranceCompilation{})
+	if !reflect.DeepEqual(metadata["repairContractFields"], []string{"recovery.contract"}) ||
+		!reflect.DeepEqual(metadata["validationContractFields"], []string{"nodes.config"}) {
+		t.Fatalf("contract fields missing from audit: %#v", metadata)
+	}
+}
 
 func TestFallbackGenerationAuditRetainsBoundedFirstDraftCodes(t *testing.T) {
 	codes := []string{"invalid_contract", "unknown_node_type", "dangling_edge", "cycle_detected", "missing_config", "missing_input"}

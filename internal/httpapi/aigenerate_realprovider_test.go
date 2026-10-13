@@ -62,6 +62,8 @@ type qualificationCaseEvidence struct {
 	FailureStage         string                      `json:"failureStage,omitempty"`
 	ValidationIssueCodes []string                    `json:"validationIssueCodes,omitempty"`
 	RepairIssueCodes     []string                    `json:"repairIssueCodes,omitempty"`
+	ValidationFields     []string                    `json:"validationContractFields,omitempty"`
+	RepairFields         []string                    `json:"repairContractFields,omitempty"`
 }
 
 type qualificationReport struct {
@@ -543,6 +545,7 @@ func evaluateRealAuthoringCase(
 	result.Repaired = meta.attempts > 1 || meta.repairAttempts > 0
 	if meta.repairAttempts > 0 {
 		result.RepairIssueCodes = append([]string(nil), meta.repairIssueCodes...)
+		result.RepairFields = append([]string(nil), meta.repairContractFields...)
 	}
 	if aiErr != nil {
 		recordAuthoringFailure(&result, meta, aiErr)
@@ -592,6 +595,7 @@ func evaluateRealAuthoringCase(
 func recordAuthoringFailure(result *qualificationCaseEvidence, meta generationMeta, aiErr *ai.AIError) {
 	result.FailureStage = meta.failureStage
 	result.ValidationIssueCodes = append([]string(nil), meta.validationIssueCodes...)
+	result.ValidationFields = append([]string(nil), meta.validationContractFields...)
 	if result.FailureStage == "" {
 		if aiErr.BeforeEgress {
 			result.FailureStage = "before_egress"
