@@ -1,8 +1,11 @@
 # AI surfaces
 
 Janusly uses a provider-neutral Go client in `internal/ai`. The supported
-completion posture is Anthropic with `claude-haiku-4-5-20251001`; embeddings are
-independent and may use self-hosted Ollama.
+completion posture is Anthropic with `claude-haiku-5-5`; embeddings are
+independent and may use self-hosted Ollama. Completions send
+`output_config.effort: low` so default provider-side thinking cannot consume a
+short output cap; the Haiku 4.5 and Sonnet 4.5 families, which reject the
+field, are called without it.
 
 ## Guarantees
 

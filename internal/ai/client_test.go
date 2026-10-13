@@ -159,6 +159,50 @@ func TestNormalizeModelID(t *testing.T) {
 	}
 }
 
+func TestGenerateTextSendsLowEffortOnlyToModelsThatAcceptIt(t *testing.T) {
+	const thinkingFirstBody = `{"id":"msg_t","type":"message","role":"assistant","model":"claude-haiku-5-5",` +
+		`"content":[{"type":"thinking","thinking":"","signature":"sig"},{"type":"text","text":"0.8"}],` +
+		`"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":9}}`
+	for _, tc := range []struct {
+		hint       string
+		wantEffort string
+	}{
+		{hint: "", wantEffort: "low"},
+		{hint: "claude-opus-5-5", wantEffort: "low"},
+		{hint: "claude-haiku-4-5-20251001"},
+		{hint: "claude-sonnet-4-5"},
+	} {
+		t.Run(tc.hint, func(t *testing.T) {
+			var sent struct {
+				OutputConfig *struct {
+					Effort string `json:"effort"`
+				} `json:"output_config"`
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(thinkingFirstBody))
+			}))
+			t.Cleanup(server.Close)
+			result, aiErr := New(Config{APIKey: "k", BaseURL: server.URL}).GenerateText(
+				context.Background(), GenerateTextInput{Prompt: "score", ModelHint: tc.hint},
+			)
+			if aiErr != nil || result.Text != "0.8" {
+				t.Fatalf("thinking-first reply: result=%+v err=%+v", result, aiErr)
+			}
+			got := ""
+			if sent.OutputConfig != nil {
+				got = sent.OutputConfig.Effort
+			}
+			if got != tc.wantEffort {
+				t.Fatalf("effort = %q, want %q", got, tc.wantEffort)
+			}
+		})
+	}
+}
+
 // The success path surfaces text, usage (cache counts included), latency,
 // and the resolved provider/model — with model hints honored.
 func TestGenerateTextSuccessShape(t *testing.T) {

@@ -177,7 +177,7 @@ jq -e --argjson cap "$max_usd" --argjson callCap "$max_calls" --argjson perCaseC
   .lifetimeCalls <= $callCap and .maxUsd == $cap and .sdkRetries == 0 and
   all(.cases[];
     (.calls | length) >= 1 and (.calls | length) <= $perCaseCap and
-    all(.calls[]; .provider == "anthropic" and .model == "claude-haiku-4-5-20251001" and
+    all(.calls[]; .provider == "anthropic" and .model == "claude-haiku-5-5" and
       .result == "ok" and .totalTokens > 0 and .costUsd > 0))
 ' <<<"$result_json" >/dev/null || die 'sanitized provider report failed the 20-case qualification envelope'
 

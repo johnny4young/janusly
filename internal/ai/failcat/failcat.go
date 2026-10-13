@@ -65,7 +65,7 @@ func SuccessEnvelope(text string) string {
 		}
 	}
 	return `{"id":"msg_fx","type":"message","role":"assistant",` +
-		`"model":"claude-haiku-4-5-20251001",` +
+		`"model":"claude-haiku-5-5",` +
 		`"content":[{"type":"text","text":"` + quoted.String() + `"}],` +
 		`"stop_reason":"end_turn",` +
 		`"usage":{"input_tokens":12,"output_tokens":7}}`

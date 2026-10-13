@@ -29,13 +29,15 @@ type ModelPrice struct {
 // ModelPricingSnapshotDate is the date the static Anthropic price catalog was
 // checked against the vendor's published pricing. Runtime env overrides remain
 // available for changes between source updates.
-const ModelPricingSnapshotDate = "2026-09-26"
+const ModelPricingSnapshotDate = "2026-10-13"
 
 // modelPrices is the completion runtime's single pricing source. Keys are
 // lowercase; cmd/pricing generates the browser copy from this map.
 var modelPrices = map[string]ModelPrice{
-	"claude-haiku-4-5-20251001":  anthropicModelPrice("claude-haiku-4-5-20251001", 1.0, 5.0),
-	"claude-haiku-4-5":           anthropicModelPrice("claude-haiku-4-5", 1.0, 5.0),
+	"claude-haiku-4-5-20251001": anthropicModelPrice("claude-haiku-4-5-20251001", 1.0, 5.0),
+	"claude-haiku-4-5":          anthropicModelPrice("claude-haiku-4-5", 1.0, 5.0),
+	// Haiku 5.5 ≤100K-token tier; usage above 100K bills at $0.50/$2.50.
+	"claude-haiku-5-5":           anthropicModelPrice("claude-haiku-5-5", 0.10, 0.50),
 	"claude-sonnet-4-5-20250929": anthropicModelPrice("claude-sonnet-4-5-20250929", 3.0, 15.0),
 	"claude-sonnet-4-5":          anthropicModelPrice("claude-sonnet-4-5", 3.0, 15.0),
 	"claude-sonnet-4-6":          anthropicModelPrice("claude-sonnet-4-6", 3.0, 15.0),

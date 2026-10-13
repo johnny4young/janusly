@@ -1,6 +1,6 @@
 // Provider-neutral LLM chokepoint — the single gate every AI surface in
 // the runtime speaks through, implements the contract's LlmClient. The
-// supported completion posture is Anthropic-only (claude-haiku-4-5) via
+// supported completion posture is Anthropic-only (claude-haiku-5-5) via
 // the official anthropic-sdk-go, but the INTERFACE never names a vendor:
 // call sites see GenerateText(input) -> (result, *AIError).
 //
@@ -29,7 +29,7 @@ import (
 )
 
 // DefaultModel is the supported operating posture's model.
-const DefaultModel = "claude-haiku-4-5-20251001"
+const DefaultModel = "claude-haiku-5-5"
 
 // MaxModelIDBytes bounds operator/env model selectors before they can become
 // provider request metadata, pricing lookup keys, telemetry dimensions, or
@@ -60,6 +60,17 @@ var anthropicModelIDPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 func NormalizeModelID(value string) (string, bool) {
 	value = strings.TrimSpace(value)
 	return value, value != "" && len(value) <= MaxModelIDBytes && anthropicModelIDPattern.MatchString(value)
+}
+
+// acceptsEffort reports whether the provider accepts output_config.effort;
+// the Haiku 4.5 and Sonnet 4.5 families reject it with a 400.
+func acceptsEffort(model string) bool {
+	for _, family := range []string{"claude-haiku-4-5", "claude-sonnet-4-5"} {
+		if model == family || strings.HasPrefix(model, family+"-") {
+			return false
+		}
+	}
+	return true
 }
 
 // AIError is the classified failure every caller maps to
@@ -329,7 +340,7 @@ func (c *anthropicClient) GenerateText(ctx context.Context, input GenerateTextIn
 	maxOutput := c.cfg.MaxOutputTokens
 	if input.MaxOutputUnits > 0 && input.MaxOutputUnits < maxOutput {
 		// A call site may narrow the tenant's output ceiling (for example the
-		// 16-token experiment judge), but it may never expand it. Treating the
+		// experiment judge), but it may never expand it. Treating the
 		// per-call hint as an override let an internal surface silently bypass
 		// ai.maxOutputUnits and its spend/response-size guard.
 		maxOutput = input.MaxOutputUnits
@@ -341,6 +352,11 @@ func (c *anthropicClient) GenerateText(ctx context.Context, input GenerateTextIn
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(input.Prompt)),
 		},
+	}
+	if acceptsEffort(model) {
+		// Thinking-by-default models spend MaxTokens on reasoning; low effort
+		// keeps short bounded replies from ending before any text.
+		params.OutputConfig = anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffortLow}
 	}
 	if input.System != "" {
 		block := anthropic.TextBlockParam{Text: input.System}
