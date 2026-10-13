@@ -616,6 +616,10 @@ var contractIssueFieldSet = map[string]bool{
 	"nodes": true, "edges": true,
 	"metadata.description": true, "metadata.tags": true, "ui.positions": true,
 	"recovery.contract": true, "recovery.circuitBreaker": true,
+	// Contract fields placed directly under recovery instead of recovery.contract.
+	"recovery.version": true, "recovery.failure": true, "recovery.evidence": true, "recovery.effects": true,
+	"recovery.repairs": true, "recovery.validation": true, "recovery.approval": true,
+	"recovery.autonomyLevel": true, "recovery.verification": true, "recovery.recurrence": true,
 	"nodes.id": true, "nodes.type": true, "nodes.label": true, "nodes.config": true,
 	"edges.id": true, "edges.from": true, "edges.to": true, "edges.condition": true, "edges.onError": true,
 }

@@ -17,6 +17,7 @@ func TestContractIssueFieldsStayInClosedSet(t *testing.T) {
 		{name: "not json", raw: `{`, want: []string{"workflow"}},
 		{name: "top level", raw: `{"name":"","nodes":[],"edges":[]}`, want: []string{"name"}},
 		{name: "indexed node field", raw: `{"nodes":[{"id":"a","type":"noop","label":""}],"edges":[]}`, want: []string{"nodes.label"}},
+		{name: "misplaced contract field", raw: `{"nodes":[],"edges":[],"recovery":{"version":"1"}}`, want: []string{"recovery.version"}},
 		{name: "model-authored key", raw: `{"nodes":[],"edges":[],"ui":{"positions":{"secret.name: x":{"x":"n","y":0}}}}`, want: []string{"ui.positions"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
