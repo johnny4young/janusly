@@ -10,9 +10,12 @@ import {
 
 describe("llm-pricing", () => {
   it("ships a frozen, non-empty MODEL_PRICES table", () => {
-    expect(MODEL_PRICING_SNAPSHOT_DATE).toBe("2026-09-26");
-    expect(Object.keys(MODEL_PRICES)).toHaveLength(15);
+    expect(MODEL_PRICING_SNAPSHOT_DATE).toBe("2026-10-13");
+    expect(Object.keys(MODEL_PRICES)).toHaveLength(16);
     expect(MODEL_PRICES["claude-haiku-4-5-20251001"]).toBeDefined();
+    expect(MODEL_PRICES["claude-haiku-5-5"]).toEqual({
+      inputUsdPer1M: 0.1, outputUsdPer1M: 0.5,
+    });
     expect(MODEL_PRICES["claude-sonnet-5"]).toEqual({
       inputUsdPer1M: 2, outputUsdPer1M: 10,
     });
