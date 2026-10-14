@@ -634,7 +634,7 @@ func contractIssueFields(issues []domain.Issue) []string {
 		}
 		path, _, _ := strings.Cut(issue.Message, ": ")
 		var segments []string
-		for _, segment := range strings.Split(path, ".") {
+		for segment := range strings.SplitSeq(path, ".") {
 			if _, err := strconv.Atoi(segment); err != nil && segment != "" {
 				segments = append(segments, segment)
 			}

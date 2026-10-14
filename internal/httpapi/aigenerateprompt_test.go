@@ -594,7 +594,7 @@ func TestMistypedFieldListsMatchParseDecoding(t *testing.T) {
 
 func TestGeneratePromptRecoveryShapeValidates(t *testing.T) {
 	var line string
-	for _, candidate := range strings.Split(generateSystemPromptTemplate, "\n") {
+	for candidate := range strings.SplitSeq(generateSystemPromptTemplate, "\n") {
 		if strings.HasPrefix(candidate, "RECOVERY SHAPE:") {
 			line = candidate
 		}
