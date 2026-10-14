@@ -310,10 +310,10 @@ func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	if delegate.maxOutputUnits != realProviderOutputUnits {
 		t.Fatalf("delegate output cap=%d, want %d", delegate.maxOutputUnits, realProviderOutputUnits)
 	}
-	// Four Haiku 4.5 calls reserve 4110 input-byte tokens each at the
-	// 5-minute cache-write rate ($1.25/M), plus 2400 output tokens at $5/M.
-	// Each 17137.5-microUSD projection rounds upward before persistence.
-	if reservedUSD, lifetimeCalls := global.reservations(); int64(math.Round(reservedUSD*1_000_000)) != 68_552 || lifetimeCalls != 4 {
+	// Four Haiku 5.5 calls reserve 4110 input-byte tokens each at the
+	// 5-minute cache-write rate ($0.125/M), plus 2400 output tokens at $0.50/M.
+	// Each 1713.75-microUSD projection rounds upward before persistence.
+	if reservedUSD, lifetimeCalls := global.reservations(); int64(math.Round(reservedUSD*1_000_000)) != 6_856 || lifetimeCalls != 4 {
 		t.Fatalf("durable cache-tier upper bound missing: reserved=%f lifetimeCalls=%d", reservedUSD, lifetimeCalls)
 	}
 	restart := func() (*qualificationFakeClient, *boundedCaseClient) {
@@ -379,7 +379,7 @@ func TestRealProviderQualificationRejectsPriceOverrideAndWrongModelBeforeEgress(
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			if testCase.override != "" {
-				t.Setenv("JANUSLY_LLM_PRICE_CLAUDE_HAIKU_4_5_20251001", testCase.override)
+				t.Setenv("JANUSLY_LLM_PRICE_"+strings.ToUpper(strings.ReplaceAll(ai.DefaultModel, "-", "_")), testCase.override)
 			}
 			delegate := &qualificationFakeClient{}
 			global := &boundedProductClient{

@@ -115,7 +115,7 @@ func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
 	}
 
 	// Env price override wins over the table.
-	t.Setenv("JANUSLY_LLM_PRICE_CLAUDE_HAIKU_4_5_20251001", "2,10")
+	t.Setenv("JANUSLY_LLM_PRICE_CLAUDE_HAIKU_5_5", "2,10")
 	overridden, aiErr := client.GenerateText(ctx, GenerateTextInput{
 		Prompt: "x", Context: CallContext{OrgID: org + "-override"},
 	})
