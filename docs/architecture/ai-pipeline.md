@@ -276,6 +276,7 @@ Verification log:
 
 - 2026-09-24 — 14/14 catalog entries match the vendor page; Sonnet 5 keeps the USD 2/10 introductory rate as its standard rate.
 - 2026-09-26 — 15/15 catalog entries match the vendor page after adding Claude Opus 5.5 at USD 4/20; its cache reads cost USD 0.20 (0.05x base, not the standard 0.1x) and five-minute cache writes USD 5 (1.25x).
+- 2026-10-13 — 16/16 catalog entries match the vendor page after adding Claude Haiku 5.5 at USD 0.10/0.50. That is its rate for prompts of 100K tokens or fewer; longer prompts bill at USD 0.50/2.50, which the flat catalog row does not model.
 
 ## Qualification layers
 
@@ -301,8 +302,12 @@ model, tokens, latency, cost, repair flag, and result only—never prompts or ra
 incident evidence—and is checksummed. A green profile proves this bounded
 corpus only; it is not production or general model-quality certification.
 Failed authoring cases additionally retain a bounded internal failure stage and
-every distinct validator issue code (a closed set; audits keep five); repaired
-cases keep the first draft's codes, and each call keeps the provider's stop
+every distinct validator issue code (a closed set; audits keep five), plus the
+schema field each `invalid_contract` issue points at, mapped onto a closed
+field list with indexes and model-authored keys dropped; repaired
+cases keep the first draft's codes and fields. Diagnosis cases keep the closed
+envelope code of each rejected reply (for example `unknown_field` or
+`evidence_count`), never the decoder message. Each call keeps the provider's stop
 reason. None retain model text or error messages. Repair feedback reports every
 top-level and graph parse defect in one round, naming mistyped fields by
 structural path rather than decoder text, including a node or edge element

@@ -150,7 +150,7 @@ silently promoted to valid tenant writes. Boolean fallbacks accept exact
 | Variable | Category | Tenant key | Type | Catalog default | Inclusive range / allowed values |
 | --- | --- | --- | --- | --- | --- |
 | `JANUSLY_AI_GENERATION_CANDIDATES` | Tenant | `ai.generationCandidates` | number | `1` | 1..5 |
-| `ANTHROPIC_MODEL` | Tenant | `ai.anthropic.model` | string | `"claude-haiku-4-5-20251001"` | catalog validator |
+| `ANTHROPIC_MODEL` | Tenant | `ai.anthropic.model` | string | `"claude-haiku-5-5"` | catalog validator |
 | `JANUSLY_LLM_TIMEOUT_MS` | Tenant | `ai.timeoutMs` | number | `30000` | 1..600000 |
 | `JANUSLY_LLM_MAX_RETRIES` | Tenant | `ai.maxRetries` | number | `2` | 0..10 |
 | `JANUSLY_LLM_MAX_OUTPUT_UNITS` | Tenant | `ai.maxOutputUnits` | number | `4096` | 256..16384 |

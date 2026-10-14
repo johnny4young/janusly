@@ -8,10 +8,11 @@ import (
 
 func TestStaticModelPricesPinsSupportedAnthropicCatalog(t *testing.T) {
 	prices := StaticModelPrices()
-	if len(prices) != 15 {
-		t.Fatalf("static model price count = %d, want 15", len(prices))
+	if len(prices) != 16 {
+		t.Fatalf("static model price count = %d, want 16", len(prices))
 	}
 	tests := map[string]ModelPrice{
+		"claude-haiku-5-5":           {InputUsdPer1M: 0.10, OutputUsdPer1M: 0.50, CacheWrite5mUsdPer1M: 0.125, CacheReadUsdPer1M: 0.01},
 		"claude-sonnet-5":            {InputUsdPer1M: 2, OutputUsdPer1M: 10, CacheWrite5mUsdPer1M: 2.5, CacheReadUsdPer1M: 0.2},
 		"claude-opus-5":              {InputUsdPer1M: 5, OutputUsdPer1M: 25, CacheWrite5mUsdPer1M: 6.25, CacheReadUsdPer1M: 0.5},
 		"claude-opus-5-5":            {InputUsdPer1M: 4, OutputUsdPer1M: 20, CacheWrite5mUsdPer1M: 5, CacheReadUsdPer1M: 0.2},

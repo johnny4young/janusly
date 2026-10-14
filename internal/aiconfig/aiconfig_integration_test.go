@@ -44,7 +44,7 @@ func TestResolveTenantAIConfig(t *testing.T) {
 
 	// Defaults straight from the catalog.
 	client, settings := Resolve(ctx, pool, org)
-	if settings.Provider != "anthropic" || settings.Model != "claude-haiku-4-5-20251001" ||
+	if settings.Provider != "anthropic" || settings.Model != "claude-haiku-5-5" ||
 		settings.PromptMaxChars != 4000 || settings.RateLimitPerMin != 30 {
 		t.Fatalf("catalog defaults: %+v", settings)
 	}

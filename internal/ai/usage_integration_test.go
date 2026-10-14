@@ -48,7 +48,7 @@ func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
 	}
 	// costUsd from the table: ordinary input + 5m cache creation + cache read
 	// + output, each at its own measured rate.
-	wantCost := (10*1.0 + 1*1.25 + 2*0.1 + 5*5.0) / 1_000_000
+	wantCost := (10*0.10 + 1*0.125 + 2*0.01 + 5*0.50) / 1_000_000
 	if result.CostUsd == nil || math.Abs(*result.CostUsd-wantCost) > 1e-12 {
 		t.Fatalf("computed cost: %v want %f", result.CostUsd, wantCost)
 	}
@@ -69,7 +69,7 @@ func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
 	row := readRow("ai")
 	for key, want := range map[string]any{
 		"__quantity": float64(18), "provider": "anthropic",
-		"model": "claude-haiku-4-5-20251001", "inputTokens": float64(10),
+		"model": DefaultModel, "inputTokens": float64(10),
 		"outputTokens": float64(5), "cachedInputTokens": float64(2),
 		"cacheCreationInputTokens": float64(1),
 		"providerSimulated":        false, "nodeId": "n1", "aiError": nil,
@@ -115,7 +115,7 @@ func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
 	}
 
 	// Env price override wins over the table.
-	t.Setenv("JANUSLY_LLM_PRICE_CLAUDE_HAIKU_4_5_20251001", "2,10")
+	t.Setenv("JANUSLY_LLM_PRICE_CLAUDE_HAIKU_5_5", "2,10")
 	overridden, aiErr := client.GenerateText(ctx, GenerateTextInput{
 		Prompt: "x", Context: CallContext{OrgID: org + "-override"},
 	})

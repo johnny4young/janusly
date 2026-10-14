@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -351,6 +352,9 @@ func generationAuditMetadata(meta generationMeta) map[string]any {
 	if len(meta.repairIssueCodes) > 0 {
 		metadata["repairIssueCodes"] = slices.Clone(meta.repairIssueCodes[:min(len(meta.repairIssueCodes), auditIssueCodeLimit)])
 	}
+	if len(meta.repairContractFields) > 0 {
+		metadata["repairContractFields"] = slices.Clone(meta.repairContractFields[:min(len(meta.repairContractFields), auditIssueCodeLimit)])
+	}
 	return metadata
 }
 
@@ -365,6 +369,9 @@ func fallbackGenerationAuditMetadata(meta generationMeta, aiErr *ai.AIError, com
 	}
 	if len(meta.validationIssueCodes) > 0 {
 		metadata["validationIssueCodes"] = slices.Clone(meta.validationIssueCodes[:min(len(meta.validationIssueCodes), auditIssueCodeLimit)])
+	}
+	if len(meta.validationContractFields) > 0 {
+		metadata["validationContractFields"] = slices.Clone(meta.validationContractFields[:min(len(meta.validationContractFields), auditIssueCodeLimit)])
 	}
 	return metadata
 }
@@ -383,6 +390,9 @@ type generationMeta struct {
 	validationIssueCodes  []string
 	// repairIssueCodes are the first draft's defects, kept even when a repair succeeds.
 	repairIssueCodes []string
+	// Contract fields come from contractIssueFields' closed set.
+	validationContractFields []string
+	repairContractFields     []string
 }
 
 func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai.Client, prompt, modelHint string, rc v1Request, candidateTarget int, systemData string, rateLimitPerMin int) ([]byte, generationMeta, *ai.AIError) {
@@ -501,6 +511,7 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 	// Repair ladder: feed the REAL validator issues back, bounded.
 	issues := validateGeneratedWorkflowCandidate(workflowJSON)
 	meta.repairIssueCodes = distinctIssueCodes(issues)
+	meta.repairContractFields = contractIssueFields(issues)
 	for repair := 1; len(issues) > 0 && repair <= maxRepairAttempts; repair++ {
 		meta.repairAttempts = repair
 		text, aiErr := generate(composeRepairPrompt(prompt, workflowJSON, issues))
@@ -528,6 +539,7 @@ func (s *V1Server) generateFreeJsonWithSystemData(ctx context.Context, client ai
 	if len(issues) > 0 {
 		meta.failureStage = "candidate_validation"
 		meta.validationIssueCodes = distinctIssueCodes(issues)
+		meta.validationContractFields = contractIssueFields(issues)
 		return nil, meta, &ai.AIError{Class: "invalid_output",
 			Message: "generated workflow failed validation: " + issueSummary(issues)}
 	}
@@ -596,6 +608,48 @@ func distinctIssueCodes(issues []domain.Issue) []string {
 		}
 	}
 	return codes
+}
+
+var contractIssueFieldSet = map[string]bool{
+	"workflow": true, "dslVersion": true, "id": true, "name": true, "metadata": true,
+	"inputs": true, "outputs": true, "templatePolicy": true, "recovery": true, "ui": true,
+	"nodes": true, "edges": true,
+	"metadata.description": true, "metadata.tags": true, "ui.positions": true,
+	"recovery.contract": true, "recovery.circuitBreaker": true,
+	// Contract fields placed directly under recovery instead of recovery.contract.
+	"recovery.version": true, "recovery.failure": true, "recovery.evidence": true, "recovery.effects": true,
+	"recovery.repairs": true, "recovery.validation": true, "recovery.approval": true,
+	"recovery.autonomyLevel": true, "recovery.verification": true, "recovery.recurrence": true,
+	"nodes.id": true, "nodes.type": true, "nodes.label": true, "nodes.config": true,
+	"edges.id": true, "edges.from": true, "edges.to": true, "edges.condition": true, "edges.onError": true,
+}
+
+// contractIssueFields maps invalid_contract paths onto a closed field set;
+// array indexes are dropped and model-authored keys collapse to their parent.
+func contractIssueFields(issues []domain.Issue) []string {
+	var fields []string
+	for _, issue := range issues {
+		if issue.Code != domain.CodeInvalidContract {
+			continue
+		}
+		path, _, _ := strings.Cut(issue.Message, ": ")
+		var segments []string
+		for segment := range strings.SplitSeq(path, ".") {
+			if _, err := strconv.Atoi(segment); err != nil && segment != "" {
+				segments = append(segments, segment)
+			}
+		}
+		field := "other"
+		if len(segments) > 1 && contractIssueFieldSet[segments[0]+"."+segments[1]] {
+			field = segments[0] + "." + segments[1]
+		} else if len(segments) > 0 && contractIssueFieldSet[segments[0]] {
+			field = segments[0]
+		}
+		if !slices.Contains(fields, field) {
+			fields = append(fields, field)
+		}
+	}
+	return fields
 }
 
 func issueSummary(issues []domain.Issue) string {

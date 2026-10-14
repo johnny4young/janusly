@@ -65,7 +65,7 @@ test('production OCI works without Anthropic and explains local mode in both loc
   expect(aiHealth.ok()).toBe(true)
   await expect(aiHealth.json()).resolves.toMatchObject({
     enabled: false,
-    model: 'claude-haiku-4-5-20251001',
+    model: 'claude-haiku-5-5',
   })
 
   await page.addInitScript(({ activeOrg }) => {

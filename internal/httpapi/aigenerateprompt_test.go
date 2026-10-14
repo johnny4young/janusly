@@ -591,3 +591,40 @@ func TestMistypedFieldListsMatchParseDecoding(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneratePromptRecoveryShapeValidates(t *testing.T) {
+	var line string
+	for candidate := range strings.SplitSeq(generateSystemPromptTemplate, "\n") {
+		if strings.HasPrefix(candidate, "RECOVERY SHAPE:") {
+			line = candidate
+		}
+	}
+	start := strings.Index(line, `{"circuitBreaker"`)
+	if start < 0 {
+		t.Fatal("prompt must carry a literal RECOVERY SHAPE object")
+	}
+	var recovery map[string]any
+	if err := json.Unmarshal([]byte(line[start:]), &recovery); err != nil {
+		t.Fatalf("RECOVERY SHAPE is not JSON: %v", err)
+	}
+	contract := recovery["contract"].(map[string]any)
+	contract["effects"].([]any)[0].(map[string]any)["nodeId"] = "notify"
+	raw, err := json.Marshal(map[string]any{
+		"dslVersion": "1.0", "id": "recoverable", "name": "Recoverable",
+		"outputs": map[string]any{"result": "{{context.notify.output}}"},
+		"nodes": []any{
+			map[string]any{"id": "start", "type": "noop", "config": map[string]any{}},
+			map[string]any{"id": "notify", "type": "tool", "config": map[string]any{
+				"tool": "email.send", "input": map[string]any{"to": "ops@example.com", "subject": "s", "text": "t"},
+			}},
+		},
+		"edges":    []any{map[string]any{"from": "start", "to": "notify"}},
+		"recovery": recovery,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := validateGeneratedWorkflowCandidate(raw); len(issues) > 0 {
+		t.Fatalf("prompt RECOVERY SHAPE must pass the generation validator: %#v", issues)
+	}
+}

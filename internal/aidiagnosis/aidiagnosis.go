@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"regexp"
 	"slices"
@@ -29,7 +28,7 @@ const (
 	MaxCauseRunes           = 800
 	MaxStatements           = 5
 	MaxStatementRunes       = 400
-	MaxDiagnosisOutputUnits = 700
+	MaxDiagnosisOutputUnits = 1200 // provider-side thinking counts against this cap
 	MaxDiagnosisOutputBytes = 32 * 1024
 )
 
@@ -88,11 +87,42 @@ type CallMeta struct {
 }
 
 // Result contains only the validated enrichment plus non-sensitive call
-// accounting. Calls is always one or two.
+// accounting. Calls is always one or two. Issue codes come from the closed
+// envelope vocabulary; an invalid_output error returns only those codes.
 type Result struct {
-	Enrichment Enrichment
-	Calls      []CallMeta
-	Repaired   bool
+	Enrichment      Enrichment
+	Calls           []CallMeta
+	Repaired        bool
+	FirstIssueCode  string
+	RepairIssueCode string
+}
+
+type envelopeIssue struct{ code, message string }
+
+func (e *envelopeIssue) Error() string { return e.message }
+
+func envelopeError(code, message string) error { return &envelopeIssue{code: code, message: message} }
+
+// IssueCode returns the closed envelope code for a Parse or
+// NormalizeEnrichment error; the message itself may echo provider field names.
+func IssueCode(err error) string {
+	var issue *envelopeIssue
+	if errors.As(err, &issue) {
+		return issue.code
+	}
+	return "unknown"
+}
+
+func decodeIssueCode(err error) string {
+	var typeErr *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &typeErr):
+		return "field_type"
+	case strings.HasPrefix(err.Error(), "json: unknown field"):
+		return "unknown_field"
+	default:
+		return "decode_error"
+	}
 }
 
 // GenerateInput carries caller attribution and the already tenant-scoped
@@ -112,6 +142,7 @@ const systemPrompt = `You are Janusly's recovery diagnosis assistant. Return ONL
 {"summary":"...","hypotheses":[{"id":"lower_snake_case","cause":"...","confidence":0.0,"evidence":["..."],"counterEvidence":["..."]}]}
 
 Rules:
+- Use only these keys: the object has exactly "summary" and "hypotheses"; each hypothesis has exactly "id", "cause", "confidence", "evidence", and "counterEvidence". Add no other field anywhere, such as notes, actions, or reasoning; the reply is rejected otherwise.
 - Produce 1 to 3 hypotheses. Evidence and counterEvidence contain at most 5 concise statements each.
 - Ground every statement only in the supplied bounded incident evidence. State uncertainty instead of inventing facts.
 - Never propose or authorize actions, candidates, patches, permissions, approvals, ranking, credentials, tools, workflow ids, node ids, or detector ids.
@@ -211,6 +242,7 @@ func Generate(ctx context.Context, client ai.Client, input GenerateInput) (Resul
 		result.Enrichment = enrichment
 		return result, nil
 	}
+	result.FirstIssueCode = IssueCode(parseErr)
 	repairPrompt := prompt + "\n\nYour previous response violated the required JSON envelope (" +
 		cleanText(parseErr.Error(), 240) + "). Return ONLY a corrected object with the exact schema."
 	text, aiErr = call(repairPrompt)
@@ -219,7 +251,7 @@ func Generate(ctx context.Context, client ai.Client, input GenerateInput) (Resul
 	}
 	enrichment, parseErr = Parse(text)
 	if parseErr != nil {
-		return Result{}, &ai.AIError{Class: "invalid_output", Message: "diagnosis enrichment violated the bounded JSON envelope"}
+		return Result{FirstIssueCode: result.FirstIssueCode, RepairIssueCode: IssueCode(parseErr)}, &ai.AIError{Class: "invalid_output", Message: "diagnosis enrichment violated the bounded JSON envelope"}
 	}
 	result.Enrichment = enrichment
 	result.Repaired = true
@@ -232,20 +264,20 @@ func Generate(ctx context.Context, client ai.Client, input GenerateInput) (Resul
 func Parse(text string) (Enrichment, error) {
 	value, ok := ai.ParseJSONValueBounded(text, MaxDiagnosisOutputBytes)
 	if !ok {
-		return Enrichment{}, errors.New("response is not a JSON object")
+		return Enrichment{}, envelopeError("response_not_json", "response is not a JSON object")
 	}
 	raw, err := json.Marshal(value)
 	if err != nil {
-		return Enrichment{}, errors.New("response JSON cannot be encoded")
+		return Enrichment{}, envelopeError("response_not_encodable", "response JSON cannot be encoded")
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	var enrichment Enrichment
 	if err := decoder.Decode(&enrichment); err != nil {
-		return Enrichment{}, fmt.Errorf("decode closed envelope: %w", err)
+		return Enrichment{}, envelopeError(decodeIssueCode(err), "decode closed envelope: "+err.Error())
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return Enrichment{}, errors.New("response must contain one JSON object")
+		return Enrichment{}, envelopeError("trailing_content", "response must contain one JSON object")
 	}
 	return NormalizeEnrichment(enrichment)
 }
@@ -255,29 +287,29 @@ func Parse(text string) (Enrichment, error) {
 // validation and scrubbing applied to provider text.
 func NormalizeEnrichment(enrichment Enrichment) (Enrichment, error) {
 	if strings.TrimSpace(enrichment.Summary) == "" || utf8.RuneCountInString(enrichment.Summary) > MaxSummaryRunes {
-		return Enrichment{}, errors.New("summary must contain 1..800 characters")
+		return Enrichment{}, envelopeError("summary_bounds", "summary must contain 1..800 characters")
 	}
 	if len(enrichment.Hypotheses) < 1 || len(enrichment.Hypotheses) > MaxHypotheses {
-		return Enrichment{}, errors.New("hypotheses must contain 1..3 items")
+		return Enrichment{}, envelopeError("hypotheses_count", "hypotheses must contain 1..3 items")
 	}
 	seen := map[string]bool{}
 	for _, hypothesis := range enrichment.Hypotheses {
 		if !hypothesisIDPattern.MatchString(hypothesis.ID) || utf8.RuneCountInString(hypothesis.ID) > MaxHypothesisIDRunes || seen[hypothesis.ID] {
-			return Enrichment{}, errors.New("hypothesis id is invalid or duplicated")
+			return Enrichment{}, envelopeError("hypothesis_id", "hypothesis id is invalid or duplicated")
 		}
 		seen[hypothesis.ID] = true
 		if strings.TrimSpace(hypothesis.Cause) == "" || utf8.RuneCountInString(hypothesis.Cause) > MaxCauseRunes {
-			return Enrichment{}, errors.New("hypothesis cause must contain 1..800 characters")
+			return Enrichment{}, envelopeError("cause_bounds", "hypothesis cause must contain 1..800 characters")
 		}
 		if hypothesis.Confidence < 0 || hypothesis.Confidence > 1 {
-			return Enrichment{}, errors.New("hypothesis confidence must be between 0 and 1")
+			return Enrichment{}, envelopeError("confidence_range", "hypothesis confidence must be between 0 and 1")
 		}
 		if len(hypothesis.Evidence) < 1 || len(hypothesis.Evidence) > MaxStatements || len(hypothesis.CounterEvidence) > MaxStatements {
-			return Enrichment{}, errors.New("evidence requires 1..5 items and counterEvidence at most 5")
+			return Enrichment{}, envelopeError("evidence_count", "evidence requires 1..5 items and counterEvidence at most 5")
 		}
 		for _, statement := range append(append([]string{}, hypothesis.Evidence...), hypothesis.CounterEvidence...) {
 			if strings.TrimSpace(statement) == "" || utf8.RuneCountInString(statement) > MaxStatementRunes {
-				return Enrichment{}, errors.New("evidence statements must contain 1..400 characters")
+				return Enrichment{}, envelopeError("statement_bounds", "evidence statements must contain 1..400 characters")
 			}
 		}
 	}

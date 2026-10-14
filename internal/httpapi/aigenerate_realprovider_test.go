@@ -62,6 +62,8 @@ type qualificationCaseEvidence struct {
 	FailureStage         string                      `json:"failureStage,omitempty"`
 	ValidationIssueCodes []string                    `json:"validationIssueCodes,omitempty"`
 	RepairIssueCodes     []string                    `json:"repairIssueCodes,omitempty"`
+	ValidationFields     []string                    `json:"validationContractFields,omitempty"`
+	RepairFields         []string                    `json:"repairContractFields,omitempty"`
 }
 
 type qualificationReport struct {
@@ -308,10 +310,10 @@ func TestRealProviderQualificationBreakersProviderFree(t *testing.T) {
 	if delegate.maxOutputUnits != realProviderOutputUnits {
 		t.Fatalf("delegate output cap=%d, want %d", delegate.maxOutputUnits, realProviderOutputUnits)
 	}
-	// Four Haiku 4.5 calls reserve 4110 input-byte tokens each at the
-	// 5-minute cache-write rate ($1.25/M), plus 2400 output tokens at $5/M.
-	// Each 17137.5-microUSD projection rounds upward before persistence.
-	if reservedUSD, lifetimeCalls := global.reservations(); int64(math.Round(reservedUSD*1_000_000)) != 68_552 || lifetimeCalls != 4 {
+	// Four Haiku 5.5 calls reserve 4110 input-byte tokens each at the
+	// 5-minute cache-write rate ($0.125/M), plus 2400 output tokens at $0.50/M.
+	// Each 1713.75-microUSD projection rounds upward before persistence.
+	if reservedUSD, lifetimeCalls := global.reservations(); int64(math.Round(reservedUSD*1_000_000)) != 6_856 || lifetimeCalls != 4 {
 		t.Fatalf("durable cache-tier upper bound missing: reserved=%f lifetimeCalls=%d", reservedUSD, lifetimeCalls)
 	}
 	restart := func() (*qualificationFakeClient, *boundedCaseClient) {
@@ -377,7 +379,7 @@ func TestRealProviderQualificationRejectsPriceOverrideAndWrongModelBeforeEgress(
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			if testCase.override != "" {
-				t.Setenv("JANUSLY_LLM_PRICE_CLAUDE_HAIKU_4_5_20251001", testCase.override)
+				t.Setenv("JANUSLY_LLM_PRICE_"+strings.ToUpper(strings.ReplaceAll(ai.DefaultModel, "-", "_")), testCase.override)
 			}
 			delegate := &qualificationFakeClient{}
 			global := &boundedProductClient{
@@ -543,6 +545,7 @@ func evaluateRealAuthoringCase(
 	result.Repaired = meta.attempts > 1 || meta.repairAttempts > 0
 	if meta.repairAttempts > 0 {
 		result.RepairIssueCodes = append([]string(nil), meta.repairIssueCodes...)
+		result.RepairFields = append([]string(nil), meta.repairContractFields...)
 	}
 	if aiErr != nil {
 		recordAuthoringFailure(&result, meta, aiErr)
@@ -592,6 +595,7 @@ func evaluateRealAuthoringCase(
 func recordAuthoringFailure(result *qualificationCaseEvidence, meta generationMeta, aiErr *ai.AIError) {
 	result.FailureStage = meta.failureStage
 	result.ValidationIssueCodes = append([]string(nil), meta.validationIssueCodes...)
+	result.ValidationFields = append([]string(nil), meta.validationContractFields...)
 	if result.FailureStage == "" {
 		if aiErr.BeforeEgress {
 			result.FailureStage = "before_egress"
@@ -616,6 +620,12 @@ func evaluateRealDiagnosisCase(
 		Context:  ai.CallContext{OrgID: "evaluation-org", UserID: "evaluation-user"},
 	})
 	result.Repaired = generated.Repaired
+	if generated.FirstIssueCode != "" {
+		result.RepairIssueCodes = []string{generated.FirstIssueCode}
+	}
+	if generated.RepairIssueCode != "" {
+		result.ValidationIssueCodes = []string{generated.RepairIssueCode}
+	}
 	if aiErr != nil {
 		result.Result = "diagnosis_" + aiErr.Class
 		return finishQualificationCase(global, result)
