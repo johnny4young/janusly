@@ -28,7 +28,7 @@ const (
 	MaxCauseRunes           = 800
 	MaxStatements           = 5
 	MaxStatementRunes       = 400
-	MaxDiagnosisOutputUnits = 700
+	MaxDiagnosisOutputUnits = 1200 // provider-side thinking counts against this cap
 	MaxDiagnosisOutputBytes = 32 * 1024
 )
 
@@ -142,6 +142,7 @@ const systemPrompt = `You are Janusly's recovery diagnosis assistant. Return ONL
 {"summary":"...","hypotheses":[{"id":"lower_snake_case","cause":"...","confidence":0.0,"evidence":["..."],"counterEvidence":["..."]}]}
 
 Rules:
+- Use only these keys: the object has exactly "summary" and "hypotheses"; each hypothesis has exactly "id", "cause", "confidence", "evidence", and "counterEvidence". Add no other field anywhere, such as notes, actions, or reasoning; the reply is rejected otherwise.
 - Produce 1 to 3 hypotheses. Evidence and counterEvidence contain at most 5 concise statements each.
 - Ground every statement only in the supplied bounded incident evidence. State uncertainty instead of inventing facts.
 - Never propose or authorize actions, candidates, patches, permissions, approvals, ranking, credentials, tools, workflow ids, node ids, or detector ids.
