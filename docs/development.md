@@ -29,7 +29,8 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 
 | Lane | Command | Needs |
 |---|---|---|
-| Go unit (race) | `make test` | nothing |
+| Go unit (race) | `go test -race ./...` | Go toolchain |
+| Host test ladder | `make test` | Go, Node 24.x, pinned pnpm, installed `web/` dependencies and Playwright Chromium |
 | CI classification/gate | `make test-ci` | git, bash, jq; fixture repositories only |
 | Browser/API route parity | `make test-route-parity` | Go, no database; reads frontend sources |
 | Two-instance HA (race) | `make test-ha` | Docker; owns a fresh PostgreSQL 18 project and migrates twice |
@@ -38,7 +39,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 | Web browser (Chromium) | `cd web && pnpm test:browser` | Playwright browsers |
 | Web scripts | `cd web && pnpm test:scripts` | nothing |
 | Web e2e | `make test-e2e` | Docker (fresh compose stack, built image) |
-| Everything | `make verify` | Docker |
+| Everything | `make verify` | Docker plus the host test/lint toolchains |
 
 `make verify` (`scripts/verify-isolated.sh`) creates a fresh PostgreSQL
 compose project, migrates twice (the second run must be a no-op), regenerates
