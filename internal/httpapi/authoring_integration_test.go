@@ -264,6 +264,114 @@ func TestWorkflowProposalProviderFreeBuildsExactPagerDutyFlagship(t *testing.T) 
 	}
 }
 
+func TestWorkflowProposalPagerDutyUnresolvedCredentials(t *testing.T) {
+	var calls atomic.Int64
+	simulator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(simulator.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", simulator.URL)
+	secretstore.ResetForTests()
+	t.Cleanup(secretstore.ResetForTests)
+	t.Setenv("JANUSLY_CREDENTIAL_MASTER_KEY",
+		base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
+
+	for _, tc := range []struct {
+		name      string
+		seed      bool
+		explicit  string
+		requested string
+		reason    string
+	}{
+		{name: "absent", reason: "credential_binding_required"},
+		{name: "ambiguous", seed: true, reason: "credential_binding_required"},
+		{name: "conflicting explicit", seed: true, explicit: " Use API credential api-one and API credential api-two; webhook credential hook-one and webhook credential hook-two.", reason: "credential_binding_required"},
+		{name: "unknown explicit", explicit: " Use API credential unknown-api and webhook credential unknown-hook.", requested: "unknown-hook", reason: "exact_credential_not_found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newAPIHarnessWithoutWorkers(t)
+			if tc.seed {
+				for _, credential := range []map[string]any{
+					{"name": "api-one", "kind": "pagerduty_api_token", "secretValue": "synthetic-api-one"},
+					{"name": "api-two", "kind": "pagerduty_api_token", "secretValue": "synthetic-api-two"},
+					{"name": "hook-one", "kind": "pagerduty_webhook_secret", "secretValue": "synthetic-hook-one"},
+					{"name": "hook-two", "kind": "pagerduty_webhook_secret", "secretValue": "synthetic-hook-two"},
+				} {
+					if res := h.call("POST", "/credentials", credential, ""); res.status != http.StatusOK {
+						t.Fatalf("seed credential: %d %+v", res.status, res.body)
+					}
+				}
+			}
+			prompt := "Starting now for one week, when PagerDuty alerts user PUSER1 outside working hours 09:00 to 17:00 in America/Bogota, acknowledge it and snooze it for 12 hours as operator@example.com." + tc.explicit
+			compiled := h.call("POST", "/v1/ai/workflow-briefs/compile", map[string]any{"prompt": prompt}, "")
+			data, _ := compiled.body["data"].(map[string]any)
+			if compiled.status != http.StatusOK || data["complete"] != true {
+				t.Fatalf("complete intent: %d %+v", compiled.status, compiled.body)
+			}
+			res := h.call("POST", "/v1/ai/workflow-proposals", map[string]any{"prompt": prompt, "brief": data["brief"]}, "")
+			if res.status != http.StatusOK {
+				t.Fatalf("proposal must expose unresolved bindings: %d %+v", res.status, res.body)
+			}
+			data = res.body["data"].(map[string]any)
+			bindings := data["bindings"].(map[string]any)
+			proposal := data["proposal"].(map[string]any)
+			if data["mode"] != "fallback" || bindings["complete"] != false || proposal["applicable"] != false {
+				t.Fatalf("unresolved credentials must block Apply: %+v", data)
+			}
+			found, apiMissing := false, false
+			for _, raw := range bindings["missing"].([]any) {
+				binding := raw.(map[string]any)
+				if binding["field"] == "config.input.credential" && binding["reason"] == tc.reason {
+					apiMissing = true
+				}
+				if binding["field"] == "config.webhookCredential" && binding["reason"] == tc.reason {
+					found = true
+					if tc.requested != "" && binding["requested"] != tc.requested {
+						t.Fatalf("unknown identity must remain exact: %+v", binding)
+					}
+					alternatives := binding["alternatives"].([]any)
+					if tc.seed && fmt.Sprint(alternatives) != "[hook-one hook-two]" {
+						t.Fatalf("ambiguous alternatives: %+v", binding)
+					}
+				}
+			}
+			if !found || !apiMissing {
+				t.Fatalf("missing webhook/API credential bindings: %+v", bindings)
+			}
+			workflow := proposal["workflow"].(map[string]any)
+			for _, raw := range workflow["nodes"].([]any) {
+				node := raw.(map[string]any)
+				if node["type"] == "pagerduty_incident" && node["config"].(map[string]any)["webhookCredential"] != tc.requested {
+					t.Fatalf("proposal invented a webhook identity: %+v", node)
+				}
+			}
+			if tc.requested == "" {
+				readiness := proposal["readiness"].(map[string]any)
+				if readiness["status"] != "fail" || !strings.Contains(fmt.Sprint(readiness["issues"]), "trigger_invalid_config") {
+					t.Fatalf("readiness must retain strict trigger validation: %+v", readiness)
+				}
+				saved := h.call("POST", "/v1/workflows/save", workflow, "")
+				failure, _ := saved.body["error"].(map[string]any)
+				if saved.status != http.StatusBadRequest || failure["code"] != "workflows_validation_failed" || !strings.Contains(fmt.Sprint(failure), "trigger_invalid_config") {
+					t.Fatalf("save must retain strict trigger validation: %d %+v", saved.status, saved.body)
+				}
+			}
+			var persisted int
+			if err := testPool(t).QueryRow(t.Context(), `SELECT count(*) FROM workflows WHERE org_id=$1`, h.org).Scan(&persisted); err != nil {
+				t.Fatal(err)
+			}
+			if persisted != 0 || calls.Load() != 0 {
+				t.Fatalf("proposal must not persist or call providers: workflows=%d calls=%d", persisted, calls.Load())
+			}
+		})
+	}
+}
+
 func TestWorkflowProposalRejectsIncompleteBriefBeforeProvider(t *testing.T) {
 	var calls atomic.Int64
 	simulator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

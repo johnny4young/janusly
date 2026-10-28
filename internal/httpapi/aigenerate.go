@@ -247,13 +247,14 @@ func (s *V1Server) generateWorkflowFromPrompt(
 			})
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
-		raw, _ := json.Marshal(recipe)
-		compiled, compilation, compileErr := compileWorkflowAssurance(prompt, raw)
+		// A local recipe may intentionally have unresolved tenant credentials.
+		// Prepare its contracts without requiring a save-ready graph: the shared
+		// proposal finalizer exposes exact missing bindings and keeps Apply closed.
+		// Readiness and save/runtime validation still inspect the incomplete graph.
+		document, compilation, compileErr := compileWorkflowAssuranceDocument(prompt, recipe)
 		if compileErr != nil {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
-		var document map[string]any
-		_ = json.Unmarshal(compiled, &document)
 		s.audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 			TargetType: "ai", TargetID: templateID(document), Metadata: map[string]any{
 				"mode": "fallback", "generationMode": "deterministic_recipe", "recipe": "pagerduty_on_call",
