@@ -59,3 +59,29 @@ func TestRenderHTMLPDFSanitization(t *testing.T) {
 		t.Fatal("unknown tags must pass children through")
 	}
 }
+
+func TestRenderHTMLPDFCoalescedText(t *testing.T) {
+	// Ignored end tags keep appending to the same text node. This bounded
+	// template exercises the parser's GO-2026-6860 quadratic-copying case.
+	const runs = 10_000
+	input := "<p>" + strings.Repeat("a</x>", runs) + "</p>"
+	pdf := RenderHTMLPDF(input)
+	pdfShapeOK(t, pdf, "coalesced html")
+	if !strings.Contains(string(pdf), strings.Repeat("a", runs)) {
+		t.Fatal("coalesced text must survive HTML rendering")
+	}
+
+	// Measure bytes rather than elapsed time so host load cannot decide the
+	// result. The old parser copies about 50 MB for this 50 KB template;
+	// leave generous headroom for linear parser and PDF-writer allocations.
+	result := testing.Benchmark(func(b *testing.B) {
+		for b.Loop() {
+			RenderHTMLPDF(input)
+		}
+	})
+	allocated := result.AllocedBytesPerOp()
+	t.Logf("coalesced HTML: %d bytes allocated per render", allocated)
+	if allocated > 16<<20 {
+		t.Fatalf("coalesced HTML allocated %d bytes per render, limit %d", allocated, 16<<20)
+	}
+}

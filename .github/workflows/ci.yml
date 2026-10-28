@@ -92,7 +92,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: 1.26.9
+          go-version: 1.26.10
           cache: true
       - name: Format
         run: test -z "$(find cmd internal e2e -name '*.go' -type f -exec gofmt -l {} +)"
@@ -156,7 +156,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: 1.26.9
+          go-version: 1.26.10
           cache: true
       - name: Process configuration forwarding
         run: bash scripts/process-config.test.sh
@@ -203,7 +203,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: 1.26.9
+          go-version: 1.26.10
           cache: true
       - run: make test-route-parity
 
@@ -233,7 +233,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: 1.26.9
+          go-version: 1.26.10
           cache: true
       - run: make migrate DB_URL="$JANUSLY_DATABASE_URL"
       - run: make migrate DB_URL="$JANUSLY_DATABASE_URL"
@@ -283,7 +283,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: 1.26.9
+          go-version: 1.26.10
           cache: true
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
