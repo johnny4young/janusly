@@ -32,7 +32,7 @@ output
 web/playwright-report
 web/test-results
 web/**/__screenshots__
-web/.vitest-attachments
+web/.vitest
 web/.design-sync
 web/.ds-sync
 web/ds-bundle

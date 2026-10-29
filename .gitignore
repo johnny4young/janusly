@@ -9,7 +9,7 @@ dist/
 .playwright-mcp/
 web/playwright-report/
 web/test-results/
-web/.vitest-attachments/
+web/.vitest/
 web/**/__screenshots__/
 output/
 artifacts/
