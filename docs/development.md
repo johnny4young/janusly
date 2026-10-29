@@ -311,6 +311,11 @@ optionally, the `PUBLIC_CF_ANALYTICS_TOKEN` variable.
 ## Gotchas
 
 - `contract/` is gitignored but `contract/openapi.json` is tracked: `git add -f`.
+- A browser-test `vi.mock` that silently loads the real module (`mockReset is
+  not a function`) is the Chromium request-interception race. Keep the
+  `playwrightWithStableMocks` provider in `web/vitest.browser.config.ts` until
+  Vitest is 5.0.4 or newer, then switch back to `playwright()` and delete
+  `src/test/mock-interception.browser.test.ts`.
 - A test that `t.Fatalf`s with an open pgx transaction hangs in
   `t.Cleanup(pool.Close)`; defer the rollback first.
 - Tests that call `request*Focus` or `requestOperationsSection` leave a hash
