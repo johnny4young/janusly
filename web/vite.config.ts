@@ -104,7 +104,9 @@ export default defineConfig(({ mode }) => ({
             || id.endsWith('/src/hooks/useVirtualList.ts')
             || id.endsWith('/src/url.ts')
           ) {
-            return 'lazy-ui'
+            // Keep shared UI helpers with their bootstrap consumer instead of
+            // paying for a tiny cross-chunk dependency throughout lazy panels.
+            return 'app-workspace'
           }
           if (
             id.endsWith('/src/components/ValidationEvidencePill.tsx')
@@ -172,7 +174,9 @@ export default defineConfig(({ mode }) => ({
           // matcher below doesn't sweep `@xyflow/react` into the eager
           // react-vendor bundle.
           if (id.includes('@xyflow/')) return undefined
-          if (id.includes('lucide-react')) return 'icons-vendor'
+          // The shell already uses this shared icon set. Co-locating it avoids
+          // duplicate chunk wrappers without pulling in the lazy canvas.
+          if (id.includes('lucide-react')) return 'app-workspace'
           if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) return 'react-vendor'
           return undefined
         },
