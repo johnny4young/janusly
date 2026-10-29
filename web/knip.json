@@ -11,6 +11,6 @@
   ],
   "project": ["src/**"],
   "ignore": ["src/lib/*.generated.ts", "src/lib/api-guards/**"],
-  "ignoreDependencies": ["@vitest/browser", "supabase"],
+  "ignoreDependencies": ["supabase"],
   "ignoreExportsUsedInFile": true
 }
