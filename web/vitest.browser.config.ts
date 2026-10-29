@@ -37,21 +37,27 @@ function playwrightWithStableMocks() {
 
 // Probe with a module import: it takes the same loader path as a mocked module,
 // and tests cannot stub it the way they stub fetch.
+let probeAttempt = 0
+
 async function armInterception(page: Page) {
-  await page.context().route((url) => url.pathname === INTERCEPTION_PROBE, (route) => route.fulfill({
+  const isProbe = (url: URL) => url.pathname === INTERCEPTION_PROBE
+  await page.context().route(isProbe, (route) => route.fulfill({
     contentType: 'text/javascript',
     headers: { 'x-interception-probe': '1' },
     body: 'export default true',
   }))
   const deadline = Date.now() + 5_000
-  for (let attempt = 0; Date.now() < deadline; attempt++) {
-    const frames = await Promise.all(page.frames().map((frame) => frame.evaluate(
-      (url) => import(url).then(() => true, () => false),
-      `${INTERCEPTION_PROBE}?attempt=${attempt}`,
-    ).catch(() => frame.isDetached())))
+  while (Date.now() < deadline) {
+    // Documents cache failed module imports, so every attempt needs a fresh URL.
+    const url = `${INTERCEPTION_PROBE}?attempt=${probeAttempt++}`
+    const frames = await Promise.all(page.frames().map((frame) => Promise.race([
+      frame.evaluate((probe) => import(probe).then(() => true, () => false), url),
+      new Promise<boolean>((resolve) => setTimeout(resolve, 1_000, false)),
+    ]).catch(() => frame.isDetached())))
     if (frames.every(Boolean)) return
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
+  await page.context().unroute(isProbe)
   throw new Error('Chromium request interception did not become active; module mocks would not apply.')
 }
 

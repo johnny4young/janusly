@@ -1,11 +1,11 @@
 import { expect, test, vi } from 'vitest'
 
-import { api } from '../api'
+import { probeTarget } from './mock-interception-fixture'
 
-vi.mock('../api', () => ({ api: vi.fn() }))
+vi.mock('./mock-interception-fixture', () => ({ probeTarget: () => 'mocked' }))
 
 test('loads module mocks while request interception is confirmed live', async () => {
-  expect(vi.isMockFunction(api)).toBe(true)
+  expect(probeTarget()).toBe('mocked')
   const response = await fetch('/__janusly_interception_probe__', { cache: 'no-store' })
   expect(response.headers.get('x-interception-probe')).toBe('1')
 })
