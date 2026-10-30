@@ -1398,7 +1398,7 @@ describe('DLQ close acknowledgement', () => {
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
     expect(await screen.findByRole('alert')).toHaveTextContent('No recovery is claimed')
     expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
-    expect(screen.getByTestId('dlq-close-cancel')).toHaveFocus()
+    await waitFor(() => expect(screen.getByTestId('dlq-close-cancel')).toHaveFocus())
     expect(useWorkflowStore.getState().toasts).toHaveLength(0)
   })
 

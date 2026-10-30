@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { deadLetterWireDefaults } from '../src/test/dead-letter-fixture'
+import { isGetDlqEntriesDeadLetterIdResponse } from '../src/lib/api-guards/operations/GetDlqEntriesDeadLetterId'
 
 const budgets = JSON.parse(
   await readFile(resolve(import.meta.dirname, '..', 'performance-budgets.json'), 'utf8'),
@@ -187,10 +188,19 @@ async function stubApi(page: Page) {
       const id = decodeURIComponent(pathname.slice('/dlq/entries/'.length))
       const row = rows.find((candidate) => candidate.id === id) ?? rows[0]
       body = {
-        ...deadLetterWireDefaults, ...row, orgId: 'default',
+        ...deadLetterWireDefaults,
+        id: row.id,
+        runId: row.runId,
+        nodeId: row.nodeId,
+        attempt: row.attempt,
+        status: row.status,
+        errorJson: row.errorJson,
+        createdAt: row.createdAt,
+        orgId: 'default',
         workflowJson: { id: 'workflow-perf', name: row.workflowName, nodes: [{ id: row.nodeId, type: 'noop', config: {} }], edges: [] },
         nodeJson: { id: row.nodeId, type: 'noop', config: {} },
       }
+      expect(isGetDlqEntriesDeadLetterIdResponse(body), 'performance detail fixture must match the HTTP contract').toBe(true)
     } else if (pathname === '/dlq') {
       body = rows
     } else if (pathname === '/recovery/metrics') {
