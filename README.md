@@ -39,17 +39,21 @@ to `127.0.0.1:3001`.
 
 - Go 1.26.9
 - PostgreSQL 18
-- pnpm 11 for frontend development
+- Node.js 24 (pinned in `.nvmrc`)
+- pnpm 11.17.0, pinned in `web/package.json`; `corepack enable` provides it
 - Docker with Compose v2 for the supported local database and image build
 
 ## Start locally
 
 ```bash
+git clone https://github.com/johnny4young/janusly.git
+cd janusly
 make frontend-install
-make db-up
-make migrate
 make dev
 ```
+
+`make dev` starts the project database and applies the baseline migration
+before launching the API and Vite.
 
 Open <http://127.0.0.1:5173>. The Go API remains available at
 <http://127.0.0.1:3001>.
