@@ -8,9 +8,7 @@ procedures and the gotchas that cost time before.
 ## Run it
 
 ```bash
-make db-up        # PostgreSQL 18 on 127.0.0.1:15473 (compose project "janusly")
-make migrate      # apply the single baseline migration
-make dev          # API on :3001, Vite dev server with the proxy, workers in-process
+make dev          # PostgreSQL 18 on 127.0.0.1:15473, baseline migration, API on :3001, Vite with the proxy
 ```
 
 One executable serves the API, the React assets, the workers and the
@@ -29,7 +27,8 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 
 | Lane | Command | Needs |
 |---|---|---|
-| Go unit (race) | `make test` | nothing |
+| Go unit (race) | `go test -race ./...` | Go toolchain |
+| Host test ladder | `make test` | Go, git, jq, Node (`.nvmrc`), pinned pnpm, installed `web/` dependencies and Playwright Chromium |
 | CI classification/gate | `make test-ci` | git, bash, jq; fixture repositories only |
 | Browser/API route parity | `make test-route-parity` | Go, no database; reads frontend sources |
 | Two-instance HA (race) | `make test-ha` | Docker; owns a fresh PostgreSQL 18 project and migrates twice |
@@ -38,7 +37,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 | Web browser (Chromium) | `cd web && pnpm test:browser` | Playwright browsers |
 | Web scripts | `cd web && pnpm test:scripts` | nothing |
 | Web e2e | `make test-e2e` | Docker (fresh compose stack, built image) |
-| Everything | `make verify` | Docker |
+| Everything | `make verify` | Docker plus the host test/lint toolchains |
 
 `make verify` (`scripts/verify-isolated.sh`) creates a fresh PostgreSQL
 compose project, migrates twice (the second run must be a no-op), regenerates

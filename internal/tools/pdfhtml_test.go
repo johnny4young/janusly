@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -74,12 +75,11 @@ func TestRenderHTMLPDFCoalescedText(t *testing.T) {
 	// Measure bytes rather than elapsed time so host load cannot decide the
 	// result. The old parser copies about 50 MB for this 50 KB template;
 	// leave generous headroom for linear parser and PDF-writer allocations.
-	result := testing.Benchmark(func(b *testing.B) {
-		for b.Loop() {
-			RenderHTMLPDF(input)
-		}
-	})
-	allocated := result.AllocedBytesPerOp()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	RenderHTMLPDF(input)
+	runtime.ReadMemStats(&after)
+	allocated := after.TotalAlloc - before.TotalAlloc
 	t.Logf("coalesced HTML: %d bytes allocated per render", allocated)
 	if allocated > 16<<20 {
 		t.Fatalf("coalesced HTML allocated %d bytes per render, limit %d", allocated, 16<<20)
