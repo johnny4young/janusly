@@ -252,6 +252,9 @@ func TestWorkflowProposalProviderFreeBuildsExactPagerDutyFlagship(t *testing.T) 
 	if qualification["intent"] != true || qualification["recovery"] != true || qualification["semantic"] != true {
 		t.Fatalf("flagship assurance qualification=%+v", qualification)
 	}
+	if readiness := proposal["readiness"].(map[string]any); readiness["status"] == "fail" {
+		t.Fatalf("flagship recipe must pass strict validation: %+v", readiness)
+	}
 	var audits int
 	if err := testPool(t).QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
 		WHERE org_id=$1 AND target_id=$2 AND action='ai.workflow.generated'
