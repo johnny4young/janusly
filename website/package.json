@@ -20,7 +20,7 @@
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@iconify-json/lucide": "^1.2.116",
     "@tailwindcss/vite": "^4.3.2",
-    "astro": "^7.1.4",
+    "astro": "^7.3.8",
     "astro-icon": "^1.1.5",
     "tailwindcss": "^4.3.2"
   },
@@ -33,7 +33,7 @@
   "overrides": {
     "sharp": "0.35.5",
     "miniflare": {
-      "undici": "7.29.1"
+      "undici": "7.30.1"
     }
   }
 }
