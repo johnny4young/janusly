@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -23,11 +24,15 @@ func TestAlertingPipeline(t *testing.T) {
 	suffix := fmt.Sprint(time.Now().UnixNano())
 
 	var webhookHits atomic.Int64
+	deliveryGate, releaseDelivery := context.WithCancel(t.Context())
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		webhookHits.Add(1)
+		if webhookHits.Add(1) == 1 {
+			<-deliveryGate.Done()
+		}
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer receiver.Close()
+	defer releaseDelivery()
 	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -101,6 +106,23 @@ func TestAlertingPipeline(t *testing.T) {
 	// webhook delivers for real, the slack channel records the honest miss.
 	runID := runFailing("wf-alert-a-" + suffix)
 	waitFor("first dispatch", func() bool { return dispatchCount() == 1 && webhookHits.Load() >= 1 })
+	// The dedupe claim is visible before delivery settles. Hold the first
+	// response to exercise that gap independently of scheduler timing.
+	res = h.call("GET", "/alerts/recent", nil, "")
+	pending := res.body["dispatches"].([]any)[0].(map[string]any)
+	if pending["outcome"] != "failed" || len(pending["channelResults"].([]any)) != 0 {
+		t.Fatalf("unsettled dispatch must retain its fail-safe claim: %+v", pending)
+	}
+	releaseDelivery()
+	waitFor("settled first dispatch", func() bool {
+		res := h.call("GET", "/alerts/recent", nil, "")
+		dispatches := res.body["dispatches"].([]any)
+		if len(dispatches) != 1 {
+			return false
+		}
+		dispatch := dispatches[0].(map[string]any)
+		return dispatch["outcome"] == "delivered" && len(dispatch["channelResults"].([]any)) == 2
+	})
 	res = h.call("GET", "/alerts/recent", nil, "")
 	dispatch := res.body["dispatches"].([]any)[0].(map[string]any)
 	if dispatch["policyId"] != policyID || dispatch["outcome"] != "delivered" {

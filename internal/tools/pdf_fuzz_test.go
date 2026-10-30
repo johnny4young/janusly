@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,7 @@ func FuzzRenderHTMLPDF(f *testing.F) {
 		"<ul><li><ul><li>deep</li></ul></li></ul>", "<a href=\"javascript:x\">y</a>",
 		"<table><tr><td>)</td></tr></table>", "<p unclosed", "<<<<>>>>",
 		"<pre>%PDF-1.9 fake</pre>", "\xff broken",
+		"<p>" + strings.Repeat("a</x>", 128) + "</p>",
 	} {
 		f.Add(seed)
 	}

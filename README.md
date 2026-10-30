@@ -37,7 +37,7 @@ to `127.0.0.1:3001`.
 
 ## Requirements
 
-- Go 1.26.9
+- Go 1.26.10
 - PostgreSQL 18
 - Node.js 24 (pinned in `.nvmrc`)
 - pnpm 11.17.0, pinned in `web/package.json`; `corepack enable` provides it
