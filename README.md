@@ -39,8 +39,8 @@ to `127.0.0.1:3001`.
 
 - Go 1.26.9
 - PostgreSQL 18
-- Node.js 24.x (the frontend declares `>=24 <25`)
-- pnpm 11.17.0 for frontend development, pinned in `web/package.json`
+- Node.js 24 (pinned in `.nvmrc`)
+- pnpm 11.17.0, pinned in `web/package.json`; `corepack enable` provides it
 - Docker with Compose v2 for the supported local database and image build
 
 ## Start locally
@@ -48,14 +48,12 @@ to `127.0.0.1:3001`.
 ```bash
 git clone https://github.com/johnny4young/janusly.git
 cd janusly
-make frontend-install PNPM='corepack pnpm --ignore-workspace'
-make dev PNPM='corepack pnpm --ignore-workspace'
+make frontend-install
+make dev
 ```
 
-The Makefile runs frontend commands from `web/`, where Corepack resolves the
-repository's pnpm pin. If your `pnpm --version` already matches that pin, the
-`PNPM` override is optional. `make dev` starts the project database and applies
-the baseline migration before launching the API and Vite.
+`make dev` starts the project database and applies the baseline migration
+before launching the API and Vite.
 
 Open <http://127.0.0.1:5173>. The Go API remains available at
 <http://127.0.0.1:3001>.
