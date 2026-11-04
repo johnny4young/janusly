@@ -27,6 +27,16 @@ LIMIT sqlc.arg(page_limit);
 -- metadata join drives tags/folders and the buffered-trigger count includes
 -- both parked events and abandoned backfill claims after the shared 5m lease.
 -- name: ListWorkflowRows :many
+WITH open_failures AS (
+  -- A failure from an edited draft still needs recovery, so unlike run_count
+  -- this is not limited to runs bound to a saved version.
+  SELECT coalesce(wv.workflow_id, r.workflow_id, r.workflow_version_id) AS workflow_id, count(*)::int AS open_count
+  FROM dead_letters dl
+  JOIN runs r ON r.org_id = dl.org_id AND r.id = dl.run_id
+  LEFT JOIN workflow_versions wv ON wv.org_id = dl.org_id AND wv.id = r.workflow_version_id
+  WHERE dl.org_id = $1 AND dl.status = 'open' AND dl.replay_mode IS NULL
+  GROUP BY 1
+)
 SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        w.paused_reason, w.deleted_at,
        (SELECT count(*) FROM runs r
@@ -34,6 +44,7 @@ SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
         WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
           AND r.replay_mode IS NULL)::int AS run_count,
        COALESCE(last_run.status, '') AS last_run_status,
+       last_run.created_at AS last_run_at,
        COALESCE(m.tags, '[]'::jsonb) AS tags,
        m.folder,
        (SELECT count(*) FROM trigger_events te
@@ -41,11 +52,16 @@ SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
           AND (te.status = 'buffered'
                OR (te.status = 'backfilling'
                    AND te.backfill_claimed_at < now() - interval '5 minutes')))::int
-         AS buffered_trigger_count
+         AS buffered_trigger_count,
+       COALESCE(open_failures.open_count, 0)::int AS open_failure_count,
+       (SELECT COALESCE(max(wv.version), 0) FROM workflow_versions wv
+        WHERE wv.org_id = w.org_id AND wv.workflow_id = w.id)::int
+         AS current_version
 FROM workflows w
 LEFT JOIN workflow_metadata m ON m.org_id = w.org_id AND m.workflow_id = w.id
+LEFT JOIN open_failures ON open_failures.workflow_id = w.id
 LEFT JOIN LATERAL (
-  SELECT r.status FROM runs r
+  SELECT r.status, r.created_at FROM runs r
   JOIN workflow_versions wv ON wv.id = r.workflow_version_id
   WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
     AND r.replay_mode IS NULL

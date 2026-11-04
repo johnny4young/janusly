@@ -62,7 +62,7 @@ async function open(page: Page, org: string, locale: keyof typeof copies, id: st
   }, { org, locale })
   await page.goto('/')
   await page.getByRole('button', { name: copy.flows, exact: true }).click()
-  await page.getByTestId(`workflows-row-${id}`).click()
+  await page.getByTestId(`workflows-row-${id}`).locator('strong').click()
   await openWorkspaceSection(page, copy.flows, copy.buildSection)
   await openWorkflowOperation(page, copy.versions)
   await expect(page.locator('.version-row')).toHaveCount(2)

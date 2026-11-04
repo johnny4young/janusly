@@ -109,4 +109,22 @@ describe('<HomeActionWorkspace /> (browser smoke)', () => {
     expect(onOpenRun).toHaveBeenCalledWith('run-waiting')
     expect(onOpenActivity).toHaveBeenCalledOnce()
   })
+
+  it('ranks the setup step after real work inside the inbox', () => {
+    render(
+      <HomeActionWorkspace
+        actions={[]}
+        activeRuns={[]}
+        activeRunCount={0}
+        status="available"
+        warnings={[]}
+        setup={<div data-testid="setup-step">Install a pack</div>}
+        onSelectAction={() => {}}
+        onOpenRun={() => {}}
+        onOpenActivity={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('home-priority-inbox')).toContainElement(screen.getByTestId('setup-step'))
+  })
 })

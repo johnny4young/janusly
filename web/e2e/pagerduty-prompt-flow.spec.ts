@@ -218,7 +218,7 @@ for (const scenario of scenarios) {
     await page.getByRole('button', { name: scenario.workflows, exact: true }).click()
     const persistedRow = page.getByTestId(`workflows-row-${workflowId}`)
     await expect(persistedRow).toContainText(scenario.workflowName)
-    await persistedRow.click()
+    await persistedRow.locator('strong').click()
     await openWorkspaceSection(page, scenario.workflows, scenario.build)
     await expect(page.getByRole('textbox', { name: scenario.nameLabel, exact: true })).toHaveValue(scenario.workflowName)
     await expect(canvas.locator('.react-flow__node')).toHaveCount(11)

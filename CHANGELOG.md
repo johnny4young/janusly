@@ -5,6 +5,33 @@
 - A failed step on the run snapshot keeps its full title, shows its error in
   one line, and links to its item in the recovery queue.
 
+- Run events opens on the latest failed run, with a run picker, and the
+  breadcrumb reads Activity › Run events.
+
+- Empty states end in a primary button instead of text that reads as a label.
+- The Settings breadcrumb names the open pane, such as Settings › Access, and
+  the pane follows its link: pasting a link, Back and Forward now change what
+  is on screen.
+- Find a setting cards show live status, such as 0 alert policies · 1 failure
+  pattern. Attention dots in the Settings rail explain their reason on hover
+  and to screen readers.
+- The Home health score lists what drives it: success rate, open failures and
+  longest downtime, each linking to where to act.
+
+- Revoking a connection lists the workflows that use it and, when there are
+  any, requires typing the connection name. If the list cannot be loaded, the
+  dialog says so and still requires the typed name. A revoked connection now
+  leaves the inventory without a reload.
+- Rotate secret no longer crashes the Connections panel when a workflow uses
+  the connection; its preview lists those workflows by name.
+- The pending setup step is a row in What needs you with its progress, not a
+  separate card repeating the next action.
+
+- Solution pack buttons keep a readable label. Under Install, a pack now names
+  the credentials to connect before running it, or says that your role can't
+  install or run packs.
+- AI Studio has a smaller header and a horizontal 1-2-3-4 stepper that marks the
+  current step.
 - Each view has one header row with its section title and tabs; descriptions
   moved to a tooltip on the title, so content starts about 110 px higher.
 - Headings that receive focus for screen readers no longer show a focus ring
@@ -13,6 +40,13 @@
 - The language selector in the account menu is a compact row like Theme and
   Density, and the canvas zoom controls follow the dark theme.
 - Buttons keep their icon and label on one row across the product.
+- The Workflows list is a table with labelled Name, Status, Open failures,
+  Health, Last run and Version columns. Open failures counts the flow's open
+  dead letters, the run count moves under Last run, Health shows the change
+  since the current version once enough runs exist, and header sorting replaces
+  the Recent / Name / Failed first switch. Clicking the health score now opens
+  its breakdown without leaving the list. `GET /v1/workflows` rows add
+  `openFailureCount`, `lastRunAt` and `currentVersion`.
 - Recovery failures open with a one-line cause such as "Host
   demo-ingest.invalid does not resolve", a cause chip and whether a retry can
   help; the raw error JSON stays collapsed below. DNS and connection errors from

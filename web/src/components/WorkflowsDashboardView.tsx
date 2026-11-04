@@ -3,6 +3,7 @@ import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { FlowRow } from './FlowRow'
 import { FlowsFilterBar } from './FlowsFilterBar'
+import { FlowsTable } from './FlowsTable'
 import { TrashPanel } from './TrashPanel'
 import type { SavedWorkflow } from '../types'
 import type { WorkflowsDashboardController } from './WorkflowsDashboard'
@@ -54,6 +55,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
     searchInvalid,
     rememberFolderToggle,
     recoveryBusyIds,
+    reportHealthScore,
     renameDraft,
     renameFolder,
     renameTag,
@@ -81,7 +83,6 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
     setRenamingTag,
     setSelectedIds,
     setSelectionMode,
-    setSort,
     setTagFilters,
     setTagRenameDraft,
     setRowTag,
@@ -97,6 +98,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
     toggleSelectAll,
     toggleSelectFolder,
     toggleSelected,
+    toggleSort,
     toggleTrashView,
     trashNowMs,
     retentionDays,
@@ -127,6 +129,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
       deleteWorkflow={deleteWorkflow}
       resumeWorkflow={resumeWorkflow}
       recoveryBusy={recoveryBusyIds.has(workflow.id)}
+      onHealthScore={reportHealthScore}
       t={t}
     />
   )
@@ -265,8 +268,6 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
           setFolderFilter={setFolderFilter}
           hasActiveFilters={hasActiveFilters}
           clearAllFilters={clearAllFilters}
-          sort={sort}
-          setSort={setSort}
           selectionMode={selectionMode}
           setSelectionMode={setSelectionMode}
           setSelectedIds={setSelectedIds}
@@ -429,9 +430,9 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
       )}
 
       {!showTrashed && visible.length > 0 && !hasFolders && (
-        <ul className="we-list">
+        <FlowsTable sort={sort} onSort={toggleSort} t={t}>
           {visible.map(renderRow)}
-        </ul>
+        </FlowsTable>
       )}
 
       {!showTrashed && visible.length > 0 && hasFolders && (
@@ -582,9 +583,9 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
                     </>
                   )}
                 </summary>
-                <ul className="we-list">
+                <FlowsTable sort={sort} onSort={toggleSort} t={t}>
                   {group.items.map(renderRow)}
-                </ul>
+                </FlowsTable>
               </details>
             )
           })}

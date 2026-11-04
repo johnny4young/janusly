@@ -263,12 +263,29 @@ for credentials and external services, while the existing `integrations` route
 identifier remains compatible with saved deep links. The canonical Connections
 inventory stays list-first with a separate add dialog; Settings links to it
 rather than duplicating the secret form. Focused areas expose their own heading,
-persist in the hash, remain horizontally reachable on narrow screens and mount
-only their active cards. On narrow Connections views, the primary action stacks
+remain horizontally reachable on narrow screens and mount only their active
+cards. The hash owns the open area: `OperationsPage` follows
+`#/operations/<section>` while mounted, opening an area pushes a history entry,
+a hash naming no openable area is rewritten to the one on screen, and the shell
+breadcrumb names the routed area (the `operations.section.*` copy stays in the
+core catalog so it paints before the workspace catalog loads). The Find a setting
+index reads the counts on its cards only while it is open, each behind the
+permission of its panel; a denied or failed read omits that count. Attention dots
+carry their reason in the rail tab's `title` and the dot's accessible name. On narrow Connections views, the primary action stacks
 inside the card and each fixed-height virtual row keeps status, kind, expiry and
 both mutation actions visible; secondary owner and last-used facts remain on the
 wider inventory. The overview no longer presents a credential-only count as if
 it represented every connection type.
+
+Rotate and Revoke share `AffectedWorkflowList`. Revoke reads
+`referencingWorkflowIds` from a fresh `GET /credentials/health` when its dialog
+opens and labels ids from the workspace's loaded workflow page; an id without a
+name keeps its row, labelled by the id. Any affected workflow requires typing
+the exact connection name. A failed, hung or malformed health read is never
+treated as "no workflows": the dialog reports it and requires the typed name.
+The typed name is a client-side guard; `DELETE /credentials/{name}` stays
+authorized by `credentials.write` alone. The list covers the latest saved
+version of each workflow, not other credential consumers.
 
 ## Canvas authoring clarity
 
@@ -286,6 +303,11 @@ next action scrolls and focuses the already-mounted canvas without changing the
 AI Studio route, so the review context remains available. A blank writable canvas
 has one primary assisted start and keeps Add step as the manual, provider-free
 path. The teaching overlay still passes palette drops through outside its action.
+
+The AI Studio header marks the current stage as the first incomplete one, with
+`aria-current="step"`. In Solution Packs, Install is disabled only by the
+`packs.install` permission; missing credentials are named under the button but
+never block it, because a pack installs as a draft that is wired afterwards.
 
 Contextual authoring prefills never submit work. Replacing an intent invalidates
 pending compilation/proposal results and releases their loading state; late
@@ -454,6 +476,21 @@ and its validation evidence stays out of production metrics. The entry is not
 duplicated in Insights, and dismissing it is session-only. Existing workspaces
 with a filtered empty run page keep their operational overview.
 
+
+### Workflows table
+
+The saved-workflows list is a real table, repeated per section when folders
+exist, with one sort state across sections and fixed column widths so sections
+stay aligned. Sort headers are buttons inside `th` elements carrying `aria-sort`;
+the column and direction persist with the other list filters, and the previous
+switch values map onto Last run, Name and Status. Sorting orders loaded rows only,
+like the filters it sits beside, and ties fall back to the most recent run.
+
+Open failures, last run and version come from the list row. Scores come from each
+row's health read, so a Health sort keeps not-yet-scored rows last until they
+report. The trend is `GET /workflows/health/delta` against the current version:
+single-version flows and samples under the server's floor show the score alone.
+The run count stays visible under Last run and is never reused as a failure count.
 
 ### Recovery queue hierarchy
 

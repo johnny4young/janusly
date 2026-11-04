@@ -123,7 +123,7 @@ for (const contract of LOCALES) {
     await page.getByTestId('workflows-search').fill(workflowName)
     const row = page.getByTestId(`workflows-row-${workflowId}`)
     await expect(row).toContainText(workflowName)
-    await row.click()
+    await row.locator('strong').click()
 
     await page.locator('.workflow-node').filter({ hasText: contract.httpNode }).click()
     const inspector = page.getByTestId('inspector-node-remote-call')

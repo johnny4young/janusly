@@ -58,6 +58,19 @@ export function useIntegrationCommands(
     return result.ok
   }, [refreshPlatform, runPlatformMutation, t])
 
+  const revokeCredential = useCallback(async (name: string): Promise<boolean> => {
+    const result = await runPlatformMutation({
+      request: () => api(`/credentials/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+      failureMessage: t('rightPanel.credentials.revokeFailed'),
+      successToast: { message: t('rightPanel.credentials.revokeDone', { name }), tone: 'success' },
+      onSuccess: async () => {
+        bumpPlatformVersion()
+        await refreshPlatform()
+      },
+    })
+    return result.ok
+  }, [bumpPlatformVersion, refreshPlatform, runPlatformMutation, t])
+
   const installPack = useCallback(async (packId: string) => {
     await runPlatformMutation<{ workflowId?: string; missingCredentials?: unknown[] }>({
       request: () => api('/workflows/import-pack', {
@@ -121,6 +134,7 @@ export function useIntegrationCommands(
 
   return {
     createCredential,
+    revokeCredential,
     injectPackFailure,
     installPack,
     installPlugin,

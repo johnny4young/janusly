@@ -19,6 +19,7 @@ import { BrandMark } from './components/BrandMark'
 import { BudgetBlockedBanner } from './components/BudgetBlockedBanner'
 import { BuilderSidebar } from './components/BuilderSidebar'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { useRouteOpsSection } from './components/operations-section-bus'
 import { PanelErrorFallback } from './components/PanelErrorFallback'
 import { UserMenu } from './components/UserMenu'
 import { WorkspaceArea, WorkspaceAreaLoading } from './components/WorkspaceArea'
@@ -151,7 +152,10 @@ function WorkspaceContent(props: AppWorkspaceProps) {
   const destination = getWorkspaceDestination(workspaceDestinationForTab(activeTab))
   const section = workspaceSectionForTab(activeTab)
   const destinationLabel = t(destination.labelKey)
-  const sectionLabel = section ? t(section.labelKey) : null
+  const settingsPane = useRouteOpsSection()
+  const sectionLabel = activeTab === 'operations' && settingsPane && settingsPane !== 'overview'
+    ? t(`operations.section.${settingsPane}.label`)
+    : section ? t(section.labelKey) : null
   const environmentLabel = header.environment === 'production'
     ? t('topbar.env.production')
     : t('topbar.env.sandbox')
