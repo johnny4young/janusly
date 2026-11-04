@@ -401,6 +401,7 @@ export default function App() {
     clearActiveRun,
     confirmReplaceCanvas,
     createCredential,
+    revokeCredential,
     createNewWorkflow,
     compileWorkflowBrief,
     explainWorkflow,
@@ -583,6 +584,7 @@ export default function App() {
           onSampleRunPack: sampleRunPack,
           onInjectPackFailure: injectPackFailure,
           onCreateCredential: createCredential,
+          onRevokeCredential: revokeCredential,
         },
         execution: {
           events,

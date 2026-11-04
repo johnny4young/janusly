@@ -6,6 +6,7 @@ import {
   Clock3,
   LoaderCircle,
 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useT } from '../../i18n'
 import type { RunSummary } from '../../types'
 import { Button } from '../ui/Button'
@@ -24,6 +25,7 @@ export function HomeActionWorkspace({
   activeRunCount,
   status,
   warnings,
+  setup,
   onSelectAction,
   onOpenRun,
   onOpenActivity,
@@ -33,6 +35,8 @@ export function HomeActionWorkspace({
   activeRunCount: number
   status: 'loading' | 'available' | 'unavailable'
   warnings: string[]
+  /** Pending setup step, ranked after real work in the same inbox. */
+  setup?: ReactNode
   onSelectAction: (action: RecommendedAction) => void
   onOpenRun: (runId: string) => void | Promise<void>
   onOpenActivity: () => void
@@ -112,6 +116,7 @@ export function HomeActionWorkspace({
             ))}
           </ol>
         )}
+        {setup}
         {status === 'available' && warnings.length > 0 ? (
           <p className="we-home-priority__warning" role="status">
             {t('home.priority.degraded')}

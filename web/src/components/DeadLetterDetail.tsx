@@ -1,10 +1,10 @@
-import { useState } from 'react'
 import { Copy, Download, FlaskConical, GitCompare, Sparkles } from 'lucide-react'
 
 import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, useT } from '../i18n'
 import type { DeadLetter } from './dead-letter-types'
 import { RecoveryDrillOutcomeCard } from './recovery/RecoveryDrillOutcomeCard'
+import { RecoveryDetailBlock, RecoveryErrorBlock } from './recovery/RecoveryErrorBlock'
 import { WorkflowDiffView } from './WorkflowDiffView'
 import { Button } from './ui/Button'
 
@@ -195,26 +195,14 @@ export function DeadLetterDetail({
             </div>
           )}
 
-          <DetailBlock title={t('dlq.detail.error')} value={(selectedFull ?? selected).errorJson} />
-          <DetailBlock title={t('dlq.detail.node')} value={(selectedFull ?? selected).nodeJson ?? null} />
-          <DetailBlock title={t('dlq.detail.workflow')} value={(selectedFull ?? selected).workflowJson ?? null} />
+          <RecoveryErrorBlock
+            errorJson={(selectedFull ?? selected).errorJson}
+            nodeType={(selectedFull ?? selected).nodeType}
+          />
+          <RecoveryDetailBlock title={t('dlq.detail.node')} value={(selectedFull ?? selected).nodeJson ?? null} />
+          <RecoveryDetailBlock title={t('dlq.detail.workflow')} value={(selectedFull ?? selected).workflowJson ?? null} />
         </section>
       )}
     </>
-  )
-}
-
-function DetailBlock({ title, value }: { title: string; value: unknown }) {
-  const { t } = useT()
-  const errorTitle = t('dlq.detail.error')
-  const [open, setOpen] = useState(title === errorTitle)
-
-  return (
-    <div className="detail-block">
-      <Button size="sm" onClick={() => setOpen(!open)}>
-        {open ? t('dlq.detail.hide', { title }) : t('dlq.detail.show', { title })}
-      </Button>
-      {open && <pre className="mini-pre">{JSON.stringify(value ?? {}, null, 2)}</pre>}
-    </div>
   )
 }

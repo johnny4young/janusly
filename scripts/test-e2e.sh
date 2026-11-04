@@ -28,6 +28,7 @@ specs=(
   e2e/recovery-confidence-passport.spec.ts
   e2e/responsive.spec.ts
   e2e/usability-study-readiness.spec.ts
+  e2e/credential-revoke.spec.ts
 )
 
 usage() {
