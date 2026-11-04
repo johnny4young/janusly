@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Permission grants is one matrix with permissions in rows and roles in
+  columns, a filter, and one Save for every edited role. Cells that differ from
+  the built-in default are tinted. If only some roles save, the panel says which
+  failed and keeps their edits to retry.
+- Revert to defaults now appears on built-in roles that have saved changes.
+
 - Canvas connections drop the repeated "default" label; named branches show a
   pill on the connection.
 

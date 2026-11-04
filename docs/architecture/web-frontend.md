@@ -258,8 +258,12 @@ Settings keeps one workspace destination and a permission-aware focused-area
 rail. The configuration-first order is Organization, Access, Connections and
 AI configuration, followed by Reliability, Usage and Infrastructure. Organization
 owns workspace-wide data governance and audit history; Access owns membership,
-roles, authentication, SSO and SCIM. Connections is the stable user-facing name
-for credentials and external services, while the existing `integrations` route
+roles, authentication, SSO and SCIM. Its permission matrix holds unsaved grants
+per role apart from server state, so a refetch keeps edits and untouched roles
+follow the server. Save posts only edited roles, one request per role with
+custom roles last, and names each role that failed while keeping its edits; the
+API's floor and route gates remain the authority. Connections is the stable
+user-facing name for credentials and external services, while the existing `integrations` route
 identifier remains compatible with saved deep links. The canonical Connections
 inventory stays list-first with a separate add dialog; Settings links to it
 rather than duplicating the secret form. Focused areas expose their own heading,

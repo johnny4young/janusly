@@ -1,23 +1,162 @@
 /* Styles for PermissionGrantsPanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
 
-.we-permissions-role-card {
+.we-permissions-bar {
   display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.we-permissions-bar__status {
+  margin: 4px 0 0;
+  color: var(--we-text-2);
+  font-size: 12px;
+}
+
+.we-permissions-bar__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.we-permissions-bar__controls input {
+  width: 200px;
+}
+
+/* Vertical scroll keeps the role names on screen beside the row being edited. */
+.we-permissions-matrix-scroll {
+  max-height: 70vh;
+  overflow: auto;
   border: 1px solid var(--we-line);
   border-radius: 8px;
-  background: var(--we-surface-1);
 }
 
-.we-permissions-role-card header {
+.we-permissions-matrix {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+.we-permissions-matrix th,
+.we-permissions-matrix td {
+  padding: 0 10px;
+  border-bottom: 1px solid var(--we-line);
+  background: var(--we-surface-1);
+  text-align: left;
+}
+
+.we-permissions-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-block: 8px;
+  color: var(--we-text-2);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: top;
+}
+
+.we-permissions-matrix__role {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 3px;
+  min-width: 96px;
+  text-align: center;
 }
 
-.we-permissions-role-card header p {
-  margin: 0;
+.we-permissions-matrix__role code {
+  color: var(--we-text-1);
+  font-size: 12px;
+}
+
+.we-permissions-matrix__description {
+  display: -webkit-box;
+  max-width: 140px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.we-permissions-matrix tbody th {
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.we-permissions-matrix tbody .we-permissions-matrix__group {
+  padding-block: 6px;
+  color: var(--we-text-2);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: top;
+}
+
+.we-permissions-matrix tbody .we-permissions-matrix__key {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.we-permissions-matrix thead .we-permissions-matrix__key {
+  left: 0;
+  z-index: 3;
+}
+
+.we-permissions-matrix td {
+  padding: 0;
+  text-align: center;
+}
+
+.we-permissions-matrix td[colspan] {
+  padding: 12px;
+  color: var(--we-text-2);
+}
+
+.we-permissions-matrix td[data-changed] {
+  background: color-mix(in srgb, var(--we-warning) 20%, var(--we-surface-1));
+}
+
+.we-permissions-matrix td[data-unsaved] {
+  box-shadow: inset 0 0 0 1px var(--we-primary);
+}
+
+.we-permissions-matrix td label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 27px;
+  cursor: pointer;
+}
+
+.we-permissions-matrix td input:disabled {
+  cursor: not-allowed;
+}
+
+.we-permissions-role-card {
+  padding: 14px;
+  border: 1px dashed var(--we-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--we-primary) 5%, var(--we-surface-1));
+}
+
+.we-permissions-role-card summary {
+  cursor: pointer;
+}
+
+.we-permissions-role-card summary h4 {
+  display: inline;
+}
+
+.we-permissions-role-card > p {
+  margin: 14px 0;
   color: var(--we-text-2);
   font-size: 12px;
 }
@@ -30,18 +169,6 @@
   color: var(--we-text-2);
   font-size: 12px;
   line-height: 1.45;
-}
-
-.we-permissions-role-card footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.we-permissions-role-card--new {
-  border-style: dashed;
-  background: color-mix(in srgb, var(--we-primary) 5%, var(--we-surface-1));
 }
 
 .we-permissions-grid {
