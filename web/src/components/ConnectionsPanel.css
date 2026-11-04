@@ -1,24 +1,11 @@
 /* Styles for ConnectionsPanel.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
 
-.we-connection-row__facts dt {
-  color: var(--we-muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.we-connection-row__facts dd {
-  color: var(--we-ink);
-  font-size: 12px;
-  font-weight: 650;
-  margin: 0;
-}
-
 /* Connections is inventory-first. Secret creation and rotation are modal
    actions; the list never renders secret values or environment names. */
 .we-connections-inventory {
   display: grid;
   gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .we-connections-inventory__type-filter {
@@ -44,76 +31,87 @@
   padding: 9px 10px;
 }
 
-.we-connections-inventory__list {
-  max-height: min(580px, 62vh);
-}
-
-.we-connections-inventory__row-slot {
-  box-sizing: border-box;
-  height: 166px;
-  padding-bottom: 8px;
-}
-
-.we-connection-row {
-  align-items: center;
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(170px, 0.78fr) minmax(360px, 1.65fr) auto;
-  height: 100%;
-  padding: 14px;
-}
-
-.we-connection-row__identity {
-  align-items: flex-start;
+.we-connections-health {
   display: grid;
   gap: 8px;
-  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.we-connection-row__identity strong {
-  font-size: 14px;
+.we-connections-health div {
+  display: block;
+  font-size: 12px;
+  padding: 8px 12px;
+}
+
+.we-connections-health dd {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* The shared .we-virtual-list rule ships with the canvas chunk, absent on a direct Settings load. */
+.we-connections-inventory__list {
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  max-height: min(580px, 62vh);
+  overflow: auto;
+}
+
+/* Fixed cell heights back the virtual list's row math; narrower panels scroll sideways. */
+.we-connections-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  min-width: 980px;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.we-connections-table th,
+.we-connections-table td {
+  border-bottom: 1px solid var(--we-line);
+  height: 48px;
   overflow: hidden;
+  padding: 0 8px;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.we-connection-row__facts {
-  display: grid;
-  gap: 10px 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 0;
-  min-width: 0;
+.we-connections-table thead th {
+  background: var(--we-surface);
+  color: var(--we-muted);
+  font-size: 11px;
+  height: 34px;
+  position: sticky;
+  text-transform: uppercase;
+  top: 0;
+  white-space: normal;
+  z-index: 2;
 }
 
-.we-connection-row__facts div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
+.we-connections-table [data-expiry="expired"] { color: var(--we-danger-text); }
+.we-connections-table [data-expiry="soon"] { color: var(--we-warning-text); }
 
-.we-connection-row__facts dd {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.we-connections-table [data-column="type"] { width: 104px; }
+.we-connections-table [data-column="health"] { width: 132px; }
+.we-connections-table [data-column="usedBy"] { width: 96px; }
+.we-connections-table [data-column="lastUsed"] { width: 124px; }
+.we-connections-table [data-column="expiry"] { width: 124px; }
+.we-connections-table [data-column="owner"] { width: 84px; }
+.we-connections-table [data-column="actions"] { width: 196px; }
 
-.we-connection-row__facts dd[data-expiry="expired"] {
-  color: var(--we-danger-text);
-}
-
-.we-connection-row__facts dd[data-expiry="soon"] {
-  color: var(--we-warning-text);
-}
-
-.we-connection-row__actions {
-  align-items: flex-end;
+.we-connections-table__actions {
   display: flex;
-  flex-direction: column;
-  gap: 7px;
+  gap: 6px;
 }
 
-.we-connection-dialog {
-  max-width: 620px;
+/* Keeps mutations in view on narrow panels; on a phone it would hide the columns scrolling under it. */
+@media (min-width: 621px) {
+  .we-connections-table [data-column="actions"] {
+    background: var(--we-surface);
+    position: sticky;
+    right: 0;
+  }
 }
 
 /* Secret status stays a tinted pill so linked versus missing is never raw

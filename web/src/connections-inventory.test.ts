@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   credentialHealthState,
   filterCredentials,
+  knownWorkflowReferences,
   listCredentialKinds,
   referencingWorkflowIds,
+  summarizeCredentialHealth,
   type CredentialHealthSnapshot,
 } from './connections-inventory'
 import type { Credential } from './types'
@@ -76,6 +78,42 @@ describe('connections inventory model', () => {
       lastErrorAt: 'not-a-date',
       lastUsedAt: '2026-07-29T10:00:00.000Z',
     }))).toBe('warning')
+  })
+})
+
+describe('summarizeCredentialHealth', () => {
+  const nowMs = Date.parse('2026-07-29T00:00:00.000Z')
+  const at = (days: number) => new Date(nowMs + days * 86_400_000).toISOString()
+  const summarize = (entry: Partial<CredentialHealthSnapshot> | null, expiresAt?: string) => summarizeCredentialHealth(
+    [{ ...credentials[0]!, expiresAt }],
+    new Map(entry ? [['pagerduty-primary', health({ usageCount30d: 1, ...entry })]] : []),
+    nowMs,
+  )
+
+  it('counts expired and soon-to-expire connections, not distant ones', () => {
+    expect(summarize({ expiresAt: at(-1) }).expiring).toBe(1)
+    expect(summarize({ expiresAt: at(14) }).expiring).toBe(1)
+    expect(summarize({ expiresAt: at(15) }).expiring).toBe(0)
+    expect(summarize({ expiresAt: null }).expiring).toBe(0)
+    expect(summarize(null, at(1)).expiring).toBe(1)
+  })
+
+  it('counts unresolved errors and missing secrets, not recovered ones', () => {
+    expect(summarize({ lastErrorAt: at(-1), lastUsedAt: at(-2) }).errors).toBe(1)
+    expect(summarize({ secretRefPresent: false }).errors).toBe(1)
+    expect(summarize({ lastErrorAt: at(-2), lastUsedAt: at(-1) }).errors).toBe(0)
+    expect(summarize(null).errors).toBe(0)
+  })
+
+  it('calls a connection unused only when nothing proves otherwise', () => {
+    expect(summarize({ usageCount30d: 0 }).unused).toBe(1)
+    expect(summarize({ usageCount30d: 2 }).unused).toBe(0)
+    expect(summarize({ usageCount30d: 0, referencingWorkflowIds: ['wf-1'] }).unused).toBe(0)
+    expect(summarize(null).unused).toBe(0)
+    const malformed = { usageCount30d: 0, referencingWorkflowIds: undefined as unknown as string[] }
+    expect(summarize(malformed).unused).toBe(0)
+    expect(knownWorkflowReferences(health(malformed))).toBeNull()
+    expect(knownWorkflowReferences(undefined)).toBeNull()
   })
 })
 

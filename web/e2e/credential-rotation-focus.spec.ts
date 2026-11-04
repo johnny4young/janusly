@@ -37,9 +37,9 @@ test('credential rotation owns focus, traps both Tab directions, and restores it
 
   await page.goto('/')
   await openWorkspaceSection(page, 'Settings', 'Connections')
-  const credentialCard = page.locator('.list-card').filter({ hasText: credentialName })
-  await expect(credentialCard).toBeVisible()
-  const rotateTrigger = credentialCard.getByRole('button', { name: 'Rotate secret', exact: true })
+  const credentialRow = page.getByTestId('connections-table').getByRole('row').filter({ hasText: credentialName })
+  await expect(credentialRow).toBeVisible()
+  const rotateTrigger = credentialRow.getByRole('button', { name: 'Rotate secret', exact: true })
   await rotateTrigger.click()
 
   const dialog = page.getByRole('dialog')

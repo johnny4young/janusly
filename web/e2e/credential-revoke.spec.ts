@@ -41,8 +41,9 @@ test('Rotate and Revoke read the real blast radius, and Revoke needs the typed n
   expect(saved.ok()).toBe(true)
 
   await openConnections(page, orgId)
-  const usedRow = page.locator('.list-card').filter({ hasText: usedName })
+  const usedRow = page.getByTestId('connections-table').getByRole('row').filter({ hasText: usedName })
   await expect(usedRow).toBeVisible()
+  await expect(usedRow.getByTestId('connections-used-by')).toHaveText('1 workflow')
 
   await usedRow.getByRole('button', { name: 'Rotate secret', exact: true }).click()
   const rotate = page.getByRole('dialog')
@@ -72,7 +73,7 @@ test('Rotate and Revoke read the real blast radius, and Revoke needs the typed n
   const names = ((await health.json()) as { credentials: { name: string }[] }).credentials.map((entry) => entry.name)
   expect(names).toEqual([unusedName])
 
-  const unusedRow = page.locator('.list-card').filter({ hasText: unusedName })
+  const unusedRow = page.getByTestId('connections-table').getByRole('row').filter({ hasText: unusedName })
   await unusedRow.getByRole('button', { name: 'Revoke', exact: true }).click()
   const plainRevoke = page.getByRole('alertdialog')
   await expect(plainRevoke.getByRole('heading', { name: 'Affected workflows (0)' })).toBeVisible()

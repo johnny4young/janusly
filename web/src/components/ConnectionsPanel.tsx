@@ -1,258 +1,59 @@
 import {
   AlertCircle,
   KeyRound,
-  LockKeyhole,
   Plus,
   Search,
-  X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api'
 import {
   credentialHealthState,
   filterCredentials,
+  knownWorkflowReferences,
   listCredentialKinds,
+  summarizeCredentialHealth,
   type CredentialHealthSnapshot,
 } from '../connections-inventory'
 import { expiryStatus } from '../credential-expiry'
 import { DOCS_URL } from '../docs-link'
-import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { getResolvedLocale, useT } from '../i18n'
 import type { Credential } from '../types'
 import type { WorkflowLabels } from './AffectedWorkflowList'
-import { CredentialRevokeDialog } from './CredentialRevokeDialog'
-import { CredentialRotateModal } from './CredentialRotateModal'
+import type { CreateCredential } from './CredentialCreateDialog'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { Button } from './ui/Button'
-import { FieldStack, FormField, SelectControl, TextInput } from './ui/Form'
+import { SelectControl, TextInput } from './ui/Form'
 import './ConnectionsPanel.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 
 const CONNECTION_TAGS = [PLATFORM_TAG, 'credentials'] as const
 
-const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
-const CONNECTION_ROW_HEIGHT = 166
+const CONNECTION_ROW_HEIGHT = 48
 
-const CREDENTIAL_KINDS = [
-  'generic',
-  'github_token',
-  'slack_webhook',
-  'slack_signing_secret',
-  'webhook_secret',
-  'postgres',
-  'pagerduty_api_token',
-  'pagerduty_webhook_secret',
-  'external_runtime_signing_secret',
+const CredentialCreateDialog = lazy(() => import('./connection-dialogs').then((m) => ({ default: m.CredentialCreateDialog })))
+const CredentialRevokeDialog = lazy(() => import('./connection-dialogs').then((m) => ({ default: m.CredentialRevokeDialog })))
+const CredentialRotateModal = lazy(() => import('./connection-dialogs').then((m) => ({ default: m.CredentialRotateModal })))
+
+type ConnectionDialog = { kind: 'create' } | { kind: 'rotate' | 'revoke'; name: string }
+
+const HEALTH_TILES = [
+  { key: 'expiring', tone: 'warning', label: 'rightPanel.credentials.health.expiring' },
+  { key: 'errors', tone: 'danger', label: 'rightPanel.credentials.health.errors' },
+  { key: 'unused', tone: 'neutral', label: 'rightPanel.credentials.health.unused' },
 ] as const
 
-type CreateCredential = (credential: {
-  name: string
-  kind: string
-  secretValue?: string
-  secretRef?: string
-  expiresAt?: string
-}) => Promise<boolean>
+const HEALTH_PILLS = {
+  healthy: { tone: 'healthy', label: 'vitals.severity.healthy' },
+  warning: { tone: 'warn', label: 'recoveryDialog.evidence.kind.recent_error' },
+  missing: { tone: 'unhealthy', label: 'rightPanel.credentials.status.missing' },
+  unknown: { tone: 'neutral', label: 'common.unknown' },
+} as const
 
-function CredentialCreateDialog({
-  onClose,
-  onCreate,
-  managedStorageAvailable,
-}: {
-  onClose: () => void
-  onCreate: CreateCredential
-  managedStorageAvailable: boolean
-}) {
-  const { t } = useT()
-  const dialogRef = useRef<HTMLDivElement | null>(null)
-  const nameRef = useRef<HTMLInputElement | null>(null)
-  const [name, setName] = useState('')
-  const [kind, setKind] = useState('generic')
-  const [storage, setStorage] = useState<'managed' | 'environment'>('managed')
-  const [secretValue, setSecretValue] = useState('')
-  const [secretRef, setSecretRef] = useState('')
-  const [expiresAt, setExpiresAt] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  useDialogFocusTrap(dialogRef, { initialFocus: nameRef, onEscape: submitting ? undefined : onClose })
-
-  useEffect(() => {
-    if (managedStorageAvailable || storage !== 'managed') return
-    // A late health response may arrive after the dialog opened. Move away
-    // from the unavailable path and erase a value that can no longer submit.
-    setStorage('environment')
-    setSecretValue('')
-  }, [managedStorageAvailable, storage])
-
-  const trimmedRef = secretRef.trim()
-  const refInvalid = trimmedRef.length > 0 && !CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
-  const canSubmit = name.trim().length > 0
-    && (storage === 'managed' ? secretValue.length > 0 : CREDENTIAL_ENV_VAR_NAME.test(trimmedRef))
-
-  const submit = async () => {
-    if (!canSubmit || submitting) return
-    setSubmitting(true)
-    try {
-      const created = await onCreate({
-        name: name.trim(),
-        kind,
-        ...(storage === 'managed' ? { secretValue } : { secretRef: trimmedRef }),
-        ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
-      })
-      if (created) onClose()
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <div className="run-input-backdrop" onClick={() => { if (!submitting) onClose() }}>
-      <div
-        ref={dialogRef}
-        className="run-input-dialog we-connection-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="credential-create-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="run-input-dialog__header">
-          <span className="run-input-dialog__icon" aria-hidden="true"><LockKeyhole size={18} /></span>
-          <div className="run-input-dialog__heading">
-            <div className="section-kicker">{t('rightPanel.credentials.formKicker')}</div>
-            <h2 id="credential-create-title">{t('rightPanel.credentials.formTitle')}</h2>
-            <p className="helper-text">{t('rightPanel.credentials.valuePlaceholder')}</p>
-          </div>
-          <button
-            type="button"
-            className="run-input-dialog__close"
-            onClick={onClose}
-            aria-label={t('common.close')}
-            disabled={submitting}
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </header>
-
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            void submit()
-          }}
-        >
-          <div className="run-input-dialog__body">
-            <FieldStack disabled={submitting} labelledBy="credential-create-title">
-              <FormField
-                id="credential-name"
-                label={t('rightPanel.credentials.nameLabel')}
-                required
-              >
-                {(controlProps) => (
-                  <input
-                    {...controlProps}
-                    ref={nameRef}
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    autoComplete="off"
-                    required
-                  />
-                )}
-              </FormField>
-              <FormField id="credential-kind" label={t('rightPanel.credentials.kindLabel')}>
-                {(controlProps) => (
-                  <select {...controlProps} value={kind} onChange={(event) => setKind(event.target.value)}>
-                    {CREDENTIAL_KINDS.map((option) => <option key={option} value={option}>{option}</option>)}
-                  </select>
-                )}
-              </FormField>
-              <FormField
-                id="credential-storage"
-                label={t('rightPanel.credentials.storageLabel')}
-                hint={!managedStorageAvailable
-                  ? t('rightPanel.credentials.storage.managedUnavailableHint')
-                  : undefined}
-              >
-                {(controlProps) => (
-                  <select
-                    {...controlProps}
-                    value={storage}
-                    onChange={(event) => setStorage(event.target.value as 'managed' | 'environment')}
-                  >
-                    <option value="managed" disabled={!managedStorageAvailable}>
-                      {managedStorageAvailable
-                        ? t('rightPanel.credentials.storage.managed')
-                        : t('rightPanel.credentials.storage.managedUnavailable')}
-                    </option>
-                    <option value="environment">{t('rightPanel.credentials.storage.environment')}</option>
-                  </select>
-                )}
-              </FormField>
-              <FormField
-                id="credential-secret"
-                label={storage === 'managed'
-                  ? t('rightPanel.credentials.valueLabel')
-                  : t('rightPanel.credentials.envLabel')}
-                required
-                hint={storage === 'managed' ? t('credentialRotation.field.newSecretValueHelp') : undefined}
-                error={storage === 'environment' && refInvalid ? (
-                  <><AlertCircle size={13} aria-hidden="true" /> {t('rightPanel.credentials.envInvalid')}</>
-                ) : undefined}
-              >
-                {(controlProps) => storage === 'managed' ? (
-                  <input
-                    {...controlProps}
-                    type="password"
-                    autoComplete="new-password"
-                    value={secretValue}
-                    onChange={(event) => setSecretValue(event.target.value)}
-                    placeholder={t('rightPanel.credentials.valuePlaceholder')}
-                    required
-                  />
-                ) : (
-                  <input
-                    {...controlProps}
-                    value={secretRef}
-                    onChange={(event) => setSecretRef(event.target.value)}
-                    placeholder={t('rightPanel.credentials.envPlaceholder')}
-                    required
-                  />
-                )}
-              </FormField>
-              <FormField
-                id="credential-expiry"
-                label={t('rightPanel.credentials.expiryLabel')}
-                hint={t('rightPanel.credentials.expiryHint')}
-              >
-                {(controlProps) => (
-                  <input
-                    {...controlProps}
-                    type="date"
-                    value={expiresAt}
-                    onChange={(event) => setExpiresAt(event.target.value)}
-                  />
-                )}
-              </FormField>
-            </FieldStack>
-          </div>
-
-          <footer className="run-input-dialog__footer">
-            <Button variant="ghost" onClick={onClose} disabled={submitting}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={!canSubmit || submitting}
-              loading={submitting}
-              loadingLabel={t('common.working')}
-              leadingIcon={<Plus size={15} />}
-            >
-              {t('rightPanel.credentials.addButton')}
-            </Button>
-          </footer>
-        </form>
-      </div>
-    </div>
-  )
+function SpacerRow({ height, columns }: { height: number; columns: number }) {
+  if (height <= 0) return null
+  return <tr aria-hidden="true" style={{ height }}><td colSpan={columns} /></tr>
 }
 
 export function ConnectionsPanel({
@@ -272,9 +73,9 @@ export function ConnectionsPanel({
   const platformVersion = useInvalidationNonce(CONNECTION_TAGS)
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [rotating, setRotating] = useState<string | null>(null)
-  const [revoking, setRevoking] = useState<string | null>(null)
+  const [dialog, setDialog] = useState<ConnectionDialog | null>(null)
+  // The first open waits on a chunk with the panel still live; the first request wins, as under a backdrop.
+  const openDialog = (next: ConnectionDialog) => setDialog((current) => current ?? next)
   const [healthByName, setHealthByName] = useState<Map<string, CredentialHealthSnapshot>>(new Map())
   const [managedStorageAvailable, setManagedStorageAvailable] = useState(true)
   const [healthUnavailable, setHealthUnavailable] = useState(false)
@@ -329,6 +130,11 @@ export function ConnectionsPanel({
     resetScrollKey: `${query}\u0000${kind}`,
     getItemKey: (credential) => credential.id,
   })
+  const healthSummary = useMemo(
+    () => summarizeCredentialHealth(credentials, healthByName, expiryNowMs),
+    [credentials, healthByName, expiryNowMs],
+  )
+  const columnCount = canWrite ? 8 : 7
 
   return (
     <PanelChrome
@@ -350,13 +156,28 @@ export function ConnectionsPanel({
             <Button variant="primary"
               type="button"
 
-              onClick={() => setCreating(true)}
+              onClick={() => openDialog({ kind: 'create' })}
             >
               <Plus size={14} aria-hidden="true" />
               <span>{t('rightPanel.credentials.addButton')}</span>
             </Button>
           )}
         </div>
+
+        {healthByName.size > 0 && (
+          <dl className="we-connections-health" data-testid="connections-health-summary">
+            {HEALTH_TILES.map(({ key, tone, label }) => (
+              <div
+                key={key}
+                className={`ui-status-summary ui-status-summary--${healthSummary[key] > 0 ? tone : 'neutral'}`}
+                data-testid={`connections-health-${key}`}
+              >
+                <dt>{t(label)}</dt>
+                <dd>{healthSummary[key]}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
 
         <div className="we-list-toolbar">
           <label className="we-list-search">
@@ -398,7 +219,7 @@ export function ConnectionsPanel({
             body={t('rightPanel.credentials.empty.body')}
             cta={canWrite ? {
               label: t('rightPanel.credentials.addButton'),
-              onClick: () => setCreating(true),
+              onClick: () => openDialog({ kind: 'create' }),
             } : undefined}
             secondary={DOCS_URL ? { label: t('rightPanel.credentials.empty.learn'), href: DOCS_URL } : undefined}
           />
@@ -419,22 +240,38 @@ export function ConnectionsPanel({
           <div
             ref={containerRef}
             className="we-virtual-list we-connections-inventory__list"
-            role="list"
-            aria-label={t('rightPanel.credentials.title')}
             data-testid="connections-virtual-list"
+            tabIndex={0}
           >
-            <div style={{ height: totalHeight, position: 'relative' }}>
-              <div style={{ transform: `translateY(${startOffset}px)` }}>
+            <table
+              className="we-connections-table"
+              aria-label={t('rightPanel.credentials.title')}
+              aria-rowcount={filteredCredentials.length + 1}
+              data-testid="connections-table"
+            >
+              <thead>
+                <tr aria-rowindex={1}>
+                  <th scope="col">{t('workflowsDashboard.columnName')}</th>
+                  <th scope="col" data-column="type">{t('scim.col.type')}</th>
+                  <th scope="col" data-column="health">{t('workflowsDashboard.columnHealth')}</th>
+                  <th scope="col" data-column="usedBy" title={t('rightPanel.credentials.usedByScope')}>
+                    {t('rightPanel.credentials.usedBy')}
+                  </th>
+                  <th scope="col" data-column="lastUsed">{t('rightPanel.credentials.lastUsed')}</th>
+                  <th scope="col" data-column="expiry">{t('rightPanel.credentials.expiryColumn')}</th>
+                  <th scope="col" data-column="owner">{t('recoveryItems.drawer.owner')}</th>
+                  {canWrite && (
+                    <th scope="col" data-column="actions">
+                      <span className="we-sr-only">{t('workflowsDashboard.columnActions')}</span>
+                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                <SpacerRow height={startOffset} columns={columnCount} />
                 {visibleItems.map(({ item: credential, index }) => {
                   const health = healthByName.get(credential.name)
-                  const healthState = credentialHealthState(health)
-                  const healthTone = healthState === 'healthy'
-                    ? 'healthy'
-                    : healthState === 'warning'
-                      ? 'warn'
-                      : healthState === 'missing'
-                        ? 'unhealthy'
-                        : 'neutral'
+                  const pill = HEALTH_PILLS[credentialHealthState(health)]
                   const expiry = expiryStatus(health?.expiresAt ?? credential.expiresAt, expiryNowMs)
                   const expiryLabel = expiry.kind === 'expired'
                     ? t('rightPanel.credentials.expiry.expired')
@@ -443,99 +280,87 @@ export function ConnectionsPanel({
                       : expiry.kind === 'ok'
                         ? new Date(health?.expiresAt ?? credential.expiresAt ?? '').toLocaleDateString(getResolvedLocale())
                         : t('common.none')
-                  const lastUsed = health?.lastUsedAt
-                    ? new Date(health.lastUsedAt).toLocaleString(getResolvedLocale())
-                    : t('recoveryDialog.playbook.never')
-                  const healthLabelKey = healthState === 'healthy'
-                    ? 'vitals.severity.healthy'
-                    : healthState === 'warning'
-                      ? 'recoveryDialog.evidence.kind.recent_error'
-                      : healthState === 'missing'
-                        ? 'rightPanel.credentials.status.missing'
-                        : 'common.unknown'
+                  const lastUsedAt = health?.lastUsedAt ? new Date(health.lastUsedAt) : null
+                  const references = knownWorkflowReferences(health)
                   return (
-                    <div
-                      key={credential.id}
-                      className="we-connections-inventory__row-slot"
-                      role="listitem"
-                      aria-posinset={index + 1}
-                      aria-setsize={filteredCredentials.length}
-                    >
-                      <article className="list-card we-connection-row">
-                        <div className="we-connection-row__identity">
-                          <strong title={credential.name}>{credential.name}</strong>
-                          <span className={`we-secret-pill we-secret-pill--${healthTone}`}>
-                            {t(healthLabelKey)}
-                          </span>
-                        </div>
-                        <dl className="we-connection-row__facts">
-                          <div>
-                            <dt>{t('rightPanel.credentials.kindLabel')}</dt>
-                            <dd>{credential.kind}</dd>
-                          </div>
-                          <div>
-                            <dt>{t('dlq.owner.label')}</dt>
-                            <dd title={credential.createdBy ?? undefined}>
-                              {credential.createdBy || t('rightPanel.chrome.kicker')}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{t('rightPanel.credentials.expiryColumn')}</dt>
-                            <dd data-expiry={expiry.kind}>{expiryLabel}</dd>
-                          </div>
-                          <div>
-                            <dt>{t('rightPanel.credentials.lastUsed')}</dt>
-                            <dd>{lastUsed}</dd>
-                          </div>
-                        </dl>
-                        {canWrite && (
-                          <div className="we-connection-row__actions">
+                    <tr key={credential.id} aria-rowindex={index + 2}>
+                      <th scope="row" title={credential.name}>{credential.name}</th>
+                      <td title={credential.kind}>{credential.kind}</td>
+                      <td>
+                        <span className={`we-secret-pill we-secret-pill--${pill.tone}`}>{t(pill.label)}</span>
+                      </td>
+                      <td
+                        data-testid="connections-used-by"
+                        title={references?.map((id) => workflows.find((workflow) => workflow.id === id)?.name ?? id).join(', ') || undefined}
+                      >
+                        {references
+                          ? t('rightPanel.credentials.usedByCount', { count: references.length })
+                          : '—'}
+                      </td>
+                      <td title={lastUsedAt?.toLocaleString(getResolvedLocale())}>
+                        {lastUsedAt
+                          ? lastUsedAt.toLocaleDateString(getResolvedLocale())
+                          : health ? t('rightPanel.credentials.lastUsedNone') : '—'}
+                      </td>
+                      <td data-expiry={expiry.kind} title={expiryLabel}>{expiryLabel}</td>
+                      <td title={credential.createdBy ?? undefined}>
+                        {credential.createdBy || t('rightPanel.chrome.kicker')}
+                      </td>
+                      {canWrite && (
+                        <td data-column="actions">
+                          <div className="we-connections-table__actions">
                             <Button
                               size="sm"
-                             
-                             
-                              onClick={() => setRotating(credential.name)}
+                              data-testid="connections-rotate"
+                              onClick={() => openDialog({ kind: 'rotate', name: credential.name })}
                             >
                               {t('credentialRotation.action.rotate')}
                             </Button>
                             <Button
                               size="sm"
                               variant="danger"
-                             
-                             
-                              onClick={() => setRevoking(credential.name)}
+                              data-testid="connections-revoke"
+                              onClick={() => openDialog({ kind: 'revoke', name: credential.name })}
                             >
                               {t('rightPanel.credentials.revoke')}
                             </Button>
                           </div>
-                        )}
-                      </article>
-                    </div>
+                        </td>
+                      )}
+                    </tr>
                   )
                 })}
-              </div>
-            </div>
+                <SpacerRow
+                  height={totalHeight - startOffset - visibleItems.length * CONNECTION_ROW_HEIGHT}
+                  columns={columnCount}
+                />
+              </tbody>
+            </table>
           </div>
         )}
       </section>
 
-      {creating && canWrite && (
-        <CredentialCreateDialog
-          onClose={() => setCreating(false)}
-          onCreate={onCreateCredential}
-          managedStorageAvailable={managedStorageAvailable}
-        />
-      )}
-      {rotating && canWrite && (
-        <CredentialRotateModal credentialName={rotating} workflows={workflows} onClose={() => setRotating(null)} />
-      )}
-      {revoking && canWrite && (
-        <CredentialRevokeDialog
-          credentialName={revoking}
-          workflows={workflows}
-          onClose={() => setRevoking(null)}
-          onRevoke={onRevokeCredential}
-        />
+      {dialog && canWrite && (
+        <Suspense fallback={null}>
+          {dialog.kind === 'create' && (
+            <CredentialCreateDialog
+              onClose={() => setDialog(null)}
+              onCreate={onCreateCredential}
+              managedStorageAvailable={managedStorageAvailable}
+            />
+          )}
+          {dialog.kind === 'rotate' && (
+            <CredentialRotateModal credentialName={dialog.name} workflows={workflows} onClose={() => setDialog(null)} />
+          )}
+          {dialog.kind === 'revoke' && (
+            <CredentialRevokeDialog
+              credentialName={dialog.name}
+              workflows={workflows}
+              onClose={() => setDialog(null)}
+              onRevoke={onRevokeCredential}
+            />
+          )}
+        </Suspense>
       )}
     </PanelChrome>
   )

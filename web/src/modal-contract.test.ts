@@ -22,7 +22,7 @@ describe('modal accessibility contract', () => {
       './components/CanvasStepPicker.tsx',
       './components/CommandPalette.tsx',
       './components/ConfirmDialog.tsx',
-      './components/ConnectionsPanel.tsx',
+      './components/CredentialCreateDialog.tsx',
       './components/CredentialRevokeDialog.tsx',
       './components/CredentialRotateModal.tsx',
       './components/DeadLetterCloseDialog.tsx',
