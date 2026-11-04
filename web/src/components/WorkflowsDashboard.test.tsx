@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { useWorkflowStore } from '../store'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
@@ -103,13 +104,36 @@ describe('<WorkflowsDashboard />', () => {
 
     render(<WorkflowsDashboard onOpen={() => {}} onCreate={onCreate} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'New workflow' }))
-    expect(screen.getByRole('button', { name: /Describe it/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Start blank/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Use a template/ })).toBeInTheDocument()
+    const trigger = await screen.findByTestId('workflows-new')
+    expect(trigger).toHaveAccessibleName('New workflow')
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menu')).toHaveAttribute('data-testid', 'workflow-creation-choices')
+    expect(screen.getByTestId('workflows-new-describe')).toHaveFocus()
+    expect(screen.getByTestId('workflows-new-describe')).toHaveAccessibleName(/^Describe it/)
+    expect(screen.getByTestId('workflows-new-blank')).toHaveAccessibleName(/^Start blank/)
+    expect(screen.getByTestId('workflows-new-template')).toHaveAccessibleName(/^Use a template/)
 
-    fireEvent.click(screen.getByRole('button', { name: /Start blank/ }))
+    fireEvent.click(screen.getByTestId('workflows-new-blank'))
     expect(onCreate).toHaveBeenCalledWith('blank')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('keeps the three creation choices in the empty state', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return []
+    })
+    const onCreate = vi.fn()
+    render(<WorkflowsDashboard onOpen={() => {}} onCreate={onCreate} />)
+
+    fireEvent.click(await screen.findByTestId('workflows-empty-describe'))
+    expect(onCreate).toHaveBeenCalledWith('describe')
+    fireEvent.click(screen.getByTestId('workflows-empty-blank'))
+    expect(onCreate).toHaveBeenCalledWith('blank')
+    fireEvent.click(screen.getByTestId('workflows-empty-template'))
+    expect(onCreate).toHaveBeenCalledWith('template')
   })
 
   it('keeps workflow creation visible but disabled without write access', async () => {
@@ -125,7 +149,7 @@ describe('<WorkflowsDashboard />', () => {
     expect(await screen.findByTestId('workflows-empty')).toHaveTextContent(
       'An editor can create the first one.',
     )
-    expect(screen.queryByTestId('empty-state-cta')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflows-empty-describe')).not.toBeInTheDocument()
   })
 
   it('shows a retryable error state when the workflow inventory cannot load', async () => {
@@ -1385,19 +1409,22 @@ describe('<WorkflowsDashboard />', () => {
     })
   }
 
-  it('soft-deletes a workflow via an inline confirm → DELETE + optimistic row removal', async () => {
+  function moveToTrash(id: string) {
+    fireEvent.click(screen.getByTestId(`workflows-row-menu-${id}`))
+    fireEvent.click(screen.getByTestId(`workflows-move-to-trash-${id}`))
+  }
+
+  it('moves a workflow to Trash from the row menu → DELETE + optimistic row removal', async () => {
     const calls: Array<{ url: string; method: string }> = []
     mockSoftDeleteLoop({ active: FLOWS, trash: [], calls })
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    // First click reveals the inline confirm (no request yet).
-    fireEvent.click(screen.getByTestId('workflows-delete-wf1'))
-    expect(screen.getByTestId('workflows-delete-confirm-wf1')).toBeInTheDocument()
+    // Opening the menu sends nothing.
+    fireEvent.click(screen.getByTestId('workflows-row-menu-wf1'))
     expect(calls).toHaveLength(0)
 
-    // Confirm fires the DELETE and the row disappears.
-    fireEvent.click(screen.getByTestId('workflows-delete-confirm-wf1'))
+    fireEvent.click(screen.getByTestId('workflows-move-to-trash-wf1'))
     await waitFor(() => expect(calls).toEqual([{ url: '/workflows/wf1', method: 'DELETE' }]))
     await waitFor(() => expect(screen.queryByTestId('workflows-row-wf1')).not.toBeInTheDocument())
     // The untouched row stays.
@@ -1414,28 +1441,84 @@ describe('<WorkflowsDashboard />', () => {
     fireEvent.click(screen.getByTestId('workflows-select-row-wf1'))
     expect(screen.getByTestId('workflows-bulk-bar')).toHaveTextContent('1 selected')
 
-    fireEvent.click(screen.getByTestId('workflows-delete-wf1'))
-    fireEvent.click(screen.getByTestId('workflows-delete-confirm-wf1'))
+    moveToTrash('wf1')
 
     await waitFor(() => expect(calls).toEqual([{ url: '/workflows/wf1', method: 'DELETE' }]))
     await waitFor(() => expect(screen.queryByTestId('workflows-row-wf1')).not.toBeInTheDocument())
     expect(screen.queryByTestId('workflows-bulk-bar')).not.toBeInTheDocument()
   })
 
-  it('cancelling the delete confirm makes no request and keeps the row', async () => {
+  it('dismissing the row menu makes no request and keeps the row', async () => {
     const calls: Array<{ url: string; method: string }> = []
     mockSoftDeleteLoop({ active: FLOWS, trash: [], calls })
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-delete-wf1'))
-    const confirm = screen.getByTestId('workflows-delete-confirm-wf1')
-    // The cancel button sits next to the confirm CTA in the same control group.
-    fireEvent.click(within(confirm.parentElement as HTMLElement).getAllByRole('button').at(-1) as HTMLElement)
+    fireEvent.click(screen.getByTestId('workflows-row-menu-wf1'))
+    fireEvent.keyDown(screen.getByTestId('workflows-move-to-trash-wf1'), { key: 'Escape' })
 
-    await waitFor(() => expect(screen.queryByTestId('workflows-delete-confirm-wf1')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('workflows-move-to-trash-wf1')).not.toBeInTheDocument()
     expect(calls).toHaveLength(0)
     expect(screen.getByTestId('workflows-row-wf1')).toBeInTheDocument()
+  })
+
+  it('offers no row menu without write access', async () => {
+    mockSoftDeleteLoop({ active: FLOWS, trash: [], calls: [] })
+    render(<WorkflowsDashboard onOpen={() => {}} canWrite={false} />)
+    await screen.findByTestId('workflows-row-wf1')
+    expect(screen.queryByTestId('workflows-row-menu-wf1')).not.toBeInTheDocument()
+  })
+
+  it('offers Undo after moving to Trash, which restores through the existing route', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: [], calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    moveToTrash('wf1')
+    await waitFor(() => expect(useWorkflowStore.getState().toasts.at(-1)?.action?.label).toBe('Undo'))
+    expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('Trash')
+
+    useWorkflowStore.getState().toasts.at(-1)?.action?.onClick()
+    await waitFor(() => expect(calls).toEqual([
+      { url: '/workflows/wf1', method: 'DELETE' },
+      { url: '/workflows/wf1/restore', method: 'POST' },
+    ]))
+    await waitFor(() => expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('Restored'))
+  })
+
+  it('reports a failed Undo', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: [], calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    moveToTrash('wf1')
+    await waitFor(() => expect(useWorkflowStore.getState().toasts.at(-1)?.action).toBeDefined())
+    const undo = useWorkflowStore.getState().toasts.at(-1)?.action?.onClick
+    vi.mocked(api).mockRejectedValueOnce(new Error('restore refused'))
+    undo?.()
+    await waitFor(() => expect(useWorkflowStore.getState().toasts.at(-1)).toMatchObject({ tone: 'error' }))
+  })
+
+  it('counts both views in the segmented control and keeps it reachable from Trash', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: TRASH, calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    expect(screen.getByTestId('workflows-view-active')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('workflows-view-active-count')).toHaveTextContent(String(FLOWS.length))
+    await waitFor(() => expect(screen.getByTestId('workflows-view-trash-count')).toHaveTextContent(String(TRASH.length)))
+
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
+    await screen.findByTestId('workflows-trash-list')
+    expect(screen.getByTestId('workflows-view-trash')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('workflows-view-trash-count')).toHaveTextContent(String(TRASH.length))
+    expect(screen.getByTestId('workflows-view-active-count')).toHaveTextContent(String(FLOWS.length))
+
+    fireEvent.click(screen.getByTestId('workflows-view-active'))
+    expect(await screen.findByTestId('workflows-row-wf1')).toBeInTheDocument()
   })
 
   it('rolls the row back when the DELETE fails', async () => {
@@ -1444,8 +1527,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-delete-wf1'))
-    fireEvent.click(screen.getByTestId('workflows-delete-confirm-wf1'))
+    moveToTrash('wf1')
 
     await waitFor(() => expect(calls).toHaveLength(1))
     // Optimistic removal is reverted — the row returns.
@@ -1458,7 +1540,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
     // The trash list renders the soft-deleted row; active rows are gone.
     await screen.findByTestId('workflows-trash-list')
     expect(screen.getByTestId('workflows-trash-row-wfd')).toBeInTheDocument()
@@ -1481,7 +1563,7 @@ describe('<WorkflowsDashboard />', () => {
     })
 
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
     await screen.findByTestId('workflows-trash-row-wfd')
 
     await act(async () => {
@@ -1508,7 +1590,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
 
     // While the trash fetch is pending, the prior active rows are cleared and
     // NONE of them paint as trash rows (the stale-view render the toggle guards).
@@ -1530,7 +1612,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
     await screen.findByTestId('workflows-trash-empty')
     expect(screen.queryByTestId('workflows-trash-list')).not.toBeInTheDocument()
   })
@@ -1559,7 +1641,7 @@ describe('<WorkflowsDashboard />', () => {
       render(<WorkflowsDashboard onOpen={() => {}} />)
       await screen.findByTestId('workflows-row-wf1')
 
-      fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+      fireEvent.click(screen.getByTestId('workflows-view-trash'))
       // Window 30, deleted 5 days ago → 25 days left.
       const fresh = await screen.findByTestId('workflows-trash-expiry-wf-fresh')
       expect(fresh).toHaveTextContent('Expires in 25 days')
@@ -1579,7 +1661,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
     await screen.findByTestId('workflows-trash-row-wf-fresh')
     expect(screen.queryByTestId('workflows-trash-expiry-wf-fresh')).not.toBeInTheDocument()
   })
@@ -1596,7 +1678,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
     await screen.findByTestId('workflows-trash-list')
 
     fireEvent.click(screen.getByTestId('workflows-trash-select-wfa'))
@@ -1620,7 +1702,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
     await screen.findByTestId('workflows-trash-list')
 
     fireEvent.click(screen.getByTestId('workflows-trash-select-all'))
@@ -1638,7 +1720,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
     await screen.findByTestId('workflows-trash-list')
 
     fireEvent.click(screen.getByTestId('workflows-trash-select-wfa'))
@@ -1672,7 +1754,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
     await screen.findByTestId('workflows-trash-list')
 
     fireEvent.click(screen.getByTestId('workflows-trash-select-wfa'))
@@ -1708,7 +1790,7 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
 
-    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-view-trash'))
     await screen.findByTestId('workflows-trash-list')
 
     // A full page → the existing keyset "Load more" button renders in Trash.

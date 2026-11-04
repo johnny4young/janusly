@@ -1213,13 +1213,6 @@
 }
 
 /* Tabular run count in a Flows row meta slot. */
-.we-list-row__count {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: var(--we-ink-soft);
-}
-
 .we-list-row__pill {
   display: inline-flex;
   align-items: center;

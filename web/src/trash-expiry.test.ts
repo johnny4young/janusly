@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { daysUntilPurge } from './trash-expiry'
+import { daysUntilPurge, purgeAtMs } from './trash-expiry'
 
 const DAY = 86_400_000
 const NOW = Date.UTC(2026, 5, 27, 12, 0, 0) // fixed "now" so the math is deterministic
@@ -38,5 +38,11 @@ describe('daysUntilPurge', () => {
   it('reflects a custom (non-default) retention window', () => {
     const deletedAt = new Date(NOW - 2 * DAY).toISOString()
     expect(daysUntilPurge(deletedAt, 7, NOW)).toBe(5) // 7 - 2
+  })
+})
+
+describe('purgeAtMs', () => {
+  it('adds the retention window to the tombstone date', () => {
+    expect(purgeAtMs('2026-06-01T00:00:00.000Z', 30)).toBe(Date.UTC(2026, 6, 1))
   })
 })

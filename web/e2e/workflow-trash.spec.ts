@@ -83,7 +83,7 @@ for (const contract of LOCALES) {
 
     await page.goto('/')
     await page.getByRole('button', { name: contract.flows, exact: true }).click()
-    await page.getByTestId('workflows-trash-toggle').click()
+    await page.getByTestId('workflows-view-trash').click()
 
     const list = page.getByTestId('workflows-trash-list')
     const row = page.getByTestId(`workflows-trash-row-${workflowId}`)

@@ -298,7 +298,7 @@ test('human form against Go: pause, fill through the real UI, resume', async ({ 
   const { openWorkspaceDestination, openWorkspaceSection, addCanvasStep } = await import('./_helpers/workspace-navigation')
   await openWorkspaceDestination(page, 'Workflows')
   await page.getByRole('button', { name: 'New workflow', exact: true }).first().click()
-  await page.getByRole('button', { name: /^Start blank\b/ }).click()
+  await page.getByRole('menuitem', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(`Go form ${Date.now()}`)
   await addCanvasStep(page, 'Collect form')
 
