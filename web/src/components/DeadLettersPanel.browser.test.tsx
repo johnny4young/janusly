@@ -48,14 +48,14 @@ describe('Recovery queue layout and focus in Chromium', () => {
     mountQueue()
     try {
       const row = await screen.findByTestId('dlq-row-invoice')
-      expect(row.getBoundingClientRect().top).toBeLessThan(330)
+      expect(row.getBoundingClientRect().top).toBeLessThan(180)
       // 640 CSS pixels exercises reflow of a 1280px-wide window at 200% zoom,
       // not screen-reader or physical browser-zoom qualification.
       for (const width of [1280, 640, 390]) {
         await page.viewport(width, 800)
         const queue = screen.getByTestId('recovery-queue')
         expect(queue.scrollWidth).toBeLessThanOrEqual(queue.clientWidth + 1)
-        for (const id of ['dlq-search', 'dlq-filter', 'dlq-severity-filter', 'dlq-sort']) {
+        for (const id of ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']) {
           const input = document.getElementById(id)!
           expect(input.getBoundingClientRect().width).toBeGreaterThan(80)
           expect(input.getBoundingClientRect().right).toBeLessThanOrEqual(width)
@@ -65,6 +65,16 @@ describe('Recovery queue layout and focus in Chromium', () => {
         await page.getByTestId('recovery-queue').screenshot({ path: `../../test-results/queue-${locale}-${width}.png` })
       }
     } finally { await page.viewport(1024, 768) }
+  })
+
+  it('keeps search, status chips and menus on one row in the 852px card beside the sidebar', async () => {
+    initI18n('en')
+    render(<div style={{ width: 852 }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
+    await screen.findByTestId('dlq-row-invoice')
+    const centers = ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']
+      .map(id => { const box = document.getElementById(id)!.getBoundingClientRect(); return box.top + box.height / 2 })
+    expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1)
+    expect(screen.getByTestId('dlq-toolbar').getBoundingClientRect().height).toBeLessThanOrEqual(40)
   })
 
   it('keeps keyboard focus, selected failure and bulk selection across background refresh', async () => {
@@ -85,11 +95,16 @@ describe('Recovery queue layout and focus in Chromium', () => {
     const search = screen.getByTestId('dlq-search')
     await userEvent.click(search)
     await userEvent.keyboard('{Tab}')
-    expect(screen.getByLabelText('Failure status')).toHaveFocus()
+    expect(screen.getByRole('radio', { name: /^Open/ })).toHaveFocus()
+    await userEvent.keyboard('j')
+    expect(screen.getByRole('radio', { name: /^Open/ })).toHaveFocus()
+    await userEvent.keyboard('{ArrowRight}')
+    const retried = screen.getByRole('radio', { name: /^Retried/ })
+    expect(retried).toHaveFocus()
+    expect(retried).toBeChecked()
+    await waitFor(() => expect(vi.mocked(api).mock.calls.at(-1)?.[0]).toContain('status=replayed'))
     await userEvent.keyboard('{Tab}')
-    expect(screen.getByTestId('dlq-owner-all')).toHaveFocus()
-    await userEvent.keyboard('{Tab}')
-    expect(screen.getByTestId('dlq-owner-mine')).toHaveFocus()
+    expect(screen.getByLabelText('Recovery owner')).toHaveFocus()
     await userEvent.keyboard('{Tab}')
     expect(screen.getByLabelText('Recovery severity')).toHaveFocus()
     await userEvent.keyboard('{Tab}')

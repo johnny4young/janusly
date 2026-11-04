@@ -1,6 +1,6 @@
 import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
 import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
@@ -363,7 +363,7 @@ describe('<DeadLettersPanel />', () => {
     // Default status 'open' → server returns only the open row.
     await waitFor(() => expect(screen.getByTestId('dlq-row-open-1')).toBeInTheDocument())
     expect(screen.queryByTestId('dlq-row-replayed-1')).toBeNull()
-    fireEvent.change(screen.getByLabelText('Failure status'), { target: { value: 'replayed' } })
+    fireEvent.click(screen.getByTestId('dlq-status-replayed'))
     await waitFor(() => {
       expect(lastDlqParams()?.get('status')).toBe('replayed')
       expect(screen.getByTestId('dlq-row-replayed-1')).toBeInTheDocument()
@@ -398,15 +398,34 @@ describe('<DeadLettersPanel />', () => {
     vi.mocked(api).mockImplementation(dlqMock(rows))
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await screen.findByTestId('dlq-row-match')
-    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'mine' } })
     fireEvent.change(screen.getByLabelText('Recovery severity'), { target: { value: 'p1' } })
     fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'oldest' } })
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'invoice' } })
     await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(1))
     expect(screen.getByTestId('dlq-row-match')).toBeInTheDocument()
     expect(Object.fromEntries(lastDlqParams()!)).toMatchObject({ status: 'open', owner: 'me', severity: 'p1', sort: 'oldest', search: 'invoice' })
-    const totals = screen.getByRole('group', { name: 'Organization totals' })
+    const totals = screen.getByRole('radiogroup', { name: 'Failure status' })
     expect([...totals.querySelectorAll('strong')].map(value => value.textContent)).toEqual(['5', '4', '0', '1'])
+  })
+
+  it('shows every failure status as a chip with its organization count', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return { total: 120, open: 100, replayed: 15, resolved: 5 }
+      if (path.startsWith('/dlq/queue')) return { items: [mockDeadLetter('a')], nextCursor: null, hasMore: false }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+    const status = screen.getByRole('radiogroup', { name: 'Failure status' })
+    await waitFor(() => expect(within(status).getByRole('radio', { name: 'All 120' })).toBe(screen.getByTestId('dlq-status-all')))
+    expect(within(status).getByRole('radio', { name: 'Open 100' })).toBe(screen.getByTestId('dlq-status-open'))
+    expect(within(status).getByRole('radio', { name: 'Retried 15' })).toBe(screen.getByTestId('dlq-status-replayed'))
+    expect(within(status).getByRole('radio', { name: 'Closed 5' })).toBe(screen.getByTestId('dlq-status-resolved'))
+    expect(screen.getByTestId('dlq-status-open')).toBeChecked()
+    expect(status).toHaveAccessibleDescription(/organization totals.*Closed means closed without recovery/i)
+    expect(screen.getByTestId('dlq-toolbar')).toContainElement(screen.getByTestId('dlq-owner'))
+    expect(screen.getByRole('option', { name: 'Owner: Mine' })).toBeInTheDocument()
   })
 
   it('renders Load more when the server reports a next page and appends on click', async () => {
@@ -477,7 +496,7 @@ describe('<DeadLettersPanel />', () => {
     })
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
-    const values = [...screen.getByRole('group', { name: 'Organization totals' }).querySelectorAll('strong')].map((s) => s.textContent)
+    const values = [...screen.getByRole('radiogroup', { name: 'Failure status' }).querySelectorAll('strong')].map((s) => s.textContent)
     expect(values).toEqual(['120', '100', '15', '5'])
   })
 
@@ -582,18 +601,17 @@ describe('<DeadLettersPanel />', () => {
 
   it('renders the owner filter with All selected by default', async () => {
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
-    await waitFor(() => expect(screen.getByTestId('dlq-owner-all')).toBeInTheDocument())
-    expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByTestId('dlq-owner-mine')).toHaveAttribute('aria-pressed', 'false')
+    await waitFor(() => expect(screen.getByTestId('dlq-owner')).toBeInTheDocument())
+    expect(screen.getByTestId('dlq-owner')).toHaveValue('all')
   })
 
   it('clicking Mine scopes the /dlq fetch with owner=me', async () => {
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
-    await waitFor(() => expect(screen.getByTestId('dlq-owner-mine')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('dlq-owner')).toBeInTheDocument())
     expect(lastDlqParams()?.get('owner')).toBeNull()
-    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'mine' } })
     await waitFor(() => expect(lastDlqParams()?.get('owner')).toBe('me'))
-    expect(screen.getByTestId('dlq-owner-mine')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('dlq-owner')).toHaveValue('mine')
   })
 
   it('Mine narrows the list to owned rows and All restores the full list', async () => {
@@ -605,12 +623,12 @@ describe('<DeadLettersPanel />', () => {
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
     expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'mine' } })
     await waitFor(() => {
       expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
       expect(screen.queryByTestId('dlq-row-b')).toBeNull()
     })
-    fireEvent.click(screen.getByTestId('dlq-owner-all'))
+    fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'all' } })
     await waitFor(() => expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument())
   })
 
@@ -618,7 +636,7 @@ describe('<DeadLettersPanel />', () => {
     vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a', { recovery: null })]))
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
-    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'mine' } })
     await waitFor(() => expect(screen.getByTestId('dlq-empty-mine')).toBeInTheDocument())
     expect(screen.queryByTestId('dlq-row-a')).toBeNull()
     expect(screen.queryByTestId('dlq-empty')).toBeNull()
@@ -671,7 +689,7 @@ describe('<DeadLettersPanel /> — severity filter', () => {
     vi.mocked(api).mockImplementation(dlqMock(rows))
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
-    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'mine' } })
     fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'p1' } })
     await waitFor(() => {
       const params = lastDlqParams()
@@ -731,8 +749,8 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: 'resolved', ownerScope: 'mine', severityFilter: 'p2' }))
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument())
-    expect((screen.getByLabelText('Failure status') as HTMLSelectElement).value).toBe('resolved')
-    expect(screen.getByTestId('dlq-owner-mine')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('dlq-status-resolved')).toBeChecked()
+    expect(screen.getByTestId('dlq-owner')).toHaveValue('mine')
     expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('p2')
   })
 
@@ -740,7 +758,7 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument())
     fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'p1' } })
-    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'mine' } })
     await waitFor(() => {
       const stored = JSON.parse(localStorage.getItem(FILTERS_KEY) ?? '{}')
       expect(stored.severityFilter).toBe('p1')
@@ -752,8 +770,8 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     localStorage.setItem(FILTERS_KEY, 'not-json{')
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument())
-    expect((screen.getByLabelText('Failure status') as HTMLSelectElement).value).toBe('open')
-    expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('dlq-status-open')).toBeChecked()
+    expect(screen.getByTestId('dlq-owner')).toHaveValue('all')
     expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
   })
 
@@ -761,8 +779,8 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: 'bogus', ownerScope: 'weird', severityFilter: 'p9' }))
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument())
-    expect((screen.getByLabelText('Failure status') as HTMLSelectElement).value).toBe('open')
-    expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('dlq-status-open')).toBeChecked()
+    expect(screen.getByTestId('dlq-owner')).toHaveValue('all')
     expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
   })
 
@@ -777,8 +795,8 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     try {
       render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
       await waitFor(() => expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument())
-      expect((screen.getByLabelText('Failure status') as HTMLSelectElement).value).toBe('open')
-      expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByTestId('dlq-status-open')).toBeChecked()
+      expect(screen.getByTestId('dlq-owner')).toHaveValue('all')
       expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
     } finally {
       if (originalDescriptor) Object.defineProperty(window, 'localStorage', originalDescriptor)
@@ -1463,6 +1481,6 @@ it('labels closed DLQ rows as accepted loss rather than recovered work', async (
   localStorage.clear()
   vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a', { status: 'resolved' })]))
   render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
-  fireEvent.change(screen.getByLabelText('Failure status'), { target: { value: 'all' } })
+  fireEvent.click(screen.getByTestId('dlq-status-all'))
   expect(await screen.findByRole('row', { name: 'node-a — Accepted loss' })).toBeInTheDocument()
 })

@@ -407,12 +407,12 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     }, { activeOrg: orgId })
     await page.goto('/')
     await expect(page.getByTestId('recovery-queue')).toBeVisible()
-    // Default Show=Open lists the five open rows; the replayed one is
+    // Default status Open lists the five open rows; the replayed one is
     // filtered out until the operator widens the status filter.
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[1])}`)).toBeVisible()
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[2])}`)).toBeVisible()
     await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[0])}`)).toBeHidden()
-    await page.getByRole('combobox', { name: 'Failure status' }).selectOption({ label: 'All' })
+    await page.getByRole('radiogroup', { name: 'Failure status' }).getByRole('radio', { name: /^All\b/ }).check()
     for (const runId of runIds) {
       await expect(page.getByTestId(`dlq-row-${byRun.get(runId)}`)).toBeVisible()
     }

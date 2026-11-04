@@ -457,15 +457,17 @@ with a filtered empty run page keep their operational overview.
 
 ### Recovery queue hierarchy
 
-The queue leads with compact organization-wide totals and visibly grouped search,
-failure-status, recovery-owner, recovery-severity and sort controls. Totals never
-represent the filtered or paginated result; failure status is distinct from the
-linked recovery item's progress. Filters keep their existing combined server
-query and persistence semantics. Refresh may reorder rows without moving focus
-or clearing the selected failure or bulk selection.
+The queue leads with one toolbar: search, a failure-status radio group whose
+chips carry organization-wide counts, then native owner, severity and sort
+menus. Counts never represent the filtered or paginated result; failure status
+is distinct from the linked recovery item's progress, and both facts stay in the
+status group's tooltip and accessible description. Filters keep their existing
+combined server query and persistence semantics. Refresh may reorder rows without
+moving focus or clearing the selected failure or bulk selection.
 
-Rows retain the fixed 54px height required by virtualization. Controls reflow
-without hiding actions at narrow widths; full failure details remain available
+Rows retain the fixed 54px height required by virtualization. The toolbar holds
+one row in English from a 1280px window and in Spanish from 1440px, and reflows
+without hiding actions at narrower widths; full failure details remain available
 below the list. Chromium checks cover long identifiers, English/Spanish labels,
 keyboard filter traversal and 390/640/1280 CSS-pixel widths. The 640px case is a
 200%-zoom layout proxy, not a screen-reader or physical browser-zoom certificate.

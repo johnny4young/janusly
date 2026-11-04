@@ -261,7 +261,7 @@ for (const contract of LOCALES) {
     const dayChip = page.getByTestId('dlq-day-filter-chip')
     await expect(queue).toBeVisible()
     await expect(dayChip).toContainText(days[0] ?? '')
-    await page.locator('#dlq-filter').selectOption('all')
+    await page.getByTestId('dlq-status-all').check()
     await expect(page.getByTestId(`dlq-row-${ids[0]}`)).toBeVisible()
     await capture(queue, `web-${contract.locale}-recovery-sparkline-drill-in`)
 

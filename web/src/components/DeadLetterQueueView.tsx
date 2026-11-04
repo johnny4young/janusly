@@ -5,7 +5,7 @@
  */
 
 import type { KeyboardEventHandler, RefObject } from 'react'
-import { CircleCheck, Inbox, RefreshCw, TimerReset, X } from 'lucide-react'
+import { CircleCheck, Inbox, RefreshCw, Search, TimerReset, X } from 'lucide-react'
 
 import { formatStatusLabel } from '../constants'
 import {
@@ -14,9 +14,9 @@ import {
   SORT_KEY_LABELS,
   STATUS_FILTER_KEYS,
   statuses,
+  toOwnerScope,
   toSeverityFilter,
   toSortKey,
-  toStatusFilter,
   type RecoveryQueueFilters,
 } from '../hooks/useRecoveryQueueFilters'
 import type { UseVirtualListResult } from '../hooks/useVirtualList'
@@ -33,7 +33,7 @@ import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { RecoveryItemBadge } from './RecoveryItemBadge'
 import { RecoveryItemDrawer } from './RecoveryItemDrawer'
-import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
+import { SelectControl, TextInput } from '@/components/ui/Form'
 import './DeadLetterQueueView.css'
 import { Button } from './ui/Button'
 
@@ -183,14 +183,6 @@ export function DeadLetterQueueView({
         </div>
       </div>
 
-      <div className="we-dlq-totals ui-field__hint" role="group" aria-label={t('dlq.organizationTotals')}>
-        <span>{t('dlq.organizationTotals')}</span>
-        {([
-          ['total', 'dlq.statTotal'], ['open', 'dlq.statOpen'],
-          ['replayed', 'dlq.statRetried'], ['resolved', 'dlq.statResolved'],
-        ] as const).map(([key, label]) => <span key={key}><strong>{counts[key]}</strong> {t(label)}</span>)}
-      </div>
-
       {dayFilter && (
         <div className="we-dlq-day-chip" data-testid="dlq-day-filter-chip">
           <span>{t('dlq.dayFilter.label', { day: dayFilter })}</span>
@@ -206,13 +198,13 @@ export function DeadLetterQueueView({
         </div>
       )}
 
-      <div className="we-dlq-filters">
-        <div className="ui-field we-dlq-search">
-          <FieldLabel htmlFor="dlq-search">{t('dlq.search.label')}</FieldLabel>
+      <div className="we-list-toolbar we-dlq-filters" data-testid="dlq-toolbar">
+        <div className="we-list-search">
+          <Search size={13} aria-hidden="true" />
           <TextInput
             id="dlq-search"
             type="search"
-
+            aria-label={t('dlq.search.label')}
             value={searchInput}
             onChange={event => queue.setSearchInput(event.target.value)}
             placeholder={t('dlq.search.placeholder')}
@@ -221,75 +213,74 @@ export function DeadLetterQueueView({
             aria-errormessage={searchInvalid ? 'dlq-search-hint' : undefined}
             data-testid="dlq-search"
           />
-          {searchHint && (
-            <p
-              id="dlq-search-hint"
-              className={searchInvalid ? 'ui-field__error' : 'ui-field__hint'}
-              aria-live="polite"
-              data-testid="dlq-search-hint"
-            >
-              {searchHint}
-            </p>
-          )}
         </div>
-        <div className="ui-field">
-          <FieldLabel htmlFor="dlq-filter">{t('dlq.show')}</FieldLabel>
-          <SelectControl id="dlq-filter" value={status} onChange={event => queue.setStatus(toStatusFilter(event.target.value))}>
-            {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item])}</option>)}
-          </SelectControl>
+        <div
+          id="dlq-filter"
+          className="we-dlq-status"
+          role="radiogroup"
+          aria-label={t('dlq.show')}
+          aria-describedby="dlq-status-help"
+          title={t('dlq.statusHelp')}
+        >
+          {statuses.map(item => (
+            <label key={item} className="ui-button ui-button--secondary ui-button--sm">
+              <input
+                type="radio"
+                name="dlq-status"
+                value={item}
+                checked={status === item}
+                onChange={() => queue.setStatus(item)}
+                data-testid={`dlq-status-${item}`}
+              />
+              {t(STATUS_FILTER_KEYS[item])} <strong>{counts[item === 'all' ? 'total' : item]}</strong>
+            </label>
+          ))}
         </div>
-        <div className="ui-field">
-          <div id="dlq-owner-label" className="ui-field__label"><span>{t('dlq.owner.label')}</span></div>
-          <div className="we-seg" role="group" aria-labelledby="dlq-owner-label">
-            <button
-              type="button"
-              aria-pressed={ownerScope === 'all'}
-              onClick={() => queue.setOwnerScope('all')}
-              data-testid="dlq-owner-all"
-            >
-              {t('dlq.owner.all')}
-            </button>
-            <button
-              type="button"
-              aria-pressed={ownerScope === 'mine'}
-              onClick={() => queue.setOwnerScope('mine')}
-              data-testid="dlq-owner-mine"
-            >
-              {t('dlq.owner.mine')}
-            </button>
-          </div>
-        </div>
-        <div className="ui-field">
-          <FieldLabel htmlFor="dlq-severity-filter">{t('dlq.severity.label')}</FieldLabel>
-          <SelectControl
-            id="dlq-severity-filter"
-
-            value={severityFilter}
-            onChange={event => queue.setSeverityFilter(toSeverityFilter(event.target.value))}
-            data-testid="dlq-severity-filter"
-          >
-            <option value="all">{t('dlq.severity.all')}</option>
-            {SEVERITIES.map(sev => (
-              <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}`)}</option>
-            ))}
-          </SelectControl>
-        </div>
-        <div className="ui-field">
-          <FieldLabel htmlFor="dlq-sort">{t('dlq.sort.label')}</FieldLabel>
-          <SelectControl
-            id="dlq-sort"
-
-            value={sortKey}
-            onChange={event => queue.setSortKey(toSortKey(event.target.value))}
-            data-testid="dlq-sort"
-          >
-            {SORT_KEYS.map(key => (
-              <option key={key} value={key}>{t(SORT_KEY_LABELS[key])}</option>
-            ))}
-          </SelectControl>
-        </div>
+        <SelectControl
+          id="dlq-owner"
+          aria-label={t('dlq.owner.label')}
+          value={ownerScope}
+          onChange={event => queue.setOwnerScope(toOwnerScope(event.target.value))}
+          data-testid="dlq-owner"
+        >
+          <option value="all">{t('dlq.owner.all')}</option>
+          <option value="mine">{t('dlq.owner.mine')}</option>
+        </SelectControl>
+        <SelectControl
+          id="dlq-severity-filter"
+          aria-label={t('dlq.severity.label')}
+          value={severityFilter}
+          onChange={event => queue.setSeverityFilter(toSeverityFilter(event.target.value))}
+          data-testid="dlq-severity-filter"
+        >
+          <option value="all">{t('dlq.severity.all')}</option>
+          {SEVERITIES.map(sev => (
+            <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}`)}</option>
+          ))}
+        </SelectControl>
+        <SelectControl
+          id="dlq-sort"
+          aria-label={t('dlq.sort.label')}
+          value={sortKey}
+          onChange={event => queue.setSortKey(toSortKey(event.target.value))}
+          data-testid="dlq-sort"
+        >
+          {SORT_KEYS.map(key => (
+            <option key={key} value={key}>{t(SORT_KEY_LABELS[key])}</option>
+          ))}
+        </SelectControl>
       </div>
-      <p className="ui-field__hint" id="dlq-status-help">{t('dlq.statusHelp')}</p>
+      {searchHint && (
+        <small
+          id="dlq-search-hint"
+          className={searchInvalid ? 'ui-field__error' : 'ui-field__hint'}
+          aria-live="polite"
+          data-testid="dlq-search-hint"
+        >
+          {searchHint}
+        </small>
+      )}
+      <p className="we-sr-only" id="dlq-status-help">{t('dlq.statusHelp')}</p>
 
       {/* Bulk-select bar — a Select-all toggle (always, in selection mode) plus
           the count + "Resolve selected" once at least one row is ticked. Reuses

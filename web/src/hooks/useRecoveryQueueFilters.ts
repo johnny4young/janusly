@@ -69,7 +69,7 @@ export const SORT_KEY_LABELS: Record<SortKey, string> = {
   sla: 'dlq.sort.sla',
 }
 
-/** Coerce a `<select>` value into a `DeadLetterStatusFilter`, defaulting to `'open'`. */
+/** Coerce a stored value into a `DeadLetterStatusFilter`, defaulting to `'open'`. */
 export function toStatusFilter(value: string): DeadLetterStatusFilter {
   for (const status of statuses) {
     if (status === value) return status
@@ -100,7 +100,7 @@ function toSearchTerm(value: unknown): string {
 }
 
 /** Coerce an arbitrary value into an `OwnerScope`, defaulting to `'all'`. */
-function toOwnerScope(value: string): OwnerScope {
+export function toOwnerScope(value: string): OwnerScope {
   return value === 'mine' ? 'mine' : 'all'
 }
 
