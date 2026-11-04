@@ -778,43 +778,9 @@
 
 /* ==========================================================================
    AI Studio and chat surfaces
-   AI Studio hero, prompt controls, supported-use-case rows, and run chat
+   AI Studio prompt controls, supported-use-case rows, and run chat
    message cards.
    ========================================================================== */
-.ai-studio-hero {
-  align-items: flex-start;
-  border: 1px solid var(--we-line);
-  border-radius: 8px;
-  display: flex;
-  gap: 14px;
-  justify-content: space-between;
-  padding: 16px;
-  background:
-    linear-gradient(135deg, var(--we-surface) 0%, var(--we-primary-soft) 54%, var(--we-accent-soft) 100%);
-  box-shadow: 0 12px 30px -24px var(--we-shadow-ink-35);
-}
-
-.ai-studio-hero--branded {
-  padding: 20px 18px;
-  border-radius: 12px;
-}
-
-.ai-studio-hero--branded h2 { margin-top: 10px; }
-
-.ai-studio-hero h2 {
-  color: var(--we-ink);
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: 0;
-  line-height: 1.08;
-  margin: 12px 0 0;
-}
-
-.ai-studio-hero svg {
-  color: var(--we-primary);
-  flex: 0 0 auto;
-}
-
 .ai-studio-prompt {
   margin-top: 12px;
 }

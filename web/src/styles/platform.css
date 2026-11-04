@@ -254,10 +254,6 @@
     grid-template-columns: 1fr;
   }
 
-  .ai-studio-hero {
-    display: grid;
-  }
-
   /* Refactored top bar — reflow into 2-row grid (brand+breadcrumb on top,
      actions stack below). The breadcrumb truncates aggressively so the brand
      stays legible. */
@@ -1543,7 +1539,6 @@
   line-height: 1.45;
 }
 
-.we-recovery-center-hero__downtime,
 .we-recovery-center-hero__streak,
 .we-recovery-center-hero__wins {
   display: inline-flex;
@@ -1556,9 +1551,6 @@
   line-height: 1.35;
 }
 
-.we-recovery-center-hero__downtime { color: var(--we-text-2); }
-.we-recovery-center-hero__downtime[data-severity="warn"] { color: var(--we-warning-text); }
-.we-recovery-center-hero__downtime[data-severity="danger"] { color: var(--we-danger-text); }
 .we-recovery-center-hero__streak { color: var(--we-success-text); }
 .we-recovery-center-hero__wins { color: var(--we-primary); }
 
@@ -1616,6 +1608,34 @@
 .we-home-health-summary .ui-button {
   justify-self: start;
 }
+
+.we-home-contributors {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.we-home-contributors button {
+  width: 100%;
+  min-width: 190px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 6px;
+  margin-inline: -6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--we-muted);
+  font-size: 12px;
+}
+
+.we-home-contributors button:hover { background: var(--we-primary-soft); }
+.we-home-contributors b { color: var(--we-text-1); font-variant-numeric: tabular-nums; }
+.we-home-contributors [data-severity="warn"] b { color: var(--we-warning-text); }
+.we-home-contributors [data-severity="danger"] b { color: var(--we-danger-text); }
 
 .we-home-workspace {
   display: grid;
@@ -3003,53 +3023,97 @@
 
 /* Governed AI Studio authoring ---------------------------------------- */
 
+.ai-studio-hero {
+  align-items: flex-start;
+  border: 1px solid var(--we-line);
+  border-radius: var(--we-radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--we-surface);
+}
+
+.ai-studio-hero h2 {
+  color: var(--we-ink);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.ai-studio-hero p {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* Four columns at every width: labels wrap under their number instead of the
+   stepper collapsing into a grid of button-like tiles. */
 .ai-authoring-steps {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   list-style: none;
-  margin: 0;
+  margin: 6px 0 0;
   padding: 0;
+  width: 100%;
 }
 
 .ai-authoring-step {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--we-line);
-  border-radius: var(--we-radius-sm);
-  background: var(--we-surface-2);
   color: var(--we-muted);
+  display: grid;
   font-size: 11px;
+  gap: 4px;
+  justify-items: center;
   line-height: 1.2;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  position: relative;
+  text-align: center;
 }
+
+.ai-authoring-step strong { font-weight: 500; }
 
 .ai-authoring-step > span {
   align-items: center;
-  display: inline-flex;
-  flex: 0 0 auto;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
+  background: var(--we-surface);
   border: 1px solid var(--we-line-strong);
   border-radius: 999px;
-  background: var(--we-surface);
   color: var(--we-ink-soft);
+  display: inline-flex;
   font-variant-numeric: tabular-nums;
   font-weight: 720;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
 }
 
-.ai-authoring-step--complete {
-  border-color: var(--we-success-border-35);
+.ai-authoring-step:not(:first-child)::before {
+  background: var(--we-line-strong);
+  content: "";
+  height: 2px;
+  inset-inline-end: calc(50% + 15px);
+  position: absolute;
+  top: 10px;
+  width: calc(100% - 30px);
+}
+
+.ai-authoring-step[data-complete] { color: var(--we-success-text); }
+
+.ai-authoring-step[data-complete] > span {
   background: var(--we-success-soft);
+  border-color: var(--we-success-border-35);
   color: var(--we-success-text);
 }
 
-.ai-authoring-step--complete > span {
-  border-color: var(--we-success-border-35);
-  color: var(--we-success-text);
+.ai-authoring-step[aria-current="step"] { color: var(--we-primary-text); }
+.ai-authoring-step[aria-current="step"] strong { font-weight: 700; }
+
+.ai-authoring-step[aria-current="step"] > span {
+  background: var(--we-primary);
+  border-color: var(--we-primary);
+  color: var(--we-brand-glyph);
 }
 
 .ai-authoring-stage,
@@ -3263,7 +3327,6 @@
 }
 
 @media (max-width: 640px) {
-  .ai-authoring-steps,
   .ai-brief-summary > dl,
   .ai-brief-summary .ui-form-disclosure dl,
   .ai-catalog-summary,
