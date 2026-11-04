@@ -7,6 +7,8 @@
   the built-in default are tinted. If only some roles save, the panel says which
   failed and keeps their edits to retry.
 - Revert to defaults now appears on built-in roles that have saved changes.
+- Build opens with the sidebar collapsed to a rail for more canvas; the flow
+  name and version move to the top bar.
 
 - Canvas connections drop the repeated "default" label; named branches show a
   pill on the connection.
