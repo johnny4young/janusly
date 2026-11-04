@@ -1,3 +1,4 @@
+import { asRecord, isStringArray } from './lib/guards'
 import type { Credential } from './types'
 
 export type CredentialHealthSnapshot = {
@@ -8,6 +9,15 @@ export type CredentialHealthSnapshot = {
   usageCount30d: number
   referencingWorkflowIds: string[]
   expiresAt: string | null
+}
+
+/** Null, never an empty list, when the response cannot prove who references the credential. */
+export function referencingWorkflowIds(healthResponse: unknown, credentialName: string): string[] | null {
+  const entries = asRecord(healthResponse)?.credentials
+  const ids = Array.isArray(entries)
+    ? asRecord(entries.find((entry) => entry?.name === credentialName))?.referencingWorkflowIds
+    : null
+  return isStringArray(ids) ? ids : null
 }
 
 export type CredentialHealthState = 'healthy' | 'warning' | 'missing' | 'unknown'

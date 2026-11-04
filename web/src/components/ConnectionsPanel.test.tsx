@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { Credential } from '../types'
-import { ConfirmProvider } from './ConfirmDialog'
 import { ConnectionsPanel } from './ConnectionsPanel'
 
 vi.mock('../api', () => ({
@@ -65,6 +64,8 @@ describe('<ConnectionsPanel />', () => {
       <ConnectionsPanel
         credentials={credentials}
         onCreateCredential={vi.fn(async () => true)}
+        workflows={[]}
+        onRevokeCredential={vi.fn(async () => true)}
         canWrite
       />,
     )
@@ -95,6 +96,8 @@ describe('<ConnectionsPanel />', () => {
       <ConnectionsPanel
         credentials={[]}
         onCreateCredential={onCreateCredential}
+        workflows={[]}
+        onRevokeCredential={vi.fn(async () => true)}
         canWrite
       />,
     )
@@ -124,6 +127,23 @@ describe('<ConnectionsPanel />', () => {
     expect(screen.queryByDisplayValue('secret-value')).not.toBeInTheDocument()
   })
 
+  it('closes the create dialog on Escape', async () => {
+    render(
+      <ConnectionsPanel
+        credentials={[]}
+        workflows={[]}
+        onCreateCredential={vi.fn(async () => true)}
+        onRevokeCredential={vi.fn(async () => true)}
+        canWrite
+      />,
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add connection' })[0]!)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
   it('offers a usable first-credential path when managed storage has no root key', async () => {
     vi.mocked(api).mockResolvedValueOnce({
       credentials: [],
@@ -134,6 +154,8 @@ describe('<ConnectionsPanel />', () => {
       <ConnectionsPanel
         credentials={[]}
         onCreateCredential={vi.fn(async () => true)}
+        workflows={[]}
+        onRevokeCredential={vi.fn(async () => true)}
         canWrite
       />,
     )
@@ -152,6 +174,8 @@ describe('<ConnectionsPanel />', () => {
       <ConnectionsPanel
         credentials={credentials}
         onCreateCredential={vi.fn(async () => true)}
+        workflows={[]}
+        onRevokeCredential={vi.fn(async () => true)}
         canWrite={false}
       />,
     )
@@ -162,15 +186,15 @@ describe('<ConnectionsPanel />', () => {
     expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument()
   })
 
-  it('uses the focus-managed confirmation dialog before revoking a connection', async () => {
+  it('opens the revoke dialog for the chosen row and returns focus when cancelled', async () => {
     render(
-      <ConfirmProvider>
-        <ConnectionsPanel
-          credentials={credentials}
-          onCreateCredential={vi.fn(async () => true)}
-          canWrite
-        />
-      </ConfirmProvider>,
+      <ConnectionsPanel
+        credentials={credentials}
+        onCreateCredential={vi.fn(async () => true)}
+        workflows={[]}
+        onRevokeCredential={vi.fn(async () => true)}
+        canWrite
+      />,
     )
 
     await screen.findByText('pagerduty-primary')
@@ -178,19 +202,36 @@ describe('<ConnectionsPanel />', () => {
     trigger.focus()
     fireEvent.click(trigger)
 
-    const dialog = await screen.findByRole('alertdialog', { name: 'Revoke connection' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Revoke pagerduty-primary' })
     expect(within(dialog).getByText(/Workflows using it will stop resolving the secret/)).toBeInTheDocument()
     expect(api).not.toHaveBeenCalledWith('/credentials/pagerduty-primary', { method: 'DELETE' })
 
-    fireEvent.click(within(dialog).getByTestId('confirm-dialog-cancel'))
+    fireEvent.click(within(dialog).getByTestId('credential-revoke-cancel'))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     await waitFor(() => expect(trigger).toHaveFocus())
+  })
 
-    fireEvent.click(trigger)
-    fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'))
-    await waitFor(() => {
-      expect(api).toHaveBeenCalledWith('/credentials/pagerduty-primary', { method: 'DELETE' })
-    })
+  it('labels affected rows from the workspace workflows and hands it the confirmed revoke', async () => {
+    const onRevokeCredential = vi.fn(async () => true)
+    render(
+      <ConnectionsPanel
+        credentials={credentials}
+        workflows={[{ id: 'workflow-1', name: 'Incident triage' }]}
+        onCreateCredential={vi.fn(async () => true)}
+        onRevokeCredential={onRevokeCredential}
+        canWrite
+      />,
+    )
+
+    await screen.findByText('pagerduty-primary')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Revoke' })[0]!)
+    const dialog = await screen.findByRole('alertdialog', { name: 'Revoke pagerduty-primary' })
+    expect(await within(dialog).findByRole('listitem')).toHaveTextContent('Incident triage')
+    fireEvent.change(screen.getByTestId('credential-revoke-typed-name'), { target: { value: 'pagerduty-primary' } })
+    fireEvent.click(screen.getByTestId('credential-revoke-confirm'))
+
+    await waitFor(() => expect(onRevokeCredential).toHaveBeenCalledWith('pagerduty-primary'))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
   })
 
   it('refreshes health when an equal-sized inventory comes from a new scope', async () => {
@@ -218,6 +259,8 @@ describe('<ConnectionsPanel />', () => {
       <ConnectionsPanel
         credentials={initial}
         onCreateCredential={vi.fn(async () => true)}
+        workflows={[]}
+        onRevokeCredential={vi.fn(async () => true)}
         canWrite
       />,
     )
@@ -227,6 +270,8 @@ describe('<ConnectionsPanel />', () => {
       <ConnectionsPanel
         credentials={[{ ...initial[0]!, id: 'other-org-credential' }]}
         onCreateCredential={vi.fn(async () => true)}
+        workflows={[]}
+        onRevokeCredential={vi.fn(async () => true)}
         canWrite
       />,
     )
@@ -249,6 +294,8 @@ describe('<ConnectionsPanel />', () => {
       <ConnectionsPanel
         credentials={many}
         onCreateCredential={vi.fn(async () => true)}
+        workflows={[]}
+        onRevokeCredential={vi.fn(async () => true)}
         canWrite
       />,
     )
