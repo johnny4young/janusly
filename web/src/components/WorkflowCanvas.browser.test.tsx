@@ -56,6 +56,22 @@ function mountCanvas(overrides: Partial<Parameters<typeof WorkflowCanvas>[0]> = 
 }
 
 describe('WorkflowCanvas (browser mode)', () => {
+  it('paints the zoom controls and attribution from the dark tokens', () => {
+    document.documentElement.dataset.theme = 'dark'
+    try {
+      const { container } = mountCanvas()
+      const button = getComputedStyle(container.querySelector('.react-flow__controls-button')!)
+      const reference = document.createElement('div')
+      reference.style.background = 'var(--we-surface)'
+      container.append(reference)
+
+      expect(button.backgroundColor).toBe(getComputedStyle(reference).backgroundColor)
+      expect(getComputedStyle(container.querySelector('.react-flow__attribution')!).backgroundColor).toBe('rgba(0, 0, 0, 0)')
+    } finally {
+      delete document.documentElement.dataset.theme
+    }
+  })
+
   it('renders every node label and edge count from props', () => {
     const { getByText, container } = mountCanvas()
 

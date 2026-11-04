@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The language selector in the account menu is a compact row like Theme and
+  Density, and the canvas zoom controls follow the dark theme.
+
 - Workflow generation audits retain bounded first-draft issue codes even when
   a repair succeeds, without storing model drafts or prompts.
 

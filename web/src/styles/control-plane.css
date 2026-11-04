@@ -1057,11 +1057,19 @@
   box-shadow: 0 8px 18px -10px var(--we-shadow-ink-25);
 }
 .we-locale-switcher--row {
-  width: 100%;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid var(--we-line);
+  padding: 4px 14px 6px;
   justify-content: space-between;
+}
+.we-locale-switcher--row .we-locale-switcher__label {
+  font-size: 11px;
+  color: var(--we-muted);
+}
+.we-locale-switcher--row .we-locale-switcher__select {
+  flex: none;
+  width: 160px;
+  min-height: 30px;
+  height: 30px;
+  padding-block: 0;
 }
 
 .boot-screen { font-weight: 600; color: var(--we-primary); }
