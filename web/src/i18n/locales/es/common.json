@@ -2720,6 +2720,8 @@
   "packs.credential.ready": "{{name}} configurada ({{kind}})",
   "packs.credential.legendMissing": "Sin configurar",
   "packs.credential.legendReady": "Lista",
+  "packs.installNote.role": "Tu rol no permite instalar ni ejecutar packs.",
+  "packs.installNote.connect": "Conecta {{names}} antes de ejecutarlo.",
   "packs.stepCount_one": "{{count}} paso",
   "packs.stepCount_other": "{{count}} pasos",
   "packs.action.install": "Instalar",
