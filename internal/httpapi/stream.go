@@ -116,7 +116,7 @@ func (h *streamHub) listen(ctx context.Context, pool *pgxpool.Pool) {
 }
 
 func isTerminalRunStatus(status string) bool {
-	return status == "succeeded" || status == "failed" || status == "cancelled"
+	return status == "succeeded" || status == "failed" || status == "cancelled" || status == "timed_out"
 }
 
 // streamRun handles GET /runs/{runId}/stream with the contract's guard:
