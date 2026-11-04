@@ -10,7 +10,7 @@
  * backdrop click, and carries the `alertdialog` ARIA roles.
  *
  * Used by the destructive-action handlers across the settings panels
- * (connections / permissions / SCIM / alerts / upstream-health).
+ * (permissions / SCIM / alerts / upstream-health).
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'

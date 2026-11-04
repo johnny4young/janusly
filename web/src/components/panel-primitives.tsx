@@ -19,34 +19,23 @@
 
 import React from 'react'
 import { Search } from 'lucide-react'
-import { useT } from '../i18n'
 import { EmptyState } from './EmptyState'
 
+/** Names a panel for assistive technology. The visible title is the section
+ *  navigation row above it, so a view has one header. */
 export function PanelChrome({
   title,
   children,
-  kicker,
   description,
-  icon,
 }: {
   title: string
   children: React.ReactNode
-  kicker?: string
   description?: string
-  icon?: React.ReactNode
 }) {
-  const { t } = useT()
-  const resolvedKicker = kicker ?? (t('rightPanel.chrome.kicker'))
   return (
     <div className="panel-stack">
-      <div className="panel-heading">
-        <div className="panel-heading-copy">
-          <div className="section-kicker">{resolvedKicker}</div>
-          <h2>{title}</h2>
-          {description && <p>{description}</p>}
-        </div>
-        {icon && <span className="panel-heading-icon">{icon}</span>}
-      </div>
+      <h2 className="we-sr-only">{title}</h2>
+      {description && <p className="we-sr-only">{description}</p>}
       {children}
     </div>
   )

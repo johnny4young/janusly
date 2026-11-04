@@ -87,6 +87,9 @@
 .ui-button--loading { cursor: wait; }
 .ui-button__icon, .ui-button__spinner { display: inline-flex; flex: 0 0 auto; }
 .ui-button__spinner { animation: ui-spin 800ms linear infinite; }
+/* Beats descendant rules like `.list-card span` that would repaint the label
+   and detach it from the button's own contrast pair. */
+.ui-button .ui-button__label { color: inherit; }
 .ui-button__label {
   min-width: 0;
   display: inline-flex;
