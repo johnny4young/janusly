@@ -1303,6 +1303,22 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     expect(useWorkflowStore.getState().toasts.at(-1)?.message).toBe('Error summary copied')
   })
 
+  it('leads the selected failure with the readable cause and keeps the raw error collapsed', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a', {
+      nodeType: 'http',
+      errorJson: { message: 'HTTP 503 from billing' },
+    })]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    expect(screen.getByTestId('recovery-error-summary')).toHaveTextContent('HTTP 503 from billing')
+    expect(screen.getByTestId('recovery-error-cause')).toHaveTextContent('HTTP · 503')
+    expect(screen.queryByTestId('recovery-error-raw')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('recovery-error-raw-toggle'))
+    expect(screen.getByTestId('recovery-error-raw')).toHaveTextContent('HTTP 503 from billing')
+  })
+
   it('reports a clipboard failure without claiming success', async () => {
     vi.mocked(copyText).mockRejectedValue(new Error('clipboard unavailable'))
     vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))

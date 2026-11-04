@@ -21,7 +21,7 @@
  */
 
 import { lazy, memo, Suspense, useCallback, useState } from 'react'
-import { Activity, Boxes, Database, FlaskConical, Layers3, Plug, Users, Workflow } from 'lucide-react'
+import { Plug, Workflow } from 'lucide-react'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
 import type { AuthoringPanelModel } from './AuthoringPanel'
@@ -97,6 +97,7 @@ export type RightPanelCatalog = {
     secretRef?: string
     expiresAt?: string
   }) => Promise<boolean>
+  onRevokeCredential: (name: string) => Promise<boolean>
 }
 
 export type RightPanelExecution = {
@@ -237,12 +238,12 @@ function RightPanelRouter(props: RightPanelProps) {
     />
   )
   if (props.tab === 'multiAgent') return (
-    <PanelChrome title={t('rightPanel.multiAgent.title')} description={t('rightPanel.multiAgent.description')} icon={<Layers3 size={18} />}>
+    <PanelChrome title={t('rightPanel.multiAgent.title')} description={t('rightPanel.multiAgent.description')}>
       <MultiAgentTimeline events={execution.events} eventsHasMore={execution.eventsHasMore} onLoadOlderEvents={execution.onLoadOlderEvents} />
     </PanelChrome>
   )
   if (props.tab === 'workflows') return (
-    <PanelChrome title={t('rightPanel.workflows.title')} description={t('rightPanel.workflows.description')} icon={<Database size={18} />}>
+    <PanelChrome title={t('rightPanel.workflows.title')} description={t('rightPanel.workflows.description')}>
       <WorkflowsDashboard
         onOpen={catalog.onOpenWorkflow}
         onCreate={catalog.onCreateWorkflow}
@@ -271,12 +272,12 @@ function RightPanelRouter(props: RightPanelProps) {
     />
   )
   if (props.tab === 'experiments') return (
-    <PanelChrome title={t('rightPanel.experiments.title')} description={t('rightPanel.experiments.description')} icon={<FlaskConical size={18} />}>
+    <PanelChrome title={t('rightPanel.experiments.title')} description={t('rightPanel.experiments.description')}>
       <ExperimentsPanel />
     </PanelChrome>
   )
   if (props.tab === 'members') return (
-    <PanelChrome title={t('rightPanel.members.title')} description={t('rightPanel.members.description')} icon={<Users size={18} />}>
+    <PanelChrome title={t('rightPanel.members.title')} description={t('rightPanel.members.description')}>
       <MembersPanel />
     </PanelChrome>
   )
@@ -317,7 +318,9 @@ function RightPanelRouter(props: RightPanelProps) {
   if (props.tab === 'credentials') return (
     <ConnectionsPanel
       credentials={catalog.credentials}
+      workflows={catalog.workflows}
       onCreateCredential={catalog.onCreateCredential}
+      onRevokeCredential={catalog.onRevokeCredential}
       canWrite={can('credentials.write')}
     />
   )
@@ -344,7 +347,7 @@ function RightPanelRouter(props: RightPanelProps) {
     />
   )
   return (
-    <PanelChrome title={t('rightPanel.reasoning.title')} description={t('rightPanel.reasoning.description')} icon={<Activity size={18} />}>
+    <PanelChrome title={t('rightPanel.reasoning.title')} description={t('rightPanel.reasoning.description')}>
       <ReasoningPanel
         events={execution.events}
         eventsHasMore={execution.eventsHasMore}
@@ -391,7 +394,7 @@ export function TemplatesPanel({
     : templates
 
   return (
-    <PanelChrome title={t('rightPanel.templates.title')} description={t('rightPanel.templates.description')} icon={<Workflow size={18} />}>
+    <PanelChrome title={t('rightPanel.templates.title')} description={t('rightPanel.templates.description')}>
       {templates.length === 0 && solutionPacks.length === 0 ? (
         <div className="panel-list">
           <EmptyView
@@ -448,7 +451,7 @@ export function TemplatesPanel({
 function ToolsPanel({ tools, onInstallPlugin, canInstall }: Pick<RightPanelCatalog, 'tools' | 'onInstallPlugin'> & { canInstall: boolean }) {
   const { t } = useT()
   return (
-    <PanelChrome title={t('rightPanel.tools.title')} description={t('rightPanel.tools.description')} icon={<Boxes size={18} />}>
+    <PanelChrome title={t('rightPanel.tools.title')} description={t('rightPanel.tools.description')}>
       <div className="panel-list">
         {tools.length === 0 && <EmptyView icon={<Plug size={22} />} title={t('rightPanel.tools.empty.title')} body={t('rightPanel.tools.empty.body')} />}
         {tools.map(tool => (

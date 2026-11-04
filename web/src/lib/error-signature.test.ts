@@ -397,13 +397,38 @@ describe("normalizeErrorSignature — network_timeout (DNS + undici codes)", () 
   it("clusters getaddrinfo ENOTFOUND", () => {
     const r = normalizeErrorSignature(new Error("getaddrinfo ENOTFOUND api.example.com"), { nodeType: "http" });
     expect(r.category).toBe("network_timeout");
-    expect(r.signature).toBe("Network timeout on http node");
+    expect(r.signature).toBe("DNS lookup failed on http node");
+  });
+  it("clusters the Go resolver failure as DNS instead of the fallback", () => {
+    const r = normalizeErrorSignature(
+      { name: "Error", message: 'Get "https://demo-ingest.invalid/feed": dial tcp: lookup demo-ingest.invalid: no such host' },
+      { nodeType: "http" },
+    );
+    expect(r).toEqual({
+      signature: "DNS lookup failed on http node",
+      category: "network_timeout",
+      suggestedOwner: "workflow_author",
+    });
+  });
+  it.each([
+    "dial tcp 10.0.0.1:443: connect: connection refused",
+    "read tcp 10.0.0.2:5000->10.0.0.1:443: read: connection reset by peer",
+    "dial tcp 10.0.0.1:443: connect: no route to host",
+    "context deadline exceeded",
+  ])("clusters the Go network failure %s", (message) => {
+    expect(normalizeErrorSignature(new Error(message), { nodeType: "http" })).toEqual({
+      signature: "Network timeout on http node",
+      category: "network_timeout",
+      suggestedOwner: "workflow_author",
+    });
   });
   it("clusters connect ENETUNREACH", () => {
     expect(normalizeErrorSignature(new Error("connect ENETUNREACH 10.0.0.1:443"), { nodeType: "http" }).category).toBe("network_timeout");
   });
   it("clusters the http-policy 'did not resolve' string", () => {
-    expect(normalizeErrorSignature(new Error("HTTP target did not resolve to any address: foo"), { nodeType: "http" }).category).toBe("network_timeout");
+    const r = normalizeErrorSignature(new Error("HTTP target did not resolve to any address: foo"), { nodeType: "http" });
+    expect(r.category).toBe("network_timeout");
+    expect(r.signature).toBe("DNS lookup failed on http node");
   });
   it("clusters bare 'fetch failed'", () => {
     expect(normalizeErrorSignature(new Error("fetch failed"), { nodeType: "http" }).category).toBe("network_timeout");

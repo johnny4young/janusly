@@ -5,7 +5,6 @@ import {
   Clock3,
   ExternalLink,
   History,
-  ShieldAlert,
 } from 'lucide-react'
 import { useT } from '../i18n'
 import type { RecoveryCase } from '../types'
@@ -48,7 +47,6 @@ export function RecoveryCasePanel(props: RecoveryCasePanelProps) {
       <PanelChrome
         title={t('recoveryCase.title')}
         description={t('recoveryCase.description')}
-        icon={<ShieldAlert size={18} />}
       >
         <EmptyView
           icon={<CircleAlert size={20} />}
@@ -64,8 +62,6 @@ export function RecoveryCasePanel(props: RecoveryCasePanelProps) {
     <PanelChrome
       title={t('recoveryCase.title')}
       description={t('recoveryCase.description')}
-      kicker={t('recoveryCase.kicker')}
-      icon={<ShieldAlert size={18} />}
     >
       <Button
         className="we-recovery-case__back"

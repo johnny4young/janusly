@@ -51,24 +51,26 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
       />
 
       {showOnboarding ? (
-        <RecoveryLabEntry
-          onOpenStudio={() => onOpenTab('ai-studio')}
-          onOpenRecipes={() => onOpenTab('templates')}
-          onStartDrill={onStartRecoveryDrill}
-          onDismiss={dismissIntro}
-        />
+        <>
+          <RecoveryLabEntry
+            onOpenStudio={() => onOpenTab('ai-studio')}
+            onOpenRecipes={() => onOpenTab('templates')}
+            onStartDrill={onStartRecoveryDrill}
+            onDismiss={dismissIntro}
+          />
+          <OnboardingBanner onOpenTab={onOpenTab} />
+        </>
       ) : <HomeActionWorkspace
         actions={recommendedActions}
         activeRuns={activeRuns}
         activeRunCount={allActiveRuns.length}
         status={operatorBriefStatus}
         warnings={operatorBriefWarnings}
+        setup={<OnboardingBanner onOpenTab={onOpenTab} />}
         onSelectAction={handleRecommendedAction}
         onOpenRun={onOpenRun}
         onOpenActivity={onOpenActivity}
       />}
-
-      <OnboardingBanner onOpenTab={onOpenTab} />
 
       <section className="we-home-insights" data-expanded={insightsOpen}>
         <button
