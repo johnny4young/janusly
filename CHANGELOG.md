@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The pending setup step is a row in What needs you with its progress, not a
+  separate card repeating the next action.
+
 - Each view has one header row with its section title and tabs; descriptions
   moved to a tooltip on the title, so content starts about 110 px higher.
 - Headings that receive focus for screen readers no longer show a focus ring

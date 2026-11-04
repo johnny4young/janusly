@@ -1,6 +1,5 @@
 /**
- * "First recovered run" onboarding checklist — a compact contextual card
- * guides a new operator through the six setup milestones (configure a
+ * "First recovered run" setup step — one row in What needs you guides a new operator through the six setup milestones (configure a
  * credential → install a pack → run it → break it → recover it).
  *
  * Self-fetching: it reads `/onboarding` on mount and on every
@@ -10,13 +9,12 @@
  * renders only while `status === 'active'` and a next step remains. The
  * server derives progress, so it survives logout/login.
  *
- * Mounted inside `RecoveryCenterPanel`, directly below the operational hero;
- * renders `null` when there's nothing to nudge. Keeping the checklist in the
- * product home means setup guidance never obscures a queue, dialog, or editor.
+ * Mounted on Home; renders `null` when there's nothing to nudge. Keeping it in
+ * the product home means setup guidance never obscures a queue, dialog, or editor.
  */
 
 import { useEffect } from 'react'
-import { ArrowRight, Check, Sparkles } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import type { OnboardingState, OnboardingStep } from '@/lib/onboarding'
 import type { ActiveTab } from '../types'
 import { useWorkflowStore } from '../store'
@@ -95,45 +93,22 @@ export function OnboardingBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab) =>
 
   return (
     <aside className="we-onboarding-banner" role="status" data-testid="onboarding-banner">
-      <span className="we-onboarding-banner__icon" aria-hidden="true">
-        <Sparkles size={18} />
-      </span>
       <div className="we-onboarding-banner__copy">
         <strong>{tk(`onboarding.step.${current.step}.title`)}</strong>
         <span>{tk(bodyKey)}</span>
-        <ol
-          className="we-onboarding-banner__dots"
-          aria-label={t('onboarding.banner.progress', { done: doneCount, total })}
-        >
-          {advanceable.map((m) => (
-            <li
-              key={m.step}
-              className={
-                m.done
-                  ? 'we-onboarding-banner__dot we-onboarding-banner__dot--done'
-                  : m.step === current.step
-                    ? 'we-onboarding-banner__dot we-onboarding-banner__dot--current'
-                    : 'we-onboarding-banner__dot'
-              }
-              aria-hidden="true"
-            >
-              {m.done ? <Check size={11} /> : null}
-            </li>
-          ))}
-        </ol>
       </div>
       <div className="we-onboarding-banner__actions">
-        <span className="we-onboarding-banner__count">
+        <span className="we-pill" data-tone="neutral" data-testid="onboarding-banner-progress">
           {t('onboarding.banner.progress', { done: doneCount, total })}
         </span>
-        <Button variant="primary"
+        <Button
           type="button"
-
+          size="sm"
           onClick={() => onOpenTab(current.target)}
           data-testid="onboarding-banner-cta"
+          trailingIcon={<ArrowRight size={14} />}
         >
           {tk(`onboarding.step.${current.step}.cta`)}
-          <ArrowRight size={14} aria-hidden="true" />
         </Button>
         <button
           type="button"
