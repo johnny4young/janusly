@@ -3522,7 +3522,6 @@
   "recoveryCenter.tile.semantic.replaced": "El reemplazo pasó todos los detectores. La ejecución se reanudó.",
   "recoveryCenter.tile.semantic.replacedPending": "El reemplazo pasó todos los detectores. Otra cuarentena todavía bloquea la ejecución.",
   "recoveryCenter.tile.semantic.resolveFailed": "No se pudo resolver el incidente semántico.",
-  "recoveryCase.kicker": "Caso de recuperación",
   "recoveryCase.title": "Recuperación de resultado",
   "recoveryCase.description": "Inspecciona la evidencia determinista, sigue cada transición y toma una decisión explícita como operador.",
   "recoveryCase.back": "Volver al Centro de recuperación",

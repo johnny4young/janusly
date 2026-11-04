@@ -360,7 +360,6 @@ export function ConnectionsPanel({
     <PanelChrome
       title={t('rightPanel.credentials.title')}
       description={t('rightPanel.credentials.description')}
-      icon={<KeyRound size={18} />}
     >
       <section
         className="we-card we-connections-inventory"

@@ -87,7 +87,7 @@ export function SolutionPacksPanel({
     )
     return embedded
       ? empty
-      : <PanelChrome title={t('packs.title')} description={t('packs.description')} icon={<Package size={18} />}>{empty}</PanelChrome>
+      : <PanelChrome title={t('packs.title')} description={t('packs.description')}>{empty}</PanelChrome>
   }
 
   const content = (
@@ -262,5 +262,5 @@ export function SolutionPacksPanel({
 
   return embedded
     ? content
-    : <PanelChrome title={t('packs.title')} description={t('packs.description')} icon={<Package size={18} />}>{content}</PanelChrome>
+    : <PanelChrome title={t('packs.title')} description={t('packs.description')}>{content}</PanelChrome>
 }

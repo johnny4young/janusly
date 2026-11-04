@@ -3522,7 +3522,6 @@
   "recoveryCenter.tile.semantic.replaced": "Replacement passed every detector. The run resumed.",
   "recoveryCenter.tile.semantic.replacedPending": "Replacement passed every detector. Another quarantine still blocks the run.",
   "recoveryCenter.tile.semantic.resolveFailed": "The semantic incident could not be resolved.",
-  "recoveryCase.kicker": "Recovery case",
   "recoveryCase.title": "Outcome recovery",
   "recoveryCase.description": "Inspect deterministic evidence, follow every state transition, and make an explicit operator decision.",
   "recoveryCase.back": "Back to Recovery Center",
