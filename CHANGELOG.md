@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Activity lists runs and recoveries as a dense table with kind, workflow,
+  step, status, time, run and next action. A recovery sits under its run, so a
+  failure no longer repeats the workflow name.
 - Workflow rows open with a click and keep delete behind a ⋯ menu. Move to
   Trash happens at once and its toast offers Undo for six seconds.
 - Active and Trash are now a segmented control with counts above the workflow

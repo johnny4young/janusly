@@ -70,8 +70,7 @@ describe('<ActivityWorkspace /> (browser smoke)', () => {
     const needsAction = screen.getByTestId('activity-filter-needs_action')
     expect(needsAction.getBoundingClientRect().height).toBeGreaterThanOrEqual(40)
 
-    const recoveryRow = screen.getByTestId('activity-row-recovery:recovery-browser')
-    fireEvent.click(recoveryRow.querySelector('button')!)
+    fireEvent.click(screen.getByTestId('activity-open-recovery:recovery-browser'))
     const updated = props()
     updated.activeRecoveryId = 'recovery-browser'
     view.rerender(
@@ -89,7 +88,7 @@ describe('<ActivityWorkspace /> (browser smoke)', () => {
 
   it('focuses newly opened recovery evidence without adding a tab stop', async () => {
     const view = render(<ActivityWorkspace {...props()} />)
-    fireEvent.click(screen.getByTestId('activity-row-recovery:recovery-browser').querySelector('button')!)
+    fireEvent.click(screen.getByTestId('activity-open-recovery:recovery-browser'))
     const updated = props()
     updated.activeRecoveryId = 'recovery-browser'
     view.rerender(<ActivityWorkspace {...updated} />)
@@ -123,22 +122,49 @@ describe('<ActivityWorkspace /> (browser smoke)', () => {
     }
   })
 
-  it('keeps every activity row field inside the fixed virtualized card on mobile', () => {
+  // 1200: every column; 700 and 430: two-line rows, as beside open detail and on a phone.
+  it.each([1200, 700, 430])('keeps every field inside the 44 px virtualized row at %i px', width => {
     render(
-      <div style={{ width: 430 }}>
+      <div style={{ width }}>
         <ActivityWorkspace {...props()} />
       </div>,
     )
 
-    for (const row of screen.getAllByRole('article')) {
+    const rows = screen.getByTestId('activity-feed-list').querySelectorAll<HTMLElement>('[data-testid^="activity-row-"]')
+    expect(rows).toHaveLength(2)
+    expect(screen.getAllByRole('columnheader')).toHaveLength(7)
+    for (const row of rows) {
       const rowBox = row.getBoundingClientRect()
-      const contentBottom = Math.max(
-        ...[...row.querySelectorAll<HTMLElement>(
-          '.we-activity-row__primary, .we-activity-row__status, .we-activity-row__next, code',
-        )].map(element => element.getBoundingClientRect().bottom),
-      )
-      expect(contentBottom).toBeLessThanOrEqual(rowBox.bottom + 1)
+      expect(rowBox.height).toBe(44)
+      for (const cell of row.querySelectorAll<HTMLElement>('[role="cell"]')) {
+        if (getComputedStyle(cell).display === 'none') continue
+        const box = cell.getBoundingClientRect()
+        expect(box.bottom).toBeLessThanOrEqual(rowBox.bottom + 1)
+        expect(box.top).toBeGreaterThanOrEqual(rowBox.top - 1)
+        expect(box.right).toBeLessThanOrEqual(rowBox.right + 1)
+      }
     }
+  })
+
+  it('selects a row from any cell through its one opener', () => {
+    render(<div style={{ width: 1200 }}><ActivityWorkspace {...props()} /></div>)
+
+    const row = screen.getByTestId('activity-row-recovery:recovery-browser')
+    expect(row.querySelectorAll('button')).toHaveLength(1)
+    row.scrollIntoView()
+    const workflow = row.querySelector('.we-activity-cell-workflow')!.getBoundingClientRect()
+    const hit = document.elementFromPoint(workflow.x + 8, workflow.y + workflow.height / 2)
+    expect(hit).toBe(screen.getByTestId('activity-open-recovery:recovery-browser'))
+  })
+
+  it('marks the selected row with a tint and a full ring, never a leading bar', () => {
+    const selected = { ...props(), activeRecoveryId: 'recovery-browser' }
+    render(<div style={{ width: 1200 }}><ActivityWorkspace {...selected} /></div>)
+
+    const style = getComputedStyle(screen.getByTestId('activity-row-recovery:recovery-browser'))
+    expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    expect(style.boxShadow).toMatch(/0px 0px 0px 1px inset/)
+    expect(style.borderLeftWidth).toBe('0px')
   })
 })
 

@@ -450,16 +450,6 @@
   min-width: 0;
 }
 
-.we-activity-row .list-card-row {
-  display: grid;
-  gap: 4px 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  height: 100%;
-  padding: 10px 12px;
-  text-align: left;
-  width: 100%;
-}
-
 .we-activity-recovery {
   display: grid;
   gap: 14px;

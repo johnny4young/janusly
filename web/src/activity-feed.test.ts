@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildActivityFeed,
+  compactActivityTime,
   countActivityFeed,
   filterActivityFeed,
+  groupActivityFeed,
 } from './activity-feed'
 import type { RunSummary, SavedWorkflow } from './types'
 import type { DeadLetter } from './components/DeadLettersPanel'
@@ -122,5 +124,57 @@ describe('activity feed model', () => {
 
     expect(feed[0]?.category).toBe('needs_action')
     expect(feed[0]?.nextAction).toBe('reviewWait')
+  })
+
+  describe('groupActivityFeed', () => {
+    const shape = (rows: ReturnType<typeof groupActivityFeed>) =>
+      rows.map(row => `${row.nested ? '  ' : ''}${row.item.key}`)
+
+    it('places a recovery under its run at the newest member position', () => {
+      const feed = buildActivityFeed([
+        run('run-a', 'failed', '2026-09-21T01:00:00.000Z'),
+        run('run-b', 'succeeded', '2026-09-21T02:00:00.000Z'),
+      ], [
+        { ...recovery('r1', 'open', '2026-09-21T03:00:00.000Z'), runId: 'run-a' },
+        { ...recovery('r2', 'open', '2026-09-21T00:30:00.000Z'), runId: 'run-a' },
+      ], workflows)
+
+      expect(shape(groupActivityFeed(feed))).toEqual([
+        'run:run-a',
+        '  recovery:r1',
+        '  recovery:r2',
+        'run:run-b',
+      ])
+    })
+
+    it('leaves a recovery standalone when its run is outside the rows', () => {
+      const feed = buildActivityFeed([
+        run('run-a', 'failed', '2026-09-21T01:00:00.000Z'),
+        run('run-b', 'waiting', '2026-09-21T02:00:00.000Z'),
+      ], [
+        { ...recovery('r1', 'open', '2026-09-21T01:00:00.000Z'), runId: 'run-a' },
+        { ...recovery('r2', 'open', '2026-09-21T00:30:00.000Z'), runId: 'run-b' },
+      ], workflows)
+
+      expect(shape(groupActivityFeed(filterActivityFeed(feed, 'needs_action')))).toEqual([
+        'run:run-b',
+        '  recovery:r2',
+        'recovery:r1',
+      ])
+    })
+  })
+
+  describe('compactActivityTime', () => {
+    const now = new Date(2026, 8, 21, 15, 0)
+
+    it('shows only the time today and adds the date otherwise', () => {
+      expect(compactActivityTime(new Date(2026, 8, 21, 13, 5).toISOString(), 'en-US', now)).toMatch(/^1:05\sPM$/)
+      expect(compactActivityTime(new Date(2026, 8, 20, 13, 5).toISOString(), 'en-US', now)).toMatch(/^Sep 20, 1:05\sPM$/)
+    })
+
+    it('keeps unknown and unparseable values honest', () => {
+      expect(compactActivityTime(null, 'en-US', now)).toBe('—')
+      expect(compactActivityTime('not-a-date', 'en-US', now)).toBe('not-a-date')
+    })
   })
 })

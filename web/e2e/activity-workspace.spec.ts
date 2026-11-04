@@ -231,7 +231,7 @@ async function selectActivityRow(
 ): Promise<Locator> {
   const row = page.getByTestId(`activity-row-${kind}:${entityId}`)
   await expect(row).toBeVisible()
-  await row.locator('button.list-card-row').click()
+  await page.getByTestId(`activity-open-${kind}:${entityId}`).click()
   return row
 }
 
@@ -253,17 +253,18 @@ for (const locale of ['en', 'es'] as const) {
 
     const shell = page.locator('.app-shell')
     const feed = page.getByTestId('activity-feed-list')
+    const rows = feed.locator('[data-testid^="activity-row-"]')
     await expect(page.getByRole('heading', {
       name: copy[locale].activity,
       exact: true,
     })).toBeVisible()
-    await expect(feed.getByRole('article')).toHaveCount(4)
+    await expect(rows).toHaveCount(4)
     await expect(page.getByTestId('activity-filter-needs_action')).toContainText('2')
     await expect(page.getByTestId('activity-filter-failed')).toContainText('1')
     await expect(page.getByText(copy[locale].askJanusly, { exact: true })).toHaveCount(0)
 
     await page.getByTestId('activity-filter-needs_action').click()
-    await expect(feed.getByRole('article')).toHaveCount(2)
+    await expect(rows).toHaveCount(2)
     await expect(feed).toContainText(copy[locale].reviewWait)
     await expect(feed).toContainText(copy[locale].recoverStep)
     await expectAccessible(page, `${locale} Activity needs-action inventory`)

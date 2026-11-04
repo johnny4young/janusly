@@ -259,6 +259,13 @@ for that window behind `dlq.read`; Recovery validation and every export need
 are not windowed: their endpoints have no window parameter. A heatmap day opens
 Recover through `#/recover/day/<YYYY-MM-DD>`.
 
+The Runs tab lists the activity feed as a virtualized table of 44 px rows.
+`groupActivityFeed` places each recovery under its run when the active filter
+keeps that run; otherwise the recovery stands alone with its workflow name.
+Each row has one button, stretched over the row, so a row is one tab stop. Below
+a feed width of 960 px the row folds into two lines and the column headers stay
+available only to assistive technology.
+
 The eager shell owns the core locale catalog. Non-home main and authoring-panel
 slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
 behind an accessible, height-preserving skeleton while the sidebar, top bar and

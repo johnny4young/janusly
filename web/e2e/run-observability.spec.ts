@@ -86,12 +86,13 @@ async function openRunFromHistory(
   const prefix = `${runId.slice(0, 8)}…`
   // Filter changes fetch asynchronously. Wait for the virtual list to receive
   // at least one row before deciding that its current scroll range is empty.
-  await expect.poll(() => history.getByRole('article').count()).toBeGreaterThan(0)
+  const rows = history.locator('article, [data-testid^="activity-row-"]')
+  await expect.poll(() => rows.count()).toBeGreaterThan(0)
   await history.evaluate(element => element.scrollTo({ top: 0 }))
   for (let offset = 0; offset < 100; offset += 4) {
-    const card = history.getByRole('article').filter({ hasText: prefix }).first()
+    const card = rows.filter({ hasText: prefix }).first()
     if (await card.isVisible().catch(() => false)) {
-      await card.locator('button.list-card-row').click()
+      await card.getByRole('button').first().click()
       await expect(page.getByTestId('run-overview')).toContainText(runId.slice(0, 12))
       return
     }
