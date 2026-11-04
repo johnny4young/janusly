@@ -10,6 +10,11 @@
 - The language selector in the account menu is a compact row like Theme and
   Density, and the canvas zoom controls follow the dark theme.
 - Buttons keep their icon and label on one row across the product.
+- Recovery failures open with a one-line cause such as "Host
+  demo-ingest.invalid does not resolve", a cause chip and whether a retry can
+  help; the raw error JSON stays collapsed below. DNS and connection errors from
+  the Go runtime now cluster under Network instead of Other, and DNS failures
+  get their own "DNS lookup failed" signature.
 
 - Workflow generation audits retain bounded first-draft issue codes even when
   a repair succeeds, without storing model drafts or prompts.

@@ -22,6 +22,10 @@ impact attribution, and feedback.
 - AI patches are suggestions. Deterministic evidence, permissions, and
   operator action retain authority.
 - Playbooks require exact workflow/signature matching and fresh validation.
+- Failure signatures normalize identically in `internal/signature` and
+  `web/src/lib/error-signature.ts`. The failure detail derives its summary, cause
+  chip and retryable fact from that same classification, stays silent about
+  retry when a failure is unclassified, and collapses the raw error JSON.
 - Recovery Contract V1 describes technical failure, evidence, effect, repair,
   approval, autonomy, verification, and recurrence boundaries. V1 semantic
   detection is always disabled.

@@ -17,6 +17,7 @@ import { buildRecoveryErrorSummary } from '../recovery-error-summary'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './dead-letter-types'
 import { RecoveryDrillOutcomeCard } from './recovery/RecoveryDrillOutcomeCard'
+import { RecoveryDetailBlock, RecoveryErrorBlock } from './recovery/RecoveryErrorBlock'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { RunExplainChat } from './RunExplainChat'
 import { Button } from './ui/Button'
@@ -67,27 +68,6 @@ export function mergeActivityRecoveryDetail(
     nodeType: detail.nodeType ?? summary.nodeType ?? snapshotNodeType,
     createdAt: detail.createdAt ?? summary.createdAt,
   }
-}
-
-function DetailBlock({
-  title,
-  value,
-  initiallyOpen = false,
-}: {
-  title: string
-  value: unknown
-  initiallyOpen?: boolean
-}) {
-  const { t } = useT()
-  const [open, setOpen] = useState(initiallyOpen)
-  return (
-    <div className="detail-block">
-      <Button size="sm" onClick={() => setOpen(value => !value)}>
-        {t(open ? 'dlq.detail.hide' : 'dlq.detail.show', { title })}
-      </Button>
-      {open && <pre className="mini-pre">{JSON.stringify(value ?? {}, null, 2)}</pre>}
-    </div>
-  )
 }
 
 export function ActivityRecoveryDetail({
@@ -332,11 +312,11 @@ export function ActivityRecoveryDetail({
             </Button>
           </div>
         </div>
-        <DetailBlock title={t('dlq.detail.error')} value={current.errorJson} initiallyOpen />
+        <RecoveryErrorBlock errorJson={current.errorJson} nodeType={current.nodeType} />
         {detail.kind === 'ready' && (
           <>
-            <DetailBlock title={t('dlq.detail.node')} value={current.nodeJson} />
-            <DetailBlock title={t('dlq.detail.workflow')} value={current.workflowJson} />
+            <RecoveryDetailBlock title={t('dlq.detail.node')} value={current.nodeJson} />
+            <RecoveryDetailBlock title={t('dlq.detail.workflow')} value={current.workflowJson} />
           </>
         )}
       </div>

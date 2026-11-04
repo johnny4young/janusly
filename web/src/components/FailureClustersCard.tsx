@@ -25,7 +25,6 @@ import { api, contractApi } from '../api'
 import { parseFailureClusters } from '../lib/recovery-metrics-model'
 import type {
   ClusterCategory,
-  ClusterOwner,
   FailureCluster,
   FailureClusters as ClustersResponse,
 } from '../lib/recovery-metrics-model'
@@ -59,22 +58,6 @@ const MIN_FREQUENCY_FOR_BULK_RECOVER = 2
  *  can opt-in to all via the show-more button. Capping the default
  *  avoids unbounded DOM growth on clusters with many recent samples. */
 const SAMPLES_PREVIEW_LIMIT = 50
-
-const CATEGORY_KEYS: Record<ClusterCategory, string> = {
-  secret_missing: 'clusters.category.secret_missing',
-  http_error: 'clusters.category.http_error',
-  network_timeout: 'clusters.category.network_timeout',
-  ai_provider: 'clusters.category.ai_provider',
-  parse_error: 'clusters.category.parse_error',
-  tool_input: 'clusters.category.tool_input',
-  unknown: 'clusters.category.unknown',
-}
-
-const OWNER_KEYS: Record<ClusterOwner, string> = {
-  ops: 'clusters.owner.ops',
-  workflow_author: 'clusters.owner.workflow_author',
-  platform: 'clusters.owner.platform',
-}
 
 /**
  * Severity tier used to colour the cluster row. `secret_missing` is the
@@ -281,7 +264,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
                 onClick={() => setExpanded((prev) => ({ ...prev, [cluster.signature]: !isOpen }))}
                 aria-expanded={isOpen}
                 aria-label={t('clusters.rowAria', {
-                  category: t(CATEGORY_KEYS[cluster.category]),
+                  category: t(`clusters.category.${cluster.category}`),
                   signature: cluster.signature,
                   occurrences: t('clusters.occurrences', { count: cluster.frequency }),
                   workflows: t('clusters.workflows', { count: cluster.affectedWorkflows.length }),
@@ -296,14 +279,14 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
                     <strong>{cluster.signature}</strong>
                   </span>
                   <span className="we-cluster-row__meta">
-                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{t(CATEGORY_KEYS[cluster.category])}</span>
+                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{t(`clusters.category.${cluster.category}`)}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.occurrences', { count: cluster.frequency })}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.workflows', { count: cluster.affectedWorkflows.length })}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.lastSeen', { rel: lastSeenLabel })}</span>
                   </span>
                 </span>
                 <span className="we-cluster-row__owner" title={t('clusters.suggestedOwner')}>
-                  <Users size={12} aria-hidden="true" /> {t(OWNER_KEYS[cluster.suggestedOwner])}
+                  <Users size={12} aria-hidden="true" /> {t(`clusters.owner.${cluster.suggestedOwner}`)}
                 </span>
               </button>
 
