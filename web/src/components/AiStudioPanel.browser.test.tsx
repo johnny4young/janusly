@@ -142,6 +142,49 @@ describe('<AiStudioPanel /> provider guidance (browser)', () => {
     expect(screen.queryByText(/OPENAI_API_KEY/i)).not.toBeInTheDocument()
   })
 
+  it.each(['en', 'es'] as const)('keeps a one-row stepper inside the side panel without the brand tile (%s)', async (locale) => {
+    initI18n(locale)
+    const { container } = render(
+      <div style={{ width: 327 }}>
+        <AiStudioPanel {...panelProps()} />
+      </div>,
+    )
+    await screen.findByTestId('capability-catalog-summary')
+
+    expect(container.querySelector('.ai-studio-hero svg')).toBeNull()
+    const stepper = screen.getByTestId('ai-authoring-steps')
+    const steps = [...stepper.children] as HTMLElement[]
+    expect(steps).toHaveLength(4)
+    const tops = new Set(steps.map((step) => Math.round(step.getBoundingClientRect().top)))
+    expect(tops.size).toBe(1)
+    expect(stepper.scrollWidth).toBeLessThanOrEqual(stepper.clientWidth)
+    for (const label of stepper.querySelectorAll('strong')) {
+      const range = document.createRange()
+      range.selectNodeContents(label)
+      expect(range.getBoundingClientRect().right).toBeLessThanOrEqual(stepper.getBoundingClientRect().right)
+    }
+  })
+
+  it('marks the first incomplete stage as current as authoring advances', async () => {
+    render(<AiStudioPanel {...panelProps()} />)
+    await screen.findByTestId('capability-catalog-summary')
+    const current = () => screen.getByTestId('ai-authoring-steps').querySelector('[aria-current="step"]')
+
+    expect(current()).toHaveTextContent('Intent brief')
+    const badge = current()!.querySelector('span')!
+    const badgeStyles = getComputedStyle(badge)
+    expect(contrastRatio(badgeStyles.color, badgeStyles.backgroundColor)).toBeGreaterThanOrEqual(4.5)
+
+    fireEvent.click(screen.getByRole('button', { name: /Compile intent brief/i }))
+    await screen.findByTestId('intent-brief')
+    expect(current()).toHaveTextContent('Capability binding')
+
+    fireEvent.click(screen.getByRole('button', { name: /Build proposal/i }))
+    await screen.findByTestId('workflow-proposal')
+    expect(current()).toHaveTextContent('Apply')
+    expect(screen.getByTestId('ai-authoring-steps').querySelectorAll('[data-complete]')).toHaveLength(3)
+  })
+
   it('renders visible Best-of-N backoff with accessible AI status contrast', async () => {
     const backedOff = proposal()
     backedOff.bonBackoff = { from: 4, to: 1 }

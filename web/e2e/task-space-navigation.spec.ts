@@ -386,6 +386,7 @@ for (const locale of LOCALES) {
       await expect(tab).toHaveAttribute('aria-current', 'page')
       await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
       await expect(page).toHaveURL(new RegExp(`#\\/operations\\/${section}$`))
+      await expect(page.getByTestId('workspace-breadcrumb-section')).toHaveText(label)
     }
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(settingsRail).toBeVisible()

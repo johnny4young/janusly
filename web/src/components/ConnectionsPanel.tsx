@@ -16,13 +16,14 @@ import {
   type CredentialHealthSnapshot,
 } from '../connections-inventory'
 import { expiryStatus } from '../credential-expiry'
+import { DOCS_URL } from '../docs-link'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { getResolvedLocale, useT } from '../i18n'
-import { useWorkflowStore } from '../store'
 import type { Credential } from '../types'
+import type { WorkflowLabels } from './AffectedWorkflowList'
+import { CredentialRevokeDialog } from './CredentialRevokeDialog'
 import { CredentialRotateModal } from './CredentialRotateModal'
-import { useConfirm } from './ConfirmDialog'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { Button } from './ui/Button'
 import { FieldStack, FormField, SelectControl, TextInput } from './ui/Form'
@@ -73,7 +74,7 @@ function CredentialCreateDialog({
   const [secretRef, setSecretRef] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  useDialogFocusTrap(dialogRef, { initialFocus: nameRef })
+  useDialogFocusTrap(dialogRef, { initialFocus: nameRef, onEscape: submitting ? undefined : onClose })
 
   useEffect(() => {
     if (managedStorageAvailable || storage !== 'managed') return
@@ -82,14 +83,6 @@ function CredentialCreateDialog({
     setStorage('environment')
     setSecretValue('')
   }, [managedStorageAvailable, storage])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !submitting) onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, submitting])
 
   const trimmedRef = secretRef.trim()
   const refInvalid = trimmedRef.length > 0 && !CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
@@ -264,18 +257,19 @@ function CredentialCreateDialog({
 
 export function ConnectionsPanel({
   credentials,
+  workflows,
   onCreateCredential,
+  onRevokeCredential,
   canWrite,
 }: {
   credentials: Credential[]
+  workflows: WorkflowLabels
   onCreateCredential: CreateCredential
+  onRevokeCredential: (name: string) => Promise<boolean>
   canWrite: boolean
 }) {
   const { t } = useT()
   const platformVersion = useInvalidationNonce(CONNECTION_TAGS)
-  const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
-  const addToast = useWorkflowStore((state) => state.addToast)
-  const confirm = useConfirm()
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState('')
   const [creating, setCreating] = useState(false)
@@ -335,26 +329,6 @@ export function ConnectionsPanel({
     resetScrollKey: `${query}\u0000${kind}`,
     getItemKey: (credential) => credential.id,
   })
-
-  const revoke = async (credential: Credential) => {
-    const accepted = await confirm({
-      title: t('rightPanel.credentials.revokeTitle'),
-      body: t('rightPanel.credentials.revokeConfirm', { name: credential.name }),
-      confirmLabel: t('rightPanel.credentials.revoke'),
-      tone: 'danger',
-    })
-    if (!accepted) return
-    setRevoking(credential.name)
-    try {
-      await api(`/credentials/${encodeURIComponent(credential.name)}`, { method: 'DELETE' })
-      bumpPlatformVersion()
-      addToast(t('rightPanel.credentials.revokeDone', { name: credential.name }), 'success')
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('rightPanel.credentials.revokeFailed'), 'error')
-    } finally {
-      setRevoking(null)
-    }
-  }
 
   return (
     <PanelChrome
@@ -426,6 +400,7 @@ export function ConnectionsPanel({
               label: t('rightPanel.credentials.addButton'),
               onClick: () => setCreating(true),
             } : undefined}
+            secondary={DOCS_URL ? { label: t('rightPanel.credentials.empty.learn'), href: DOCS_URL } : undefined}
           />
         ) : filteredCredentials.length === 0 ? (
           <EmptyView
@@ -520,7 +495,6 @@ export function ConnectionsPanel({
                              
                              
                               onClick={() => setRotating(credential.name)}
-                              disabled={revoking !== null}
                             >
                               {t('credentialRotation.action.rotate')}
                             </Button>
@@ -529,12 +503,9 @@ export function ConnectionsPanel({
                               variant="danger"
                              
                              
-                              onClick={() => { void revoke(credential) }}
-                              disabled={revoking !== null}
+                              onClick={() => setRevoking(credential.name)}
                             >
-                              {revoking === credential.name
-                                ? t('common.working')
-                                : t('rightPanel.credentials.revoke')}
+                              {t('rightPanel.credentials.revoke')}
                             </Button>
                           </div>
                         )}
@@ -556,7 +527,15 @@ export function ConnectionsPanel({
         />
       )}
       {rotating && canWrite && (
-        <CredentialRotateModal credentialName={rotating} onClose={() => setRotating(null)} />
+        <CredentialRotateModal credentialName={rotating} workflows={workflows} onClose={() => setRotating(null)} />
+      )}
+      {revoking && canWrite && (
+        <CredentialRevokeDialog
+          credentialName={revoking}
+          workflows={workflows}
+          onClose={() => setRevoking(null)}
+          onRevoke={onRevokeCredential}
+        />
       )}
     </PanelChrome>
   )
