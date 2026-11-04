@@ -254,10 +254,6 @@
     grid-template-columns: 1fr;
   }
 
-  .panel-heading-icon {
-    display: none;
-  }
-
   .ai-studio-hero {
     display: grid;
   }

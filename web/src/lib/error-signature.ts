@@ -265,10 +265,11 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
     };
   }
 
-  // 3. Network timeout / connection failures.
-  if (NETWORK_FAILURE_PATTERN.test(message)) {
+  // 3. Network failures. DNS keeps its own cluster: the fix is the host, not a retry.
+  const dnsFailure = DNS_FAILURE_PATTERN.test(message);
+  if (dnsFailure || NETWORK_FAILURE_PATTERN.test(message)) {
     return {
-      signature: `Network timeout on ${nodeType} node`,
+      signature: `${dnsFailure ? "DNS lookup failed" : "Network timeout"} on ${nodeType} node`,
       category: "network_timeout",
       suggestedOwner: "workflow_author",
     };
@@ -297,9 +298,9 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
   }
 
   // 4. AI provider — explicit aiError or message hint.
-  const aiReason = matchAiProviderReason(error, message);
+  const aiReason = matchAiProviderReason(errorObj, message);
   if (aiReason) {
-    const provider = inferAiProvider(error, context);
+    const provider = inferAiProvider(errorObj);
     return {
       signature: `${provider} ${aiReason}`,
       category: "ai_provider",
@@ -351,7 +352,8 @@ const ENV_MISSING_PATTERN = /Missing\s+(?:env(?:ironment)?\s+)?variable[: ]+([\w
 const CREDENTIAL_MISSING_PATTERN = /credential\s+secret\s+missing\s+for\s+['"]?([\w\-_.]+)/i;
 const MISSING_SECRET_PATTERN = /Missing\s+secret[: ]+['"]?([\w\-_.]+)/i;
 const HTTP_STATUS_PATTERN = /\bHTTP\s+(\d{3})\b/i;
-const NETWORK_FAILURE_PATTERN = /\b(?:timeout|timed\s+out|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ECONNABORTED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET))\b|getaddrinfo|did\s+not\s+resolve\s+to\s+any\s+address|fetch\s+failed/i;
+const DNS_FAILURE_PATTERN = /\bno\s+such\s+host\b|\bserver\s+misbehaving\b|did\s+not\s+resolve\s+to\s+any\s+address|\b(?:ENOTFOUND|EAI_AGAIN)\b|getaddrinfo|name\s+resolution/i;
+const NETWORK_FAILURE_PATTERN = /\b(?:timeout|timed\s+out|deadline\s+exceeded|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ECONNABORTED|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET)|dial\s+tcp|connection\s+(?:refused|reset)|broken\s+pipe)\b|fetch\s+failed/i;
 const PARSE_ERROR_PATTERN = /\b(?:invalid\s+JSON|is\s+not\s+valid\s+JSON|JSON\.parse|unexpected\s+token|unexpected\s+end\s+of\s+JSON|parse\s+error|in\s+JSON\s+at\s+position|expected\s+property\s+name)\b/i;
 // http-policy.ts chokepoint guard failures (body-cap abort, redirect cap, SSRF
 // private block, unsupported protocol) — all reached the HTTP layer → http_error.
@@ -370,14 +372,10 @@ const AI_PROVIDER_REASONS: Array<{ pattern: RegExp; reason: string }> = [
 ];
 
 function matchSecretMissing(message: string): string | null {
-  const direct = message.match(SECRET_NOT_FOUND_PATTERN);
-  if (direct?.[1]) return direct[1];
-  const env = message.match(ENV_MISSING_PATTERN);
-  if (env?.[1]) return env[1];
-  const cred = message.match(CREDENTIAL_MISSING_PATTERN);
-  if (cred?.[1]) return cred[1];
-  const missing = message.match(MISSING_SECRET_PATTERN);
-  if (missing?.[1]) return missing[1];
+  for (const pattern of [SECRET_NOT_FOUND_PATTERN, ENV_MISSING_PATTERN, CREDENTIAL_MISSING_PATTERN, MISSING_SECRET_PATTERN]) {
+    const name = message.match(pattern)?.[1];
+    if (name) return name;
+  }
   return null;
 }
 
@@ -388,26 +386,19 @@ function matchHttpStatus(message: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-function matchAiProviderReason(error: unknown, message: string): string | null {
-  // 1. Explicit `aiError` field on the error envelope (the AI fallback contract
-  //    sets this when a provider call degrades).
-  const errorObj = isPlainObject(error) ? (error as Record<string, unknown>) : null;
-  const aiErrorField = errorObj && typeof errorObj.aiError === "string" ? errorObj.aiError : null;
-  const haystack = aiErrorField ? `${aiErrorField} ${message}` : message;
+function matchAiProviderReason(errorObj: Record<string, unknown> | null, message: string): string | null {
+  // An explicit `aiError` field is set when a provider call degrades.
+  const haystack = typeof errorObj?.aiError === "string" ? `${errorObj.aiError} ${message}` : message;
   for (const candidate of AI_PROVIDER_REASONS) {
     if (candidate.pattern.test(haystack)) return candidate.reason;
   }
   return null;
 }
 
-function inferAiProvider(error: unknown, context: ErrorContext): string {
-  const errorObj = isPlainObject(error) ? (error as Record<string, unknown>) : null;
-  const provider = errorObj && typeof errorObj.provider === "string" ? errorObj.provider.toLowerCase() : null;
+function inferAiProvider(errorObj: Record<string, unknown> | null): string {
+  const provider = typeof errorObj?.provider === "string" ? errorObj.provider.toLowerCase() : null;
   if (provider === "openai") return "OpenAI";
   if (provider === "anthropic") return "Anthropic";
-  if (context.nodeType === "ai" || context.nodeType === "agent" || context.nodeType === "multi_agent") {
-    return "AI";
-  }
   return "AI";
 }
 
