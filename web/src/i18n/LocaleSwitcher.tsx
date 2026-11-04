@@ -55,7 +55,7 @@ export function LocaleSwitcher({ variant }: LocaleSwitcherProps) {
   return (
     <div className={containerClass}>
       <label className="we-locale-switcher__label" htmlFor={selectId}>
-        <Languages size={14} aria-hidden="true" />
+        {variant === 'auth-corner' && <Languages size={14} aria-hidden="true" />}
         <span>{t('auth.userMenu.language')}</span>
       </label>
       <SelectControl
