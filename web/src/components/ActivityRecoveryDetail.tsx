@@ -109,8 +109,10 @@ export function ActivityRecoveryDetail({
   const [closeTarget, setCloseTarget] = useState<DeadLetterCloseTarget | null>(null)
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
 
-  // Consent covers the failure it was asked for, never the next selection.
-  useEffect(() => setCloseTarget(null), [deadLetter.id])
+  const orgId = useWorkflowStore(state => state.orgId)
+  const userId = useWorkflowStore(state => state.userId)
+  // Consent covers the failure and identity it was asked for, never what comes next.
+  useEffect(() => setCloseTarget(null), [deadLetter.id, orgId, userId])
 
   useEffect(() => {
     if (initialDetailMatches) {

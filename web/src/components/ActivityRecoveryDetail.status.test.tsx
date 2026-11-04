@@ -5,6 +5,7 @@ import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 import type { DeadLetter } from './dead-letter-types'
 import { ActivityRecoveryDetail } from './ActivityRecoveryDetail'
 import { deferred } from '../test/deferred'
+import { useWorkflowStore } from '../store'
 
 vi.mock('../lib/dead-letter-contract', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/dead-letter-contract')>()),
@@ -31,7 +32,10 @@ const handlers = {
   canUseRecovery: false, canStartRuns: false,
 }
 
+const initialStore = useWorkflowStore.getState()
+
 beforeEach(() => {
+  useWorkflowStore.setState({ ...initialStore }, true)
   vi.mocked(readDeadLetterDetail).mockReset()
 })
 
@@ -92,4 +96,16 @@ it('closes only through the reason confirmation, with the facts of the failure i
   await waitFor(() => expect(onResolve).toHaveBeenCalledWith(summary.id, 'Refunded by hand'))
   await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
   expect(screen.getByTestId('activity-recovery-detail').querySelector('.status-pill')).toHaveAttribute('data-status', 'resolved')
+})
+
+it.each(['failure', 'organization'])('discards pending consent when the %s changes', async change => {
+  vi.mocked(readDeadLetterDetail).mockResolvedValue(detail('open', 'boom'))
+  const onResolve = vi.fn(async () => true)
+  const { rerender } = render(<ActivityRecoveryDetail deadLetter={summary} {...handlers} onResolve={onResolve} />)
+  fireEvent.click(await screen.findByTestId('activity-recovery-close'))
+  await screen.findByRole('alertdialog', undefined, { timeout: 30_000 })
+  if (change === 'organization') act(() => useWorkflowStore.setState({ orgId: 'other-org' }))
+  else rerender(<ActivityRecoveryDetail deadLetter={{ ...summary, id: 'dlq-next' }} {...handlers} onResolve={onResolve} />)
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  expect(onResolve).not.toHaveBeenCalled()
 })
