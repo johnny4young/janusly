@@ -27,7 +27,9 @@ import (
 const (
 	streamRetryHintMs = 3_000
 	streamHeartbeat   = 25 * time.Second
-	streamCatchupMax  = 500
+	// Trailing frames may follow a terminal status; then the connection ends.
+	streamTerminalGrace = 2 * time.Second
+	streamCatchupMax    = 500
 	// With a healthy LISTEN connection the wake channel delivers
 	// sub-second latency and the poll is pure loss insurance; only a
 	// degraded hub needs the tight cadence. At hundreds of open run
@@ -113,6 +115,10 @@ func (h *streamHub) listen(ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
+func isTerminalRunStatus(status string) bool {
+	return status == "succeeded" || status == "failed" || status == "cancelled"
+}
+
 // streamRun handles GET /runs/{runId}/stream with the contract's guard:
 // an unknown or cross-org run is the indistinguishable 403.
 func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -169,6 +175,7 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 	heartbeat := time.NewTicker(streamHeartbeat)
 	defer heartbeat.Stop()
 	lastStatus := ""
+	var terminalGrace <-chan time.Time
 
 	for {
 		rows, err := q.ListRunEventsAfterForOrg(r.Context(), store.ListRunEventsAfterForOrgParams{
@@ -212,6 +219,11 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 			if !write("event: run-status\ndata: " + string(data) + "\n\n") {
 				return
 			}
+			// A later non-terminal status means the run came back to life.
+			terminalGrace = nil
+			if isTerminalRunStatus(run.Status) {
+				terminalGrace = time.After(streamTerminalGrace)
+			}
 		}
 
 		pollFallback := streamPollFallback
@@ -225,6 +237,9 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 	wait:
 		for {
 			select {
+			case <-terminalGrace:
+				fallback.Stop()
+				return
 			case <-wake:
 				break wait
 			case <-fallback.C:

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Run events opens on the latest failed run, with a run picker, and the
+  breadcrumb reads Activity › Run events.
+
 - Empty states end in a primary button instead of text that reads as a label.
 - The Settings breadcrumb names the open pane, such as Settings › Access, and
   the pane follows its link: pasting a link, Back and Forward now change what
