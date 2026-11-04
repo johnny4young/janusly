@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Empty states end in a primary button instead of text that reads as a label.
+- The Settings breadcrumb names the open pane, such as Settings › Access, and
+  the pane follows its link: pasting a link, Back and Forward now change what
+  is on screen.
+- Find a setting cards show live status, such as 0 alert policies · 1 failure
+  pattern. Attention dots in the Settings rail explain their reason on hover
+  and to screen readers.
 - The Home health score lists what drives it: success rate, open failures and
   longest downtime, each linking to where to act.
 

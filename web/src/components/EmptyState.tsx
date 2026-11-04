@@ -9,13 +9,18 @@ export type EmptyStateProps = {
     label: string
     onClick: () => void
   }
+  /** Optional link beside the primary action, such as related documentation. */
+  secondary?: {
+    label: string
+    href: string
+  }
   /** Override the default `empty-state` testid so call sites that already
    *  ship a surface-specific testid (e.g. `dlq-empty`) keep their existing
    *  test contract without per-call-site wrappers. */
   testId?: string
 }
 
-export function EmptyState({ icon, kicker, body, cta, testId }: EmptyStateProps) {
+export function EmptyState({ icon, kicker, body, cta, secondary, testId }: EmptyStateProps) {
   return (
     <div className="we-empty-state" data-testid={testId ?? 'empty-state'}>
       <div className="we-empty-state__icon" aria-hidden>
@@ -27,14 +32,24 @@ export function EmptyState({ icon, kicker, body, cta, testId }: EmptyStateProps)
       </div>
       {cta ? (
         <Button
-          variant="ghost"
-          size="sm"
+          variant="primary"
           className="we-empty-state__cta"
           onClick={cta.onClick}
           data-testid="empty-state-cta"
         >
           {cta.label}
         </Button>
+      ) : null}
+      {secondary ? (
+        <a
+          className="we-empty-state__link"
+          href={secondary.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="empty-state-secondary"
+        >
+          {secondary.label}
+        </a>
       ) : null}
     </div>
   )
