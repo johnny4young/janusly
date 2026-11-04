@@ -97,6 +97,7 @@ export type RightPanelCatalog = {
     secretRef?: string
     expiresAt?: string
   }) => Promise<boolean>
+  onRevokeCredential: (name: string) => Promise<boolean>
 }
 
 export type RightPanelExecution = {
@@ -317,7 +318,9 @@ function RightPanelRouter(props: RightPanelProps) {
   if (props.tab === 'credentials') return (
     <ConnectionsPanel
       credentials={catalog.credentials}
+      workflows={catalog.workflows}
       onCreateCredential={catalog.onCreateCredential}
+      onRevokeCredential={catalog.onRevokeCredential}
       canWrite={can('credentials.write')}
     />
   )

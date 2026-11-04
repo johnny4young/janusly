@@ -270,6 +270,16 @@ both mutation actions visible; secondary owner and last-used facts remain on the
 wider inventory. The overview no longer presents a credential-only count as if
 it represented every connection type.
 
+Rotate and Revoke share `AffectedWorkflowList`. Revoke reads
+`referencingWorkflowIds` from a fresh `GET /credentials/health` when its dialog
+opens and labels ids from the workspace's loaded workflow page; an id without a
+name keeps its row, labelled by the id. Any affected workflow requires typing
+the exact connection name. A failed, hung or malformed health read is never
+treated as "no workflows": the dialog reports it and requires the typed name.
+The typed name is a client-side guard; `DELETE /credentials/{name}` stays
+authorized by `credentials.write` alone. The list covers the latest saved
+version of each workflow, not other credential consumers.
+
 ## Canvas authoring clarity
 
 Authoring edges always expose a route kind: default, conditional, or error. A

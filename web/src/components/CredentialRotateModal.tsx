@@ -19,43 +19,36 @@ import { AlertCircle, CheckCircle2, KeyRound, X } from 'lucide-react'
 
 import { api } from '../api'
 import { tApiError, useT } from '../i18n'
+import { isStringArray } from '../lib/guards'
 import { useWorkflowStore } from '../store'
+import { AffectedWorkflowList, type WorkflowLabels } from './AffectedWorkflowList'
 import { Button } from './ui/Button'
 import { FormField } from './ui/Form'
 import { StatusSummary } from './ui/StatusSummary'
 
-/** One workflow touched by the rotation, with the referencing node ids. */
-type AffectedWorkflow = {
-  workflowId: string
-  workflowName: string
-  nodeIds: string[]
-}
-
 type PreviewResponse = {
-  credentialName: string
-  kind: string
   updatedAt: string | null
-  affected: AffectedWorkflow[]
-  affectedCount: number
+  affected: unknown
 }
 
 /** Modal step machine: preview load → preview → rotating → done | error. */
 type Step =
   | { kind: 'loading' }
-  | { kind: 'preview'; affected: AffectedWorkflow[]; ifMatch: string }
-  | { kind: 'rotating'; affected: AffectedWorkflow[]; ifMatch: string }
+  | { kind: 'preview'; affected: string[]; ifMatch: string }
+  | { kind: 'rotating'; affected: string[]; ifMatch: string }
   | { kind: 'done'; count: number }
   | { kind: 'error'; message: string }
 
 type CredentialRotateModalProps = {
   credentialName: string
+  workflows: WorkflowLabels
   onClose: () => void
 }
 
 /** Env-var NAME shape the server accepts for the new `secretRef`. */
 const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
-export function CredentialRotateModal({ credentialName, onClose }: CredentialRotateModalProps) {
+export function CredentialRotateModal({ credentialName, workflows, onClose }: CredentialRotateModalProps) {
   const { t } = useT()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
@@ -74,11 +67,11 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
         body: JSON.stringify({ dryRun: true }),
       })) as PreviewResponse
       if (!aliveRef.current) return
-      if (!res.updatedAt) {
+      if (!res.updatedAt || !isStringArray(res.affected)) {
         setStep({ kind: 'error', message: t('credentialRotation.error.generic') })
         return
       }
-      setStep({ kind: 'preview', affected: res.affected ?? [], ifMatch: res.updatedAt })
+      setStep({ kind: 'preview', affected: res.affected, ifMatch: res.updatedAt })
     } catch (error) {
       if (!aliveRef.current) return
       setStep({ kind: 'error', message: tApiError(error) || (t('credentialRotation.error.generic')) })
@@ -97,7 +90,7 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
     ? newSecretValue.length > 0
     : ENV_VAR_NAME.test(trimmedRef)
 
-  const rotate = async (affected: AffectedWorkflow[], ifMatch: string) => {
+  const rotate = async (affected: string[], ifMatch: string) => {
     if (!secretValid) return
     setStep({ kind: 'rotating', affected, ifMatch })
     try {
@@ -163,23 +156,7 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
 
           {(step.kind === 'preview' || step.kind === 'rotating') && (
             <>
-              <h3 className="section-title">
-                {t('credentialRotation.preview.affectedHeading', { count: step.affected.length })}
-              </h3>
-              {step.affected.length === 0 ? (
-                <p className="helper-text">{t('credentialRotation.preview.none')}</p>
-              ) : (
-                <ul className="we-credential-rotate__list">
-                  {step.affected.map((wf) => (
-                    <li key={wf.workflowId} className="we-credential-rotate__row">
-                      <strong>{wf.workflowName}</strong>
-                      <span className="we-credential-rotate__nodes">
-                        {t('credentialRotation.preview.nodeIds', { ids: wf.nodeIds.join(', ') })}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <AffectedWorkflowList workflowIds={step.affected} workflows={workflows} />
               <FormField id="credential-rotate-storage" label={t('rightPanel.credentials.storageLabel')}>
                 {controlProps => (
                   <select

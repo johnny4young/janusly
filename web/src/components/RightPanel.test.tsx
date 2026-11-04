@@ -71,6 +71,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       onSampleRunPack: vi.fn(),
       onInjectPackFailure: vi.fn(),
       onCreateCredential: vi.fn(),
+      onRevokeCredential: vi.fn(),
     },
     execution: {
       events: [],
