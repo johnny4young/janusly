@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Build opens with the sidebar collapsed to a rail for more canvas; the flow
+  name and version move to the top bar.
+
 - Canvas connections drop the repeated "default" label; named branches show a
   pill on the connection.
 

@@ -35,68 +35,22 @@
   gap: 10px;
 }
 
-.sb-workflow__top {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.sb-workflow__name {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.sb-workflow__name-ic { color: var(--we-primary); flex-shrink: 0; }
-
-.sb-workflow__name-input {
-  flex: 1;
-  min-width: 0;
+.top-bar-workflow-name {
+  field-sizing: content;
+  max-width: min(280px, 28vw);
+  min-width: 80px;
+  padding: 2px 4px;
   border: 0;
+  border-radius: 4px;
   background: transparent;
-  font-size: 13px;
-  font-weight: 700;
   color: var(--we-ink);
-  letter-spacing: -0.01em;
-  padding: 2px 0;
+  font: inherit;
+  font-weight: 600;
   outline: none;
 }
 
-.sb-workflow__name-input:focus {
-  background: var(--we-surface);
-  box-shadow: 0 0 0 2px var(--we-primary-ring);
-  border-radius: 4px;
-}
-
-.sb-workflow__name-edit {
-  color: var(--we-faint);
-  flex-shrink: 0;
-}
-
-.sb-env {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: var(--we-radius-pill);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.sb-env--sandbox {
-  background: var(--we-success-soft);
-  color: var(--we-success-text);
-  border: 1px solid var(--we-success-border-30);
-}
-
-.sb-env--production {
-  background: var(--we-danger-soft);
-  color: var(--we-danger-text);
-  border: 1px solid var(--we-danger-border-30);
-}
+.top-bar-workflow-name:hover:not(:disabled) { background: var(--we-surface-muted); }
+.top-bar-workflow-name:focus { background: var(--we-surface); box-shadow: 0 0 0 2px var(--we-primary-ring); }
 
 .sb-workflow__meta {
   display: flex;
@@ -439,10 +393,7 @@
   background: transparent;
   border: 0;
 }
-.builder-sidebar[data-collapsed="true"] .sb-workflow__top,
 .builder-sidebar[data-collapsed="true"] .sb-workflow__meta,
-.builder-sidebar[data-collapsed="true"] .sb-workflow__name,
-.builder-sidebar[data-collapsed="true"] .sb-env,
 .builder-sidebar[data-collapsed="true"] .sb-search,
 .builder-sidebar[data-collapsed="true"] .sb-ai-strip__body,
 .builder-sidebar[data-collapsed="true"] .sb-ai-strip__pill,
