@@ -14,11 +14,12 @@ const NAMESPACE_PARAM = 'janusly-namespace'
 const NAMESPACES = new Set(['core', 'workspace'])
 const PACK_SEPARATOR = '\0'
 
-// Home renders before the large workspace catalog is requested. Keep the
-// bounded Operator Brief copy on the core path even though the broader
-// operations settings surface remains demand-loaded with the workspace.
+// Home renders before the large workspace catalog is requested, and the shell
+// breadcrumb names the settings pane. Keep that bounded copy on the core path
+// even though the broader operations surface is demand-loaded with the workspace.
 const CORE_PREFIXES = [
   'operations.brief.',
+  'operations.section.',
 ]
 
 const WORKSPACE_PREFIXES = [
