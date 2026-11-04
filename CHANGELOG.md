@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A failed step on the run snapshot keeps its full title, shows its error in
+  one line, and links to its item in the recovery queue.
+
 - Each view has one header row with its section title and tabs; descriptions
   moved to a tooltip on the title, so content starts about 110 px higher.
 - Headings that receive focus for screen readers no longer show a focus ring

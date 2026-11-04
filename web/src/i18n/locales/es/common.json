@@ -881,6 +881,7 @@
   "canvas.flowMap": "Mapa de flujo",
   "canvas.runMap": "Instantánea de la ejecución",
   "canvas.readOnly": "Solo lectura",
+  "canvas.recoverStep": "Recuperar este paso",
   "canvas.empty.title": "Este flujo está vacío",
   "canvas.empty.body": "Crea un borrador local con Janusly o usa Agregar paso para construirlo manualmente.",
   "canvas.empty.aiAction": "Describir el resultado",

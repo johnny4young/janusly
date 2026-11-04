@@ -171,9 +171,18 @@ path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
   font-weight: 800;
   line-height: 1.2;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.workflow-node-error {
+  border-color: var(--we-danger-border-25);
+  color: var(--we-danger-text);
+  overflow-wrap: anywhere;
+}
+
+.workflow-node-recover {
+  margin-top: 8px;
+  width: 100%;
 }
 
 .workflow-node-status {

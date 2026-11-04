@@ -129,6 +129,7 @@ type AppWorkspaceProps = {
   onOpenTab: (tab: ActiveTab) => void
   onOpenHelp: () => void
   onOpenRecovery: () => void
+  onRecoverRunNode: (runId: string, nodeId: string) => void
   onReadinessResult: (result: ReadinessResult | null) => void
   onOpenPalette: () => void
   onCloseShortcuts: () => void
@@ -226,6 +227,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
                 run={observedRun}
                 runNodes={runNodes}
                 panel={rightPanelElement}
+                onRecoverNode={(nodeId) => props.onRecoverRunNode(observedRun.id, nodeId)}
               />
             </Suspense>
           ) : (

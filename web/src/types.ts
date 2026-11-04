@@ -35,6 +35,9 @@ type WorkflowNodeData = {
   status?: string
   helper?: string
   hasValidationError?: boolean
+  /** One-line error of a failed step while observing a run. */
+  errorSummary?: string | null
+  onRecover?: () => void
 }
 type WorkflowEdgeData = {
   condition?: string

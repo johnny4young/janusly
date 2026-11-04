@@ -881,6 +881,7 @@
   "canvas.flowMap": "Flow map",
   "canvas.runMap": "Run snapshot",
   "canvas.readOnly": "Read only",
+  "canvas.recoverStep": "Recover this step",
   "canvas.empty.title": "This workflow is empty",
   "canvas.empty.body": "Draft locally with Janusly, or build manually with Add step.",
   "canvas.empty.aiAction": "Describe the outcome",
