@@ -184,7 +184,9 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
     new URL(response.url()).pathname === '/dlq/resolve'
     && response.request().method() === 'POST'
   ))
-  await focusedFailure.getByRole('button', { name: 'Resolver', exact: true }).click()
+  await focusedFailure.getByRole('button', { name: 'Cerrar sin recuperar', exact: true }).click()
+  await page.getByTestId('dlq-close-reason').fill('Ejercicio de recuperación aceptado')
+  await page.getByTestId('dlq-close-confirm').click()
   expect((await resolveResponse).status()).toBe(200)
 
   const resolvedDetail = await openActivityRecoveryDetail(page, drill.deadLetterId)

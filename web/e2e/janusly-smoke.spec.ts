@@ -455,7 +455,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     await singleRow.focus()
     await page.keyboard.press('Control+Enter')
     await expect(page.getByRole('alertdialog')).toContainText(singleId)
-    await expect(page.getByTestId('dlq-close-cancel')).toBeFocused()
+    await expect(page.getByTestId('dlq-close-reason')).toBeFocused()
     await page.keyboard.press('Escape')
     const readClosedStatus = async (id: string) => {
       const response = await request.get(`${API_URL}/v1/dlq/entries/${id}`, { headers: headers(orgId) })
@@ -465,7 +465,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     expect(await readClosedStatus(singleId)).toBe('open')
     await singleRow.focus()
     await page.keyboard.press('Control+Enter')
-    await expect(page.getByTestId('dlq-close-cancel')).toBeFocused()
+    await expect(page.getByTestId('dlq-close-reason')).toBeFocused()
     await page.screenshot({ path: test.info().outputPath('accepted-loss-confirmation-en.png'), animations: 'disabled' })
     const dialogBounds = await page.getByRole('alertdialog').boundingBox()
     const viewport = page.viewportSize()!
@@ -474,6 +474,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     expect(dialogBounds!.y).toBeGreaterThanOrEqual(0)
     expect(dialogBounds!.x + dialogBounds!.width).toBeLessThanOrEqual(viewport.width)
     expect(dialogBounds!.y + dialogBounds!.height).toBeLessThanOrEqual(viewport.height)
+    await page.getByTestId('dlq-close-reason').fill('Smoke test accepted loss')
     await page.getByTestId('dlq-close-confirm').click()
     await expect.poll(() => readClosedStatus(singleId)).toBe('resolved')
     await waitStatus(runIds[3], 'failed')
@@ -493,6 +494,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     for (const runId of runIds.slice(4)) {
       await expect(page.getByRole('alertdialog')).toContainText(byRun.get(runId)!)
     }
+    await page.getByTestId('dlq-close-reason').fill('Smoke test accepted loss')
     await page.getByTestId('dlq-close-confirm').click()
     await expect(page.getByRole('alertdialog')).toBeHidden()
     for (const runId of runIds.slice(4)) {

@@ -15,12 +15,17 @@ import { formatStatusLabel, getNodeLabel } from '../constants'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { buildRecoveryErrorSummary } from '../recovery-error-summary'
 import { useWorkflowStore } from '../store'
-import type { DeadLetter } from './dead-letter-types'
+import { deadLetterCloseTarget, type DeadLetter, type DeadLetterCloseTarget } from './dead-letter-types'
 import { RecoveryDrillOutcomeCard } from './recovery/RecoveryDrillOutcomeCard'
 import { RecoveryDetailBlock, RecoveryErrorBlock } from './recovery/RecoveryErrorBlock'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { RunExplainChat } from './RunExplainChat'
 import { Button } from './ui/Button'
+
+// Ships with the recovery queue rather than as a chunk of its own.
+const DeadLetterCloseDialog = lazy(() => import('./RunsPanel').then(module => ({
+  default: module.DeadLetterCloseDialog,
+})))
 
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then(module => ({
   default: module.RecoveryDialog,
@@ -36,7 +41,7 @@ export type ActivityRecoveryDetailProps = {
   initialDetail?: DeadLetter
   onOpenRun: (runId: string) => void
   onReplay: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
-  onResolve: (id: string) => boolean | Promise<boolean> | undefined
+  onResolve: (id: string, reason: string) => boolean | Promise<boolean> | undefined
   canReplay?: boolean
   canResolve?: boolean
   canStartRuns?: boolean
@@ -101,7 +106,13 @@ export function ActivityRecoveryDetail({
         })
   const [busy, setBusy] = useState<'replay' | 'resolve' | null>(null)
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false)
+  const [closeTarget, setCloseTarget] = useState<DeadLetterCloseTarget | null>(null)
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
+
+  const orgId = useWorkflowStore(state => state.orgId)
+  const userId = useWorkflowStore(state => state.userId)
+  // Consent covers the failure and identity it was asked for, never what comes next.
+  useEffect(() => setCloseTarget(null), [deadLetter.id, orgId, userId])
 
   useEffect(() => {
     if (initialDetailMatches) {
@@ -151,18 +162,18 @@ export function ActivityRecoveryDetail({
     addToast(t(copied ? 'dlq.copy.success' : 'dlq.copy.failed'), copied ? 'success' : 'error')
   }
 
-  const runMutation = async (kind: 'replay' | 'resolve') => {
+  const runMutation = async (
+    kind: 'replay' | 'resolve',
+    action: () => boolean | Promise<boolean> | undefined,
+  ) => {
     setBusy(kind)
     try {
-      const succeeded = kind === 'replay'
-        ? await onReplay(current.id, current.createdAt ?? undefined)
-        : await onResolve(current.id)
-      if (succeeded !== false) {
-        const status = kind === 'replay' ? 'replayed' : 'resolved'
-        setDetail(previous => previous.kind === 'ready' && previous.id === current.id
-          ? { ...previous, value: { ...previous.value, status } }
-          : previous)
-      }
+      if (await action() === false) return false
+      const status = kind === 'replay' ? 'replayed' : 'resolved'
+      setDetail(previous => previous.kind === 'ready' && previous.id === current.id
+        ? { ...previous, value: { ...previous.value, status } }
+        : previous)
+      return true
     } finally {
       setBusy(null)
     }
@@ -208,7 +219,7 @@ export function ActivityRecoveryDetail({
            
            
             disabled={!isOpen || busy !== null}
-            onClick={() => { void runMutation('replay') }}
+            onClick={() => { void runMutation('replay', () => onReplay(current.id, current.createdAt ?? undefined)) }}
           >
             <RefreshCcw size={12} aria-hidden="true" />
             {t('common.retry')}
@@ -220,7 +231,8 @@ export function ActivityRecoveryDetail({
            
            
             disabled={current.status === 'resolved' || busy !== null}
-            onClick={() => { void runMutation('resolve') }}
+            onClick={() => setCloseTarget(deadLetterCloseTarget(current))}
+            data-testid="activity-recovery-close"
           >
             {t('dlq.action.resolve')}
           </Button>
@@ -323,6 +335,12 @@ export function ActivityRecoveryDetail({
 
       <RunExplainChat runId={current.runId} />
 
+      {closeTarget && canResolve && (
+        <Suspense fallback={null}>
+          <DeadLetterCloseDialog targets={[closeTarget]} onClose={() => setCloseTarget(null)}
+            onConfirm={reason => runMutation('resolve', () => onResolve(closeTarget.id, reason))} />
+        </Suspense>
+      )}
       {showRecoveryDialog && detail.kind === 'ready' && (
         <Suspense fallback={null}>
           <RecoveryDialog

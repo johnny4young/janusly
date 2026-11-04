@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Closing a failure without recovery now shows its workflow, step and
+  occurrences and requires a short reason. The reason is saved to the audit log
+  and appears in the audit log's details.
 - Workflow rows open with a click and keep delete behind a ⋯ menu. Move to
   Trash happens at once and its toast offers Undo for six seconds.
 - Active and Trash are now a segmented control with counts above the workflow

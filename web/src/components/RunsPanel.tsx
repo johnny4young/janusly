@@ -25,6 +25,7 @@ import { downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
 import { DeadLettersPanel } from './DeadLettersPanel'
+export { DeadLetterCloseDialog } from './DeadLetterCloseDialog'
 import { RunExplainChat } from './RunExplainChat'
 import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
@@ -99,7 +100,7 @@ export type RunsPanelProps = {
   onRedriveNode: (nodeId: string) => void
   onCancelActiveRun?: () => void | Promise<void>
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
-  onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
+  onResolveDeadLetter: (id: string, reason: string) => boolean | Promise<boolean> | undefined
   canStartRuns?: boolean
   canCancelRuns?: boolean
   canReplayDeadLetters?: boolean

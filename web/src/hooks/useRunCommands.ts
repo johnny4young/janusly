@@ -369,9 +369,9 @@ export function useRunCommands(
     return result.ok
   }, [bumpPlatformVersion, loadStatus, refreshPlatform, runId, runPlatformMutation, t])
 
-  const resolveDeadLetter = useCallback(async (deadLetterId: string) => {
+  const resolveDeadLetter = useCallback(async (deadLetterId: string, reason: string) => {
     const result = await runPlatformMutation({
-      request: () => resolveDeadLetterEntry(deadLetterId),
+      request: () => resolveDeadLetterEntry(deadLetterId, reason),
       failureMessage: t('toasts.deadLetterResolveFailed'),
       successToast: { message: t('toasts.deadLetterResolved'), tone: 'success' },
       onSuccess: async () => {

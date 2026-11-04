@@ -69,3 +69,9 @@
   line-height: 1.45;
   white-space: normal;
 }
+
+.we-audit-reason {
+  margin: 0 0 4px;
+  font-size: 11px;
+  white-space: pre-wrap;
+}

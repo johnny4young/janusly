@@ -1492,6 +1492,7 @@ export interface ApiRequests {
   /** Resolve one dead letter as accepted loss */
   "POST /dlq/resolve": {
     "id": string
+    "reason"?: string
   }
   /** Start a write-suppressed validation replay for a proposed fix */
   "POST /dlq/validate-fix": {
