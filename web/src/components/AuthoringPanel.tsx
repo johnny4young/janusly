@@ -83,29 +83,6 @@ export function AuthoringPanel({
       title={t('authoring.title')}
       description={t('authoring.description')}
     >
-      {canUseAi && (
-        <section className="authoring-ai-actions" aria-label={t('authoring.ai.aria')}>
-          <div>
-            <strong>{t('authoring.ai.title')}</strong>
-            <span>{t('authoring.ai.body')}</span>
-          </div>
-          <div className="authoring-ai-actions__buttons">
-            {actions.map((item) => (
-              <Button
-                size="sm"
-                key={item.action}
-               
-               
-                onClick={() => onOpenAiAction(item.action)}
-              >
-                {item.icon}
-                <span>{t(item.labelKey)}</span>
-              </Button>
-            ))}
-          </div>
-        </section>
-      )}
-
       <nav className="authoring-scope-nav" aria-label={t('authoring.scope.aria')}>
         <button
           type="button"
@@ -138,6 +115,22 @@ export function AuthoringPanel({
           {problemCount > 0 && <small>{problemCount}</small>}
         </button>
       </nav>
+
+      {canUseAi && (
+        <section className="authoring-ai-actions" aria-label={t('authoring.ai.title')} data-testid="authoring-ai-toolbar">
+          {actions.map((item) => (
+            <Button
+              size="sm"
+              key={item.action}
+              leadingIcon={item.icon}
+              data-testid={`authoring-ai-${item.action}`}
+              onClick={() => onOpenAiAction(item.action)}
+            >
+              {t(item.labelKey)}
+            </Button>
+          ))}
+        </section>
+      )}
 
       {scope === 'problems' && (
         <AuthoringProblemsPanel

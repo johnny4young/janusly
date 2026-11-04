@@ -111,6 +111,36 @@
   color: var(--we-primary);
 }
 
+/* The Build layout carries the section tabs in the top bar. They stay whole:
+   the workflow name yields first, then below 1400px they take their own row. */
+.top-bar--authoring .workspace-section-nav {
+  background: none;
+  border: 0;
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+}
+
+.top-bar--authoring .workspace-section-nav__intro,
+.top-bar--authoring .workspace-section-nav__item > span:first-child,
+.top-bar--authoring .top-bar-cmdk > span { display: none; }
+
+.top-bar--authoring .workspace-section-nav__rail { flex-wrap: nowrap; }
+.top-bar--authoring .workspace-section-nav__item { padding-inline: 6px; white-space: nowrap; }
+
+@media (max-width: 1400px) {
+  .top-bar--authoring {
+    grid-template-areas: "brand right" "nav nav";
+    grid-template-columns: minmax(0, auto) 1fr;
+    padding-block: 12px 4px;
+    row-gap: 4px;
+  }
+
+  .top-bar--authoring .top-bar-left { grid-area: brand; }
+  .top-bar--authoring .top-bar-right { grid-area: right; }
+  .top-bar--authoring .workspace-section-nav { grid-area: nav; }
+}
+
 .we-operations-header__intro {
   color: var(--we-muted);
   font-size: 12px;
@@ -1080,7 +1110,7 @@
 [data-density="compact"] .user-menu__id { padding: 10px 12px; }
 
 [data-density="compact"] .recovery-center-composer { padding: 10px 12px; gap: 8px; }
-[data-density="compact"] .top-bar { padding: 0 12px; }
+[data-density="compact"] .top-bar { padding-inline: 12px; }
 
 /* ==========================================================================
    List rows — polished pattern used by WorkflowsDashboard, MembersPanel,

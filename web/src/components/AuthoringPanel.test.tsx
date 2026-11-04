@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { WorkflowGraphNode } from '../types'
@@ -88,6 +88,33 @@ describe('<AuthoringPanel />', () => {
     }
     fireEvent.click(screen.getByRole('button', { name: 'Fix' }))
     expect(onOpenAiAction).toHaveBeenCalledWith('fix')
+  })
+
+  it('opens on the scope tabs with the AI actions as a named toolbar below them', () => {
+    const onOpenAiAction = vi.fn()
+    render(
+      <AuthoringPanel model={model()} canWrite canUseAi onOpenAiAction={onOpenAiAction} />,
+    )
+
+    const toolbar = screen.getByRole('region', { name: 'Ask Janusly' })
+    expect(toolbar).toHaveAttribute('data-testid', 'authoring-ai-toolbar')
+    const tabs = screen.getByRole('navigation', { name: 'Authoring scope' })
+    expect(tabs.compareDocumentPosition(toolbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(toolbar.compareDocumentPosition(screen.getByTestId('inspector-scope')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    for (const action of ['generate', 'explain', 'review', 'fix'] as const) {
+      fireEvent.click(within(toolbar).getByTestId(`authoring-ai-${action}`))
+      expect(onOpenAiAction).toHaveBeenLastCalledWith(action)
+    }
+  })
+
+  it('hides the AI toolbar without the AI permission and keeps the scope tabs', () => {
+    render(
+      <AuthoringPanel model={model()} canWrite canUseAi={false} onOpenAiAction={vi.fn()} />,
+    )
+
+    expect(screen.queryByTestId('authoring-ai-toolbar')).toBeNull()
+    expect(screen.getByRole('navigation', { name: 'Authoring scope' })).toBeInTheDocument()
   })
 
   it('opens the canonical Problems scope from the header handoff', () => {

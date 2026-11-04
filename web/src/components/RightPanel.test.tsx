@@ -12,6 +12,9 @@ vi.mock('./ReportsPanel', () => ({
     <div data-testid="reports-gates">{`dlq:${canReadDeadLetters} reports:${canReadReports}`}</div>
   ),
 }))
+vi.mock('./AuthoringPanel', () => ({
+  AuthoringPanel: () => <div data-testid="authoring-panel" />,
+}))
 vi.mock('./RunsPanel', () => ({
   RunsPanel: ({ mode }: { mode?: string }) => (
     <div data-testid="runs-panel-mode">{mode ?? 'runs'}</div>
@@ -156,6 +159,13 @@ describe('<RightPanel /> recovery task space', () => {
     const sectionNav = screen.getByTestId('workspace-section-nav')
     expect(within(sectionNav).getByRole('button', { name: 'Reports' })).toHaveAttribute('aria-current', 'page')
     expect(within(sectionNav).getByTestId('workspace-section-recover-count')).toHaveTextContent('2')
+  })
+
+  it('leaves section navigation to the top bar on the Build layout', async () => {
+    render(<RightPanel {...props({ tab: 'inspector', permissions: ['workflows.read'] })} />)
+
+    expect(await screen.findByTestId('authoring-panel')).toBeInTheDocument()
+    expect(screen.queryByTestId('workspace-section-nav')).toBeNull()
   })
 
   it('filters contextual sections with the same effective permissions as global navigation', () => {

@@ -24,6 +24,9 @@
   connection, last used, expiry and owner. A header counts connections that are
   expiring or expired, with errors, and unused for 30 days. Long lists now scroll
   when Settings is opened directly.
+- The Build panel opens on Step, Workflow and Problems. Its section tabs moved
+  to the top bar, and Generate, Explain, Review and Fix sit on one line that
+  fits in English and Spanish.
 
 - Canvas connections drop the repeated "default" label; named branches show a
   pill on the connection.

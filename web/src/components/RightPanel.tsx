@@ -22,6 +22,7 @@
 
 import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react'
 import { Workflow } from 'lucide-react'
+import { isCanvasTab } from '../types'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
 import type { AuthoringPanelModel } from './AuthoringPanel'
@@ -31,6 +32,7 @@ import { ErrorBoundary } from './ErrorBoundary'
 import { PanelErrorFallback } from './PanelErrorFallback'
 import { RunEventsPicker } from './RunEventsPicker'
 import { WorkspaceSectionNav } from './WorkspaceSectionNav'
+export { WorkspaceSectionNav }
 // Every tab panel is code-split out of the eager shell: each renders only when
 // the operator navigates to its tab, behind the shared <Suspense> below. AI
 // Studio and the Inspector (node/edge config) are lazy too — their chunk is
@@ -165,12 +167,15 @@ export const RightPanel = memo(function RightPanel(props: RightPanelProps) {
       className="workspace-panel-stack"
       data-destination={destination}
     >
-      <WorkspaceSectionNav
-        activeTab={props.tab}
-        permissions={props.permissions}
-        openRecoveryCount={openRecoveryCount}
-        onOpenTab={props.navigation.onOpenTab}
-      />
+      {/* The Build layout shows this navigation in the top bar. */}
+      {!isCanvasTab(props.tab) && (
+        <WorkspaceSectionNav
+          activeTab={props.tab}
+          permissions={props.permissions}
+          openRecoveryCount={openRecoveryCount}
+          onOpenTab={props.navigation.onOpenTab}
+        />
+      )}
       <ErrorBoundary
         resetKey={props.tab}
         logTag={`panel:${props.tab}`}

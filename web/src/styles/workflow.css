@@ -93,32 +93,21 @@
 .we-panel-search input::placeholder { color: var(--we-muted); }
 
 .authoring-ai-actions {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--we-primary-ring);
-  border-radius: 10px;
-  background: var(--we-primary-soft);
+  container-type: inline-size;
+  display: flex;
+  gap: 4px;
 }
 
-.authoring-ai-actions > div:first-child {
-  display: grid;
-  gap: 3px;
-}
-
-.authoring-ai-actions > div:first-child strong { font-size: 12px; }
-.authoring-ai-actions > div:first-child span { color: var(--we-muted); font-size: 12px; }
-
-.authoring-ai-actions__buttons {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 5px;
-}
-
-.authoring-ai-actions__buttons .small-command {
-  justify-content: center;
+.authoring-ai-actions .ui-button {
+  flex: 1 1 auto;
+  gap: 4px;
   min-width: 0;
   padding-inline: 6px;
+}
+
+/* Spanish labels leave no room for icons in the narrowest panel. */
+@container (max-width: 320px) {
+  .authoring-ai-actions .ui-button__icon { display: none; }
 }
 
 .authoring-scope-nav {
