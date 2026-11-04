@@ -204,6 +204,8 @@ describe('<ConnectionsPanel />', () => {
     )
 
     await screen.findByText('pagerduty-primary')
+    // Once the impact read settles, the typed-name field takes focus: hold it to observe the opening state.
+    vi.mocked(api).mockReturnValue(new Promise(() => {}))
     const trigger = screen.getAllByRole('button', { name: 'Revoke' })[0]!
     trigger.focus()
     fireEvent.click(trigger)
