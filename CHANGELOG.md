@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Buttons keep their icon and label on one row across the product.
+
 - Workflow generation audits retain bounded first-draft issue codes even when
   a repair succeeds, without storing model drafts or prompts.
 
