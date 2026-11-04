@@ -2720,6 +2720,8 @@
   "packs.credential.ready": "{{name}} configured ({{kind}})",
   "packs.credential.legendMissing": "Not configured",
   "packs.credential.legendReady": "Ready",
+  "packs.installNote.role": "Your role can't install or run packs.",
+  "packs.installNote.connect": "Connect {{names}} before running it.",
   "packs.stepCount_one": "{{count}} step",
   "packs.stepCount_other": "{{count}} steps",
   "packs.action.install": "Install",
