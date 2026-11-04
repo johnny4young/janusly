@@ -1,11 +1,19 @@
 /**
- * Compact, paste-ready recovery context derived from an already visible DLQ
- * entry. The helper deliberately extracts one message instead of copying raw
- * JSON so escalation channels receive a useful single line.
+ * Readable recovery context derived from an already visible DLQ entry: a
+ * paste-ready single line for escalation channels, and the digest shown above
+ * the raw error JSON in the failure detail.
  *
  * Used by:
  * - `web/src/components/DeadLettersPanel.tsx`
+ * - `web/src/components/ActivityRecoveryDetail.tsx`
+ * - `web/src/components/recovery/RecoveryErrorBlock.tsx`
  */
+
+import {
+  normalizeErrorSignature,
+  scrubSecretShapes,
+  type ErrorCategory,
+} from './lib/error-signature'
 
 type RecoveryErrorSummaryInput = {
   workflowName?: string | null
@@ -61,4 +69,60 @@ export function buildRecoveryErrorSummary(
   const message = extractErrorMessage(input.errorJson) ?? fallbacks.error
   const timestamp = normalizeTimestamp(input.createdAt, fallbacks.timestamp)
   return `${workflow} · ${input.nodeId} (${nodeType}) · ${message} · ${timestamp} · ${input.runId}`
+}
+
+/** Facts for the failure detail; the view maps the codes to localized copy. */
+export type RecoveryErrorDigest = {
+  /** The unresolvable host, when the failure is DNS and names one. */
+  dnsHost: string | null
+  message: string | null
+  /** Null hides the cause chip: "Other" would add nothing to the summary. */
+  category: Exclude<ErrorCategory, 'unknown'> | null
+  causeDetail: 'DNS' | number | null
+  /** Null hides the retry chip when the error gives no basis to claim either way. */
+  retryable: boolean | null
+}
+
+const DNS_HOST_PATTERN = /(?:\blookup\s+(?!failed\b)|\b(?:ENOTFOUND|EAI_AGAIN)\s+|any\s+address:\s*)([\w.-]+)(?=$|:|\s+on\s)/i
+
+function causeFacts(
+  category: ErrorCategory,
+  signature: string,
+  message: string,
+): Pick<RecoveryErrorDigest, 'causeDetail' | 'retryable'> {
+  switch (category) {
+    case 'network_timeout':
+      return signature.startsWith('DNS')
+        ? { causeDetail: 'DNS', retryable: /EAI_AGAIN|misbehaving|temporary/i.test(message) }
+        : { causeDetail: null, retryable: true }
+    case 'http_error':
+    case 'ai_provider': {
+      const status = Number(signature.match(/^HTTP (\d+)/)?.[1])
+      return status
+        ? { causeDetail: status, retryable: status >= 500 || status === 408 || status === 429 }
+        : { causeDetail: null, retryable: /\brate\b/i.test(signature) }
+    }
+    case 'unknown':
+      return { causeDetail: null, retryable: null }
+    default:
+      return { causeDetail: null, retryable: false }
+  }
+}
+
+/** Classify with the cluster normalizer so the detail and its cluster agree. */
+export function describeRecoveryError(errorJson: unknown, nodeType?: string | null): RecoveryErrorDigest {
+  const { signature, category } = normalizeErrorSignature(errorJson, { nodeType: nodeType ?? undefined })
+  const raw = extractErrorMessage(errorJson)
+  const message = raw && scrubSecretShapes(raw)
+  const facts = causeFacts(category, signature, message ?? '')
+  const known = category !== 'unknown'
+  return {
+    ...facts,
+    // Read from the scrubbed text, so a secret-shaped host cannot match.
+    dnsHost: facts.causeDetail === 'DNS' ? message?.match(DNS_HOST_PATTERN)?.[1] ?? null : null,
+    message: message ?? (known ? signature : null),
+    category: known ? category : null,
+    // The engine refuses to auto-retry these: external effects may already have happened.
+    retryable: (errorJson as { writeSide?: unknown } | null)?.writeSide === true ? false : facts.retryable,
+  }
 }
