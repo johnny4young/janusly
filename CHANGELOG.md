@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Each view has one header row with its section title and tabs; descriptions
+  moved to a tooltip on the title, so content starts about 110 px higher.
+
 - The language selector in the account menu is a compact row like Theme and
   Density, and the canvas zoom controls follow the dark theme.
 - Buttons keep their icon and label on one row across the product.

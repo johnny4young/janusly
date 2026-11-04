@@ -82,7 +82,6 @@ export function AuthoringPanel({
     <PanelChrome
       title={t('authoring.title')}
       description={t('authoring.description')}
-      icon={<GitBranch size={18} />}
     >
       {canUseAi && (
         <section className="authoring-ai-actions" aria-label={t('authoring.ai.aria')}>

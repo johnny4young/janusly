@@ -231,7 +231,6 @@ export function RunWorkspace({
               <PanelChrome
                 title={t('rightPanel.reasoning.title')}
                 description={t('rightPanel.reasoning.description')}
-                icon={<Activity size={18} />}
               >
                 <ReasoningPanel
                   events={events}
@@ -249,7 +248,6 @@ export function RunWorkspace({
               <PanelChrome
                 title={t('rightPanel.multiAgent.title')}
                 description={t('rightPanel.multiAgent.description')}
-                icon={<Layers3 size={18} />}
               >
                 <MultiAgentTimeline
                   events={events}

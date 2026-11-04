@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Activity, CheckCircle2, CircleX, Copy, Download, FlaskConical, GitBranch, ListChecks, Send, ShieldAlert } from 'lucide-react'
+import { Activity, CheckCircle2, CircleX, Copy, Download, FlaskConical, GitBranch, ListChecks, Send } from 'lucide-react'
 import type { RunEvent, RunNode, RunSummary, SavedWorkflow, WorkflowInputSchemaShape } from '../types'
 import { isOpenRunStatus, isTerminalRunStatus } from '@/lib/status'
 import { formatCompactDuration, formatStatusLabel, formatNodeDuration } from '../constants'
@@ -284,7 +284,6 @@ export function RunsPanel({
     <PanelChrome
       title={t(recoveryMode ? 'rightPanel.recover.title' : 'rightPanel.runs.title')}
       description={t(recoveryMode ? 'rightPanel.recover.description' : 'rightPanel.runs.description')}
-      icon={recoveryMode ? <ShieldAlert size={18} /> : <Activity size={18} />}
     >
       {!recoveryMode && !activityDetail && <VitalSignsStrip
         tiles={withSeverityLabels(runMetricTiles, t)}
