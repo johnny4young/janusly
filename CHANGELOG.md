@@ -7,6 +7,9 @@
 - Reports shows recovery trends for the last 7, 30 or 90 days: recovery KPIs,
   the activity heatmap, failure clusters, model calibration, AI spend, and
   Recovery validation and the Value dashboard with Markdown and JSON exports.
+- Canvas connections drop the repeated "default" label; named branches show a
+  pill on the connection.
+
 - A failed step on the run snapshot keeps its full title, shows its error in
   one line, and links to its item in the recovery queue.
 
