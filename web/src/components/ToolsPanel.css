@@ -1,0 +1,107 @@
+/* Styles for ToolsPanel.tsx: shipped with the lazy chunk that renders them. */
+
+.we-tools {
+  container-type: inline-size;
+  display: grid;
+  gap: 12px;
+}
+
+.we-tools__filter {
+  flex-wrap: wrap;
+  justify-self: start;
+}
+
+.we-tools__filter button,
+.we-tools__row {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.we-tools__count,
+.we-tools__group-head span {
+  color: var(--we-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.we-tools__grid {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@container (max-width: 760px) {
+  .we-tools__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@container (max-width: 480px) {
+  .we-tools__grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.we-tools__group {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: var(--we-radius-sm);
+  display: grid;
+  gap: 2px;
+  padding: 10px 8px;
+}
+
+.we-tools__group-head {
+  align-items: baseline;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 0 4px 4px;
+}
+
+.we-tools__group-head strong,
+.we-tools__name,
+.we-tools__details code {
+  font-family: var(--font-mono);
+}
+
+.we-tools__row {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--we-ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  min-height: 28px;
+  padding: 2px 4px;
+  text-align: start;
+  width: 100%;
+}
+
+.we-tools__row:hover,
+.we-tools__row[aria-expanded="true"] {
+  background: var(--we-surface-muted);
+}
+
+.we-tools__name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.we-tools__capability { color: var(--we-muted); flex: none; }
+.we-tools__capability[data-write="true"] { color: var(--we-warning-text); }
+
+.we-tools__chevron {
+  color: var(--we-muted);
+  flex: none;
+}
+
+.we-tools__row[aria-expanded="true"] .we-tools__chevron { transform: rotate(180deg); }
+
+.we-tools__details {
+  display: grid;
+  font-size: 12px;
+  gap: 8px;
+  justify-items: start;
+  padding: 8px 4px 10px;
+}

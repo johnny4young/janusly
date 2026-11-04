@@ -10,7 +10,7 @@
  *
  * Pure presentational logic lives in `recovery-center-model.ts`.
  *
- * Used by `HomeInsights.tsx`.
+ * Used by `HomeInsights.tsx` and `ReportsPanel.tsx`.
  */
 
 import React, { useEffect, useState } from 'react'
@@ -343,7 +343,7 @@ export function CalibrationHealthTile() {
 // distinct endpoint from the panel's `/recovery/metrics`).
 // ─────────────────────────────────────────────────────────────────────────
 
-export function BudgetTile({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void }) {
+export function BudgetTile({ title, onOpenTab }: { title?: string; onOpenTab: (tab: ActiveTab) => void }) {
   const { t } = useT()
   const platformVersion = useInvalidationNonce(RECOVERY_TILE_TAGS)
   const [envelope, setEnvelope] = useState<BudgetEnvelope | null>(null)
@@ -379,7 +379,7 @@ export function BudgetTile({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void 
 
   return (
     <RecoveryCenterTile
-      title={t('recoveryCenter.budget.title')}
+      title={title ?? t('recoveryCenter.budget.title')}
       kicker={hasBudget ? t('recoveryCenter.budget.kickerUsed', { percent: (ratio * 100).toFixed(0) }) : t('recoveryCenter.budget.kickerNotConfigured')}
       severity={tileSeverity}
       icon={<Coins size={18} aria-hidden="true" />}

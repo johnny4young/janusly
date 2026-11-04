@@ -1,12 +1,14 @@
 import { useEffect } from 'react'
 
 import { useT } from '../i18n'
+import { isTerminalRunStatus } from '../lib/status'
 import type { RunSummary } from '../types'
 import { FormField, SelectControl } from './ui/Form'
 
-/** Newest failed run first, so opening Run events lands on something to debug. */
+/** Newest failed run first, so opening Run events lands on something to debug.
+ *  Never a live run: opening one holds a stream open for as long as it runs. */
 function defaultRun(runs: readonly RunSummary[]): RunSummary | undefined {
-  return runs.find((run) => run.status === 'failed') ?? runs[0]
+  return runs.find((run) => run.status === 'failed') ?? runs.find((run) => isTerminalRunStatus(run.status))
 }
 
 export function RunEventsPicker({

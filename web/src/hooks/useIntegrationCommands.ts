@@ -22,8 +22,8 @@ export function useIntegrationCommands(
   const { bumpPlatformVersion } = store
   const { openRecoveryQueue, openRun, openWorkflow } = dependencies
 
-  const installPlugin = useCallback(async (pluginId: string) => {
-    await runPlatformMutation({
+  const installPlugin = useCallback(async (pluginId: string): Promise<boolean> => {
+    const result = await runPlatformMutation({
       request: () => api('/plugins/install', {
         method: 'POST',
         body: JSON.stringify({ pluginId, config: {} }),
@@ -33,6 +33,7 @@ export function useIntegrationCommands(
       successToastTiming: 'before-effect',
       onSuccess: refreshPlatform,
     })
+    return result.ok
   }, [refreshPlatform, runPlatformMutation, t])
 
   const createCredential = useCallback(async (credential: {
