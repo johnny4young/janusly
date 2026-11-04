@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/browsersession"
 	"github.com/johnny4young/janusly/internal/store"
@@ -75,6 +76,25 @@ func TestIdentitySurfaces(t *testing.T) {
 	}
 	if res := h.call("POST", "/plugins/install", map[string]any{}, ""); res.status != 400 {
 		t.Fatalf("missing pluginId must 400: %d", res.status)
+	}
+
+	listed := h.call("GET", "/plugins/installed", nil, "")
+	if ids, _ := listed.body["pluginIds"].([]any); listed.status != 200 || len(ids) != 1 || ids[0] != "slack-notify" {
+		t.Fatalf("installed plugins: %d %+v", listed.status, listed.body)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO installed_plugins (id, org_id, plugin_id, config_json) VALUES ($1, $2, 'other-plugin', '{}')`, uuid.NewString(), h.org+"-other"); err != nil {
+		t.Fatal(err)
+	}
+	listed = h.call("GET", "/plugins/installed", nil, "")
+	if ids, _ := listed.body["pluginIds"].([]any); len(ids) != 1 {
+		t.Fatalf("installed plugins must stay scoped to the caller's organization: %+v", listed.body)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO org_roles(id, org_id, name, inherits_from, granted_permissions) VALUES($1, $2, 'plugins-no-read', 'editor', '["ai.write"]'::jsonb)`, h.org+"-no-read", h.org); err != nil {
+		t.Fatal(err)
+	}
+	seedMemberRow(t, pool, h.org, "plugins-no-read", "no-read@example.test", "plugins-no-read")
+	if denied := h.callWithHeaders("GET", "/plugins/installed", nil, "", map[string]string{"x-user-id": "plugins-no-read"}); denied.status != http.StatusForbidden {
+		t.Fatalf("installed plugins require workflows.read: %d %+v", denied.status, denied.body)
 	}
 }
 

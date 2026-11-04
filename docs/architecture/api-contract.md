@@ -380,6 +380,10 @@ the wire. Absent input examples remain omitted and explicit empty examples remai
 objects. The typed template envelope preserves the embedded workflows and absent
 versus empty credential requirements.
 
+`GET /plugins/installed` returns `{ pluginIds }`, the plugin ids installed in the
+caller's organization. It requires viewer rank and `workflows.read`, and backs the
+install state of the Tools catalog.
+
 Browser readers validate entire pages before updating a projection: malformed
 successful responses are errors, not empty lists or partially filtered success.
 Shape comes from the generated guards; the readers reject duplicate identities

@@ -181,6 +181,9 @@ SET email = EXCLUDED.email,
 INSERT INTO installed_plugins (id, org_id, plugin_id, config_json, installed_by)
 VALUES ($1, $2, $3, $4, $5);
 
+-- name: ListInstalledPluginIDs :many
+SELECT plugin_id FROM installed_plugins WHERE org_id = $1 ORDER BY plugin_id;
+
 -- name: RevokePendingInvitation :execrows
 UPDATE invitations SET status = 'revoked'
 WHERE id = $1 AND org_id = $2 AND status = 'pending';

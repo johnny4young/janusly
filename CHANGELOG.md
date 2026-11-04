@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The Tools catalog fits one screen: tools are grouped by namespace in a
+  three-column grid, filterable by Read-only, May change external systems and
+  Installed. Install state now survives a reload, and a tool's description and
+  Install action open from its row.
+
 - Revoking a connection lists the workflows that use it and, when there are
   any, requires typing the connection name. If the list cannot be loaded, the
   dialog says so and still requires the typed name. A revoked connection now
