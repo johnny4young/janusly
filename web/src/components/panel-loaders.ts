@@ -13,6 +13,7 @@ export const panelLoaders = {
   workflows: () => import('./WorkflowsDashboard'),
   members: () => import('./MembersPanel'),
   credentials: () => import('./ConnectionsPanel'),
+  marketplace: () => import('./ToolsPanel'),
   packs: () => import('./SolutionPacksPanel'),
   operations: () => import('./OperationsPage'),
   experiments: () => import('./ExperimentsPanel'),

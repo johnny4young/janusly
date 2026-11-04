@@ -38,6 +38,10 @@
   install or run packs.
 - AI Studio has a smaller header and a horizontal 1-2-3-4 stepper that marks the
   current step.
+- The Tools catalog fits one screen: tools are grouped by namespace in a
+  three-column grid, filterable by Read-only, May change external systems and
+  Installed. Install state now survives a reload, and a tool's description and
+  Install action open from its row.
 - Each view has one header row with its section title and tabs; descriptions
   moved to a tooltip on the title, so content starts about 110 px higher.
 - Headings that receive focus for screen readers no longer show a focus ring
