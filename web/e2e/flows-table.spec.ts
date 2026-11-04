@@ -94,4 +94,10 @@ test('labels each number and sorts from the header by keyboard', async ({ page, 
   await page.reload()
   await expect(page.getByRole('table', { name: 'Saved flows' }).getByRole('columnheader', { name: 'Open failures', exact: true }))
     .toHaveAttribute('aria-sort', 'descending')
+
+  await failingRow.locator('.we-readiness-badge__summary').click()
+  await expect(failingRow.locator('.we-readiness-badge__issues')).toBeVisible()
+  await failingRow.locator('.we-readiness-badge__summary').click()
+  await failingRow.locator('strong').click()
+  await expect(page.locator('.workflow-node').first()).toBeVisible({ timeout: 20_000 })
 })

@@ -92,7 +92,7 @@ async function openBranchRuleEditor(
   await page.getByRole('button', { name: contract.flows, exact: true }).click()
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
-  await row.click()
+  await row.locator('strong').click()
   await openWorkspaceSection(page, contract.flows, locale === 'en' ? 'Build' : 'Crear')
   await page.locator('.react-flow__node[data-id="rules"] .workflow-node').click()
 

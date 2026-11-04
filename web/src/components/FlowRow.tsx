@@ -226,9 +226,11 @@ export const FlowRow = memo(function FlowRow({
         {openFailures}
       </td>
       <td>
-        {/* The badge expands its breakdown in place, so a click here never opens the row. */}
-        <div className="we-flows-table__cell" onClick={(event) => event.stopPropagation()}>
-          <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} onScore={onHealthScore} />
+        <div className="we-flows-table__cell">
+          {/* The badge expands its breakdown in place, so clicking it never opens the row. */}
+          <span onClick={(event) => event.stopPropagation()}>
+            <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} onScore={onHealthScore} />
+          </span>
           <FlowHealthTrend workflowId={workflow.id} currentVersion={workflow.currentVersion ?? 0} />
         </div>
       </td>
