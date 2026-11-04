@@ -1,0 +1,30 @@
+.we-reports {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.we-reports .we-ops-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.we-reports__windows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.we-reports__error {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+}
+
+.we-reports__tiles {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  min-width: 0;
+}

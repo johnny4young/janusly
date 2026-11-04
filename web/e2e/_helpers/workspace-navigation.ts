@@ -54,40 +54,33 @@ export async function openWorkspaceSection(
   section: string,
 ): Promise<void> {
   const sectionNav = page.getByTestId('workspace-section-nav')
-  let sectionButton = sectionNav.getByRole('button', {
+  const sectionButton = sectionNav.getByRole('button', {
     name: section,
     exact: true,
   })
   if (await sectionButton.count() === 0) {
     await openWorkspaceDestination(page, destination)
-    sectionButton = sectionNav.getByRole('button', {
-      name: section,
-      exact: true,
-    })
-    if (
-      await sectionButton.count() === 0
-      && (destination === 'Activity' || destination === 'Actividad')
-    ) {
-      if (section === 'Recover' || section === 'Recuperar') {
-        if (await page.getByTestId('recovery-queue').isVisible().catch(() => false)) return
-        await openWorkspaceDestination(page, destination, true)
-        const recoveryTools = page.getByTestId('activity-open-recovery-tools')
-        await recoveryTools.waitFor({ state: 'visible' })
-        await recoveryTools.click()
-        await page.getByTestId('recovery-queue').waitFor({ state: 'visible' })
-      } else if (section === 'Runs' || section === 'Ejecuciones') {
-        if (await page.getByTestId('activity-run-history').isVisible().catch(() => false)) return
-        await openWorkspaceDestination(page, destination, true)
-        const runHistory = page.getByTestId('activity-open-run-history')
-        await runHistory.waitFor({ state: 'visible' })
-        await runHistory.click()
-        await page.getByTestId('activity-run-history').waitFor({ state: 'visible' })
-      }
-      return
-    }
+    await sectionNav.waitFor({ state: 'visible' })
   }
-  if (await sectionButton.getAttribute('aria-current') !== 'page') {
+  const activity = destination === 'Activity' || destination === 'Actividad'
+  // Permissions can leave Activity with a single section and no tabs to click.
+  if (
+    (!activity || await sectionButton.count() > 0)
+    && await sectionButton.getAttribute('aria-current') !== 'page'
+  ) {
     await sectionButton.click()
+  }
+  if (!activity) return
+  if (section === 'Recover' || section === 'Recuperar') {
+    await page.getByTestId('recovery-queue').waitFor({ state: 'visible' })
+  } else if (section === 'Runs' || section === 'Ejecuciones') {
+    // Detailed run history is a disclosure inside the Runs tab, not its own tab.
+    const runHistory = page.getByTestId('activity-run-history')
+    if (await runHistory.isVisible().catch(() => false)) return
+    // Reasoning also highlights Runs, so the click above may not have left it.
+    if (await sectionButton.count() > 0) await sectionButton.click()
+    await page.getByTestId('activity-open-run-history').click()
+    await runHistory.waitFor({ state: 'visible' })
   }
 }
 

@@ -20,7 +20,7 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import { lazy, memo, Suspense, useCallback, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react'
 import { Plug, Workflow } from 'lucide-react'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
@@ -48,6 +48,7 @@ const ActivityWorkspace = lazy(() => panelLoaders.recover().then((m) => ({ defau
 const RunsPanel = lazy(() => panelLoaders.runs().then((m) => ({ default: m.RunsPanel })))
 const RecoveryCasePanel = lazy(() => panelLoaders.recoveryCase().then((m) => ({ default: m.RecoveryCasePanel })))
 const ReasoningPanel = lazy(() => panelLoaders.reasoning().then((m) => ({ default: m.ReasoningPanel })))
+const ReportsPanel = lazy(() => panelLoaders.reports().then((m) => ({ default: m.ReportsPanel })))
 const AiStudioPanel = lazy(() => panelLoaders['ai-studio']().then((m) => ({ default: m.AiStudioPanel })))
 const AuthoringPanel = lazy(() => panelLoaders.inspector().then((m) => ({ default: m.AuthoringPanel })))
 import { api, contractApi } from '../api'
@@ -154,6 +155,10 @@ export type RightPanelProps = {
 export const RightPanel = memo(function RightPanel(props: RightPanelProps) {
   const { t } = useT()
   const destination = workspaceDestinationForTab(props.tab)
+  const openRecoveryCount = useMemo(
+    () => props.execution.deadLetters.filter((deadLetter) => deadLetter.status === 'open').length,
+    [props.execution.deadLetters],
+  )
   return (
     <div
       className="workspace-panel-stack"
@@ -162,6 +167,7 @@ export const RightPanel = memo(function RightPanel(props: RightPanelProps) {
       <WorkspaceSectionNav
         activeTab={props.tab}
         permissions={props.permissions}
+        openRecoveryCount={openRecoveryCount}
         onOpenTab={props.navigation.onOpenTab}
       />
       <ErrorBoundary
@@ -240,6 +246,15 @@ function RightPanelRouter(props: RightPanelProps) {
   if (props.tab === 'multiAgent') return (
     <PanelChrome title={t('rightPanel.multiAgent.title')} description={t('rightPanel.multiAgent.description')}>
       <MultiAgentTimeline events={execution.events} eventsHasMore={execution.eventsHasMore} onLoadOlderEvents={execution.onLoadOlderEvents} />
+    </PanelChrome>
+  )
+  if (props.tab === 'reports') return (
+    <PanelChrome title={t('workspace.section.reports.label')} description={t('workspace.section.reports.helper')}>
+      <ReportsPanel
+        canReadDeadLetters={can('dlq.read')}
+        canReadReports={can('reports.read')}
+        onOpenTab={navigation.onOpenTab}
+      />
     </PanelChrome>
   )
   if (props.tab === 'workflows') return (

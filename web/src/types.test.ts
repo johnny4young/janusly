@@ -35,6 +35,7 @@ const ALL_TABS: ActiveTab[] = [
   'runs',
   'reasoning',
   'multiAgent',
+  'reports',
   'operations',
   'recoveryCase',
 ]
@@ -68,6 +69,7 @@ describe('CANVAS_TABS contract', () => {
     expect(nonCanvasTabs).toContain('marketplace')
     expect(nonCanvasTabs).toContain('runs')
     expect(nonCanvasTabs).toContain('multiAgent')
+    expect(nonCanvasTabs).toContain('reports')
     expect(nonCanvasTabs).toContain('workflows')
     expect(nonCanvasTabs).toContain('reasoning')
     expect(nonCanvasTabs).toContain('recoveryCase')
@@ -112,6 +114,7 @@ describe('getCanvasVisibility — canvas mount + visibility decision', () => {
     'runs',
     'reasoning',
     'multiAgent',
+    'reports',
     'operations',
     'experiments',
     'recoveryCase',

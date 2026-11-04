@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Activity shows its sections as tabs: Runs, Recover with the number of open
+  failures, Agent activity and Reports.
+- Reports shows recovery trends for the last 7, 30 or 90 days: recovery KPIs,
+  the activity heatmap, failure clusters, model calibration, AI spend, and
+  Recovery validation and the Value dashboard with Markdown and JSON exports.
 - Empty states end in a primary button instead of text that reads as a label.
 - The Settings breadcrumb names the open pane, such as Settings › Access, and
   the pane follows its link: pasting a link, Back and Forward now change what

@@ -246,6 +246,16 @@ Activity / Recover, and a recovery-case route resolves to the same Recover
 context. Reloading or browser navigation must preserve both the route and that
 context; grouping a section never makes its deep link anonymous.
 
+Activity shows the tabs Runs, Recover (with its open count), Agent activity and
+Reports, each filtered by the permission that opens it. Reports (`#/reports`,
+`recovery.read`) is a lazy panel with a 7, 30 or 90 day window. KPIs, failure
+clusters and the Value dashboard read `/recovery/metrics` and `/dlq/clusters`
+for that window behind `dlq.read`; Recovery validation and every export need
+`reports.read`; the heatmap, ledger and wins come from `/recovery/home`, whose
+90-day heatmap the panel narrows to the window. Model calibration and AI spend
+are not windowed: their endpoints have no window parameter. A heatmap day opens
+Recover through `#/recover/day/<YYYY-MM-DD>`.
+
 The eager shell owns the core locale catalog. Non-home main and authoring-panel
 slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
 behind an accessible, height-preserving skeleton while the sidebar, top bar and

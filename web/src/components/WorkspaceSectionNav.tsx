@@ -1,5 +1,6 @@
 import {
   Activity,
+  BarChart3,
   Boxes,
   Database,
   FlaskConical,
@@ -33,6 +34,7 @@ const SECTION_ICONS: Partial<Record<ActiveTab, ReactNode>> = {
   recover: <ShieldAlert size={14} />,
   reasoning: <GitBranch size={14} />,
   multiAgent: <Layers3 size={14} />,
+  reports: <BarChart3 size={14} />,
   operations: <Settings2 size={14} />,
   credentials: <KeyRound size={14} />,
   members: <Users size={14} />,
@@ -42,10 +44,12 @@ const SECTION_ICONS: Partial<Record<ActiveTab, ReactNode>> = {
 export function WorkspaceSectionNav({
   activeTab,
   permissions,
+  openRecoveryCount = 0,
   onOpenTab,
 }: {
   activeTab: ActiveTab
   permissions?: readonly string[]
+  openRecoveryCount?: number
   onOpenTab: (tab: ActiveTab) => void
 }) {
   const { t } = useT()
@@ -83,6 +87,7 @@ export function WorkspaceSectionNav({
           {sections.map((section) => {
             const label = t(section.labelKey)
             const active = activeTab === section.tab || section.activeAliases?.includes(activeTab) === true
+            const count = section.tab === 'recover' ? openRecoveryCount : 0
             return (
               <button
                 key={section.tab}
@@ -93,10 +98,16 @@ export function WorkspaceSectionNav({
                 onClick={() => onOpenTab(section.tab)}
                 onPointerEnter={() => preloadPanel(section.tab)}
                 onFocus={() => preloadPanel(section.tab)}
-                title={`${label} — ${t(section.helperKey)}`}
+                title={`${label} — ${count > 0 ? t('topbar.recover', { count }) : t(section.helperKey)}`}
+                data-testid={`workspace-section-${section.tab}`}
               >
                 <span aria-hidden="true">{SECTION_ICONS[section.tab]}</span>
                 <span>{label}</span>
+                {count > 0 && (
+                  <span className="workspace-section-nav__count" aria-hidden="true" data-testid="workspace-section-recover-count">
+                    {count}
+                  </span>
+                )}
               </button>
             )
           })}
