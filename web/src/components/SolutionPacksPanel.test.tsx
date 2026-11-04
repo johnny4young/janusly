@@ -100,6 +100,84 @@ describe('<SolutionPacksPanel />', () => {
     expect(assurance).toHaveTextContent('2 qualification fixtures')
   })
 
+  it('names only the unconnected credentials and keeps Install available', () => {
+    const pack: SolutionPackPublic = {
+      ...PACK,
+      requiredCredentials: [
+        ...PACK.requiredCredentials,
+        { name: 'ops_github', kind: 'github_token', purpose: 'Files the incident' },
+        { name: 'ops_pager', kind: 'pagerduty_api_token', purpose: 'Pages on call' },
+      ],
+    }
+    const panel = (credentials: Credential[]) => (
+      <SolutionPacksPanel
+        packs={[pack]}
+        credentials={credentials}
+        onInstall={handlers.onInstall}
+        onSampleRun={handlers.onSampleRun}
+        onInjectFailure={handlers.onInjectFailure}
+      />
+    )
+    const { rerender } = render(panel([{ id: 'cred-1', name: 'ops_slack', kind: 'slack_webhook' }]))
+
+    const note = screen.getByTestId('pack-note-incident-triage')
+    expect(note).toHaveTextContent('Connect ops_github and ops_pager before running it.')
+    const install = screen.getByRole('button', { name: 'Install' })
+    expect(install).toHaveAccessibleDescription(note.textContent)
+    fireEvent.click(install)
+    expect(handlers.onInstall).toHaveBeenCalledWith('incident-triage')
+
+    rerender(panel([
+      { id: 'cred-1', name: 'ops_slack', kind: 'slack_webhook' },
+      { id: 'cred-2', name: 'ops_github', kind: 'github_token' },
+      { id: 'cred-3', name: 'ops_pager', kind: 'pagerduty_api_token' },
+    ]))
+    expect(screen.queryByTestId('pack-note-incident-triage')).not.toBeInTheDocument()
+    expect(install).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('joins the credential names for the active language', async () => {
+    await changeRuntimeLocale('es')
+    try {
+      render(
+        <SolutionPacksPanel
+          packs={[{
+            ...PACK,
+            requiredCredentials: [
+              ...PACK.requiredCredentials,
+              { name: 'ops_github', kind: 'github_token', purpose: 'Files the incident' },
+            ],
+          }]}
+          credentials={[]}
+          onInstall={handlers.onInstall}
+          onSampleRun={handlers.onSampleRun}
+          onInjectFailure={handlers.onInjectFailure}
+        />,
+      )
+      expect(screen.getByTestId('pack-note-incident-triage'))
+        .toHaveTextContent('Conecta ops_slack y ops_github antes de ejecutarlo.')
+    } finally {
+      await act(() => changeRuntimeLocale('en'))
+    }
+  })
+
+  it('explains a disabled Install by role, not by credentials', () => {
+    render(
+      <SolutionPacksPanel
+        packs={[PACK]}
+        credentials={[]}
+        canInstall={false}
+        onInstall={handlers.onInstall}
+        onSampleRun={handlers.onSampleRun}
+        onInjectFailure={handlers.onInjectFailure}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled()
+    expect(screen.getByTestId('pack-note-incident-triage'))
+      .toHaveTextContent("Your role can't install or run packs.")
+  })
+
   it('filters out non-matching packs and offers clear-filter', () => {
     renderPanel([{ id: 'cred-2', name: 'ops_slack', kind: 'slack_webhook' }])
     expect(screen.getByText('ops_slack')).toBeInTheDocument()

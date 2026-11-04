@@ -38,7 +38,7 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
 
     const downtime = screen.getByTestId('recovery-center-longest-downtime')
     const streak = screen.getByTestId('recovery-center-clean-streak')
-    expect(downtime).toHaveTextContent('Longest downtime: 5h')
+    expect(downtime).toHaveTextContent('Longest downtime5h')
     expect(downtime).toHaveAttribute('data-severity', 'danger')
     expect(streak).toHaveTextContent('6-day clean streak')
     expect(downtime.getBoundingClientRect().height).toBeGreaterThan(0)
@@ -170,5 +170,45 @@ describe('Home evidence truth in Chromium', () => {
     render(<RecoveryCenterHero {...baseProps} metricsStatus="stale" onRefreshStatus={retry} />)
     await userEvent.keyboard('{Tab}{Enter}')
     expect(retry).toHaveBeenCalledExactlyOnceWith()
+  })
+
+  it('explains the score with contributors that link to where to act', () => {
+    const onOpenRuns = vi.fn()
+    const onOpenRecoveryQueue = vi.fn()
+    render(<RecoveryCenterHero
+      {...baseProps}
+      healthScore={71}
+      openFailures={2}
+      priorityCount={1}
+      longestOpenMs={6 * 60 * 1000}
+      successRateDisplay="71.4%"
+      onOpenRuns={onOpenRuns}
+      onOpenRecoveryQueue={onOpenRecoveryQueue}
+    />)
+
+    const success = screen.getByTestId('home-contributor-success')
+    const failures = screen.getByTestId('home-contributor-failures')
+    expect(success).toHaveTextContent('Success rate71.4%')
+    expect(failures).toHaveTextContent('Open failures2')
+    fireEvent.click(success)
+    fireEvent.click(failures)
+    fireEvent.click(screen.getByTestId('recovery-center-longest-downtime'))
+    expect(onOpenRuns).toHaveBeenCalledTimes(1)
+    expect(onOpenRecoveryQueue).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps open failures and downtime without metrics evidence, but no success rate', () => {
+    render(<RecoveryCenterHero
+      {...baseProps}
+      healthScore={null}
+      metricsStatus="unavailable"
+      openFailures={1}
+      longestOpenMs={60_000}
+      successRateDisplay="71.4%"
+    />)
+
+    expect(screen.queryByTestId('home-contributor-success')).toBeNull()
+    expect(screen.getByTestId('home-contributor-failures')).toHaveTextContent('1')
+    expect(screen.getByTestId('recovery-center-longest-downtime')).toBeVisible()
   })
 })

@@ -304,6 +304,11 @@ AI Studio route, so the review context remains available. A blank writable canva
 has one primary assisted start and keeps Add step as the manual, provider-free
 path. The teaching overlay still passes palette drops through outside its action.
 
+The AI Studio header marks the current stage as the first incomplete one, with
+`aria-current="step"`. In Solution Packs, Install is disabled only by the
+`packs.install` permission; missing credentials are named under the button but
+never block it, because a pack installs as a draft that is wired afterwards.
+
 Contextual authoring prefills never submit work. Replacing an intent invalidates
 pending compilation/proposal results and releases their loading state; late
 responses cannot clear a newer request's loading or restore the old proposal.

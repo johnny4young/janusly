@@ -8,6 +8,8 @@
 - Find a setting cards show live status, such as 0 alert policies · 1 failure
   pattern. Attention dots in the Settings rail explain their reason on hover
   and to screen readers.
+- The Home health score lists what drives it: success rate, open failures and
+  longest downtime, each linking to where to act.
 
 - Revoking a connection lists the workflows that use it and, when there are
   any, requires typing the connection name. If the list cannot be loaded, the
@@ -18,6 +20,11 @@
 - The pending setup step is a row in What needs you with its progress, not a
   separate card repeating the next action.
 
+- Solution pack buttons keep a readable label. Under Install, a pack now names
+  the credentials to connect before running it, or says that your role can't
+  install or run packs.
+- AI Studio has a smaller header and a horizontal 1-2-3-4 stepper that marks the
+  current step.
 - Each view has one header row with its section title and tabs; descriptions
   moved to a tooltip on the title, so content starts about 110 px higher.
 - Headings that receive focus for screen readers no longer show a focus ring
