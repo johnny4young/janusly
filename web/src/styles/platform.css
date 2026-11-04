@@ -264,6 +264,16 @@
       "right right";
   }
 
+  .top-bar--authoring {
+    grid-template-areas:
+      "brand user"
+      "right right"
+      "nav nav";
+  }
+
+  .top-bar--authoring .workspace-section-nav { min-width: 0; }
+  .top-bar--authoring .workspace-section-nav__rail { overflow-x: auto; padding: 3px; }
+
   .top-bar-left { grid-area: brand; }
   .top-bar-right {
     grid-area: right;

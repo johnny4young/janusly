@@ -184,7 +184,10 @@ defined there and are passed to `contractApi` as its `guard` option (see
 reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector load
 lazily like every other tab panel: `src/components/panel-loaders.ts` holds one
 dynamic importer per tab, `RightPanel` builds its `lazy()` components from
-them, and `WorkspaceSectionNav` reuses those importers on hover/focus. The
+them, and `WorkspaceSectionNav` reuses those importers on hover/focus. On the
+canvas tabs `AppWorkspace` renders that navigation in the top bar, lazily from
+the `RightPanel` chunk, and `RightPanel` omits it; every other tab keeps it as
+the panel's header row. The
 `authoring-workspace` group also contains shared dependencies, so its code can
 load before an authoring panel mounts. `lazy()` defers mounting, not necessarily
 transfer; a second destination-level preload effect is unnecessary. First-open
