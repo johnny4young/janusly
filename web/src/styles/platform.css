@@ -1548,7 +1548,6 @@
   line-height: 1.45;
 }
 
-.we-recovery-center-hero__downtime,
 .we-recovery-center-hero__streak,
 .we-recovery-center-hero__wins {
   display: inline-flex;
@@ -1561,9 +1560,6 @@
   line-height: 1.35;
 }
 
-.we-recovery-center-hero__downtime { color: var(--we-text-2); }
-.we-recovery-center-hero__downtime[data-severity="warn"] { color: var(--we-warning-text); }
-.we-recovery-center-hero__downtime[data-severity="danger"] { color: var(--we-danger-text); }
 .we-recovery-center-hero__streak { color: var(--we-success-text); }
 .we-recovery-center-hero__wins { color: var(--we-primary); }
 
@@ -1621,6 +1617,34 @@
 .we-home-health-summary .ui-button {
   justify-self: start;
 }
+
+.we-home-contributors {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.we-home-contributors button {
+  width: 100%;
+  min-width: 190px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 6px;
+  margin-inline: -6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--we-muted);
+  font-size: 12px;
+}
+
+.we-home-contributors button:hover { background: var(--we-primary-soft); }
+.we-home-contributors b { color: var(--we-text-1); font-variant-numeric: tabular-nums; }
+.we-home-contributors [data-severity="warn"] b { color: var(--we-warning-text); }
+.we-home-contributors [data-severity="danger"] b { color: var(--we-danger-text); }
 
 .we-home-workspace {
   display: grid;

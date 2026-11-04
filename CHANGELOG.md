@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The Home health score lists what drives it: success rate, open failures and
+  longest downtime, each linking to where to act.
+
 - Headings that receive focus for screen readers no longer show a focus ring
   when a page opens.
 
