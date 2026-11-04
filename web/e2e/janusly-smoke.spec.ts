@@ -650,6 +650,8 @@ for (const locale of ['en', 'es'] as const) {
     expect(dlqResponse.ok()).toBe(true)
     const dlq = await dlqResponse.json() as { data: { status: string } }
     expect(dlq.data.status).toBe('open')
+    // The drill opens the queue once its refresh settles; going Home earlier loses that race.
+    await expect(page).toHaveURL(/#\/runs\/dlq/)
     await page.goto('/#/home')
     // Validation evidence never becomes a successful production sample.
     await expect(health).not.toContainText(locale === 'en' ? 'On track' : 'Todo encaminado')
