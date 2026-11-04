@@ -4,6 +4,8 @@ package httpapi
 
 import (
 	"bufio"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -195,4 +197,39 @@ func TestStreamGuardsMatchRunReads(t *testing.T) {
 		403, "runs_forbidden", "Forbidden")
 	requireError(t, h.call("GET", "/runs/"+runID+"/stream", nil, h.org+"-x"),
 		403, "runs_forbidden", "Forbidden")
+}
+
+// The web stops reconnecting once it sees a terminal status and relies on the
+// server ending the response, or the connection would stay open indefinitely.
+func TestRunStreamEndsAfterTerminalStatus(t *testing.T) {
+	h := newAPIHarness(t)
+	started := h.call("POST", "/v1/start", map[string]any{"workflow": map[string]any{
+		"nodes": []any{map[string]any{"id": "only", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}}, "")
+	runID := started.body["data"].(map[string]any)["runId"].(string)
+
+	conn := openStream(t, h, runID, "")
+	readFrames(t, conn, func(frames []sseFrame) bool {
+		for _, f := range frames {
+			if f.event == "run-status" && strings.Contains(f.data, "succeeded") {
+				return true
+			}
+		}
+		return false
+	}, 15*time.Second)
+
+	deadline := time.After(streamTerminalGrace + 10*time.Second)
+	for {
+		select {
+		case <-conn.lines:
+		case err := <-conn.errs:
+			if !errors.Is(err, io.EOF) {
+				t.Fatalf("stream ended with %v, want EOF", err)
+			}
+			return
+		case <-deadline:
+			t.Fatal("stream stayed open after the terminal grace window")
+		}
+	}
 }

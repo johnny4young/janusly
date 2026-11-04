@@ -483,6 +483,11 @@ export default function App() {
   // Shell derivations are memoized on their inputs: the shell renders on
   // every store tick, and these walks over runs, nodes and dead letters used
   // to run on each of them.
+  const recoverRunNode = useCallback((failedRunId: string, nodeId: string) => {
+    openRecoveryQueue(deadLetters.find((item) => (
+      item.runId === failedRunId && item.nodeId === nodeId && item.status === 'open'
+    ))?.id)
+  }, [deadLetters, openRecoveryQueue])
   const openDlqCount = useMemo(() => deadLetters.filter(dlq => dlq.status === 'open').length, [deadLetters])
   // Waiting is a run-level posture. Semantic quarantine deliberately leaves
   // its source node succeeded, so node-only counting would report all-clear
@@ -694,6 +699,7 @@ export default function App() {
       onOpenTab={setActiveTab}
       onOpenHelp={openShortcuts}
       onOpenRecovery={openRecoveryQueue}
+      onRecoverRunNode={recoverRunNode}
       onReadinessResult={handleReadinessResult}
       onOpenPalette={() => setPaletteOpen(true)}
       onCloseShortcuts={closeShortcuts}

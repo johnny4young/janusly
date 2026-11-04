@@ -9,6 +9,15 @@
   Restore.
 - New workflow opens a menu with Describe it, Start blank and Use a template,
   selectable with keys 1 to 3. The empty list shows the same three choices.
+- Canvas connections drop the repeated "default" label; named branches show a
+  pill on the connection.
+
+- A failed step on the run snapshot keeps its full title, shows its error in
+  one line, and links to its item in the recovery queue.
+
+- Run events opens on the latest failed run, with a run picker, and the
+  breadcrumb reads Activity › Run events.
+
 - Empty states end in a primary button instead of text that reads as a label.
 - The Settings breadcrumb names the open pane, such as Settings › Access, and
   the pane follows its link: pasting a link, Back and Forward now change what

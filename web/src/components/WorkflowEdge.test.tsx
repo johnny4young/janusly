@@ -104,8 +104,8 @@ describe('<WorkflowEdge />', () => {
 
   it('distinguishes default, conditional, and error routes', () => {
     const { container, rerender } = renderEdge()
-    expect(screen.getByText('default')).toBeInTheDocument()
-    expect(container.querySelector('.we-edge-label')).toHaveAttribute('data-kind', 'default')
+    expect(container.querySelector('.we-edge-label')).toBeNull()
+    expect(container.querySelector('path.we-edge')).toHaveAttribute('aria-label', expect.stringContaining('default'))
 
     rerender(<ReactFlowProvider><svg><WorkflowEdge
       id="edge-1" source="a" target="b" sourceX={0} sourceY={0} targetX={100} targetY={100}
