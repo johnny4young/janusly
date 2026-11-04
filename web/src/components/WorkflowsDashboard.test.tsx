@@ -433,6 +433,32 @@ describe('<WorkflowsDashboard />', () => {
     expect(screen.queryByTestId('workflows-load-more')).not.toBeInTheDocument()
   })
 
+  it('sorts from the table headers, remembers the choice and drops the old switch', async () => {
+    const rowIds = () => screen.getAllByTestId(/^workflows-row-wf\w*$/).map(row => row.dataset.testid)
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return [
+        { id: 'wfA', orgId: 'o', name: 'Alpha', openFailureCount: 0, lastRunAt: '2026-06-03T00:00:00.000Z' },
+        { id: 'wfB', orgId: 'o', name: 'Bravo', openFailureCount: 4, lastRunAt: '2026-06-01T00:00:00.000Z' },
+        { id: 'wfC', orgId: 'o', name: 'Charlie', openFailureCount: 1, lastRunAt: '2026-06-02T00:00:00.000Z' },
+      ]
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wfA')
+    expect(screen.queryByRole('group', { name: /sort/i })).toBeNull()
+    expect(rowIds()).toEqual(['workflows-row-wfA', 'workflows-row-wfC', 'workflows-row-wfB'])
+
+    fireEvent.click(screen.getByTestId('workflows-sort-openFailures'))
+    expect(rowIds()).toEqual(['workflows-row-wfB', 'workflows-row-wfC', 'workflows-row-wfA'])
+
+    fireEvent.click(screen.getByTestId('workflows-sort-openFailures'))
+    expect(rowIds()).toEqual(['workflows-row-wfA', 'workflows-row-wfC', 'workflows-row-wfB'])
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem(FILTERS_KEY)!)).toMatchObject({
+      sort: 'openFailures',
+      sortDirection: 'asc',
+    }))
+  })
+
   it('migrates a persisted legacy scalar tag into a filter chip on mount', async () => {
     window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tag: 'billing', query: 'bill', sort: 'name' }))
     mockApi((url) => {

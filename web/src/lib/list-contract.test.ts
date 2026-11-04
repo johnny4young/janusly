@@ -20,7 +20,8 @@ const version = {
 }
 const saved = {
   id: workflow.id, orgId: 'org-a', name: 'Example', createdAt: null, createdBy: null, deletedAt: null, folder: null,
-  lastRunStatus: null, pausedReason: null, status: 'active', tags: [], runCount: 0, bufferedTriggerCount: 0,
+  lastRunStatus: null, lastRunAt: null, pausedReason: null, status: 'active', tags: [], runCount: 0, bufferedTriggerCount: 0,
+  openFailureCount: 0, currentVersion: 1,
 }
 const run = {
   id: 'run-a', orgId: 'org-a', status: 'timed_out', createdAt: null, createdBy: null, hasWaitingNodes: false,

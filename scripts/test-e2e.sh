@@ -22,6 +22,7 @@ specs=(
   e2e/guided-authoring.spec.ts
   e2e/durable-authoring.spec.ts
   e2e/text-search.spec.ts
+  e2e/flows-table.spec.ts
   e2e/operator-velocity.spec.ts
   e2e/workflow-rollouts.spec.ts
   e2e/recovery-confidence-passport.spec.ts

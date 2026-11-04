@@ -5455,6 +5455,10 @@
               "null"
             ]
           },
+          "currentVersion": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "deletedAt": {
             "type": [
               "string",
@@ -5470,6 +5474,12 @@
           "id": {
             "type": "string"
           },
+          "lastRunAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "lastRunStatus": {
             "type": [
               "string",
@@ -5478,6 +5488,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "openFailureCount": {
+            "minimum": 0,
+            "type": "integer"
           },
           "orgId": {
             "type": "string"
@@ -5509,8 +5523,11 @@
           "createdBy",
           "createdAt",
           "lastRunStatus",
+          "lastRunAt",
           "runCount",
           "bufferedTriggerCount",
+          "openFailureCount",
+          "currentVersion",
           "status",
           "pausedReason",
           "tags",

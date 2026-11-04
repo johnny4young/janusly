@@ -47,7 +47,7 @@ func TestViewKeySetsPinned(t *testing.T) {
 		{"dlqSummary", DeadLetterSummaryView{}, "attempt,createdAt,errorJson,id,nodeId,nodeType,orgId,recovery,replayedAt,runId,status,workflowName"},
 		{"dlqDetail", DeadLetterDetailView{}, "attempt,createdAt,drill,drillOutcome,errorJson,id,nodeId,nodeJson,orgId,replayClaimedAt,replayedAt,runId,status,suspectVersion,workflowJson"},
 		{"recoveryOverlay", RecoveryOverlayView{}, "comments,id,lastOccurredAt,metadataWorkflowId,occurrenceCount,owner,resolutionReason,severity,slaTargetAt,status,workflowId"},
-		{"workflowListItem", WorkflowListItemView{}, "bufferedTriggerCount,createdAt,createdBy,deletedAt,folder,id,lastRunStatus,name,orgId,pausedReason,runCount,status,tags"},
+		{"workflowListItem", WorkflowListItemView{}, "bufferedTriggerCount,createdAt,createdBy,currentVersion,deletedAt,folder,id,lastRunAt,lastRunStatus,name,openFailureCount,orgId,pausedReason,runCount,status,tags"},
 		{"version", VersionView{}, "createdAt,createdBy,dagJson,id,orgId,sloJson,upstreamHealthSources,version,workflowId"},
 	}
 	for _, tc := range cases {

@@ -1,8 +1,8 @@
 /**
- * A single workflow row in the active Flows list (name, tag pills, folder pill,
- * last-run status, paused pill + breaker Resume, health badge, per-row
- * folder/tag controls, the inline-confirm Delete, and the open affordance). Rendered by `WorkflowsDashboard.tsx` in both
- * the flat and folder-grouped views.
+ * A single workflow row of the Flows table (name/slug with tag and folder
+ * controls, status pills, open failures, health with trend, last run, version,
+ * breaker Resume, the inline-confirm Delete, and the open affordance). Rendered
+ * inside `FlowsTable` in both the flat and folder-grouped views.
  *
  * Presentation only: the container owns all state (drag, selection, delete
  * confirm) and the folder/tag/delete mutations; this component receives them as
@@ -10,8 +10,9 @@
  */
 
 import { memo, type Dispatch, type SetStateAction } from 'react'
-import { Folder, GripVertical, PlayCircle, Trash2, Workflow, X } from 'lucide-react'
+import { Folder, GripVertical, PlayCircle, Trash2, X } from 'lucide-react'
 import type { SavedWorkflow } from '../types'
+import { FlowHealthTrend } from './FlowHealthTrend'
 import { WorkflowHealthBadge } from './WorkflowHealthBadge'
 import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, useT } from '../i18n'
@@ -39,6 +40,7 @@ export type FlowRowProps = {
   deleteWorkflow: (workflowId: string) => void | Promise<void>
   resumeWorkflow: (workflowId: string) => void | Promise<void>
   recoveryBusy: boolean
+  onHealthScore?: (workflowId: string, score: number) => void
   t: TFunc
 }
 
@@ -65,12 +67,14 @@ export const FlowRow = memo(function FlowRow({
   deleteWorkflow,
   resumeWorkflow,
   recoveryBusy,
+  onHealthScore,
   t,
 }: FlowRowProps) {
   // `status` is absent on older cached rows; treat that as active.
   const pausedByBreaker = workflow.status === STATUS_PAUSED_CIRCUIT_BREAKER
   const isPaused = Boolean(workflow.status) && workflow.status !== 'active'
   const hasBufferedTriggers = (workflow.bufferedTriggerCount ?? 0) > 0
+  const openFailures = workflow.openFailureCount ?? 0
   // Folder choices for the per-row "Move to folder" select: the org-wide
   // folder list plus the row's own folder if a stale value isn't already in it
   // (so the native select can always render its current value as a real option).
@@ -82,106 +86,124 @@ export const FlowRow = memo(function FlowRow({
   const rowTags = workflow.tags ?? []
   const addableTags = tagOptions.filter((tg) => !rowTags.includes(tg))
   return (
-    <li>
-      <div
-        className="we-list-row"
-        data-clickable="true"
-        data-severity="cobalt"
-        data-dragging={draggingId === workflow.id ? 'true' : undefined}
-        data-testid={`workflows-row-${workflow.id}`}
-        onClick={() => onOpen(workflow.id)}
-      >
-        {/* Bulk-select checkbox — only in selection mode. stopPropagation so
-            ticking a row never opens it. */}
-        {canWrite && selectionMode && (
-          <input
-            type="checkbox"
-            className="we-list-row__select"
-            checked={selectedIds.has(workflow.id)}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => { event.stopPropagation(); toggleSelected(workflow.id) }}
-            aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name })}
-            data-testid={`workflows-select-row-${workflow.id}`}
-          />
-        )}
-        {/* Drag handle — only rendered once folders exist (otherwise there's no
-            section to drop onto). Native DnD is mouse-only; the per-row select
-            below and the Inspector folder field stay keyboard-accessible. */}
-        {canWrite && hasFolders && (
-          <span
-            className="we-list-row__drag"
-            draggable
-            onDragStart={(event) => {
-              event.dataTransfer.setData('text/plain', workflow.id)
-              event.dataTransfer.effectAllowed = 'move'
-              setDraggingId(workflow.id)
-            }}
-            onDragEnd={() => {
-              setDraggingId(null)
-              setDropTarget(null)
-            }}
-            onClick={(event) => event.stopPropagation()}
-            title={t('workflowsDashboard.dragHandleTitle')}
-            aria-label={t('workflowsDashboard.dragHandleTitle')}
-            data-testid={`workflows-drag-${workflow.id}`}
-          >
-            <GripVertical size={14} aria-hidden="true" />
-          </span>
-        )}
-        <span className="we-list-row__avatar" aria-hidden="true">
-          <Workflow size={14} />
-        </span>
-        <div className="we-list-row__body">
-          <strong>{workflow.name}</strong>
-          <small className="mono" title={workflow.id}>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString(getResolvedLocale()) : workflow.id}</small>
-          {/* Tag pills are editable inline: each carries a ✕ to remove it, and a
-              "+ tag" picker adds an existing org tag — the per-row equivalent of
-              the bulk tag bar. Controls stopPropagation so they never open the row. */}
-          {(rowTags.length > 0 || addableTags.length > 0) && (
-            <span className="we-list-row__tags">
-              {rowTags.map(tag => (
-                <span key={tag} className="we-pill we-list-row__tag" data-tone="ghost">
-                  {tag}
-                  {canWrite && (
-                    <button
-                      type="button"
-                      className="we-list-row__tag-remove"
-                      aria-label={t('workflowsDashboard.removeTagAria', { tag })}
-                      title={t('workflowsDashboard.removeTagAria', { tag })}
-                      onClick={(event) => { event.stopPropagation(); void setRowTag(workflow.id, tag, 'remove') }}
-                      data-testid={`workflows-row-tag-remove-${workflow.id}-${tag}`}
-                    >
-                      <X size={10} aria-hidden="true" />
-                    </button>
-                  )}
-                </span>
-              ))}
-              {canWrite && addableTags.length > 0 && (
-                <select
-                  className="we-list-row__tag-add"
-                  value=""
-                  aria-label={t('workflowsDashboard.addTagAria', { name: workflow.name })}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) => { event.stopPropagation(); if (event.target.value) void setRowTag(workflow.id, event.target.value, 'add') }}
-                  data-testid={`workflows-row-tag-add-${workflow.id}`}
-                >
-                  <option value="">{t('workflowsDashboard.addTagPlaceholder')}</option>
-                  {addableTags.map(tag => (
-                    <option key={tag} value={tag}>{tag}</option>
-                  ))}
-                </select>
-              )}
+    <tr
+      data-dragging={draggingId === workflow.id ? 'true' : undefined}
+      data-testid={`workflows-row-${workflow.id}`}
+      onClick={() => onOpen(workflow.id)}
+    >
+      <td>
+        <div className="we-flows-table__cell we-flows-table__identity">
+          {/* Bulk-select checkbox — only in selection mode. stopPropagation so
+              ticking a row never opens it. */}
+          {canWrite && selectionMode && (
+            <input
+              type="checkbox"
+              className="we-list-row__select"
+              checked={selectedIds.has(workflow.id)}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => { event.stopPropagation(); toggleSelected(workflow.id) }}
+              aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name })}
+              data-testid={`workflows-select-row-${workflow.id}`}
+            />
+          )}
+          {/* Drag handle — only rendered once folders exist (otherwise there's no
+              section to drop onto). Native DnD is mouse-only; the per-row select
+              below and the Inspector folder field stay keyboard-accessible. */}
+          {canWrite && hasFolders && (
+            <span
+              className="we-list-row__drag"
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData('text/plain', workflow.id)
+                event.dataTransfer.effectAllowed = 'move'
+                setDraggingId(workflow.id)
+              }}
+              onDragEnd={() => {
+                setDraggingId(null)
+                setDropTarget(null)
+              }}
+              onClick={(event) => event.stopPropagation()}
+              title={t('workflowsDashboard.dragHandleTitle')}
+              aria-label={t('workflowsDashboard.dragHandleTitle')}
+              data-testid={`workflows-drag-${workflow.id}`}
+            >
+              <GripVertical size={14} aria-hidden="true" />
             </span>
           )}
-          {workflow.folder && (
-            <span className="we-list-row__folder">
-              <span className="we-pill" data-tone="ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder })}>
-                <Folder size={12} aria-hidden="true" /> {workflow.folder}
+          <div className="we-flows-table__title">
+            <strong>{workflow.name}</strong>
+            <small className="we-flows-table__mono">{workflow.id}</small>
+            {/* Tag pills are editable inline: each carries a ✕ to remove it, and a
+                "+ tag" picker adds an existing org tag — the per-row equivalent of
+                the bulk tag bar. Controls stopPropagation so they never open the row. */}
+            {(rowTags.length > 0 || addableTags.length > 0) && (
+              <span className="we-list-row__tags">
+                {rowTags.map(tag => (
+                  <span key={tag} className="we-pill we-list-row__tag" data-tone="ghost">
+                    {tag}
+                    {canWrite && (
+                      <button
+                        type="button"
+                        className="we-list-row__tag-remove"
+                        aria-label={t('workflowsDashboard.removeTagAria', { tag })}
+                        title={t('workflowsDashboard.removeTagAria', { tag })}
+                        onClick={(event) => { event.stopPropagation(); void setRowTag(workflow.id, tag, 'remove') }}
+                        data-testid={`workflows-row-tag-remove-${workflow.id}-${tag}`}
+                      >
+                        <X size={10} aria-hidden="true" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {canWrite && addableTags.length > 0 && (
+                  <select
+                    className="we-list-row__tag-add"
+                    value=""
+                    aria-label={t('workflowsDashboard.addTagAria', { name: workflow.name })}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => { event.stopPropagation(); if (event.target.value) void setRowTag(workflow.id, event.target.value, 'add') }}
+                    data-testid={`workflows-row-tag-add-${workflow.id}`}
+                  >
+                    <option value="">{t('workflowsDashboard.addTagPlaceholder')}</option>
+                    {addableTags.map(tag => (
+                      <option key={tag} value={tag}>{tag}</option>
+                    ))}
+                  </select>
+                )}
               </span>
-            </span>
-          )}
+            )}
+            {(workflow.folder || (canWrite && hasFolders)) && (
+              <span className="we-list-row__folder">
+                {workflow.folder && (
+                  <span className="we-pill" data-tone="ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder })}>
+                    <Folder size={12} aria-hidden="true" /> {workflow.folder}
+                  </span>
+                )}
+                {/* Keyboard / screen-reader equivalent of drag-to-folder: a native
+                    <select> is operable without a mouse. Same gate as the drag
+                    handle; reuses the moveToFolder path the drag drop uses. */}
+                {canWrite && hasFolders && (
+                  <select
+                    className="we-list-row__folder-select"
+                    value={workflow.folder ?? ''}
+                    aria-label={t('workflowsDashboard.moveToFolderAria', { name: workflow.name })}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => { event.stopPropagation(); void moveToFolder(workflow.id, event.target.value) }}
+                    data-testid={`workflows-move-folder-${workflow.id}`}
+                  >
+                    <option value="">{t('workflowsDashboard.ungroupedFolder')}</option>
+                    {folderChoices.map(folder => (
+                      <option key={folder} value={folder}>{folder}</option>
+                    ))}
+                  </select>
+                )}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="we-list-row__meta">
+      </td>
+      <td>
+        <div className="we-flows-table__cell">
           {/* A paused workflow refuses new runs, so the list says so before the
               operator clicks Run and gets a 409. The reason carries the
               evidence (which is why it's the tooltip, not a truncated pill). */}
@@ -190,32 +212,39 @@ export const FlowRow = memo(function FlowRow({
               {t(pausedByBreaker ? 'workflowsDashboard.pausedByBreaker' : 'workflowsDashboard.paused')}
             </span>
           )}
-          {workflow.lastRunStatus && (
+          {workflow.lastRunStatus ? (
             <span className="status-pill" data-status={workflow.lastRunStatus}>{formatStatusLabel(workflow.lastRunStatus)}</span>
+          ) : !isPaused && (
+            <span className="status-pill" data-status="idle">{t('workflowsDashboard.statusIdle')}</span>
           )}
-          {typeof workflow.runCount === 'number' && (
-            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount })}>{workflow.runCount}</span>
-          )}
-          <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
-          {/* Keyboard / screen-reader equivalent of drag-to-folder: a native
-              <select> is operable without a mouse. Only rendered once folders
-              exist (same gate as the drag handle), so the flat no-folder list is
-              unchanged. Reuses the same moveToFolder path the drag drop uses. */}
-          {canWrite && hasFolders && (
-            <select
-              className="we-list-row__folder-select"
-              value={workflow.folder ?? ''}
-              aria-label={t('workflowsDashboard.moveToFolderAria', { name: workflow.name })}
-              onClick={(event) => event.stopPropagation()}
-              onChange={(event) => { event.stopPropagation(); void moveToFolder(workflow.id, event.target.value) }}
-              data-testid={`workflows-move-folder-${workflow.id}`}
-            >
-              <option value="">{t('workflowsDashboard.ungroupedFolder')}</option>
-              {folderChoices.map(folder => (
-                <option key={folder} value={folder}>{folder}</option>
-              ))}
-            </select>
-          )}
+        </div>
+      </td>
+      <td
+        data-open={openFailures > 0 ? 'true' : undefined}
+        data-testid={`workflows-open-failures-${workflow.id}`}
+      >
+        {openFailures}
+      </td>
+      <td>
+        {/* The badge expands its breakdown in place, so a click here never opens the row. */}
+        <div className="we-flows-table__cell" onClick={(event) => event.stopPropagation()}>
+          <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} onScore={onHealthScore} />
+          <FlowHealthTrend workflowId={workflow.id} currentVersion={workflow.currentVersion ?? 0} />
+        </div>
+      </td>
+      <td data-testid={`workflows-last-run-${workflow.id}`}>
+        {workflow.lastRunAt ? (
+          <time dateTime={workflow.lastRunAt}>{new Date(workflow.lastRunAt).toLocaleString(getResolvedLocale(), { dateStyle: 'medium', timeStyle: 'short' })}</time>
+        ) : t('workflowsDashboard.lastRunNever')}
+        {(workflow.runCount ?? 0) > 0 && (
+          <small>{t('workflowsDashboard.runCountTitle', { count: workflow.runCount })}</small>
+        )}
+      </td>
+      <td className="we-flows-table__mono" data-testid={`workflows-version-${workflow.id}`}>
+        {workflow.currentVersion ? `v${workflow.currentVersion}` : '—'}
+      </td>
+      <td>
+        <div className="we-flows-table__cell we-flows-table__actions">
           {/* Only breaker pauses get a Resume: an upstream-outage pause clears
               itself when the status page recovers. An active workflow can
               continue a capped buffered window without changing pause state. */}
@@ -223,7 +252,6 @@ export const FlowRow = memo(function FlowRow({
             <Button
               size="sm"
               onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
-             
               title={t('workflowsDashboard.resumeFlowTitle')}
               data-testid={`workflows-resume-${workflow.id}`}
               disabled={recoveryBusy}
@@ -235,7 +263,6 @@ export const FlowRow = memo(function FlowRow({
             <Button
               size="sm"
               onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
-             
               title={t('workflowsDashboard.continueBackfillTitle', { count: workflow.bufferedTriggerCount ?? 0 })}
               data-testid={`workflows-backfill-${workflow.id}`}
               disabled={recoveryBusy}
@@ -253,8 +280,6 @@ export const FlowRow = memo(function FlowRow({
               <Button
                 size="sm"
                 variant="danger"
-               
-               
                 onClick={(event) => { event.stopPropagation(); void deleteWorkflow(workflow.id) }}
                 data-testid={`workflows-delete-confirm-${workflow.id}`}
               >
@@ -262,8 +287,6 @@ export const FlowRow = memo(function FlowRow({
               </Button>
               <Button
                 size="sm"
-               
-               
                 onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(null) }}
               >
                 {t('common.cancel')}
@@ -274,8 +297,6 @@ export const FlowRow = memo(function FlowRow({
               size="sm"
               variant="danger"
               className="we-list-row__delete"
-             
-             
               onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(workflow.id) }}
               title={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
               aria-label={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
@@ -285,7 +306,7 @@ export const FlowRow = memo(function FlowRow({
             </Button>
           )}
         </div>
-      </div>
-    </li>
+      </td>
+    </tr>
   )
 })

@@ -76,7 +76,7 @@ test.describe('marketing screens', () => {
     // Open a seeded workflow first so the canvas shows a real graph next to
     // the proposal instead of an empty draft.
     await openWorkspaceDestination(page, 'Workflows')
-    const pipelineRow = page.locator('.we-list-row').filter({ hasText: 'Demo · order pipeline' }).first()
+    const pipelineRow = page.locator('[data-testid^="workflows-row-"]').filter({ hasText: 'Demo · order pipeline' }).first()
     await pipelineRow.waitFor({ state: 'visible' })
     await pipelineRow.getByRole('button', { name: /^Open/ }).first().click()
     await expect(page.locator('.workflow-node').first()).toBeVisible({ timeout: 20_000 })

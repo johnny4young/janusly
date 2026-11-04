@@ -3,6 +3,13 @@
 ## Unreleased
 
 - Buttons keep their icon and label on one row across the product.
+- The Workflows list is a table with labelled Name, Status, Open failures,
+  Health, Last run and Version columns. Open failures counts the flow's open
+  dead letters, the run count moves under Last run, Health shows the change
+  since the current version once enough runs exist, and header sorting replaces
+  the Recent / Name / Failed first switch. Clicking the health score now opens
+  its breakdown without leaving the list. `GET /v1/workflows` rows add
+  `openFailureCount`, `lastRunAt` and `currentVersion`.
 
 - Workflow generation audits retain bounded first-draft issue codes even when
   a repair succeeds, without storing model drafts or prompts.
