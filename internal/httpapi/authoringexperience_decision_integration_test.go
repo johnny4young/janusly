@@ -283,11 +283,19 @@ func TestAuthoringExperienceRevalidationFailuresNeverRequestGeneration(t *testin
 			probe := &experienceReaderProbe{}
 			h, request, _, calls := experienceProposalIntegrationFixture(t, config.AuthoringExperienceReview, func(options *V1ServerOptions) { options.ExperienceReader = probe })
 			probe.registry = &authoring.ExperienceRegistry{Pool: testPool(t), Enabled: true}
+			// Issuing the receipt is setup: a loaded host must not trip the stage deadline here.
+			probe.decide = func(ctx context.Context, input authoring.DecisionRequest, catalog authoring.Catalog) (authoring.ExperienceSelection, error) {
+				return probe.registry.Decide(context.WithoutCancel(ctx), input, catalog)
+			}
 			first := h.call("POST", "/v1/ai/workflow-proposals", request, "")
 			if first.status != http.StatusOK {
 				t.Fatal(first.body)
 			}
-			request["experienceReceipt"] = first.body["data"].(map[string]any)["experienceDecision"]
+			receipt := first.body["data"].(map[string]any)["experienceDecision"]
+			if receipt == nil {
+				t.Fatalf("setup issued no receipt: %+v", first.body)
+			}
+			request["experienceReceipt"] = receipt
 			probe.decide = func(ctx context.Context, _ authoring.DecisionRequest, _ authoring.Catalog) (authoring.ExperienceSelection, error) {
 				if failure == "deadline" {
 					<-ctx.Done()

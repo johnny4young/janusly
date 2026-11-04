@@ -8,9 +8,22 @@
   leaves the inventory without a reload.
 - Rotate secret no longer crashes the Connections panel when a workflow uses
   the connection; its preview lists those workflows by name.
+- The pending setup step is a row in What needs you with its progress, not a
+  separate card repeating the next action.
+
+- Each view has one header row with its section title and tabs; descriptions
+  moved to a tooltip on the title, so content starts about 110 px higher.
+- Headings that receive focus for screen readers no longer show a focus ring
+  when a page opens.
+
 - The language selector in the account menu is a compact row like Theme and
   Density, and the canvas zoom controls follow the dark theme.
 - Buttons keep their icon and label on one row across the product.
+- Recovery failures open with a one-line cause such as "Host
+  demo-ingest.invalid does not resolve", a cause chip and whether a retry can
+  help; the raw error JSON stays collapsed below. DNS and connection errors from
+  the Go runtime now cluster under Network instead of Other, and DNS failures
+  get their own "DNS lookup failed" signature.
 
 - Workflow generation audits retain bounded first-draft issue codes even when
   a repair succeeds, without storing model drafts or prompts.

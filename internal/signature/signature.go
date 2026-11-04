@@ -92,7 +92,8 @@ var (
 	credentialMissingPattern = regexp.MustCompile(`(?i)credential\s+secret\s+missing\s+for\s+['"]?([\w\-.]+)`)
 	missingSecretPattern     = regexp.MustCompile(`(?i)Missing\s+secret[: ]+['"]?([\w\-.]+)`)
 	httpStatusPattern        = regexp.MustCompile(`(?i)\bHTTP\s+(\d{3})\b`)
-	networkFailurePattern    = regexp.MustCompile(`(?i)\b(?:timeout|timed\s+out|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ECONNABORTED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET))\b|getaddrinfo|did\s+not\s+resolve\s+to\s+any\s+address|fetch\s+failed`)
+	dnsFailurePattern        = regexp.MustCompile(`(?i)\bno\s+such\s+host\b|\bserver\s+misbehaving\b|did\s+not\s+resolve\s+to\s+any\s+address|\b(?:ENOTFOUND|EAI_AGAIN)\b|getaddrinfo|name\s+resolution`)
+	networkFailurePattern    = regexp.MustCompile(`(?i)\b(?:timeout|timed\s+out|deadline\s+exceeded|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ECONNABORTED|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET)|dial\s+tcp|connection\s+(?:refused|reset)|broken\s+pipe)\b|fetch\s+failed`)
 	parseErrorPattern        = regexp.MustCompile(`(?i)\b(?:invalid\s+JSON|is\s+not\s+valid\s+JSON|JSON\.parse|unexpected\s+token|unexpected\s+end\s+of\s+JSON|parse\s+error|in\s+JSON\s+at\s+position|expected\s+property\s+name)\b`)
 	httpGuardPattern         = regexp.MustCompile(`(?i)\b(?:exceeds?\s+maxResponseBytes|redirect\s+limit\s+exceeded|target\s+is\s+private\s+and\s+blocked|resolves?\s+to\s+a\s+private\s+address|Unsupported\s+HTTP\s+target\s+protocol|response\s+(?:body\s+)?too\s+large)\b`)
 	rateLimitPattern         = regexp.MustCompile(`(?i)\b(?:rate[_\s-]?limit(?:ed|s)?\s+(?:exceeded|reached|hit)|429\s+too\s+many\s+requests|too\s+many\s+requests)\b`)
@@ -170,10 +171,15 @@ func Normalize(errValue any, ctx Context) Result {
 		}
 	}
 
-	// 3. Network timeout / connection failures.
-	if networkFailurePattern.MatchString(message) {
+	// 3. Network failures. DNS keeps its own cluster: the fix is the host, not a retry.
+	dnsFailure := dnsFailurePattern.MatchString(message)
+	if dnsFailure || networkFailurePattern.MatchString(message) {
+		label := "Network timeout"
+		if dnsFailure {
+			label = "DNS lookup failed"
+		}
 		return Result{
-			Signature:      "Network timeout on " + nodeType + " node",
+			Signature:      label + " on " + nodeType + " node",
 			Category:       "network_timeout",
 			SuggestedOwner: "workflow_author",
 		}

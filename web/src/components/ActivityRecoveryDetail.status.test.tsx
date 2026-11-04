@@ -68,3 +68,12 @@ it('does not reuse an initial detail with a different summary status', async () 
   expect(await screen.findByText(/fresh detail/)).toBeInTheDocument()
   expect(screen.queryByText(/stale detail/)).not.toBeInTheDocument()
 })
+
+it('leads the evidence with the readable cause and keeps the raw error collapsed', async () => {
+  vi.mocked(readDeadLetterDetail).mockResolvedValue(detail('open', 'lookup demo-ingest.invalid: no such host'))
+  render(<ActivityRecoveryDetail deadLetter={summary} {...handlers} />)
+
+  expect(await screen.findByText('Host demo-ingest.invalid does not resolve')).toBeInTheDocument()
+  expect(screen.getByTestId('recovery-error-raw-toggle')).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.queryByTestId('recovery-error-raw')).not.toBeInTheDocument()
+})
