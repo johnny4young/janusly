@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Workflow rows open with a click and keep delete behind a ⋯ menu. Move to
+  Trash happens at once and its toast offers Undo for six seconds.
+- Active and Trash are now a segmented control with counts above the workflow
+  list. Deleted workflows appear in the same table, with their expiry date and
+  Restore.
+- New workflow opens a menu with Describe it, Start blank and Use a template,
+  selectable with keys 1 to 3. The empty list shows the same three choices.
+- Activity shows its sections as tabs: Runs, Recover with the number of open
+  failures, Agent activity and Reports.
+- Reports shows recovery trends for the last 7, 30 or 90 days: recovery KPIs,
+  the activity heatmap, failure clusters, model calibration, AI spend, and
+  Recovery validation and the Value dashboard with Markdown and JSON exports.
+- Home keeps only what needs a decision now: the collapsed Insights and history
+  section is gone, replaced by a Today strip with today's runs and success, open
+  failures and pending approvals, plus the Operator prompt and a link to Reports.
+  An AI budget banner appears only at the warning threshold.
 - Build opens with the sidebar collapsed to a rail for more canvas; the flow
   name and version move to the top bar.
 - Connections is now a table with type, health, the workflows known to use each
@@ -42,6 +58,10 @@
   install or run packs.
 - AI Studio has a smaller header and a horizontal 1-2-3-4 stepper that marks the
   current step.
+- The Tools catalog fits one screen: tools are grouped by namespace in a
+  three-column grid, filterable by Read-only, May change external systems and
+  Installed. Install state now survives a reload, and a tool's description and
+  Install action open from its row.
 - Each view has one header row with its section title and tabs; descriptions
   moved to a tooltip on the title, so content starts about 110 px higher.
 - Headings that receive focus for screen readers no longer show a focus ring

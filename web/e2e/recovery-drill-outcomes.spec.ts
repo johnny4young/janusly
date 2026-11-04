@@ -1,4 +1,4 @@
-import {
+import { openReports,
   openActivityRecoveryDetail,
   openWorkspaceSection,
 } from './_helpers/workspace-navigation'
@@ -147,8 +147,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   await dismissToasts(page)
   await captureEvidence(recoveredOutcome, 'recovery-drill-outcome-en-recovered')
 
-  await page.getByRole('button', { name: /^Home\b/ }).click()
-  await page.getByTestId('home-insights-toggle').click()
+  await openReports(page)
   const validation = page.getByTestId('recovery-validation-section')
   await expect(validation).toContainText('Recovery validation')
   await expect(validation).toContainText('1/1')
@@ -200,9 +199,7 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
   await dismissToasts(page)
   await captureEvidence(resolvedOutcome, 'recovery-drill-outcome-es-accepted-loss-mobile')
 
-  await page.getByRole('button', { name: 'Navegación' }).click()
-  await page.locator('#workspace-sidebar').getByRole('button', { name: /^Inicio\b/ }).click()
-  await page.getByTestId('home-insights-toggle').click()
+  await openReports(page)
   const validation = page.getByTestId('recovery-validation-section')
   await expect(validation).toContainText('Validación de recuperación')
   await expect(validation).toContainText('1/1')

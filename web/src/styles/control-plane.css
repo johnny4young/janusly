@@ -95,6 +95,22 @@
   color: var(--we-brand-glyph);
 }
 
+.workspace-section-nav__count {
+  background: var(--we-danger-soft);
+  border-radius: 999px;
+  color: var(--we-danger-text);
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  min-width: 16px;
+  padding: 0 5px;
+  text-align: center;
+}
+
+.workspace-section-nav__item[data-active="true"] .workspace-section-nav__count {
+  background: var(--we-brand-glyph);
+  color: var(--we-primary);
+}
+
 .we-operations-header__intro {
   color: var(--we-muted);
   font-size: 12px;
@@ -1197,13 +1213,6 @@
 }
 
 /* Tabular run count in a Flows row meta slot. */
-.we-list-row__count {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: var(--we-ink-soft);
-}
-
 .we-list-row__pill {
   display: inline-flex;
   align-items: center;

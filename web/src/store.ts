@@ -153,7 +153,8 @@ type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
  */
 type StreamTransport = 'idle' | 'sse' | 'polling'
 type ToastTone = 'success' | 'error' | 'info'
-type Toast = { id: string; message: string; tone: ToastTone }
+type ToastAction = { label: string; onClick: () => void }
+type Toast = { id: string; message: string; tone: ToastTone; action?: ToastAction }
 type BudgetBlockedEnvelope = {
   monthlyUsdSpent?: number
   monthlyUsdLimit?: number | null
@@ -300,7 +301,7 @@ type WorkflowStore = {
   setStreamStatus: (status: StreamStatus) => void
   setStreamTransport: (transport: StreamTransport) => void
   resetRun: () => void
-  addToast: (message: string, tone?: ToastTone) => void
+  addToast: (message: string, tone?: ToastTone, action?: ToastAction) => void
   removeToast: (id: string) => void
   setBudgetBlocked: (envelope: BudgetBlockedEnvelope | null) => void
   clearBudgetBlocked: () => void
@@ -899,16 +900,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   setStreamTransport: (streamTransport) => set({ streamTransport }),
   resetRun: () => set((state) => clearedRunProjection(state.runTransitionGeneration)),
-  addToast: (message, tone = 'info') => {
+  addToast: (message, tone = 'info', action) => {
     // Polling callers can emit the same failure every tick during an
     // outage; a visible duplicate adds noise without information, so an
     // identical (message, tone) refreshes nothing and is dropped.
-    if (get().toasts.some((toast) => toast.message === message && toast.tone === tone)) return
+    if (!action && get().toasts.some((toast) => toast.message === message && toast.tone === tone)) return
     const id = crypto.randomUUID()
-    set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))
+    set((state) => ({ toasts: [...state.toasts, { id, message, tone, action }] }))
     // Errors need longer on screen than success/info: an error often asks the
-    // reader to act (switch panel, fix a field) before it auto-dismisses.
-    setTimeout(() => get().removeToast(id), tone === 'error' ? TOAST_TTL_ERROR_MS : TOAST_TTL_DEFAULT_MS)
+    // reader to act (switch panel, fix a field) before it auto-dismisses. So
+    // does a toast offering an action.
+    setTimeout(() => get().removeToast(id), tone === 'error' || action ? TOAST_TTL_ERROR_MS : TOAST_TTL_DEFAULT_MS)
   },
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
   bumpPlatformVersion: (tags = [PLATFORM_TAG]) => {

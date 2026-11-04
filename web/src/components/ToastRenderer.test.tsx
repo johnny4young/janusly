@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useWorkflowStore } from '../store'
 import { ToastRenderer } from './ToastRenderer'
 
@@ -26,5 +26,28 @@ describe('<ToastRenderer />', () => {
     useWorkflowStore.setState({ toasts: [{ id: 'b', message: 'Boom', tone: 'error' }] })
     render(<ToastRenderer />)
     expect(screen.getByRole('button', { name: 'Boom' }).className).toContain('toast-error')
+  })
+
+  it('runs a toast action once and removes the toast', () => {
+    const onClick = vi.fn()
+    useWorkflowStore.setState({ toasts: [{ id: 'c', message: 'Moved', tone: 'success', action: { label: 'Undo', onClick } }] })
+    render(<ToastRenderer />)
+    fireEvent.click(screen.getByTestId('toast-action'))
+    expect(onClick).toHaveBeenCalledOnce()
+    expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('takes orphaned focus for the action but never steals it', () => {
+    const input = document.body.appendChild(document.createElement('input'))
+    input.focus()
+    useWorkflowStore.setState({ toasts: [{ id: 'd', message: 'One', tone: 'success', action: { label: 'Undo', onClick: () => {} } }] })
+    const first = render(<ToastRenderer />)
+    expect(input).toHaveFocus()
+    first.unmount()
+    input.remove()
+
+    useWorkflowStore.setState({ toasts: [{ id: 'e', message: 'Two', tone: 'success', action: { label: 'Undo', onClick: () => {} } }] })
+    render(<ToastRenderer />)
+    expect(screen.getByTestId('toast-action')).toHaveFocus()
   })
 })

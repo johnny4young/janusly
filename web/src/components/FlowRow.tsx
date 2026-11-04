@@ -1,22 +1,22 @@
 /**
  * A single workflow row of the Flows table (name/slug with tag and folder
  * controls, status pills, open failures, health with trend, last run, version,
- * breaker Resume, the inline-confirm Delete, and the open affordance). Rendered
- * inside `FlowsTable` in both the flat and folder-grouped views.
+ * breaker Resume, the open affordance, and the row menu). Rendered inside
+ * `FlowsTable` in both the flat and folder-grouped views.
  *
- * Presentation only: the container owns all state (drag, selection, delete
- * confirm) and the folder/tag/delete mutations; this component receives them as
- * props.
+ * Presentation only: the container owns all state (drag, selection) and the
+ * folder/tag/delete mutations; this component receives them as props.
  */
 
 import { memo, type Dispatch, type SetStateAction } from 'react'
-import { Folder, GripVertical, PlayCircle, Trash2, X } from 'lucide-react'
+import { Folder, GripVertical, MoreHorizontal, PlayCircle, Trash2, X } from 'lucide-react'
 import type { SavedWorkflow } from '../types'
 import { FlowHealthTrend } from './FlowHealthTrend'
 import { WorkflowHealthBadge } from './WorkflowHealthBadge'
 import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, useT } from '../i18n'
 import { Button } from './ui/Button'
+import { Menu } from './ui/Menu'
 
 type TFunc = ReturnType<typeof useT>['t']
 
@@ -29,12 +29,10 @@ export type FlowRowProps = {
   selectionMode: boolean
   selectedIds: Set<string>
   draggingId: string | null
-  confirmDeleteId: string | null
   onOpen: (id: string) => void
   toggleSelected: (workflowId: string) => void
   setDraggingId: Dispatch<SetStateAction<string | null>>
   setDropTarget: Dispatch<SetStateAction<string | null>>
-  setConfirmDeleteId: Dispatch<SetStateAction<string | null>>
   setRowTag: (workflowId: string, tag: string, op: 'add' | 'remove') => void | Promise<void>
   moveToFolder: (workflowId: string, folderKey: string) => void | Promise<void>
   deleteWorkflow: (workflowId: string) => void | Promise<void>
@@ -56,12 +54,10 @@ export const FlowRow = memo(function FlowRow({
   selectionMode,
   selectedIds,
   draggingId,
-  confirmDeleteId,
   onOpen,
   toggleSelected,
   setDraggingId,
   setDropTarget,
-  setConfirmDeleteId,
   setRowTag,
   moveToFolder,
   deleteWorkflow,
@@ -273,39 +269,24 @@ export const FlowRow = memo(function FlowRow({
             </Button>
           )}
           <Button size="sm" onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }}>{t('workflowsDashboard.openFlow')}</Button>
-          {/* Soft-delete affordance: an inline confirm (one row at a time) so a
-              click never deletes immediately. The delete is recoverable from the
-              Trash view. stopPropagation so the controls never open the row. */}
-          {!canWrite ? null : confirmDeleteId === workflow.id ? (
-            <span className="we-list-row__confirm" onClick={(event) => event.stopPropagation()}>
-              <span className="we-list-row__confirm-text">{t('workflowsDashboard.deleteConfirm', { name: workflow.name })}</span>
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={(event) => { event.stopPropagation(); void deleteWorkflow(workflow.id) }}
-                data-testid={`workflows-delete-confirm-${workflow.id}`}
-              >
-                {t('common.delete')}
-              </Button>
-              <Button
-                size="sm"
-                onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(null) }}
-              >
-                {t('common.cancel')}
-              </Button>
-            </span>
-          ) : (
-            <Button
-              size="sm"
-              variant="danger"
-              className="we-list-row__delete"
-              onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(workflow.id) }}
-              title={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
-              aria-label={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
-              data-testid={`workflows-delete-${workflow.id}`}
+          {canWrite && (
+            <Menu
+              size="icon"
+              variant="ghost"
+              aria-label={t('workflowsDashboard.moreActions', { name: workflow.name })}
+              title={t('workflowsDashboard.moreActions', { name: workflow.name })}
+              data-testid={`workflows-row-menu-${workflow.id}`}
+              items={[{
+                id: 'trash',
+                label: t('workflowsDashboard.moveToTrash'),
+                icon: <Trash2 size={14} />,
+                danger: true,
+                testId: `workflows-move-to-trash-${workflow.id}`,
+                onSelect: () => void deleteWorkflow(workflow.id),
+              }]}
             >
-              <Trash2 size={14} aria-hidden="true" />
-            </Button>
+              <MoreHorizontal size={14} aria-hidden="true" />
+            </Menu>
           )}
         </div>
       </td>

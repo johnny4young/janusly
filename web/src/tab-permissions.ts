@@ -15,6 +15,7 @@ export const TAB_PERMISSION: Partial<Record<ActiveTab, string>> = {
   runs: 'runs.read',
   reasoning: 'runs.read',
   multiAgent: 'workflows.read',
+  reports: 'recovery.read',
   operations: 'recovery.read',
   recoveryCase: 'recovery.read',
   credentials: 'credentials.read',
@@ -24,7 +25,7 @@ export const TAB_PERMISSION: Partial<Record<ActiveTab, string>> = {
 export const TAB_FALLBACK_ORDER: ActiveTab[] = [
   'home',
   'workflows', 'ai-studio', 'inspector', 'templates', 'packs', 'experiments',
-  'runs', 'recover', 'reasoning', 'multiAgent',
+  'runs', 'recover', 'reasoning', 'multiAgent', 'reports',
   'operations', 'credentials', 'members', 'marketplace',
 ]
 

@@ -63,6 +63,8 @@ export type ValueDashboardSectionProps = {
   personalWins?: OperatorWins | null
   /** When true, the section renders the private-beta-pending empty state. */
   terminalRunsZero: boolean
+  /** The exports are a separate permission from reading the numbers. */
+  canExport?: boolean
 }
 
 function formatCurrency(amount: number): string {
@@ -96,7 +98,7 @@ function formatSeconds(seconds: number): string {
 
 export function ValueDashboardSection(props: ValueDashboardSectionProps) {
   const { t } = useT()
-  const { clustersResolved, valueEstimate, terminalRunsZero, windowDays } = props
+  const { canExport = true, clustersResolved, valueEstimate, terminalRunsZero, windowDays } = props
   const [exporting, setExporting] = useState<'markdown' | 'json' | null>(null)
 
   const baselineMttrSeconds = valueEstimate?.assumptions.baselineMttrSeconds ?? 0
@@ -161,28 +163,30 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
           {personalWinsLine}
           {ledgerLine}
         </div>
-        <div className="we-recovery-center-value__actions">
-          <Button
-            size="sm"
-           
-           
-            disabled={exporting !== null}
-            onClick={() => void handleExport('markdown')}
-          >
-            <FileText size={14} aria-hidden="true" />
-            {t('recoveryCenter.value.export.markdown')}
-          </Button>
-          <Button
-            size="sm"
-           
-           
-            disabled={exporting !== null}
-            onClick={() => void handleExport('json')}
-          >
-            <Download size={14} aria-hidden="true" />
-            {t('recoveryCenter.value.export.json')}
-          </Button>
-        </div>
+        {canExport && (
+          <div className="we-recovery-center-value__actions">
+            <Button
+              size="sm"
+             
+             
+              disabled={exporting !== null}
+              onClick={() => void handleExport('markdown')}
+            >
+              <FileText size={14} aria-hidden="true" />
+              {t('recoveryCenter.value.export.markdown')}
+            </Button>
+            <Button
+              size="sm"
+             
+             
+              disabled={exporting !== null}
+              onClick={() => void handleExport('json')}
+            >
+              <Download size={14} aria-hidden="true" />
+              {t('recoveryCenter.value.export.json')}
+            </Button>
+          </div>
+        )}
       </header>
 
       <div className="we-recovery-center-value__grid">

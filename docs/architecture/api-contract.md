@@ -151,7 +151,7 @@ ships in the chunk of the call sites that import it: a guard used only by a lazy
 panel stays in that panel's chunk. A guard the eager Home controller imports
 ships eagerly: all eight `/recovery/home` section guards, including
 `RecoveryMetrics` and `FailureClusters`, land in `app-workspace.js` even though
-the lazy `HomeInsights` chunk renders them. The generator rewrites the whole
+only the lazy Reports chunk renders the clusters. The generator rewrites the whole
 directory, so a removed schema leaves no orphan module.
 
 A guard enforces shape: JSON types, nullability, `enum`/`const`, required keys,
@@ -383,6 +383,10 @@ the public kind values. Runtime callbacks and accepted-type internals never ente
 the wire. Absent input examples remain omitted and explicit empty examples remain
 objects. The typed template envelope preserves the embedded workflows and absent
 versus empty credential requirements.
+
+`GET /plugins/installed` returns `{ pluginIds }`, the plugin ids installed in the
+caller's organization. It requires viewer rank and `workflows.read`, and backs the
+install state of the Tools catalog.
 
 Browser readers validate entire pages before updating a projection: malformed
 successful responses are errors, not empty lists or partially filtered success.
