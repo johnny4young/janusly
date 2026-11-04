@@ -263,8 +263,15 @@ for credentials and external services, while the existing `integrations` route
 identifier remains compatible with saved deep links. The canonical Connections
 inventory stays list-first with a separate add dialog; Settings links to it
 rather than duplicating the secret form. Focused areas expose their own heading,
-persist in the hash, remain horizontally reachable on narrow screens and mount
-only their active cards. On narrow Connections views, the primary action stacks
+remain horizontally reachable on narrow screens and mount only their active
+cards. The hash owns the open area: `OperationsPage` follows
+`#/operations/<section>` while mounted, opening an area pushes a history entry,
+a hash naming no openable area is rewritten to the one on screen, and the shell
+breadcrumb names the routed area (the `operations.section.*` copy stays in the
+core catalog so it paints before the workspace catalog loads). The Find a setting
+index reads the counts on its cards only while it is open, each behind the
+permission of its panel; a denied or failed read omits that count. Attention dots
+carry their reason in the rail tab's `title` and the dot's accessible name. On narrow Connections views, the primary action stacks
 inside the card and each fixed-height virtual row keeps status, kind, expiry and
 both mutation actions visible; secondary owner and last-used facts remain on the
 wider inventory. The overview no longer presents a credential-only count as if

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The Settings breadcrumb names the open pane, such as Settings › Access, and
+  the pane follows its link: pasting a link, Back and Forward now change what
+  is on screen.
+- Find a setting cards show live status, such as 0 alert policies · 1 failure
+  pattern. Attention dots in the Settings rail explain their reason on hover
+  and to screen readers.
+
 - Revoking a connection lists the workflows that use it and, when there are
   any, requires typing the connection name. If the list cannot be loaded, the
   dialog says so and still requires the typed name. A revoked connection now

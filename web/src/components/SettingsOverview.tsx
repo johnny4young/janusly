@@ -4,24 +4,38 @@ import { useState } from 'react'
 import type { AiHealth, ActiveTab } from '../types'
 import { useT } from '../i18n'
 import { canOpenSettingsSection, SETTINGS_AREAS } from '../settings-sections'
+import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
 import type { OpsSection } from './operations-section-bus'
 import { EmptyView } from './panel-primitives'
 import { TextInput } from '@/components/ui/Form'
 import './SettingsOverview.css'
 import { Button } from './ui/Button'
+import { useSettingsAreaCounts, type SettingsAreaCounts } from './useSettingsAreaCounts'
+
+type CountedStatus = Exclude<keyof SettingsAreaCounts, 'mfaRequired'>
+
+function joinStatus(parts: readonly (string | null)[]): string {
+  return parts.filter(Boolean).join(' · ')
+}
 
 export function SettingsOverview({
   permissions,
   aiHealth,
+  usageStatus,
+  infrastructureStatus,
   onOpenSection,
   onOpenTab,
 }: {
   permissions?: readonly string[]
   aiHealth: AiHealth | null
+  usageStatus: string | null
+  infrastructureStatus: string | null
   onOpenSection: (section: Exclude<OpsSection, 'overview'>) => void
   onOpenTab: (tab: ActiveTab) => void
 }) {
   const { t } = useT()
+  const counts = useSettingsAreaCounts(permissions)
+  const { status: memory } = useMemoryConsentStatus()
   const [query, setQuery] = useState('')
   const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -37,12 +51,23 @@ export function SettingsOverview({
       .includes(normalizedQuery)
   })
 
-  const statusFor = (area: Exclude<OpsSection, 'overview'>): string | null => {
-    if (area === 'ai') {
-      if (aiHealth === null) return t('badges.health.unavailable')
-      return t(aiHealth?.enabled ? 'aiStudio.healthOn' : 'aiStudio.healthOff')
-    }
-    return null
+  const counted = (key: CountedStatus) =>
+    counts[key] === undefined ? null : t(`operations.status.${key}`, { count: counts[key] })
+  const statusByArea: Record<Exclude<OpsSection, 'overview'>, string | null> = {
+    ai: aiHealth === null
+      ? t('badges.health.unavailable')
+      : t(aiHealth.enabled ? 'aiStudio.healthOn' : 'aiStudio.healthOff'),
+    usage: usageStatus,
+    infrastructure: infrastructureStatus,
+    organization: memory && t(memory.enabled ? 'memoryGovernance.enabled' : 'memoryGovernance.disabled'),
+    access: joinStatus([
+      counted('roles'),
+      counts.mfaRequired === undefined
+        ? null
+        : t(counts.mfaRequired ? 'operations.status.mfaOn' : 'operations.status.mfaOff'),
+    ]),
+    integrations: joinStatus([counted('credentials'), counted('mcpConnections')]),
+    reliability: joinStatus([counted('alertPolicies'), counted('failurePatterns')]),
   }
 
   return (
@@ -76,7 +101,7 @@ export function SettingsOverview({
       ) : (
         <div className="we-settings-index__grid">
           {visibleAreas.map((area) => {
-            const status = statusFor(area)
+            const status = statusByArea[area]
             return (
               <button
                 key={area}
@@ -88,7 +113,7 @@ export function SettingsOverview({
                 <span className="we-settings-index__card-copy">
                   <strong>{t(`operations.section.${area}.label`)}</strong>
                   <span>{t(`operations.section.${area}.helper`)}</span>
-                  {status && <small>{status}</small>}
+                  {status && <small data-testid={`settings-index-status-${area}`}>{status}</small>}
                 </span>
               </button>
             )
