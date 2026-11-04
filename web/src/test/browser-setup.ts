@@ -1,11 +1,15 @@
 import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach } from 'vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { initI18n } from '../i18n'
 import { bootstrapTestCatalogs } from './i18n-bootstrap'
 import '../index.css'
 
 await bootstrapTestCatalogs()
+
+// `findBy*` waits on real lazy chunks here. The 1 s default fails on a busy host
+// with no product fault; a failing assertion still fails, only later.
+configure({ asyncUtilTimeout: 5_000 })
 
 beforeEach(() => {
   // Reset to English between tests so locale-mutating tests don't leak state.
