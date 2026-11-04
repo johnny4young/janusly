@@ -43,6 +43,9 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         celebrationTrigger={celebrationTrigger}
         personalWins={operatorWins}
         memoryPurgeCountdown={memoryPurgeCountdownLabel}
+        successRateDisplay={metrics?.successRate.display}
+        onOpenRuns={() => onOpenTab('runs')}
+        onOpenRecoveryQueue={() => onOpenRecoveryQueue()}
         onRefreshStatus={bumpPlatformVersion}
         onOpenMemoryGovernance={onOpenMemoryGovernance}
       />

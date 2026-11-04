@@ -32,6 +32,9 @@ export function RecoveryCenterHero({
   celebrationTrigger,
   personalWins = null,
   memoryPurgeCountdown = null,
+  successRateDisplay = null,
+  onOpenRuns,
+  onOpenRecoveryQueue,
   onRefreshStatus,
   onOpenMemoryGovernance,
 }: {
@@ -49,6 +52,9 @@ export function RecoveryCenterHero({
   celebrationTrigger?: number
   personalWins?: OperatorWins | null
   memoryPurgeCountdown?: string | null
+  successRateDisplay?: string | null
+  onOpenRuns?: () => void
+  onOpenRecoveryQueue?: () => void
   onRefreshStatus?: () => void
   onOpenMemoryGovernance?: () => void
 }) {
@@ -105,15 +111,6 @@ export function RecoveryCenterHero({
           <>
             <h1 id="recovery-center-hero-title" className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">{salutation}</h1>
             <p className="we-recovery-center-hero__subline">{subline}</p>
-            {typeof longestOpenMs === 'number' && longestOpenMs >= 0 && openFailures > 0 && (
-              <p
-                className="we-recovery-center-hero__downtime"
-                data-severity={longestOpenSeverity ?? 'ok'}
-                data-testid="recovery-center-longest-downtime"
-              >
-                {t('recoveryCenter.hero.longestDowntime', { duration: formatDowntime(longestOpenMs) })}
-              </p>
-            )}
             {hasEvidence && priorityCount === 0 && personalWins && personalWins.recovered > 0 && (
               <p className="we-recovery-center-hero__wins" data-testid="recovery-center-personal-wins">
                 <Award size={14} aria-hidden="true" />
@@ -156,6 +153,37 @@ export function RecoveryCenterHero({
             <Button variant="ghost" size="sm" type="button"  onClick={() => onRefreshStatus()}>
               {t('common.retry')}
             </Button>
+          )}
+          {(hasEvidence || openFailures > 0) && (
+            <ul className="we-home-contributors" aria-label={t('home.health.contributors')}>
+              {hasEvidence && successRateDisplay && (
+                <li>
+                  <button type="button" onClick={onOpenRuns} data-testid="home-contributor-success">
+                    <span>{t('home.health.successRate')}</span>
+                    <b>{successRateDisplay}</b>
+                  </button>
+                </li>
+              )}
+              <li>
+                <button type="button" onClick={onOpenRecoveryQueue} data-testid="home-contributor-failures">
+                  <span>{t('recoveryCenter.metric.failures.label')}</span>
+                  <b>{openFailures}</b>
+                </button>
+              </li>
+              {typeof longestOpenMs === 'number' && longestOpenMs >= 0 && openFailures > 0 && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={onOpenRecoveryQueue}
+                    data-severity={longestOpenSeverity ?? 'ok'}
+                    data-testid="recovery-center-longest-downtime"
+                  >
+                    <span>{t('home.health.downtime')}</span>
+                    <b>{formatDowntime(longestOpenMs)}</b>
+                  </button>
+                </li>
+              )}
+            </ul>
           )}
         </div>
       </div>

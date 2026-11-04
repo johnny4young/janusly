@@ -52,7 +52,7 @@ export function SolutionPacksPanel({
   onQueryChange,
   showSearch = true,
 }: SolutionPacksPanelProps) {
-  const { t } = useT()
+  const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
   const [internalQuery, setInternalQuery] = useState('')
   const [selectedDrills, setSelectedDrills] = useState<Record<string, string>>({})
@@ -112,6 +112,15 @@ export function SolutionPacksPanel({
           const selectedFixture = pack.failureFixtures.find((fixture) => fixture.id === requestedFixtureId)
             ?? pack.failureFixtures[0]
           const drillDescriptionId = `pack-drill-description-${pack.id}`
+          const missingCredentials = pack.requiredCredentials
+            .filter((cred) => !credentialKeys.has(`${cred.kind}:${cred.name}`))
+          // Missing credentials never block Install: a pack installs as a draft and is wired afterwards.
+          const installNote = !canInstall
+            ? t('packs.installNote.role')
+            : missingCredentials.length > 0 && t('packs.installNote.connect', {
+              names: new Intl.ListFormat(i18n.language).format(missingCredentials.map((cred) => cred.name)),
+            })
+          const installNoteId = `pack-note-${pack.id}`
           return (
             <div key={pack.id} className="list-card" data-testid={`solution-pack-${pack.id}`}>
               <div className="split-row" style={{ width: '100%' }}>
@@ -147,7 +156,7 @@ export function SolutionPacksPanel({
                   <h4 className="ui-field__label"><span>{t('packs.requires')}</span></h4>
                   <div className="we-tool-params">
                     {pack.requiredCredentials.map((cred) => {
-                      const missing = !credentialKeys.has(`${cred.kind}:${cred.name}`)
+                      const missing = missingCredentials.includes(cred)
                       const statusLabel = t(
                         missing ? 'packs.credential.missing' : 'packs.credential.ready',
                         { name: cred.name, kind: cred.kind },
@@ -185,13 +194,23 @@ export function SolutionPacksPanel({
               )}
 
               <div className="form-actions">
-                <Button variant="primary" type="button"  disabled={!canInstall} onClick={() => onInstall(pack.id)}>
+                <Button
+                  variant="primary"
+                  disabled={!canInstall}
+                  aria-describedby={installNote ? installNoteId : undefined}
+                  onClick={() => onInstall(pack.id)}
+                >
                   <Download size={13} aria-hidden="true" /> {t('packs.action.install')}
                 </Button>
-                <Button variant="secondary" type="button"  disabled={!canInstall} onClick={() => onSampleRun(pack.id)}>
+                <Button disabled={!canInstall} onClick={() => onSampleRun(pack.id)}>
                   <Play size={13} aria-hidden="true" /> {t('packs.action.sampleRun')}
                 </Button>
               </div>
+              {installNote && (
+                <small className="helper-text" id={installNoteId} data-testid={installNoteId}>
+                  {installNote}
+                </small>
+              )}
 
               {selectedFixture && (
                 <section className="we-pack-drill" aria-labelledby={`pack-drill-title-${pack.id}`}>
@@ -242,8 +261,7 @@ export function SolutionPacksPanel({
                       })}
                     </p>
                   </div>
-                  <Button variant="secondary"
-                    type="button"
+                  <Button
                     className="we-pack-drill__action"
                     disabled={!canInstall}
                     data-testid={`pack-drill-start-${pack.id}`}
