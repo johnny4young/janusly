@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A failed step on the run snapshot keeps its full title, shows its error in
+  one line, and links to its item in the recovery queue.
+
 - Run events opens on the latest failed run, with a run picker, and the
   breadcrumb reads Activity › Run events.
 

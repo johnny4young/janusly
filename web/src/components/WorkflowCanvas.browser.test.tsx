@@ -72,6 +72,20 @@ describe('WorkflowCanvas (browser mode)', () => {
     }
   })
 
+  it('shows a failed step\'s error and recovers without selecting the node', async () => {
+    const onRecover = vi.fn()
+    const node = makeNode('alpha', 'A step title long enough to need a second line', { x: 0, y: 0 })
+    node.data = { ...node.data, status: 'failed', errorSummary: 'Host demo.invalid does not resolve', onRecover }
+    const { props, findByTestId } = mountCanvas({ nodes: [node], edges: [] })
+
+    expect(await findByTestId('workflow-node-error')).toHaveTextContent('Host demo.invalid does not resolve')
+    const title = document.querySelector('.workflow-node-title') as HTMLElement
+    expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth)
+    ;(await findByTestId('workflow-node-recover')).click()
+    expect(onRecover).toHaveBeenCalledOnce()
+    expect(props.onNodeClick).not.toHaveBeenCalled()
+  })
+
   it('renders every node label and edge count from props', () => {
     const { getByText, container } = mountCanvas()
 
