@@ -138,7 +138,11 @@ describe('<PermissionGrantsPanel />', () => {
     expect(matrix.querySelectorAll('input[type=checkbox]')).toHaveLength(4 * CATALOG.catalog.length)
     expect(screen.getByRole('columnheader', { name: /^viewer/ })).toBeInTheDocument()
     expect(screen.getByRole('rowheader', { name: 'dlq.replay' })).toHaveAttribute('title', 'Replay DLQ')
-    expect(screen.getByTestId('permissions-add-role')).toHaveTextContent('Add custom role')
+    const addRole = screen.getByTestId('permissions-add-role')
+    expect(addRole).toHaveTextContent('Add custom role')
+    expect(addRole.closest('details')).not.toHaveAttribute('open')
+    fireEvent.click(addRole)
+    expect(addRole.closest('details')).toHaveAttribute('open')
   })
 
   it('saves every edited role with one Save and leaves untouched roles alone', async () => {
@@ -432,7 +436,9 @@ describe('<PermissionGrantsPanel />', () => {
     render(<PermissionGrantsPanel />)
     await screen.findByTestId('permissions-matrix')
     fireEvent.click(screen.getByLabelText('compliance - dlq.replay'))
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Delete custom role compliance' })) })
+    const remove = screen.getByRole('button', { name: 'Delete custom role compliance' })
+    expect(remove).toBe(screen.getByTestId('permissions-delete-compliance'))
+    await act(async () => { fireEvent.click(remove) })
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/org/roles/compliance', { method: 'DELETE' })
     })
