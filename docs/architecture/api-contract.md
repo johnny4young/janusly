@@ -151,7 +151,7 @@ ships in the chunk of the call sites that import it: a guard used only by a lazy
 panel stays in that panel's chunk. A guard the eager Home controller imports
 ships eagerly: all eight `/recovery/home` section guards, including
 `RecoveryMetrics` and `FailureClusters`, land in `app-workspace.js` even though
-the lazy `HomeInsights` chunk renders them. The generator rewrites the whole
+only the lazy Reports chunk renders the clusters. The generator rewrites the whole
 directory, so a removed schema leaves no orphan module.
 
 A guard enforces shape: JSON types, nullability, `enum`/`const`, required keys,

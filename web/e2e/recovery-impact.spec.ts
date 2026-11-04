@@ -4,6 +4,7 @@
  * refuse caller-supplied timestamps and actor identities.
  */
 
+import { openReports } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { execPostgresSql } from './_helpers/postgres'
@@ -245,8 +246,9 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
 
   await prepareSession(page, orgId)
   await page.goto('/')
-  await page.getByTestId('home-insights-toggle').click()
   const hero = page.locator('.we-recovery-center-hero')
+  await waitForHealthRingToSettle(hero)
+  await openReports(page)
   const valueDashboard = page.locator('.we-recovery-center-value')
   await expect(valueDashboard.getByTestId('recovery-insights-personal-wins')).toHaveText(
     'You recovered 2 failures in the last 30 days',
@@ -254,21 +256,18 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
   await expect(valueDashboard.getByTestId('recovery-lifetime-ledger')).toHaveText(
     'Since day one: 4 failures recovered · 3h 20m of downtime ended',
   )
-  await waitForHealthRingToSettle(hero)
   await hideUnrelatedOverlays(page)
   await capture(valueDashboard.getByTestId('recovery-insights-personal-wins'), 'web-en-recovery-personal-wins-default')
   await capture(valueDashboard, 'web-en-recovery-lifetime-ledger-default')
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
-  await page.getByTestId('home-insights-toggle').click()
   await expect(valueDashboard.getByTestId('recovery-insights-personal-wins')).toHaveText(
     'Recuperaste 2 fallos en los últimos 30 días',
   )
   await expect(valueDashboard.getByTestId('recovery-lifetime-ledger')).toHaveText(
     'Desde el primer día: 4 fallos recuperados · 3h 20m de inactividad terminada',
   )
-  await waitForHealthRingToSettle(hero)
   await hideUnrelatedOverlays(page)
   await capture(valueDashboard.getByTestId('recovery-insights-personal-wins'), 'web-es-recovery-personal-wins-default')
   await capture(valueDashboard, 'web-es-recovery-lifetime-ledger-default')
@@ -278,8 +277,8 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
   // authoritative count must retire that stale local row while the impact
   // poll surfaces the worker-owned terminal fact.
   const backgroundImpact = await seedPendingBackgroundRecovery(orgId)
+  await page.goto('/#/home')
   await page.reload()
-  await page.getByTestId('home-insights-toggle').click()
   await expect(page.getByTestId('recovery-center-metric-failures')).toContainText('1')
   const readsBeforeCompletion = recoveryReadResponses.length
   await completeBackgroundRecovery(orgId, backgroundImpact)
@@ -297,11 +296,13 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
     'Todo en orden',
     { timeout: 15_000 },
   )
+  await hideUnrelatedOverlays(page)
+  await capture(hero, 'web-es-recovery-background-impact-all-clear')
+  await openReports(page)
   await expect(valueDashboard.getByTestId('recovery-lifetime-ledger')).toHaveText(
     'Desde el primer día: 5 fallos recuperados · 3h 30m de inactividad terminada',
   )
   await hideUnrelatedOverlays(page)
-  await capture(hero, 'web-es-recovery-background-impact-all-clear')
   await capture(valueDashboard, 'web-es-recovery-background-impact-polled')
 
   expect(consoleErrors).toEqual([])

@@ -1,29 +1,25 @@
-import { lazy, Suspense } from 'react'
-import { ChevronDown } from 'lucide-react'
 import { OnboardingReplayButton } from './OnboardingReplayButton'
 import { OnboardingBanner } from './OnboardingBanner'
 import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
 import { RecoveryLabEntry } from './recovery-center/RecoveryCenterEmptyState'
 import { HomeActionWorkspace } from './recovery-center/HomeActionWorkspace'
+import { HomeBudgetBanner } from './recovery-center/HomeBudgetBanner'
+import { HomeTodayStrip } from './recovery-center/HomeTodayStrip'
+import { RecoveryCenterComposer } from './recovery-center/RecoveryCenterComposer'
 import { downtimeSeverity } from './recovery-center/recovery-center-model'
 import { useT } from '../i18n'
 import type { RecoveryCenterController } from './RecoveryCenterPanel'
 
-const HomeInsights = lazy(() => import('./recovery-center/HomeInsights').then((module) => ({
-  default: module.HomeInsights,
-})))
-
 export function RecoveryCenterView({ model }: { model: RecoveryCenterController }) {
   const { t } = useT()
   const {
-    activeRuns, allActiveRuns, allClear, allClearDowntimeOverride, bumpPlatformVersion,
-    celebrationTrigger, clusters, dismissIntro, greeting, handleRecommendedAction,
-    healthScore, heatmap, heatmapCells, insightsOpen, ledger, longestOpen, memoryPurgeCountdownLabel,
+    activeRuns, allActiveRuns, allClear, allClearDowntimeOverride, approvalsPending, bumpPlatformVersion,
+    celebrationTrigger, dismissIntro, greeting, handleRecommendedAction,
+    healthScore, longestOpen, memoryPurgeCountdownLabel,
     metrics, metricsError, metricsLoading, metricsStatus, nowMs, onOpenActivity,
     onOpenMemoryGovernance, onOpenRecoveryQueue, onOpenRun, onOpenTab, onStartRecoveryDrill,
     openDeadLetters, openFailureCount, operatorBriefStatus, operatorBriefWarnings, operatorWins,
-    recommendedActions, recoveryClearEligible,
-    setInsightsOpen, showOnboarding, streak, validation, waitingNodes,
+    recommendedActions, recoveryClearEligible, runsToday, showOnboarding, streak,
   } = model
 
   return (
@@ -50,6 +46,8 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         onOpenMemoryGovernance={onOpenMemoryGovernance}
       />
 
+      <HomeBudgetBanner onOpenTab={onOpenTab} />
+
       {showOnboarding ? (
         <>
           <RecoveryLabEntry
@@ -72,57 +70,22 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         onOpenActivity={onOpenActivity}
       />}
 
-      <section className="we-home-insights" data-expanded={insightsOpen}>
-        <button
-          type="button"
-          className="we-home-insights__toggle"
-          aria-expanded={insightsOpen}
-          aria-controls="we-home-insights-content"
-          onClick={() => setInsightsOpen((open) => !open)}
-          data-testid="home-insights-toggle"
-        >
-          <span className="we-home-insights__toggle-copy">
-            <strong>{t('home.insights.title')}</strong>
-          </span>
-          <span className="we-home-insights__toggle-action" aria-hidden="true">
-            <ChevronDown size={16} aria-hidden="true" />
-          </span>
-        </button>
+      <RecoveryCenterComposer onOpenTab={onOpenTab} recentDlqRunId={openDeadLetters[0]?.runId} />
 
-        {insightsOpen && (
-          <div id="we-home-insights-content">
-            <Suspense
-              fallback={(
-                <p className="helper-text" role="status">
-                  {t('common.loading')}
-                </p>
-              )}
-            >
-              <HomeInsights
-                metrics={metrics}
-                openFailureCount={openFailureCount}
-                waitingApprovals={waitingNodes.length}
-                clusters={clusters}
-                heatmap={heatmap}
-                heatmapCells={heatmapCells}
-                nowMs={nowMs}
-                validation={validation}
-                ledger={ledger}
-                personalWins={operatorWins}
-                recentDlqRunId={openDeadLetters[0]?.runId}
-                onOpenTab={onOpenTab}
-                onOpenRecoveryQueue={onOpenRecoveryQueue}
-              />
-            </Suspense>
+      <HomeTodayStrip
+        runsToday={runsToday}
+        openFailures={openFailureCount}
+        approvals={approvalsPending}
+        onOpenRecoveryQueue={() => onOpenRecoveryQueue()}
+        onOpenRuns={() => onOpenTab('runs')}
+        onOpenReports={() => onOpenTab('reports')}
+      />
 
-            {metricsError && !metricsLoading && (
-              <p className="we-recovery-center-error" role="status">
-                {t('recoveryCenter.metricsUnavailable', { detail: metricsError })}
-              </p>
-            )}
-          </div>
-        )}
-      </section>
+      {metricsError && !metricsLoading && (
+        <p className="we-recovery-center-error" role="status">
+          {t('recoveryCenter.metricsUnavailable', { detail: metricsError })}
+        </p>
+      )}
 
       <OnboardingReplayButton />
     </div>

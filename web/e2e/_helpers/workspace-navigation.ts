@@ -16,6 +16,11 @@ export async function openActivityRecoveryDetail(
   return detail
 }
 
+export async function openReports(page: Page): Promise<void> {
+  await page.goto('/#/reports')
+  await expect(page.getByTestId('reports-panel')).toBeVisible()
+}
+
 export async function openWorkspaceDestination(
   page: Page,
   destination: string,

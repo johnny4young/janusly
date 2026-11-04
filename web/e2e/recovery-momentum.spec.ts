@@ -111,7 +111,6 @@ async function runRecoveryCycle(
 
   await prepareIsolatedSession(page, contract.locale, options.reducedMotion)
   await page.goto('/')
-  await page.getByTestId('home-insights-toggle').click()
 
   const drillButton = page.getByTestId('recovery-center-empty-cta-drill')
   await expect(drillButton).toBeVisible()
@@ -205,7 +204,6 @@ test('two validation drills stay inspectable without fabricating operator work',
   const orgId = await prepareIsolatedSession(page, 'en', false)
   await page.goto('/')
 
-  await page.getByTestId('home-insights-toggle').click()
   const firstDrillResponse = page.waitForResponse((response) => (
     response.url().includes('/solution-packs/')
     && response.url().endsWith('/inject-failure')

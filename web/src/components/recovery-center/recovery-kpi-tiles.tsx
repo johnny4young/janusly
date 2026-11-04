@@ -1,4 +1,4 @@
-import { Hourglass, RefreshCw, ShieldCheck, Target, Zap } from 'lucide-react'
+import { Activity, Hourglass, RefreshCw, ShieldCheck, Target, Zap } from 'lucide-react'
 
 import { tRecoveryMetricRationale, useT } from '../../i18n'
 import type { ActiveTab } from '../../types'
@@ -6,7 +6,7 @@ import { selectRecoveryTimeMetric } from '../recovery-metrics'
 import type { VitalSignsTile } from '../VitalSignsStrip'
 import { formatDowntime, type RecoveryMetrics } from './recovery-center-model'
 
-/** The recovery KPI tiles Home and Reports both show, with the same drill-ins. */
+/** The recovery KPI tiles Reports shows, with their drill-ins. */
 export function useRecoveryKpiTiles(
   metrics: RecoveryMetrics | null,
   onOpenTab: (tab: ActiveTab) => void,
@@ -119,5 +119,20 @@ export function useRecoveryKpiTiles(
     testId: 'recovery-center-metric-sla',
   }
 
-  return { verifiedRecovery, firstAction, replay, durability, sla }
+  const runsLabel = t('activity.reports.runsSuccess')
+  const runsDisplay = `${metrics?.terminalRuns ?? 0} · ${metrics?.successRate.display ?? '—'}`
+  const runsRationale = t('activity.reports.runsWindow', { days: metrics?.windowDays ?? 30 })
+  const runs: VitalSignsTile = {
+    icon: <Activity size={14} aria-hidden="true" />,
+    label: runsLabel,
+    display: runsDisplay,
+    numericValue: null,
+    severity: metrics?.successRate.severity ?? 'neutral',
+    rationale: runsRationale,
+    ariaLabel: ariaLabel(runsLabel, runsDisplay, runsRationale),
+    onClick: () => onOpenTab('runs'),
+    testId: 'reports-metric-runs',
+  }
+
+  return { verifiedRecovery, firstAction, replay, durability, sla, runs }
 }

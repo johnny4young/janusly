@@ -14,6 +14,10 @@
 - Reports shows recovery trends for the last 7, 30 or 90 days: recovery KPIs,
   the activity heatmap, failure clusters, model calibration, AI spend, and
   Recovery validation and the Value dashboard with Markdown and JSON exports.
+- Home keeps only what needs a decision now: the collapsed Insights and history
+  section is gone, replaced by a Today strip with today's runs and success, open
+  failures and pending approvals, plus the Operator prompt and a link to Reports.
+  An AI budget banner appears only at the warning threshold.
 - Build opens with the sidebar collapsed to a rail for more canvas; the flow
   name and version move to the top bar.
 
