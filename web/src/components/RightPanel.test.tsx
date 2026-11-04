@@ -7,6 +7,11 @@ import { RightPanel, type RightPanelProps } from './RightPanel'
 vi.mock('../api', () => ({
   api: vi.fn(),
 }))
+vi.mock('./ReportsPanel', () => ({
+  ReportsPanel: ({ canReadDeadLetters, canReadReports }: { canReadDeadLetters: boolean; canReadReports: boolean }) => (
+    <div data-testid="reports-gates">{`dlq:${canReadDeadLetters} reports:${canReadReports}`}</div>
+  ),
+}))
 vi.mock('./RunsPanel', () => ({
   RunsPanel: ({ mode }: { mode?: string }) => (
     <div data-testid="runs-panel-mode">{mode ?? 'runs'}</div>
@@ -129,10 +134,28 @@ describe('<RightPanel /> recovery task space', () => {
       .toHaveTextContent('recovery')
     const sectionNav = screen.getByTestId('workspace-section-nav')
     expect(sectionNav).toHaveAttribute('data-destination', 'activity')
-    expect(within(sectionNav).queryByRole('button')).not.toBeInTheDocument()
     expect(within(sectionNav).getByText('Activity')).toBeVisible()
-    expect(within(sectionNav).getByTestId('workspace-section-context'))
-      .toHaveTextContent('Recover')
+    expect(within(sectionNav).getByRole('button', { name: 'Recover' }))
+      .toHaveAttribute('aria-current', 'page')
+    expect(within(sectionNav).getByRole('button', { name: 'Runs' }))
+      .not.toHaveAttribute('aria-current')
+  })
+
+  it('mounts Reports with each widget gate and counts only open failures on Recover', async () => {
+    const base = props()
+    render(<RightPanel {...props({
+      tab: 'reports',
+      permissions: ['recovery.read', 'reports.read'],
+      execution: {
+        ...base.execution,
+        deadLetters: [{ status: 'open' }, { status: 'open' }, { status: 'resolved' }] as typeof base.execution.deadLetters,
+      },
+    })} />)
+
+    expect(await screen.findByTestId('reports-gates')).toHaveTextContent('dlq:false reports:true')
+    const sectionNav = screen.getByTestId('workspace-section-nav')
+    expect(within(sectionNav).getByRole('button', { name: 'Reports' })).toHaveAttribute('aria-current', 'page')
+    expect(within(sectionNav).getByTestId('workspace-section-recover-count')).toHaveTextContent('2')
   })
 
   it('filters contextual sections with the same effective permissions as global navigation', () => {

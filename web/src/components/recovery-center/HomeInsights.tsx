@@ -1,13 +1,5 @@
-import {
-  AlertTriangle,
-  Hourglass,
-  RefreshCw,
-  ShieldCheck,
-  Target,
-  Users,
-  Zap,
-} from 'lucide-react'
-import { tRecoveryMetricRationale, useT } from '../../i18n'
+import { AlertTriangle, Users } from 'lucide-react'
+import { useT } from '../../i18n'
 import type { ActiveTab } from '../../types'
 import { RecoveryValidationSection, type RecoveryValidationReport } from '../RecoveryValidationSection'
 import { ValueDashboardSection } from '../ValueDashboardSection'
@@ -22,8 +14,8 @@ import {
   OperatorTodayTile,
 } from './RecoveryCenterTiles'
 import { RecoveryHeatmap } from './RecoveryHeatmap'
+import { useRecoveryKpiTiles } from './recovery-kpi-tiles'
 import {
-  formatDowntime,
   type ClustersResponse,
   type HeatmapCell,
   type HeatmapDay,
@@ -68,42 +60,16 @@ export function HomeInsights({
     ? t('recoveryCenter.metric.failures.rationaleEmpty')
     : t('recoveryCenter.metric.failures.rationale')
   const recoveryTime = metrics ? selectRecoveryTimeMetric(metrics) : null
-  const recoveryTimeLabel = t('recoveryCenter.metric.mttr.label')
-  const recoveryTimeDisplay = recoveryTime?.display ?? '—'
-  const recoveryTimeRationale = recoveryTime
-    ? tRecoveryMetricRationale(recoveryTime)
-    : t('recoveryCenter.metric.mttr.rationaleFallback')
-  const mttrTrend = metrics?.mttrTrend ?? []
-  const mttrTrendSeconds = mttrTrend.map((point) => point.seconds)
-  const mttrTrendPointLabels = mttrTrend.map(
-    (point) => `${point.day}: ${formatDowntime(point.seconds * 1000)}`,
-  )
-  const mttrTrendTitle = mttrTrendPointLabels.join('\n')
-  const firstActionLabel = t('recoveryCenter.metric.firstAction.label')
-  const firstActionDisplay = metrics?.timeToFirstAction?.display ?? '—'
-  const firstActionRationale = metrics?.timeToFirstAction
-    ? tRecoveryMetricRationale(metrics.timeToFirstAction)
-    : t('recoveryCenter.metric.firstAction.rationaleFallback')
+  const openDay = (day: string) => {
+    requestRecoveryDayFocus(day)
+    onOpenTab('recover')
+  }
+  const kpis = useRecoveryKpiTiles(metrics, onOpenTab, openDay)
   const approvalsLabel = t('recoveryCenter.metric.approvals.label')
   const approvalsDisplay = String(waitingApprovals)
   const approvalsRationale = waitingApprovals === 0
     ? t('recoveryCenter.metric.approvals.rationaleEmpty')
     : t('recoveryCenter.metric.approvals.rationale')
-  const replayLabel = t('recoveryCenter.metric.replay.label')
-  const replayDisplay = metrics?.replayRate.display ?? '—'
-  const replayRationale = metrics?.replayRate
-    ? tRecoveryMetricRationale(metrics.replayRate)
-    : t('recoveryCenter.metric.replay.rationaleFallback')
-  const durabilityLabel = t('recoveryCenter.metric.durability.label')
-  const durabilityDisplay = metrics?.recurrenceRate?.display ?? '—'
-  const durabilityRationale = metrics?.recurrenceRate
-    ? tRecoveryMetricRationale(metrics.recurrenceRate)
-    : t('recoveryCenter.metric.durability.rationaleFallback')
-  const slaLabel = t('recoveryCenter.metric.sla.label')
-  const slaDisplay = metrics?.slaAttainment?.display ?? '—'
-  const slaRationale = metrics?.slaAttainment
-    ? tRecoveryMetricRationale(metrics.slaAttainment)
-    : t('recoveryCenter.metric.sla.rationaleFallback')
   const homeTiles: VitalSignsTile[] = [
     {
       icon: <AlertTriangle size={14} aria-hidden="true" />,
@@ -120,52 +86,8 @@ export function HomeInsights({
       onClick: () => onOpenRecoveryQueue(),
       testId: 'recovery-center-metric-failures',
     },
-    {
-      icon: <RefreshCw size={14} aria-hidden="true" />,
-      label: recoveryTimeLabel,
-      display: recoveryTimeDisplay,
-      numericValue: recoveryTime?.value ?? null,
-      severity: recoveryTime?.severity ?? 'neutral',
-      rationale: recoveryTimeRationale,
-      ariaLabel: t('recoveryCenter.metric.aria', {
-        label: recoveryTimeLabel,
-        display: recoveryTimeDisplay,
-        rationale: recoveryTimeRationale,
-      }),
-      sparkline: mttrTrendSeconds.length >= 2 ? mttrTrendSeconds : undefined,
-      sparklineLabel: t('recoveryCenter.metric.mttr.trendAria', {
-        count: mttrTrendSeconds.length,
-      }),
-      sparklineTitle: mttrTrendSeconds.length >= 2 ? mttrTrendTitle : undefined,
-      sparklinePointLabels: mttrTrendSeconds.length >= 2
-        ? mttrTrendPointLabels
-        : undefined,
-      onSelectSparklinePoint: mttrTrendSeconds.length >= 2
-        ? (index) => {
-            const day = mttrTrend[index]?.day
-            if (!day) return
-            requestRecoveryDayFocus(day)
-            onOpenTab('recover')
-          }
-        : undefined,
-      onClick: () => onOpenTab('operations'),
-      testId: 'recovery-center-metric-verified-recovery',
-    },
-    {
-      icon: <Hourglass size={14} aria-hidden="true" />,
-      label: firstActionLabel,
-      display: firstActionDisplay,
-      numericValue: metrics?.timeToFirstAction?.value ?? null,
-      severity: metrics?.timeToFirstAction?.severity ?? 'neutral',
-      rationale: firstActionRationale,
-      ariaLabel: t('recoveryCenter.metric.aria', {
-        label: firstActionLabel,
-        display: firstActionDisplay,
-        rationale: firstActionRationale,
-      }),
-      onClick: () => onOpenTab('operations'),
-      testId: 'recovery-center-metric-first-action',
-    },
+    kpis.verifiedRecovery,
+    kpis.firstAction,
     {
       icon: <Users size={14} aria-hidden="true" />,
       label: approvalsLabel,
@@ -181,52 +103,9 @@ export function HomeInsights({
       onClick: () => onOpenTab('runs'),
       testId: 'recovery-center-metric-approvals',
     },
-    {
-      icon: <Zap size={14} aria-hidden="true" />,
-      label: replayLabel,
-      display: replayDisplay,
-      numericValue: metrics?.replayRate.value ?? null,
-      severity: metrics?.replayRate.severity ?? 'neutral',
-      rationale: replayRationale,
-      ariaLabel: t('recoveryCenter.metric.aria', {
-        label: replayLabel,
-        display: replayDisplay,
-        rationale: replayRationale,
-      }),
-      onClick: () => onOpenTab('operations'),
-      testId: 'recovery-center-metric-replay',
-    },
-    {
-      icon: <ShieldCheck size={14} aria-hidden="true" />,
-      label: durabilityLabel,
-      display: durabilityDisplay,
-      numericValue: metrics?.recurrenceRate?.value ?? null,
-      progressValue: metrics?.recurrenceRate?.value ?? null,
-      severity: metrics?.recurrenceRate?.severity ?? 'neutral',
-      rationale: durabilityRationale,
-      ariaLabel: t('recoveryCenter.metric.aria', {
-        label: durabilityLabel,
-        display: durabilityDisplay,
-        rationale: durabilityRationale,
-      }),
-      onClick: () => onOpenTab('operations'),
-      testId: 'recovery-center-metric-durability',
-    },
-    {
-      icon: <Target size={14} aria-hidden="true" />,
-      label: slaLabel,
-      display: slaDisplay,
-      numericValue: metrics?.slaAttainment?.value ?? null,
-      severity: metrics?.slaAttainment?.severity ?? 'neutral',
-      rationale: slaRationale,
-      ariaLabel: t('recoveryCenter.metric.aria', {
-        label: slaLabel,
-        display: slaDisplay,
-        rationale: slaRationale,
-      }),
-      onClick: () => onOpenTab('operations'),
-      testId: 'recovery-center-metric-sla',
-    },
+    kpis.replay,
+    kpis.durability,
+    kpis.sla,
   ]
   const topClusters = (clusters?.clusters ?? [])
     .slice()
@@ -246,10 +125,7 @@ export function HomeInsights({
         cells={heatmapCells}
         windowDays={90}
         nowMs={nowMs}
-        onSelectDay={(day) => {
-          requestRecoveryDayFocus(day)
-          onOpenTab('recover')
-        }}
+        onSelectDay={openDay}
       />
 
       <div className="we-home-insights__grid">

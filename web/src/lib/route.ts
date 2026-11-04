@@ -8,6 +8,7 @@
  *   #/runs/dlq                    the recovery queue, heading focused
  *   #/runs/dlq/<deadLetterId>     the recovery queue focused on one failure
  *   #/runs/day/<YYYY-MM-DD>       the recovery queue filtered to one UTC day
+ *   #/recover/day/<YYYY-MM-DD>    the same filter, opening the Recover tab
  *   #/operations/<section>        one Operations sub-section
  *
  * Hash routing keeps the served bundle a single static document: no server
@@ -18,7 +19,7 @@ import type { ActiveTab } from '../types'
 
 export const ROUTE_TABS = [
   'home', 'recover', 'workflows', 'members', 'ai-studio', 'experiments', 'marketplace', 'templates',
-  'packs', 'credentials', 'inspector', 'runs', 'reasoning', 'multiAgent', 'operations', 'recoveryCase',
+  'packs', 'credentials', 'inspector', 'runs', 'reasoning', 'multiAgent', 'reports', 'operations', 'recoveryCase',
 ] as const satisfies readonly ActiveTab[]
 
 // A tab added to ActiveTab without a spelling here fails to compile.
@@ -78,6 +79,10 @@ export function parseRoute(hash: string): WorkspaceRoute | null {
     if (kind === 'day') return DAY.test(id) ? { tab, focusDay: id } : null
     return null
   }
+  if (tab === 'recover' && kind === 'day' && rest.length === 1) {
+    const day = segment(rest[0])
+    return day && DAY.test(day) ? { tab, focusDay: day } : null
+  }
   if (tab === 'operations' && rest.length === 0) {
     const section = segment(kind)
     return section ? { tab, opsSection: section } : null
@@ -89,7 +94,7 @@ export function formatRoute(route: WorkspaceRoute): string {
   if (route.tab === 'recoveryCase' && route.recoveryCaseId) return `#/recoveryCase/${encodeURIComponent(route.recoveryCaseId)}`
   if (route.tab === 'runs' && route.deadLetterId) return `#/runs/dlq/${encodeURIComponent(route.deadLetterId)}`
   if (route.tab === 'runs' && route.queueFocus) return '#/runs/dlq'
-  if (route.tab === 'runs' && route.focusDay) return `#/runs/day/${route.focusDay}`
+  if ((route.tab === 'runs' || route.tab === 'recover') && route.focusDay) return `#/${route.tab}/day/${route.focusDay}`
   if (route.tab === 'operations' && route.opsSection) return `#/operations/${encodeURIComponent(route.opsSection)}`
   return `#/${route.tab}`
 }

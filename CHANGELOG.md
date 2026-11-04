@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Activity shows its sections as tabs: Runs, Recover with the number of open
+  failures, Agent activity and Reports.
+- Reports shows recovery trends for the last 7, 30 or 90 days: recovery KPIs,
+  the activity heatmap, failure clusters, model calibration, AI spend, and
+  Recovery validation and the Value dashboard with Markdown and JSON exports.
 - Build opens with the sidebar collapsed to a rail for more canvas; the flow
   name and version move to the top bar.
 

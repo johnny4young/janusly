@@ -521,7 +521,7 @@ test('every workspace tab mounts against Go without page errors', async ({ page,
   const tabs = [
     'home', 'recover', 'workflows', 'members', 'ai-studio', 'experiments',
     'marketplace', 'templates', 'packs', 'credentials', 'inspector',
-    'runs', 'reasoning', 'multiAgent', 'operations',
+    'runs', 'reasoning', 'multiAgent', 'reports', 'operations',
   ] as const
 
   for (const tab of tabs) {

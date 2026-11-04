@@ -19,6 +19,7 @@ describe('workspace route', () => {
       { tab: 'runs', queueFocus: true },
       { tab: 'runs', deadLetterId: 'dl-7' },
       { tab: 'runs', focusDay: '2026-09-04' },
+      { tab: 'recover', focusDay: '2026-09-04' },
       { tab: 'operations', opsSection: 'ai' },
     ] as const
     for (const route of cases) {
@@ -28,7 +29,7 @@ describe('workspace route', () => {
   })
 
   it('refuses anything it did not spell', () => {
-    for (const hash of ['', '#', '#/', '#/nope', '/runs', '#/runs/dlq/a/b', '#/runs/day', '#/runs/day/tomorrow',
+    for (const hash of ['', '#', '#/', '#/nope', '/runs', '#/runs/dlq/a/b', '#/runs/day', '#/runs/day/tomorrow', '#/recover/day/tomorrow', '#/recover/dlq/x',
       '#/runs/other/x', '#/recoveryCase', '#/recoveryCase/', '#/home/extra', '#/runs/dlq/%E0%A4%A',
       `#/recoveryCase/${'x'.repeat(257)}`]) {
       expect(parseRoute(hash), hash).toBeNull()
