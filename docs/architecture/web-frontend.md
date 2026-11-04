@@ -272,9 +272,19 @@ core catalog so it paints before the workspace catalog loads). The Find a settin
 index reads the counts on its cards only while it is open, each behind the
 permission of its panel; a denied or failed read omits that count. Attention dots
 carry their reason in the rail tab's `title` and the dot's accessible name. On narrow Connections views, the primary action stacks
-inside the card and each fixed-height virtual row keeps status, kind, expiry and
-both mutation actions visible; secondary owner and last-used facts remain on the
-wider inventory. The overview no longer presents a credential-only count as if
+inside the card. The inventory is a virtualized table (name, type, health, used
+by, last used, expiry, owner) that scrolls sideways on its own, with Rotate and
+Revoke pinned to the right edge above phone width. A header counts connections
+that are expiring or expired, with unresolved errors or a missing secret, and
+unused (no use in 30 days and no known workflow); it shows only once health has
+loaded, and unknown cells read as a dash, never as zero. Used by counts
+`referencingWorkflowIds`: the latest saved version of each workflow, top-level
+nodes only, so it is labelled as known. Last used covers the same 30-day window
+as the usage rows behind it, so an older use reads as none in 30 days, not never.
+The API has no rotation timestamp (`updated_at` also moves on expiry edits), so
+the header has no not-rotated count. Create, Rotate and Revoke load together as
+one lazy chunk on first open; the first requested dialog wins while it loads, and
+the trigger keeps focus until the dialog takes it. The overview no longer presents a credential-only count as if
 it represented every connection type.
 
 Rotate and Revoke share `AffectedWorkflowList`. Revoke reads

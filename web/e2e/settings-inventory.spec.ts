@@ -218,18 +218,12 @@ test('Settings and Connections are inventory-first in English and Spanish', asyn
           && buttonBounds.right <= containerBounds.right
       })
       expect(addButtonFits).toBe(true)
-      const firstRowFits = await inventory.locator('.we-connection-row').first()
-        .evaluate((element) => {
-          const actions = element.querySelector<HTMLElement>('.we-connection-row__actions')
-          if (!actions) return false
-          const rowBounds = element.getBoundingClientRect()
-          const actionBounds = actions.getBoundingClientRect()
-          return actionBounds.left >= rowBounds.left
-            && actionBounds.right <= rowBounds.right
-            && actionBounds.top >= rowBounds.top
-            && actionBounds.bottom <= rowBounds.bottom
-        })
-      expect(firstRowFits).toBe(true)
+      const scrollsInsideTable = await inventory.evaluate((element) => element.scrollWidth > element.clientWidth)
+      expect(scrollsInsideTable).toBe(true)
+      const rotate = inventory.getByTestId('connections-rotate').first()
+      await rotate.scrollIntoViewIfNeeded()
+      await expect(rotate).toBeInViewport()
+      await inventory.evaluate((element) => { element.scrollLeft = 0 })
       await capture(shell, 'web-es-connections-mobile')
     }
   }

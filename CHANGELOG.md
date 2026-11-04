@@ -4,6 +4,10 @@
 
 - Build opens with the sidebar collapsed to a rail for more canvas; the flow
   name and version move to the top bar.
+- Connections is now a table with type, health, the workflows known to use each
+  connection, last used, expiry and owner. A header counts connections that are
+  expiring or expired, with errors, and unused for 30 days. Long lists now scroll
+  when Settings is opened directly.
 
 - Canvas connections drop the repeated "default" label; named branches show a
   pill on the connection.
