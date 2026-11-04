@@ -4,13 +4,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { WorkflowsDashboardView } from './WorkflowsDashboardView'
 import {
   UNGROUPED_FOLDER,
+  sortFlows,
   updateCollapsedFolders,
 } from './workflows-dashboard-model'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
-import { readFlowsFilters, writeFlowsFilters, type SortKey } from '../flows-filters'
+import { DEFAULT_FLOWS_SORT, nextFlowsSort, readFlowsFilters, writeFlowsFilters, type FlowsSort, type SortKey } from '../flows-filters'
 import {
   activeTextSearch,
   classifyTextSearch,
@@ -24,10 +25,11 @@ const WORKFLOW_MUTATION_TAGS = ['workflows'] as const
 
 const WORKFLOW_DASHBOARD_TAGS = [PLATFORM_TAG, 'workflows', 'org-config', 'runs'] as const
 
-const FAILED_RUN_STATUSES = new Set(['failed', 'cancelled', 'timed_out'])
 const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
 
 const PAGE_SIZE = 100
+
+const NO_HEALTH_SCORES: Readonly<Record<string, number>> = {}
 
 const UNGROUPED = UNGROUPED_FOLDER
 
@@ -70,7 +72,12 @@ function useWorkflowsDashboardController({
   const [newFolderDraft, setNewFolderDraft] = useState('')
   const [query, setQuery] = useState(() => readFlowsFilters()?.query ?? '')
   const [debouncedQuery, setDebouncedQuery] = useState(() => activeTextSearch(readFlowsFilters()?.query ?? ''))
-  const [sort, setSort] = useState<SortKey>(() => readFlowsFilters()?.sort ?? 'recent')
+  const [sort, setSort] = useState<FlowsSort>(() => readFlowsFilters()?.sort ?? DEFAULT_FLOWS_SORT)
+  const toggleSort = useCallback((key: SortKey) => setSort((current) => nextFlowsSort(current, key)), [])
+  const [healthScores, setHealthScores] = useState<Readonly<Record<string, number>>>({})
+  const reportHealthScore = useCallback((workflowId: string, score: number) => {
+    setHealthScores((current) => (current[workflowId] === score ? current : { ...current, [workflowId]: score }))
+  }, [])
   const [tagFilters, setTagFilters] = useState<string[]>(() => readFlowsFilters()?.tags ?? [])
   const [tagOptions, setTagOptions] = useState<string[]>([])
   const [folderFilter, setFolderFilter] = useState(() => readFlowsFilters()?.folder ?? '')
@@ -222,22 +229,16 @@ function useWorkflowsDashboardController({
     })()
     return () => { cancelled = true }
   }, [showTrashed, platformVersion])
+  // Scores arrive one row at a time; only a Health sort needs to react to them.
+  const sortScores = sort.key === 'health' ? healthScores : NO_HEALTH_SCORES
   const visible = useMemo(() => {
     const locale = getResolvedLocale()
     const q = queryState.kind === 'valid' ? queryState.value.toLocaleLowerCase(locale) : ''
     const filtered = q
       ? workflows.filter(w => w.name.toLocaleLowerCase(locale).includes(q) || w.id.toLocaleLowerCase(locale).includes(q))
       : workflows
-    return [...filtered].sort((a, b) => {
-      if (sort === 'name') return a.name.localeCompare(b.name, getResolvedLocale())
-      if (sort === 'failed') {
-        const af = a.lastRunStatus && FAILED_RUN_STATUSES.has(a.lastRunStatus) ? 0 : 1
-        const bf = b.lastRunStatus && FAILED_RUN_STATUSES.has(b.lastRunStatus) ? 0 : 1
-        if (af !== bf) return af - bf
-      }
-      return (b.updatedAt ?? b.createdAt ?? '').localeCompare(a.updatedAt ?? a.createdAt ?? '')
-    })
-  }, [workflows, queryState, sort])
+    return sortFlows(filtered, sort, sortScores, locale)
+  }, [workflows, queryState, sort, sortScores])
   const visibleIds = useMemo(() => visible.map((w) => w.id), [visible])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
   const showToolbar =
@@ -701,7 +702,7 @@ function useWorkflowsDashboardController({
     setConfirmDeleteId, setConfirmDeleteTag, setCreationOpen, setDraggingId, setDropTarget,
     setFolderFilter, setNewFolderDraft, setNewFolderDropFor, setNewFolderHover, setQuery,
     setRenameDraft, setRenamingFolder, setRenamingTag, setSelectedIds, setSelectionMode,
-    setShowTrashed, setSort, setTagFilters, setTagRenameDraft, setRowTag, showToolbar,
+    setShowTrashed, toggleSort, reportHealthScore, setTagFilters, setTagRenameDraft, setRowTag, showToolbar,
     showTrashed, soleTagFilter, sort, t, tagFilters, tagOptions, tagRenameDraft,
     toggleFolder, toggleSelectAll, toggleSelectFolder, toggleSelected, toggleTrashView,
     rememberFolderToggle, trashNowMs, retentionDays, visible, visibleIds, workflows,

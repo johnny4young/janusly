@@ -80,6 +80,10 @@ body) are the validators' job, not the scan's. The generated guard then
 rejects an unknown value, so readers keep only the translation maps, which
 typecheck against the generated union.
 
+`GET /v1/workflows` rows carry `lastRunAt`, `openFailureCount` (open production
+dead letters attributed to the workflow, edited-draft runs included) and
+`currentVersion` next to the existing run aggregates.
+
 `GET /v1/workflows/versions` is a keyset page of one workflow's history,
 newest first: `limit` (default 50, at most 200), `beforeVersion` as the
 cursor below the oldest row shown, and `version` to pin one exact row. Rows

@@ -207,7 +207,7 @@ for (const locale of ['en', 'es'] as const) {
     await page.getByRole('button', { name: copy.workflows, exact: true }).click()
     const workflowRow = page.getByTestId(`workflows-row-${workflowId}`)
     await expect(workflowRow).toContainText(workflowName)
-    await workflowRow.click()
+    await workflowRow.locator('strong').click()
     await openWorkspaceSection(page, copy.workflows, copy.build)
 
     const canvas = page.locator('.canvas-frame[data-mode="author"]')

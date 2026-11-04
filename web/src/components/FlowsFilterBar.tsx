@@ -1,18 +1,16 @@
 /**
- * Filter / sort toolbar for the active Flows list — name search, the multi-tag
- * filter (chips + picker + single-tag rename/delete), the folder filter, the
- * clear-all reset, the sort segment, and the bulk-select toggles. Rendered by
- * `WorkflowsDashboard.tsx` above the list.
+ * Filter toolbar for the active Flows list — name search, the multi-tag filter
+ * (chips + picker + single-tag rename/delete), the folder filter, the clear-all
+ * reset, and the bulk-select toggles. Rendered by `WorkflowsDashboard.tsx` above
+ * the list.
  *
  * Presentation only: the container owns all filter/selection state and the tag
- * mutations; this component receives them as props. Sort keys come from the
- * shared `flows-filters` contract.
+ * mutations; this component receives them as props.
  */
 
 import type { Dispatch, SetStateAction } from 'react'
 import { FilterX, Pencil, Search, Trash2, X } from 'lucide-react'
 import { useT } from '../i18n'
-import type { SortKey } from '../flows-filters'
 import { SelectControl, TextInput } from '@/components/ui/Form'
 import { Button } from './ui/Button'
 
@@ -41,8 +39,6 @@ export type FlowsFilterBarProps = {
   setFolderFilter: Dispatch<SetStateAction<string>>
   hasActiveFilters: boolean
   clearAllFilters: () => void
-  sort: SortKey
-  setSort: Dispatch<SetStateAction<SortKey>>
   selectionMode: boolean
   setSelectionMode: Dispatch<SetStateAction<boolean>>
   setSelectedIds: Dispatch<SetStateAction<Set<string>>>
@@ -75,8 +71,6 @@ export function FlowsFilterBar({
   setFolderFilter,
   hasActiveFilters,
   clearAllFilters,
-  sort,
-  setSort,
   selectionMode,
   setSelectionMode,
   setSelectedIds,
@@ -241,17 +235,6 @@ export function FlowsFilterBar({
           {t('workflowsDashboard.clearFilters')}
         </Button>
       )}
-      <div className="we-seg" role="group" aria-label={t('workflowsDashboard.sortAria')}>
-        <button type="button" aria-pressed={sort === 'recent'} onClick={() => setSort('recent')}>
-          {t('workflowsDashboard.sortRecent')}
-        </button>
-        <button type="button" aria-pressed={sort === 'name'} onClick={() => setSort('name')}>
-          {t('workflowsDashboard.sortName')}
-        </button>
-        <button type="button" aria-pressed={sort === 'failed'} onClick={() => setSort('failed')}>
-          {t('workflowsDashboard.sortFailed')}
-        </button>
-      </div>
       {/* Bulk-select toggle — reveals per-row checkboxes + the bulk bar. Off
           by default so the list is unchanged. */}
       {canWrite && (

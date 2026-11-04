@@ -1221,11 +1221,14 @@ export type WorkflowListItem = {
   "bufferedTriggerCount": number
   "createdAt": string | null
   "createdBy": string | null
+  "currentVersion": number
   "deletedAt": string | null
   "folder": string | null
   "id": string
+  "lastRunAt": string | null
   "lastRunStatus": string | null
   "name": string
+  "openFailureCount": number
   "orgId": string
   "pausedReason": string | null
   "runCount": number
