@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The Home health score lists what drives it: success rate, open failures and
+  longest downtime, each linking to where to act.
+
 - Revoking a connection lists the workflows that use it and, when there are
   any, requires typing the connection name. If the list cannot be loaded, the
   dialog says so and still requires the typed name. A revoked connection now
