@@ -29,6 +29,7 @@ import { panelLoaders } from './panel-loaders'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { ErrorBoundary } from './ErrorBoundary'
 import { PanelErrorFallback } from './PanelErrorFallback'
+import { RunEventsPicker } from './RunEventsPicker'
 import { WorkspaceSectionNav } from './WorkspaceSectionNav'
 // Every tab panel is code-split out of the eager shell: each renders only when
 // the operator navigates to its tab, behind the shared <Suspense> below. AI
@@ -112,7 +113,7 @@ export type RightPanelExecution = {
   activeRunId?: string | null
   activeRecoveryId?: string | null
   usage: Record<string, number>
-  onOpenRun: (id: string) => void | Promise<void>
+  onOpenRun: (id: string, targetTab?: ActiveTab) => void | Promise<void>
   onRefreshPlatform: () => void
   onApproveNode: (nodeId: string) => void
   onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) =>
@@ -197,6 +198,8 @@ function RightPanelRouter(props: RightPanelProps) {
     if (!execution.activeRunId) return Promise.resolve(null)
     return api(`/causal?runId=${encodeURIComponent(execution.activeRunId)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
   }, [execution.activeRunId])
+  const { onOpenRun } = execution
+  const openRunEvents = useCallback((id: string) => void onOpenRun(id, 'reasoning'), [onOpenRun])
   const runsPanelProps = {
     runs: execution.runs,
     workflows: execution.workflows,
@@ -363,6 +366,11 @@ function RightPanelRouter(props: RightPanelProps) {
   )
   return (
     <PanelChrome title={t('rightPanel.reasoning.title')} description={t('rightPanel.reasoning.description')}>
+      <RunEventsPicker
+        runs={execution.runs}
+        activeRunId={execution.activeRunId}
+        onSelectRun={openRunEvents}
+      />
       <ReasoningPanel
         events={execution.events}
         eventsHasMore={execution.eventsHasMore}

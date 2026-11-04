@@ -487,6 +487,21 @@ duplicated in Insights, and dismissing it is session-only. Existing workspaces
 with a filtered empty run page keep their operational overview.
 
 
+### Workflows table
+
+The saved-workflows list is a real table, repeated per section when folders
+exist, with one sort state across sections and fixed column widths so sections
+stay aligned. Sort headers are buttons inside `th` elements carrying `aria-sort`;
+the column and direction persist with the other list filters, and the previous
+switch values map onto Last run, Name and Status. Sorting orders loaded rows only,
+like the filters it sits beside, and ties fall back to the most recent run.
+
+Open failures, last run and version come from the list row. Scores come from each
+row's health read, so a Health sort keeps not-yet-scored rows last until they
+report. The trend is `GET /workflows/health/delta` against the current version:
+single-version flows and samples under the server's floor show the score alone.
+The run count stays visible under Last run and is never reused as a failure count.
+
 ### Recovery queue hierarchy
 
 The queue leads with compact organization-wide totals and visibly grouped search,

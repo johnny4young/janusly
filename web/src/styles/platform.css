@@ -2847,12 +2847,7 @@
   text-overflow: ellipsis;
 }
 
-/* Drag-to-folder. The grip column only appears on rows that carry the handle
-   (i.e. once folders exist); the flat no-folder list keeps its 3-column grid. */
-.we-list-row:has(.we-list-row__drag) {
-  grid-template-columns: auto auto 1fr auto;
-}
-
+/* Drag-to-folder handle; only rendered once folders exist. */
 .we-list-row__drag {
   cursor: grab;
   display: inline-flex;
@@ -2863,10 +2858,6 @@
 
 .we-list-row__drag:active {
   cursor: grabbing;
-}
-
-.we-list-row[data-dragging="true"] {
-  opacity: 0.5;
 }
 
 .we-list-folder[data-drop-target="true"] {
@@ -2918,6 +2909,7 @@
 .we-list-row__folder {
   align-items: center;
   display: inline-flex;
+  gap: 6px;
   margin-top: 4px;
 }
 

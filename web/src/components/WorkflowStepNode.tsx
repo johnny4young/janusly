@@ -12,6 +12,7 @@ import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import { formatStatusLabel, getNodeConfigSummary, getNodeHelper, getNodeLabel } from '../constants'
 import { useT } from '../i18n'
+import { Button } from './ui/Button'
 import type { WorkflowGraphNode } from '../types'
 
 const nodeIcons: Record<string, React.ReactNode> = {
@@ -44,7 +45,7 @@ export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode
   // intentionally does NOT carry `i18n.language` in its dep array —
   // making the leaf component the locale reactivity boundary keeps
   // the canvas projection identity stable across toggles.
-  useT()
+  const { t } = useT()
   const status = data.status ?? 'pending'
   const type = data.type
   const title = data.label?.trim() || getNodeLabel(type)
@@ -61,7 +62,22 @@ export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode
         <span className="status-pill workflow-node-status" data-status={tone}>{formatStatusLabel(status)}</span>
       </div>
       <p>{helper}</p>
-      <div className="workflow-node-summary">{summary}</div>
+      {data.errorSummary
+        ? <div className="workflow-node-summary workflow-node-error" data-testid="workflow-node-error">{data.errorSummary}</div>
+        : <div className="workflow-node-summary">{summary}</div>}
+      {data.onRecover && (
+        <Button
+          size="sm"
+          className="workflow-node-recover nodrag nopan"
+          onClick={(event) => {
+            event.stopPropagation()
+            data.onRecover?.()
+          }}
+          data-testid="workflow-node-recover"
+        >
+          {t('canvas.recoverStep')}
+        </Button>
+      )}
       <Handle className="workflow-handle workflow-handle-source" type="source" position={Position.Bottom} />
     </div>
   )

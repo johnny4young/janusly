@@ -35,6 +35,9 @@ type WorkflowNodeData = {
   status?: string
   helper?: string
   hasValidationError?: boolean
+  /** One-line error of a failed step while observing a run. */
+  errorSummary?: string | null
+  onRecover?: () => void
 }
 type WorkflowEdgeData = {
   condition?: string
@@ -152,7 +155,7 @@ export type SolutionPackPublic = {
  * `lastRunStatus`, which is the outcome of its most recent run. A paused
  * workflow refuses new runs, so the list must say so.
  */
-export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string | null; createdAt?: string | null; updatedAt?: string | null; lastRunStatus?: string | null; runCount?: number; bufferedTriggerCount?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
+export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string | null; createdAt?: string | null; updatedAt?: string | null; lastRunStatus?: string | null; lastRunAt?: string | null; runCount?: number; bufferedTriggerCount?: number; openFailureCount?: number; currentVersion?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
 export type ValidationEvidenceLevel =
   | 'static'
   | 'writes_skipped'

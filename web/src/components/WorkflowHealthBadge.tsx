@@ -20,18 +20,17 @@
  * Used in:
  *   - `App.tsx` workspace header next to `WorkflowReadinessBadge`
  *     (the live workflow's badge — same surface, same visual language).
- *   - `WorkflowsDashboard.tsx` row footer (per-workflow badge in the
- *     saved-workflows list, compact mode without the label).
+ *   - `FlowRow.tsx` Health cell (per-workflow badge in the saved-workflows
+ *     table, compact mode without the label).
  */
 
 import { useEffect, useState } from 'react'
 import { Activity } from 'lucide-react'
 import { contractApi } from '../api'
 import { tHealthRationale, useT } from '../i18n'
-import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { WORKFLOW_HEALTH_TAGS } from '../lib/health-delta'
+import { useInvalidationNonce } from '../lib/query-cache'
 import { isGetWorkflowsHealthResponse } from '../lib/api-guards/operations/GetWorkflowsHealth'
-
-const WORKFLOW_HEALTH_TAGS = [PLATFORM_TAG, 'workflows', 'runs', 'dlq', 'recovery'] as const
 
 type HealthCategory =
   | 'reliability'
@@ -102,9 +101,11 @@ type WorkflowHealthBadgeProps = {
   workflowId: string | undefined
   /** When true, render label as `Health: N / 100`. When false, render only the dot + score. */
   showLabel?: boolean
+  /** Reports each fetched score; must be a stable callback. */
+  onScore?: (workflowId: string, score: number) => void
 }
 
-export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHealthBadgeProps) {
+export function WorkflowHealthBadge({ workflowId, showLabel = true, onScore }: WorkflowHealthBadgeProps) {
   const { t } = useT()
   const platformVersion = useInvalidationNonce(WORKFLOW_HEALTH_TAGS)
   const [result, setResult] = useState<HealthScore | null>(null)
@@ -134,6 +135,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
         }
         setResult(health as HealthScore)
         setLoading(false)
+        onScore?.(workflowId, health.score)
       })
       .catch((err) => {
         if (cancelled) return
@@ -141,7 +143,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [workflowId, platformVersion, t])
+  }, [workflowId, platformVersion, t, onScore])
 
   if (!workflowId) return null
   if (error) {
