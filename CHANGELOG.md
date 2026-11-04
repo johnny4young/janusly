@@ -5,6 +5,11 @@
 - The pending setup step is a row in What needs you with its progress, not a
   separate card repeating the next action.
 
+- Solution pack buttons keep a readable label. Under Install, a pack now names
+  the credentials to connect before running it, or says that your role can't
+  install or run packs.
+- AI Studio has a smaller header and a horizontal 1-2-3-4 stepper that marks the
+  current step.
 - Each view has one header row with its section title and tabs; descriptions
   moved to a tooltip on the title, so content starts about 110 px higher.
 - Headings that receive focus for screen readers no longer show a focus ring
