@@ -10,8 +10,8 @@
  * `RightPanel.tsx → RunsPanel.tsx` dispatcher edge.
  *
  * Used by:
- * - `RightPanel.tsx` — dispatcher + small panels (Templates / Tools /
- *   Credentials / Reasoning) wrap themselves in `PanelChrome`; the four
+ * - `RightPanel.tsx` — dispatcher + small panels (Templates / Credentials /
+ *   Reasoning) wrap themselves in `PanelChrome`; those
  *   small panels also render `EmptyView` for their empty list states.
  * - `RunsPanel.tsx` — wraps in `PanelChrome`; renders `EmptyView` in the
  *   run-history empty state.

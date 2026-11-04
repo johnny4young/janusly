@@ -7,6 +7,9 @@
 - Reports shows recovery trends for the last 7, 30 or 90 days: recovery KPIs,
   the activity heatmap, failure clusters, model calibration, AI spend, and
   Recovery validation and the Value dashboard with Markdown and JSON exports.
+- Build opens with the sidebar collapsed to a rail for more canvas; the flow
+  name and version move to the top bar.
+
 - Canvas connections drop the repeated "default" label; named branches show a
   pill on the connection.
 
@@ -40,6 +43,10 @@
   install or run packs.
 - AI Studio has a smaller header and a horizontal 1-2-3-4 stepper that marks the
   current step.
+- The Tools catalog fits one screen: tools are grouped by namespace in a
+  three-column grid, filterable by Read-only, May change external systems and
+  Installed. Install state now survives a reload, and a tool's description and
+  Install action open from its row.
 - Each view has one header row with its section title and tabs; descriptions
   moved to a tooltip on the title, so content starts about 110 px higher.
 - Headings that receive focus for screen readers no longer show a focus ring

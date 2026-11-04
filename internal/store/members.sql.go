@@ -459,6 +459,30 @@ func (q *Queries) ListIdentityMemberships(ctx context.Context, userID string) ([
 	return items, nil
 }
 
+const listInstalledPluginIDs = `-- name: ListInstalledPluginIDs :many
+SELECT plugin_id FROM installed_plugins WHERE org_id = $1 ORDER BY plugin_id
+`
+
+func (q *Queries) ListInstalledPluginIDs(ctx context.Context, orgID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listInstalledPluginIDs, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var plugin_id string
+		if err := rows.Scan(&plugin_id); err != nil {
+			return nil, err
+		}
+		items = append(items, plugin_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgInvitations = `-- name: ListOrgInvitations :many
 SELECT id, org_id, email, role, invited_by, status, accepted_at, created_at
 FROM invitations WHERE org_id = $1

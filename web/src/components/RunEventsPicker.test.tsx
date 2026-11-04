@@ -24,6 +24,14 @@ describe('<RunEventsPicker />', () => {
     expect(onSelectRun).toHaveBeenCalledExactlyOnceWith('run-done-0000')
   })
 
+  it('never opens a live run by itself, but still offers it', () => {
+    const onSelectRun = vi.fn()
+    render(<RunEventsPicker runs={[{ id: 'run-wait-0000', workflowName: 'Gate', status: 'waiting' }]} onSelectRun={onSelectRun} />)
+
+    expect(onSelectRun).not.toHaveBeenCalled()
+    expect(screen.getByRole('option', { name: /run-wait/ })).toBeInTheDocument()
+  })
+
   it('keeps the open run and switches on selection', () => {
     const onSelectRun = vi.fn()
     render(<RunEventsPicker runs={runs} activeRunId="run-done-0000" onSelectRun={onSelectRun} />)
