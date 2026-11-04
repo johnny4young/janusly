@@ -8,6 +8,9 @@
   leaves the inventory without a reload.
 - Rotate secret no longer crashes the Connections panel when a workflow uses
   the connection; its preview lists those workflows by name.
+- The language selector in the account menu is a compact row like Theme and
+  Density, and the canvas zoom controls follow the dark theme.
+- Buttons keep their icon and label on one row across the product.
 
 - Workflow generation audits retain bounded first-draft issue codes even when
   a repair succeeds, without storing model drafts or prompts.
