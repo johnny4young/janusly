@@ -22,7 +22,7 @@ describe('one page header (browser)', () => {
     const nav = screen.getByTestId('workspace-section-nav')
 
     expect(within(nav).queryAllByRole('button')).toHaveLength(0)
-    expect(within(nav).getByTestId('workspace-section-context')).toHaveTextContent('Reasoning')
+    expect(within(nav).getByTestId('workspace-section-context')).toHaveTextContent('Run events')
   })
 
   it('shows the Activity tabs with the open count on Recover only', () => {
