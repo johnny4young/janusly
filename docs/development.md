@@ -244,7 +244,7 @@ CommonJS interop (`react-esm-facade-plugin.mjs`), `d3-color` and Lucide's React
 keys (`trim-vendor-plugin.mjs`), and always-true `color-mix` guards
 (`css-floor-plugin.mjs`). `scripts/production-trims.test.mjs` exercises them
 against the untrimmed vendors. Together with dropping the modulepreload polyfill
-they measured 11.6 KiB off both totals; the caps did not move with them, so that
+they measured 11.4 KiB off both totals; the caps did not move with them, so that
 room stays available until the caps are next lowered to the measured size.
 The artifact and worst-locale caps were rebased once more in 2026-10, by the
 measured 3.3 KiB of the generated response guards (605 → 608.3 and
