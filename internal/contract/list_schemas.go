@@ -12,10 +12,11 @@ var runSummary = closedObj(map[string]any{
 
 var workflowListItem = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "name": str(), "createdBy": nullableString(), "createdAt": nullableString(),
-	"lastRunStatus": nullableString(), "runCount": map[string]any{"type": "integer", "minimum": 0},
+	"lastRunStatus": nullableString(), "lastRunAt": nullableString(), "runCount": map[string]any{"type": "integer", "minimum": 0},
 	"bufferedTriggerCount": map[string]any{"type": "integer", "minimum": 0}, "status": str(),
+	"openFailureCount": map[string]any{"type": "integer", "minimum": 0}, "currentVersion": map[string]any{"type": "integer", "minimum": 0},
 	"pausedReason": nullableString(), "tags": arr(str()), "folder": nullableString(), "deletedAt": nullableString(),
-}, "id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus", "runCount", "bufferedTriggerCount", "status", "pausedReason", "tags", "folder", "deletedAt")
+}, "id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus", "lastRunAt", "runCount", "bufferedTriggerCount", "openFailureCount", "currentVersion", "status", "pausedReason", "tags", "folder", "deletedAt")
 
 var workflowVersion = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "workflowId": str(), "version": map[string]any{"type": "integer", "minimum": 1},
