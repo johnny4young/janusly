@@ -57,6 +57,7 @@ export function WorkspaceSectionNav({
   const destinationLabel = t(destination.labelKey)
   const currentSection = workspaceSectionForTab(activeTab)
   const currentSectionLabel = currentSection ? t(currentSection.labelKey) : null
+  const showRail = destinationId !== 'activity' || sections.length > 1
 
   return (
     <nav
@@ -66,8 +67,8 @@ export function WorkspaceSectionNav({
       data-testid="workspace-section-nav"
     >
       <div className="workspace-section-nav__intro">
-        <strong>{destinationLabel}</strong>
-        {currentSectionLabel && currentSectionLabel !== destinationLabel && (
+        <strong title={t(currentSection?.helperKey ?? destination.helperKey)}>{destinationLabel}</strong>
+        {!showRail && currentSectionLabel && currentSectionLabel !== destinationLabel && (
           <span
             className="workspace-section-nav__context"
             data-testid="workspace-section-context"
@@ -76,9 +77,8 @@ export function WorkspaceSectionNav({
             {currentSectionLabel}
           </span>
         )}
-        <span>{t(currentSection?.helperKey ?? destination.helperKey)}</span>
       </div>
-      {(destinationId !== 'activity' || sections.length > 1) && (
+      {showRail && (
         <div className="workspace-section-nav__rail">
           {sections.map((section) => {
             const label = t(section.labelKey)

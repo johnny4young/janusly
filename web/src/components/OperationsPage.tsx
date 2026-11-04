@@ -20,7 +20,6 @@ import {
   BrainCircuit,
   Building2,
   ChartNoAxesCombined,
-  Gauge,
   LayoutGrid,
   Plug,
   RefreshCw,
@@ -362,14 +361,8 @@ function OperationsHeader({
   const { t } = useT()
   return (
     <header className="we-operations-header">
-      <div className="panel-heading">
-        <div className="panel-heading-copy">
-          <div className="section-kicker">{t('operations.kicker')}</div>
-          <h2>{t('operations.title')}</h2>
-          <p>{t('operations.intro', { days: windowDays })}</p>
-        </div>
-        <span className="panel-heading-icon"><Gauge size={18} aria-hidden="true" /></span>
-      </div>
+      <h2 className="we-sr-only">{t('operations.title')}</h2>
+      <p className="we-operations-header__intro">{t('operations.intro', { days: windowDays })}</p>
 
       {error && (
         <section className="we-card">
