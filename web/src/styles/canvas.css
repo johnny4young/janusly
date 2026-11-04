@@ -221,10 +221,14 @@ path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
   overflow: hidden;
 }
 
-.react-flow__controls-button {
-  background: var(--we-surface);
-  color: var(--we-ink-soft);
-  border-bottom: 1px solid var(--we-line);
+/* Variables, not overrides: the library stylesheet may load after this one. */
+.canvas-flow-surface {
+  --xy-controls-button-background-color: var(--we-surface);
+  --xy-controls-button-background-color-hover: var(--we-surface-hover);
+  --xy-controls-button-color: var(--we-ink-soft);
+  --xy-controls-button-color-hover: var(--we-ink);
+  --xy-controls-button-border-color: var(--we-line);
+  --xy-attribution-background-color: transparent;
 }
 
 .react-flow__edge-textbg {
@@ -238,8 +242,6 @@ path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
   font-size: 11px;
   font-weight: 700;
 }
-
-.react-flow__attribution { background: transparent; }
 
 @media (max-width: 760px) {
   .workflow-node {

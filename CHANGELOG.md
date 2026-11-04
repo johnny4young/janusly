@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The language selector in the account menu is a compact row like Theme and
+  Density, and the canvas zoom controls follow the dark theme.
 - Buttons keep their icon and label on one row across the product.
 
 - Workflow generation audits retain bounded first-draft issue codes even when
