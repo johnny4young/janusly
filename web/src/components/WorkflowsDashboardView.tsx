@@ -1,16 +1,19 @@
+import { lazy, Suspense } from 'react'
 import { AlertCircle, FilePlus2, FolderPlus, LayoutTemplate, ListChecks, Pencil, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { FlowRow } from './FlowRow'
 import { FlowsFilterBar } from './FlowsFilterBar'
 import { FlowsTable } from './FlowsTable'
-import { TrashPanel } from './TrashPanel'
 import type { SavedWorkflow } from '../types'
 import type { WorkflowCreationMode, WorkflowsDashboardController } from './WorkflowsDashboard'
 import { UNGROUPED_FOLDER as UNGROUPED } from './workflows-dashboard-model'
 import { TextInput } from '@/components/ui/Form'
 import { Button } from './ui/Button'
 import { Menu } from './ui/Menu'
+
+// Rarely opened, so it stays out of the eager workspace chunk.
+const TrashPanel = lazy(() => import('./TrashPanel').then((module) => ({ default: module.TrashPanel })))
 
 const CREATION_CHOICES = [
   { mode: 'describe', icon: <Sparkles size={14} />, titleKey: 'workflowCreation.describe.title', bodyKey: 'workflowCreation.describe.body' },
@@ -312,19 +315,21 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
           the raw server-ordered `workflows`, NOT `visible`, so a stale active-
           view search term never filters it). Restore-only; no folders/tags/bulk. */}
       {showTrashed && !loadError && (
-        <TrashPanel
-          canWrite={canWrite}
-          workflows={workflows}
-          loading={loading}
-          selectedIds={selectedIds}
-          setSelectedIds={setSelectedIds}
-          toggleSelected={toggleSelected}
-          restoreWorkflow={restoreWorkflow}
-          bulkRestore={bulkRestore}
-          retentionDays={retentionDays}
-          trashNowMs={trashNowMs}
-          t={t}
-        />
+        <Suspense fallback={<LoadingSkeleton rows={5} label={t('common.loading')} />}>
+          <TrashPanel
+            canWrite={canWrite}
+            workflows={workflows}
+            loading={loading}
+            selectedIds={selectedIds}
+            setSelectedIds={setSelectedIds}
+            toggleSelected={toggleSelected}
+            restoreWorkflow={restoreWorkflow}
+            bulkRestore={bulkRestore}
+            retentionDays={retentionDays}
+            trashNowMs={trashNowMs}
+            t={t}
+          />
+        </Suspense>
       )}
 
       {/* Empty-state precedence — one chain over `visible.length === 0` (covers
