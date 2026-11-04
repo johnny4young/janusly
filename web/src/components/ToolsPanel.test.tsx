@@ -125,6 +125,10 @@ describe('<ToolsPanel />', () => {
     fireEvent.click(screen.getByTestId('tools-install-slack.post'))
     expect(onInstallPlugin).toHaveBeenCalledWith('slack.post')
     expect(screen.getByTestId('tools-install-slack.post')).toBeDisabled()
+    // Clearing a single in-flight marker would otherwise re-enable a second tool's pending install.
+    fireEvent.click(screen.getByTestId('tools-row-csv.stringify'))
+    expect(screen.getByTestId('tools-install-csv.stringify')).toBeDisabled()
+    fireEvent.click(screen.getByTestId('tools-row-slack.post'))
 
     await act(async () => finish(true))
     expect(screen.getByTestId('tools-installed-slack.post')).toBeInTheDocument()

@@ -159,7 +159,7 @@ function ToolsCatalog({ tools, onInstallPlugin, canInstall }: ToolsPanelProps) {
                               {!isInstalled && (
                                 <Button
                                   size="sm"
-                                  disabled={!canInstall}
+                                  disabled={!canInstall || installing !== null}
                                   loading={installing === tool.name}
                                   onClick={() => void install(tool.name)}
                                   data-testid={`tools-install-${tool.name}`}
