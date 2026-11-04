@@ -18,10 +18,27 @@ import { isStringArray } from './lib/guards'
 
 const KEY = 'janusly:flowsFilters'
 
-/** Sort options for the Flows list — exported so the dashboard's `sort` state
- *  and the persisted-value validator agree on the closed set. */
-export const SORT_KEYS = ['recent', 'name', 'failed'] as const
+/** Sortable Flows-table columns — exported so the dashboard's `sort` state and
+ *  the persisted-value validator agree on the closed set. */
+export const SORT_KEYS = ['name', 'status', 'openFailures', 'health', 'lastRun', 'version'] as const
 export type SortKey = (typeof SORT_KEYS)[number]
+type SortDirection = 'asc' | 'desc'
+export type FlowsSort = { key: SortKey; direction: SortDirection }
+
+/** First-click direction per column: the end of the range an operator is after. */
+const SORT_FIRST_DIRECTION: Record<SortKey, SortDirection> = {
+  name: 'asc', status: 'asc', openFailures: 'desc', health: 'asc', lastRun: 'desc', version: 'desc',
+}
+
+export const DEFAULT_FLOWS_SORT: FlowsSort = { key: 'lastRun', direction: 'desc' }
+
+/** The Recent / Name / Failed first switch stored these values. */
+const LEGACY_SORTS: ReadonlyMap<unknown, SortKey> = new Map([['recent', 'lastRun'], ['failed', 'status']])
+
+export function nextFlowsSort(current: FlowsSort, key: SortKey): FlowsSort {
+  if (current.key !== key) return { key, direction: SORT_FIRST_DIRECTION[key] }
+  return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+}
 
 /** The persisted Flows-list view: the selected tags (`[]` = all; multiple AND
  *  together), the selected folder (`''` = all), the name-search query, the sort,
@@ -32,7 +49,7 @@ export type FlowsFilters = {
   tags: string[]
   folder: string
   query: string
-  sort: SortKey
+  sort: FlowsSort
   collapsedFolders: string[]
 }
 
@@ -40,15 +57,12 @@ function isSortKey(value: unknown): value is SortKey {
   return typeof value === 'string' && (SORT_KEYS as readonly string[]).includes(value)
 }
 
-/** True for an object carrying at least the `{ query, sort }` pair — rejects a
- *  corrupt / outdated / partial localStorage value. `tags` / `folder` /
- *  `collapsedFolders` are read leniently in `readFlowsFilters` so a value written
- *  before any of them shipped (or with the legacy scalar `tag`) still restores
- *  the query / sort. */
-function isFlowsFilters(value: unknown): value is FlowsFilters {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as Record<string, unknown>
-  return typeof v.query === 'string' && isSortKey(v.sort)
+function readSort(record: Record<string, unknown>): FlowsSort | null {
+  const { sortDirection } = record
+  const sort = LEGACY_SORTS.get(record.sort) ?? record.sort
+  if (!isSortKey(sort)) return null
+  const direction = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : SORT_FIRST_DIRECTION[sort]
+  return { key: sort, direction }
 }
 
 /** Read the saved Flows filters, or `null` when none / unavailable / corrupt.
@@ -61,8 +75,12 @@ export function readFlowsFilters(): FlowsFilters | null {
     const raw = window.localStorage.getItem(KEY)
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
-    if (!isFlowsFilters(parsed)) return null
+    if (typeof parsed !== 'object' || parsed === null) return null
     const record = parsed as Record<string, unknown>
+    // A corrupt or partial value must carry at least a query and a sort; the
+    // other fields are read leniently so older stored views still restore.
+    const sort = readSort(record)
+    if (typeof record.query !== 'string' || !sort) return null
     const collapsedFolders = isStringArray(record.collapsedFolders)
       ? (record.collapsedFolders as string[])
       : []
@@ -76,7 +94,7 @@ export function readFlowsFilters(): FlowsFilters | null {
       : typeof record.tag === 'string' && record.tag.length > 0
         ? [record.tag]
         : []
-    return { tags, folder, query: parsed.query, sort: parsed.sort, collapsedFolders }
+    return { tags, folder, query: record.query, sort, collapsedFolders }
   } catch {
     return null
   }
@@ -84,7 +102,7 @@ export function readFlowsFilters(): FlowsFilters | null {
 
 /** Persist the Flows filters; failure is non-fatal (storage unavailable /
  *  private mode / quota). Only the closed `{ tags, folder, query, sort,
- *  collapsedFolders }` shape is stored. */
+ *  sortDirection, collapsedFolders }` shape is stored. */
 export function writeFlowsFilters(filters: FlowsFilters): void {
   if (typeof window === 'undefined' || !window.localStorage) return
   try {
@@ -94,7 +112,8 @@ export function writeFlowsFilters(filters: FlowsFilters): void {
         tags: filters.tags,
         folder: filters.folder,
         query: filters.query,
-        sort: filters.sort,
+        sort: filters.sort.key,
+        sortDirection: filters.sort.direction,
         collapsedFolders: filters.collapsedFolders,
       }),
     )

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/engine"
@@ -540,6 +541,72 @@ func TestRunsKeysetCursorRoundTrip(t *testing.T) {
 		400, "invalid_input", "Invalid request body")
 }
 
+func TestWorkflowListOpenFailureCount(t *testing.T) {
+	h := newAPIHarness(t)
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer broken.Close()
+	workflowID := "wf-open-failures-" + h.org
+	doc := map[string]any{
+		"id": workflowID, "name": "Open failures", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "call", "type": "http", "config": map[string]any{
+			"url": broken.URL, "timeoutMs": 500,
+		}}},
+		"edges": []any{},
+	}
+	h.call("POST", "/v1/workflows/save", doc, "")
+	listed := func() map[string]any {
+		rows := h.call("GET", "/v1/workflows?q="+workflowID, nil, "").body["data"].([]any)
+		if len(rows) != 1 {
+			t.Fatalf("search must narrow to the one workflow, got %d", len(rows))
+		}
+		return rows[0].(map[string]any)
+	}
+	if row := listed(); row["openFailureCount"] != float64(0) || row["lastRunAt"] != nil {
+		t.Fatalf("a workflow that never ran has no failures and no last run: %v", row)
+	}
+
+	runID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": doc}, ""))
+	h.waitRun(runID, "failed")
+	if row := listed(); row["openFailureCount"] != float64(1) {
+		t.Fatalf("the failed run's dead letter must count as open: %v", row)
+	}
+
+	// An edited draft is not a saved version, so its run stays out of runCount,
+	// but its failure still waits in recovery and must show on the row.
+	draft := map[string]any{
+		"id": workflowID, "name": "Open failures", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "edited", "type": "http", "config": map[string]any{
+			"url": broken.URL, "timeoutMs": 500,
+		}}},
+		"edges": []any{},
+	}
+	draftRunID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": draft}, ""))
+	h.waitRun(draftRunID, "failed")
+	if row := listed(); row["openFailureCount"] != float64(2) || row["runCount"] != float64(1) {
+		t.Fatalf("a draft failure must count as open without counting as a saved run: %v", row)
+	}
+
+	rows, err := testPool(t).Query(t.Context(), `SELECT id FROM dead_letters WHERE org_id = $1 AND run_id = ANY($2)`,
+		h.org, []string{runID, draftRunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadLetterIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(deadLetterIDs) != 2 {
+		t.Fatalf("dead letters: %v %v", deadLetterIDs, err)
+	}
+	for _, id := range deadLetterIDs {
+		if res := h.call("POST", "/v1/dlq/resolve", map[string]any{"id": id}, ""); res.status != 200 {
+			t.Fatalf("resolve: %d %+v", res.status, res.body)
+		}
+	}
+	if row := listed(); row["openFailureCount"] != float64(0) {
+		t.Fatalf("resolved dead letters must stop counting: %v", row)
+	}
+}
+
 func TestWorkflowReadSurfaces(t *testing.T) {
 	h := newAPIHarness(t)
 	workflowID := "wf-read-" + h.org
@@ -558,14 +625,20 @@ func TestWorkflowReadSurfaces(t *testing.T) {
 	}
 	row := rows[0].(map[string]any)
 	requireKeys(t, row,
-		"id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus",
-		"runCount", "bufferedTriggerCount", "status", "pausedReason",
+		"id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus", "lastRunAt",
+		"runCount", "bufferedTriggerCount", "openFailureCount", "currentVersion", "status", "pausedReason",
 		"tags", "folder", "deletedAt")
 	// Exact copies posted by older clients auto-bind to the latest immutable
 	// version. They therefore count as saved workflow traffic; an edited draft
 	// remains ad-hoc and is covered by TestVersionAttributionSemantics.
 	if row["runCount"] != float64(1) || row["lastRunStatus"] != "succeeded" {
 		t.Fatalf("content-bound saved run must count: %v", row)
+	}
+	if row["currentVersion"] != float64(2) || row["openFailureCount"] != float64(0) {
+		t.Fatalf("list row must carry the latest version and open failures: %v", row)
+	}
+	if at, _ := row["lastRunAt"].(string); at == "" {
+		t.Fatalf("list row must carry the last run time: %v", row)
 	}
 
 	// Latest: nullable contract — a version row with the full key set here.

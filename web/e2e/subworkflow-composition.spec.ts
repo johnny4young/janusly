@@ -102,7 +102,7 @@ async function openVersionField(
   await page.getByRole('button', { name: contract.flows, exact: true }).click()
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
-  await row.click()
+  await row.locator('strong').click()
   await openWorkspaceSection(
     page,
     contract.flows,

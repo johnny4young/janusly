@@ -227,8 +227,11 @@ type WorkflowListItemView struct {
 	CreatedBy            *string  `json:"createdBy"`
 	CreatedAt            *string  `json:"createdAt"`
 	LastRunStatus        *string  `json:"lastRunStatus"`
+	LastRunAt            *string  `json:"lastRunAt"`
 	RunCount             int32    `json:"runCount"`
 	BufferedTriggerCount int      `json:"bufferedTriggerCount"`
+	OpenFailureCount     int      `json:"openFailureCount"`
+	CurrentVersion       int      `json:"currentVersion"`
 	Status               string   `json:"status"`
 	PausedReason         *string  `json:"pausedReason"`
 	Tags                 []string `json:"tags"`
@@ -240,9 +243,10 @@ func newWorkflowListItemView(row store.ListWorkflowRowsRow) WorkflowListItemView
 	return WorkflowListItemView{
 		ID: row.ID, OrgID: row.OrgID, Name: row.Name,
 		CreatedBy: nullableTextValue(row.CreatedBy), CreatedAt: nullableTimeValue(row.CreatedAt),
-		LastRunStatus: textOrNullString(row.LastRunStatus), RunCount: row.RunCount,
-		BufferedTriggerCount: int(row.BufferedTriggerCount),
-		Status:               row.Status, PausedReason: nullableTextValue(row.PausedReason),
+		LastRunStatus: textOrNullString(row.LastRunStatus), LastRunAt: nullableTimeValue(row.LastRunAt),
+		RunCount: row.RunCount, BufferedTriggerCount: int(row.BufferedTriggerCount),
+		OpenFailureCount: int(row.OpenFailureCount), CurrentVersion: int(row.CurrentVersion),
+		Status: row.Status, PausedReason: nullableTextValue(row.PausedReason),
 		Tags: decodeStringArray(row.Tags), Folder: nullableTextValue(row.Folder),
 		DeletedAt: nullableTimeValue(row.DeletedAt),
 	}

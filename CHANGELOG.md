@@ -6,6 +6,9 @@
   three-column grid, filterable by Read-only, May change external systems and
   Installed. Install state now survives a reload, and a tool's description and
   Install action open from its row.
+- Run events opens on the latest failed run, with a run picker, and the
+  breadcrumb reads Activity › Run events.
+
 - Empty states end in a primary button instead of text that reads as a label.
 - The Settings breadcrumb names the open pane, such as Settings › Access, and
   the pane follows its link: pasting a link, Back and Forward now change what
@@ -38,6 +41,13 @@
 - The language selector in the account menu is a compact row like Theme and
   Density, and the canvas zoom controls follow the dark theme.
 - Buttons keep their icon and label on one row across the product.
+- The Workflows list is a table with labelled Name, Status, Open failures,
+  Health, Last run and Version columns. Open failures counts the flow's open
+  dead letters, the run count moves under Last run, Health shows the change
+  since the current version once enough runs exist, and header sorting replaces
+  the Recent / Name / Failed first switch. Clicking the health score now opens
+  its breakdown without leaving the list. `GET /v1/workflows` rows add
+  `openFailureCount`, `lastRunAt` and `currentVersion`.
 - Recovery failures open with a one-line cause such as "Host
   demo-ingest.invalid does not resolve", a cause chip and whether a retry can
   help; the raw error JSON stays collapsed below. DNS and connection errors from
