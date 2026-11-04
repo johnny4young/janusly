@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Canvas connections drop the repeated "default" label; named branches show a
+  pill on the connection.
+
 - A failed step on the run snapshot keeps its full title, shows its error in
   one line, and links to its item in the recovery queue.
 
