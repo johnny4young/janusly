@@ -44,7 +44,23 @@ describe('<EmptyState />', () => {
 
     const cta = screen.getByTestId('empty-state-cta')
     expect(cta).toHaveTextContent('Invite member')
+    expect(cta).toHaveClass('ui-button--primary')
     fireEvent.click(cta)
     expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders an optional secondary link that opens in an isolated tab', () => {
+    render(
+      <EmptyState
+        icon={<CheckCircle2 />}
+        kicker="No connections yet"
+        body="Add a managed secret."
+        secondary={{ label: 'Learn more', href: 'https://docs.example.com/' }}
+      />,
+    )
+
+    const link = screen.getByTestId('empty-state-secondary')
+    expect(link).toHaveAttribute('href', 'https://docs.example.com/')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   })
 })

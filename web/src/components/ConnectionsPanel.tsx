@@ -16,6 +16,7 @@ import {
   type CredentialHealthSnapshot,
 } from '../connections-inventory'
 import { expiryStatus } from '../credential-expiry'
+import { DOCS_URL } from '../docs-link'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { getResolvedLocale, useT } from '../i18n'
@@ -399,6 +400,7 @@ export function ConnectionsPanel({
               label: t('rightPanel.credentials.addButton'),
               onClick: () => setCreating(true),
             } : undefined}
+            secondary={DOCS_URL ? { label: t('rightPanel.credentials.empty.learn'), href: DOCS_URL } : undefined}
           />
         ) : filteredCredentials.length === 0 ? (
           <EmptyView
