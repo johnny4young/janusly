@@ -75,7 +75,7 @@ async function openTeam(page: Page) {
 async function createAndRunWorkflow(page: Page, workflowName: string) {
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await openWorkflowCreation(page)
-  await page.getByRole('button', { name: /^Start blank\b/ }).click()
+  await page.getByRole('menuitem', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
   await addCanvasStep(page, 'Do nothing')
   await page.getByRole('button', { name: 'Validate', exact: true }).click()

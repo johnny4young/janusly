@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Workflow rows open with a click and keep delete behind a ⋯ menu. Move to
+  Trash happens at once and its toast offers Undo for six seconds.
+- Active and Trash are now a segmented control with counts above the workflow
+  list. Deleted workflows appear in the same table, with their expiry date and
+  Restore.
+- New workflow opens a menu with Describe it, Start blank and Use a template,
+  selectable with keys 1 to 3. The empty list shows the same three choices.
 - Activity shows its sections as tabs: Runs, Recover with the number of open
   failures, Agent activity and Reports.
 - Reports shows recovery trends for the last 7, 30 or 90 days: recovery KPIs,

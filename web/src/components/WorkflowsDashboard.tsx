@@ -37,6 +37,8 @@ const DEFAULT_RETENTION_DAYS = 30
 
 type FolderGroup = { key: string; items: SavedWorkflow[] }
 
+const countLabel = (count: number | null, more: boolean) => (count === null ? '' : `${count}${more ? '+' : ''}`)
+
 export type WorkflowCreationMode = 'describe' | 'blank' | 'template'
 export type WorkflowsDashboardProps = {
   onOpen: (id: string) => void
@@ -60,7 +62,6 @@ function useWorkflowsDashboardController({
   workflowsRef.current = workflows
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [creationOpen, setCreationOpen] = useState(false)
   const recoveryBusyRef = useRef(new Set<string>())
   const [recoveryBusyIds, setRecoveryBusyIds] = useState<Set<string>>(() => new Set())
   const [hasMore, setHasMore] = useState(false)
@@ -97,7 +98,8 @@ function useWorkflowsDashboardController({
   const [bulkFolderDraft, setBulkFolderDraft] = useState('')
   const [bulkTagDraft, setBulkTagDraft] = useState('')
   const [showTrashed, setShowTrashed] = useState(false)
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  // The open view counts its loaded rows; this is the size of the other one.
+  const [otherViewCount, setOtherViewCount] = useState<number | null>(null)
   const [retentionDays, setRetentionDays] = useState<number | null>(null)
   const [trashNowMs, setTrashNowMs] = useState<number | null>(null)
   const listRequestSeq = useRef(0)
@@ -227,6 +229,14 @@ function useWorkflowsDashboardController({
         if (!cancelled) setRetentionDays(null)
       }
     })()
+    return () => { cancelled = true }
+  }, [showTrashed, platformVersion])
+  useEffect(() => {
+    let cancelled = false
+    api(showTrashed ? '/workflows' : '/workflows/trash').then(
+      (data) => { if (!cancelled) setOtherViewCount(Array.isArray(data) ? data.length : null) },
+      () => { if (!cancelled) setOtherViewCount(null) },
+    )
     return () => { cancelled = true }
   }, [showTrashed, platformVersion])
   // Scores arrive one row at a time; only a Health sort needs to react to them.
@@ -620,7 +630,13 @@ function useWorkflowsDashboardController({
   // Delete and restore share one optimistic lifecycle: drop the row and its
   // selection at once, call the server, and put the row back if it refuses.
   const removeWorkflowOptimistically = useCallback(
-    async (workflowId: string, request: () => Promise<unknown>, successKey: string, failureKey: string) => {
+    async (
+      workflowId: string,
+      request: () => Promise<unknown>,
+      successKey: string,
+      failureKey: string,
+      successAction?: (workflow: SavedWorkflow) => { label: string; onClick: () => void },
+    ) => {
       const current = workflowsRef.current.find((w) => w.id === workflowId)
       if (!current) return
       setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
@@ -632,7 +648,7 @@ function useWorkflowsDashboardController({
       })
       try {
         await request()
-        addToast(t(successKey, { name: current.name }), 'success')
+        addToast(t(successKey, { name: current.name }), 'success', successAction?.(current))
         bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
@@ -641,28 +657,45 @@ function useWorkflowsDashboardController({
     },
     [addToast, bumpPlatformVersion, t],
   )
+  const restoreRequest = useCallback(
+    (workflowId: string) => api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' }),
+    [],
+  )
+  const undoDelete = useCallback(
+    async (workflowId: string, name: string) => {
+      try {
+        await restoreRequest(workflowId)
+        addToast(t('workflowsDashboard.workflowRestored', { name }), 'success')
+        // The reload brings the row back in server order, whichever view is open.
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
+      } catch (err) {
+        addToast(tApiError(err) || t('workflowsDashboard.restoreFailed'), 'error')
+      }
+    },
+    [addToast, bumpPlatformVersion, restoreRequest, t],
+  )
   const deleteWorkflow = useCallback(
     async (workflowId: string) => {
-      setConfirmDeleteId(null)
       await removeWorkflowOptimistically(
         workflowId,
         () => api(`/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE' }),
         'workflowsDashboard.workflowDeleted',
         'workflowsDashboard.deleteFailed',
+        ({ id, name }) => ({ label: t('workflowsDashboard.undo'), onClick: () => void undoDelete(id, name) }),
       )
     },
-    [removeWorkflowOptimistically],
+    [removeWorkflowOptimistically, t, undoDelete],
   )
   const restoreWorkflow = useCallback(
     async (workflowId: string) => {
       await removeWorkflowOptimistically(
         workflowId,
-        () => api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' }),
+        () => restoreRequest(workflowId),
         'workflowsDashboard.workflowRestored',
         'workflowsDashboard.restoreFailed',
       )
     },
-    [removeWorkflowOptimistically],
+    [removeWorkflowOptimistically, restoreRequest],
   )
   const bulkRestore = useCallback(
     async () => {
@@ -672,40 +705,45 @@ function useWorkflowsDashboardController({
       setWorkflows((prev) => prev.filter((w) => !idSet.has(w.id)))
       setSelectedIds(new Set())
       const results = await Promise.allSettled(
-        ids.map((id) => api(`/workflows/${encodeURIComponent(id)}/restore`, { method: 'POST' })),
+        ids.map(restoreRequest),
       )
       const ok = results.filter((r) => r.status === 'fulfilled').length
       if (ok > 0) addToast(t('workflowsDashboard.bulkRestored', { count: ok }), 'success')
       if (ok < ids.length) addToast(t('workflowsDashboard.bulkRestoreFailed'), 'error')
       bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
     },
-    [selectedIds, workflows, addToast, bumpPlatformVersion, t],
+    [selectedIds, workflows, addToast, bumpPlatformVersion, restoreRequest, t],
   )
-  const toggleTrashView = useCallback(() => {
-    setShowTrashed((current) => !current)
+  const selectView = useCallback((trash: boolean) => {
+    if (trash === showTrashed) return
+    setOtherViewCount(workflowsRef.current.length)
+    setShowTrashed(trash)
     setSelectionMode(false)
     setSelectedIds(new Set())
-    setConfirmDeleteId(null)
     setWorkflows([])
     setLoading(true)
-  }, [])
+  }, [showTrashed])
+  const openViewLabel = countLabel(loading && workflows.length === 0 ? null : workflows.length, hasMore)
+  const otherViewLabel = countLabel(otherViewCount, otherViewCount === PAGE_SIZE)
+  const activeCountLabel = showTrashed ? otherViewLabel : openViewLabel
+  const trashCountLabel = showTrashed ? openViewLabel : otherViewLabel
   return {
-    allVisibleSelected, bulkAssign, bulkAssignTag, bulkFolderDraft, bulkRestore, bulkTagDraft,
+    activeCountLabel, allVisibleSelected, bulkAssign, bulkAssignTag, bulkFolderDraft, bulkRestore, bulkTagDraft,
     canWrite, cancelNewFolder, clearAllFilters, collapsedFolders, commitNewFolder,
-    confirmDeleteFolder, confirmDeleteId, confirmDeleteTag, creationOpen, deleteFolder,
+    confirmDeleteFolder, confirmDeleteTag, deleteFolder,
     deleteTag, deleteWorkflow, draggingId, dropTarget, folderFilter, folderOptions, groups,
     hasActiveFilters, hasFolders, hasMore, load, loadError, loadMore, loading, loadingMore,
     moveToFolder, newFolderDraft, newFolderDropFor, newFolderHover, onCreate, onOpen,
     persistCollapsedFolders, query, searchHint, searchInvalid, recoveryBusyIds, renameDraft, renameFolder, renameTag,
     renamingFolder, renamingTag, restoreWorkflow, resumeWorkflow, selectedIds,
     selectionMode, setBulkFolderDraft, setBulkTagDraft, setConfirmDeleteFolder,
-    setConfirmDeleteId, setConfirmDeleteTag, setCreationOpen, setDraggingId, setDropTarget,
+    selectView, setConfirmDeleteTag, setDraggingId, setDropTarget,
     setFolderFilter, setNewFolderDraft, setNewFolderDropFor, setNewFolderHover, setQuery,
     setRenameDraft, setRenamingFolder, setRenamingTag, setSelectedIds, setSelectionMode,
-    setShowTrashed, toggleSort, reportHealthScore, setTagFilters, setTagRenameDraft, setRowTag, showToolbar,
+    toggleSort, reportHealthScore, setTagFilters, setTagRenameDraft, setRowTag, showToolbar,
     showTrashed, soleTagFilter, sort, t, tagFilters, tagOptions, tagRenameDraft,
-    toggleFolder, toggleSelectAll, toggleSelectFolder, toggleSelected, toggleTrashView,
-    rememberFolderToggle, trashNowMs, retentionDays, visible, visibleIds, workflows,
+    toggleFolder, toggleSelectAll, toggleSelectFolder, toggleSelected,
+    rememberFolderToggle, trashCountLabel, trashNowMs, retentionDays, visible, visibleIds, workflows,
   }
 }
 export type WorkflowsDashboardController = ReturnType<typeof useWorkflowsDashboardController>

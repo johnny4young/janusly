@@ -483,6 +483,23 @@ describe('useWorkflowStore', () => {
     expect(useWorkflowStore.getState().toasts).toHaveLength(0)
   })
 
+  it('keeps a toast with an action as long as an error, even when the message repeats', () => {
+    vi.useFakeTimers()
+    try {
+      useWorkflowStore.setState({ toasts: [] })
+      const action = { label: 'Undo', onClick: () => {} }
+      useWorkflowStore.getState().addToast('Moved', 'success', action)
+      useWorkflowStore.getState().addToast('Moved', 'success', action)
+      expect(useWorkflowStore.getState().toasts).toHaveLength(2)
+      vi.advanceTimersByTime(4000)
+      expect(useWorkflowStore.getState().toasts).toHaveLength(2)
+      vi.advanceTimersByTime(2500)
+      expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps error toasts on screen longer than success toasts', () => {
     vi.useFakeTimers()
     try {

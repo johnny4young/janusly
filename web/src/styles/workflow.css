@@ -40,6 +40,8 @@
   box-shadow: 0 24px 48px -18px var(--we-primary-shadow-strong), 0 1px 2px var(--we-shadow-ink-04);
 }
 
+.toast--action { align-items: center; cursor: default; display: flex; gap: 12px; justify-content: space-between; }
+
 .toast-success { border-color: var(--we-success-border-40); background: var(--we-success-soft); color: var(--we-success-text); }
 .toast-error { border-color: var(--we-danger-border-40); background: var(--we-danger-soft); color: var(--we-danger-text); }
 .toast-info { border-color: color-mix(in srgb, var(--we-primary) 30%, transparent); background: var(--we-primary-soft); color: var(--we-primary-strong); }

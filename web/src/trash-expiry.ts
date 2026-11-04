@@ -10,6 +10,11 @@
 /** One day in milliseconds. */
 const DAY_MS = 86_400_000;
 
+/** The instant the retention window of a soft-deleted workflow ends. */
+export function purgeAtMs(deletedAtIso: string, retentionDays: number): number {
+  return new Date(deletedAtIso).getTime() + retentionDays * DAY_MS;
+}
+
 /**
  * Whole days until a soft-deleted workflow is purged:
  * `ceil((deletedAt + retentionDays - now) / 1 day)`.
@@ -22,6 +27,5 @@ const DAY_MS = 86_400_000;
  * pure and deterministically testable.
  */
 export function daysUntilPurge(deletedAtIso: string, retentionDays: number, nowMs: number): number {
-  const expiresAtMs = new Date(deletedAtIso).getTime() + retentionDays * DAY_MS;
-  return Math.ceil((expiresAtMs - nowMs) / DAY_MS);
+  return Math.ceil((purgeAtMs(deletedAtIso, retentionDays) - nowMs) / DAY_MS);
 }
