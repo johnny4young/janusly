@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Headings that receive focus for screen readers no longer show a focus ring
+  when a page opens.
+
 - Buttons keep their icon and label on one row across the product.
 
 - Workflow generation audits retain bounded first-draft issue codes even when

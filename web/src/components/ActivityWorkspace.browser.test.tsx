@@ -141,3 +141,19 @@ describe('<ActivityWorkspace /> (browser smoke)', () => {
     }
   })
 })
+
+describe('programmatic heading focus (browser)', () => {
+  it('moves focus to a heading without drawing a ring, and keeps the ring on controls', () => {
+    render(<><h2 tabIndex={-1}>Recent activity</h2><a href="#target">Open</a></>)
+    const heading = screen.getByRole('heading', { name: 'Recent activity' })
+    heading.focus()
+    expect(document.activeElement).toBe(heading)
+    expect(heading.matches(':focus-visible')).toBe(true)
+    expect(getComputedStyle(heading).outlineStyle).toBe('none')
+
+    const link = screen.getByRole('link', { name: 'Open' })
+    link.focus()
+    expect(link.matches(':focus-visible')).toBe(true)
+    expect(getComputedStyle(link).outlineStyle).toBe('solid')
+  })
+})
