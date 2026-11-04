@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Headings that receive focus for screen readers no longer show a focus ring
+  when a page opens.
+
 - The language selector in the account menu is a compact row like Theme and
   Density, and the canvas zoom controls follow the dark theme.
 - Buttons keep their icon and label on one row across the product.

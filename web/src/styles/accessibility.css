@@ -41,6 +41,9 @@
   border-radius: 6px;
 }
 
+/* Code moves focus to these headings for screen readers; they are not controls. */
+:is(h1, h2, h3, h4, h5, h6)[tabindex="-1"]:focus-visible { outline: none; }
+
 /* Placeholders must clear AA: lift the browser-default faint gray to the
    `--we-muted` token (which passes on white). opacity:1 defeats Firefox's
    default placeholder dimming. */
