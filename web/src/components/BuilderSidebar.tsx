@@ -206,6 +206,8 @@ export function BuilderSidebar({
               onClick={() => { void runAction('run', onStart) }}
               disabled={busyAction !== null || !permissions.includes('runs.start')}
               aria-busy={busyAction === 'run'}
+              aria-label={busyAction === 'run' ? t('sidebar.action.running') : t('sidebar.action.run')}
+              title={t('sidebar.action.run')}
             >
               {busyAction === 'run'
                 ? <Loader2 size={12} className="we-spin" aria-hidden="true" />

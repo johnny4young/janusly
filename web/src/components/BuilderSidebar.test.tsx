@@ -68,6 +68,8 @@ describe('<BuilderSidebar />', () => {
     renderSidebar({ activeTab: 'inspector' })
     const aside = document.querySelector('.builder-sidebar')!
     expect(aside).toHaveAttribute('data-collapsed', 'true')
+    // The rail hides the visible label, so the name must not depend on it.
+    expect(screen.getByRole('button', { name: 'Run' })).toHaveAttribute('aria-label', 'Run')
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
     expect(aside).toHaveAttribute('data-collapsed', 'false')
