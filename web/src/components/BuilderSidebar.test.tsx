@@ -9,13 +9,11 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof BuilderSidebar>>
   const props: ComponentProps<typeof BuilderSidebar> = {
     activeTab: 'inspector',
     aiHealth: null,
-    workflowName: 'Test workflow',
     streamStatus: 'idle',
     permissions: [
       'workflows.read', 'workflows.write', 'runs.read', 'runs.start', 'recovery.read',
       'ai.write', 'evals.read', 'packs.read', 'credentials.read', 'members.read',
     ],
-    onWorkflowNameChange: vi.fn(),
     onValidate: vi.fn(),
     onSave: vi.fn(),
     onStart: vi.fn(),
@@ -64,6 +62,18 @@ describe('<BuilderSidebar />', () => {
     expect(saveButton).toHaveAttribute('aria-busy', 'false')
     expect(validateButton).not.toBeDisabled()
     expect(runButton).not.toBeDisabled()
+  })
+
+  it('opens Build on the rail and remembers expanding it, without changing other views', () => {
+    renderSidebar({ activeTab: 'inspector' })
+    const aside = document.querySelector('.builder-sidebar')!
+    expect(aside).toHaveAttribute('data-collapsed', 'true')
+    // The rail hides the visible label, so the name must not depend on it.
+    expect(screen.getByRole('button', { name: 'Run' })).toHaveAttribute('aria-label', 'Run')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+    expect(aside).toHaveAttribute('data-collapsed', 'false')
+    expect(JSON.parse(window.localStorage.getItem('janusly:sidebar:state')!)).toMatchObject({ expandedInBuild: true, collapsed: false })
   })
 
   it('keeps step discovery out of global navigation', () => {

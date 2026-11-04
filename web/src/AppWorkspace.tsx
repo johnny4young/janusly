@@ -130,6 +130,7 @@ type AppWorkspaceProps = {
   onOpenTab: (tab: ActiveTab) => void
   onOpenHelp: () => void
   onOpenRecovery: () => void
+  onRecoverRunNode: (runId: string, nodeId: string) => void
   onReadinessResult: (result: ReadinessResult | null) => void
   onOpenPalette: () => void
   onCloseShortcuts: () => void
@@ -230,6 +231,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
                 run={observedRun}
                 runNodes={runNodes}
                 panel={rightPanelElement}
+                onRecoverNode={(nodeId) => props.onRecoverRunNode(observedRun.id, nodeId)}
               />
             </Suspense>
           ) : (
@@ -267,7 +269,19 @@ function WorkspaceContent(props: AppWorkspaceProps) {
             <nav className="top-bar-breadcrumb" aria-label={t('layout.workflowStatus')}>
               <span>{header.organizationLabel}</span>
               <ChevronRight size={12} aria-hidden="true" />
-              <b>{authoringMode ? header.workflowName : destinationLabel}</b>
+              {authoringMode ? (
+                <input
+                  className="top-bar-workflow-name"
+                  value={header.workflowName}
+                  onChange={(event) => props.onWorkflowNameChange(event.target.value)}
+                  aria-label={t('sidebar.field.name')}
+                  disabled={!canWriteWorkflows}
+                  data-testid="top-bar-workflow-name"
+                />
+              ) : <b>{destinationLabel}</b>}
+              {authoringMode && header.workflowVersion !== null && (
+                <span data-testid="top-bar-workflow-version">v{header.workflowVersion}</span>
+              )}
               {!authoringMode && activeTab !== 'home' && sectionLabel && sectionLabel !== destinationLabel && (
                 <>
                   <ChevronRight size={12} aria-hidden="true" />
@@ -352,13 +366,11 @@ function WorkspaceContent(props: AppWorkspaceProps) {
         <BuilderSidebar
           activeTab={activeTab}
           aiHealth={header.aiHealth}
-          workflowName={header.workflowName}
           streamStatus={header.streamStatus}
           workflowEnv={header.environment}
           workflowVersion={header.workflowVersion}
           workflowRunsCount={header.workflowRunsCount}
           permissions={permissions}
-          onWorkflowNameChange={props.onWorkflowNameChange}
           onValidate={() => { void props.onValidate() }}
           onSave={() => { void props.onSave() }}
           onOpenTab={props.onOpenTab}

@@ -14,7 +14,6 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
-  Pencil,
   Play,
   Save,
   Search,
@@ -36,7 +35,6 @@ import {
 } from '../workspace-locations'
 
 type BuilderSidebarProps = {
-  workflowName: string
   activeTab: ActiveTab
   streamStatus: string
   aiHealth: AiHealth | null
@@ -44,7 +42,6 @@ type BuilderSidebarProps = {
   workflowVersion?: number | null
   workflowRunsCount?: number | null
   permissions: readonly string[]
-  onWorkflowNameChange: (name: string) => void
   onValidate: () => void | Promise<void>
   onSave: () => void | Promise<void>
   onStart: () => void | Promise<void>
@@ -61,18 +58,20 @@ const DESTINATION_ICONS: Record<WorkspaceDestination, ReactNode> = {
   settings: <Settings2 size={14} />,
 }
 
-function loadCollapsedState(): boolean {
+type SidebarState = { collapsed: boolean; expandedInBuild: boolean }
+
+function loadSidebarState(): SidebarState {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '{}') as { collapsed?: unknown }
-    return parsed.collapsed === true
+    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '{}') as Partial<Record<keyof SidebarState, unknown>>
+    return { collapsed: parsed.collapsed === true, expandedInBuild: parsed.expandedInBuild === true }
   } catch {
-    return false
+    return { collapsed: false, expandedInBuild: false }
   }
 }
 
-function persistCollapsedState(collapsed: boolean): void {
+function persistSidebarState(state: SidebarState): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ collapsed }))
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   } catch {
     // Storage is an optional convenience; navigation remains functional.
   }
@@ -81,7 +80,6 @@ function persistCollapsedState(collapsed: boolean): void {
 export function BuilderSidebar({
   activeTab,
   aiHealth,
-  workflowName,
   streamStatus,
   workflowEnv = 'sandbox',
   workflowVersion = null,
@@ -92,22 +90,24 @@ export function BuilderSidebar({
   onStart,
   onOpenTab,
   onOpenHelp,
-  onWorkflowNameChange,
 }: BuilderSidebarProps) {
   const { t } = useT()
   const isMobile = useMediaQuery(MOBILE_WORKSPACE_QUERY)
   const currentWorkflowSaved = useWorkflowStore((state) => state.currentWorkflowSaved)
   const [busyAction, setBusyAction] = useState<'validate' | 'save' | 'run' | null>(null)
   const busyActionRef = useRef<typeof busyAction>(null)
-  const [collapsed, setCollapsed] = useState(loadCollapsedState)
+  const [sidebarState, setSidebarState] = useState(loadSidebarState)
   const [searchQuery, setSearchQuery] = useState('')
+  // Build needs the canvas width, so it opens on the rail unless expanded there.
+  const building = activeTab === 'inspector'
+  const collapsed = building ? !sidebarState.expandedInBuild : sidebarState.collapsed
   const visuallyCollapsed = collapsed && !isMobile
   const authoringMode = activeTab === 'ai-studio' || activeTab === 'inspector'
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase()
 
   useEffect(() => {
-    persistCollapsedState(collapsed)
-  }, [collapsed])
+    persistSidebarState(sidebarState)
+  }, [sidebarState])
 
   useEffect(() => {
     document.documentElement.dataset.sidebarCollapsed = visuallyCollapsed ? 'true' : 'false'
@@ -139,30 +139,12 @@ export function BuilderSidebar({
   const aiSubline = aiHealth?.enabled
     ? t('sidebar.aiMode.tagline', { model: aiHealth.model })
     : t('sidebar.aiMode.copyLocal')
-  const envLabel = workflowEnv === 'production'
-    ? t('sidebar.workflow.envProduction')
-    : t('sidebar.workflow.envSandbox')
   const connectionLabel = streamStatus === 'connected' ? t('sidebar.footer.connected') : streamStatus
 
   return (
     <aside className="builder-sidebar" data-collapsed={visuallyCollapsed ? 'true' : 'false'}>
       {authoringMode && (
         <div className={`sb-workflow ${workflowEnv === 'production' ? 'sb-workflow--prod' : 'sb-workflow--sandbox'}`}>
-          <div className="sb-workflow__top">
-            <label className="sb-workflow__name" aria-label={t('sidebar.workflow.rename')}>
-              <span className="sb-workflow__name-ic" aria-hidden="true"><Workflow size={13} /></span>
-              <input
-                type="text"
-                value={workflowName}
-                onChange={(event) => onWorkflowNameChange(event.target.value)}
-                className="sb-workflow__name-input"
-                aria-label={t('sidebar.field.name')}
-                disabled={!permissions.includes('workflows.write')}
-              />
-              <span className="sb-workflow__name-edit" aria-hidden="true"><Pencil size={11} /></span>
-            </label>
-            <span className={`sb-env sb-env--${workflowEnv}`}>{envLabel}</span>
-          </div>
           <div className="sb-workflow__meta">
             <span className={`sb-workflow__dot sb-workflow__dot--${streamStatus}`} />
             <span>
@@ -224,6 +206,8 @@ export function BuilderSidebar({
               onClick={() => { void runAction('run', onStart) }}
               disabled={busyAction !== null || !permissions.includes('runs.start')}
               aria-busy={busyAction === 'run'}
+              aria-label={busyAction === 'run' ? t('sidebar.action.running') : t('sidebar.action.run')}
+              title={t('sidebar.action.run')}
             >
               {busyAction === 'run'
                 ? <Loader2 size={12} className="we-spin" aria-hidden="true" />
@@ -311,7 +295,9 @@ export function BuilderSidebar({
           <button
             type="button"
             className="sb-footer__collapse"
-            onClick={() => setCollapsed((value) => !value)}
+            onClick={() => setSidebarState((state) => (building
+              ? { ...state, expandedInBuild: !state.expandedInBuild }
+              : { ...state, collapsed: !state.collapsed }))}
             title={collapsed ? t('sidebar.footer.expand') : t('sidebar.footer.collapse')}
             aria-label={collapsed ? t('sidebar.footer.expand') : t('sidebar.footer.collapse')}
             aria-pressed={collapsed}

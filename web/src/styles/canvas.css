@@ -95,7 +95,8 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   max-width: min(18rem, 42vw);
   background: var(--we-surface);
   border: 1px solid var(--we-line);
-  border-radius: 4px;
+  border-radius: var(--we-radius-pill);
+  box-shadow: 0 0 0 3px var(--we-surface);
   color: var(--we-text-secondary);
   font-size: 12px;
   font-family: var(--font-mono);
@@ -122,10 +123,6 @@ path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
 .we-edge-label[data-kind="error"] {
   border-color: var(--we-danger);
   color: var(--we-danger);
-}
-
-.we-edge-label[data-kind="default"] {
-  color: var(--we-ink-muted);
 }
 
 .canvas-toolbar__history {
@@ -171,9 +168,18 @@ path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
   font-weight: 800;
   line-height: 1.2;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.workflow-node-error {
+  border-color: var(--we-danger-border-25);
+  color: var(--we-danger-text);
+  overflow-wrap: anywhere;
+}
+
+.workflow-node-recover {
+  margin-top: 8px;
+  width: 100%;
 }
 
 .workflow-node-status {

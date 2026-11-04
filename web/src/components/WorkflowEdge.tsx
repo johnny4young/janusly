@@ -75,7 +75,7 @@ export function WorkflowEdge(props: EdgeProps<WorkflowGraphEdge>) {
         aria-label={connectionLabel}
         role="img"
       />
-      <EdgeLabelRenderer>
+      {kind !== 'default' && <EdgeLabelRenderer>
         <div
           className="we-edge-label"
           data-kind={kind}
@@ -91,7 +91,7 @@ export function WorkflowEdge(props: EdgeProps<WorkflowGraphEdge>) {
         >
           {routeLabel}
         </div>
-      </EdgeLabelRenderer>
+      </EdgeLabelRenderer>}
     </>
   )
 }

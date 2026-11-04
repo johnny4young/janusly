@@ -211,7 +211,8 @@ for (const locale of ['en', 'es'] as const) {
     await openWorkspaceSection(page, copy.workflows, copy.build)
 
     const canvas = page.locator('.canvas-frame[data-mode="author"]')
-    await expect(canvas.locator('.we-edge-label[data-kind="default"]')).toHaveText(copy.defaultRoute)
+    await expect(canvas.locator('.we-edge-label[data-kind="default"]')).toHaveCount(0)
+    await expect(canvas.locator(`.we-edge[role="img"][aria-label$=": ${copy.defaultRoute}"]`).first()).toBeVisible()
     const initialConditionLabel = canvas.locator('.we-edge-label[data-kind="condition"]')
     await expect(initialConditionLabel).toContainText(`${copy.conditionPrefix}context.gate.output.result === true`)
     await canvas.locator('.react-flow__node[data-id="gate"] .workflow-node').click()

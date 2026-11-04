@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Build opens with the sidebar collapsed to a rail for more canvas; the flow
+  name and version move to the top bar.
+
+- Canvas connections drop the repeated "default" label; named branches show a
+  pill on the connection.
+
+- A failed step on the run snapshot keeps its full title, shows its error in
+  one line, and links to its item in the recovery queue.
+
 - Run events opens on the latest failed run, with a run picker, and the
   breadcrumb reads Activity › Run events.
 
