@@ -8,6 +8,9 @@ import tailwindcss from '@tailwindcss/vite'
 import { minify as minifyWithTerser } from 'terser'
 import { compactI18nCatalogs } from './scripts/compact-i18n-plugin.mjs'
 import { injectBuildStamp } from './scripts/build-stamp'
+import { cssFloor } from './scripts/css-floor-plugin.mjs'
+import { reactEsmFacade } from './scripts/react-esm-facade-plugin.mjs'
+import { trimVendor } from './scripts/trim-vendor-plugin.mjs'
 import { resolveWebTestWorkerLimit } from './vitest-worker-policy.js'
 
 /**
@@ -40,8 +43,11 @@ export default defineConfig(({ mode }) => ({
     compactI18nCatalogs({
       canonicalPath: resolve(import.meta.dirname, 'src/i18n/locales/en/common.json'),
     }),
+    reactEsmFacade(),
+    trimVendor(),
     react(),
     tailwindcss(),
+    cssFloor(),
     {
       name: 'janusly-terser-compression-pass',
       // This extra pass intentionally returns no source map. Keep it scoped to
@@ -84,6 +90,8 @@ export default defineConfig(({ mode }) => ({
     // sidecar can flip this to 'hidden' to emit .map files without inlining.
     sourcemap: mode !== 'production',
     cssMinify: 'lightningcss',
+    // Preloading is only a hint, so browsers without native support still load every chunk.
+    modulePreload: { polyfill: false },
     rollupOptions: {
       output: {
         manualChunks: (id) => {
