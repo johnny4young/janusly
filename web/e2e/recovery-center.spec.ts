@@ -33,7 +33,9 @@ test('Home leads with priorities and active work', async ({ page }) => {
   await expect(page.getByTestId('home-health-summary')).toBeVisible()
   await expect(page.getByTestId('home-priority-inbox')).toBeVisible()
   await expect(page.getByTestId('home-active-work')).toBeVisible()
-  await expect(page.getByTestId('recovery-center-metric-strip')).toBeHidden()
+  await expect(page.getByTestId('home-today')).toBeVisible()
+  await expect(page.getByTestId('recovery-center-composer')).toBeVisible()
+  await expect(page.getByTestId('recovery-heatmap')).toHaveCount(0)
   await captureWorkspace(page, 'web-en-home-caught-up')
 
   await page.getByTestId('home-active-work').getByRole('button', { name: 'Activity' }).click()
@@ -43,12 +45,13 @@ test('Home leads with priorities and active work', async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(2)
 })
 
-test('Recovery Center exposes calibration health without blocking an empty workspace', async ({ page }) => {
+test('Reports exposes calibration health without blocking an empty workspace', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await prepareEmptySession(page)
   await page.goto('/')
+  await page.getByTestId('home-today-open-reports').click()
+  await expect(page).toHaveURL(/#\/reports$/)
 
-  await page.getByTestId('home-insights-toggle').click()
   const calibration = page.getByTestId('recovery-center-tile-calibration')
   await expect(calibration).toBeVisible()
   await expect(calibration.getByRole('heading', { name: 'Model calibration' })).toBeVisible()

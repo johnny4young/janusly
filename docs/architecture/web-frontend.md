@@ -250,9 +250,12 @@ Activity shows the tabs Runs, Recover (with its open count), Agent activity and
 Reports, each filtered by the permission that opens it. Reports (`#/reports`,
 `recovery.read`) is a lazy panel with a 7, 30 or 90 day window. KPIs, failure
 clusters and the Value dashboard read `/recovery/metrics` and `/dlq/clusters`
-for that window behind `dlq.read`; Recovery validation and every export need
-`reports.read`; the heatmap, ledger and wins come from `/recovery/home`, whose
-90-day heatmap the panel narrows to the window. Model calibration and AI spend
+for that window behind `dlq.read`; windowed Recovery validation and every export
+need `reports.read`; the heatmap, ledger and wins come from `/recovery/home`,
+whose 90-day heatmap the panel narrows to the window. An operator without
+`dlq.read` or `reports.read` reads those reports from the same `/recovery/home`
+sections, which `recovery.read` allows: fixed at 30 days (90 for the heatmap),
+with no window control and no exports. Model calibration and AI spend
 are not windowed: their endpoints have no window parameter. A heatmap day opens
 Recover through `#/recover/day/<YYYY-MM-DD>`.
 
@@ -456,6 +459,17 @@ not a substitute for either. Accepted loss does not publish the recovered
 all-clear celebration or promise undo of external effects.
 
 
+### Home signals
+
+Home shows what needs a decision now; every trend, breakdown and history lives
+in Reports. Below the hero and the action inbox sit the Operator prompt and a
+Today strip. Today's runs and success come from the loaded run page in the
+operator's timezone, so they read `100+` once a full page is today's and are
+absent without `runs.read`; open failures and pending approvals link to where
+they are acted on. A recurring failure reaches the inbox through the operator
+brief. An AI budget banner renders only once `/billing/budget` reports the
+warning threshold crossed.
+
 ### Home evidence states
 
 Home derives health from validated production metrics, not the visible run page.
@@ -482,8 +496,8 @@ known work remains accessible through the action inbox.
 A genuinely empty workspace leads with the existing permission-gated controlled
 drill and workflow creation actions rather than two empty work cards. No drill
 starts on mount; the missing-billing-secret fixture fails before provider egress,
-and its validation evidence stays out of production metrics. The entry is not
-duplicated in Insights, and dismissing it is session-only. Existing workspaces
+and its validation evidence stays out of production metrics. Dismissing the
+entry is session-only. Existing workspaces
 with a filtered empty run page keep their operational overview.
 
 

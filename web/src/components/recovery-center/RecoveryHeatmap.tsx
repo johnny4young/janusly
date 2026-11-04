@@ -5,7 +5,7 @@
  * "we used to fail a lot, now we recover" story at a glance.
  *
  * Pure grid logic lives in `./helpers.ts` (`buildHeatmapCells` / `heatmapOutcome`);
- * this component is presentational and fetches nothing — `RecoveryCenterPanel`
+ * this component is presentational and fetches nothing — `ReportsPanel`
  * passes the API rows in. When day selection is available the calendar uses a
  * single roving tab stop; arrows move through the column-major seven-day grid.
  */
@@ -13,19 +13,16 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
 import { useT } from '../../i18n'
-import { buildHeatmapCells, type HeatmapCell, type HeatmapDay } from './recovery-center-model'
+import { buildHeatmapCells, type HeatmapDay } from './recovery-center-model'
 import './recovery-center.css'
 
 export function RecoveryHeatmap({
   days,
-  cells: providedCells,
   windowDays,
   nowMs,
   onSelectDay,
 }: {
   days: HeatmapDay[]
-  /** Reuse a parent-owned densified grid when another hero signal needs it. */
-  cells?: HeatmapCell[]
   windowDays: number
   nowMs: number | null
   /** Drill into one day's failures. Only days WITH failures are clickable. */
@@ -33,8 +30,8 @@ export function RecoveryHeatmap({
 }) {
   const { t } = useT()
   const cells = useMemo(
-    () => providedCells ?? buildHeatmapCells(days, windowDays, nowMs ?? 0),
-    [days, providedCells, windowDays, nowMs],
+    () => buildHeatmapCells(days, windowDays, nowMs ?? 0),
+    [days, windowDays, nowMs],
   )
   const defaultFocusIndex = useMemo(() => {
     for (let index = cells.length - 1; index >= 0; index -= 1) {

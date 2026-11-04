@@ -349,50 +349,6 @@ button.we-recovery-heatmap__cell:focus-visible {
 
 [data-density="compact"] .we-recovery-watch-row { padding: 6px 8px; }
 
-.we-operator-mini {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.we-operator-mini__cell {
-  padding: 10px;
-  border: 1px solid var(--we-line);
-  border-radius: 8px;
-  background: var(--we-surface);
-}
-
-.we-operator-mini__lbl {
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--we-muted);
-}
-
-.we-operator-mini__val {
-  margin-top: 4px;
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--we-ink);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-}
-
-.we-operator-mini__delta {
-  margin-top: 2px;
-  font-size: 10px;
-  color: var(--we-muted);
-  font-family: var(--font-mono);
-}
-
-.we-operator-mini__delta[data-severity="success"],
-.we-operator-mini__delta[data-severity="healthy"] { color: var(--we-success-text); }
-
-.we-operator-mini__delta[data-severity="warn"] { color: var(--we-warning-text); }
-
-.we-operator-mini__delta[data-severity="unhealthy"],
-.we-operator-mini__delta[data-severity="danger"] { color: var(--we-danger-text); }
 
 /* Recovery Lab entry */
 .we-recovery-lab-entry {

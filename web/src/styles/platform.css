@@ -1902,79 +1902,56 @@
   text-underline-offset: 2px;
 }
 
-.we-home-insights {
-  overflow: hidden;
-  border: 1px solid var(--we-line);
-  border-radius: 10px;
-  background: var(--we-surface-1);
+.we-home-today {
+  padding: 14px 18px 16px;
 }
 
-.we-home-insights__toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  width: 100%;
-  min-height: 60px;
-  padding: 14px 18px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
+.we-home-today__cells {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.we-home-today__cell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-1);
+  color: var(--we-text-2);
+  font-size: 12px;
   text-align: left;
 }
 
-.we-home-insights__toggle:hover {
-  background: var(--we-surface-2);
-}
-
-.we-home-insights__toggle:focus-visible {
-  outline: 2px solid var(--we-primary);
-  outline-offset: -3px;
-}
-
-.we-home-insights__toggle-copy {
-  min-width: 0;
-}
-
-.we-home-insights__toggle-copy strong {
+.we-home-today__cell b {
   color: var(--we-text-1);
-  font-size: 14px;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
-.we-home-insights__toggle-action {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
+button.we-home-today__cell {
+  cursor: pointer;
 }
 
-.we-home-insights[data-expanded="true"] .we-home-insights__toggle-action svg {
-  transform: rotate(180deg);
+button.we-home-today__cell:hover {
+  background: var(--we-primary-soft);
 }
 
-.we-home-insights__content {
-  display: grid;
-  gap: 16px;
-  padding: 0 18px 18px;
-  border-top: 1px solid var(--we-line);
+button.we-home-today__cell:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: -2px;
 }
 
-.we-home-insights__content > :first-child {
-  margin-top: 18px;
+.we-home-today__cell[data-attention] {
+  background: var(--we-warning-soft);
 }
 
-.we-home-insights__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
-  gap: 16px;
-}
-
-.we-home-insights__assistant,
-.we-home-insights__rail {
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  min-width: 0;
+.we-home-today__cell[data-attention] b {
+  color: var(--we-warning-text);
 }
 
 /* Decorative success confetti. The React component removes this DOM for
@@ -2234,8 +2211,7 @@
   .we-recovery-center-hero {
     padding: 24px;
   }
-  .we-home-workspace,
-  .we-home-insights__grid {
+  .we-home-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -2274,9 +2250,6 @@
   .we-home-priority__list .ui-button {
     grid-column: 1 / -1;
     justify-content: center;
-  }
-  .we-home-insights__toggle {
-    align-items: flex-start;
   }
   .we-recovery-center-hero__memory-purge {
     grid-template-columns: auto minmax(0, 1fr);
@@ -2345,13 +2318,6 @@
   .we-home-priority__list .ui-button {
     grid-column: 1 / -1;
     min-height: 44px;
-  }
-  .we-home-insights__toggle {
-    min-height: 92px;
-    padding: 14px;
-  }
-  .we-home-insights__content {
-    padding: 0 12px 12px;
   }
   .we-recovery-center-value {
     padding: 18px;

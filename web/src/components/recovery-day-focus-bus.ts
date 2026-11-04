@@ -1,9 +1,9 @@
 /**
- * "Drill into one day's failures" — a recovery-heatmap cell click on the Home
- * tab asks the recovery queue (mounted lazily under the Runs tab) to filter to
- * that UTC day, spelled as the route `#/runs/day/<YYYY-MM-DD>`.
+ * "Drill into one day's failures" — a recovery-heatmap cell click in Reports
+ * asks the recovery queue (mounted lazily under Activity) to filter to that
+ * UTC day, spelled as the route `#/recover/day/<YYYY-MM-DD>`.
  *
- * A tiny standalone module so the Home surface can request a focus day
+ * A tiny standalone module so Reports can request a focus day
  * WITHOUT statically importing the heavy queue panel. The requested day is
  * read from the route on mount (consume-once) so a click made before the
  * queue mounts still lands, plus a live event for when it is already mounted.

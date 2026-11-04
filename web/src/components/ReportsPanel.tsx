@@ -36,6 +36,7 @@ const REPORT_WINDOWS = [7, 30, 90] as const
 const REPORT_TAGS = [PLATFORM_TAG, 'recovery', 'runs', 'dlq'] as const
 // The heatmap has no endpoint of its own; the Home read model carries it, with the ledger and wins.
 const WHOLE_HISTORY = 0
+const READ_MODEL_HEATMAP_DAYS = 90
 
 const loadMetrics = (windowDays: number, signal: AbortSignal) =>
   contractApi('GET /recovery/metrics', `/recovery/metrics?windowDays=${windowDays}`, undefined, { signal })
@@ -57,6 +58,9 @@ const loadHistory = (_windowDays: number, signal: AbortSignal) =>
       days: readRecoveryHomeSection(snapshot, 'heatmap', decodeHeatmap)?.days ?? null,
       ledger: readRecoveryHomeSection(snapshot, 'ledger', decodeRecoveryLedger),
       wins: readRecoveryHomeSection(snapshot, 'wins', decodeOperatorWins),
+      metrics: readRecoveryHomeSection(snapshot, 'metrics', decodeRecoveryMetrics),
+      clusters: readRecoveryHomeSection(snapshot, 'clusters', decodeClustersResponse),
+      validation: readRecoveryHomeSection(snapshot, 'validation', decodeRecoveryValidationReport),
     }
   })
 
@@ -101,10 +105,15 @@ export function ReportsPanel({
   const [windowDays, setWindowDays] = useState<number>(30)
   const [nowMs] = useState(() => Date.now())
 
-  const metrics = useReportRead(loadMetrics, canReadDeadLetters, orgId, windowDays, refresh)
-  const clusters = useReportRead(loadClusters, canReadDeadLetters, orgId, windowDays, refresh)
-  const validation = useReportRead(loadValidation, canReadReports, orgId, windowDays, refresh)
+  const windowedMetrics = useReportRead(loadMetrics, canReadDeadLetters, orgId, windowDays, refresh)
+  const windowedClusters = useReportRead(loadClusters, canReadDeadLetters, orgId, windowDays, refresh)
+  const windowedValidation = useReportRead(loadValidation, canReadReports, orgId, windowDays, refresh)
   const history = useReportRead(loadHistory, true, orgId, WHOLE_HISTORY, refresh)
+  // The focused routes need dlq.read and reports.read; recovery.read alone gets
+  // the read model's fixed 30-day projections of the same reports.
+  const metrics = canReadDeadLetters ? windowedMetrics : history?.metrics
+  const clusters = canReadDeadLetters ? windowedClusters : history?.clusters
+  const validation = canReadReports ? windowedValidation : history?.validation
 
   const openDay = (day: string) => {
     requestRecoveryDayFocus(day, 'recover')
@@ -112,30 +121,30 @@ export function ReportsPanel({
   }
   const kpis = useRecoveryKpiTiles(metrics ?? null, onOpenTab, openDay)
   const recoveryTime = metrics ? selectRecoveryTimeMetric(metrics) : null
-  const failed = (canReadDeadLetters && (metrics === null || clusters === null))
-    || (canReadReports && validation === null)
-    || history === null
-    || history?.days === null
+  const failed = metrics === null || clusters === null || validation === null
+    || history === null || history?.days === null
 
   return (
     <div className="we-reports" data-testid="reports-panel">
-      <div
-        className="we-reports__windows"
-        role="group"
-        aria-label={t('activity.reports.windowAria')}
-      >
-        {REPORT_WINDOWS.map((days) => (
-          <Button
-            key={days}
-            size="sm"
-            aria-pressed={days === windowDays}
-            data-testid={`reports-window-${days}`}
-            onClick={() => setWindowDays(days)}
-          >
-            {t('workflowSlo.windowOption', { days })}
-          </Button>
-        ))}
-      </div>
+      {canReadDeadLetters && (
+        <div
+          className="we-reports__windows"
+          role="group"
+          aria-label={t('activity.reports.windowAria')}
+        >
+          {REPORT_WINDOWS.map((days) => (
+            <Button
+              key={days}
+              size="sm"
+              aria-pressed={days === windowDays}
+              data-testid={`reports-window-${days}`}
+              onClick={() => setWindowDays(days)}
+            >
+              {t('workflowSlo.windowOption', { days })}
+            </Button>
+          ))}
+        </div>
+      )}
 
       {failed && (
         <div className="we-recovery-center-error we-reports__error" role="status" data-testid="reports-unavailable">
@@ -146,9 +155,9 @@ export function ReportsPanel({
         </div>
       )}
 
-      {canReadDeadLetters && (
+      {metrics && (
         <VitalSignsStrip
-          tiles={withSeverityLabels([kpis.verifiedRecovery, kpis.firstAction, kpis.replay, kpis.durability, kpis.sla], t)}
+          tiles={withSeverityLabels([kpis.verifiedRecovery, kpis.firstAction, kpis.replay, kpis.durability, kpis.sla, kpis.runs], t)}
           ariaLabel={t('recoveryCenter.metricStripAria')}
           testId="reports-metric-strip"
         />
@@ -157,7 +166,7 @@ export function ReportsPanel({
       {history?.days && (
         <RecoveryHeatmap
           days={history.days}
-          windowDays={windowDays}
+          windowDays={canReadDeadLetters ? windowDays : READ_MODEL_HEATMAP_DAYS}
           nowMs={nowMs}
           onSelectDay={openDay}
         />
@@ -176,7 +185,7 @@ export function ReportsPanel({
         <BudgetTile title={t('activity.reports.aiSpend')} onOpenTab={onOpenTab} />
       </div>
 
-      {canReadReports && <RecoveryValidationSection report={validation} />}
+      <RecoveryValidationSection report={validation} canExport={canReadReports} />
 
       {metrics && (
         <ValueDashboardSection
