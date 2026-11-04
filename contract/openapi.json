@@ -6852,6 +6852,11 @@
                   "id": {
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "reason": {
+                    "maxLength": 280,
+                    "minLength": 1,
+                    "type": "string"
                   }
                 },
                 "required": [

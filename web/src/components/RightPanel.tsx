@@ -126,7 +126,7 @@ export type RightPanelExecution = {
   onSelectRecovery: (id: string | null) => void
   onClearActiveRun: () => void
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
-  onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
+  onResolveDeadLetter: (id: string, reason: string) => boolean | Promise<boolean> | undefined
 }
 
 export type RightPanelNavigation = {

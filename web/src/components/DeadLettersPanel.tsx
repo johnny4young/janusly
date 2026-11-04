@@ -1,6 +1,6 @@
 import { currentApiRequestLifecycle } from '../api-request-lifecycle'
 import { useAliveRef } from '../hooks/useAliveRef'
-import { DeadLetterCloseDialog, type DeadLetterCloseTarget } from './DeadLetterCloseDialog'
+import { DeadLetterCloseDialog } from './DeadLetterCloseDialog'
 import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 /**
  * Dead-letter operations panel — surfaces `dead_letters` rows with replay
@@ -35,10 +35,12 @@ import {
   isBulkResolveResult,
   triageQueueSignature,
 } from './dead-letter-model'
-import type {
-  BulkDeadLetterError,
-  DeadLetter,
-  PendingTriageFocus,
+import {
+  deadLetterCloseTarget,
+  type BulkDeadLetterError,
+  type DeadLetter,
+  type DeadLetterCloseTarget,
+  type PendingTriageFocus,
 } from './dead-letter-types'
 import { DeadLetterQueueView } from './DeadLetterQueueView'
 import { RecoveryAutomationDisclosure } from './RecoveryAutomationDisclosure'
@@ -61,7 +63,7 @@ const DLQ_ROW_PITCH = 60
 type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
   onReplay: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
-  onResolve: (id: string) => boolean | Promise<boolean> | undefined
+  onResolve: (id: string, reason: string) => boolean | Promise<boolean> | undefined
   canReplay?: boolean
   canResolve?: boolean
   canStartRuns?: boolean
@@ -158,12 +160,11 @@ export function DeadLettersPanel({
       && current.orgId === closeRequest.orgId && current.userId === closeRequest.userId
   }
 
-  const requestClose = (items: DeadLetterCloseTarget[], bulk: boolean) => {
-    if (!canResolve || closeRequest || items.length === 0) return
+  const requestClose = (targets: DeadLetterCloseTarget[], bulk: boolean) => {
+    if (!canResolve || closeRequest || targets.length === 0) return
     setPendingTriageFocus(null)
     setCloseRequest({
-      targets: items.map(({ id, workflowName, runId, nodeId }) => ({ id, workflowName, runId, nodeId })),
-      bulk, orgId, userId, signal: currentApiRequestLifecycle().signal,
+      targets, bulk, orgId, userId, signal: currentApiRequestLifecycle().signal,
     })
   }
   // Per-row failure reasons from the last bulk action's partial-success
@@ -225,13 +226,13 @@ export function DeadLettersPanel({
   // resolve's post-success behavior (bump + refetch + toast). The API uses a
   // 200 partial-success envelope, so inspect it before deciding whether to
   // clear or keep the remaining failed selections.
-  const bulkResolve = async () => {
+  const bulkResolve = async (reason: string) => {
     if (!canResolve || !closeIsCurrent() || !closeRequest) return false
     const ids = closeRequest.targets.map(item => item.id)
     if (ids.some(id => replayingIds.has(id))) return false
     setBulkErrors([])
     try {
-      const result = await api('/dlq/bulk-resolve', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
+      const result = await api('/dlq/bulk-resolve', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids, reason }) })
       if (!closeIsCurrent()) return false
       if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed'))
 
@@ -494,7 +495,7 @@ export function DeadLettersPanel({
 
   const resolveSelected = async () => {
     if (!canResolve || !selected || selected.status === 'resolved' || replayingIds.has(selected.id)) return
-    requestClose([selected], false)
+    requestClose([deadLetterCloseTarget(selected)], false)
   }
 
   useEffect(() => {
@@ -699,7 +700,10 @@ export function DeadLettersPanel({
           bulkReplay,
           bulkResolve: async () => requestClose([...selectedIds]
             .filter(id => !replayingIds.has(id))
-            .map(id => filtered.find(item => item.id === id) ?? { id }), true),
+            .map(id => {
+              const row = filtered.find(item => item.id === id)
+              return row ? deadLetterCloseTarget(row) : { id }
+            }), true),
           createReplayCampaign: setCampaignDeadLetterIds,
           selectRow: (id) => { setQueueFocusRequest(null); setRequestedId(null); setSelectedId(id) },
           openRecoveryItem: setOpenRecoveryItemId,
@@ -716,12 +720,12 @@ export function DeadLettersPanel({
       {closeRequest && (
         <DeadLetterCloseDialog targets={closeRequest.targets}
           onClose={() => setCloseRequest(current => current === closeRequest ? null : current)}
-          onConfirm={async () => {
+          onConfirm={async reason => {
             if (!canResolve || !closeIsCurrent()) return false
-            if (closeRequest.bulk) return bulkResolve()
+            if (closeRequest.bulk) return bulkResolve(reason)
             const target = closeRequest.targets[0]
             if (!target || replayingIds.has(target.id)) return false
-            return runSelectedTriageAction(onResolve, target)
+            return runSelectedTriageAction(id => onResolve(id, reason), target)
           }} />
       )}
       <RecoveryAutomationDisclosure

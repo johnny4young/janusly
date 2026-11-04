@@ -16,6 +16,10 @@ import { requestRecoveryQueueFocus } from './recovery-queue-focus-bus'
 // returns a { items, nextCursor, hasMore } keyset envelope. The default stub
 // returns an empty page; `dlqMock` simulates the server for filter/sort cases.
 // Supplementary recovery cards are deferred until the operator expands them.
+function fillCloseReason(reason = 'Refunded by hand') {
+  fireEvent.change(screen.getByTestId('dlq-close-reason'), { target: { value: reason } })
+}
+
 vi.mock('../api', () => {
   const module = ({
   api: vi.fn(async (path?: unknown, _init?: RequestInit) => {
@@ -837,11 +841,12 @@ describe('<DeadLettersPanel /> — sort', () => {
     expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('2 selected')
 
     fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
     await waitFor(() => {
       const call = vi.mocked(api).mock.calls.find(([p]) => p === '/dlq/bulk-resolve')
       expect(call).toBeTruthy()
-      expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ deadLetterIds: ['a', 'b'] })
+      expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ deadLetterIds: ['a', 'b'], reason: 'Refunded by hand' })
     })
     // A successful bulk resolve exits selection mode → the bar disappears.
     await waitFor(() => expect(screen.queryByTestId('dlq-bulk-bar')).not.toBeInTheDocument())
@@ -851,7 +856,7 @@ describe('<DeadLettersPanel /> — sort', () => {
     const rows = [mockDeadLetter('a'), mockDeadLetter('b')]
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/dlq/bulk-resolve') {
-        expect(JSON.parse(String(options?.body))).toEqual({ deadLetterIds: ['a', 'b'] })
+        expect(JSON.parse(String(options?.body))).toEqual({ deadLetterIds: ['a', 'b'], reason: 'Refunded by hand' })
         return { resolved: 1, failed: 1, errors: [{ deadLetterId: 'b', error: 'DLQ entry not found' }] }
       }
       return dlqMock(rows)(path, options)
@@ -863,6 +868,7 @@ describe('<DeadLettersPanel /> — sort', () => {
     fireEvent.click(await screen.findByTestId('dlq-select-row-a'))
     fireEvent.click(screen.getByTestId('dlq-select-row-b'))
     fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
 
     await waitFor(() => {
@@ -1118,9 +1124,10 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     expect(onReplay).toHaveBeenCalledWith('a', '2026-05-25T12:00:00Z')
     expect(onResolve).not.toHaveBeenCalled()
     expect(screen.getAllByRole('alertdialog')).toHaveLength(1)
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
     await waitFor(() => expect(onResolve).toHaveBeenCalledOnce())
-    expect(onResolve).toHaveBeenCalledWith('a')
+    expect(onResolve).toHaveBeenCalledWith('a', 'Refunded by hand')
   })
 
   it('shows Recovering immediately, blocks duplicate actions, and clears after failure', async () => {
@@ -1346,7 +1353,7 @@ describe('DLQ close acknowledgement', () => {
     ]))
   })
 
-  it('shows exact single scope, defaults focus to Cancel and cancels without mutation', async () => {
+  it('shows exact single scope, defaults focus to the reason and cancels without mutation', async () => {
     const onResolve = vi.fn()
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={onResolve} />)
     const row = await screen.findByTestId('dlq-row-a')
@@ -1356,9 +1363,10 @@ describe('DLQ close acknowledgement', () => {
     expect(dialog).toHaveTextContent('Customer invoices')
     expect(dialog).toHaveTextContent('Failure: a')
     expect(dialog).toHaveTextContent('Run: run-a')
-    expect(dialog).toHaveTextContent('Step: node-a')
+    expect(dialog).toHaveTextContent('Stepnode-a')
     expect(dialog).toHaveTextContent('accepted loss')
-    expect(screen.getByTestId('dlq-close-cancel')).toHaveFocus()
+    expect(screen.getByTestId('dlq-close-reason')).toHaveFocus()
+    expect(screen.getByTestId('dlq-close-confirm')).toBeDisabled()
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     await waitFor(() => expect(row).toHaveFocus())
@@ -1372,8 +1380,9 @@ describe('DLQ close acknowledgement', () => {
     fireEvent.click(screen.getByRole('button', { name: /close without recovery/i }))
     fireEvent.click(screen.getByTestId('dlq-row-b'))
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Failure: a')
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
-    await waitFor(() => expect(onResolve).toHaveBeenCalledWith('a'))
+    await waitFor(() => expect(onResolve).toHaveBeenCalledWith('a', 'Refunded by hand'))
     expect(onResolve).toHaveBeenCalledOnce()
   })
 
@@ -1390,6 +1399,7 @@ describe('DLQ close acknowledgement', () => {
     fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
     // An external selection update cannot rewrite the acknowledged payload.
     fireEvent.click(screen.getByTestId('dlq-select-row-b'))
+    fillCloseReason('  Refunded by hand  ')
     const submit = screen.getByTestId('dlq-close-confirm')
     fireEvent.click(submit)
     fireEvent.click(submit)
@@ -1399,7 +1409,7 @@ describe('DLQ close acknowledgement', () => {
     expect(screen.getByTestId('dlq-close-cancel')).toBeDisabled()
     const requests = vi.mocked(api).mock.calls.filter(([path]) => path === '/dlq/bulk-resolve')
     expect(requests).toHaveLength(1)
-    expect(JSON.parse(String(requests[0][1]?.body))).toEqual({ deadLetterIds: ['a', 'b'] })
+    expect(JSON.parse(String(requests[0][1]?.body))).toEqual({ deadLetterIds: ['a', 'b'], reason: 'Refunded by hand' })
     await act(async () => finish({ resolved: 2, failed: 0, errors: [] }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('closed without recovery')
@@ -1411,6 +1421,7 @@ describe('DLQ close acknowledgement', () => {
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={onResolve} />)
     fireEvent.click(await screen.findByTestId('dlq-row-a'))
     fireEvent.click(screen.getByRole('button', { name: /close without recovery/i }))
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
     expect(await screen.findByRole('alert')).toHaveTextContent('No recovery is claimed')
     expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
@@ -1454,7 +1465,7 @@ it('does not let a background queue focus request steal the confirmation focus',
   render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
   fireEvent.keyDown(await screen.findByTestId('dlq-row-a'), { key: 'Enter', ctrlKey: true })
   act(() => requestRecoveryQueueFocus('b'))
-  expect(screen.getByTestId('dlq-close-cancel')).toHaveFocus()
+  expect(screen.getByTestId('dlq-close-reason')).toHaveFocus()
   expect(screen.getByRole('alertdialog')).toHaveTextContent('Failure: a')
 })
 

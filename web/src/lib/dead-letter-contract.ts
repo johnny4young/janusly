@@ -30,6 +30,6 @@ export async function readDeadLetterDetail(id: string, signal?: AbortSignal): Pr
 }
 
 /** Resolves only on the server's affirmative `{ ok: true }` receipt, which the guard requires. */
-export async function resolveDeadLetterEntry(id: string): Promise<void> {
-  await contractApi('POST /dlq/resolve', '/dlq/resolve', { id }, { guard: isPostDlqResolveResponse })
+export async function resolveDeadLetterEntry(id: string, reason: string): Promise<void> {
+  await contractApi('POST /dlq/resolve', '/dlq/resolve', { id, reason }, { guard: isPostDlqResolveResponse })
 }

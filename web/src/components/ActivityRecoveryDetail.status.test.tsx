@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 
 import { readDeadLetterDetail } from '../lib/dead-letter-contract'
@@ -76,4 +76,20 @@ it('leads the evidence with the readable cause and keeps the raw error collapsed
   expect(await screen.findByText('Host demo-ingest.invalid does not resolve')).toBeInTheDocument()
   expect(screen.getByTestId('recovery-error-raw-toggle')).toHaveAttribute('aria-expanded', 'false')
   expect(screen.queryByTestId('recovery-error-raw')).not.toBeInTheDocument()
+})
+
+it('closes only through the reason confirmation, with the facts of the failure it opened on', async () => {
+  vi.mocked(readDeadLetterDetail).mockResolvedValue(detail('open', 'boom'))
+  const onResolve = vi.fn(async () => true)
+  const row = { ...summary, recovery: { occurrenceCount: 3 } as DeadLetter['recovery'] }
+  render(<ActivityRecoveryDetail deadLetter={row} {...handlers} onResolve={onResolve} />)
+  fireEvent.click(await screen.findByTestId('activity-recovery-close'))
+  expect(onResolve).not.toHaveBeenCalled()
+  expect(await screen.findByRole('alertdialog', undefined, { timeout: 30_000 })).toHaveTextContent('Occurrences3')
+  expect(screen.getByTestId('dlq-close-confirm')).toBeDisabled()
+  fireEvent.change(screen.getByTestId('dlq-close-reason'), { target: { value: 'Refunded by hand' } })
+  fireEvent.click(screen.getByTestId('dlq-close-confirm'))
+  await waitFor(() => expect(onResolve).toHaveBeenCalledWith(summary.id, 'Refunded by hand'))
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  expect(screen.getByTestId('activity-recovery-detail').querySelector('.status-pill')).toHaveAttribute('data-status', 'resolved')
 })

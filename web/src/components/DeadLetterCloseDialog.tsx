@@ -1,32 +1,33 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useAliveRef } from '../hooks/useAliveRef'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useT } from '../i18n'
+import type { DeadLetterCloseTarget } from './dead-letter-types'
 import { Button } from './ui/Button'
+import { FormField } from './ui/Form'
 import './DeadLetterCloseDialog.css'
 
-export type DeadLetterCloseTarget = {
-  id: string
-  workflowName?: string | null
-  runId?: string
-  nodeId?: string
-}
+// Mirrors the API bound on the audited reason.
+const REASON_MAX_LENGTH = 280
 
 /** A fixed scope, not a live selection: polling cannot change what is confirmed. */
 export function DeadLetterCloseDialog({ targets, onConfirm, onClose }: {
   targets: readonly DeadLetterCloseTarget[]
-  onConfirm: () => Promise<boolean>
+  onConfirm: (reason: string) => Promise<boolean>
   onClose: () => void
 }) {
   const { t } = useT()
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [reasonInput, setReasonInput] = useState('')
+  const reason = reasonInput.trim()
   const busyRef = useRef(false)
   const alive = useAliveRef()
   const dialogRef = useRef<HTMLDivElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
+  const reasonRef = useRef<HTMLTextAreaElement>(null)
   useDialogFocusTrap(dialogRef, {
-    initialFocus: cancelRef,
+    initialFocus: reasonRef,
     onEscape: () => { if (!busyRef.current) onClose() },
   })
   useEffect(() => {
@@ -35,12 +36,12 @@ export function DeadLetterCloseDialog({ targets, onConfirm, onClose }: {
   }, [busy, failed])
 
   const submit = async () => {
-    if (busyRef.current) return
+    if (busyRef.current || !reason) return
     busyRef.current = true
     setBusy(true)
     setFailed(false)
     try {
-      const closed = await onConfirm()
+      const closed = await onConfirm(reason)
       if (!alive.current) return
       if (closed) onClose()
       else setFailed(true)
@@ -79,18 +80,34 @@ export function DeadLetterCloseDialog({ targets, onConfirm, onClose }: {
           <ul className="we-dlq-close__targets" aria-label={t('dlq.close.scope')}>
             {targets.map(target => (
               <li key={target.id}>
-                <strong>{target.workflowName || t('dlq.copy.unknownWorkflow')}</strong>
+                <dl className="we-dlq-close__facts">
+                  {[
+                    [t('diff.workflow'), target.workflowName || t('dlq.copy.unknownWorkflow')],
+                    [t('activity.recoveryDetail.stepLabel'), target.nodeId],
+                    [t('dlq.close.occurrences'), target.occurrences],
+                  ].map(([label, value]) => value != null && (
+                    <Fragment key={label}><dt>{label}</dt><dd>{value}</dd></Fragment>
+                  ))}
+                </dl>
                 <span>{t('dlq.close.failure', { id: target.id })}</span>
                 {target.runId && <span>{t('dlq.close.run', { id: target.runId })}</span>}
-                {target.nodeId && <span>{t('dlq.close.node', { id: target.nodeId })}</span>}
               </li>
             ))}
           </ul>
+        </div>
+        <div className="we-dlq-close__reason">
+          <FormField label={t('dlq.close.reason')} required>
+            {controlProps => (
+              <textarea {...controlProps} ref={reasonRef} rows={2} required maxLength={REASON_MAX_LENGTH}
+                disabled={busy} value={reasonInput} onChange={event => setReasonInput(event.target.value)}
+                data-testid="dlq-close-reason" />
+            )}
+          </FormField>
           {failed && <p role="alert" className="ui-field__error">{t('dlq.close.failed')}</p>}
         </div>
         <footer className="run-input-dialog__footer">
           <Button ref={cancelRef} disabled={busy} onClick={onClose} data-testid="dlq-close-cancel">{t('common.cancel')}</Button>
-          <Button variant="danger" loading={busy} loadingLabel={t('common.working')}
+          <Button variant="danger" disabled={!reason} loading={busy} loadingLabel={t('common.working')}
             onClick={() => { void submit() }} data-testid="dlq-close-confirm">{t('dlq.action.resolve')}</Button>
         </footer>
       </div>

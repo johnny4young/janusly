@@ -15,8 +15,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/aiconfig"
@@ -150,16 +154,64 @@ func (s *V1Server) dismissLinkedRecoveryItem(ctx context.Context, rc v1Request, 
 	})
 }
 
+// closeReasonMaxRunes matches the contract's maxLength for the accepted-loss note.
+const closeReasonMaxRunes = 280
+
+// readCloseReason validates the optional accepted-loss note. It is absent for
+// API clients that predate it; when sent it must be usable, and a rejection
+// never echoes the text.
+func readCloseReason(raw any) (string, *opResult) {
+	if raw == nil {
+		return "", nil
+	}
+	text, isString := raw.(string)
+	reason := strings.TrimSpace(text)
+	if !isString || reason == "" || utf8.RuneCountInString(reason) > closeReasonMaxRunes ||
+		strings.ContainsFunc(reason, func(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\t' }) {
+		res := opError(http.StatusBadRequest, "dlq_reason_invalid", "reason is not valid",
+			map[string]any{"field": "reason", "maxLength": closeReasonMaxRunes})
+		return "", &res
+	}
+	return reason, nil
+}
+
+func closeAuditMetadata(reason string, bulk bool) map[string]any {
+	metadata := map[string]any{}
+	if reason != "" {
+		metadata["reason"] = reason
+	}
+	if bulk {
+		metadata["bulk"] = true
+	}
+	return metadata
+}
+
 func (s *V1Server) resolveDeadLetterCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
-		ID string `json:"id"`
+		ID     string `json:"id"`
+		Reason any    `json:"reason"`
 	}
 	if err := decodeBody(r, &body); err != nil || body.ID == "" {
 		return opError(http.StatusBadRequest, "dlq_field_required", "id is required",
 			map[string]any{"field": "id"})
 	}
-	affected, err := store.New(s.pool).MarkDeadLetterResolved(r.Context(), store.MarkDeadLetterResolvedParams{
-		OrgID: rc.orgID, ID: body.ID,
+	reason, bad := readCloseReason(body.Reason)
+	if bad != nil {
+		return *bad
+	}
+	// The receipt commits with the closure so a stated reason can never be lost.
+	var affected int64
+	err := s.audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		var err error
+		affected, err = store.New(tx).MarkDeadLetterResolved(r.Context(), store.MarkDeadLetterResolvedParams{
+			OrgID: rc.orgID, ID: body.ID,
+		})
+		if err != nil || affected == 0 {
+			return err
+		}
+		return txAudit("dlq.resolved", audit.Options{
+			TargetType: "dlq", TargetID: body.ID, Metadata: closeAuditMetadata(reason, false),
+		})
 	})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
@@ -167,10 +219,6 @@ func (s *V1Server) resolveDeadLetterCore(r *http.Request, rc v1Request) opResult
 	if affected == 0 {
 		return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
 	}
-
-	s.audit.Write(r.Context(), s.pool, rc.authContext, "dlq.resolved", audit.Options{
-		TargetType: "dlq", TargetID: body.ID,
-	})
 	s.dismissLinkedRecoveryItem(r.Context(), rc, body.ID)
 	return opOK(map[string]any{"ok": true})
 }
@@ -203,6 +251,7 @@ func readBulkDeadLetterIDs(raw []any, present bool) ([]string, *opResult) {
 func (s *V1Server) bulkResolveCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
 		DeadLetterIds []any `json:"deadLetterIds"`
+		Reason        any   `json:"reason"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
@@ -211,13 +260,31 @@ func (s *V1Server) bulkResolveCore(r *http.Request, rc v1Request) opResult {
 	if bad != nil {
 		return *bad
 	}
-	q := store.New(s.pool)
+	reason, bad := readCloseReason(body.Reason)
+	if bad != nil {
+		return *bad
+	}
 	errorsOut := make([]map[string]any, 0)
 	// One org-scoped statement resolves the selection; the returned ids are
 	// exactly the rows this org owns, so an id missing from them is the
 	// same "not found" the per-id read used to report.
-	touched, err := q.MarkDeadLettersResolved(r.Context(), store.MarkDeadLettersResolvedParams{
-		OrgID: rc.orgID, Ids: ids,
+	var touched []string
+	err := s.audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		var err error
+		touched, err = store.New(tx).MarkDeadLettersResolved(r.Context(), store.MarkDeadLettersResolvedParams{
+			OrgID: rc.orgID, Ids: ids,
+		})
+		if err != nil {
+			return err
+		}
+		for _, id := range touched {
+			if err := txAudit("dlq.resolved", audit.Options{
+				TargetType: "dlq", TargetID: id, Metadata: closeAuditMetadata(reason, true),
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
@@ -232,9 +299,6 @@ func (s *V1Server) bulkResolveCore(r *http.Request, rc v1Request) opResult {
 			errorsOut = append(errorsOut, map[string]any{"deadLetterId": id, "error": "DLQ entry not found"})
 			continue
 		}
-		s.audit.Write(r.Context(), s.pool, rc.authContext, "dlq.resolved", audit.Options{
-			TargetType: "dlq", TargetID: id, Metadata: map[string]any{"bulk": true},
-		})
 		s.dismissLinkedRecoveryItem(r.Context(), rc, id)
 		resolved++
 	}

@@ -461,12 +461,15 @@ route budgets in `performance/routes.performance.spec.ts` only ratchet down. The
 
 ## Closing failures without recovery
 
-Individual, bulk and keyboard DLQ closure share an explicit accepted-loss
-confirmation. The dialog snapshots IDs and available workflow/run/step labels;
-polling or a changed selection cannot change the acknowledged request. Cancel is
-the initial focus, Escape cancels before submission, and submission is guarded
-against duplicate activation. While a request is pending, dismissal and competing
-queue actions are disabled. Context/permission changes invalidate pending consent.
+Individual, bulk, keyboard and Activity-detail DLQ closure share an explicit
+accepted-loss confirmation. The dialog snapshots IDs and available workflow, step
+and occurrence facts; polling or a changed selection cannot change the
+acknowledged request. It requires a reason, which the API stores on the audit
+row, and the destructive action stays disabled until the reason is filled. The
+reason field is the initial focus, where Enter cannot submit; Escape cancels
+before submission, and submission is guarded against duplicate activation. While
+a request is pending, dismissal and competing queue actions are disabled.
+Context/permission changes invalidate pending consent.
 
 A partial bulk response keeps failed rows selected for a new acknowledgement.
 An unconfirmed or failed closure never advances triage or claims recovery. Closing

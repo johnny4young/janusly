@@ -222,7 +222,10 @@ var Routes = []Route{
 		Response: map[string]any{"type": "array", "items": deadLetterSummary, "maxItems": 200}},
 	{Method: "GET", Path: "/v1/dlq/entries/{deadLetterId}", Summary: "Tenant-bound dead-letter snapshot", Response: deadLetterDetail},
 	{Method: "POST", Path: "/v1/dlq/resolve", Summary: "Resolve one dead letter as accepted loss",
-		Request:  closedObj(map[string]any{"id": map[string]any{"type": "string", "minLength": 1}}, "id"),
+		Request: closedObj(map[string]any{
+			"id":     map[string]any{"type": "string", "minLength": 1},
+			"reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 280},
+		}, "id"),
 		Response: closedObj(map[string]any{"ok": map[string]any{"const": true}}, "ok")},
 	{Method: "GET", Path: "/v1/dlq/clusters", Summary: "Failure clusters over open dead letters",
 		Response: failureClusters},
