@@ -16,7 +16,7 @@ test('run history opens report delivery dialog and surfaces a credential error',
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await openWorkflowCreation(page)
-  await page.getByRole('button', { name: /^Start blank\b/ }).click()
+  await page.getByRole('menuitem', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
   await addCanvasStep(page, 'Do nothing')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' })).toBeVisible()

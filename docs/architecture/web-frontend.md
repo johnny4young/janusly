@@ -216,8 +216,11 @@ one action a surface leads with, `variant="danger"` for destructive ones,
 `size="icon" variant="ghost"` for icon-only controls, and `aria-pressed` for
 toggles (the primitive styles the pressed state). The legacy `small-command`
 and `icon-button` classes are gone from buttons; raw `<button>` remains only
-for non-action semantics — tabs, radios, menu items, list rows, chips — that
-carry their own component styles.
+for non-action semantics — tabs, radios, list rows, chips — that carry their
+own component styles. Action menus use `Menu` (`components/ui/Menu.tsx`): arrow
+keys, Home/End and optional single-key shortcuts move or select, Escape and Tab
+close and return focus to the trigger, and fixed positioning keeps the menu
+visible inside tables that scroll.
 
 ## Routing
 

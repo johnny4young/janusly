@@ -32,12 +32,10 @@ function props(workflow: SavedWorkflow, selectedIds = new Set<string>()): FlowRo
     selectionMode: true,
     selectedIds,
     draggingId: null,
-    confirmDeleteId: null,
     onOpen: noop,
     toggleSelected: noop,
     setDraggingId: noop,
     setDropTarget: noop,
-    setConfirmDeleteId: noop,
     setRowTag: noop,
     moveToFolder: noop,
     deleteWorkflow: noop,
@@ -174,13 +172,14 @@ describe('<FlowRow /> labelled cells', () => {
     expect(screen.queryByText('workflowsDashboard.statusIdle')).toBeNull()
   })
 
-  it('opens from the row and from the button, but not from delete or the health badge', () => {
+  it('opens from the row and from the button, but not from the row menu or the health badge', () => {
     const onOpen = vi.fn()
-    const setConfirmDeleteId = vi.fn()
-    renderRow(<FlowRow {...props(base)} onOpen={onOpen} setConfirmDeleteId={setConfirmDeleteId} />)
+    const deleteWorkflow = vi.fn()
+    renderRow(<FlowRow {...props(base)} onOpen={onOpen} deleteWorkflow={deleteWorkflow} />)
 
-    fireEvent.click(screen.getByTestId('workflows-delete-demo-flaky-ingest'))
-    expect(setConfirmDeleteId).toHaveBeenCalledWith('demo-flaky-ingest')
+    fireEvent.click(screen.getByTestId('workflows-row-menu-demo-flaky-ingest'))
+    fireEvent.click(screen.getByTestId('workflows-move-to-trash-demo-flaky-ingest'))
+    expect(deleteWorkflow).toHaveBeenCalledWith('demo-flaky-ingest')
     expect(onOpen).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'health' }))

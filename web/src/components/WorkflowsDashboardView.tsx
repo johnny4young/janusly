@@ -1,4 +1,4 @@
-import { AlertCircle, FilePlus2, FolderPlus, LayoutTemplate, ListChecks, Pencil, Plus, RefreshCw, Sparkles, Trash, Trash2, Workflow, X } from 'lucide-react'
+import { AlertCircle, FilePlus2, FolderPlus, LayoutTemplate, ListChecks, Pencil, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { FlowRow } from './FlowRow'
@@ -6,13 +6,21 @@ import { FlowsFilterBar } from './FlowsFilterBar'
 import { FlowsTable } from './FlowsTable'
 import { TrashPanel } from './TrashPanel'
 import type { SavedWorkflow } from '../types'
-import type { WorkflowsDashboardController } from './WorkflowsDashboard'
+import type { WorkflowCreationMode, WorkflowsDashboardController } from './WorkflowsDashboard'
 import { UNGROUPED_FOLDER as UNGROUPED } from './workflows-dashboard-model'
 import { TextInput } from '@/components/ui/Form'
 import { Button } from './ui/Button'
+import { Menu } from './ui/Menu'
+
+const CREATION_CHOICES = [
+  { mode: 'describe', icon: <Sparkles size={14} />, titleKey: 'workflowCreation.describe.title', bodyKey: 'workflowCreation.describe.body' },
+  { mode: 'blank', icon: <FilePlus2 size={14} />, titleKey: 'workflowCreation.blank.title', bodyKey: 'workflowCreation.blank.body' },
+  { mode: 'template', icon: <LayoutTemplate size={14} />, titleKey: 'workflowCreation.template.title', bodyKey: 'workflowCreation.template.body' },
+] as const satisfies ReadonlyArray<{ mode: WorkflowCreationMode; icon: unknown; titleKey: string; bodyKey: string }>
 
 export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardController }) {
   const {
+    activeCountLabel,
     allVisibleSelected,
     bulkAssign,
     bulkAssignTag,
@@ -25,9 +33,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
     collapsedFolders,
     commitNewFolder,
     confirmDeleteFolder,
-    confirmDeleteId,
     confirmDeleteTag,
-    creationOpen,
     deleteFolder,
     deleteTag,
     deleteWorkflow,
@@ -64,13 +70,12 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
     restoreWorkflow,
     resumeWorkflow,
     selectedIds,
+    selectView,
     selectionMode,
     setBulkFolderDraft,
     setBulkTagDraft,
     setConfirmDeleteFolder,
-    setConfirmDeleteId,
     setConfirmDeleteTag,
-    setCreationOpen,
     setDraggingId,
     setDropTarget,
     setFolderFilter,
@@ -99,7 +104,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
     toggleSelectFolder,
     toggleSelected,
     toggleSort,
-    toggleTrashView,
+    trashCountLabel,
     trashNowMs,
     retentionDays,
     visible,
@@ -118,12 +123,10 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
       selectionMode={selectionMode}
       selectedIds={selectedIds}
       draggingId={draggingId}
-      confirmDeleteId={confirmDeleteId}
       onOpen={onOpen}
       toggleSelected={toggleSelected}
       setDraggingId={setDraggingId}
       setDropTarget={setDropTarget}
-      setConfirmDeleteId={setConfirmDeleteId}
       setRowTag={setRowTag}
       moveToFolder={moveToFolder}
       deleteWorkflow={deleteWorkflow}
@@ -137,112 +140,41 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
   return (
     <div className="panel-list">
       <div className="panel-toolbar">
-        <div>
-          <strong>
-            {showTrashed
-              ? t('workflowsDashboard.trashTitle', { count: workflows.length })
-              : t('workflowsDashboard.savedFlows', { count: workflows.length })}
-          </strong>
-          <p className="helper-text">{showTrashed ? t('workflowsDashboard.trashHelper') : t('workflowsDashboard.helper')}</p>
+        <div className="we-flows-views" role="group" aria-label={t('workflowsDashboard.viewAria')}>
+          <Button size="sm" variant="ghost" aria-pressed={!showTrashed} onClick={() => selectView(false)} data-testid="workflows-view-active">
+            {t('workflowsDashboard.viewActive')}<span className="we-flows-views__count" data-testid="workflows-view-active-count">{activeCountLabel}</span>
+          </Button>
+          <Button size="sm" variant="ghost" aria-pressed={showTrashed} onClick={() => selectView(true)} data-testid="workflows-view-trash">
+            {t('workflowsDashboard.viewTrash')}<span className="we-flows-views__count" data-testid="workflows-view-trash-count">{trashCountLabel}</span>
+          </Button>
         </div>
         <div className="panel-toolbar__actions">
           {!showTrashed && onCreate && (
-            <Button
+            <Menu
               size="sm"
               variant="primary"
-             
-             
-              onClick={() => setCreationOpen((open) => !open)}
-              aria-expanded={creationOpen}
-              aria-controls="workflow-creation-choices"
               disabled={!canWrite}
+              menuId="workflow-creation-choices"
+              menuTestId="workflow-creation-choices"
+              data-testid="workflows-new"
+              items={CREATION_CHOICES.map(({ mode, icon, titleKey, bodyKey }, index) => ({
+                id: mode,
+                label: t(titleKey),
+                description: t(bodyKey),
+                icon,
+                shortcut: String(index + 1),
+                testId: `workflows-new-${mode}`,
+                onSelect: () => onCreate(mode),
+              }))}
             >
               <Plus size={14} aria-hidden="true" /> {t('workflowsDashboard.newWorkflow')}
-            </Button>
+            </Menu>
           )}
-          {/* Trash toggle — always reachable (it lives in the always-rendered
-              header, not the filterable toolbar). Entering Trash clears any
-              active-view selection + delete-confirm so the views don't bleed. */}
-          <Button
-            size="sm"
-           
-           
-            aria-pressed={showTrashed}
-            onClick={toggleTrashView}
-            data-testid="workflows-trash-toggle"
-          >
-            {showTrashed ? (
-              <><Workflow size={14} aria-hidden="true" /> {t('workflowsDashboard.trashToggleToActive')}</>
-            ) : (
-              <><Trash size={14} aria-hidden="true" /> {t('workflowsDashboard.trashToggleToTrash')}</>
-            )}
-          </Button>
           <Button size="sm" onClick={load} disabled={loading} aria-label={t('common.refresh')}>
             <RefreshCw size={14} aria-hidden="true" /> {loading ? t('common.loading') : t('common.refresh')}
           </Button>
         </div>
       </div>
-
-      {!showTrashed && creationOpen && onCreate && (
-        <section
-          id="workflow-creation-choices"
-          className="workflow-creation"
-          aria-labelledby="workflow-creation-title"
-          data-testid="workflow-creation-choices"
-        >
-          <div className="workflow-creation__intro">
-            <div>
-              <span className="section-kicker">{t('workflowCreation.kicker')}</span>
-              <h3 id="workflow-creation-title">{t('workflowCreation.title')}</h3>
-              <p>{t('workflowCreation.body')}</p>
-            </div>
-            <Button
-              size="sm"
-             
-             
-              onClick={() => setCreationOpen(false)}
-              aria-label={t('workflowCreation.close')}
-            >
-              <X size={15} aria-hidden="true" />
-            </Button>
-          </div>
-          <div className="workflow-creation__choices">
-            <button
-              type="button"
-              className="workflow-creation__choice workflow-creation__choice--primary"
-              onClick={() => onCreate('describe')}
-            >
-              <span className="workflow-creation__icon" aria-hidden="true"><Sparkles size={19} /></span>
-              <span>
-                <strong>{t('workflowCreation.describe.title')}</strong>
-                <small>{t('workflowCreation.describe.body')}</small>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="workflow-creation__choice"
-              onClick={() => onCreate('blank')}
-            >
-              <span className="workflow-creation__icon" aria-hidden="true"><FilePlus2 size={18} /></span>
-              <span>
-                <strong>{t('workflowCreation.blank.title')}</strong>
-                <small>{t('workflowCreation.blank.body')}</small>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="workflow-creation__choice"
-              onClick={() => onCreate('template')}
-            >
-              <span className="workflow-creation__icon" aria-hidden="true"><LayoutTemplate size={18} /></span>
-              <span>
-                <strong>{t('workflowCreation.template.title')}</strong>
-                <small>{t('workflowCreation.template.body')}</small>
-              </span>
-            </button>
-          </div>
-        </section>
-      )}
 
       {showToolbar && !showTrashed && (
         <FlowsFilterBar
@@ -418,12 +350,21 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
             body={canWrite
               ? t('workflowsDashboard.emptyHelper')
               : t('workflowsDashboard.emptyReadOnlyHelper')}
-            cta={canWrite && onCreate
-              ? {
-                label: t('workflowsDashboard.newWorkflow'),
-                onClick: () => setCreationOpen(true),
-              }
-              : undefined}
+            actions={canWrite && onCreate ? (
+              <div className="we-flows-empty-choices">
+                {CREATION_CHOICES.map(({ mode, icon, titleKey }, index) => (
+                  <Button
+                    key={mode}
+                    variant={index === 0 ? 'primary' : 'secondary'}
+                    leadingIcon={icon}
+                    onClick={() => onCreate(mode)}
+                    data-testid={`workflows-empty-${mode}`}
+                  >
+                    {t(titleKey)}
+                  </Button>
+                ))}
+              </div>
+            ) : undefined}
             testId="workflows-empty"
           />
         )
