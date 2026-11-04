@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Revoking a connection lists the workflows that use it and, when there are
+  any, requires typing the connection name. If the list cannot be loaded, the
+  dialog says so and still requires the typed name. A revoked connection now
+  leaves the inventory without a reload.
+- Rotate secret no longer crashes the Connections panel when a workflow uses
+  the connection; its preview lists those workflows by name.
 - The pending setup step is a row in What needs you with its progress, not a
   separate card repeating the next action.
 

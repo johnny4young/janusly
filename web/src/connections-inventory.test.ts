@@ -4,6 +4,7 @@ import {
   credentialHealthState,
   filterCredentials,
   listCredentialKinds,
+  referencingWorkflowIds,
   type CredentialHealthSnapshot,
 } from './connections-inventory'
 import type { Credential } from './types'
@@ -75,5 +76,32 @@ describe('connections inventory model', () => {
       lastErrorAt: 'not-a-date',
       lastUsedAt: '2026-07-29T10:00:00.000Z',
     }))).toBe('warning')
+  })
+})
+
+describe('referencingWorkflowIds', () => {
+  it('returns the references of the named credential, including an empty list', () => {
+    const response = {
+      credentials: [
+        { name: 'other', referencingWorkflowIds: ['wf-other'] },
+        { name: 'used', referencingWorkflowIds: ['wf-1', 'wf-2'] },
+        { name: 'unused', referencingWorkflowIds: [] },
+      ],
+    }
+    expect(referencingWorkflowIds(response, 'used')).toEqual(['wf-1', 'wf-2'])
+    expect(referencingWorkflowIds(response, 'unused')).toEqual([])
+  })
+
+  it.each([
+    [null],
+    ['nope'],
+    [{}],
+    [{ credentials: 'nope' }],
+    [{ credentials: [null, 'x'] }],
+    [{ credentials: [{ name: 'other', referencingWorkflowIds: [] }] }],
+    [{ credentials: [{ name: 'used' }] }],
+    [{ credentials: [{ name: 'used', referencingWorkflowIds: [1] }] }],
+  ])('never turns an unproven response into an empty list: %j', (response) => {
+    expect(referencingWorkflowIds(response, 'used')).toBeNull()
   })
 })
