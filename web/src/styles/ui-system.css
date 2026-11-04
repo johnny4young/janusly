@@ -10,7 +10,7 @@
   min-height: var(--we-control-md);
   display: inline-flex;
   align-items: center;
-  justify-content: safe center;
+  justify-content: center;
   gap: var(--we-space-2);
   padding: 0 var(--we-space-4);
   border: 1px solid var(--we-line-strong);
@@ -87,8 +87,12 @@
 .ui-button--loading { cursor: wait; }
 .ui-button__icon, .ui-button__spinner { display: inline-flex; flex: 0 0 auto; }
 .ui-button__spinner { animation: ui-spin 800ms linear infinite; }
-/* Icons passed as children join the button's own row and gap. */
-.ui-button__label { display: contents; }
+.ui-button__label {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+}
 
 .ui-field { display: grid; gap: var(--we-space-2); min-width: 0; }
 
