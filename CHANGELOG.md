@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Empty states end in a primary button instead of text that reads as a label.
+
 - The language selector in the account menu is a compact row like Theme and
   Density, and the canvas zoom controls follow the dark theme.
 - Buttons keep their icon and label on one row across the product.

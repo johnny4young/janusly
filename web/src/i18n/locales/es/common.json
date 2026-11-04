@@ -2847,6 +2847,7 @@
   "credentialRotation.toast.success": "Secreto rotado para {{name}}",
   "rightPanel.credentials.empty.title": "Aún no hay conexiones",
   "rightPanel.credentials.empty.body": "Añade aquí un secreto administrado; no hace falta una variable de entorno por credencial.",
+  "rightPanel.credentials.empty.learn": "Conoce cómo se guardan los secretos",
   "rightPanel.usage.title": "Resumen de uso",
   "rightPanel.usage.refresh": "Refrescar",
   "rightPanel.usage.emptyKicker": "Sin uso registrado aún",

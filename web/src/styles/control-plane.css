@@ -1533,6 +1533,12 @@
   margin-top: 4px;
 }
 
+.we-empty-state__link {
+  color: var(--we-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* ==========================================================================
    Command palette — Cmd+K modal. Glass backdrop, lifted card, keyboard
    list. Lives in App.tsx's `overlay` slot. Mirrors Linear/Cursor patterns.

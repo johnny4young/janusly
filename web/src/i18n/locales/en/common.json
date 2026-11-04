@@ -2847,6 +2847,7 @@
   "credentialRotation.toast.success": "Rotated secret for {{name}}",
   "rightPanel.credentials.empty.title": "No connections yet",
   "rightPanel.credentials.empty.body": "Add a managed secret here; no per-credential environment variable is required.",
+  "rightPanel.credentials.empty.learn": "Learn about secret storage",
   "rightPanel.usage.title": "Usage summary",
   "rightPanel.usage.refresh": "Refresh",
   "rightPanel.usage.emptyKicker": "No usage recorded yet",
