@@ -237,8 +237,15 @@ recorded baseline. Styles for a lazy panel live next to the component
 reports; a new named asset must get a baseline entry after review. Structural
 changes that add object keys (a controller/view model, a router) cost gzip
 bytes no minifier removes; the caps were raised once for that in 2026-09 and
-are not raised for features. The bundle held no duplicated modules and the
-i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
+are not raised for features. The bundle holds no duplicated first-party modules
+and the i18n catalogs are prefix-compressed, so dead bytes live in vendor code and
+interop. Production-only plugins remove them: named React bindings instead of
+CommonJS interop (`react-esm-facade-plugin.mjs`), `d3-color` and Lucide's React
+keys (`trim-vendor-plugin.mjs`), and always-true `color-mix` guards
+(`css-floor-plugin.mjs`). `scripts/production-trims.test.mjs` exercises them
+against the untrimmed vendors. Together with dropping the modulepreload polyfill
+they measured 11.6 KiB off both totals; the caps did not move with them, so that
+room stays available until the caps are next lowered to the measured size.
 The artifact and worst-locale caps were rebased once more in 2026-10, by the
 measured 3.3 KiB of the generated response guards (605 → 608.3 and
 560.5 → 563.8 KiB); guards compose shared primitives so each new adoption costs
