@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The AI budget in Settings now meters this month's spend against the limit,
+  with the warning threshold marked on the bar. An Off / Limit switch replaces
+  entering 0 to turn the budget off. A limit must be at least $0.01 and a warning
+  threshold at least 1%. Workflow overrides are table rows with their limit,
+  warning, policy and spend, edited in place, and can be set back to the Org-wide
+  budget.
 - Permission grants is one matrix with permissions in rows and roles in
   columns, a filter, and one Save for every edited role. Cells that differ from
   the built-in default are tinted. If only some roles save, the panel says which
