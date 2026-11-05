@@ -141,16 +141,20 @@ is bound to the source, step and override, so an edited resubmit starts its own
 run. Validation runs cannot be rerun, which keeps a sandbox from becoming
 production. The audit row records whether the input was edited, never its values.
 
-Once a rerun has run a step again, every redrive and replay of that step in the
-source run returns a conflict, because no provider idempotency key would stop the
-write repeating. Its dead letter stays open until an operator closes it. A rerun
-start and a redrive serialize on the source's completion lock, so one always sees
-the other. A rerun that only cloned a step leaves that step replayable.
+Replays of a step are checked across the whole rerun lineage, siblings included,
+because no provider idempotency key would stop a write repeating. A replay returns
+a conflict if a later run in the lineage ran or will run the step, or if any other
+run in it completed the step. A step no other run executed stays replayable, and
+so does the newest failed attempt. A superseded dead letter stays open until an
+operator closes it. A rerun start and a redrive of the same run serialize on its
+completion lock, where the start also refuses if the selected step's row moved
+since planning. A source with a live subworkflow child cannot be rerun.
 
-Reruns stay out of the circuit breaker because they are operator-initiated
-attempts. A rerun neither counts in the failure streak nor resets it, and its
-failure does not evaluate the breaker, so it cannot pause production. Only
-production runs and redrives of them move the streak.
+A rerun itself cannot pause production: it neither counts in the circuit breaker's
+failure streak nor resets it, and its failure does not evaluate the breaker,
+because it is an operator-initiated attempt. A subworkflow child started by a rerun
+is an ordinary child run and counts as usual for its own workflow. Only those runs,
+production runs and redrives of them move a streak.
 
 Wake-ups carry a count: `janusly_wake` notifications and the wake sweeper
 say how many nodes just became claimable, and that many workers wake,

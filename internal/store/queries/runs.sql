@@ -6,13 +6,36 @@ INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_b
   workflow_id, trigger_kind)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);
 
--- name: RunNodeHasRerun :one
--- A rerun cloning this step never executed it; any other row in the child did or will.
+-- name: RunNodeSupersededByRerun :one
+-- Walks the whole rerun lineage, siblings included. A later run that ran or will
+-- run the step, or any other run holding its success, makes a replay a repeat. A
+-- later clone of a failure is skipped, and an earlier failed attempt supersedes nothing.
+WITH RECURSIVE up AS (
+  SELECT r.id, r.parent_run_id, r.parent_link_kind FROM runs r
+  WHERE r.org_id = sqlc.arg(org_id) AND r.id = sqlc.arg(run_id)
+  UNION
+  SELECT p.id, p.parent_run_id, p.parent_link_kind FROM runs p JOIN up ON p.id = up.parent_run_id
+  WHERE up.parent_link_kind = 'rerun' AND p.org_id = sqlc.arg(org_id)
+), lineage AS (
+  SELECT up.id FROM up
+  UNION
+  SELECT c.id FROM runs c JOIN lineage l ON c.parent_run_id = l.id
+  WHERE c.parent_link_kind = 'rerun' AND c.org_id = sqlc.arg(org_id)
+)
 SELECT EXISTS (
-  SELECT 1 FROM runs c JOIN run_nodes n ON n.run_id = c.id
-  WHERE c.org_id = sqlc.arg(org_id) AND c.parent_run_id = sqlc.arg(run_id)::text
-    AND c.parent_link_kind = 'rerun' AND n.node_id = sqlc.arg(node_id)
-    AND (n.attempts > 0 OR n.status IN ('pending', 'queued', 'running', 'waiting'))
+  SELECT 1 FROM lineage l JOIN runs c ON c.id = l.id JOIN run_nodes n ON n.run_id = c.id
+  WHERE c.id <> sqlc.arg(run_id) AND n.node_id = sqlc.arg(node_id)
+    AND (n.status = 'succeeded'
+      OR (c.created_at >= (SELECT s.created_at FROM runs s WHERE s.id = sqlc.arg(run_id))
+          AND (n.attempts > 0 OR n.status IN ('pending', 'queued', 'running', 'waiting'))))
+);
+
+-- name: RunHasLiveSubworkflowChild :one
+SELECT EXISTS (
+  SELECT 1 FROM runs
+  WHERE org_id = $1 AND parent_run_id = sqlc.arg(run_id)::text
+    AND (parent_link_kind = 'subworkflow' OR (parent_link_kind IS NULL AND replay_mode IS NULL))
+    AND status NOT IN ('succeeded', 'failed', 'cancelled', 'timed_out')
 );
 
 -- Recovery drills reproduce a server-authored historical claim and therefore

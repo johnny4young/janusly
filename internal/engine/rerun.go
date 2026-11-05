@@ -12,6 +12,9 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/executors"
@@ -25,8 +28,15 @@ const RerunLinkKind = "rerun"
 // rerunSkipReason marks a step a rerun skipped, unlike a branch not taken.
 var rerunSkipReason = []byte("outside_rerun")
 
-// ErrRerunSourceOpen reports a source run revived after the rerun was planned.
-var ErrRerunSourceOpen = errors.New("the source run has not finished")
+// ErrRerunSourceOpen reports a source that was revived or moved after planning.
+var ErrRerunSourceOpen = errors.New("the source run changed or has not finished")
+
+func rerunRowMoved(seed *RerunSeed, row store.GetRunNodeRow) bool {
+	if row.Attempts != seed.PlannedAttempts || (row.FinishedAt == nil) != (seed.PlannedFinishedAt == nil) {
+		return true
+	}
+	return row.FinishedAt != nil && !row.FinishedAt.Equal(*seed.PlannedFinishedAt)
+}
 
 // NodeSeed is a node row's starting state in a rerun.
 type NodeSeed struct {
@@ -38,6 +48,9 @@ type NodeSeed struct {
 type RerunSeed struct {
 	SourceRunID, NodeID string
 	Nodes               map[string]NodeSeed
+	// The selected row as planned: StartRun refuses if it moved since.
+	PlannedAttempts   pgtype.Int4
+	PlannedFinishedAt *time.Time
 }
 
 // RerunEffect names one step that can change external state when it runs.
@@ -109,7 +122,10 @@ func PlanRerun(sourceRunID string, wf *domain.Workflow, rows []store.ListRunNode
 	}
 	plan := RerunPlan{
 		Reused: []string{}, Rerun: []string{}, NotRun: []string{}, SideEffects: []RerunEffect{},
-		Seed: &RerunSeed{SourceRunID: sourceRunID, NodeID: nodeID, Nodes: make(map[string]NodeSeed, len(wf.Nodes))},
+		Seed: &RerunSeed{
+			SourceRunID: sourceRunID, NodeID: nodeID, Nodes: make(map[string]NodeSeed, len(wf.Nodes)),
+			PlannedAttempts: source[nodeID].Attempts, PlannedFinishedAt: source[nodeID].FinishedAt,
+		},
 	}
 	for _, node := range wf.Nodes {
 		row := source[node.ID]

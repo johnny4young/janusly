@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/store"
 )
 
 type rerunTarget struct {
@@ -829,5 +831,197 @@ func TestProductionSuccessStillResetsTheBreakerStreak(t *testing.T) {
 	b.productionFailure()
 	if got := b.status(); got != "active" {
 		t.Fatalf("a production success must reset the streak: %s", got)
+	}
+}
+
+func (h *apiHarness) superseded(runID, nodeID string) bool {
+	h.t.Helper()
+	got, err := store.New(testPool(h.t)).RunNodeSupersededByRerun(h.t.Context(), store.RunNodeSupersededByRerunParams{
+		OrgID: h.org, RunID: runID, NodeID: nodeID,
+	})
+	if err != nil {
+		h.t.Fatalf("superseded: %v", err)
+	}
+	return got
+}
+
+func (h *apiHarness) deadLetterFor(runID, nodeID string) string {
+	h.t.Helper()
+	var id string
+	if err := testPool(h.t).QueryRow(h.t.Context(), `SELECT id FROM dead_letters WHERE run_id=$1 AND node_id=$2`, runID, nodeID).Scan(&id); err != nil {
+		h.t.Fatalf("dead letter for %s: %v", nodeID, err)
+	}
+	return id
+}
+
+func (h *apiHarness) requireReplayRefused(deadLetterID string) {
+	h.t.Helper()
+	res := h.call("POST", "/v1/dlq/replay", map[string]any{"deadLetterId": deadLetterID}, "")
+	if res.status != 409 || !strings.Contains(fmt.Sprint(res.body), "rerun") {
+		h.t.Fatalf("replay must be refused: %d %+v", res.status, res.body)
+	}
+}
+
+// A grandchild of the failed run can execute the write: a rerun beside it skips
+// the step, and a rerun of that rerun from an earlier step runs it.
+func TestDeadLetterReplayRefusedAfterAGrandchildRanTheStep(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	target := newRerunTarget(t)
+	retry := map[string]any{"maxAttempts": 1}
+	workflow := map[string]any{
+		"id": fmt.Sprintf("wf-rerun-lineage-%d", time.Now().UnixNano()), "name": "Lineage", "dslVersion": "1.0",
+		"nodes": []any{
+			map[string]any{"id": "q", "type": "noop", "config": map[string]any{}},
+			map[string]any{"id": "w", "type": "http", "config": map[string]any{"url": target.URL + "/broken", "method": "POST", "retry": retry}},
+			map[string]any{"id": "x", "type": "noop", "config": map[string]any{}},
+		},
+		"edges": []any{map[string]any{"from": "q", "to": "w"}, map[string]any{"from": "q", "to": "x"}},
+	}
+	source := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, ""))
+	h.waitRun(source, "failed")
+	// The failure can overtake the sibling, so settle it instead of racing it.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var running int
+		_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM run_nodes WHERE run_id=$1 AND status='running'`, source).Scan(&running)
+		if running == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("source steps never settled")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE run_nodes SET status='succeeded', state_json='{"output":{}}' WHERE run_id=$1 AND node_id='x'`, source); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	deadLetter := h.deadLetterFor(source, "w")
+
+	first := h.call("POST", "/runs/rerun", map[string]any{"sourceRunId": source, "nodeId": "x"}, "")
+	if first.status != 200 {
+		t.Fatalf("first rerun: %d %+v", first.status, first.body)
+	}
+	firstID := first.body["runId"].(string)
+	h.waitRun(firstID, "succeeded")
+	if h.superseded(source, "w") {
+		t.Fatal("no run in the lineage has executed w yet, so it stays replayable")
+	}
+
+	second := h.call("POST", "/runs/rerun", map[string]any{"sourceRunId": firstID, "nodeId": "q", "acknowledgedSideEffects": []string{"w"}}, "")
+	if second.status != 200 {
+		t.Fatalf("second rerun: %d %+v", second.status, second.body)
+	}
+	h.waitRun(second.body["runId"].(string), "failed")
+	if !h.superseded(source, "w") {
+		t.Fatal("a grandchild executed w, so the source's dead letter must be superseded")
+	}
+	h.requireReplayRefused(deadLetter)
+}
+
+// Two reruns of one source: the older one's dead letter must not repeat a write
+// the newer one already completed. The newest failed attempt stays replayable.
+func TestDeadLetterReplayAcrossSiblingReruns(t *testing.T) {
+	h := newAPIHarness(t)
+	target := newRerunTarget(t)
+	retry := map[string]any{"maxAttempts": 1}
+	source := h.failedRerunSource(target.URL, fmt.Sprintf("wf-rerun-sibling-%d", time.Now().UnixNano()))
+	request := func(override map[string]any) map[string]any {
+		body := map[string]any{"sourceRunId": source, "nodeId": "fetch", "acknowledgedSideEffects": []string{"notify"}}
+		if override != nil {
+			body["inputOverride"] = override
+		}
+		return body
+	}
+	older := h.call("POST", "/runs/rerun", request(nil), "")
+	if older.status != 200 {
+		t.Fatalf("older rerun: %d %+v", older.status, older.body)
+	}
+	olderID := older.body["runId"].(string)
+	h.waitRun(olderID, "failed")
+	if h.superseded(olderID, "fetch") {
+		t.Fatal("the source's earlier failed attempt must not block the newest rerun's replay")
+	}
+	if h.superseded(olderID, "notify") {
+		t.Fatal("a step only pending in an earlier run must not block a replay")
+	}
+
+	newer := h.call("POST", "/runs/rerun", request(map[string]any{"url": target.URL + "/fixed", "method": "GET", "retry": retry}), "")
+	if newer.status != 200 {
+		t.Fatalf("newer rerun: %d %+v", newer.status, newer.body)
+	}
+	h.waitRun(newer.body["runId"].(string), "succeeded")
+	h.requireReplayRefused(h.deadLetterFor(olderID, "fetch"))
+	h.requireReplayRefused(h.deadLetterFor(source, "fetch"))
+}
+
+// A step a run already completed stays completed: a later failed rerun of it must
+// not be replayed into a repeat. A rerun that only cloned it leaves it replayable.
+func TestDeadLetterReplayRefusedWhenAnEarlierRunCompletedTheStep(t *testing.T) {
+	h := newAPIHarness(t)
+	target := newRerunTarget(t)
+	retry := map[string]any{"maxAttempts": 1}
+	workflow := map[string]any{
+		"id": fmt.Sprintf("wf-rerun-done-%d", time.Now().UnixNano()), "name": "Done", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "pay", "type": "http", "config": map[string]any{"url": target.URL + "/pay", "method": "POST", "retry": retry}}},
+		"edges": []any{},
+	}
+	source := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, ""))
+	h.waitRun(source, "succeeded")
+	failed := h.call("POST", "/runs/rerun", map[string]any{
+		"sourceRunId": source, "nodeId": "pay", "acknowledgedSideEffects": []string{"pay"},
+		"inputOverride": map[string]any{"url": target.URL + "/broken", "method": "POST", "retry": retry},
+	}, "")
+	if failed.status != 200 {
+		t.Fatalf("rerun: %d %+v", failed.status, failed.body)
+	}
+	failedID := failed.body["runId"].(string)
+	h.waitRun(failedID, "failed")
+	h.requireReplayRefused(h.deadLetterFor(failedID, "pay"))
+}
+
+// Cancelling a parent leaves its child running and overwrites the waiting row, so
+// only the runs table still knows the child can write.
+func TestRerunRefusesASourceWithALiveSubworkflowChild(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	target := newRerunTarget(t)
+	source := h.failedRerunSource(target.URL, fmt.Sprintf("wf-rerun-child-%d", time.Now().UnixNano()))
+	request := map[string]any{"sourceRunId": source, "nodeId": "fetch"}
+	child := "child-" + source
+	insert := func(status string, kind, replay any) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `DELETE FROM runs WHERE id=$1`, child); err != nil {
+			t.Fatalf("clear: %v", err)
+		}
+		if _, err := pool.Exec(t.Context(), `INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, parent_run_id, parent_node_id, parent_link_kind, replay_mode)
+			VALUES ($1,$2,$1,$3,'{}',$4,'call',$5,$6)`, child, h.org, status, source, kind, replay); err != nil {
+			t.Fatalf("child: %v", err)
+		}
+	}
+	for name, tc := range map[string]struct {
+		kind any
+		want int
+	}{"subworkflow": {"subworkflow", 409}, "legacy NULL kind": {nil, 409}} {
+		insert("running", tc.kind, nil)
+		res := h.call("POST", "/runs/rerun/preview", request, "")
+		if res.status != tc.want || res.body["code"] != "rerun_source_open" {
+			t.Fatalf("%s: %d %+v", name, res.status, res.body)
+		}
+	}
+	insert("cancelled", "subworkflow", nil)
+	if res := h.call("POST", "/runs/rerun/preview", request, ""); res.status != 200 {
+		t.Fatalf("a finished child must not block: %d %+v", res.status, res.body)
+	}
+	insert("running", "replay", "validation")
+	if res := h.call("POST", "/runs/rerun/preview", request, ""); res.status != 200 {
+		t.Fatalf("a sandbox replay of the source must not block: %d %+v", res.status, res.body)
+	}
+	insert("running", "subworkflow", nil)
+	if res := h.call("POST", "/runs/rerun/preview", request, "other-org-"+source); res.status != 404 {
+		t.Fatalf("another org: %d %+v", res.status, res.body)
+	}
+	if _, err := pool.Exec(t.Context(), `DELETE FROM runs WHERE id=$1`, child); err != nil {
+		t.Fatalf("cleanup: %v", err)
 	}
 }

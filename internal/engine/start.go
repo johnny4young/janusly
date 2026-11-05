@@ -255,6 +255,14 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		default:
 			return "", ErrRerunSourceOpen
 		}
+		// A redrive that settled again leaves the run terminal but the plan stale.
+		selected, err := q.GetRunNode(ctx, store.GetRunNodeParams{RunID: in.Rerun.SourceRunID, NodeID: in.Rerun.NodeID})
+		if err != nil {
+			return "", fmt.Errorf("read rerun step: %w", err)
+		}
+		if rerunRowMoved(in.Rerun, selected) {
+			return "", ErrRerunSourceOpen
+		}
 	}
 
 	traceID := in.TraceID

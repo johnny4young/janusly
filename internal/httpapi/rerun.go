@@ -96,6 +96,14 @@ func (s *V1Server) prepareRerun(r *http.Request, rc v1Request, body rerunRequest
 		// Saved outputs are not settled, and the source could still run the effects.
 		return fail(opError(http.StatusConflict, "rerun_source_open", "The source run has not finished", nil))
 	}
+	// Cancelling a parent leaves its child running and erases the waiting row.
+	live, err := store.New(s.pool).RunHasLiveSubworkflowChild(r.Context(), store.RunHasLiveSubworkflowChildParams{OrgID: rc.orgID, RunID: run.ID})
+	if err != nil {
+		return fail(opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+	}
+	if live {
+		return fail(opError(http.StatusConflict, "rerun_source_open", "A subworkflow of the source run is still executing", nil))
+	}
 	wf, input, err := engine.RunSnapshot(run.InputJson)
 	if err != nil {
 		return fail(opError(http.StatusBadRequest, "invalid_snapshot", "Source run snapshot failed schema validation", nil))
@@ -188,7 +196,7 @@ func (s *V1Server) rerunStartCore(r *http.Request, rc v1Request) opResult {
 		Input:              prepared.input, IdempotencyKey: rerunIdempotencyKey(idempotencyKey, body), Rerun: prepared.plan.Seed,
 	})
 	if errors.Is(err, engine.ErrRerunSourceOpen) {
-		return opError(http.StatusConflict, "rerun_source_open", "The source run has not finished", nil)
+		return opError(http.StatusConflict, "rerun_source_open", "The source run changed or has not finished", nil)
 	}
 	if err != nil {
 		return runStartFailure(err)

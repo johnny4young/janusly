@@ -2511,24 +2511,60 @@ func (q *Queries) ReviveFailedRun(ctx context.Context, id string) (int64, error)
 	return result.RowsAffected(), nil
 }
 
-const runNodeHasRerun = `-- name: RunNodeHasRerun :one
+const runHasLiveSubworkflowChild = `-- name: RunHasLiveSubworkflowChild :one
 SELECT EXISTS (
-  SELECT 1 FROM runs c JOIN run_nodes n ON n.run_id = c.id
-  WHERE c.org_id = $1 AND c.parent_run_id = $2::text
-    AND c.parent_link_kind = 'rerun' AND n.node_id = $3
-    AND (n.attempts > 0 OR n.status IN ('pending', 'queued', 'running', 'waiting'))
+  SELECT 1 FROM runs
+  WHERE org_id = $1 AND parent_run_id = $2::text
+    AND (parent_link_kind = 'subworkflow' OR (parent_link_kind IS NULL AND replay_mode IS NULL))
+    AND status NOT IN ('succeeded', 'failed', 'cancelled', 'timed_out')
 )
 `
 
-type RunNodeHasRerunParams struct {
-	OrgID  string
-	RunID  string
-	NodeID string
+type RunHasLiveSubworkflowChildParams struct {
+	OrgID string
+	RunID string
 }
 
-// A rerun cloning this step never executed it; any other row in the child did or will.
-func (q *Queries) RunNodeHasRerun(ctx context.Context, arg RunNodeHasRerunParams) (bool, error) {
-	row := q.db.QueryRow(ctx, runNodeHasRerun, arg.OrgID, arg.RunID, arg.NodeID)
+func (q *Queries) RunHasLiveSubworkflowChild(ctx context.Context, arg RunHasLiveSubworkflowChildParams) (bool, error) {
+	row := q.db.QueryRow(ctx, runHasLiveSubworkflowChild, arg.OrgID, arg.RunID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const runNodeSupersededByRerun = `-- name: RunNodeSupersededByRerun :one
+WITH RECURSIVE up AS (
+  SELECT r.id, r.parent_run_id, r.parent_link_kind FROM runs r
+  WHERE r.org_id = $3 AND r.id = $1
+  UNION
+  SELECT p.id, p.parent_run_id, p.parent_link_kind FROM runs p JOIN up ON p.id = up.parent_run_id
+  WHERE up.parent_link_kind = 'rerun' AND p.org_id = $3
+), lineage AS (
+  SELECT up.id FROM up
+  UNION
+  SELECT c.id FROM runs c JOIN lineage l ON c.parent_run_id = l.id
+  WHERE c.parent_link_kind = 'rerun' AND c.org_id = $3
+)
+SELECT EXISTS (
+  SELECT 1 FROM lineage l JOIN runs c ON c.id = l.id JOIN run_nodes n ON n.run_id = c.id
+  WHERE c.id <> $1 AND n.node_id = $2
+    AND (n.status = 'succeeded'
+      OR (c.created_at >= (SELECT s.created_at FROM runs s WHERE s.id = $1)
+          AND (n.attempts > 0 OR n.status IN ('pending', 'queued', 'running', 'waiting'))))
+)
+`
+
+type RunNodeSupersededByRerunParams struct {
+	RunID  string
+	NodeID string
+	OrgID  string
+}
+
+// Walks the whole rerun lineage, siblings included. A later run that ran or will
+// run the step, or any other run holding its success, makes a replay a repeat. A
+// later clone of a failure is skipped, and an earlier failed attempt supersedes nothing.
+func (q *Queries) RunNodeSupersededByRerun(ctx context.Context, arg RunNodeSupersededByRerunParams) (bool, error) {
+	row := q.db.QueryRow(ctx, runNodeSupersededByRerun, arg.RunID, arg.NodeID, arg.OrgID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

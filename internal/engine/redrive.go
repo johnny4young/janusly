@@ -29,7 +29,7 @@ var ErrRedriveConflict = errors.New("dead letter replay already claimed")
 type rerunExistsError struct{}
 
 func (rerunExistsError) Error() string {
-	return "this step already ran again in a rerun; open that run instead of replaying it"
+	return "this step already ran in a related rerun; open the latest run instead of replaying it"
 }
 
 func (rerunExistsError) Is(target error) bool { return target == ErrRedriveConflict }
@@ -39,7 +39,7 @@ func (rerunExistsError) Is(target error) bool { return target == ErrRedriveConfl
 var ErrRedriveRerunExists error = rerunExistsError{}
 
 func refuseRedriveAfterRerun(ctx context.Context, q *store.Queries, orgID, runID, nodeID string) error {
-	rerun, err := q.RunNodeHasRerun(ctx, store.RunNodeHasRerunParams{OrgID: orgID, RunID: runID, NodeID: nodeID})
+	rerun, err := q.RunNodeSupersededByRerun(ctx, store.RunNodeSupersededByRerunParams{OrgID: orgID, RunID: runID, NodeID: nodeID})
 	if err != nil {
 		return fmt.Errorf("read rerun children: %w", err)
 	}
