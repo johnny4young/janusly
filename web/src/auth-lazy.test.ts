@@ -84,7 +84,7 @@ describe('captured implicit-grant callback', () => {
     const auth = await import('./auth')
     captureAuthCallback()
 
-    await expect(auth.resolveAuthCallbackIdentity()).resolves.toBe('invited@example.com')
+    await expect(auth.resolveAuthCallbackIdentity()).resolves.toEqual({ id: 'user-1', email: 'invited@example.com' })
 
     const [url, init] = fetchMock.mock.calls.at(-1)!
     expect(String(url)).toBe('https://example.supabase.co/auth/v1/user')
@@ -97,6 +97,7 @@ describe('captured implicit-grant callback', () => {
     ['rejects the token', async () => new Response('{}', { status: 401 })],
     ['ended the session', async () => new Response(JSON.stringify({ error_code: 'session_not_found' }), { status: 403 })],
     ['returns no email to show', async () => new Response(JSON.stringify({ id: 'user-1' }), { status: 200 })],
+    ['returns no user id', async () => new Response(JSON.stringify({ email: 'a@example.com' }), { status: 200 })],
     ['returns malformed JSON', async () => new Response('not json', { status: 200 })],
     ['is unreachable', async () => { throw new TypeError('Failed to fetch') }],
   ])('reports a failed link when the auth server %s', async (_name, respond) => {
@@ -191,6 +192,95 @@ describe('captured implicit-grant callback', () => {
 
     expect(signOut).toHaveBeenCalledOnce()
     expect(setSession).not.toHaveBeenCalled()
+  })
+})
+
+describe('password setup', () => {
+  async function setup(authClient: Record<string, unknown>) {
+    stubSupabaseEnv()
+    stubNoCookieSession()
+    runtime.createClient.mockReturnValue({ auth: authClient })
+    const callback = await import('./auth-callback')
+    const auth = await import('./auth')
+    callback.markPasswordSetup('user-1')
+    return { auth, marker: callback.passwordSetupUser }
+  }
+
+  const sessionFor = (id: string, email: string | undefined = 'a@example.com') => (
+    vi.fn(async () => ({ data: { session: { user: { id, email } } }, error: null }))
+  )
+
+  it('is owed to the account that holds the session', async () => {
+    const { auth, marker } = await setup({ getSession: sessionFor('user-1') })
+
+    await expect(auth.resolvePasswordSetupEmail()).resolves.toBe('a@example.com')
+    expect(marker()).toBe('user-1')
+  })
+
+  it.each([
+    ['another account holds the session', sessionFor('user-2')],
+    ['no session exists', vi.fn(async () => ({ data: { session: null }, error: null }))],
+  ])('retires when %s', async (_name, getSession) => {
+    const { auth, marker } = await setup({ getSession })
+
+    await expect(auth.resolvePasswordSetupEmail()).resolves.toBeNull()
+    expect(marker()).toBeNull()
+  })
+
+  it('keeps the step owed when the session cannot be read', async () => {
+    const getSession = vi.fn(async () => ({ data: { session: null }, error: new Error('network') }))
+    const { auth, marker } = await setup({ getSession })
+
+    await expect(auth.resolvePasswordSetupEmail()).resolves.toBeNull()
+    expect(marker()).toBe('user-1')
+  })
+
+  it('never loads the client when no step is owed', async () => {
+    stubSupabaseEnv()
+    const auth = await import('./auth')
+
+    await expect(auth.resolvePasswordSetupEmail()).resolves.toBeNull()
+    expect(runtime.createClient).not.toHaveBeenCalled()
+  })
+
+  it('finishes only when the password update succeeds', async () => {
+    const updateUser = vi.fn()
+      .mockResolvedValueOnce({ data: { user: null }, error: { code: 'weak_password' } })
+      .mockResolvedValueOnce({ data: { user: {} }, error: null })
+    const { auth, marker } = await setup({ updateUser })
+
+    await expect(auth.AuthProvider.updatePassword('short-one')).resolves.toEqual({ error: { code: 'weak_password' } })
+    expect(marker()).toBe('user-1')
+
+    await expect(auth.AuthProvider.updatePassword('long-enough')).resolves.toEqual({ error: null })
+    expect(updateUser).toHaveBeenLastCalledWith({ password: 'long-enough' })
+    expect(marker()).toBeNull()
+  })
+
+  it('stops being owed after a password sign-in, which proves the account has one', async () => {
+    const signInWithPassword = vi.fn()
+      .mockResolvedValueOnce({ data: {}, error: new Error('bad credentials') })
+      .mockResolvedValueOnce({ data: {}, error: null })
+    const { auth, marker } = await setup({ signInWithPassword })
+
+    await auth.AuthProvider.signIn('a@example.com', 'wrong')
+    expect(marker()).toBe('user-1')
+
+    await auth.AuthProvider.signIn('a@example.com', 'right')
+    expect(marker()).toBeNull()
+  })
+
+  it('stops being owed only after sign-out succeeds', async () => {
+    const signOut = vi.fn()
+      .mockResolvedValueOnce({ error: new Error('network') })
+      .mockResolvedValueOnce({ error: null })
+    const { auth, marker } = await setup({ signOut })
+
+    await auth.AuthProvider.signOut()
+    expect(marker()).toBe('user-1')
+
+    await auth.AuthProvider.signOut()
+    expect(marker()).toBeNull()
   })
 })
 
