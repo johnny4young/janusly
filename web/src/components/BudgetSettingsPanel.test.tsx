@@ -1,5 +1,5 @@
 import { useInvalidationNonce } from '../lib/query-cache'
-import { fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { configure, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -15,6 +15,9 @@ vi.mock('../api', () => {
       options === undefined ? module.api(path) : module.api(path, options),
   }
 })
+
+// Each row chains two reads before it can paint its meter.
+configure({ asyncUtilTimeout: 5000 })
 
 const REFRESH_TAGS = ['billing'] as const
 const initialState = useWorkflowStore.getState()
@@ -179,7 +182,7 @@ describe('<BudgetSettingsPanel />', () => {
     expect(postsTo('/org/config')).toHaveLength(1)
   })
 
-  it('requires an amount above 0 to turn the limit on', async () => {
+  it('requires an amount of at least a cent to turn the limit on', async () => {
     mockBudgetApi({ monthlyUsd: 0 })
     render(<BudgetSettingsPanel />)
 
@@ -192,7 +195,7 @@ describe('<BudgetSettingsPanel />', () => {
     expect(screen.getByTestId('budget-org-save')).toBeDisabled()
 
     fireEvent.change(monthly, { target: { value: '0' } })
-    expect(screen.getByText('Monthly limit must be above 0')).toBeInTheDocument()
+    expect(screen.getByText('Monthly limit must be at least $0.01')).toBeInTheDocument()
     expect(monthly).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByTestId('budget-org-save')).toBeDisabled()
 
@@ -279,7 +282,7 @@ describe('<BudgetSettingsPanel />', () => {
     await waitFor(() => expect(screen.queryByTestId('budget-workflow-monthly')).not.toBeInTheDocument())
   })
 
-  it('falls a workflow back to the org budget by storing 0, keeping its saved warning and policy', async () => {
+  it('falls a workflow back to the org budget by storing 0, ignoring its open warning and policy fields', async () => {
     mockBudgetApi()
     render(<BudgetSettingsPanel />)
 
@@ -292,7 +295,7 @@ describe('<BudgetSettingsPanel />', () => {
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/workflows/wf_1/budget', expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ monthlyUsd: 0, warnPercent: 70, policy: 'block' }),
+        body: JSON.stringify({ monthlyUsd: 0 }),
       }))
     })
   })
@@ -309,6 +312,19 @@ describe('<BudgetSettingsPanel />', () => {
     fireEvent.click(screen.getByTestId('budget-workflow-mode-limit'))
     expect(screen.getByTestId('budget-workflow-monthly')).toHaveValue(null)
     expect(screen.getByTestId('budget-workflow-save')).toBeDisabled()
+  })
+
+  it('starts a new workflow limit from the warning and policy that govern the workflow now', async () => {
+    mockBudgetApi()
+    render(<BudgetSettingsPanel />)
+
+    await waitFor(() => expect(screen.getByTestId('budget-workflow-limit-wf_2')).toHaveTextContent('Org-wide'))
+    fireEvent.click(screen.getByTestId('budget-workflow-edit-wf_2'))
+    fireEvent.click(screen.getByTestId('budget-workflow-mode-limit'))
+
+    // The org envelope carries warn 75 and block; 80 and warn would silently weaken an org block.
+    expect(screen.getByTestId('budget-workflow-warn')).toHaveValue(75)
+    expect(screen.getByTestId('budget-workflow-policy')).toHaveValue('block')
   })
 
   it('discards a row draft on Cancel', async () => {
@@ -384,7 +400,7 @@ describe('<BudgetSettingsPanel />', () => {
     await screen.findByTestId('budget-workflow-row-wf_19')
     expect(screen.queryByTestId('budget-workflow-row-wf_20')).not.toBeInTheDocument()
     const reads = () => vi.mocked(api).mock.calls.filter(([path]) => String(path).includes('workflowId=')).length
-    expect(reads()).toBe(10)
+    await waitFor(() => expect(reads()).toBe(10))
 
     fireEvent.click(screen.getByTestId('budget-workflow-more'))
     expect(screen.getByTestId('budget-workflow-row-wf_21')).toBeInTheDocument()
@@ -458,13 +474,303 @@ describe('<BudgetSettingsPanel />', () => {
     expect(screen.getByTestId('budget-org-save')).toBeEnabled()
   })
 
+  it('refetches after a partial org save so Off can still turn off the limit that landed', async () => {
+    mockBudgetApi({ monthlyUsd: 0 })
+    const healthy = vi.mocked(api).getMockImplementation()!
+    let held = 0
+    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/org/config' && init?.method === 'POST') {
+        const { key, value } = JSON.parse(String(init.body))
+        if (key === 'ai.budgetWarnPercent') throw new Error('warn write failed')
+        if (key === 'ai.budgetMonthlyUsd') held = value
+        return {}
+      }
+      if (path === '/org/config') {
+        return { config: [{ key: 'ai.budgetMonthlyUsd', value: held }, { key: 'ai.budgetWarnPercent', value: 75 }, { key: 'ai.budgetExceededPolicy', value: 'warn' }] }
+      }
+      return healthy(path, init)
+    })
+    render(<BudgetSettingsPanel />)
+
+    await screen.findByTestId('budget-org-off')
+    fireEvent.click(screen.getByTestId('budget-org-mode-limit'))
+    fireEvent.change(screen.getByTestId('budget-org-monthly'), { target: { value: '50' } })
+    fireEvent.click(screen.getByTestId('budget-org-save'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('warn write failed')
+    await waitFor(() => expect(screen.getByTestId('budget-org-monthly')).toBeEnabled())
+    expect(held).toBe(50)
+    // The refetch must not clear the failure it follows, or drop what was typed.
+    expect(screen.getByRole('alert')).toHaveTextContent('warn write failed')
+    expect(screen.getByTestId('budget-org-monthly')).toHaveValue(50)
+
+    fireEvent.click(screen.getByTestId('budget-org-mode-off'))
+    expect(screen.queryByTestId('budget-org-off')).not.toBeInTheDocument()
+    expect(screen.getByTestId('budget-org-save')).toBeEnabled()
+    fireEvent.click(screen.getByTestId('budget-org-save'))
+    await waitFor(() => expect(held).toBe(0))
+  })
+
+  it('lets a changed limit be reverted after a partial org save', async () => {
+    mockBudgetApi()
+    const healthy = vi.mocked(api).getMockImplementation()!
+    let held = 25.5
+    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/org/config' && init?.method === 'POST') {
+        const { key, value } = JSON.parse(String(init.body))
+        if (key === 'ai.budgetExceededPolicy') throw new Error('policy write failed')
+        if (key === 'ai.budgetMonthlyUsd') held = value
+        return {}
+      }
+      if (path === '/org/config') {
+        return { config: [{ key: 'ai.budgetMonthlyUsd', value: held }, { key: 'ai.budgetWarnPercent', value: 75 }, { key: 'ai.budgetExceededPolicy', value: 'block' }] }
+      }
+      return healthy(path, init)
+    })
+    render(<BudgetSettingsPanel />)
+
+    const monthly = await screen.findByTestId('budget-org-monthly')
+    fireEvent.change(monthly, { target: { value: '40' } })
+    fireEvent.click(screen.getByTestId('budget-org-save'))
+    await screen.findByRole('alert')
+    await waitFor(() => expect(screen.getByTestId('budget-org-monthly')).toBeEnabled())
+
+    fireEvent.change(screen.getByTestId('budget-org-monthly'), { target: { value: '25.5' } })
+    expect(screen.getByTestId('budget-org-save')).toBeEnabled()
+  })
+
+  it('locks the org form while a failed save leaves the server state unknown', async () => {
+    mockBudgetApi()
+    const healthy = vi.mocked(api).getMockImplementation()!
+    let saveFailed = false
+    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/org/config' && init?.method === 'POST') {
+        saveFailed = true
+        throw new Error('save failed')
+      }
+      if (path === '/org/config' && saveFailed) throw new Error('read failed')
+      return healthy(path, init)
+    })
+    render(<BudgetSettingsPanel />)
+
+    fireEvent.change(await screen.findByTestId('budget-org-monthly'), { target: { value: '40' } })
+    fireEvent.click(screen.getByTestId('budget-org-save'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('save failed')
+    await waitFor(() => expect(vi.mocked(api).mock.calls.filter(([path, init]) => path === '/org/config' && !init).length).toBeGreaterThan(1))
+    expect(screen.getByTestId('budget-org-save')).toBeDisabled()
+    expect(screen.getByTestId('budget-org-monthly')).toBeDisabled()
+  })
+
+  it('rejects a warning threshold of 0, which the server would read as 80', async () => {
+    mockBudgetApi()
+    render(<BudgetSettingsPanel />)
+
+    const warn = await screen.findByTestId('budget-org-warn')
+    expect(warn).toHaveAttribute('min', '1')
+    fireEvent.change(warn, { target: { value: '0' } })
+    expect(screen.getByText('Warning threshold must be a whole number between 1 and 100')).toBeInTheDocument()
+    expect(warn).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByTestId('budget-org-save')).toBeDisabled()
+
+    fireEvent.change(warn, { target: { value: '1' } })
+    expect(screen.getByTestId('budget-org-save')).toBeEnabled()
+  })
+
+  it('says workflow limits still apply when the org budget is Off', async () => {
+    mockBudgetApi({ monthlyUsd: 0 })
+    render(<BudgetSettingsPanel />)
+
+    const off = await screen.findByTestId('budget-org-off')
+    expect(off).toHaveTextContent('Workflow limits still apply')
+    expect(off).not.toHaveTextContent('not checked')
+  })
+
+  it('says when no workflow matches the filter', async () => {
+    const workflows = Array.from({ length: 12 }, (_, index) => ({ id: `wf_${index + 10}`, orgId: 'default', name: `Flow ${index + 10}` }))
+    mockBudgetApi({ workflows })
+    render(<BudgetSettingsPanel />)
+
+    await screen.findByTestId('budget-workflow-row-wf_19')
+    fireEvent.change(screen.getByTestId('budget-workflow-filter'), { target: { value: 'nothing' } })
+
+    expect(screen.getByTestId('budget-workflow-no-match')).toHaveTextContent('No workflows match this filter')
+    expect(screen.queryByTestId('budget-workflow-table')).not.toBeInTheDocument()
+  })
+
+  it('does not imply a workflow is missing when the list may be truncated', async () => {
+    const workflows = Array.from({ length: 100 }, (_, index) => ({ id: `wf_${index + 10}`, orgId: 'default', name: `Flow ${index + 10}` }))
+    mockBudgetApi({ workflows })
+    render(<BudgetSettingsPanel />)
+
+    await screen.findByTestId('budget-workflow-row-wf_19')
+    fireEvent.change(screen.getByTestId('budget-workflow-filter'), { target: { value: 'nothing' } })
+
+    expect(screen.getByTestId('budget-workflow-no-match')).toHaveTextContent('No match in the first 100 workflows')
+  })
+
+  it('leaves another row\'s open editor and focus alone when a save finishes', async () => {
+    mockBudgetApi()
+    const healthy = vi.mocked(api).getMockImplementation()!
+    let finishSave: (value: unknown) => void = () => {}
+    vi.mocked(api).mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/workflows/wf_1/budget') return new Promise((resolve) => { finishSave = resolve })
+      return healthy(path, init)
+    })
+    render(<BudgetSettingsPanel />)
+
+    await screen.findByTestId('budget-workflow-meter-wf_1')
+    await waitFor(() => expect(screen.getByTestId('budget-workflow-edit-wf_2')).toBeEnabled())
+    fireEvent.click(screen.getByTestId('budget-workflow-edit-wf_1'))
+    fireEvent.change(screen.getByTestId('budget-workflow-monthly'), { target: { value: '8' } })
+    fireEvent.click(screen.getByTestId('budget-workflow-save'))
+    await waitFor(() => expect(postsTo('/workflows/wf_1/budget')).toHaveLength(1))
+
+    fireEvent.click(screen.getByTestId('budget-workflow-edit-wf_2'))
+    expect(screen.getByTestId('budget-workflow-edit-wf_2')).toHaveAttribute('aria-expanded', 'true')
+    const mode = screen.getByTestId('budget-workflow-mode-limit')
+    mode.focus()
+
+    finishSave({})
+    await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
+    expect(screen.getByTestId('budget-workflow-edit-wf_2')).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByTestId('budget-workflow-mode-limit')).toHaveFocus()
+  })
+
+  it('keeps an open editor and its draft when the filter stops matching its row', async () => {
+    const workflows = Array.from({ length: 12 }, (_, index) => ({ id: `wf_${index + 10}`, orgId: 'default', name: `Flow ${index + 10}` }))
+    mockBudgetApi({ workflows })
+    render(<BudgetSettingsPanel />)
+
+    await screen.findByTestId('budget-workflow-row-wf_10')
+    await waitFor(() => expect(screen.getByTestId('budget-workflow-edit-wf_10')).toBeEnabled())
+    fireEvent.click(screen.getByTestId('budget-workflow-edit-wf_10'))
+    fireEvent.click(screen.getByTestId('budget-workflow-mode-limit'))
+    fireEvent.change(screen.getByTestId('budget-workflow-monthly'), { target: { value: '9' } })
+
+    fireEvent.change(screen.getByTestId('budget-workflow-filter'), { target: { value: 'flow 21' } })
+    expect(screen.getByTestId('budget-workflow-monthly')).toHaveValue(9)
+    expect(screen.getByTestId('budget-workflow-row-wf_21')).toBeInTheDocument()
+    expect(screen.queryByTestId('budget-workflow-row-wf_11')).not.toBeInTheDocument()
+  })
+
+  it('keeps an open editor past the page limit when the filter is cleared', async () => {
+    const workflows = Array.from({ length: 12 }, (_, index) => ({ id: `wf_${index + 10}`, orgId: 'default', name: `Flow ${index + 10}` }))
+    mockBudgetApi({ workflows })
+    render(<BudgetSettingsPanel />)
+
+    fireEvent.change(await screen.findByTestId('budget-workflow-filter'), { target: { value: 'flow 21' } })
+    await waitFor(() => expect(screen.getByTestId('budget-workflow-edit-wf_21')).toBeEnabled())
+    fireEvent.click(screen.getByTestId('budget-workflow-edit-wf_21'))
+    fireEvent.click(screen.getByTestId('budget-workflow-mode-limit'))
+    fireEvent.change(screen.getByTestId('budget-workflow-monthly'), { target: { value: '9' } })
+
+    fireEvent.change(screen.getByTestId('budget-workflow-filter'), { target: { value: '' } })
+    expect(screen.getByTestId('budget-workflow-monthly')).toHaveValue(9)
+    expect(screen.queryByTestId('budget-workflow-row-wf_20')).not.toBeInTheDocument()
+  })
+
+  it('keeps an open editor and flags the row when its refresh fails', async () => {
+    mockBudgetApi()
+    const healthy = vi.mocked(api).getMockImplementation()!
+    let readFails = false
+    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+      if (readFails && path.includes('workflowId=wf_1')) throw new Error('boom')
+      return healthy(path, init)
+    })
+    render(<BudgetSettingsPanel />)
+
+    await screen.findByTestId('budget-workflow-meter-wf_1')
+    fireEvent.click(screen.getByTestId('budget-workflow-edit-wf_1'))
+    fireEvent.change(screen.getByTestId('budget-workflow-monthly'), { target: { value: '9' } })
+
+    readFails = true
+    useWorkflowStore.getState().bumpPlatformVersion(REFRESH_TAGS)
+
+    await waitFor(() => expect(screen.getByTestId('budget-workflow-limit-wf_1')).toHaveTextContent('Failed to load budget'))
+    expect(screen.queryByTestId('budget-workflow-meter-wf_1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('budget-workflow-monthly')).toHaveValue(9)
+
+    fireEvent.click(screen.getByTestId('budget-workflow-edit-wf_1'))
+    expect(screen.getByTestId('budget-workflow-edit-wf_1')).toBeDisabled()
+  })
+
+  it('drops the org meter when its refresh fails instead of showing stale spend', async () => {
+    mockBudgetApi()
+    const healthy = vi.mocked(api).getMockImplementation()!
+    let readFails = false
+    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+      if (readFails && path === '/billing/budget') throw new Error('boom')
+      return healthy(path, init)
+    })
+    render(<BudgetSettingsPanel />)
+
+    await screen.findByTestId('budget-org-meter')
+    readFails = true
+    useWorkflowStore.getState().bumpPlatformVersion(REFRESH_TAGS)
+
+    await screen.findByTestId('budget-org-spend-unavailable')
+    expect(screen.queryByTestId('budget-org-meter')).not.toBeInTheDocument()
+  })
+
+  it('rejects a limit below a cent, which float4 storage could turn into Org-wide', async () => {
+    mockBudgetApi()
+    render(<BudgetSettingsPanel />)
+
+    await screen.findByTestId('budget-workflow-meter-wf_1')
+    fireEvent.click(screen.getByTestId('budget-workflow-edit-wf_1'))
+    const monthly = screen.getByTestId('budget-workflow-monthly')
+    expect(monthly).toHaveAttribute('min', '0.01')
+    for (const tiny of ['0.001', '1e-50']) {
+      fireEvent.change(monthly, { target: { value: tiny } })
+      expect(monthly).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByTestId('budget-workflow-save')).toBeDisabled()
+    }
+    fireEvent.change(monthly, { target: { value: '0.01' } })
+    expect(screen.getByTestId('budget-workflow-save')).toBeEnabled()
+  })
+
+  it('rejects a limit too large for float4 storage', async () => {
+    mockBudgetApi()
+    render(<BudgetSettingsPanel />)
+
+    const monthly = await screen.findByTestId('budget-org-monthly')
+    fireEvent.change(monthly, { target: { value: '1e39' } })
+    expect(monthly).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByTestId('budget-org-save')).toBeDisabled()
+  })
+
+  it('does not rewrite a stored limit the user did not edit', async () => {
+    mockBudgetApi()
+    const healthy = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+      // float4 reads 123456.78 back as 123456.78125.
+      if (path.includes('workflowId=wf_1')) return { ...WORKFLOW_ENVELOPE, monthlyUsdLimit: 123456.78125 }
+      return healthy(path, init)
+    })
+    render(<BudgetSettingsPanel />)
+
+    await screen.findByTestId('budget-workflow-meter-wf_1')
+    expect(screen.getByTestId('budget-workflow-limit-wf_1')).toHaveTextContent('$123456.78 / month')
+    fireEvent.click(screen.getByTestId('budget-workflow-edit-wf_1'))
+    expect(screen.getByTestId('budget-workflow-monthly')).toHaveValue(123456.78)
+    fireEvent.change(screen.getByTestId('budget-workflow-warn'), { target: { value: '71' } })
+    fireEvent.click(screen.getByTestId('budget-workflow-save'))
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/workflows/wf_1/budget', expect.objectContaining({
+        body: JSON.stringify({ monthlyUsd: 123456.78, warnPercent: 71, policy: 'block' }),
+      }))
+    })
+  })
+
   it('flags a negative monthly budget inline and gates save', async () => {
     mockBudgetApi()
     render(<BudgetSettingsPanel />)
 
     const monthly = await screen.findByTestId('budget-org-monthly')
     fireEvent.change(monthly, { target: { value: '-5' } })
-    expect(screen.getByText('Monthly limit must be above 0')).toBeInTheDocument()
+    expect(screen.getByText('Monthly limit must be at least $0.01')).toBeInTheDocument()
     expect(monthly).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByTestId('budget-org-save')).toBeDisabled()
   })

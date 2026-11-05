@@ -25,6 +25,9 @@ const BUDGET_TAGS = [PLATFORM_TAG, 'billing', 'org-config', 'workflows'] as cons
 
 // There is no list endpoint for overrides: each visible row issues its own read.
 const WORKFLOW_PAGE_SIZE = 10;
+// `GET /workflows` returns 100 rows by default, so a full list may be truncated.
+const WORKFLOW_LIST_LIMIT = 100;
+const MIN_MONTHLY_USD = 0.01;
 
 type BudgetPolicy = "warn" | "block";
 
@@ -45,17 +48,18 @@ const ORG_CONFIG_KEYS = {
   policy: "ai.budgetExceededPolicy",
 } as const;
 
-/** Content that isn't a positive number; 0 is what Off stores, so a limit can't be 0. */
+/** Off stores 0, and float4 storage turns a tiny workflow limit into 0 and a huge one into Infinity. */
 function isMonthlyInvalid(value: string): boolean {
   if (value.trim() === "") return false;
   const n = Number(value);
-  return !Number.isFinite(n) || n <= 0;
+  return !Number.isFinite(Math.fround(n)) || n < MIN_MONTHLY_USD;
 }
 
 function isWarnInvalid(value: string): boolean {
   if (value.trim() === "") return false;
   const n = Number(value);
-  return !Number.isInteger(n) || n < 0 || n > 100;
+  // The server reads a threshold of 0 as its default of 80.
+  return !Number.isInteger(n) || n < 1 || n > 100;
 }
 
 function isDraftReady(draft: BudgetDraft): boolean {
@@ -70,13 +74,24 @@ function isSameDraft(a: BudgetDraft, b: BudgetDraft): boolean {
     && a.warnPercent === b.warnPercent && a.policy === b.policy;
 }
 
-/** A workflow without its own limit reports the org's spend and limit, not its own. */
+/** Shortest decimal that stores as the same float4: 7.099999904632568 is 7.1, 123456.78125 is 123456.78. */
+function float4Text(value: number): string {
+  for (let digits = 1; digits < 9; digits++) {
+    const candidate = Number(value.toPrecision(digits));
+    if (Math.fround(candidate) === Math.fround(value)) return String(candidate);
+  }
+  return String(value);
+}
+
+/**
+ * A workflow without its own limit reports the org's envelope, and a stored 0 hides the
+ * row's old warning and policy, so a new limit starts from what governs the workflow now.
+ */
 function workflowDraft(envelope: BudgetEnvelope): BudgetDraft {
-  if (envelope.resolvedScope !== "workflow" || typeof envelope.monthlyUsdLimit !== "number") return OFF_DRAFT;
+  const limit = envelope.resolvedScope === "workflow" ? envelope.monthlyUsdLimit : null;
   return {
-    limitOn: true,
-    // Stored as float4: 7.1 reads back as 7.099999904632568.
-    monthlyUsd: String(Number(envelope.monthlyUsdLimit.toPrecision(7))),
+    limitOn: typeof limit === "number",
+    monthlyUsd: typeof limit === "number" ? float4Text(limit) : "",
     warnPercent: String(envelope.warningPercent ?? 80),
     policy: envelope.policy === "block" ? "block" : "warn",
   };
@@ -96,7 +111,8 @@ function useBudgetEnvelope(path: string, reloadKey: number) {
         if (!cancelled) setState({ envelope: payload as BudgetEnvelope, failed: false });
       })
       .catch(() => {
-        if (!cancelled) setState({ envelope: null, failed: true });
+        // The last good read stays so a failed refresh can't close an open row editor.
+        if (!cancelled) setState((current) => ({ envelope: current.envelope, failed: true }));
       });
     return () => { cancelled = true; };
   }, [path, reloadKey]);
@@ -136,11 +152,12 @@ function BudgetMeter({ envelope, compact = false, testId }: { envelope: BudgetEn
   );
 }
 
-function BudgetNumberField({ error, id, label, max, onChange, step, value }: {
+function BudgetNumberField({ error, id, label, max, min, onChange, step, value }: {
   error?: string;
   id: string;
   label: string;
   max?: number;
+  min: number;
   onChange: (value: string) => void;
   step: number;
   value: string;
@@ -151,7 +168,7 @@ function BudgetNumberField({ error, id, label, max, onChange, step, value }: {
         <input
           {...controlProps}
           type="number"
-          min={0}
+          min={min}
           max={max}
           step={step}
           value={value}
@@ -193,6 +210,7 @@ function BudgetLimitFields({ draft, offLabel, onChange, prefix }: {
             id={`${prefix}-monthly`}
             label={t("budget.field.monthly")}
             error={isMonthlyInvalid(draft.monthlyUsd) ? t("budget.errorMonthly") : undefined}
+            min={MIN_MONTHLY_USD}
             step={0.01}
             value={draft.monthlyUsd}
             onChange={(monthlyUsd) => onChange({ monthlyUsd })}
@@ -202,6 +220,7 @@ function BudgetLimitFields({ draft, offLabel, onChange, prefix }: {
             label={t("budget.field.warn")}
             error={isWarnInvalid(draft.warnPercent) ? t("budget.errorWarn") : undefined}
             max={100}
+            min={1}
             step={1}
             value={draft.warnPercent}
             onChange={(warnPercent) => onChange({ warnPercent })}
@@ -240,28 +259,26 @@ function WorkflowBudgetRow({ editing, onEditingChange, reloadKey, workflow }: {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const editButtonRef = useRef<HTMLButtonElement>(null);
+  const editorRowRef = useRef<HTMLTableRowElement>(null);
   const draft = edits ?? saved ?? OFF_DRAFT;
 
   const closeEditor = () => {
     setEdits(null);
     setSaveError(null);
+    // A save can finish after another row's editor opened: leave focus there.
+    if (editorRowRef.current) editButtonRef.current?.focus();
     onEditingChange(false);
-    editButtonRef.current?.focus();
   };
 
   const save = async () => {
     setSaving(true);
     setSaveError(null);
-    // Off stores 0 and keeps the warning and policy already saved for this row.
-    const source = draft.limitOn ? draft : saved ?? OFF_DRAFT;
     try {
       await api(`/workflows/${encodeURIComponent(workflow.id)}/budget`, {
         method: "POST",
-        body: JSON.stringify({
-          monthlyUsd: draft.limitOn ? Number(draft.monthlyUsd) : 0,
-          warnPercent: Number(source.warnPercent),
-          policy: source.policy,
-        }),
+        body: JSON.stringify(draft.limitOn
+          ? { monthlyUsd: Number(draft.monthlyUsd), warnPercent: Number(draft.warnPercent), policy: draft.policy }
+          : { monthlyUsd: 0 }),
       });
       closeEditor();
       addToast(t("budget.workflow.toastSaved"), "success");
@@ -273,14 +290,14 @@ function WorkflowBudgetRow({ editing, onEditingChange, reloadKey, workflow }: {
     }
   };
 
-  const rowHasLimit = saved?.limitOn === true;
+  const rowHasLimit = !failed && saved?.limitOn === true;
   return (
     <>
       <tr data-testid={`budget-workflow-row-${workflow.id}`}>
         <td>{workflow.name ?? workflow.id}</td>
         <td data-testid={`budget-workflow-limit-${workflow.id}`}>
-          {saved === null
-            ? (failed ? t("budget.errorLoad") : "…")
+          {failed ? t("budget.errorLoad")
+            : !saved ? "…"
             : rowHasLimit ? t("budget.workflow.current", { usd: Number(saved.monthlyUsd).toFixed(2) }) : t("budget.org")}
         </td>
         <td>{rowHasLimit ? `${saved.warnPercent}%` : "—"}</td>
@@ -294,7 +311,7 @@ function WorkflowBudgetRow({ editing, onEditingChange, reloadKey, workflow }: {
           <Button
             ref={editButtonRef}
             size="sm"
-            disabled={saved === null}
+            disabled={!editing && (!saved || failed)}
             aria-expanded={editing}
             aria-label={t("budget.workflow.editAria", { name: workflow.name ?? workflow.id })}
             onClick={() => (editing ? closeEditor() : onEditingChange(true))}
@@ -305,7 +322,7 @@ function WorkflowBudgetRow({ editing, onEditingChange, reloadKey, workflow }: {
         </td>
       </tr>
       {editing && saved && (
-        <tr className="we-budget-table__editor">
+        <tr ref={editorRowRef} className="we-budget-table__editor">
           <td colSpan={6}>
             <fieldset className="we-budget-editor" disabled={saving}>
               <BudgetLimitFields
@@ -363,9 +380,9 @@ function WorkflowBudgetTable({ reloadKey }: { reloadKey: number }) {
   if (workflows.length === 0) return <p className="helper-text">{t("budget.workflow.empty")}</p>;
 
   const query = filter.trim().toLowerCase();
-  const matches = query
-    ? workflows.filter((workflow) => (workflow.name ?? workflow.id).toLowerCase().includes(query))
-    : workflows;
+  // The open editor's row stays through filtering and paging so its draft survives.
+  const matches = workflows.filter((workflow) => workflow.id === editingId
+    || (workflow.name ?? workflow.id).toLowerCase().includes(query));
   return (
     <>
       {workflows.length > WORKFLOW_PAGE_SIZE && (
@@ -378,31 +395,39 @@ function WorkflowBudgetTable({ reloadKey }: { reloadKey: number }) {
           data-testid="budget-workflow-filter"
         />
       )}
-      <div className="we-budget-table-wrap">
-        <table className="we-budget-table" data-testid="budget-workflow-table">
-          <thead>
-            <tr>
-              <th scope="col">{t("budget.workflow.label")}</th>
-              <th scope="col">{t("budget.table.budget")}</th>
-              <th scope="col">{t("budget.table.warn")}</th>
-              <th scope="col">{t("budget.table.policy")}</th>
-              <th scope="col">{t("budget.table.spent")}</th>
-              <th scope="col"><span className="we-sr-only">{t("common.edit")}</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {matches.slice(0, visible).map((workflow) => (
-              <WorkflowBudgetRow
-                key={workflow.id}
-                editing={editingId === workflow.id}
-                onEditingChange={(editing) => setEditingId(editing ? workflow.id : null)}
-                reloadKey={reloadKey}
-                workflow={workflow}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {matches.length === 0 ? (
+        <p className="helper-text" data-testid="budget-workflow-no-match">
+          {workflows.length >= WORKFLOW_LIST_LIMIT
+            ? t("budget.workflow.noMatchPartial", { count: workflows.length })
+            : t("budget.workflow.noMatch")}
+        </p>
+      ) : (
+        <div className="we-budget-table-wrap">
+          <table className="we-budget-table" data-testid="budget-workflow-table">
+            <thead>
+              <tr>
+                <th scope="col">{t("budget.workflow.label")}</th>
+                <th scope="col">{t("budget.table.budget")}</th>
+                <th scope="col">{t("budget.table.warn")}</th>
+                <th scope="col">{t("budget.table.policy")}</th>
+                <th scope="col">{t("budget.table.spent")}</th>
+                <th scope="col"><span className="we-sr-only">{t("common.edit")}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {matches.filter((workflow, index) => index < visible || workflow.id === editingId).map((workflow) => (
+                <WorkflowBudgetRow
+                  key={workflow.id}
+                  editing={editingId === workflow.id}
+                  onEditingChange={(editing) => setEditingId((current) => (editing ? workflow.id : current === workflow.id ? null : current))}
+                  reloadKey={reloadKey}
+                  workflow={workflow}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {matches.length > visible && (
         <FormActions>
           <Button size="sm" onClick={() => setVisible((count) => count + WORKFLOW_PAGE_SIZE)} data-testid="budget-workflow-more">
@@ -425,12 +450,14 @@ export function BudgetSettingsPanel() {
   const [edits, setEdits] = useState<BudgetDraft | null>(null);
   const { envelope, failed: spendFailed } = useBudgetEnvelope("/billing/budget", platformVersion);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const error = saveError ?? loadError;
   const draft = edits ?? saved ?? OFF_DRAFT;
 
   useEffect(() => {
     let cancelled = false;
-    setError(null);
+    setLoadError(null);
     api("/org/config")
       .then((payload) => {
         if (cancelled) return;
@@ -445,14 +472,14 @@ export function BudgetSettingsPanel() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : (t("budget.errorLoad")));
+        setLoadError(err instanceof Error ? err.message : (t("budget.errorLoad")));
       });
     return () => { cancelled = true; };
   }, [platformVersion, t]);
 
   const saveOrgBudget = async () => {
     setSaving(true);
-    setError(null);
+    setSaveError(null);
     try {
       await api("/org/config", {
         method: "POST",
@@ -476,7 +503,10 @@ export function BudgetSettingsPanel() {
     } catch (err) {
       // Surface the failure inline only — the persistent form error below is
       // the single feedback channel here (no duplicate transient toast).
-      setError(tApiError(err) || (t("budget.errorSave")));
+      setSaveError(tApiError(err) || (t("budget.errorSave")));
+      // Some of the writes may have landed: the form stays locked until the server says what it holds.
+      setSaved(null);
+      bumpPlatformVersion(BUDGET_MUTATION_TAGS);
     } finally {
       setSaving(false);
     }
@@ -515,7 +545,7 @@ export function BudgetSettingsPanel() {
       )}
 
       <FormSection title={t("budget.org")} disabled={saved === null || saving}>
-        {saved?.limitOn && hasMeasuredSpend(envelope) && <BudgetMeter envelope={envelope} testId="budget-org-meter" />}
+        {saved?.limitOn && !spendFailed && hasMeasuredSpend(envelope) && <BudgetMeter envelope={envelope} testId="budget-org-meter" />}
         {saved?.limitOn && spendFailed && (
           <p className="helper-text" data-testid="budget-org-spend-unavailable">{t("budget.meter.unavailable")}</p>
         )}

@@ -4,9 +4,10 @@
 
 - The AI budget in Settings now meters this month's spend against the limit,
   with the warning threshold marked on the bar. An Off / Limit switch replaces
-  entering 0 to turn the budget off, and a limit must be above 0. Workflow
-  overrides are table rows with their limit, warning, policy and spend, edited
-  in place, and can be set back to the Org-wide budget.
+  entering 0 to turn the budget off. A limit must be at least $0.01 and a warning
+  threshold at least 1%. Workflow overrides are table rows with their limit,
+  warning, policy and spend, edited in place, and can be set back to the Org-wide
+  budget.
 - Rerun a run from any step that ran, from the Timeline tab. Earlier steps reuse
   their saved outputs, so nothing before the step repeats. The step's input is
   edited beside the original, the steps with side effects are listed before you
