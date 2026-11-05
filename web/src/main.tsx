@@ -7,7 +7,7 @@
 
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import { captureAuthCallback, markAuthCallbackFailed, pendingAuthCallbackToken } from './auth-callback'
+import { captureAuthCallback, markAuthCallbackFailed, passwordSetupUser, pendingAuthCallbackToken } from './auth-callback'
 import { bootstrapI18n, FALLBACK_LOCALE, getStoredLanguage, resolveAppLanguage } from './i18n'
 import { bootTheme } from './theme'
 import { ConfirmProvider } from './components/ConfirmDialog'
@@ -51,7 +51,7 @@ async function mountApp(): Promise<void> {
   }
 
   const root = createRoot(document.getElementById('root')!)
-  if (pendingAuthCallbackToken()) {
+  if (pendingAuthCallbackToken() || passwordSetupUser()) {
     try {
       const { settleAuthCallback } = await import('./components/AuthCallbackGate')
       await settleAuthCallback(root)

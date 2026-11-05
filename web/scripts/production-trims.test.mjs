@@ -20,6 +20,7 @@ const ENTRY = join(outDir, 'entry.mjs')
 writeFileSync(ENTRY, `
 export { GoTrueClient } from '@supabase/auth-js'
 export { XYPanZoom } from ${JSON.stringify(XYFLOW_SYSTEM)}
+export { select } from ${JSON.stringify(join(XYFLOW_SYSTEM, '../../d3-selection'))}
 export { Bot } from 'lucide-react'
 `)
 
@@ -91,6 +92,9 @@ const AUTH_SCENARIOS = {
   'rejected password': { password: () => authJson({ error_code: 'invalid_credentials', msg: 'bad' }, 400) },
   'signup awaiting confirmation': { signup: () => authJson(AUTH_USER) },
   'weak signup password': { signup: () => authJson({ error_code: 'weak_password', msg: 'weak' }, 422) },
+  'rejected password update': { updatePassword: () => authJson({ error_code: 'same_password', msg: 'same' }, 422) },
+  'password update for an ended session': { updatePassword: () => authJson({ error_code: 'session_not_found', msg: 'gone' }, 403) },
+  'unreachable password update': { updatePassword: () => { throw new TypeError('Failed to fetch') } },
   'rejected logout': { logout: () => authJson({ msg: 'forbidden' }, 403) },
   'failing logout': { logout: () => authJson({ msg: 'unavailable' }, 500) },
 }
@@ -127,6 +131,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
       if (search.includes('grant_type=password')) return scenario.password?.() ?? authJson(authSession('password'))
       if (search.includes('grant_type=refresh_token')) return scenario.refresh?.() ?? authJson(authSession('refreshed'))
       if (pathname.endsWith('/logout')) return scenario.logout?.() ?? new Response(null, { status: 204 })
+      if (pathname.endsWith('/user') && init.method === 'PUT') return scenario.updatePassword?.() ?? authJson(AUTH_USER)
       if (pathname.endsWith('/user')) return scenario.user?.() ?? authJson(AUTH_USER)
       return authJson({ msg: 'unexpected' }, 500)
     },
@@ -141,6 +146,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
   document.dispatchEvent(new window.Event('visibilitychange'))
   const signUp = comparable(await client.signUp({ email: 'a@example.test', password: 'pw-12345' }))
   const signIn = comparable(await client.signInWithPassword({ email: 'a@example.test', password: 'pw-12345' }))
+  const updatePassword = comparable(await client.updateUser({ password: 'pw-67890' }).catch((error) => error))
   const stored = window.localStorage.getItem(storageKey)
   if (stored) window.localStorage.setItem(storageKey, JSON.stringify({ ...JSON.parse(stored), expires_at: 1 }))
   const afterExpiry = comparable(await client.getSession())
@@ -153,6 +159,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
     adopted,
     signUp,
     signIn,
+    updatePassword,
     afterExpiry,
     signOut,
     afterSignOut,
@@ -178,6 +185,7 @@ test('auth pruning keeps session code and removes unused surfaces', () => {
   const code = readFileSync(join(AUTH_MODULE_DIR, 'GoTrueClient.js'), 'utf8')
   const { kept, removed } = pruneAuthClass(code, 'GoTrueClient')
   assert.ok(kept.includes('setSession'))
+  assert.ok(kept.includes('updateUser'))
   assert.ok(kept.includes('_refreshAccessToken'))
   assert.ok(removed.includes('signInWithOAuth'))
   const admin = readFileSync(join(AUTH_MODULE_DIR, 'GoTrueAdminApi.js'), 'utf8')
@@ -192,6 +200,7 @@ const syntheticClient = (member) => `class GoTrueClient {
   signInWithPassword() {}
   signOut() {}
   signUp() {}
+  updateUser() {}
   unused() {}
 }`
 
@@ -259,9 +268,9 @@ test('pruned auth client signs in, adopts an approved callback and ignores the U
   assert.ok(lifecycle.calls.some((call) => call.includes('/logout')))
 }))
 
-test('stubbed d3-color still runs animated and linear React Flow zoom transitions', async () => {
+test('trimmed d3 still runs animated and linear React Flow zoom transitions', async () => {
   const dom = installBrowser('https://app.example.test/')
-  const { XYPanZoom } = trimmed
+  const { XYPanZoom, select } = trimmed
   const domNode = document.getElementById('pane')
   const panZoom = XYPanZoom({
     domNode,
@@ -280,6 +289,7 @@ test('stubbed d3-color still runs animated and linear React Flow zoom transition
     await panZoom.setViewport(target, { duration: 30, interpolate })
     assert.deepEqual(panZoom.getViewport(), target)
   }
+  assert.throws(() => select(domNode).transition().attr('x', 1), /Unsupported d3 transition method/)
   panZoom.destroy()
   dom.window.close()
 })
