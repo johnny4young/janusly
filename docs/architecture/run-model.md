@@ -125,8 +125,11 @@ and the reused, rerun, not-run and side-effect steps. Side effects are classifie
 from the document that will run, with static tool capability metadata, treating a
 subworkflow or unknown tool as effectful, and the start must acknowledge them, so
 an edit that adds a write returns 409 with the new list. Only agents check
-approval at dispatch, so a side effect with any approval upstream that is not in
-the closure refuses the rerun until it starts at that approval.
+approval at dispatch, so a side effect with an approval or human form upstream
+that is not in the closure refuses the rerun until it starts at that step: one
+person's answer covers one execution, and an override could change what they
+reviewed. A webhook, timer or subworkflow upstream stays reusable. A webhook is
+usually the run's trigger, whose payload nobody would send again.
 
 `inputOverride` replaces the step's authored config in a copy of the run's
 snapshot. Rendered per-node input is not persisted, because it can hold resolved

@@ -82,7 +82,7 @@
   "apiErrors.fork_node_not_found": "Fork node not found in this workflow",
   "apiErrors.predecessor_not_succeeded": "One or more earlier steps did not succeed in the source run",
   "apiErrors.override_too_large": "Override exceeds 64 KiB size cap",
-  "apiErrors.rerun_needs_approval": "Rerun from {{nodeId}}: an approval covers one execution",
+  "apiErrors.rerun_needs_approval": "Rerun from {{nodeId}}: a decision covers one execution",
   "apiErrors.rerun_raw_secret": "Credential fields need a secret reference",
   "apiErrors.no_workflow_snapshot": "Source run has no workflow snapshot available",
   "apiErrors.invalid_snapshot": "Source run's workflow snapshot is invalid",
