@@ -31,7 +31,7 @@
  *    absent means the workflow is ungrouped in the Flows list.
  */
 
-import * as z from 'zod/mini'
+import * as z from './schema-lite'
 
 import { RECOVERY_ITEM_SEVERITIES } from './recovery-item-values'
 import {

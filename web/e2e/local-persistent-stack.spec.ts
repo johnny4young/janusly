@@ -33,7 +33,7 @@ test('persistent local stack exposes configured packs and recoverable provider f
 
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
-  await expect(page.locator('.top-bar-breadcrumb')).toContainText('Untitled Workflow')
+  await expect(page.locator('.top-bar-breadcrumb').getByRole('textbox', { name: 'Name' })).toHaveValue('Untitled Workflow')
   await expect(page.locator('.top-bar-breadcrumb')).not.toContainText('undefined')
   await openWorkspaceSection(page, 'Workflows', 'Build')
   await expect(page.getByTestId('canvas-empty')).toBeVisible()

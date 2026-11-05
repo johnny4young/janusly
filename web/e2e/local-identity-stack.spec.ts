@@ -117,7 +117,7 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
   await openWorkspaceSection(page, 'Workflows', 'Build')
   await expect(page.getByTestId('canvas-empty')).toBeVisible()
   await expect(page.locator('.react-flow__node')).toHaveCount(0)
-  await expect(page.locator('.top-bar-breadcrumb')).toContainText('Untitled Workflow')
+  await expect(page.locator('.top-bar-breadcrumb').getByRole('textbox', { name: 'Name' })).toHaveValue('Untitled Workflow')
   await capture(page, 'identity-empty-workflow')
 
   await openUserMenu(page)

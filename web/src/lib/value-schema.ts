@@ -20,7 +20,7 @@
  * change.
  */
 
-import * as z from "zod/mini";
+import * as z from "./schema-lite";
 
 export const workflowInputTypeValues = [
   "string",
@@ -46,7 +46,7 @@ export type WorkflowInputSchemaShape = {
   default?: unknown;
 };
 
-export const WorkflowInputSchema: z.ZodMiniType<WorkflowInputSchemaShape> =
+export const WorkflowInputSchema: z.Schema<WorkflowInputSchemaShape> =
   /* @__PURE__ */ z.lazy(() =>
     z.object({
       type: WorkflowInputTypeSchema,

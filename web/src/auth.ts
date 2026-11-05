@@ -46,7 +46,12 @@ const apiUrl = ''
 /** True when both Supabase env vars are present in the build. */
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 
-type SupabaseAuthFacade = { auth: GoTrueClient }
+// The production build removes every other GoTrueClient method.
+type SupabaseAuthClient = Pick<
+  GoTrueClient,
+  'getSession' | 'onAuthStateChange' | 'signInWithPassword' | 'signOut' | 'signUp'
+>
+type SupabaseAuthFacade = { auth: SupabaseAuthClient }
 
 let supabaseClientPromise: Promise<SupabaseAuthFacade | null> | null = null
 
@@ -164,7 +169,6 @@ function ensureBrowserSession(): Promise<BrowserSessionIdentity | null> {
   return browserSessionProbe
 }
 
-type SupabaseAuthClient = GoTrueClient
 type SignOutResponse = Awaited<ReturnType<SupabaseAuthClient['signOut']>>
 type SessionResponse = Awaited<ReturnType<SupabaseAuthClient['getSession']>>
 type AuthSubscriptionResponse = ReturnType<SupabaseAuthClient['onAuthStateChange']>
