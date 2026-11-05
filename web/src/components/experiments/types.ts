@@ -90,13 +90,21 @@ export const INITIAL_RUN_FORM: RunForm = {
 
 export const DEFAULT_MAX_PROVIDER_CALLS = 20
 
+/** Byte limits the API enforces on the trimmed values the panel sends. */
+export const TEXT_LIMITS = { name: 120, ref: 256, datasetName: 120, datasetDescription: 2000 } as const
+
+const utf8 = new TextEncoder()
+export function utf8Length(value: string): number {
+  return utf8.encode(value.trim()).length
+}
+
 export const SETUP_STEPS = ['dataset', 'arms', 'run'] as const
 export type SetupStep = typeof SETUP_STEPS[number]
 export type DatasetsState = 'loading' | 'failed' | 'ready'
 
 export type RunBlocker = {
   step: SetupStep
-  reason: 'datasetsLoading' | 'datasetsFailed' | 'noDataset' | 'chooseDataset' | 'emptyDataset' | 'datasetTooLarge' | 'control' | 'candidate' | 'callLimit' | 'name'
+  reason: 'datasetsLoading' | 'datasetsFailed' | 'noDataset' | 'chooseDataset' | 'emptyDataset' | 'datasetTooLarge' | 'control' | 'candidate' | 'refTooLong' | 'callLimit' | 'name' | 'nameTooLong'
   field: string
 }
 
@@ -113,19 +121,24 @@ export function getRunBlockers(
     const reason = datasets.length > 0 ? 'chooseDataset'
       : datasetsState === 'loading' ? 'datasetsLoading'
         : datasetsState === 'failed' ? 'datasetsFailed' : 'noDataset'
-    blockers.push({ step: 'dataset', reason, field: reason === 'chooseDataset' ? 'experiment-dataset' : 'experiment-dataset-name' })
+    const field = reason === 'noDataset' ? 'experiment-dataset-name'
+      : reason === 'datasetsFailed' ? 'experiment-datasets-retry' : 'experiment-dataset'
+    blockers.push({ step: 'dataset', reason, field })
   } else if (!(dataset.exampleCount > 0)) {
     blockers.push({ step: 'dataset', reason: 'emptyDataset', field: 'experiment-dataset' })
   } else if (estimateProviderCalls(dataset.exampleCount, 'string_equality') > maxProviderCalls) {
     blockers.push({ step: 'dataset', reason: 'datasetTooLarge', field: 'experiment-dataset' })
   }
-  if (!form.controlRef.trim()) blockers.push({ step: 'arms', reason: 'control', field: 'experiment-control' })
-  if (!form.candidateRef.trim()) blockers.push({ step: 'arms', reason: 'candidate', field: 'experiment-candidate' })
+  for (const [key, field] of [['controlRef', 'experiment-control'], ['candidateRef', 'experiment-candidate']] as const) {
+    if (!form[key].trim()) blockers.push({ step: 'arms', reason: key === 'controlRef' ? 'control' : 'candidate', field })
+    else if (utf8Length(form[key]) > TEXT_LIMITS.ref) blockers.push({ step: 'arms', reason: 'refTooLong', field })
+  }
   if (dataset && estimateProviderCalls(dataset.exampleCount, 'string_equality') <= maxProviderCalls
     && estimateProviderCalls(dataset.exampleCount, form.scorerKind) > maxProviderCalls) {
     blockers.push({ step: 'run', reason: 'callLimit', field: 'experiment-scorer' })
   }
   if (!form.name.trim()) blockers.push({ step: 'run', reason: 'name', field: 'experiment-name' })
+  else if (utf8Length(form.name) > TEXT_LIMITS.name) blockers.push({ step: 'run', reason: 'nameTooLong', field: 'experiment-name' })
   return blockers
 }
 

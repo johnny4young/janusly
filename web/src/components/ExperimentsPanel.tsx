@@ -20,12 +20,13 @@ import { api } from '../api'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { ExperimentSummaryDetail } from './experiments/ExperimentSummary'
-import { asRecord, DEFAULT_MAX_PROVIDER_CALLS, estimateProviderCalls, formatDate, getRunBlockers, INITIAL_RUN_FORM, SETUP_STEPS, updateExperiment, type EvalDataset, type Experiment, type ExperimentKind, type RunForm, type SetupStep } from './experiments/types'
+import { asRecord, DEFAULT_MAX_PROVIDER_CALLS, estimateProviderCalls, formatDate, getRunBlockers, INITIAL_RUN_FORM, SETUP_STEPS, TEXT_LIMITS, updateExperiment, utf8Length, type EvalDataset, type Experiment, type ExperimentKind, type RunForm, type SetupStep } from './experiments/types'
 import { EmptyView } from './panel-primitives'
 import { Button } from '@/components/ui/Button'
 import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
 import './experiments/experiments.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { currentSessionOrganization } from '../identity-context'
 
 const EXPERIMENT_MUTATION_TAGS = ['experiments'] as const
 
@@ -37,7 +38,26 @@ const STEP_FIRST_FIELD: Record<SetupStep, string> = {
   run: 'experiment-scorer',
 }
 
+// Over-limit text marks its input invalid and names the byte count beside it.
+function LimitNote({ id, value, max }: { id: string; value: string; max: number }): React.ReactElement | null {
+  const { t } = useT()
+  const count = utf8Length(value)
+  if (count <= max) return null
+  return <p id={id} className="helper-text helper-text--error" data-testid={id}>{t('experiments.limit.over', { count, max })}</p>
+}
+
+function limitProps(id: string, value: string, max: number) {
+  return utf8Length(value) > max ? { 'aria-invalid': true, 'aria-describedby': id } : {}
+}
+
 export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {}): React.ReactElement {
+  const organization = useWorkflowStore((state) => currentSessionOrganization(state.identityContext))
+  // The run and dataset routes also require admin rank, which a custom role may lack.
+  const rankAllows = !organization || organization.roleBase === 'admin'
+  return <ExperimentsPanelForOrganization key={organization?.id ?? ''} canWrite={canWrite && rankAllows} />
+}
+
+function ExperimentsPanelForOrganization({ canWrite }: { canWrite: boolean }): React.ReactElement {
   const { t } = useT()
   const platformVersion = useInvalidationNonce(EXPERIMENT_TAGS)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
@@ -98,7 +118,7 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
 
   async function createDataset(): Promise<void> {
     const name = datasetName.trim()
-    if (!name) return
+    if (!name || datasetOverLimit) return
     setCreatingDataset(true)
     try {
       const response = asRecord(await api('/eval/datasets', {
@@ -150,6 +170,8 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
       bumpPlatformVersion(EXPERIMENT_MUTATION_TAGS)
     } catch (error) {
       addToast(tApiError(error) || t('experiments.toast.runError'), 'error')
+      // A dataset deleted since the list loaded: reload so the blocker asks for another one.
+      if (asRecord(error)?.code === 'eval_dataset_not_found') bumpPlatformVersion(EXPERIMENT_MUTATION_TAGS)
     } finally {
       setRunning(false)
     }
@@ -170,6 +192,8 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
     setPendingFocus({ field })
   }
 
+  const datasetOverLimit = utf8Length(datasetName) > TEXT_LIMITS.datasetName
+    || utf8Length(datasetDescription) > TEXT_LIMITS.datasetDescription
   const selectedDataset = datasets.find((dataset) => dataset.id === runForm.evalDatasetId) ?? null
   const providerCallEstimate = estimateProviderCalls(selectedDataset?.exampleCount ?? 0, runForm.scorerKind)
   const callPlanAllowed = providerCallEstimate > 0 && providerCallEstimate <= maxProviderCalls
@@ -217,13 +241,19 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
         </ol>
         {step === 'dataset' && (
           <div className="we-experiments__form" data-testid="experiment-panel-dataset">
-            {(datasets.length > 0 || !canWrite) && (
+            {(datasets.length > 0 || !canWrite || loading || datasetsFailed) && (
               <>
                 <FieldLabel htmlFor="experiment-dataset">{t('experiments.field.dataset')}</FieldLabel>
                 <SelectControl id="experiment-dataset" value={runForm.evalDatasetId} onChange={(event) => setRunForm((current) => ({ ...current, evalDatasetId: event.target.value }))}>
                   <option value="">{t('experiments.dataset.placeholder')}</option>
                   {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{t('experiments.dataset.option', { name: dataset.name, count: dataset.exampleCount })}</option>)}
                 </SelectControl>
+                {datasetsFailed && !loading && (
+                  <Button variant="secondary" size="sm" type="button" id="experiment-datasets-retry" data-testid="experiment-datasets-retry" onClick={() => bumpPlatformVersion(EXPERIMENT_MUTATION_TAGS)}>
+                    <RefreshCw size={14} aria-hidden="true" />
+                    {t('experiments.action.reloadDatasets')}
+                  </Button>
+                )}
               </>
             )}
             {canWrite && (
@@ -232,9 +262,9 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
                 <p className="helper-text">{t('experiments.dataset.description')}</p>
                 <div className="we-experiments__dataset-form">
                   <FieldLabel htmlFor="experiment-dataset-name">{t('experiments.dataset.name')}</FieldLabel>
-                  <TextInput id="experiment-dataset-name" value={datasetName} onChange={(event) => setDatasetName(event.target.value)} />
+                  <TextInput id="experiment-dataset-name" value={datasetName} onChange={(event) => setDatasetName(event.target.value)} {...limitProps('experiment-dataset-name-limit', datasetName, TEXT_LIMITS.datasetName)} />
                   <FieldLabel htmlFor="experiment-dataset-description">{t('experiments.dataset.descriptionLabel')}</FieldLabel>
-                  <TextInput id="experiment-dataset-description" value={datasetDescription} onChange={(event) => setDatasetDescription(event.target.value)} />
+                  <TextInput id="experiment-dataset-description" value={datasetDescription} onChange={(event) => setDatasetDescription(event.target.value)} {...limitProps('experiment-dataset-description-limit', datasetDescription, TEXT_LIMITS.datasetDescription)} />
                   <FieldLabel htmlFor="experiment-dataset-retention">{t('experiments.dataset.retentionLabel')}</FieldLabel>
                   <SelectControl
                     id="experiment-dataset-retention"
@@ -246,11 +276,13 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
                       <option key={days} value={days}>{t('experiments.dataset.retention.days', { count: days })}</option>
                     ))}
                   </SelectControl>
-                  <Button variant="secondary" type="button" data-testid="experiment-dataset-create" onClick={() => void createDataset()} disabled={!datasetName.trim() || creatingDataset}>
+                  <Button variant="secondary" type="button" data-testid="experiment-dataset-create" onClick={() => void createDataset()} disabled={!datasetName.trim() || datasetOverLimit || creatingDataset}>
                     <Plus size={14} aria-hidden="true" />
                     {creatingDataset ? t('experiments.action.creatingDataset') : t('experiments.action.createDataset')}
                   </Button>
                 </div>
+                <LimitNote id="experiment-dataset-name-limit" value={datasetName} max={TEXT_LIMITS.datasetName} />
+                <LimitNote id="experiment-dataset-description-limit" value={datasetDescription} max={TEXT_LIMITS.datasetDescription} />
                 <p className="helper-text">{t('experiments.dataset.retentionHelp')}</p>
               </div>
             )}
@@ -265,9 +297,11 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
             </SelectControl>
             <p className="helper-text we-experiments__ref-hint">{t(`experiments.refHint.${runForm.kind}`)}</p>
             <FieldLabel htmlFor="experiment-control">{t('experiments.field.control')}</FieldLabel>
-            <TextInput id="experiment-control" value={runForm.controlRef} onChange={(event) => setRunForm((current) => ({ ...current, controlRef: event.target.value }))} />
+            <TextInput id="experiment-control" value={runForm.controlRef} onChange={(event) => setRunForm((current) => ({ ...current, controlRef: event.target.value }))} {...limitProps('experiment-control-limit', runForm.controlRef, TEXT_LIMITS.ref)} />
+            <LimitNote id="experiment-control-limit" value={runForm.controlRef} max={TEXT_LIMITS.ref} />
             <FieldLabel htmlFor="experiment-candidate">{t('experiments.field.candidate')}</FieldLabel>
-            <TextInput id="experiment-candidate" value={runForm.candidateRef} onChange={(event) => setRunForm((current) => ({ ...current, candidateRef: event.target.value }))} />
+            <TextInput id="experiment-candidate" value={runForm.candidateRef} onChange={(event) => setRunForm((current) => ({ ...current, candidateRef: event.target.value }))} {...limitProps('experiment-candidate-limit', runForm.candidateRef, TEXT_LIMITS.ref)} />
+            <LimitNote id="experiment-candidate-limit" value={runForm.candidateRef} max={TEXT_LIMITS.ref} />
           </div>
         )}
         {step === 'run' && (
@@ -279,7 +313,8 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
               <option value="llm_judge">{t('experiments.scorer.llmJudge')}</option>
             </SelectControl>
             <FieldLabel htmlFor="experiment-name">{t('experiments.field.name')}</FieldLabel>
-            <TextInput id="experiment-name" value={runForm.name} onChange={(event) => setRunForm((current) => ({ ...current, name: event.target.value }))} />
+            <TextInput id="experiment-name" value={runForm.name} onChange={(event) => setRunForm((current) => ({ ...current, name: event.target.value }))} {...limitProps('experiment-name-limit', runForm.name, TEXT_LIMITS.name)} />
+            <LimitNote id="experiment-name-limit" value={runForm.name} max={TEXT_LIMITS.name} />
           </div>
         )}
         {selectedDataset && (
