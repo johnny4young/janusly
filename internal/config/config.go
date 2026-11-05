@@ -40,6 +40,9 @@ type Config struct {
 	DatabaseURL string
 	// Port serves the public API.
 	Port int
+	// HTTPHost is the public listener's bind address; empty listens on every
+	// interface.
+	HTTPHost string
 	// InternalPort serves Prometheus metrics and pprof; never exposed publicly.
 	InternalPort int
 	// InternalHost is loopback unless an operator explicitly opens the
@@ -140,6 +143,7 @@ func Load(getenv func(string) string) (Config, error) {
 		AuthoringExperienceMode:     experienceMode,
 		DatabaseURL:                 str("JANUSLY_DATABASE_URL", defaultDatabaseURL),
 		Port:                        num("JANUSLY_PORT", 3001, 1, 65535),
+		HTTPHost:                    str("JANUSLY_HTTP_HOST", ""),
 		InternalPort:                num("JANUSLY_INTERNAL_PORT", 9464, 1, 65535),
 		InternalHost:                str("JANUSLY_INTERNAL_HOST", "127.0.0.1"),
 		WorkerConcurrency:           num("JANUSLY_WORKER_CONCURRENCY", 8, 1, 64),
@@ -167,6 +171,11 @@ func Load(getenv func(string) string) (Config, error) {
 				problems = append(problems, name+" must not be enabled when JANUSLY_ENV=production")
 			}
 		}
+	}
+	switch cfg.HTTPHost {
+	case "", "127.0.0.1", "0.0.0.0", "::1", "::":
+	default:
+		problems = append(problems, "JANUSLY_HTTP_HOST must be empty, 127.0.0.1, 0.0.0.0, ::1, or ::")
 	}
 	switch cfg.InternalHost {
 	case "127.0.0.1", "0.0.0.0", "::1", "::":
