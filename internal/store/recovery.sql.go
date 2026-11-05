@@ -1256,8 +1256,10 @@ WHERE dl.org_id = $1
              nullif(r.input_json->'workflow'->>'id', ''),
              r.workflow_version_id
            ) = $4))
+  AND ($5::timestamptz IS NULL
+       OR (dl.created_at, dl.id) < ($5::timestamptz, $6::text))
 ORDER BY dl.created_at DESC, dl.id DESC
-LIMIT $5
+LIMIT $7
 `
 
 type ListDeadLetterSummariesParams struct {
@@ -1265,6 +1267,8 @@ type ListDeadLetterSummariesParams struct {
 	FilterStatus     pgtype.Text
 	FilterNodeID     pgtype.Text
 	FilterWorkflowID pgtype.Text
+	BeforeCreatedAt  *time.Time
+	BeforeID         pgtype.Text
 	PageLimit        int32
 }
 
@@ -1301,6 +1305,8 @@ func (q *Queries) ListDeadLetterSummaries(ctx context.Context, arg ListDeadLette
 		arg.FilterStatus,
 		arg.FilterNodeID,
 		arg.FilterWorkflowID,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
 		arg.PageLimit,
 	)
 	if err != nil {
