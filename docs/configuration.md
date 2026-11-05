@@ -203,6 +203,13 @@ calls after recorded spend reaches the threshold; concurrent or already
 in-flight calls may still settle above it. Use the separately bounded
 qualification harness for an exact call/cost breaker during provider tests.
 
+Settings shows this budget as an Off / Limit switch and a meter of the month's
+spend against the limit. Off stores `0`. `GET /billing/budget` only measures
+spend while a limit applies, so Off shows no spend figure. A workflow override
+replaces the org budget for that workflow; set back to Org-wide it stores `0`
+and the org budget applies again, so its row shows spend only while it has its
+own limit.
+
 The catalog applies the same normalization to API writes and stored rows.
 Operator guidance is capped at 8 KiB and rejects secret-like content;
 `memory.allowedKinds`, `memory.retentionDaysByKind`, and

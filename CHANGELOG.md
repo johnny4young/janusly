@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The AI budget in Settings now meters this month's spend against the limit,
+  with the warning threshold marked on the bar. An Off / Limit switch replaces
+  entering 0 to turn the budget off, and a limit must be above 0. Workflow
+  overrides are table rows with their limit, warning, policy and spend, edited
+  in place, and can be set back to the Org-wide budget.
 - Retrying on Network errors now covers connection refused, connection reset and
   DNS failures, and retrying on Timeouts covers deadline exceeded. A policy that
   ignores `network` now stops retries for those failures too. A write-side MCP

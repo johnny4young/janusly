@@ -1,0 +1,171 @@
+/* Styles for BudgetSettingsPanel.tsx: shipped with the lazy chunk that renders them. */
+
+.we-budget-meter {
+  display: grid;
+  gap: 8px;
+}
+
+.we-budget-meter__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  color: var(--we-text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.we-budget-meter__row strong {
+  color: var(--we-text-1);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.we-budget-meter__warn {
+  margin-left: auto;
+}
+
+.we-budget-meter__status {
+  padding: 1px 8px;
+  border-radius: var(--we-radius-pill);
+  background: var(--we-warning-soft);
+  color: var(--we-warning-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.we-budget-meter[data-band="danger"] .we-budget-meter__status {
+  background: var(--we-danger-soft);
+  color: var(--we-danger-text);
+}
+
+.we-budget-meter__bar {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--we-line) 60%, transparent);
+}
+
+.we-budget-meter__fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  border-radius: 4px;
+  background: var(--we-primary);
+}
+
+.we-budget-meter[data-band="warning"] .we-budget-meter__fill { background: var(--we-warning); }
+
+.we-budget-meter[data-band="danger"] .we-budget-meter__fill { background: var(--we-danger); }
+
+.we-budget-meter__tick {
+  position: absolute;
+  inset-block: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--we-text-2);
+}
+
+.we-budget-meter--compact {
+  gap: 4px;
+}
+
+.we-budget-meter--compact .we-budget-meter__row { font-size: 12px; }
+
+.we-budget-meter--compact .we-budget-meter__row strong { font-size: 13px; }
+
+.we-budget-meter--compact .we-budget-meter__bar { height: 6px; }
+
+.we-budget-mode {
+  display: inline-flex;
+  justify-self: start;
+  padding: 2px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-1);
+}
+
+.we-budget-mode label {
+  position: relative;
+  cursor: pointer;
+}
+
+.we-budget-mode span {
+  display: block;
+  padding: 4px 14px;
+  border-radius: 6px;
+  color: var(--we-text-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.we-budget-mode input:checked + span {
+  background: var(--we-primary-soft);
+  color: var(--we-text-1);
+  font-weight: 600;
+}
+
+.we-budget-mode input:focus-visible + span {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 1px;
+}
+
+.we-budget-mode input:disabled + span { opacity: 0.6; }
+
+.we-budget-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.we-budget-editor {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 0;
+  border: 0;
+}
+
+.we-budget-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.we-budget-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.we-budget-table th,
+.we-budget-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--we-line);
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.we-budget-table th {
+  color: var(--we-text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.we-budget-table td:nth-child(5) { width: 24%; }
+
+.we-budget-table td:last-child { text-align: right; }
+
+.we-budget-table tr:last-child td { border-bottom: 0; }
+
+.we-budget-table__editor td {
+  background: var(--we-surface-1);
+  text-align: left;
+}
+
+@media (max-width: 760px) {
+  .we-budget-fields { grid-template-columns: minmax(0, 1fr); }
+}
