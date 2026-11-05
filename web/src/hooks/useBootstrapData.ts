@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import { api } from '../api'
 import { readRunSummaryPage, readSavedWorkflowPage, readTemplateCatalog, readToolCatalog } from '../lib/list-contract'
 import { useWorkflowStore } from '../store'
@@ -25,8 +26,7 @@ export type BootstrapData = {
   credentials: Credential[]
   /** False until a list was read for this organization, or when the role can't read one. */
   credentialsKnown: boolean
-  /** List a credential the API just created, without waiting for a refresh that can fail or lose to a newer one. */
-  addCredential: (credential: Credential) => void
+  setCredentials: Dispatch<SetStateAction<Credential[]>>
   runs: RunSummary[]
   savedWorkflows: SavedWorkflow[]
   deadLetters: DeadLetter[]
@@ -167,10 +167,6 @@ export function useBootstrapData(
   // catalogs stay in every refresh wave.
   const catalogsNeededRef = useRef(false)
 
-  const addCredential = useCallback((credential: Credential) => {
-    setCredentials((current) => [...current, credential])
-  }, [])
-
   const refreshPlatform = useCallback(async () => {
     const requestedScope = tenantScopeRef.current
     if (!requestedScope) return
@@ -281,7 +277,7 @@ export function useBootstrapData(
     solutionPacks,
     credentials,
     credentialsKnown,
-    addCredential,
+    setCredentials,
     runs,
     savedWorkflows,
     deadLetters,

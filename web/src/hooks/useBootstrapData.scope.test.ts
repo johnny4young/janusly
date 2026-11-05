@@ -140,7 +140,7 @@ describe('useBootstrapData tenant boundary', () => {
       await settled(result)
 
       answer(() => Promise.reject(new Error('down')))
-      act(() => result.current.addCredential({ id: 'new', name: 'ops_slack', kind: 'slack_webhook' }))
+      act(() => result.current.setCredentials((current) => [...current, { id: 'new', name: 'ops_slack', kind: 'slack_webhook' }]))
       await settled(result)
       expect(result.current.credentials.map((c) => c.name)).toEqual(['ops_slack'])
     })

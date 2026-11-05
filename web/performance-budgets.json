@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 607.5,
+  "artifactGzipKiB": 607.1,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 563.0
+    "maxGzipKiB": 562.5
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,7 +85,7 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 82.98,
+    "app-workspace.js": 82.99,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,

@@ -65,7 +65,7 @@ export function usePlatformMutation() {
 
       return { ok: true, value }
     } catch (error) {
-      addToast((error instanceof Error && tApiError(error)) || options.failureMessage, 'error')
+      addToast(tApiError(error) || options.failureMessage, 'error')
       return { ok: false, error }
     }
   }, [addToast])
