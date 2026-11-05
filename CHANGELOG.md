@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Run detail is one sheet. Its header shows the workflow, the actions and a data
+  row with status, duration, start, version, trace and run ID, and it stays in
+  place across the tabs Overview, Timeline, Events, Agents and Ask. Timeline now
+  groups this run's attempts by step on one time scale and marks retries; the
+  event list moved to Events, and the conversation with Janusly to Ask, where it
+  survives a look at another tab. View timeline is gone in favor of the tabs,
+  Cancel run only appears while a run can still stop, and a Close button returns
+  to the activity feed.
+- Recover is now a list and a detail side by side. Filters stay above the queue,
+  the failures sit on the left and the selected failure on the right, each pane
+  scrolling on its own, so moving with J/K keeps both on screen and the action
+  bar in view. Actions are grouped: Suggest fix, Retry and Replay in Lab; Copy
+  error and Export; Close without recovery.
+- The recovery queue groups failures by cluster by default, with a switch to All
+  items. Each cluster shows its signature, category, occurrences and affected
+  workflows, plus Investigate, which opens the fix for every open failure in the
+  cluster, and Replay cluster, which starts a paced campaign after its preview.
 - Home's Operator prompt is now one compact field at the bottom of What needs
   you, and answers open in a side panel instead of pushing Home down. The panel
   links the run the answer is based on and opens its recovery case in one click.

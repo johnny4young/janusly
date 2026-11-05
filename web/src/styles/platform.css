@@ -222,6 +222,7 @@
   }
 
   .detail-box > .split-row,
+  .we-dlq-detail__head > .split-row,
   .detail-box > .split-row > .split-row {
     align-items: flex-start;
     flex-wrap: wrap;

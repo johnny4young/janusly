@@ -73,10 +73,7 @@ async function openRunFromHistory(page: Page, runId: string, locale: 'en' | 'es'
     if (await card.isVisible().catch(() => false)) {
       await card.locator('button.list-card-row').click()
       await expect(page.getByTestId('run-overview')).toContainText(runId.slice(0, 12))
-      await page.getByTestId('run-overview').getByRole('button', {
-        name: locale === 'en' ? 'View timeline' : 'Ver cronología',
-        exact: true,
-      }).click()
+      await page.getByTestId('run-workspace-tab-events').click()
       return
     }
     const reachedEnd = await history.evaluate((element, rowOffset) => {

@@ -11,8 +11,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api } from '../api'
+import { api, contractApi } from '../api'
+import { isGetDlqClustersResponse } from '../lib/api-guards/operations/GetDlqClusters'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
+import { parseFailureClusters, type FailureCluster } from '../lib/recovery-metrics-model'
 import {
   acknowledgeRecoveryFocusDay,
   consumeRecoveryFocusDay,
@@ -104,6 +106,8 @@ function toOwnerScope(value: string): OwnerScope {
   return value === 'mine' ? 'mine' : 'all'
 }
 
+export type QueueView = 'clusters' | 'list'
+
 /** localStorage key holding the operator's recovery-queue filter + sort
  *  selections. Single global UI-pref blob, matching the `janusly:` prefix
  *  convention used for the active org / locale. */
@@ -119,6 +123,7 @@ type PersistedFilters = {
   severityFilter: SeverityFilter
   sortKey: SortKey
   search: string
+  view: QueueView
 }
 
 /** Read + coercion-validate the persisted filters, falling back to the
@@ -126,7 +131,7 @@ type PersistedFilters = {
  *  corrupt storage. Defensive about `window.localStorage` (private mode, SSR,
  *  jsdom) mirroring `auth.ts`. */
 function readPersistedFilters(): PersistedFilters {
-  const fallback: PersistedFilters = { status: 'open', ownerScope: 'all', severityFilter: 'all', sortKey: 'newest', search: '' }
+  const fallback: PersistedFilters = { status: 'open', ownerScope: 'all', severityFilter: 'all', sortKey: 'newest', search: '', view: 'clusters' }
   const storage = getLocalStorage()
   if (!storage) return fallback
   try {
@@ -139,6 +144,7 @@ function readPersistedFilters(): PersistedFilters {
       severityFilter: toSeverityFilter(String(parsed.severityFilter ?? '')),
       sortKey: toSortKey(String(parsed.sortKey ?? '')),
       search: toSearchTerm(parsed.search),
+      view: parsed.view === 'list' ? 'list' : 'clusters',
     }
   } catch {
     return fallback
@@ -231,6 +237,10 @@ export type RecoveryQueueFilters = {
   setSeverityFilter: (value: SeverityFilter) => void
   sortKey: SortKey
   setSortKey: (value: SortKey) => void
+  view: QueueView
+  setView: (value: QueueView) => void
+  /** Rollup behind the cluster headers' totals, read only while that view is on. */
+  clusters: FailureCluster[]
   /** Raw (un-debounced) value of the search box — bind the `<input>` to this.
    *  Its debounced mirror drives the server fetch (substring over node id / run
    *  id / error message), so typing doesn't issue a request per keystroke. */
@@ -291,6 +301,8 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   const [ownerScope, setOwnerScope] = useState<OwnerScope>(initialFilters.ownerScope)
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>(initialFilters.severityFilter)
   const [sortKey, setSortKey] = useState<SortKey>(initialFilters.sortKey)
+  const [view, setView] = useState<QueueView>(initialFilters.view)
+  const [clusters, setClusters] = useState<FailureCluster[]>([])
   // Raw search box value vs the debounced term that drives the server fetch.
   // Both seed from the persisted term so the first load already carries it.
   const [searchInput, setSearchInput] = useState<string>(initialFilters.search)
@@ -365,6 +377,16 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     }
   }, [invalidationNonce, refreshNonce, status, ownerScope, severityFilter, sortKey, search, dayFilter])
 
+  // A failed rollup read still groups the queue from its loaded rows.
+  useEffect(() => {
+    if (view !== 'clusters') return
+    let cancelled = false
+    contractApi('GET /dlq/clusters', '/dlq/clusters', undefined, { guard: isGetDlqClustersResponse })
+      .then((payload) => { if (!cancelled) setClusters(parseFailureClusters(payload)?.clusters ?? []) })
+      .catch(() => { if (!cancelled) setClusters([]) })
+    return () => { cancelled = true }
+  }, [invalidationNonce, refreshNonce, view])
+
   // Org-wide status counts for the mini-grid. Keyed ONLY on invalidationNonce +
   // refresh — NOT on the filter/sort, because the mini-grid summarizes the WHOLE
   // queue, not the filtered page. A failed fetch degrades to zeros.
@@ -427,8 +449,8 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   // localStorage posture used for the active org / locale; the no-op write on
   // mount is harmless. Persists the debounced `search` (trimmed/capped).
   useEffect(() => {
-    writePersistedFilters({ status, ownerScope, severityFilter, sortKey, search })
-  }, [status, ownerScope, severityFilter, sortKey, search])
+    writePersistedFilters({ status, ownerScope, severityFilter, sortKey, search, view })
+  }, [status, ownerScope, severityFilter, sortKey, search, view])
 
   // Hydrate the recovery overlay from each row's inline `recovery` field — one
   // cap-correct source, no second fetch. Rows with no recovery item (e.g. a
@@ -473,6 +495,9 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     setSeverityFilter,
     sortKey,
     setSortKey,
+    view,
+    setView,
+    clusters,
     searchInput,
     setSearchInput,
     searchState,
