@@ -282,4 +282,46 @@ describe('<FailureClustersCard />', () => {
     })
     expect(screen.queryByRole('button', { name: /Generate suggestion/i })).toBeNull()
   })
+
+  it('opens Replay Lab for the representative run when the cluster dialog has no AI key', async () => {
+    useWorkflowStore.setState({ aiHealth: { enabled: false, model: 'm', timeoutMs: 1, maxRetries: 0 } })
+    const cluster = {
+      signature: 'HTTP 502 on fetch',
+      category: 'http_error',
+      frequency: 2,
+      affectedWorkflows: [{ workflowId: 'wf-recovery', workflowName: 'Recovery Flow', count: 2 }],
+      firstSeen: '2026-07-01T10:00:00.000Z',
+      lastSeen: '2026-07-01T11:00:00.000Z',
+      suggestedOwner: 'workflow_author',
+      samples: [{ source: 'dead_letter', id: 'dlq-recovery', runId: 'run-recovery-12345678' }],
+    }
+    const clustersPayload = { clusters: [cluster], totalSamples: 2, windowDays: 30 }
+    const dlq = {
+      ...deadLetterWireDefaults,
+      id: 'dlq-recovery',
+      runId: 'run-recovery-12345678',
+      nodeId: 'fetch',
+      attempt: 3,
+      status: 'open',
+      workflowJson: { dslVersion: '1.0', nodes: [{ id: 'fetch', type: 'http', config: {} }], edges: [] },
+      nodeJson: { id: 'fetch', type: 'http', config: {} },
+      errorJson: { message: 'upstream 502' },
+    }
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/dlq/clusters') return clustersPayload
+      if (path.startsWith('/dlq/cluster-members?')) return { deadLetterIds: ['dlq-recovery', 'dlq-peer'], total: 2, capped: false }
+      if (path === '/dlq/entries/dlq-recovery') return dlq
+      return { ok: true }
+    })
+    try {
+      render(<FailureClustersCard canStartRuns />)
+      fireEvent.click(await screen.findByRole('button', { name: /HTTP 502 on fetch/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Recover this pattern/i }))
+      fireEvent.click(await screen.findByTestId('recovery-replay-in-lab'))
+      expect(await screen.findByRole('button', { name: 'Start replay' })).toBeInTheDocument()
+      expect(screen.getByText('run-recovery-12345678')).toBeInTheDocument()
+    } finally {
+      useWorkflowStore.setState({ aiHealth: null })
+    }
+  })
 })

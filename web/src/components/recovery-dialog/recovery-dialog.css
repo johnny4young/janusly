@@ -1,5 +1,59 @@
 /* Styles for the recovery dialog bodies and evidence cards, shipped with their lazy chunk. */
 
+.we-recovery-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+}
+.we-recovery-stages li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--we-muted);
+}
+.we-recovery-stages li::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--we-radius-pill);
+  background: var(--we-faint);
+}
+.we-recovery-stages li[data-state="review"],
+.we-recovery-stages li[data-state="active"] { color: var(--we-ink); font-weight: 600; }
+.we-recovery-stages li[data-state="review"]::before { background: var(--we-primary); }
+.we-recovery-stages li[data-state="active"]::before {
+  background: var(--we-primary);
+  animation: we-pulse 1.2s ease-in-out infinite;
+}
+/* Done and failed differ by glyph too, so a validation result never rests on colour. */
+.we-recovery-stages li[data-state="done"] { color: var(--we-ink-soft); }
+.we-recovery-stages li[data-state="failed"] { color: var(--we-danger-text); font-weight: 600; }
+.we-recovery-stages li[data-state="done"]::before,
+.we-recovery-stages li[data-state="failed"]::before {
+  width: auto;
+  height: auto;
+  background: none;
+  font-weight: 700;
+}
+.we-recovery-stages li[data-state="done"]::before { content: "\2713"; color: var(--we-success); }
+.we-recovery-stages li[data-state="failed"]::before { content: "\00d7"; color: var(--we-danger); }
+
+.we-recovery-passport__facts.we-recovery-availability {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin-bottom: 12px;
+}
+
+.we-recovery-warning svg { flex: none; }
+
+/* The no-key footer holds three actions, which do not fit one row on a phone. */
+.we-recovery-dialog .run-input-dialog__footer { flex-wrap: wrap; }
+
 .we-recovery-playbook-source {
   display: grid;
   gap: 10px;
