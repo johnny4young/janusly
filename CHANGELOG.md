@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Build can compare versions on the canvas. In Versions, pick two versions and
+  choose Open on canvas, or use Compare draft to check unsaved edits against the
+  version they started from, including when only one version is saved. Steps and
+  paths are marked new, modified or deleted, a counter steps through each change,
+  and each one shows its before and after JSON with secrets masked.
 - Run detail is one sheet. Its header shows the workflow, the actions and a data
   row with status, duration, start, version, trace and run ID, and it stays in
   place across the tabs Overview, Timeline, Events, Agents and Ask. Timeline now

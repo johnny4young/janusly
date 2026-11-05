@@ -7,7 +7,8 @@
  *   - **Compare**: toggled via the "Compare" button. Each row gets a
  *     checkbox; picking two rows expands a `<WorkflowDiffView>` panel
  *     inline below the list. Older version is rendered on the left
- *     regardless of click order.
+ *     regardless of click order. The pair, or the draft against its source
+ *     version, can also open as a marked graph over the canvas.
  *
  * Used by `RightPanel.tsx` (Inspector tab → version history).
  */
@@ -29,8 +30,10 @@ import { currentSavedHistoryAuthority, ownCanvas } from '../lib/canvas-authority
 import './VersionHistoryPanel.css'
 import { PLATFORM_TAG, useResourceRefresh } from '../lib/query-cache'
 import { Button } from './ui/Button'
+import { loadVersionCanvasCompare } from './version-compare-loader'
 
 const AuthoringExperienceRegistry = lazy(() => import('./AuthoringExperienceRegistry'))
+const VersionCanvasCompare = lazy(loadVersionCanvasCompare)
 
 const VERSION_HISTORY_TAGS = [PLATFORM_TAG, 'workflows', 'versions', 'rollouts'] as const
 
@@ -77,10 +80,8 @@ type ImprovementState =
 // the oldest version already shown.
 const VERSIONS_PAGE_SIZE = 50
 
-const APPROACHES = ['add_retry', 'raise_timeout', 'swap_secret_ref', 'add_approval', 'add_observability', 'simplify', 'other']
-
 function approachLabelText(label: string): string {
-  return APPROACHES.includes(label) ? runtimeT(`versionHistory.approach.${label}`) : label
+  return runtimeT(`versionHistory.approach.${label}`, { defaultValue: label })
 }
 
 /** Render the version-history list for the active workflow with click-to-hydrate. */
@@ -105,6 +106,8 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
   // Retain the exact diff the operator opened; refresh clears this pair.
   const [rollbackPair, setRollbackPair] = useState<{ current: VersionRow; target: VersionRow } | null>(null)
   const [improvement, setImprovement] = useState<ImprovementState>({ kind: 'idle' })
+  const [canvasOpen, setCanvasOpen] = useState(false)
+  const workflowDirty = useWorkflowStore(state => state.workflowDirty)
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   const owner = useRef<AbortController | null>(null)
   const suggestion = useRef<AbortController | null>(null)
@@ -214,6 +217,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
 
   const onToggleCompare = () => {
     onResetImprovement()
+    setCanvasOpen(false)
     if (compareMode) setSelectedIds([])
     setCompareMode(!compareMode)
   }
@@ -267,6 +271,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
     improvement.kind !== 'ai' &&
     improvement.kind !== 'fallback'
   const activeSuggestion = improvement.kind === 'ai' ? improvement.suggestions[improvement.activeIdx] : undefined
+  const canCompareOnCanvas = compareMode ? comparePair : workflowDirty && versions.length > 0
 
   return (
     <div className="we-card">
@@ -305,7 +310,7 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
         // Rolling back to the latest version is a no-op; in compare-mode the
         // row's checkbox owns the click. Hide the Rollback button in both
         // cases. With only one version there's nothing to roll back to.
-        const showRollback = canRollback && !compareMode && versions.length > 1 && index !== 0
+        const showRollback = canRollback && !compareMode && index !== 0
         return (
           <div
             key={version.id}
@@ -328,10 +333,10 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
               {isLatest && <span className="we-list-row__pill we-list-row__pill--cobalt">{t('versionHistory.latest')}</span>}
               <span>{version.createdAt ? new Date(version.createdAt).toLocaleString(getResolvedLocale()) : ''}</span>
             </button>
-            {showRollback && versions[0] && (
+            {showRollback && (
               <Button size="icon" variant="ghost"
                 className="version-row__rollback"
-                onClick={() => setRollbackPair({ current: versions[0]!, target: version })}
+                onClick={() => setRollbackPair({ current: versions[0], target: version })}
                 aria-label={t('versionHistory.rollbackAria', { version: version.version })}
                 title={t('versionHistory.rollbackAria', { version: version.version })}
               >
@@ -354,6 +359,23 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
 
       {loadState === 'ready' && versions.length > 0 && canRollback && canSuggest && (
         <Suspense fallback={null}><AuthoringExperienceRegistry versions={versions} /></Suspense>
+      )}
+
+      {canCompareOnCanvas && (
+        <Button
+          size="sm"
+          aria-pressed={canvasOpen}
+          onClick={() => setCanvasOpen(!canvasOpen)}
+          data-testid="version-compare-open"
+        >
+          {t(compareMode ? 'versionCompare.open' : 'versionCompare.compareDraft')}
+        </Button>
+      )}
+
+      {canvasOpen && canCompareOnCanvas && (
+        <Suspense fallback={null}>
+          <VersionCanvasCompare pair={comparePair} history={versions} onClose={() => setCanvasOpen(false)} />
+        </Suspense>
       )}
 
       {compareMode && comparePair && (
