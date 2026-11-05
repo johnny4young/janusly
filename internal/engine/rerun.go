@@ -80,9 +80,9 @@ func RunSnapshot(inputJSON []byte) (*domain.Workflow, map[string]any, error) {
 	return workflowFromRunInput(inputJSON)
 }
 
-// rerunHasEffect fails safe: a subworkflow is opaque here and an unknown tool
+// NodeMayHaveEffect fails safe: a subworkflow is opaque here and an unknown tool
 // name, possibly templated, is not proven read-only.
-func rerunHasEffect(node domain.Node) bool {
+func NodeMayHaveEffect(node domain.Node) bool {
 	if node.Type == "subworkflow" {
 		return true
 	}
@@ -92,6 +92,20 @@ func rerunHasEffect(node domain.Node) bool {
 			return !registry.Has(name) || registry.IsWriteSide(name)
 		},
 	})
+}
+
+// ClosureEffects lists, in workflow order, the step and everything downstream of
+// it that can change external state: what may run when that step runs again.
+func ClosureEffects(wf *domain.Workflow, nodeID string) []RerunEffect {
+	closure := collectRelatives(wf, nodeID, false)
+	closure[nodeID] = true
+	effects := []RerunEffect{}
+	for _, node := range wf.Nodes {
+		if closure[node.ID] && NodeMayHaveEffect(node) {
+			effects = append(effects, RerunEffect{NodeID: node.ID, Type: node.Type})
+		}
+	}
+	return effects
 }
 
 // PlanRerun decides each node's role. Only the selected step and its downstream
@@ -121,7 +135,7 @@ func PlanRerun(sourceRunID string, wf *domain.Workflow, rows []store.ListRunNode
 		maps.Copy(needed, collectRelatives(wf, member, true))
 	}
 	plan := RerunPlan{
-		Reused: []string{}, Rerun: []string{}, NotRun: []string{}, SideEffects: []RerunEffect{},
+		Reused: []string{}, Rerun: []string{}, NotRun: []string{}, SideEffects: ClosureEffects(wf, nodeID),
 		Seed: &RerunSeed{
 			SourceRunID: sourceRunID, NodeID: nodeID, Nodes: make(map[string]NodeSeed, len(wf.Nodes)),
 			PlannedAttempts: source[nodeID].Attempts, PlannedFinishedAt: source[nodeID].FinishedAt,
@@ -132,9 +146,6 @@ func PlanRerun(sourceRunID string, wf *domain.Workflow, rows []store.ListRunNode
 		switch {
 		case closure[node.ID]:
 			plan.Rerun = append(plan.Rerun, node.ID)
-			if rerunHasEffect(node) {
-				plan.SideEffects = append(plan.SideEffects, RerunEffect{NodeID: node.ID, Type: node.Type})
-			}
 		case row.Status == "succeeded" && hasSavedOutput(row.StateJson):
 			plan.Seed.Nodes[node.ID] = NodeSeed{Status: row.Status, State: row.StateJson}
 			plan.Reused = append(plan.Reused, node.ID)
@@ -150,13 +161,13 @@ func PlanRerun(sourceRunID string, wf *domain.Workflow, rows []store.ListRunNode
 			plan.NotRun = append(plan.NotRun, node.ID)
 		}
 	}
-	// An approval covers one execution, and only agents check it at dispatch, so
-	// each write needs every approval upstream of it to run again in this rerun.
+	// A human decision covers one execution, and only agents check approval at
+	// dispatch, so each write needs every decision upstream of it to run again.
 	for _, effect := range plan.SideEffects {
 		upstream := collectRelatives(wf, effect.NodeID, true)
 		for _, node := range wf.Nodes {
-			if node.Type == "approval" && upstream[node.ID] && !closure[node.ID] {
-				return RerunPlan{}, &RerunRejection{Code: "rerun_needs_approval", Message: "Rerun from the approval step so it is approved again", NodeID: node.ID}
+			if domain.ConsumesHumanDecision(node.Type) && upstream[node.ID] && !closure[node.ID] {
+				return RerunPlan{}, &RerunRejection{Code: "rerun_needs_approval", Message: "Rerun from this human step so it is decided again", NodeID: node.ID}
 			}
 		}
 	}

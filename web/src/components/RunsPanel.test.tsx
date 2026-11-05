@@ -9,7 +9,13 @@ import { RunsPanel } from './RunsPanel'
 import type { RunNode, RunSummary } from '../types'
 import { useWorkflowStore } from '../store'
 
-vi.mock('./DeadLettersPanel', () => ({ DeadLettersPanel: () => null }))
+const deadLettersProps = vi.hoisted(() => vi.fn())
+vi.mock('./DeadLettersPanel', () => ({
+  DeadLettersPanel: (props: unknown) => {
+    deadLettersProps(props)
+    return null
+  },
+}))
 vi.mock('./RunExplainChat', () => ({ RunExplainChat: () => null }))
 vi.mock('./UsageSummaryCard', () => ({ UsageSummaryCard: () => null }))
 vi.mock('./RunStreamChip', () => ({ RunStreamChip: () => <span>Live</span> }))
@@ -37,6 +43,17 @@ const handlers = {
   onReplayDeadLetter: vi.fn(),
   onResolveDeadLetter: vi.fn(),
 }
+
+describe('recovery run links', () => {
+  it('offers a run link only to an operator who can read runs', () => {
+    const { unmount } = render(<RunsPanel {...handlers} mode="recovery" runs={[]} workflows={[]} runNodes={[]} usage={{}} />)
+    expect(deadLettersProps.mock.lastCall?.[0]).toMatchObject({ onOpenRun: handlers.onOpenRun })
+    unmount()
+
+    render(<RunsPanel {...handlers} mode="recovery" canReadRuns={false} runs={[]} workflows={[]} runNodes={[]} usage={{}} />)
+    expect(deadLettersProps.mock.lastCall?.[0]).toMatchObject({ onOpenRun: undefined })
+  })
+})
 
 describe('selected-run outcome evidence', () => {
   it.each([

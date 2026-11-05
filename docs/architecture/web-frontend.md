@@ -297,8 +297,17 @@ server clusters with, so every filter, sort and page keeps applying.
 rows share one fixed height, so the queue stays virtualized in both views, and
 J/K and triage focus walk the rows in the order shown.
 Investigate and Replay cluster read `/dlq/cluster-members` when clicked and open
-the cluster recovery and campaign dialogs. The full rollup, with failed run nodes
-and suggested owners, remains under Automation and patterns.
+the cluster recovery and recovery job dialogs. The full rollup, with failed run
+nodes and suggested owners, remains under Automation and patterns.
+
+Recovery jobs is a second view of Recover, loaded when it opens. The queue stays
+mounted behind it so filters and selection survive. The list polls while any job
+runs, from a timer that outlives the view, so the end of a job raises a toast
+from any workspace tab until the page reloads or the session changes. Polls never
+overlap, an older response is dropped, a job is announced once, repeated failures
+back off and 401 or 403 stops the watch. A job started from
+the dialog opens this view; New recovery job returns to the queue in selection
+mode, because a job's cohort is always chosen there.
 
 Templates has two views over one shared search. Recipes groups by the category
 each template carries in `internal/httpapi/assets/templates.json`, so a new

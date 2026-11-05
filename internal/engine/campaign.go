@@ -47,6 +47,20 @@ func (e *Engine) auditCampaignCompleted(ctx context.Context, campaign store.Repl
 		})
 }
 
+// ReplayItemFailureCode maps an item's stored error to a stable code: the text
+// can wrap internal detail, so it stays in the database and the audit trail.
+func ReplayItemFailureCode(message string) string {
+	switch message {
+	case ErrRedriveRerunExists.Error():
+		return "rerun_exists"
+	case ErrRedriveConflict.Error():
+		return "already_claimed"
+	case ErrDeadLetterNotFound.Error():
+		return "not_found"
+	}
+	return "replay_failed"
+}
+
 // ProcessDueReplayCampaignStep claims ONE due running campaign and drains
 // at most one item. Returns false when nothing was due.
 func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error) {

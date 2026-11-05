@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 612.6,
+  "artifactGzipKiB": 613.4,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 567.8
+    "maxGzipKiB": 568.5
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,7 +85,7 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 83.15,
+    "app-workspace.js": 91.54,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
@@ -98,7 +98,7 @@
     "BudgetSettingsPanel.js": 3.58,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 40.77,
+    "catalog-en.js": 44.85,
     "catalog-es.js": 45.56,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
@@ -142,7 +142,7 @@
     "RecoveryDialog.css": 2.32,
     "RecoveryDialog.js": 11.82,
     "ReplayCampaignsCard.css": 0.57,
-    "ReplayCampaignsCard.js": 1.6,
+    "ReplayCampaignsCard.js": 2.5,
     "RollbackConfirmDialog.js": 1.43,
     "rolldown-runtime.js": 0.41,
     "RunExplainChat.css": 0.74,
