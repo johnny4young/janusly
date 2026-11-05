@@ -26,7 +26,7 @@ describe('<ExperimentsPanel /> (browser smoke)', () => {
 
     render(<ExperimentsPanel />)
 
-    await screen.findByLabelText('Evaluation dataset')
+    await screen.findByRole('option', { name: 'Accepted recoveries · 4 examples' })
     const button = screen.getByRole('button', { name: 'Run comparison' })
     const rect = button.getBoundingClientRect()
     expect(rect.height).toBeGreaterThan(0)
