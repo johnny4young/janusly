@@ -28,7 +28,7 @@
 import { create } from 'zustand'
 import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import type { Session, User } from '@supabase/auth-js'
-import type { ActiveTab, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { ActiveTab, AiHealth, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import type { OnboardingState } from '@/lib/onboarding'
 import type { SessionContext } from './identity-context'
 import { getNodePreset } from './constants'
@@ -176,6 +176,8 @@ type WorkflowStore = {
   authReady: boolean
   identityContext: SessionContext | null
   identityReady: boolean
+  aiHealth: AiHealth | null
+  setAiHealth: (aiHealth: AiHealth | null) => void
 
   currentWorkflowId: string
   currentWorkflowName: string
@@ -476,6 +478,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   authReady: false,
   identityContext: null,
   identityReady: false,
+  aiHealth: null,
 
   currentWorkflowId: initialWorkflowId,
   // `main.tsx` starts downloading App in parallel with the locale catalog, so
@@ -529,6 +532,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       ? {
           identityContext: null,
           identityReady: false,
+          aiHealth: null,
           toasts: [],
           activeRecoveryCaseId: null,
           activeTab: state.activeTab === 'recoveryCase' ? 'home' : state.activeTab,
@@ -549,6 +553,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     authReady: true,
     identityContext: null,
     identityReady: true,
+    aiHealth: null,
     // Notifications belong to the departing identity/workspace. Keeping them
     // after logout can disclose stale operational details to the next user.
     toasts: [],
@@ -559,6 +564,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     ...clearedRunProjection(state.runTransitionGeneration),
   })),
   setAuthReady: (authReady) => set({ authReady }),
+  setAiHealth: (aiHealth) => set({ aiHealth }),
   setIdentityContext: (identityContext) => set({ identityContext, identityReady: true }),
   setIdentityPending: () => set({ identityReady: false }),
   dismissRecoveryIntroThisSession: () => set({ recoveryIntroDismissedThisSession: true }),

@@ -489,7 +489,7 @@ function ReliabilitySection({ permissions }: { permissions?: readonly string[] }
       {hasPermission(permissions, 'upstream.read') && (
         <UpstreamHealthPanel canWrite={hasPermission(permissions, 'upstream.write')} />
       )}
-      {hasPermission(permissions, 'dlq.read') && <FailureClustersCard />}
+      {hasPermission(permissions, 'dlq.read') && <FailureClustersCard canStartRuns={hasPermission(permissions, 'runs.start')} />}
     </>
   )
 }

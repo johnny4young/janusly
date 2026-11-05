@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Suggest fix now opens with the failed step, the attempts and whether AI is
+  connected. Without an API key it says so and leads with Replay in Lab; Review
+  evidence still shows the deterministic evidence, with no patch. Once a
+  suggestion is under way, the dialog shows Patch, Validate and Apply, and marks
+  Validate done only after a sandbox run passes.
 - Build can compare versions on the canvas. In Versions, pick two versions and
   choose Open on canvas, or use Compare draft to check unsaved edits against the
   version they started from, including when only one version is saved. Steps and

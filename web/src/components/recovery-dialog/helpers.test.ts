@@ -5,6 +5,7 @@ import {
   normalizeConsideredAlternatives,
   pickErrorMessage,
   pickFailedNodeErrorJson,
+  recoveryStages,
   resolveConfidenceDisplay,
   toWorkflow,
 } from './recovery-dialog-model'
@@ -15,6 +16,24 @@ const baseWorkflow = {
   nodes: [{ id: 'fetch', type: 'http', config: { url: 'https://x' } }],
   edges: [],
 }
+
+describe('recoveryStages', () => {
+  const suggestion = {} as PatchSuggestion
+  it('marks Validate done only after a sandbox pass', () => {
+    expect(recoveryStages({ kind: 'idle' })).toBeNull()
+    expect(recoveryStages({ kind: 'loading' })).toEqual(['active', 'pending', 'pending'])
+    expect(recoveryStages({ kind: 'review', suggestion })).toEqual(['review', 'pending', 'pending'])
+    expect(recoveryStages({ kind: 'validating', suggestion, selectedIndex: 0, runId: null })).toEqual(['done', 'active', 'pending'])
+    expect(recoveryStages({ kind: 'validation-failed', suggestion, selectedIndex: 0, runId: 'r', errorJson: null, playbookRetired: false }))
+      .toEqual(['done', 'failed', 'pending'])
+    expect(recoveryStages({ kind: 'validated', suggestion, selectedIndex: 0, runId: 'r' })).toEqual(['done', 'done', 'review'])
+    expect(recoveryStages({ kind: 'applying', mode: 'single' })).toEqual(['done', 'done', 'active'])
+  })
+
+  it('makes no progress claim on an error, even one holding a suggestion', () => {
+    expect(recoveryStages({ kind: 'error', message: 'x', suggestion })).toBeNull()
+  })
+})
 
 describe('normalizeConsideredAlternatives', () => {
   it('rejects malformed runtime values and returns at most two scrubbed bounded rows', () => {
