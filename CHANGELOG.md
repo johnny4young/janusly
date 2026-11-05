@@ -11,6 +11,21 @@
   the runs for their outcome. Janusly shows a notice when a job you have seen
   running ends, even after you leave Recover. These jobs moved here from
   Automation and patterns.
+- The AI budget in Settings now meters this month's spend against the limit,
+  with the warning threshold marked on the bar. An Off / Limit switch replaces
+  entering 0 to turn the budget off. A limit must be at least $0.01 and a warning
+  threshold at least 1%. Workflow overrides are table rows with their limit,
+  warning, policy and spend, edited in place, and can be set back to the Org-wide
+  budget.
+- Permission grants is one matrix with permissions in rows and roles in
+  columns, a filter, and one Save for every edited role. Cells that differ from
+  the built-in default are tinted. If only some roles save, the panel says which
+  failed and keeps their edits to retry. Switching workspace during a save stops
+  it, so grants never land in the other workspace, and the panel reports which
+  roles saved.
+- A custom role named `constructor` or `__proto__` no longer crashes the
+  permissions panel.
+- Revert to defaults now appears on built-in roles that have saved changes.
 - Rerun a run from any step that ran, from the Timeline tab. Earlier steps reuse
   their saved outputs, so nothing before the step repeats. The step's input is
   edited beside the original, the steps with side effects are listed before you

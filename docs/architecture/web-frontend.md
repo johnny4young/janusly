@@ -326,8 +326,16 @@ Settings keeps one workspace destination and a permission-aware focused-area
 rail. The configuration-first order is Organization, Access, Connections and
 AI configuration, followed by Reliability, Usage and Infrastructure. Organization
 owns workspace-wide data governance and audit history; Access owns membership,
-roles, authentication, SSO and SCIM. Connections is the stable user-facing name
-for credentials and external services, while the existing `integrations` route
+roles, authentication, SSO and SCIM. Its permission matrix holds unsaved grants
+per role apart from server state and drops a draft once it matches that state,
+so a refetch keeps edits and untouched roles follow the server. Drafts belong
+to one organization. Save posts only edited roles, one request per role with
+custom roles last, and names each role that failed while keeping its edits.
+Because `api()` reads the active organization per request, Save captures it
+first and stops if it changes or the panel unmounts, then reports which roles
+saved and which are unconfirmed; the API's floor and route gates remain the
+authority. Connections is the stable
+user-facing name for credentials and external services, while the existing `integrations` route
 identifier remains compatible with saved deep links. The canonical Connections
 inventory stays list-first with a separate add dialog; Settings links to it
 rather than duplicating the secret form. Focused areas expose their own heading,
@@ -339,7 +347,7 @@ breadcrumb names the routed area (the `operations.section.*` copy stays in the
 core catalog so it paints before the workspace catalog loads). The Find a setting
 index reads the counts on its cards only while it is open, each behind the
 permission of its panel; a denied or failed read omits that count. Attention dots
-carry their reason in the rail tab's `title` and the dot's accessible name. On narrow Connections views, the primary action stacks
+carry their reason in the rail tab's `title` and the dot's accessible name. The AI budget card meters spend from `/billing/budget` and reads workflow overrides one visible row at a time, because no list endpoint exists. Its filter searches the 100 workflows `GET /workflows` returns by default, and says so when a full list has no match. On narrow Connections views, the primary action stacks
 inside the card. The inventory is a virtualized table (name, type, health, used
 by, last used, expiry, owner) that scrolls sideways on its own, with Rotate and
 Revoke pinned to the right edge above phone width. A header counts connections
