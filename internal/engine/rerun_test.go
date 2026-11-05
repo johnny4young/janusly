@@ -364,3 +364,39 @@ func TestApplyRerunOverrideRefusesAMovedMask(t *testing.T) {
 		t.Errorf("a reference needs no restore: %+v", rejected)
 	}
 }
+
+// A step whose answer stands for one human's decision covers one execution; a
+// timer or a callback carries no decision, and a trigger webhook must stay reusable.
+func TestPlanRerunGatesAWriteBehindAHumanStep(t *testing.T) {
+	configs := map[string]string{
+		"approval":    `{"message":"Go"}`,
+		"human_form":  `{"schema":{"type":"object","properties":{"ok":{"type":"boolean"}}}}`,
+		"webhook":     `{}`,
+		"wait_until":  `{"duration":"PT5M"}`,
+		"subworkflow": `{"workflowId":"child"}`,
+	}
+	cases := map[string]bool{"approval": true, "human_form": true, "webhook": false, "wait_until": false, "subworkflow": false}
+	for nodeType, gated := range cases {
+		t.Run(nodeType, func(t *testing.T) {
+			wf := rerunDoc(t, `{"dslVersion":"1.0","nodes":[
+				{"id":"gate","type":"`+nodeType+`","config":`+configs[nodeType]+`},
+				{"id":"send","type":"http","config":{"url":"https://a.example","method":"POST"}},
+				{"id":"read","type":"http","config":{"url":"https://a.example","method":"GET"}}
+			],"edges":[{"from":"gate","to":"send"},{"from":"gate","to":"read"}]}`)
+			statuses := map[string]string{"gate": "succeeded", "send": "failed", "read": "failed"}
+			_, rejected := PlanRerun("src", wf, rerunRows(statuses), "send")
+			if gated && (rejected == nil || rejected.Code != "rerun_needs_approval" || rejected.NodeID != "gate") {
+				t.Fatalf("a write must not reuse this step: %+v", rejected)
+			}
+			if !gated && rejected != nil {
+				t.Fatalf("a write can reuse this step: %+v", rejected)
+			}
+			if _, rejected := PlanRerun("src", wf, rerunRows(statuses), "read"); rejected != nil {
+				t.Fatalf("a read can reuse this step: %+v", rejected)
+			}
+			if plan, rejected := PlanRerun("src", wf, rerunRows(statuses), "gate"); rejected != nil || plan.Seed.NodeID != "gate" {
+				t.Fatalf("rerunning the step itself runs it again: %+v %+v", plan, rejected)
+			}
+		})
+	}
+}

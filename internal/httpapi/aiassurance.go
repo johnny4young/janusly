@@ -213,9 +213,10 @@ func derivedRecoveryEffects(document map[string]any) []any {
 }
 
 func recoveryEffectForNode(typeName string, config map[string]any) (kind, receipt string, effect bool) {
-	switch typeName {
-	case "approval", "human_form":
+	if domain.ConsumesHumanDecision(typeName) {
 		return "human_action", "manual", true
+	}
+	switch typeName {
 	case "http":
 		method, _ := config["method"].(string)
 		switch strings.ToUpper(strings.TrimSpace(method)) {

@@ -161,13 +161,13 @@ func PlanRerun(sourceRunID string, wf *domain.Workflow, rows []store.ListRunNode
 			plan.NotRun = append(plan.NotRun, node.ID)
 		}
 	}
-	// An approval covers one execution, and only agents check it at dispatch, so
-	// each write needs every approval upstream of it to run again in this rerun.
+	// A human decision covers one execution, and only agents check approval at
+	// dispatch, so each write needs every decision upstream of it to run again.
 	for _, effect := range plan.SideEffects {
 		upstream := collectRelatives(wf, effect.NodeID, true)
 		for _, node := range wf.Nodes {
-			if node.Type == "approval" && upstream[node.ID] && !closure[node.ID] {
-				return RerunPlan{}, &RerunRejection{Code: "rerun_needs_approval", Message: "Rerun from the approval step so it is approved again", NodeID: node.ID}
+			if domain.ConsumesHumanDecision(node.Type) && upstream[node.ID] && !closure[node.ID] {
+				return RerunPlan{}, &RerunRejection{Code: "rerun_needs_approval", Message: "Rerun from this human step so it is decided again", NodeID: node.ID}
 			}
 		}
 	}

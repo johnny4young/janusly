@@ -522,6 +522,13 @@ func IsSensitiveActionNodeWithOptions(node Node, opts ReadinessOptions) bool {
 	return isSensitiveAction(node, opts)
 }
 
+// ConsumesHumanDecision reports a step whose completion is one person's answer,
+// which covers one execution. It grants no agent write authority: only an
+// approval does, through HasApprovalAncestorIn.
+func ConsumesHumanDecision(nodeType string) bool {
+	return nodeType == "approval" || nodeType == "human_form"
+}
+
 // HasApprovalAncestorIn reports whether human approval dominates every path
 // into nodeID. It is the graph authority used by dispatch, not a loose
 // "approval exists somewhere upstream" hint.
