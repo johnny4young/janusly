@@ -223,6 +223,9 @@ function WorkspaceContent(props: AppWorkspaceProps) {
                 readOnly={canvas.readOnly}
                 viewportWorkflowId={canvas.viewportWorkflowId}
                 active={visibility.visible}
+                validationIssues={props.rightPanel.authoring.validationIssues}
+                readiness={props.rightPanel.authoring.readinessResult}
+                aiReviewIssues={props.rightPanel.authoring.aiReviewIssues}
               />
             </Suspense>
           </div>

@@ -1,6 +1,6 @@
 import { openReports,
   openActivityRecoveryDetail,
-  openWorkspaceSection,
+  openTemplatePacks,
 } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
@@ -111,7 +111,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   const orgId = await prepareSession(page, 'en')
 
   await page.goto('/')
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await openTemplatePacks(page)
   const drill = await startRuntimeDrill(page, 'Start recovery drill')
   const focusedFailure = await openActivityRecoveryDetail(page, drill.deadLetterId)
   const initialOutcome = focusedFailure.getByTestId('dlq-recovery-drill-outcome')
@@ -173,7 +173,7 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Navegación' }).click()
-  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  await openTemplatePacks(page, true)
   const drill = await startRuntimeDrill(page, 'Iniciar ejercicio de recuperación')
   const focusedFailure = await openActivityRecoveryDetail(page, drill.deadLetterId)
   const outcome = focusedFailure.getByTestId('dlq-recovery-drill-outcome')

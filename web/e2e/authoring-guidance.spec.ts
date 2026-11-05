@@ -71,7 +71,7 @@ test('Problems and graph context guide an author to a valid branch expression', 
   await page.getByRole('button', { name: 'Review this flow', exact: true }).click()
   await page.locator('.workflow-node').filter({ hasText: 'Branch rule' }).click()
 
-  await page.getByRole('button', { name: /^Problems\b/ }).click()
+  await page.getByRole('navigation', { name: 'Authoring scope' }).getByRole('button', { name: /^Problems\b/ }).click()
   await expect(page.getByTestId('authoring-problems')).toBeVisible()
   const aiReviewProblem = page.getByTestId('authoring-problem-branch_needs_context')
   await expect(aiReviewProblem).toContainText('AI review')
@@ -88,7 +88,7 @@ test('Problems and graph context guide an author to a valid branch expression', 
   await expression.fill('process.exit()')
   await expect(page.getByTestId('authoring-problem-branch_needs_context')).toHaveCount(0)
   await expect(page.getByRole('alert')).toContainText('does not match the supported runtime grammar')
-  await page.getByRole('button', { name: /^Problems\b/ }).click()
+  await page.getByRole('navigation', { name: 'Authoring scope' }).getByRole('button', { name: /^Problems\b/ }).click()
   await page.getByRole('button', { name: 'Run checks' }).click()
   const invalidProblem = page.getByTestId('authoring-problem-condition_invalid_expression')
   await expect(invalidProblem).toBeVisible()
@@ -106,13 +106,13 @@ test('Problems and graph context guide an author to a valid branch expression', 
     await route.continue()
   })
   await expression.fill('process.exit()')
-  await page.getByRole('button', { name: /^Problems\b/ }).click()
+  await page.getByRole('navigation', { name: 'Authoring scope' }).getByRole('button', { name: /^Problems\b/ }).click()
   const staleValidationResponse = page.waitForResponse((response) => response.url().endsWith('/validate'))
   await page.getByRole('button', { name: 'Run checks' }).click()
   await page.getByRole('button', { name: 'Step', exact: true }).click()
   await expression.fill('context.fetch.output.statusCode === 201')
   await staleValidationResponse
-  await page.getByRole('button', { name: /^Problems\b/ }).click()
+  await page.getByRole('navigation', { name: 'Authoring scope' }).getByRole('button', { name: /^Problems\b/ }).click()
   await expect(invalidProblem).toHaveCount(0)
 
   // The same revision guard applies to AI review findings that complete after
@@ -124,7 +124,7 @@ test('Problems and graph context guide an author to a valid branch expression', 
   await page.getByLabel('Run rule').selectOption('advanced')
   await page.getByLabel('Branch expression').fill('context.fetch.output.statusCode === 202')
   await staleReviewResponse
-  await page.getByRole('button', { name: /^Problems\b/ }).click()
+  await page.getByRole('navigation', { name: 'Authoring scope' }).getByRole('button', { name: /^Problems\b/ }).click()
   await expect(page.getByTestId('authoring-problem-branch_needs_context')).toHaveCount(0)
   expect(browserErrors).toEqual([])
 })

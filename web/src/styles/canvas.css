@@ -37,6 +37,31 @@
   width: 238px;
 }
 
+/* A 24px target around a 12px dot on the node's corner. */
+.workflow-node .workflow-node-problem {
+  height: 24px;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0;
+  position: absolute;
+  right: -12px;
+  top: -12px;
+  width: 24px;
+  z-index: 1;
+}
+
+.workflow-node-problem::before {
+  background: var(--we-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--we-surface);
+  content: "";
+  height: 12px;
+  width: 12px;
+}
+
+.workflow-node-problem[data-severity="warn"]::before { background: var(--we-warning); }
+.workflow-node-problem[data-severity="fail"]::before { background: var(--we-danger); }
+
 .workflow-node[data-selected="true"] {
   border-color: var(--we-primary);
   box-shadow: 0 0 0 4px var(--we-primary-ring), 0 22px 42px -28px var(--we-primary-shadow);

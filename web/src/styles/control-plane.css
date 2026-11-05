@@ -1109,7 +1109,6 @@
 [data-density="compact"] .user-menu__workspace { padding: 8px; }
 [data-density="compact"] .user-menu__id { padding: 10px 12px; }
 
-[data-density="compact"] .recovery-center-composer { padding: 10px 12px; gap: 8px; }
 [data-density="compact"] .top-bar { padding-inline: 12px; }
 
 /* ==========================================================================
@@ -1151,12 +1150,15 @@
 .we-list-row[data-clickable="true"]:active { transform: translateY(1px); }
 
 /* Recovery rows are fixed-height because their scroll surface is virtualized.
- * Keep metadata on one line so the 54px row + 6px list gap matches the
+ * Keep each line unwrapped so the 84px row + 6px list gap matches the
  * `DLQ_ROW_PITCH` used by `DeadLettersPanel`. */
 .we-dlq-row {
+  align-content: center;
+  gap: 4px 8px;
   grid-template-columns: minmax(0, 1fr) auto;
-  height: 54px;
-  min-height: 54px;
+  height: 84px;
+  min-height: 84px;
+  padding-block: 6px;
 }
 
 .we-dlq-row[data-selection-mode="true"] {
@@ -1166,14 +1168,31 @@
 .we-dlq-row__selection-cell {
   align-items: center;
   display: inline-flex;
+  grid-row: span 2;
 }
 
-.we-dlq-row__identity {
-  align-items: center;
-  display: flex;
-  gap: 12px;
+.we-dlq-row__identity { min-width: 0; }
+
+.we-dlq-row__recovery {
+  grid-column: 1 / -1;
   min-width: 0;
+  overflow: hidden;
 }
+
+.we-dlq-row[data-selection-mode="true"] .we-dlq-row__recovery { grid-column: 2 / -1; }
+
+.we-dlq-row .we-recovery-item-badge {
+  background: transparent;
+  border: 0;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  min-height: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+
+/* The owner gives way first so the SLA after it stays readable. */
+.we-dlq-row .we-recovery-item-badge > :not(.we-recovery-item-badge__owner) { flex-shrink: 0; }
 
 .we-dlq-row .we-list-row__meta {
   flex-wrap: nowrap;
@@ -1187,13 +1206,9 @@
     padding-inline: 8px;
   }
 
-  .we-dlq-row__identity { gap: 8px; }
-  .we-dlq-row .we-list-row__avatar { height: 28px; width: 28px; }
   .we-dlq-row .we-list-row__meta { gap: 4px; }
   .we-dlq-row .we-list-row__downtime,
-  .we-dlq-row .we-recovery-item-badge__status,
-  .we-dlq-row .we-recovery-item-badge__owner,
-  .we-dlq-row .we-recovery-item-badge__sla {
+  .we-dlq-row .we-recovery-item-badge__status {
     display: none;
   }
 }
@@ -1826,22 +1841,6 @@
    the operator explicitly starts a controlled drill.
    ========================================================================== */
 
-/* Recovery-first chip variant — used for the lead composer chip
-   ("Suggest a fix") so the recovery action is visually weighted
-   above the diagnostic + diff + spend chips. */
-.recovery-center-composer__chip--primary {
-  border-color: color-mix(in srgb, var(--we-primary) 32%, transparent);
-  background: color-mix(in srgb, var(--we-primary) 6%, var(--we-surface) 94%);
-  color: var(--we-primary);
-}
-
-.recovery-center-composer__chip--primary:hover {
-  background: var(--we-primary-soft);
-  border-color: var(--we-primary);
-}
-
-.recovery-center-composer__chip--primary svg { color: var(--we-primary); }
-
 .auth-card {
   width: min(380px, 100%);
   border: 1px solid var(--we-line);
@@ -1859,6 +1858,7 @@
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .auth-submit { margin-top: 6px; width: 100%; }

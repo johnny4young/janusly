@@ -23,8 +23,28 @@ import type {
   PatchApproachLabel,
   ConsideredAlternative,
   PatchSuggestion,
+  Step,
   SuggestionTab,
 } from './types'
+
+/** `review` waits on the operator; `active` is work in flight. */
+export type RecoveryStageState = 'pending' | 'review' | 'active' | 'done' | 'failed'
+
+/**
+ * Patch, Validate and Apply states for a step. Validate reads done only after a
+ * sandbox pass; steps that make no progress claim return null.
+ */
+export function recoveryStages(step: Step): [RecoveryStageState, RecoveryStageState, RecoveryStageState] | null {
+  switch (step.kind) {
+    case 'loading': return ['active', 'pending', 'pending']
+    case 'review': return ['review', 'pending', 'pending']
+    case 'validating': return ['done', 'active', 'pending']
+    case 'validation-failed': return ['done', 'failed', 'pending']
+    case 'validated': return ['done', 'done', 'review']
+    case 'applying': return ['done', 'done', 'active']
+    default: return null
+  }
+}
 
 function oneLineAlternative(value: unknown, maxChars: number): string {
   if (typeof value !== 'string') return ''

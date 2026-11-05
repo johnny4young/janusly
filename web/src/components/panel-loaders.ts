@@ -14,6 +14,7 @@ export const panelLoaders = {
   members: () => import('./MembersPanel'),
   credentials: () => import('./ConnectionsPanel'),
   marketplace: () => import('./ToolsPanel'),
+  templates: () => import('./RecipeCatalog'),
   packs: () => import('./SolutionPacksPanel'),
   operations: () => import('./OperationsPage'),
   experiments: () => import('./ExperimentsPanel'),

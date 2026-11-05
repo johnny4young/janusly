@@ -26,7 +26,7 @@ import { isCanvasTab } from '../types'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
 import type { AuthoringPanelModel } from './AuthoringPanel'
-import { panelLoaders } from './panel-loaders'
+import { panelLoaders, preloadPanel } from './panel-loaders'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { ErrorBoundary } from './ErrorBoundary'
 import { PanelErrorFallback } from './PanelErrorFallback'
@@ -46,6 +46,7 @@ const MembersPanel = lazy(() => panelLoaders.members().then((m) => ({ default: m
 const ConnectionsPanel = lazy(() => panelLoaders.credentials().then((m) => ({ default: m.ConnectionsPanel })))
 const ToolsPanel = lazy(() => panelLoaders.marketplace().then((m) => ({ default: m.ToolsPanel })))
 const SolutionPacksPanel = lazy(() => panelLoaders.packs().then((m) => ({ default: m.SolutionPacksPanel })))
+const RecipeCatalog = lazy(() => panelLoaders.templates().then((m) => ({ default: m.RecipeCatalog })))
 const OperationsPage = lazy(() => panelLoaders.operations().then((m) => ({ default: m.OperationsPage })))
 const ExperimentsPanel = lazy(() => panelLoaders.experiments().then((m) => ({ default: m.ExperimentsPanel })))
 const ActivityWorkspace = lazy(() => panelLoaders.recover().then((m) => ({ default: m.ActivityWorkspace })))
@@ -418,12 +419,28 @@ export function TemplatesPanel({
   const { t } = useT()
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   const [query, setQuery] = useState('')
+  const [view, setView] = useState<'recipes' | 'packs'>('recipes')
+  const [category, setCategory] = useState('all')
+  const activeView = templates.length === 0 ? 'packs' : view
   const q = query.trim().toLowerCase()
   const filtered = q
     ? templates.filter(template =>
       `${tTemplateName(template)} ${tTemplateDescription(template)} ${tTemplateCategory(template)}`.toLowerCase().includes(q),
     )
     : templates
+  // Same fields SolutionPacksPanel searches, so a search can point at the other view.
+  const matchingPacks = q
+    ? solutionPacks.filter(pack => [
+      t(`packs.${pack.id}.name`, { defaultValue: pack.name }),
+      t(`packs.${pack.id}.description`, { defaultValue: pack.description }),
+      t(`packs.category.${pack.category}`, { defaultValue: pack.category }),
+      ...pack.failureFixtures.flatMap(fixture => [
+        t(`packs.${pack.id}.drills.${fixture.id}.label`, { defaultValue: fixture.label }),
+        t(`packs.${pack.id}.drills.${fixture.id}.description`, { defaultValue: fixture.description }),
+        t(`packs.drill.mode.${fixture.failureMode}`, { defaultValue: fixture.failureMode }),
+      ]),
+    ].join(' ').toLowerCase().includes(q))
+    : solutionPacks
 
   return (
     <PanelChrome title={t('rightPanel.templates.title')} description={t('rightPanel.templates.description')}>
@@ -438,29 +455,35 @@ export function TemplatesPanel({
         </div>
       ) : (
         <>
-          <PanelSearch value={query} onChange={setQuery} placeholder={t('rightPanel.templates.searchPlaceholder')} />
-          <section className="template-catalog-section">
-            <div className="section-kicker">{t('rightPanel.templates.recipes')}</div>
-            {filtered.length === 0 ? (
-              <p className="helper-text">{t('rightPanel.templates.noRecipeMatches')}</p>
-            ) : (
-              <div className="we-recipe-grid">
-                {filtered.map(template => (
-                  <button key={template.id} className="list-card list-card-button" disabled={!canUse} onClick={() => onUseTemplate(template.workflow)}>
-                    <div className="split-row" style={{ width: '100%' }}>
-                      <span className="mode-pill mode-pill-neutral">{tTemplateCategory(template)}</span>
-                      <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
-                    </div>
-                    <strong>{tTemplateName(template)}</strong>
-                    <span>{tTemplateDescription(template)}</span>
-                    <span className="list-card-action">{t('rightPanel.templates.useRecipe')}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-          <section className="template-catalog-section">
-            <div className="section-kicker">{t('rightPanel.templates.solutionPacks')}</div>
+          <div className="template-catalog-toolbar">
+            <PanelSearch value={query} onChange={setQuery} placeholder={t('rightPanel.templates.searchPlaceholder')} />
+            <div className="we-seg" role="group" aria-label={t('rightPanel.templates.viewAria')}>
+              <button type="button" aria-pressed={activeView === 'recipes'} onClick={() => setView('recipes')} data-testid="template-view-recipes">
+                {t('rightPanel.templates.recipes')} <strong>{filtered.length}</strong>
+              </button>
+              <button
+                type="button"
+                aria-pressed={activeView === 'packs'}
+                onClick={() => setView('packs')}
+                onPointerEnter={() => preloadPanel('packs')}
+                onFocus={() => preloadPanel('packs')}
+                data-testid="template-view-packs"
+              >
+                {t('workspace.section.packs.label')} <strong>{matchingPacks.length}</strong>
+              </button>
+            </div>
+          </div>
+          {activeView === 'recipes' && (
+            <RecipeCatalog
+              templates={templates}
+              matches={filtered}
+              category={category}
+              onCategoryChange={setCategory}
+              canUse={canUse}
+              onUseTemplate={onUseTemplate}
+            />
+          )}
+          {activeView === 'packs' && <section className="template-catalog-section">
             <SolutionPacksPanel
               embedded
               showSearch={false}
@@ -474,7 +497,7 @@ export function TemplatesPanel({
               onCreateCredential={onCreateCredential}
               canInstall={canInstallPacks}
             />
-          </section>
+          </section>}
         </>
       )}
     </PanelChrome>

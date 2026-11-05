@@ -16,7 +16,6 @@ const locales = {
   en: {
     flows: 'Workflows',
     runs: 'Runs',
-    viewTimeline: 'View timeline',
     processingMode: 'Processing mode',
     forEachMode: 'Run a tool for each item',
     tool: 'Tool',
@@ -28,7 +27,6 @@ const locales = {
   es: {
     flows: 'Flujos',
     runs: 'Ejecuciones',
-    viewTimeline: 'Ver cronología',
     processingMode: 'Modo de procesamiento',
     forEachMode: 'Ejecutar una herramienta por elemento',
     tool: 'Herramienta',
@@ -293,7 +291,7 @@ test('bounded for-each authoring, runtime budgets, and diagnostics work in Engli
   await capture(spanishConfig, 'web-es-loop-for-each-authoring')
 
   await openRunFromHistory(page, 'es', exceeded.runId)
-  await page.getByTestId('run-overview').getByRole('button', { name: locales.es.viewTimeline, exact: true }).click()
+  await page.getByTestId('run-workspace-tab-events').click()
   const timeline = page.getByTestId('run-event-timeline')
   await timeline.getByTestId('run-event-filter').fill('loop.failure_budget.exceeded')
   const failureEvent = timeline.getByRole('listitem').filter({ hasText: 'Se superó el presupuesto de fallos del bucle' }).first()

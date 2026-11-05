@@ -3,29 +3,10 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react'
 import type { AiReviewIssue, ReadinessResult, ValidationIssue, WorkflowGraphEdge } from '../types'
-import { tAiReviewIssue, tReadinessIssue, tValidationIssue, useT } from '../i18n'
-import { useWorkflowStore } from '../store'
-import { buildAuthoringProblems, type AuthoringProblem } from './authoring-problems'
-import { requestAuthoringFocus } from './authoring-focus-bus'
-import { requestResilienceFocus } from './resilience-focus-bus'
+import { useT } from '../i18n'
+import { buildAuthoringProblems, localizeAuthoringProblem } from './authoring-problems'
+import { hasAuthoringProblemTarget, openAuthoringProblem } from './open-authoring-problem'
 import { Button } from './ui/Button'
-
-const resilienceIssueCodes = new Set(['external_node_missing_retry', 'http_missing_bounds', 'tool_result_policy_missing'])
-
-function localizeProblem(problem: AuthoringProblem): string {
-  const issue = {
-    code: problem.code,
-    severity: problem.severity,
-    message: problem.message,
-    nodeId: problem.nodeId,
-    edgeId: problem.edgeId,
-    rationale: problem.rationale,
-    suggestion: problem.suggestion,
-  }
-  if (problem.primarySource === 'validation') return tValidationIssue(issue)
-  if (problem.primarySource === 'readiness') return tReadinessIssue(issue)
-  return tAiReviewIssue(issue)
-}
 
 export function AuthoringProblemsPanel({
   validationIssues,
@@ -33,41 +14,19 @@ export function AuthoringProblemsPanel({
   aiReviewIssues,
   workflowEdges,
   onValidate,
-  onOpenProblem,
 }: {
   validationIssues: ValidationIssue[]
   readiness: ReadinessResult | null
   aiReviewIssues: AiReviewIssue[]
   workflowEdges: WorkflowGraphEdge[]
   onValidate(): Promise<boolean>
-  onOpenProblem?(): void
 }) {
   const { t } = useT()
-  const selectNode = useWorkflowStore((state) => state.selectNode)
-  const selectEdge = useWorkflowStore((state) => state.selectEdge)
-  const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
   const [checking, setChecking] = useState(false)
   const problems = useMemo(
     () => buildAuthoringProblems({ validationIssues, readiness, aiReviewIssues, workflowEdges }),
     [aiReviewIssues, readiness, validationIssues, workflowEdges],
   )
-
-  const openProblem = (problem: AuthoringProblem) => {
-    if (problem.nodeId) {
-      if (resilienceIssueCodes.has(problem.code)) requestResilienceFocus(problem.nodeId)
-      else requestAuthoringFocus({ kind: 'node', id: problem.nodeId })
-      selectNode(problem.nodeId)
-      setActiveTab('inspector')
-      onOpenProblem?.()
-      return
-    }
-    if (problem.edgeId) {
-      requestAuthoringFocus({ kind: 'edge', id: problem.edgeId })
-      selectEdge(problem.edgeId)
-      setActiveTab('inspector')
-      onOpenProblem?.()
-    }
-  }
 
   const runValidation = async () => {
     setChecking(true)
@@ -107,14 +66,14 @@ export function AuthoringProblemsPanel({
         <ol className="we-authoring-problems__list">
           {problems.map((problem) => {
             const location = problem.nodeId ?? problem.edgeId
-            const locatable = Boolean(location)
+            const locatable = hasAuthoringProblemTarget(problem)
             const content = (
               <>
                 <span className="we-authoring-problems__severity" data-severity={problem.severity}>
                   <AlertTriangle size={13} aria-hidden="true" />
                   {t(`problems.severity.${problem.severity}`)}
                 </span>
-                <span className="we-authoring-problems__message">{localizeProblem(problem)}</span>
+                <span className="we-authoring-problems__message">{localizeAuthoringProblem(problem)}</span>
                 <span className="we-authoring-problems__meta">
                   {problem.sources.map((source) => t(`problems.source.${source}`)).join(' · ')}
                   {location ? ` · ${location}` : ''}
@@ -128,8 +87,8 @@ export function AuthoringProblemsPanel({
                   <button
                     type="button"
                     className="we-authoring-problems__row"
-                    onClick={() => openProblem(problem)}
-                    aria-label={t(problem.nodeId ? 'problems.openNode' : 'problems.openEdge', { id: location })}
+                    onClick={() => openAuthoringProblem(problem)}
+                    aria-label={location ? t(problem.nodeId ? 'problems.openNode' : 'problems.openEdge', { id: location }) : undefined}
                     data-testid={`authoring-problem-${problem.code}`}
                   >
                     {content}
