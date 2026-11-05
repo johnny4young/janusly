@@ -23,6 +23,10 @@ export type BootstrapData = {
   templates: Template[]
   solutionPacks: SolutionPackPublic[]
   credentials: Credential[]
+  /** False until a list was read for this organization, or when the role can't read one. */
+  credentialsKnown: boolean
+  /** List a credential the API just created, without waiting for a refresh that can fail or lose to a newer one. */
+  addCredential: (credential: Credential) => void
   runs: RunSummary[]
   savedWorkflows: SavedWorkflow[]
   deadLetters: DeadLetter[]
@@ -120,6 +124,7 @@ export function useBootstrapData(
   const [templates, setTemplates] = useState<Template[]>([])
   const [solutionPacks, setSolutionPacks] = useState<SolutionPackPublic[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
+  const [credentialsKnown, setCredentialsKnown] = useState(false)
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [savedWorkflows, setSavedWorkflows] = useState<SavedWorkflow[]>([])
   const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
@@ -161,6 +166,10 @@ export function useBootstrapData(
   // Latch: once a catalog surface has been opened this session, the
   // catalogs stay in every refresh wave.
   const catalogsNeededRef = useRef(false)
+
+  const addCredential = useCallback((credential: Credential) => {
+    setCredentials((current) => [...current, credential])
+  }, [])
 
   const refreshPlatform = useCallback(async () => {
     const requestedScope = tenantScopeRef.current
@@ -213,6 +222,7 @@ export function useBootstrapData(
     }
     if (credentialData.status === 'fulfilled' && credentialData.value !== null) {
       setCredentials(Array.isArray(credentialData.value) ? credentialData.value : [])
+      setCredentialsKnown(allowed.has('credentials.read') && Array.isArray(credentialData.value))
     }
     if (runData.status === 'fulfilled') {
       const incoming = runData.value
@@ -248,6 +258,7 @@ export function useBootstrapData(
     setTemplates([])
     setSolutionPacks([])
     setCredentials([])
+    setCredentialsKnown(false)
     setRuns([])
     setSavedWorkflows([])
     setDeadLetters([])
@@ -269,6 +280,8 @@ export function useBootstrapData(
     templates,
     solutionPacks,
     credentials,
+    credentialsKnown,
+    addCredential,
     runs,
     savedWorkflows,
     deadLetters,

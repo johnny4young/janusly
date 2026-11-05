@@ -237,8 +237,10 @@ recorded baseline. Styles for a lazy panel live next to the component
 (`<Component>.css`) so they ship with its chunk instead of the cold path. `pnpm bundle-check`
 reports; a new named asset must get a baseline entry after review. Structural
 changes that add object keys (a controller/view model, a router) cost gzip
-bytes no minifier removes; the caps were raised once for that in 2026-09 and
-are not raised for features. The bundle holds no duplicated first-party modules
+bytes no minifier removes; the caps were raised once for that in 2026-09. In
+2026-11 the owner approved moving the artifact, worst-locale and per-chunk caps
+by each workspace redesign change's measured cost, stated in its pull request;
+the cold-path caps and route budgets still only ratchet down. The bundle holds no duplicated first-party modules
 and the i18n catalogs are prefix-compressed, so dead bytes live in vendor code and
 interop. Production-only plugins remove them: named React bindings instead of
 CommonJS interop (`react-esm-facade-plugin.mjs`), `d3-color` and Lucide's React

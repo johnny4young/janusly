@@ -5,8 +5,12 @@
 - Solution packs show a Before installing checklist with each required credential,
   its state and how many are ready. Connect opens the new connection dialog with
   the name and kind filled in, and the row turns ready without leaving the page.
-  Install becomes the primary action once every credential is connected, and it
-  still installs a draft before then.
+  A credential that has expired, has no secret set on the server or is held under
+  another kind says so and offers Review, which opens Connections. Install becomes
+  the primary action once every credential is ready, and it still installs a draft
+  before then.
+- Failed actions that go through the platform's shared error toast now show the
+  message in your language when one exists, instead of the server's English.
 - Rerun a run from any step that ran, from the Timeline tab. Earlier steps reuse
   their saved outputs, so nothing before the step repeats. The step's input is
   edited beside the original, the steps with side effects are listed before you

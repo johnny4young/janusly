@@ -61,9 +61,11 @@
   padding: 4px 0;
 }
 
-.we-pack-check__row[data-state='missing'] > svg { color: var(--we-warning-text); }
+.we-pack-check__row[data-state] > svg { color: var(--we-warning-text); }
 
 .we-pack-check__row[data-state='ready'] > svg { color: var(--we-success-text); }
+
+.we-pack-check__row[data-state='unknown'] > svg { color: inherit; }
 
 .we-pack-check__row code {
   color: var(--we-ink);

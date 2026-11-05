@@ -2,10 +2,16 @@
  * Real-Chromium coverage for Install contrast inside the global `.list-card` rules.
  */
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { userEvent } from 'vitest/browser'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Credential, SolutionPackPublic } from '../types'
 import { SolutionPacksPanel } from './SolutionPacksPanel'
+
+vi.mock('../api', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../api')>(),
+  api: vi.fn(async () => ({ managedStorageAvailable: true, credentials: [] })),
+}))
 
 const PACK: SolutionPackPublic = {
   id: 'failed-payment-recovery',
@@ -42,12 +48,13 @@ function contrast(foreground: string, background: string): number {
   return (lighter! + 0.05) / (darker! + 0.05)
 }
 
-function renderPanel(theme: 'light' | 'dark', canInstall: boolean, credentials: Credential[] = []) {
+function renderPanel(theme: 'light' | 'dark', canInstall: boolean, credentials: Credential[] = [], credentialsKnown = true) {
   return render(
     <div data-theme={theme}>
       <SolutionPacksPanel
         packs={[PACK]}
         credentials={credentials}
+        credentialsKnown={credentialsKnown}
         canInstall={canInstall}
         onInstall={vi.fn()}
         onSampleRun={vi.fn()}
@@ -83,12 +90,20 @@ describe('<SolutionPacksPanel /> Install contrast (browser)', () => {
     onTestFinished(() => { delete document.documentElement.dataset.theme })
     renderPanel(theme, true, [{ id: 'cred-1', name: 'billing_webhook', kind: 'http_bearer' }])
     const cardBackground = getComputedStyle(screen.getByTestId(`solution-pack-${PACK.id}`)).backgroundColor
-    for (const name of ['billing_webhook', 'billing_slack']) {
-      const row = screen.getByText(name).closest('li')!
-      for (const part of [row.querySelector('code')!, row.querySelector('span')!, row.querySelector('svg')!]) {
-        expect(contrast(getComputedStyle(part).color, cardBackground)).toBeGreaterThanOrEqual(4.5)
+    const expectReadableRows = () => {
+      for (const name of ['billing_webhook', 'billing_slack']) {
+        const row = screen.getByText(name).closest('li')!
+        for (const part of [row.querySelector('code')!, row.querySelector('span')!, row.querySelector('svg')!]) {
+          expect(contrast(getComputedStyle(part).color, cardBackground)).toBeGreaterThanOrEqual(4.5)
+        }
       }
     }
+    expectReadableRows()
+
+    cleanup()
+    renderPanel(theme, true, [], false)
+    expect(screen.getByText('billing_slack').closest('li')).toHaveProperty('dataset.state', 'unknown')
+    expectReadableRows()
 
     cleanup()
     renderPanel(theme, true, PACK.requiredCredentials.map((cred) => ({ id: cred.name, name: cred.name, kind: cred.kind })))
@@ -98,5 +113,42 @@ describe('<SolutionPacksPanel /> Install contrast (browser)', () => {
       getComputedStyle(button.querySelector('.ui-button__label')!).color,
       getComputedStyle(button).backgroundColor,
     )).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+describe('<SolutionPacksPanel /> Connect focus (browser)', () => {
+  it('keeps Tab inside the dialog while a create is in flight and after it fails', async () => {
+    let finishCreate = (_created: boolean) => {}
+    const created = new Promise<boolean>((resolve) => { finishCreate = resolve })
+    render(
+      <>
+        <button type="button" data-testid="behind">Behind</button>
+        <SolutionPacksPanel
+          packs={[PACK]}
+          credentials={[]}
+          onInstall={vi.fn()}
+          onSampleRun={vi.fn()}
+          onInjectFailure={vi.fn()}
+          onCreateCredential={() => created}
+        />
+      </>,
+    )
+    onTestFinished(cleanup)
+    const focusInDialog = () => screen.getByRole('dialog').contains(document.activeElement)
+
+    screen.getByTestId('pack-connect-failed-payment-recovery-billing_slack').click()
+    const secret = await screen.findByLabelText(/^Secret value/)
+    await waitFor(() => expect(document.activeElement).toBe(secret))
+    await userEvent.keyboard('hunter2{Enter}')
+
+    await waitFor(() => expect(secret.matches(':disabled')).toBe(true))
+    await userEvent.tab()
+    expect(focusInDialog(), `in flight, focus was on ${document.activeElement?.tagName}`).toBe(true)
+
+    finishCreate(false)
+    await waitFor(() => expect(secret.matches(':disabled')).toBe(false))
+    await waitFor(() => expect(document.activeElement).toBe(secret))
+    await userEvent.tab()
+    expect(focusInDialog(), `after failure, focus was on ${document.activeElement?.tagName}`).toBe(true)
   })
 })

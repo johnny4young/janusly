@@ -42,8 +42,8 @@ test('persistent local stack exposes configured packs and recoverable provider f
   await expect(page.getByRole('heading', { name: 'Templates', exact: true })).toBeVisible()
 
   const incidentPack = page.getByTestId('solution-pack-incident-triage')
-  await expect(incidentPack.getByLabel('ops_github configured (github_token)')).toBeVisible()
-  await expect(incidentPack.getByLabel('ops_slack configured (slack_webhook)')).toBeVisible()
+  await expect(incidentPack.getByLabel('ops_github (github_token): Connected')).toBeVisible()
+  await expect(incidentPack.getByLabel('ops_slack (slack_webhook): Connected')).toBeVisible()
   await screenshot(page, 'local-stack-packs-configured')
 
   const recoverButton = page.locator('.top-bar-cta')

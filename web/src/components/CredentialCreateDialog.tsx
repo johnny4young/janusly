@@ -51,7 +51,14 @@ export function CredentialCreateDialog({
   const [secretRef, setSecretRef] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  useDialogFocusTrap(dialogRef, { initialFocus: preset ? secretInputRef : nameRef, onEscape: submitting ? undefined : onClose })
+  const firstFieldRef = preset ? secretInputRef : nameRef
+  useDialogFocusTrap(dialogRef, { initialFocus: firstFieldRef, onEscape: submitting ? undefined : onClose })
+
+  // Every control disables while submitting, which would drop focus out of the modal.
+  useEffect(() => {
+    if (submitting) dialogRef.current?.focus()
+    else if (document.activeElement === dialogRef.current) firstFieldRef.current?.focus()
+  }, [submitting, firstFieldRef])
 
   useEffect(() => {
     if (managedStorageAvailable || storage !== 'managed') return
@@ -90,6 +97,7 @@ export function CredentialCreateDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="credential-create-title"
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="run-input-dialog__header">

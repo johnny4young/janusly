@@ -12,6 +12,7 @@
 
 import { useCallback } from 'react'
 
+import { tApiError } from '../i18n/server-events'
 import { useWorkflowStore } from '../store'
 
 type ToastTone = 'success' | 'error' | 'info'
@@ -64,7 +65,7 @@ export function usePlatformMutation() {
 
       return { ok: true, value }
     } catch (error) {
-      addToast(error instanceof Error ? error.message : options.failureMessage, 'error')
+      addToast((error instanceof Error && tApiError(error)) || options.failureMessage, 'error')
       return { ok: false, error }
     }
   }, [addToast])

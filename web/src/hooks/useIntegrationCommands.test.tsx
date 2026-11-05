@@ -14,9 +14,11 @@ vi.mock('../api', () => ({
 function renderCommands() {
   const refreshPlatform = vi.fn(async () => {})
   const bumpPlatformVersion = vi.fn()
+  const addCredential = vi.fn()
   const { result } = renderHook(() => useIntegrationCommands({
     store: { bumpPlatformVersion },
     refreshPlatform,
+    addCredential,
     runPlatformMutation: usePlatformMutation(),
     t: (key: string, options?: { name?: string }) => (options?.name ? `${key}:${options.name}` : key),
   } as unknown as AppCommandsOptions, {
@@ -24,7 +26,7 @@ function renderCommands() {
     openRun: vi.fn(async () => {}),
     openWorkflow: vi.fn(async () => true),
   }))
-  return { result, refreshPlatform, bumpPlatformVersion }
+  return { result, refreshPlatform, bumpPlatformVersion, addCredential }
 }
 
 const initialStore = useWorkflowStore.getState()
@@ -32,6 +34,46 @@ const initialStore = useWorkflowStore.getState()
 beforeEach(() => {
   vi.mocked(api).mockReset()
   useWorkflowStore.setState({ ...initialStore, toasts: [] }, true)
+})
+
+describe('createCredential', () => {
+  it('lists the new credential before the refresh, which can fail or lose to a newer one', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'cred-1' })
+    const { result, refreshPlatform, addCredential } = renderCommands()
+    refreshPlatform.mockImplementation(async () => {
+      expect(addCredential).toHaveBeenCalledTimes(1)
+    })
+
+    await expect(result.current.createCredential({
+      name: 'ops_slack',
+      kind: 'slack_webhook',
+      secretRef: 'OPS_SLACK',
+    })).resolves.toBe(true)
+
+    expect(addCredential).toHaveBeenCalledWith({
+      id: 'cred-1',
+      name: 'ops_slack',
+      kind: 'slack_webhook',
+      storage: 'environment',
+      expiresAt: null,
+    })
+    expect(refreshPlatform).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes after a failed create and lists nothing, so a stale row can correct itself', async () => {
+    vi.mocked(api).mockRejectedValue(new Error('Credential name already exists'))
+    const { result, refreshPlatform, addCredential } = renderCommands()
+
+    await expect(result.current.createCredential({
+      name: 'ops_slack',
+      kind: 'slack_webhook',
+      secretValue: 'hunter2',
+    })).resolves.toBe(false)
+
+    expect(refreshPlatform).toHaveBeenCalledTimes(1)
+    expect(addCredential).not.toHaveBeenCalled()
+    expect(useWorkflowStore.getState().toasts.at(-1)).toMatchObject({ tone: 'error' })
+  })
 })
 
 describe('revokeCredential', () => {

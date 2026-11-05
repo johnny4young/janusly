@@ -1,34 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 
-import { api } from '../api'
 import { CredentialCreateDialog, type CreateCredential } from './CredentialCreateDialog'
 
 /** The create dialog for one credential a solution pack requires, opened from the pack's checklist. */
-export function PackConnectDialog({ packId, credential, onCreate, onClose }: {
+export function PackConnectDialog({ packId, credential, onCreate, onClose, managedStorageAvailable }: {
   packId: string
   credential: { name: string; kind: string }
   onCreate: CreateCredential
   onClose: () => void
+  managedStorageAvailable: boolean
 }) {
-  const [managedStorageAvailable, setManagedStorageAvailable] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    api('/credentials/health')
-      .then((response) => {
-        if (!cancelled) setManagedStorageAvailable((response as { managedStorageAvailable?: boolean } | null)?.managedStorageAvailable === true)
-      })
-      .catch(() => {
-        if (!cancelled) setManagedStorageAvailable(false)
-      })
-    return () => { cancelled = true }
-  }, [])
-
   // A connected row loses its button, so the dialog has no opener to return focus to.
+  // Install is disabled for a role that connects but can't install; the checklist takes focus then.
   useEffect(() => () => {
     if (document.activeElement !== document.body) return
-    document.querySelector(`[data-testid="solution-pack-${packId}"]`)
-      ?.querySelector<HTMLElement>('[data-testid^="pack-connect-"], [data-testid^="pack-install-"]')?.focus()
+    const card = document.querySelector(`[data-testid="solution-pack-${packId}"]`)
+    const target = card?.querySelector<HTMLElement>('[data-testid^="pack-connect-"], [data-testid^="pack-install-"]:not(:disabled)')
+      ?? card?.querySelector<HTMLElement>('section[tabindex]')
+    target?.focus()
   }, [packId])
 
   return (

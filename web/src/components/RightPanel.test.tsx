@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { RightPanel, type RightPanelProps } from './RightPanel'
@@ -69,6 +69,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       templates: [],
       solutionPacks: [],
       credentials: [],
+      credentialsKnown: true,
       workflows: [],
       onOpenWorkflow: vi.fn(),
       onOpenWorkflowVersion: vi.fn(async () => true),
@@ -110,6 +111,9 @@ beforeEach(() => {
 })
 
 describe('<RightPanel /> credentials', () => {
+  // The cold lazy chunks can outlast a query's timeout on a loaded machine.
+  beforeAll(() => Promise.all([import('./ConnectionsPanel'), import('./connection-dialogs')]))
+
   it('keeps creation focused and offers postgres for external DB tools', async () => {
     render(<RightPanel {...props()} />)
 

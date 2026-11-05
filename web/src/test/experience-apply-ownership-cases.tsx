@@ -50,7 +50,7 @@ function proposal(): WorkflowProposalResponse {
 function options(): AppCommandsOptions {
   return {
     store: useWorkflowStore.getState() as unknown as AppCommandsOptions['store'], permissions,
-    projectedRuns: [], refreshPlatform: vi.fn(async () => undefined), projectRunSummary: vi.fn(),
+    projectedRuns: [], refreshPlatform: vi.fn(async () => undefined), addCredential: vi.fn(), projectRunSummary: vi.fn(),
     loadStatus: vi.fn(async () => undefined), runTransitionGuard: {} as AppCommandsOptions['runTransitionGuard'],
     runPlatformMutation: vi.fn() as AppCommandsOptions['runPlatformMutation'],
     setValidationIssues: vi.fn(), setAiReviewIssues: vi.fn(), setRunInputOpen: vi.fn(),

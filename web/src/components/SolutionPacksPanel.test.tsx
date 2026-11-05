@@ -1,10 +1,12 @@
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { useState } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
+import { useWorkflowStore } from '../store'
 import type { Credential, SolutionPackPublic } from '../types'
 import { changeRuntimeLocale } from '../i18n'
+import type { CreateCredential } from './CredentialCreateDialog'
 import { SolutionPacksPanel } from './SolutionPacksPanel'
 
 vi.mock('../api', async (importOriginal) => ({
@@ -72,9 +74,13 @@ function renderPanel(credentials: Credential[]) {
 }
 
 describe('<SolutionPacksPanel />', () => {
+  // The cold dialog chunk can outlast a query's timeout on a loaded machine.
+  beforeAll(() => import('./connection-dialogs'))
+
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api).mockResolvedValue({ credentials: [], managedStorageAvailable: true })
+    useWorkflowStore.setState({ activeTab: 'packs' })
   })
 
   it('treats a credential as present only when both kind and name match', () => {
@@ -83,8 +89,8 @@ describe('<SolutionPacksPanel />', () => {
     ])
 
     const row = credentialRow('ops_slack')
-    expect(row).toHaveAttribute('data-state', 'missing')
-    expect(row).toHaveAccessibleName('ops_slack missing (slack_webhook)')
+    expect(row).toHaveAttribute('data-state', 'wrongKind')
+    expect(row).toHaveAccessibleName('ops_slack (slack_webhook): Exists as github_token')
 
     rerender(
       <SolutionPacksPanel
@@ -97,7 +103,7 @@ describe('<SolutionPacksPanel />', () => {
     )
 
     expect(row).toHaveAttribute('data-state', 'ready')
-    expect(row).toHaveAccessibleName('ops_slack configured (slack_webhook)')
+    expect(row).toHaveAccessibleName('ops_slack (slack_webhook): Connected')
     expect(row).toHaveTextContent('Connected')
   })
 
@@ -202,36 +208,143 @@ describe('<SolutionPacksPanel />', () => {
     expect(screen.queryByTestId('pack-connect-incident-triage-ops_slack')).not.toBeInTheDocument()
   })
 
-  it('names the kind that holds the name and offers no Connect, because creating it would conflict', () => {
-    render(
+  const FUTURE = new Date(Date.now() + 86_400_000).toISOString()
+  const PAST = new Date(Date.now() - 86_400_000).toISOString()
+
+  function renderConnectable(credentials: Credential[], extra: { canInstall?: boolean; credentialsKnown?: boolean } = {}) {
+    return render(
       <SolutionPacksPanel
         packs={[PACK]}
-        credentials={[{ id: 'cred-1', name: 'ops_slack', kind: 'github_token' }]}
+        credentials={credentials}
+        onInstall={handlers.onInstall}
+        onSampleRun={handlers.onSampleRun}
+        onInjectFailure={handlers.onInjectFailure}
+        onCreateCredential={vi.fn()}
+        {...extra}
+      />,
+    )
+  }
+
+  it.each([
+    ['a name held by another kind', [{ id: 'c', name: 'ops_slack', kind: 'github_token' }], 'wrongKind', 'Exists as github_token', []],
+    ['an expired credential', [{ id: 'c', name: 'ops_slack', kind: 'slack_webhook', expiresAt: PAST }], 'expired', 'Expired', []],
+    ['a variable unset on the server', [{ id: 'c', name: 'ops_slack', kind: 'slack_webhook', storage: 'environment' as const }], 'unset', 'Secret not set', ['ops_slack']],
+  ])('offers Review instead of Connect on %s, and never counts it as ready', async (_label, credentials, state, text, unset) => {
+    vi.mocked(api).mockResolvedValue({
+      managedStorageAvailable: true,
+      credentials: unset.map((name) => ({ name, secretRefPresent: false })),
+    })
+    renderConnectable(credentials)
+
+    const row = credentialRow('ops_slack')
+    await waitFor(() => expect(row).toHaveAttribute('data-state', state))
+    expect(row).toHaveTextContent(text)
+    expect(row).toHaveAccessibleName(`ops_slack (slack_webhook): ${text}`)
+    expect(checklist()).toHaveAccessibleName('Before installing · 0 of 1 ready')
+    expect(screen.getByTestId('pack-install-incident-triage')).toHaveClass('ui-button--secondary')
+    expect(screen.getByTestId('pack-note-incident-triage')).toHaveTextContent('Set up ops_slack before running it.')
+    expect(screen.queryByTestId('pack-connect-incident-triage-ops_slack')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('pack-review-incident-triage-ops_slack'))
+    expect(useWorkflowStore.getState().activeTab).toBe('credentials')
+  })
+
+  it('counts a credential with a future expiry as ready', () => {
+    renderConnectable([{ id: 'c', name: 'ops_slack', kind: 'slack_webhook', expiresAt: FUTURE }])
+
+    expect(credentialRow('ops_slack')).toHaveAttribute('data-state', 'ready')
+    expect(screen.getByTestId('pack-install-incident-triage')).toHaveClass('ui-button--primary')
+    expect(screen.queryByTestId('pack-review-incident-triage-ops_slack')).not.toBeInTheDocument()
+  })
+
+  it('reads health once for the whole panel, however many rows and dialogs it shows', async () => {
+    render(
+      <SolutionPacksPanel
+        packs={[{
+          ...PACK,
+          requiredCredentials: [
+            ...PACK.requiredCredentials,
+            { name: 'ops_github', kind: 'github_token', purpose: 'Files the incident' },
+          ],
+        }]}
+        credentials={[]}
         onInstall={handlers.onInstall}
         onSampleRun={handlers.onSampleRun}
         onInjectFailure={handlers.onInjectFailure}
         onCreateCredential={vi.fn()}
       />,
     )
+    fireEvent.click(screen.getByTestId('pack-connect-incident-triage-ops_slack'))
+    await screen.findByLabelText(/^Secret value/)
 
-    expect(credentialRow('ops_slack')).toHaveTextContent('Exists as github_token')
-    expect(screen.queryByTestId('pack-connect-incident-triage-ops_slack')).not.toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/credentials/health')).toHaveLength(1)
   })
 
-  function ConnectHarness({ pack = PACK, onCreate }: {
+  it('keeps a row ready when health cannot be read, since nothing proves the secret is unset', async () => {
+    vi.mocked(api).mockRejectedValue(new Error('offline'))
+    renderConnectable([{ id: 'c', name: 'ops_slack', kind: 'slack_webhook' }])
+
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/credentials/health'))
+    expect(credentialRow('ops_slack')).toHaveAttribute('data-state', 'ready')
+  })
+
+  it('forgets which secrets were unset when the list stops being known, as on an organization switch', async () => {
+    const panel = (credentialsKnown: boolean) => (
+      <SolutionPacksPanel
+        packs={[PACK]}
+        credentials={[{ id: 'c', name: 'ops_slack', kind: 'slack_webhook' }]}
+        credentialsKnown={credentialsKnown}
+        onInstall={handlers.onInstall}
+        onSampleRun={handlers.onSampleRun}
+        onInjectFailure={handlers.onInjectFailure}
+      />
+    )
+    vi.mocked(api).mockResolvedValue({ credentials: [{ name: 'ops_slack', secretRefPresent: false }] })
+    const { rerender } = render(panel(true))
+    await waitFor(() => expect(credentialRow('ops_slack')).toHaveAttribute('data-state', 'unset'))
+
+    vi.mocked(api).mockRejectedValue(new Error('offline'))
+    rerender(panel(false))
+    rerender(panel(true))
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(2))
+    expect(credentialRow('ops_slack')).toHaveAttribute('data-state', 'ready')
+  })
+
+  it('claims nothing about a credential list it could not read', () => {
+    renderConnectable([], { credentialsKnown: false })
+
+    const row = credentialRow('ops_slack')
+    expect(row).toHaveAttribute('data-state', 'unknown')
+    expect(row).toHaveTextContent('Status unavailable')
+    expect(row).toHaveAccessibleName('ops_slack (slack_webhook): Status unavailable')
+    expect(row).not.toHaveTextContent('missing')
+    expect(checklist()).toHaveAccessibleName('Before installing')
+    expect(screen.queryByTestId('pack-connect-incident-triage-ops_slack')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('pack-review-incident-triage-ops_slack')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('pack-note-incident-triage')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pack-install-incident-triage')).toHaveClass('ui-button--secondary')
+    expect(api).not.toHaveBeenCalled()
+  })
+
+  function ConnectHarness({ pack = PACK, onCreate, createCredential, canInstall }: {
     pack?: SolutionPackPublic
-    onCreate: (credential: { name: string; kind: string; secretValue?: string }) => void
+    onCreate?: (credential: { name: string; kind: string; secretValue?: string }) => void
+    /** Replaces the always-successful create: gets the list setter, as the app's refresh would. */
+    createCredential?: (setCredentials: (list: Credential[]) => void) => ReturnType<CreateCredential>
+    canInstall?: boolean
   }) {
     const [credentials, setCredentials] = useState<Credential[]>([])
     return (
       <SolutionPacksPanel
         packs={[pack]}
         credentials={credentials}
+        canInstall={canInstall}
         onInstall={handlers.onInstall}
         onSampleRun={handlers.onSampleRun}
         onInjectFailure={handlers.onInjectFailure}
         onCreateCredential={async (credential) => {
-          onCreate(credential)
+          if (createCredential) return createCredential(setCredentials)
+          onCreate?.(credential)
           setCredentials((current) => [...current, { id: credential.name, name: credential.name, kind: credential.kind }])
           return true
         }}
@@ -280,6 +393,62 @@ describe('<SolutionPacksPanel />', () => {
     fireEvent.submit(secret.closest('form')!)
 
     await waitFor(() => expect(screen.getByTestId(target)).toHaveFocus())
+  })
+
+  async function submitConnect() {
+    fireEvent.click(screen.getByTestId('pack-connect-incident-triage-ops_slack'))
+    const secret = await screen.findByLabelText(/^Secret value/)
+    fireEvent.change(secret, { target: { value: 'hunter2' } })
+    fireEvent.submit(secret.closest('form')!)
+    return secret
+  }
+
+  it.each([
+    ['the same kind', 'slack_webhook', 'ready'],
+    ['another kind', 'github_token', 'wrongKind'],
+  ])('closes on a conflict once the refreshed list shows the name, held by %s', async (_label, kind, state) => {
+    render(<ConnectHarness createCredential={async (setCredentials) => {
+      setCredentials([{ id: 'other-admin', name: 'ops_slack', kind }])
+      return false
+    }} />)
+    await submitConnect()
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(credentialRow('ops_slack')).toHaveAttribute('data-state', state)
+    expect(screen.queryByTestId('pack-connect-incident-triage-ops_slack')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('pack-install-incident-triage')).toHaveFocus())
+  })
+
+  it('stays open with the typed secret when a failed create changes nothing in the list', async () => {
+    const create = vi.fn(async () => false)
+    render(<ConnectHarness createCredential={create} />)
+    const secret = await submitConnect()
+
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled())
+    expect(secret).toHaveValue('hunter2')
+    expect(credentialRow('ops_slack')).toHaveAttribute('data-state', 'missing')
+  })
+
+  it('moves focus as soon as the list holds the name, without waiting for the refresh behind the create', async () => {
+    let finish = (_created: boolean) => {}
+    render(<ConnectHarness createCredential={(setCredentials) => {
+      setCredentials([{ id: 'new', name: 'ops_slack', kind: 'slack_webhook' }])
+      return new Promise((resolve) => { finish = resolve })
+    }} />)
+    await submitConnect()
+
+    await waitFor(() => expect(screen.getByTestId('pack-install-incident-triage')).toHaveFocus())
+    await act(async () => { finish(true) })
+    expect(screen.getByTestId('pack-install-incident-triage')).toHaveFocus()
+  })
+
+  it('moves focus to the checklist when the role connects but cannot install', async () => {
+    render(<ConnectHarness canInstall={false} onCreate={vi.fn()} />)
+    await submitConnect()
+
+    await waitFor(() => expect(checklist()).toHaveFocus())
+    expect(screen.getByTestId('pack-install-incident-triage')).toBeDisabled()
   })
 
   it('returns focus to the opener when the dialog is cancelled', async () => {
@@ -333,7 +502,7 @@ describe('<SolutionPacksPanel />', () => {
     const { rerender } = render(panel([{ id: 'cred-1', name: 'ops_slack', kind: 'slack_webhook' }]))
 
     const note = screen.getByTestId('pack-note-incident-triage')
-    expect(note).toHaveTextContent('Connect ops_github and ops_pager before running it.')
+    expect(note).toHaveTextContent('Set up ops_github and ops_pager before running it.')
     const install = screen.getByRole('button', { name: 'Install' })
     expect(install).toHaveAccessibleDescription(note.textContent)
     fireEvent.click(install)
@@ -367,7 +536,7 @@ describe('<SolutionPacksPanel />', () => {
         />,
       )
       expect(screen.getByTestId('pack-note-incident-triage'))
-        .toHaveTextContent('Conecta ops_slack y ops_github antes de ejecutarlo.')
+        .toHaveTextContent('Configura ops_slack y ops_github antes de ejecutarlo.')
     } finally {
       await act(() => changeRuntimeLocale('en'))
     }

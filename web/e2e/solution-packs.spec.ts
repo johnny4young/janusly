@@ -70,8 +70,8 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
 
   const incidentPack = page.getByTestId('solution-pack-incident-triage')
   await expect(incidentPack).toBeVisible()
-  await expect(incidentPack.getByLabel('ops_github missing (github_token)')).toBeVisible()
-  await expect(incidentPack.getByLabel('ops_slack missing (slack_webhook)')).toBeVisible()
+  await expect(incidentPack.getByLabel('ops_github (github_token): Credential missing')).toBeVisible()
+  await expect(incidentPack.getByLabel('ops_slack (slack_webhook): Credential missing')).toBeVisible()
   const checklist = incidentPack.getByRole('region', { name: /^Before installing/ })
   await expect(checklist).toContainText('0 of 2 ready')
 
@@ -81,7 +81,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   await expect(connectDialog.getByLabel(/^Connection kind/)).toHaveValue('slack_webhook')
   await connectDialog.getByLabel(/^Secret value/).fill('e2e-solution-pack-secret')
   await connectDialog.getByRole('button', { name: 'Add connection', exact: true }).click()
-  await expect(incidentPack.getByLabel('ops_slack configured (slack_webhook)')).toBeVisible()
+  await expect(incidentPack.getByLabel('ops_slack (slack_webhook): Connected')).toBeVisible()
   await expect(checklist).toContainText('1 of 2 ready')
   await expect(incidentPack.getByTestId('pack-connect-incident-triage-ops_github')).toBeFocused()
   await dismissToasts(page)

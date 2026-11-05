@@ -51,6 +51,7 @@ function options(): AppCommandsOptions {
     permissions: ['runs.read', 'runs.start', 'workflows.write'],
     projectedRuns: [],
     refreshPlatform: vi.fn(async () => undefined),
+    addCredential: vi.fn(),
     projectRunSummary: vi.fn(),
     loadStatus: vi.fn(async () => undefined),
     runTransitionGuard: createRunTransitionGuard(

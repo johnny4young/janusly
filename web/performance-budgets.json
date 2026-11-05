@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 606.3,
+  "artifactGzipKiB": 607.5,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 562.1
+    "maxGzipKiB": 563.0
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -162,7 +162,7 @@
     "SlackInteractionsPanel.js": 2.56,
     "SnippetInsertMenu.js": 3.92,
     "SolutionPacksPanel.css": 0.43,
-    "SolutionPacksPanel.js": 1.85,
+    "SolutionPacksPanel.js": 2.55,
     "supabase-runtime.js": 21.13,
     "ToolInputFields.js": 1.51,
     "UpstreamHealthPanel.js": 2.39,
