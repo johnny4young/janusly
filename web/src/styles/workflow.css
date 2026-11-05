@@ -229,10 +229,89 @@
   gap: 8px;
 }
 
-.template-catalog-section + .template-catalog-section {
-  margin-top: 4px;
-  padding-top: 14px;
-  border-top: 1px solid var(--we-line);
+.template-catalog-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.template-catalog-toolbar .we-panel-search {
+  flex: 1 1 240px;
+  margin: 0;
+}
+
+.we-recipe-catalog {
+  container-type: inline-size;
+  display: grid;
+  gap: 10px;
+}
+
+.we-recipe-catalog__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.we-recipe-catalog__grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@container (max-width: 760px) {
+  .we-recipe-catalog__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@container (max-width: 480px) {
+  .we-recipe-catalog__grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.we-recipe-card strong,
+.we-recipe-card__description {
+  -webkit-box-orient: vertical;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.we-recipe-card__footer {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  justify-content: space-between;
+  margin-top: auto;
+  width: 100%;
+}
+
+.we-recipe-card__footer .list-card-action { margin-top: 0; }
+
+.we-recipe-card__chain {
+  align-items: center;
+  color: var(--we-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.we-recipe-card__step {
+  align-items: center;
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 5px;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.we-recipe-card__step svg {
+  color: var(--we-primary-text);
+  height: 12px;
+  width: 12px;
 }
 
 /* ==========================================================================
@@ -759,6 +838,3 @@
   text-decoration: none;
   font-weight: 600;
 }
-
-.recovery-center-composer__head .section-kicker { margin-bottom: 0; }
-

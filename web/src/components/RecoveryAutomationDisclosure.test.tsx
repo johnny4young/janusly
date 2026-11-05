@@ -41,6 +41,7 @@ describe('<RecoveryAutomationDisclosure />', () => {
     render(
       <RecoveryAutomationDisclosure
         canRecover
+        canStartRuns
         canCancelCampaign
         canReadAutoHealing
         canDecideAutoHealing
@@ -65,6 +66,7 @@ describe('<RecoveryAutomationDisclosure />', () => {
     render(
       <RecoveryAutomationDisclosure
         canRecover={false}
+        canStartRuns={false}
         canCancelCampaign={false}
         canReadAutoHealing={false}
         canDecideAutoHealing={false}

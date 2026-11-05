@@ -122,6 +122,17 @@ describe('useRunPolling request ownership', () => {
     expect(useWorkflowStore.getState().toasts).toEqual([])
   })
 
+  it('returns to idle when the run closes, not to an offline state', async () => {
+    vi.mocked(api).mockImplementation(() => new Promise(() => {}))
+    useWorkflowStore.setState({ runId: 'run-a' })
+    const { rerender } = render(<Harness runId="run-a" />)
+    await waitFor(() => expect(useWorkflowStore.getState().streamStatus).toBe('connecting'))
+
+    rerender(<Harness runId={null} />)
+
+    expect(useWorkflowStore.getState().streamStatus).toBe('idle')
+  })
+
   it('serializes interval ticks while a status request is in flight', async () => {
     vi.useFakeTimers()
     try {

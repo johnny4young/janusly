@@ -1,4 +1,4 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openTemplatePacks, openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -38,7 +38,7 @@ test('persistent local stack exposes configured packs and recoverable provider f
   await openWorkspaceSection(page, 'Workflows', 'Build')
   await expect(page.getByTestId('canvas-empty')).toBeVisible()
   await expect(page.locator('.react-flow__node')).toHaveCount(0)
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await openTemplatePacks(page)
   await expect(page.getByRole('heading', { name: 'Templates', exact: true })).toBeVisible()
 
   const incidentPack = page.getByTestId('solution-pack-incident-triage')
