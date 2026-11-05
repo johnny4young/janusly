@@ -1,6 +1,8 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '../api'
+import { changeRuntimeLocale } from '../i18n'
 import { usePlatformMutation } from './usePlatformMutation'
 
 const addToast = vi.fn()
@@ -48,6 +50,24 @@ describe('usePlatformMutation', () => {
 
     expect(order).toEqual(['request', 'effect', 'toast'])
     expect(addToast).toHaveBeenLastCalledWith('saved 8', 'info')
+  })
+
+  it('translates a coded API failure instead of showing the server\'s English', async () => {
+    await changeRuntimeLocale('es')
+    try {
+      const { result } = renderHook(() => usePlatformMutation())
+      await act(async () => {
+        await result.current({
+          request: async () => {
+            throw new ApiError('Credential name already exists', { code: 'credentials_conflict', statusCode: 409 })
+          },
+          failureMessage: 'fallback',
+        })
+      })
+      expect(addToast).toHaveBeenLastCalledWith('Ya existe una credencial con ese nombre', 'error')
+    } finally {
+      await changeRuntimeLocale('en')
+    }
   })
 
   it('uses Error messages and falls back for non-Error failures', async () => {

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 import type { DeadLetter } from './dead-letter-types'
@@ -111,6 +111,9 @@ it.each(['failure', 'organization'])('discards pending consent when the %s chang
 })
 
 describe('Suggest fix without an AI key', () => {
+  // The cold dialog chunk can outlast a query's timeout on a loaded machine.
+  beforeAll(() => import('./RecoveryDialog'))
+
   const openDialog = async (canStartRuns: boolean) => {
     useWorkflowStore.setState({ aiHealth: { enabled: false, model: 'm', timeoutMs: 1, maxRetries: 0 } })
     vi.mocked(readDeadLetterDetail).mockResolvedValue(detail('open', 'boom'))

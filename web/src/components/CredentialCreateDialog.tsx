@@ -32,22 +32,33 @@ export function CredentialCreateDialog({
   onClose,
   onCreate,
   managedStorageAvailable,
+  preset,
 }: {
   onClose: () => void
   onCreate: CreateCredential
   managedStorageAvailable: boolean
+  /** Locks name and kind: a required credential only counts when both match. */
+  preset?: { name: string; kind: string }
 }) {
   const { t } = useT()
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const nameRef = useRef<HTMLInputElement | null>(null)
-  const [name, setName] = useState('')
-  const [kind, setKind] = useState('generic')
+  const secretInputRef = useRef<HTMLInputElement | null>(null)
+  const [name, setName] = useState(preset?.name ?? '')
+  const [kind, setKind] = useState(preset?.kind ?? 'generic')
   const [storage, setStorage] = useState<'managed' | 'environment'>('managed')
   const [secretValue, setSecretValue] = useState('')
   const [secretRef, setSecretRef] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  useDialogFocusTrap(dialogRef, { initialFocus: nameRef, onEscape: submitting ? undefined : onClose })
+  const firstFieldRef = preset ? secretInputRef : nameRef
+  useDialogFocusTrap(dialogRef, { initialFocus: firstFieldRef, onEscape: submitting ? undefined : onClose })
+
+  // Every control disables while submitting, which would drop focus out of the modal.
+  useEffect(() => {
+    if (submitting) dialogRef.current?.focus()
+    else if (document.activeElement === dialogRef.current) firstFieldRef.current?.focus()
+  }, [submitting, firstFieldRef])
 
   useEffect(() => {
     if (managedStorageAvailable || storage !== 'managed') return
@@ -86,6 +97,7 @@ export function CredentialCreateDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="credential-create-title"
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="run-input-dialog__header">
@@ -126,14 +138,20 @@ export function CredentialCreateDialog({
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                     autoComplete="off"
+                    disabled={Boolean(preset)}
                     required
                   />
                 )}
               </FormField>
               <FormField id="credential-kind" label={t('rightPanel.credentials.kindLabel')}>
                 {(controlProps) => (
-                  <select {...controlProps} value={kind} onChange={(event) => setKind(event.target.value)}>
-                    {CREDENTIAL_KINDS.map((option) => <option key={option} value={option}>{option}</option>)}
+                  <select
+                    {...controlProps}
+                    value={kind}
+                    disabled={Boolean(preset)}
+                    onChange={(event) => setKind(event.target.value)}
+                  >
+                    {(preset ? [preset.kind] : CREDENTIAL_KINDS).map((option) => <option key={option} value={option}>{option}</option>)}
                   </select>
                 )}
               </FormField>
@@ -173,6 +191,7 @@ export function CredentialCreateDialog({
                 {(controlProps) => storage === 'managed' ? (
                   <input
                     {...controlProps}
+                    ref={secretInputRef}
                     type="password"
                     autoComplete="new-password"
                     value={secretValue}
@@ -183,6 +202,7 @@ export function CredentialCreateDialog({
                 ) : (
                   <input
                     {...controlProps}
+                    ref={secretInputRef}
                     value={secretRef}
                     onChange={(event) => setSecretRef(event.target.value)}
                     placeholder={t('rightPanel.credentials.envPlaceholder')}
