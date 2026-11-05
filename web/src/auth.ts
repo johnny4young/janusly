@@ -39,7 +39,9 @@ import {
 } from './api-request-lifecycle'
 import {
   clearAuthCallback,
+  clearPasswordSetup,
   markAuthCallbackFailed,
+  passwordSetupUser,
   pendingAuthCallbackToken,
   takeAuthCallbackSession,
 } from './auth-callback'
@@ -55,18 +57,18 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 // The production build removes every other GoTrueClient method.
 type SupabaseAuthClient = Pick<
   GoTrueClient,
-  'getSession' | 'onAuthStateChange' | 'setSession' | 'signInWithPassword' | 'signOut' | 'signUp'
+  'getSession' | 'onAuthStateChange' | 'setSession' | 'signInWithPassword' | 'signOut' | 'signUp' | 'updateUser'
 >
 type SupabaseAuthFacade = { auth: SupabaseAuthClient }
 
 let supabaseClientPromise: Promise<SupabaseAuthFacade | null> | null = null
 
 /**
- * The email a captured callback would sign in as, or null when there is nothing
+ * The account a captured callback would sign in as, or null when there is nothing
  * to approve. Asks the auth server directly: the client's user lookup can drop
  * the stored session when it rejects a token.
  */
-export async function resolveAuthCallbackIdentity(): Promise<string | null> {
+export async function resolveAuthCallbackIdentity(): Promise<{ id: string; email: string } | null> {
   const token = pendingAuthCallbackToken()
   if (!token) return null
   if (!isSupabaseConfigured) {
@@ -80,12 +82,28 @@ export async function resolveAuthCallbackIdentity(): Promise<string | null> {
       headers: { apikey: supabaseAnonKey!, Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
-    const user = response.ok ? await response.json() as { email?: unknown } : null
-    if (typeof user?.email === 'string' && user.email) return user.email
+    const user = response.ok ? await response.json() as { id?: unknown; email?: unknown } : null
+    if (typeof user?.id === 'string' && typeof user.email === 'string' && user.email) {
+      return { id: user.id, email: user.email }
+    }
   } catch {
     // Reported below with every other rejected link.
   }
   markAuthCallbackFailed()
+  return null
+}
+
+/**
+ * The email to set a password for, or null when no step is owed. A failed read
+ * keeps the marker, so a network error cannot retire the step.
+ */
+export async function resolvePasswordSetupEmail(): Promise<string | null> {
+  const userId = passwordSetupUser()
+  if (!userId) return null
+  const { data, error } = await AuthProvider.getSession()
+  const user = data.session?.user
+  if (user?.id === userId && user.email) return user.email
+  if (!error) clearPasswordSetup()
   return null
 }
 
@@ -340,7 +358,9 @@ export const AuthProvider = {
     resumeApiRequestLifecycle()
     const client = await getSupabaseClient()
     if (!client) return devAuthResponse
-    return client.auth.signInWithPassword({ email, password })
+    const response = await client.auth.signInWithPassword({ email, password })
+    if (!response.error) clearPasswordSetup()
+    return response
   },
   signUp: async (email: string, password: string) => {
     resumeApiRequestLifecycle()
@@ -367,7 +387,17 @@ export const AuthProvider = {
     }
     const client = await getSupabaseClient()
     if (!client) return devSignOutResponse
-    return client.auth.signOut()
+    const response = await client.auth.signOut()
+    if (!response.error) clearPasswordSetup()
+    return response
+  },
+  updatePassword: async (password: string) => {
+    resumeApiRequestLifecycle()
+    const client = await getSupabaseClient()
+    if (!client) return { error: null }
+    const { error } = await client.auth.updateUser({ password })
+    if (!error) clearPasswordSetup()
+    return { error }
   },
   getSession: async () => {
     if (await ensureBrowserSession()) return devSessionResponse
