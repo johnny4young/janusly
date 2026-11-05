@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Gauge, TimerReset, X } from 'lucide-react'
+import { AlertCircle, TimerReset, X } from 'lucide-react'
 
 import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
@@ -19,7 +19,7 @@ import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
 type CampaignPreview = {
   canCreate: boolean
   clusterSignature: string | null
-  eligible: Array<{ deadLetterId: string; runId: string; nodeId: string }>
+  eligible: Array<{ deadLetterId: string; runId: string; nodeId: string; sideEffect?: boolean }>
   rejected: Array<{ deadLetterId: string; reason: string }>
 }
 
@@ -53,6 +53,20 @@ function isCampaignCreateResult(value: unknown): value is CampaignCreateResult {
 }
 
 const PACING_OPTIONS_MS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000] as const
+
+function formatEstimate(totalMs: number): string {
+  const seconds = Math.ceil(totalMs / 1_000)
+  const [value, unit] = seconds < 120 ? [seconds, 'second'] : [Math.ceil(seconds / 60), 'minute']
+  return `~${new Intl.NumberFormat(getResolvedLocale(), { style: 'unit', unit, unitDisplay: 'short' }).format(value)}`
+}
+
+function sideEffectSteps(preview: CampaignPreview | null): Array<[string, number]> {
+  const steps = new Map<string, number>()
+  for (const entry of preview?.eligible ?? []) {
+    if (entry.sideEffect) steps.set(entry.nodeId, (steps.get(entry.nodeId) ?? 0) + 1)
+  }
+  return [...steps]
+}
 
 export function ReplayCampaignDialog({
   deadLetterIds,
@@ -128,6 +142,9 @@ export function ReplayCampaignDialog({
     if (!submitting) onClose()
   }
 
+  const eligibleCount = preview?.eligible.length ?? 0
+  const writingSteps = sideEffectSteps(preview)
+
   return (
     <div className="run-input-backdrop" onClick={close}>
       <div
@@ -142,9 +159,7 @@ export function ReplayCampaignDialog({
         <header className="run-input-dialog__header">
           <span className="run-input-dialog__icon" aria-hidden="true"><TimerReset size={18} /></span>
           <div className="run-input-dialog__heading">
-            <div className="section-kicker">{t('replayCampaign.dialog.kicker')}</div>
             <h2 id="replay-campaign-title">{t('replayCampaign.dialog.title')}</h2>
-            <p className="helper-text">{t('replayCampaign.dialog.description')}</p>
           </div>
           <button
             type="button"
@@ -184,6 +199,31 @@ export function ReplayCampaignDialog({
                 </span>
               )}
             </div>
+            {eligibleCount > 0 && (
+              <dl className="we-campaign-preview__stats" data-testid="replay-campaign-stats">
+                {([
+                  ['failures', eligibleCount],
+                  ['runs', new Set(preview?.eligible.map((entry) => entry.runId)).size],
+                  ['sideEffectSteps', writingSteps.length],
+                  ['estimate', formatEstimate(eligibleCount * pacingMs)],
+                ] as const).map(([key, value]) => (
+                  <div key={key}>
+                    <dt>{t(`replayCampaign.dialog.${key}`)}</dt>
+                    <dd data-testid={`replay-campaign-stat-${key}`}>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {writingSteps.length > 0 && (
+              <ul className="we-campaign-preview__rejections" data-testid="replay-campaign-side-effects">
+                {writingSteps.map(([nodeId, count]) => (
+                  <li key={nodeId}>
+                    <code>{nodeId}</code>
+                    <span>{t('replayCampaign.dialog.sideEffect', { count })}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
             {preview && preview.rejected.length > 0 && (
               <ul className="we-campaign-preview__rejections" data-testid="replay-campaign-rejections">
                 {preview.rejected.map((item) => (
@@ -223,9 +263,6 @@ export function ReplayCampaignDialog({
               </option>
             ))}
           </SelectControl>
-          <p className="helper-text we-campaign-pace-helper">
-            <Gauge size={13} aria-hidden="true" /> {t('replayCampaign.dialog.paceHelper')}
-          </p>
 
           <footer className="run-input-dialog__footer">
             <Button variant="secondary" type="button"  onClick={close} disabled={submitting}>

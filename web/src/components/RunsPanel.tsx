@@ -656,6 +656,7 @@ export function RunsPanel({
         canUseRecovery={canUseRecovery}
         canReadAutoHealing={canReadAutoHealing}
         canDecideAutoHealing={canDecideAutoHealing}
+        onOpenRun={onOpenRun}
       />}
 
       {!recoveryMode && !activityDetail && <RunHistoryList

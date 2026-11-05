@@ -342,11 +342,22 @@
   padding: 2px 5px;
 }
 
-.we-campaign-pace-helper {
-  align-items: center;
-  display: flex;
-  gap: 6px;
-  margin: -8px 0 0;
+.we-campaign-preview__stats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  margin: 0;
+}
+
+.we-campaign-preview__stats dt {
+  color: var(--we-muted);
+  font-size: 11px;
+}
+
+.we-campaign-preview__stats dd {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
 }
 
 @media (max-width: 480px) {

@@ -18,9 +18,11 @@ VALUES ($1, $2, $3, $4, $5);
 SELECT * FROM replay_campaigns WHERE org_id = $1 AND id = $2;
 
 -- name: ListReplayCampaignItems :many
-SELECT * FROM replay_campaign_items
-WHERE org_id = $1 AND campaign_id = $2
-ORDER BY position;
+SELECT i.*, d.run_id, d.node_id
+FROM replay_campaign_items i
+LEFT JOIN dead_letters d ON d.org_id = i.org_id AND d.id = i.dead_letter_id
+WHERE i.org_id = $1 AND i.campaign_id = $2
+ORDER BY i.position;
 
 -- name: ListReplayCampaigns :many
 SELECT * FROM replay_campaigns

@@ -15,6 +15,10 @@ impact attribution, and feedback.
   Savepoint recovery failures abort completion rather than claiming success.
 - Replay claims are compare-and-set and bound to the exact failed task.
 - Validation replay suppresses external write effects.
+- A replay campaign preview marks each eligible step with `sideEffect`, from the
+  same classifier readiness uses (write-side tools, non-read HTTP methods, MCP
+  tools and write-enabled agents), so an operator sees repeated writes before
+  starting. Campaign detail links each item to its run and step.
 - Circuit breaking pauses every run entry point and requires explicit resume.
 - Buffered event triggers resume oldest-first; missed schedule ticks are not
   synthesized.

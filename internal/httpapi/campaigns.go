@@ -18,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -35,6 +37,7 @@ type cohortEntry struct {
 	DeadLetterID string `json:"deadLetterId"`
 	RunID        string `json:"runId"`
 	NodeID       string `json:"nodeId"`
+	SideEffect   bool   `json:"sideEffect"`
 }
 
 type cohortRejection struct {
@@ -76,6 +79,10 @@ func (s *V1Server) previewCohort(r *http.Request, orgID string, requestedIDs []s
 		sig   string
 	}
 	var candidates []candidate
+	registry := executors.SharedToolRegistry()
+	sideEffectOptions := domain.ReadinessOptions{
+		IsWriteSideTool: func(name string, _ map[string]any) bool { return registry.IsWriteSide(name) },
+	}
 	preview := cohortPreview{Eligible: []cohortEntry{}, Rejected: []cohortRejection{}}
 	for _, id := range ids {
 		item, ok := byID[id]
@@ -87,10 +94,7 @@ func (s *V1Server) previewCohort(r *http.Request, orgID string, requestedIDs []s
 			preview.Rejected = append(preview.Rejected, cohortRejection{DeadLetterID: id, Reason: "already_" + item.Status})
 			continue
 		}
-		var node struct {
-			Type   string         `json:"type"`
-			Config map[string]any `json:"config"`
-		}
+		var node domain.Node
 		if err := json.Unmarshal(item.NodeJson, &node); err != nil || node.Type == "" {
 			preview.Rejected = append(preview.Rejected, cohortRejection{DeadLetterID: id, Reason: "invalid_node_snapshot"})
 			continue
@@ -100,7 +104,11 @@ func (s *V1Server) previewCohort(r *http.Request, orgID string, requestedIDs []s
 			NodeType: node.Type, NodeID: item.NodeID, ToolName: toolName,
 		}).Signature
 		candidates = append(candidates, candidate{
-			entry: cohortEntry{DeadLetterID: id, RunID: item.RunID, NodeID: item.NodeID}, sig: sig,
+			entry: cohortEntry{
+				DeadLetterID: id, RunID: item.RunID, NodeID: item.NodeID,
+				SideEffect: domain.IsSensitiveActionNodeWithOptions(node, sideEffectOptions),
+			},
+			sig: sig,
 		})
 	}
 
@@ -241,7 +249,8 @@ func (s *V1Server) campaignDetail(r *http.Request, rc v1Request, id string) (map
 	for _, item := range items {
 		itemViews = append(itemViews, map[string]any{
 			"id": item.ID, "orgId": item.OrgID, "campaignId": item.CampaignID,
-			"deadLetterId": item.DeadLetterID, "position": item.Position,
+			"deadLetterId": item.DeadLetterID, "runId": textOrNull(item.RunID),
+			"nodeId": textOrNull(item.NodeID), "position": item.Position,
 			"status": item.Status, "attemptCount": item.AttemptCount,
 			"error": textOrNull(item.Error), "completedAt": timeOrNull(item.CompletedAt),
 			"createdAt": isoMillis(item.CreatedAt),

@@ -1,72 +1,75 @@
-/* Styles for ReplayCampaignsCard.tsx: shipped with the lazy chunk that renders them (moved from platform.css). */
+/* Styles for ReplayCampaignsCard.tsx: shipped with the lazy chunk that renders them. */
 
-/* Paced recovery campaigns — durable progress stays compact above the queue. */
-.we-replay-campaigns__list {
-  display: grid;
-  gap: 10px;
+.we-recovery-jobs {
+  border-collapse: collapse;
+  font-size: 12px;
   margin-top: 12px;
+  width: 100%;
 }
 
-.we-replay-campaign {
-  background: var(--we-surface-2);
-  border: 1px solid var(--we-line);
-  border-radius: 10px;
-  display: grid;
-  gap: 9px;
-  padding: 12px;
+.we-recovery-jobs th {
+  color: var(--we-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 10px 6px;
+  text-align: left;
 }
 
-.we-replay-campaign__identity {
-  align-items: center;
-  display: flex;
-  gap: 9px;
-  min-width: 0;
+.we-recovery-jobs td {
+  border-top: 1px solid var(--we-line);
+  padding: 10px;
+  vertical-align: top;
 }
 
-.we-replay-campaign__identity > div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.we-replay-campaign__identity strong,
-.we-replay-campaign__identity small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.we-replay-campaign__identity small {
+.we-recovery-jobs small {
   color: var(--we-muted);
   font-size: 11px;
 }
 
-.we-replay-campaign__icon {
+.we-recovery-jobs__job strong,
+.we-recovery-jobs__job small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.we-recovery-jobs__progress {
+  min-width: 130px;
+}
+
+.we-recovery-jobs__progress small {
+  margin-left: 6px;
+}
+
+.we-recovery-jobs__detail td {
+  background: var(--we-surface-2);
+  border-top: 0;
+}
+
+.we-recovery-jobs__runs {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-recovery-jobs__runs li {
   align-items: center;
-  background: var(--we-info-soft);
-  border-radius: 8px;
-  color: var(--we-info);
-  display: inline-flex;
-  flex: 0 0 auto;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
 }
 
-.we-replay-campaign__icon[data-status="completed"] {
-  background: var(--we-success-soft);
-  color: var(--we-success-text);
-}
-
-.we-replay-campaign__icon[data-status="cancelled"] {
-  background: var(--we-surface-muted);
-  color: var(--we-muted);
+.we-recovery-jobs__runs small {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
 }
 
 .we-replay-campaign__progress {
   background: var(--we-line);
   border-radius: var(--we-radius-pill);
   height: 6px;
+  margin-top: 6px;
   overflow: hidden;
 }
 
@@ -78,14 +81,6 @@
   transition: width 180ms ease;
 }
 
-.we-replay-campaign__meta {
-  color: var(--we-muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 11px;
-  gap: 6px 14px;
-}
-
 .we-replay-campaign__actions {
   align-items: center;
   display: flex;
@@ -94,8 +89,21 @@
   justify-content: flex-end;
 }
 
-@media (max-width: 640px) {
-  .we-replay-campaign__meta { display: grid; gap: 3px; }
+/* Below this width each job stacks, with its column name beside the value. */
+@media (max-width: 760px) {
+  .we-recovery-jobs thead { display: none; }
+  .we-recovery-jobs,
+  .we-recovery-jobs tbody,
+  .we-recovery-jobs tr,
+  .we-recovery-jobs td { display: block; }
+  .we-recovery-jobs td { border-top: 0; padding: 4px 0; }
+  .we-recovery-jobs tr { border-top: 1px solid var(--we-line); padding: 8px 0; }
+  .we-recovery-jobs tr.we-recovery-jobs__detail { border-top: 0; }
+  .we-recovery-jobs td[data-label]::before {
+    color: var(--we-muted);
+    content: attr(data-label) ": ";
+    font-size: 11px;
+  }
   .we-replay-campaign__actions { justify-content: stretch; }
   .we-replay-campaign__actions > button { flex: 1 1 auto; }
 }

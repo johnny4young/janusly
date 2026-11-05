@@ -68,6 +68,13 @@ func TestReplayCampaignLifecycle(t *testing.T) {
 		t.Fatalf("cohort signature: %+v", preview.body)
 	}
 
+	// The GET http node is read-side, so the preview marks no side effect.
+	for _, raw := range preview.body["eligible"].([]any) {
+		if raw.(map[string]any)["sideEffect"] != false {
+			t.Fatalf("read-side entry marked: %+v", raw)
+		}
+	}
+
 	// A single-item cohort can never be a campaign (minimum two).
 	solo := h.call("POST", "/recovery/campaigns", map[string]any{
 		"deadLetterIds": ids[:1], "name": "solo", "pacingMs": float64(1000),
@@ -90,6 +97,12 @@ func TestReplayCampaignLifecycle(t *testing.T) {
 	campaignID := campaign["id"].(string)
 	if len(created.body["items"].([]any)) != 2 {
 		t.Fatalf("items snapshot: %+v", created.body["items"])
+	}
+	for _, raw := range created.body["items"].([]any) {
+		item := raw.(map[string]any)
+		if item["nodeId"] != "call" || item["runId"] == nil || item["runId"] == "" {
+			t.Fatalf("item must link its run and step: %+v", item)
+		}
 	}
 
 	// The pump drains one item per pacing period until completion. Two
@@ -149,6 +162,35 @@ func TestReplayCampaignLifecycle(t *testing.T) {
 	} {
 		if got := countAudit(t, pool, h.org, action); got != want {
 			t.Fatalf("%s: want %d rows, got %d", action, want, got)
+		}
+	}
+}
+
+func TestReplayCampaignPreviewMarksSideEffects(t *testing.T) {
+	h := newAPIHarness(t)
+	for _, suffix := range []string{"a", "b"} {
+		doc := map[string]any{
+			"id": "wf-camp-write-" + suffix + "-" + h.org, "name": "Campaign Write Flow",
+			"nodes": []any{map[string]any{"id": "charge", "type": "http", "config": map[string]any{
+				"url": "http://127.0.0.1:1", "method": "POST", "timeoutMs": float64(200),
+			}}},
+			"edges": []any{},
+		}
+		res := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
+		if res.status != 200 {
+			t.Fatalf("start: %+v", res.body)
+		}
+		h.waitRun(res.body["data"].(map[string]any)["runId"].(string), "failed")
+	}
+	preview := h.call("POST", "/recovery/campaigns/preview",
+		map[string]any{"deadLetterIds": deadLetterIDs(t, h)}, "")
+	eligible, _ := preview.body["eligible"].([]any)
+	if preview.status != 200 || len(eligible) != 2 {
+		t.Fatalf("preview: %d %+v", preview.status, preview.body)
+	}
+	for _, raw := range eligible {
+		if raw.(map[string]any)["sideEffect"] != true {
+			t.Fatalf("POST step must be marked: %+v", raw)
 		}
 	}
 }

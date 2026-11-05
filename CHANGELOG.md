@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Recover has a Recovery jobs view beside the queue. Name a paced replay after
+  the incident; before it starts you see how many failures and runs it touches,
+  which steps may change external systems and the estimated time. Each job shows
+  live progress, its replayed, failed and cancelled counts and who started it,
+  with Abort while it runs and View runs to open any run it touched. Janusly
+  shows a notice when a job you have seen running ends, even after you leave
+  Recover. These jobs moved here from Automation and patterns.
 - Run detail is one sheet. Its header shows the workflow, the actions and a data
   row with status, duration, start, version, trace and run ID, and it stays in
   place across the tabs Overview, Timeline, Events, Agents and Ask. Timeline now
@@ -18,7 +25,7 @@
 - The recovery queue groups failures by cluster by default, with a switch to All
   items. Each cluster shows its signature, category, occurrences and affected
   workflows, plus Investigate, which opens the fix for every open failure in the
-  cluster, and Replay cluster, which starts a paced campaign after its preview.
+  cluster, and Replay cluster, which starts a recovery job after its preview.
 - Home's Operator prompt is now one compact field at the bottom of What needs
   you, and answers open in a side panel instead of pushing Home down. The panel
   links the run the answer is based on and opens its recovery case in one click.
