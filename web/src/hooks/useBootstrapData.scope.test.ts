@@ -83,6 +83,69 @@ describe('useBootstrapData tenant boundary', () => {
     expect(result.current.templates).toEqual([template])
   })
 
+  describe('credentialsKnown', () => {
+    const permissions = ['credentials.read', 'packs.read']
+    const answer = (credentials: () => Promise<unknown>) => apiMock.mockImplementation((path: string) => (
+      path === '/credentials' ? credentials()
+        : Promise.resolve(path === '/billing/usage' ? {} : path === '/ai/health' ? { enabled: false } : path === '/solution-packs' ? { packs: [] } : [])
+    ))
+    const settled = async (result: { current: { refreshPlatform: () => Promise<void> } }) => {
+      await act(async () => { await result.current.refreshPlatform() })
+    }
+
+    beforeEach(() => useWorkflowStore.setState({ activeTab: 'packs' }))
+
+    it('stays false when the list request fails, and survives a later failure once read', async () => {
+      answer(() => Promise.reject(new Error('down')))
+      const { result } = renderHook(() => useBootstrapData('org-a', permissions))
+      await settled(result)
+      expect(result.current.credentialsKnown).toBe(false)
+
+      answer(() => Promise.resolve([{ id: 'c', name: 'ops_slack', kind: 'slack_webhook' }]))
+      await settled(result)
+      expect(result.current.credentialsKnown).toBe(true)
+
+      answer(() => Promise.reject(new Error('down')))
+      await settled(result)
+      expect(result.current.credentialsKnown).toBe(true)
+      expect(result.current.credentials).toHaveLength(1)
+    })
+
+    it('stays false for a role that cannot read credentials, even though the list is empty', async () => {
+      answer(() => Promise.resolve([]))
+      const { result } = renderHook(() => useBootstrapData('org-a', ['packs.read']))
+      await settled(result)
+      expect(result.current.credentialsKnown).toBe(false)
+      expect(apiMock).not.toHaveBeenCalledWith('/credentials')
+    })
+
+    it('resets on an organization switch', async () => {
+      answer(() => Promise.resolve([]))
+      const { result, rerender } = renderHook(
+        ({ scope }) => useBootstrapData(scope, permissions),
+        { initialProps: { scope: 'org-a' } },
+      )
+      await settled(result)
+      expect(result.current.credentialsKnown).toBe(true)
+
+      answer(() => Promise.reject(new Error('down')))
+      rerender({ scope: 'org-b' })
+      await settled(result)
+      expect(result.current.credentialsKnown).toBe(false)
+    })
+
+    it('keeps a just-created credential when the refresh behind it fails', async () => {
+      answer(() => Promise.resolve([]))
+      const { result } = renderHook(() => useBootstrapData('org-a', permissions))
+      await settled(result)
+
+      answer(() => Promise.reject(new Error('down')))
+      act(() => result.current.setCredentials((current) => [...current, { id: 'new', name: 'ops_slack', kind: 'slack_webhook' }]))
+      await settled(result)
+      expect(result.current.credentials.map((c) => c.name)).toEqual(['ops_slack'])
+    })
+  })
+
   it('defers catalog reads until a surface that renders them is opened', async () => {
     useWorkflowStore.setState({ activeTab: 'home' })
     apiMock.mockImplementation((path: string) => Promise.resolve(

@@ -19,6 +19,7 @@ export type AppCommandsOptions = {
   permissions: readonly string[]
   projectedRuns: RunSummary[]
   refreshPlatform: BootstrapData['refreshPlatform']
+  setCredentials: BootstrapData['setCredentials']
   projectRunSummary: (id: string, patch: Partial<RunSummary>) => void
   loadStatus: (runId: string) => Promise<unknown>
   runTransitionGuard: RunTransitionGuard

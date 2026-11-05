@@ -86,6 +86,7 @@ export type RightPanelCatalog = {
   templates: Template[]
   solutionPacks: SolutionPackPublic[]
   credentials: Credential[]
+  credentialsKnown: boolean
   workflows: SavedWorkflow[]
   onOpenWorkflow: (id: string) => void
   onOpenWorkflowVersion: (workflowId: string, versionId: string, targetTab?: ActiveTab) => Promise<boolean>
@@ -320,10 +321,12 @@ function RightPanelRouter(props: RightPanelProps) {
       templates={catalog.templates}
       solutionPacks={catalog.solutionPacks}
       credentials={catalog.credentials}
+      credentialsKnown={catalog.credentialsKnown}
       onUseTemplate={catalog.onUseTemplate}
       onInstallPack={catalog.onInstallPack}
       onSampleRunPack={catalog.onSampleRunPack}
       onInjectPackFailure={catalog.onInjectPackFailure}
+      onCreateCredential={can('credentials.write') ? catalog.onCreateCredential : undefined}
       canUse={can('workflows.write')}
       canInstallPacks={can('packs.install')}
     />
@@ -332,9 +335,11 @@ function RightPanelRouter(props: RightPanelProps) {
     <SolutionPacksPanel
       packs={catalog.solutionPacks}
       credentials={catalog.credentials}
+      credentialsKnown={catalog.credentialsKnown}
       onInstall={catalog.onInstallPack}
       onSampleRun={catalog.onSampleRunPack}
       onInjectFailure={catalog.onInjectPackFailure}
+      onCreateCredential={can('credentials.write') ? catalog.onCreateCredential : undefined}
       canInstall={can('packs.install')}
     />
   )
@@ -395,10 +400,12 @@ export function TemplatesPanel({
   templates,
   solutionPacks,
   credentials,
+  credentialsKnown,
   onUseTemplate,
   onInstallPack,
   onSampleRunPack,
   onInjectPackFailure,
+  onCreateCredential,
   canUse = true,
   canInstallPacks = true,
 }: Pick<
@@ -411,6 +418,8 @@ export function TemplatesPanel({
   | 'onSampleRunPack'
   | 'onInjectPackFailure'
 > & {
+  credentialsKnown?: boolean
+  onCreateCredential?: RightPanelCatalog['onCreateCredential']
   canUse?: boolean
   canInstallPacks?: boolean
 }) {
@@ -489,9 +498,11 @@ export function TemplatesPanel({
               onQueryChange={setQuery}
               packs={solutionPacks}
               credentials={credentials}
+              credentialsKnown={credentialsKnown}
               onInstall={onInstallPack}
               onSampleRun={onSampleRunPack}
               onInjectFailure={onInjectPackFailure}
+              onCreateCredential={onCreateCredential}
               canInstall={canInstallPacks}
             />
           </section>}

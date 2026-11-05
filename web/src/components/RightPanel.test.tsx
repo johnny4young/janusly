@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { RightPanel, type RightPanelProps } from './RightPanel'
@@ -69,6 +69,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       templates: [],
       solutionPacks: [],
       credentials: [],
+      credentialsKnown: true,
       workflows: [],
       onOpenWorkflow: vi.fn(),
       onOpenWorkflowVersion: vi.fn(async () => true),
@@ -110,6 +111,9 @@ beforeEach(() => {
 })
 
 describe('<RightPanel /> credentials', () => {
+  // The cold lazy chunks can outlast a query's timeout on a loaded machine.
+  beforeAll(() => Promise.all([import('./ConnectionsPanel'), import('./connection-dialogs')]))
+
   it('keeps creation focused and offers postgres for external DB tools', async () => {
     render(<RightPanel {...props()} />)
 
@@ -166,6 +170,33 @@ describe('<RightPanel /> recovery task space', () => {
 
     expect(await screen.findByTestId('authoring-panel')).toBeInTheDocument()
     expect(screen.queryByTestId('workspace-section-nav')).toBeNull()
+  })
+
+  it.each([
+    ['packs', 'with credentials.write', ['packs.read', 'credentials.write'], true],
+    ['packs', 'without credentials.write', ['packs.read'], false],
+    ['templates', 'with credentials.write', ['packs.read', 'credentials.write'], true],
+    ['templates', 'without credentials.write', ['packs.read'], false],
+  ] as const)('on %s, gates pack Connect by role (%s)', async (tab, _label, permissions, connects) => {
+    const base = props({ tab, permissions: [...permissions] })
+    render(<RightPanel {...base} catalog={{ ...base.catalog, solutionPacks: [{
+      id: 'p',
+      name: 'Pack',
+      description: 'd',
+      category: 'c',
+      version: '1',
+      assurance: { intentContract: false, recoveryContractVersion: '', qualificationFixtureCount: 0 },
+      requiredCredentials: [{ name: 'c', kind: 'k', purpose: 'x' }],
+      requiredOrgConfigs: [],
+      nodeCount: 1,
+      sampleCount: 0,
+      failureCount: 0,
+      samplePayloadIds: [],
+      failureFixtureIds: [],
+      failureFixtures: [],
+    }] }} />)
+    await screen.findByTestId('solution-pack-p')
+    expect(screen.queryAllByTestId('pack-connect-p-c')).toHaveLength(connects ? 1 : 0)
   })
 
   it('filters contextual sections with the same effective permissions as global navigation', () => {
