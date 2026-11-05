@@ -115,8 +115,8 @@ func TestDraftTestUsesStandInsWithoutEffectsOrVersions(t *testing.T) {
 		"workflow": draftWorkflow(workflowID, target.URL),
 		"pins":     map[string]any{"fetch": map[string]any{"sourceRunId": runID}},
 	}, "")
-	if relaundered.status != 422 || relaundered.body["code"] != "draft_pin_no_output" {
-		t.Fatalf("a stand-in is not a real output to pin again: %d %+v", relaundered.status, relaundered.body)
+	if relaundered.status != 422 || relaundered.body["code"] != "draft_pin_sandbox_source" {
+		t.Fatalf("a test run's outputs are not real outputs to pin: %d %+v", relaundered.status, relaundered.body)
 	}
 	fetch := h.nodeState(runID, "fetch")
 	if strings.Contains(fetch, "raw-secret") || !strings.Contains(fetch, "[redacted]") {
@@ -270,6 +270,17 @@ func TestDraftTestFailuresDoNotCountTowardTheBreaker(t *testing.T) {
 	if open != 0 {
 		t.Fatalf("a draft test failure must not open production recovery work: %d", open)
 	}
+	var sandboxDeadLetter string
+	_ = testPool(t).QueryRow(context.Background(), `SELECT dl.id FROM dead_letters dl JOIN runs r ON r.id = dl.run_id
+		WHERE dl.org_id=$1 AND r.workflow_id=$2 LIMIT 1`, h.org, b.id).Scan(&sandboxDeadLetter)
+	if res := h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": sandboxDeadLetter}, ""); res.status != 200 {
+		t.Fatalf("redrive by id: %d %+v", res.status, res.body)
+	}
+	var items int
+	_ = testPool(t).QueryRow(context.Background(), `SELECT count(*) FROM recovery_items WHERE org_id=$1 AND dead_letter_id=$2`, h.org, sandboxDeadLetter).Scan(&items)
+	if items != 0 {
+		t.Fatal("redriving a draft test failure must not open a recovery item")
+	}
 	b.productionFailure()
 	b.productionFailure()
 	if got := b.status(); got != "active" {
@@ -373,4 +384,57 @@ func TestDraftTestKeepsTheStartGates(t *testing.T) {
 			t.Fatalf("a draft test must not spend budget: %d usage rows", usage)
 		}
 	})
+}
+
+func TestDraftTestValidatesAndBoundsItsRequest(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := context.Background()
+	id := fmt.Sprintf("wf-draft-bound-%d", time.Now().UnixNano())
+	nodes := []any{}
+	pins := map[string]any{}
+	chunk := strings.Repeat("x", 60_000)
+	for i := range 5 {
+		nodeID := fmt.Sprintf("n%d", i)
+		nodes = append(nodes, map[string]any{"id": nodeID, "type": "noop", "config": map[string]any{}})
+		pins[nodeID] = map[string]any{"mock": map[string]any{"blob": chunk}}
+	}
+	doc := map[string]any{"id": id, "name": "Bound", "dslVersion": "1.0", "nodes": nodes, "edges": []any{}}
+	if res := h.call("POST", "/workflows/save", doc, ""); res.status != 200 {
+		t.Fatalf("save: %d %+v", res.status, res.body)
+	}
+	before := 0
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE org_id=$1`, h.org).Scan(&before)
+	if res := h.call("POST", "/runs/draft-test", map[string]any{"workflow": doc, "pins": pins}, ""); res.status != 422 || res.body["code"] != "draft_test_data_too_large" {
+		t.Fatalf("stand-ins over the cap: %d %v", res.status, res.body["code"])
+	}
+
+	// The document is validated before any pin source is read.
+	invalid := map[string]any{"id": id, "name": "Bound", "dslVersion": "1.0", "edges": []any{},
+		"nodes": []any{map[string]any{"id": "n0", "type": "http", "config": map[string]any{"url": "http://x.test", "retry": map[string]any{"maxAttempts": 99}}}}}
+	if res := h.call("POST", "/runs/draft-test", map[string]any{"workflow": invalid, "pins": map[string]any{"n0": map[string]any{"sourceRunId": "missing"}}}, ""); res.status != 400 || res.body["code"] != "workflows_validation_failed" {
+		t.Fatalf("validation first: %d %+v", res.status, res.body)
+	}
+
+	send := func(key string, body map[string]any) string {
+		res := h.callWithHeaders("POST", "/runs/draft-test", body, "", map[string]string{"Idempotency-Key": key})
+		if res.status != 200 {
+			t.Fatalf("draft test: %d %+v", res.status, res.body)
+		}
+		return res.body["runId"].(string)
+	}
+	small := map[string]any{"workflow": doc, "pins": map[string]any{"n0": map[string]any{"mock": 1}}}
+	first, second := send("draft-"+id, small), send("draft-"+id, small)
+	if first != second {
+		t.Fatalf("a double submit must start one run: %s %s", first, second)
+	}
+	edited := map[string]any{"workflow": doc, "pins": map[string]any{"n0": map[string]any{"mock": 2}}}
+	if send("draft-"+id, edited) == first {
+		t.Fatal("an edited draft with the same key must start its own run")
+	}
+	after := 0
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE org_id=$1`, h.org).Scan(&after)
+	if after != before+2 {
+		t.Fatalf("runs started: %d, want 2", after-before)
+	}
 }

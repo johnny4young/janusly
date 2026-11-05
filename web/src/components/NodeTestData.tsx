@@ -6,7 +6,7 @@ import { api } from '../api'
 import { getNodeLabel } from '../constants'
 import { useT } from '../i18n'
 import { tApiError } from '../i18n/server-events'
-import { testDataFor, useTestData, type TestDatum } from '../lib/test-data'
+import { testDataFor, useTestData, useTestDataPins, type TestDatum } from '../lib/test-data'
 import { useWorkflowStore } from '../store'
 import type { JsonObject, WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { Button } from './ui/Button'
@@ -49,7 +49,7 @@ export function NodeTestData({ node, nodes, edges, readOnly }: {
   const setRunId = useWorkflowStore(state => state.setRunId)
   const setRunDetail = useWorkflowStore(state => state.setRunDetail)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
-  const pins = useTestData(state => state.workflowId === workflowId ? state.pins : undefined) ?? {}
+  const pins = useTestDataPins(workflowId) ?? {}
   const setDatum = useTestData(state => state.setDatum)
   const [mockDraft, setMockDraft] = useState<string | null>(null)
   const [mockError, setMockError] = useState(false)
@@ -59,9 +59,10 @@ export function NodeTestData({ node, nodes, edges, readOnly }: {
   const runInput = asObject(runDetail?.inputJson)
   const runWorkflowId = asObject(runInput?.workflow)?.id ?? runDetail?.workflowId
   const sameWorkflowRun = Boolean(runId && runDetail?.id === runId && runWorkflowId === workflowId)
-  const runStandIns = asObject(asObject(runInput?.draftTest)?.pins) ?? {}
+  // Only a production run's outputs are real; a test run's may derive from a mock.
+  const productionRun = sameWorkflowRun && !runDetail?.replayMode
   const lastOutput = (id: string): { found: boolean; value?: unknown } => {
-    const row = sameWorkflowRun && !runStandIns[id] ? runNodes.find(item => item.nodeId === id) : undefined
+    const row = productionRun ? runNodes.find(item => item.nodeId === id) : undefined
     const state = asObject(row?.stateJson)
     return row?.status === 'succeeded' && state && 'output' in state ? { found: true, value: state.output } : { found: false }
   }
@@ -96,9 +97,9 @@ export function NodeTestData({ node, nodes, edges, readOnly }: {
 
   const start = async (stepNodeId?: string) => {
     const workflow = useWorkflowStore.getState().getWorkflowJson()
-    const present = new Set(workflow.nodes.map(item => item.id))
+    const accepts = new Set(workflow.nodes.filter(item => !NO_STAND_IN.has(item.type)).map(item => item.id))
     const standIns = Object.fromEntries(Object.entries(testDataFor(workflowId))
-      .filter(([id]) => present.has(id))
+      .filter(([id]) => accepts.has(id))
       .map(([id, datum]) => [id, datum.kind === 'pinned' ? { sourceRunId: datum.sourceRunId } : { mock: datum.output }]))
     const input = sameWorkflowRun ? runInput?.input : undefined
     setBusy(true)
@@ -167,8 +168,10 @@ export function NodeTestData({ node, nodes, edges, readOnly }: {
               onClick={() => setMockDraft(JSON.stringify(own?.output ?? ownLast.value ?? {}, null, 2))}>
               {t('testData.mock')}
             </Button>
-            {own && <Button size="sm" variant="ghost" data-testid="test-data-clear" onClick={() => save(null)}>{t('testData.clear')}</Button>}
           </>
+        )}
+        {own && mockDraft === null && (
+          <Button size="sm" variant="ghost" data-testid="test-data-clear" onClick={() => save(null)}>{t('testData.clear')}</Button>
         )}
         {!readOnly && mockDraft === null && (
           <>

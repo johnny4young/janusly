@@ -8,8 +8,14 @@
   value instead of running, so earlier AI and tool calls are not repeated. Test
   runs never change external systems, never publish a version and do not count
   in reports, recovery or the circuit breaker. The run is marked Test data and
-  the canvas marks pinned and mocked steps. Pins stay in this browser tab only.
-  Approvals, forms and routers cannot be pinned or mocked.
+  the canvas marks pinned and mocked steps. Pins come from production runs only,
+  stay in this browser tab and workspace, and approvals, forms and routers cannot
+  be pinned or mocked.
+- Saved step outputs, run events and model-facing copies now also mask values
+  under API, access, refresh and ID token fields, `X-Auth-Token`, `Set-Cookie`,
+  `Proxy-Authorization`, `credentials`, `passwd` and API secret fields.
+- Sandbox and test runs no longer change the success rates routers learn from,
+  and redriving one of their failures no longer opens a recovery item or alert.
 - Login has Forgot password?, which emails a reset link that ends at the
   set-password step. The answer is the same whether or not the email has an
   account, including when the auth server limits how often it sends.

@@ -4426,6 +4426,8 @@
   "apiErrors.draft_pin_no_output": "Ese paso no tiene una salida guardada en la ejecución",
   "apiErrors.draft_mock_invalid": "La simulación debe ser JSON válido de hasta 64 KiB",
   "apiErrors.draft_test_unsaved": "Guarda el flujo antes de probarlo",
+  "apiErrors.draft_pin_sandbox_source": "Fija salidas de una ejecución de producción",
+  "apiErrors.draft_test_data_too_large": "Las salidas fijadas y simuladas superan 256 KiB en total",
   "testData.title": "Datos de prueba",
   "testData.draftOnly": "Solo borrador",
   "testData.empty": "Aún no hay datos de ejecución",

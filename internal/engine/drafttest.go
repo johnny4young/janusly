@@ -50,12 +50,19 @@ func draftTestOutput(replayMode string, inputJSON []byte, nodeID, nodeType strin
 	if replayMode != "validation" || !DraftPinAllowed(nodeType) {
 		return nil, false
 	}
+	// Only this step's stand-in is decoded; the others stay raw.
 	var envelope struct {
-		DraftTest *DraftTest `json:"draftTest"`
+		DraftTest struct {
+			Pins map[string]json.RawMessage `json:"pins"`
+		} `json:"draftTest"`
 	}
-	if json.Unmarshal(inputJSON, &envelope) != nil || envelope.DraftTest == nil {
+	if json.Unmarshal(inputJSON, &envelope) != nil {
 		return nil, false
 	}
-	data, ok := envelope.DraftTest.Pins[nodeID]
-	return data.Output, ok
+	var data DraftData
+	raw, ok := envelope.DraftTest.Pins[nodeID]
+	if !ok || json.Unmarshal(raw, &data) != nil {
+		return nil, false
+	}
+	return data.Output, true
 }

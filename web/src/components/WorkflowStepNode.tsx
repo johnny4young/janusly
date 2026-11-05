@@ -15,7 +15,7 @@ import { openAuthoringProblem } from './open-authoring-problem'
 import { Button } from './ui/Button'
 import { workflowNodeIcon } from './workflow-node-icons'
 import type { WorkflowGraphNode } from '../types'
-import { useTestData } from '../lib/test-data'
+import { useTestDataPins } from '../lib/test-data'
 import { useWorkflowStore } from '../store'
 
 /** Render one workflow step on the canvas with icon, label, summary, and status pill. */
@@ -35,7 +35,7 @@ export function WorkflowStepNode({ id, data, selected }: NodeProps<WorkflowGraph
   const tone = data.hasValidationError ? 'error' : status
   const problem = data.problem
   const workflowId = useWorkflowStore(state => state.currentWorkflowId)
-  const standIn = useTestData(state => state.workflowId === workflowId ? state.pins[id]?.kind : undefined)
+  const standIn = useTestDataPins(workflowId)?.[id]?.kind
 
   return (
     <div className="workflow-node" data-status={tone} data-selected={selected ? 'true' : 'false'}>

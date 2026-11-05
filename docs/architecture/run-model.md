@@ -172,16 +172,19 @@ reports, recovery and the circuit breaker ignore it like any sandbox run. Its
 evidence level is `writes_skipped`, which no playbook or recovery check accepts.
 It enters through `runstart` like any start, so validation, production
 readiness, the breaker pause, the saved-only policy and the start rate limit all
-apply; it only skips rollout assignment and never claims a version.
+apply; it only skips rollout assignment and never claims a version. An
+`Idempotency-Key` is bound to the request, so a double submit starts one run.
+No run with a replay mode updates routing rewards, and redriving one of its dead
+letters opens no recovery item and sends no alert.
 
 The request may give a step a stand-in output: `sourceRunId` copies that step's
-saved output from a run of the same workflow in the organization, and `mock`
-takes a JSON value. Both are masked by sensitive key before they are stored in
+saved output from a production run of the same workflow in the organization, and
+`mock` takes a JSON value. The document is validated first, and pinned outputs
+and mocks together are capped at 256 KiB. Both are masked by sensitive key before they are stored in
 the run's `input_json.draftTest`, never in the workflow document. The worker
 completes a step with a stand-in without calling its executor, and only when the
 run's `replay_mode` is `validation`, so the same envelope on a production run is
-ignored. Approvals, human forms and routers cannot take one. A stand-in from an
-earlier test is not offered as a pin source. `stepNodeId` runs that step and its
+ignored. Approvals, human forms and routers cannot take one. `stepNodeId` runs that step and its
 ancestors and starts every other step skipped. The audit row names the steps with
 stand-ins, never their values.
 

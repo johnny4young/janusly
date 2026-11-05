@@ -4426,6 +4426,8 @@
   "apiErrors.draft_pin_no_output": "That step has no saved output in the run",
   "apiErrors.draft_mock_invalid": "A mock must be valid JSON up to 64 KiB",
   "apiErrors.draft_test_unsaved": "Save the workflow before testing it",
+  "apiErrors.draft_pin_sandbox_source": "Pin outputs from a production run",
+  "apiErrors.draft_test_data_too_large": "Pinned and mocked outputs exceed 256 KiB together",
   "testData.title": "Test data",
   "testData.draftOnly": "Draft only",
   "testData.empty": "No run data yet",

@@ -29,7 +29,8 @@ function renderFor(selected: WorkflowGraphNode, readOnly = false) {
 
 beforeEach(() => {
   vi.mocked(api).mockReset()
-  useTestData.setState({ workflowId: '', pins: {} })
+  useTestData.setState({ scope: '', pins: {} })
+  localStorage.removeItem('janusly:activeOrg')
   useWorkflowStore.setState({
     currentWorkflowId: 'wf-1',
     runId: 'run-12345678',
@@ -48,7 +49,7 @@ describe('<NodeTestData />', () => {
     expect(screen.getByTestId('test-data-source-shape')).toHaveTextContent('Last run run-1234')
 
     fireEvent.click(screen.getByTestId('test-data-pin'))
-    expect(useTestData.getState()).toMatchObject({ workflowId: 'wf-1', pins: { shape: { kind: 'pinned', sourceRunId: 'run-12345678' } } })
+    expect(useTestData.getState().pins).toMatchObject({ shape: { kind: 'pinned', sourceRunId: 'run-12345678' } })
     expect(screen.getByTestId('test-data-source-shape')).toHaveTextContent('Pinned · run run-1234')
     expect(screen.queryByTestId('test-data-pin')).toBeNull()
 
@@ -95,12 +96,32 @@ describe('<NodeTestData />', () => {
     expect(screen.queryByTestId('test-data-pin')).toBeNull()
   })
 
-  it('does not offer a stand-in from a test run as last-run data', () => {
-    useWorkflowStore.setState({ runDetail: { id: 'run-12345678', status: 'succeeded', inputJson: { workflow: { id: 'wf-1' }, draftTest: { pins: { shape: { kind: 'mocked' } } } } } })
+  it('offers last-run data only from a production run', () => {
+    useWorkflowStore.setState({ runDetail: { id: 'run-12345678', status: 'succeeded', replayMode: 'validation', inputJson: { workflow: { id: 'wf-1' } } } })
     renderFor(nodes[1])
-    expect(screen.getByTestId('test-data-row-fetch')).toBeInTheDocument()
+    expect(screen.queryByTestId('test-data-row-fetch')).toBeNull()
     expect(screen.queryByTestId('test-data-row-shape')).toBeNull()
     expect(screen.queryByTestId('test-data-pin')).toBeNull()
+  })
+
+  it('keeps Clear for a stale stand-in and never sends it', async () => {
+    useWorkflowStore.setState({ getWorkflowJson: () => ({ id: 'wf-1', name: 'W', nodes: [{ id: 'gate', type: 'approval', config: {} }], edges: [] }) } as never)
+    useTestData.getState().setDatum('wf-1', 'gate', { kind: 'mocked', output: 1 })
+    vi.mocked(api).mockResolvedValue({ runId: 'run-test-0002' })
+    renderFor(nodes[2])
+    expect(screen.queryByTestId('test-data-mock')).toBeNull()
+    await act(async () => { fireEvent.click(screen.getByTestId('test-data-run-draft')) })
+    expect(JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body)).pins).toEqual({})
+    fireEvent.click(screen.getByTestId('test-data-clear'))
+    expect(useTestData.getState().pins).toEqual({})
+  })
+
+  it('keeps stand-ins to the workspace that set them', () => {
+    useTestData.getState().setDatum('wf-1', 'fetch', { kind: 'mocked', output: 1 })
+    localStorage.setItem('janusly:activeOrg', 'other-org')
+    renderFor(nodes[0])
+    expect(screen.getByTestId('test-data-source-fetch')).toHaveTextContent('Last run')
+    expect(screen.queryByTestId('test-data-clear')).toBeNull()
   })
 
   it('starts a step test with the stand-ins and the last input', async () => {

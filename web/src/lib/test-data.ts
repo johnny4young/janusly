@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { getActiveOrg } from '../auth'
 
 /** A step's stand-in output for draft test runs. Never part of the workflow document. */
 export type TestDatum =
@@ -6,24 +7,35 @@ export type TestDatum =
   | { kind: 'mocked'; output: unknown }
 
 type TestDataState = {
-  workflowId: string
+  scope: string
   pins: Record<string, TestDatum>
   setDatum: (workflowId: string, nodeId: string, datum: TestDatum | null) => void
 }
 
-// In memory only: a reload or another workflow starts without stand-ins.
+const scopeOf = (workflowId: string) => `${getActiveOrg()}\n${workflowId}`
+
+// In memory only: a reload, another workflow or another workspace starts empty.
 export const useTestData = create<TestDataState>(set => ({
-  workflowId: '',
+  scope: '',
   pins: {},
   setDatum: (workflowId, nodeId, datum) => set(state => {
-    const pins = state.workflowId === workflowId ? { ...state.pins } : {}
+    const scope = scopeOf(workflowId)
+    const pins = state.scope === scope ? { ...state.pins } : {}
     if (datum) pins[nodeId] = datum
     else delete pins[nodeId]
-    return { workflowId, pins }
+    return { scope, pins }
   }),
 }))
 
+export function useTestDataPins(workflowId: string): Record<string, TestDatum> | undefined {
+  return useTestData(state => state.scope === scopeOf(workflowId) ? state.pins : undefined)
+}
+
 export function testDataFor(workflowId: string): Record<string, TestDatum> {
   const state = useTestData.getState()
-  return state.workflowId === workflowId ? state.pins : {}
+  return state.scope === scopeOf(workflowId) ? state.pins : {}
+}
+
+export function clearTestData(): void {
+  useTestData.setState({ scope: '', pins: {} })
 }
