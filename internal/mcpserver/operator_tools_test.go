@@ -97,6 +97,9 @@ func TestMCPToolCatalogHasTruthfulAnnotationsAndNoApprovalTool(t *testing.T) {
 	byName := map[string]*mcp.Tool{}
 	for _, tool := range listed.Tools {
 		byName[tool.Name] = tool
+		if tool.OutputSchema == nil {
+			t.Fatalf("%s lacks an outputSchema", tool.Name)
+		}
 		if tool.Annotations == nil || tool.Annotations.OpenWorldHint == nil || *tool.Annotations.OpenWorldHint {
 			t.Fatalf("tool lacks closed-world annotations: %+v", tool)
 		}
