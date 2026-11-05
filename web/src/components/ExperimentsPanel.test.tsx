@@ -76,9 +76,11 @@ describe('<ExperimentsPanel />', () => {
     render(<ExperimentsPanel />)
 
     await screen.findByRole('option', { name: 'Accepted recoveries · 4 examples' })
-    fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Triage candidate' } })
+    fireEvent.click(screen.getByTestId('experiment-step-next'))
     fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'triage@1' } })
     fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'triage@2' } })
+    fireEvent.click(screen.getByTestId('experiment-step-next'))
+    fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Triage candidate' } })
     fireEvent.click(screen.getByRole('button', { name: 'Run comparison' }))
 
     await waitFor(() => {
@@ -212,9 +214,11 @@ describe('<ExperimentsPanel />', () => {
     render(<ExperimentsPanel />)
 
     await screen.findByRole('option', { name: 'Six cases · 6 examples' })
-    fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Judge candidate' } })
+    fireEvent.click(screen.getByTestId('experiment-step-arms'))
     fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'model-a' } })
     fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'model-b' } })
+    fireEvent.click(screen.getByTestId('experiment-step-run'))
+    fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Judge candidate' } })
     fireEvent.change(screen.getByLabelText('Scorer'), { target: { value: 'llm_judge' } })
 
     expect(screen.getByRole('alert')).toHaveTextContent('This plan needs 24 provider calls')
@@ -229,5 +233,136 @@ describe('<ExperimentsPanel />', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/network unavailable/i)
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  describe('three-step setup', () => {
+    const blocker = () => screen.getByTestId('experiment-run-blocker')
+    const runButton = () => screen.getByTestId('experiment-run')
+    function mockData(datasets: unknown[], limits?: unknown): void {
+      vi.mocked(api).mockImplementation(async (path: string) => {
+        if (path === '/experiments') return { experiments: [], limits }
+        if (path === '/eval/datasets') return { datasets }
+        return {}
+      })
+    }
+    const dataset = (exampleCount: number) => ({ id: 'dataset-1', name: 'Bed', description: '', exampleCount })
+
+    it('names the missing dataset step and offers only creation when none exists', async () => {
+      mockData([])
+      render(<ExperimentsPanel />)
+
+      await waitFor(() => expect(blocker()).toHaveTextContent('Step 1 · Dataset: create a dataset first'))
+      expect(runButton()).toBeDisabled()
+      expect(runButton()).toHaveAttribute('aria-describedby', 'experiment-run-blocker')
+      expect(screen.getByTestId('experiment-step-dataset')).toHaveAttribute('aria-current', 'step')
+      expect(screen.queryByLabelText('Evaluation dataset')).not.toBeInTheDocument()
+      expect(screen.getByTestId('experiment-create-dataset')).toBeInTheDocument()
+      expect(screen.getByTestId('experiment-dataset-create')).toBeDisabled()
+      expect(screen.getByTestId('experiment-panel-dataset')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('experiment-step-run'))
+      fireEvent.click(blocker())
+      expect(screen.getByTestId('experiment-step-dataset')).toHaveAttribute('aria-current', 'step')
+      expect(screen.getByLabelText('Dataset name')).toHaveFocus()
+    })
+
+    it('does not claim that no dataset exists before the list loads or when it fails', async () => {
+      let rejectDatasets: (error: Error) => void = () => undefined
+      vi.mocked(api).mockImplementation((path: string) => path === '/eval/datasets'
+        ? new Promise((_, reject) => { rejectDatasets = reject })
+        : Promise.resolve({ experiments: [] }))
+      render(<ExperimentsPanel />)
+
+      expect(blocker()).toHaveTextContent('Step 1 · Dataset: loading datasets')
+      rejectDatasets(new Error('offline'))
+      await waitFor(() => expect(blocker()).toHaveTextContent('Step 1 · Dataset: datasets could not be loaded'))
+    })
+
+    it('walks each missing field in step order until the run is allowed', async () => {
+      mockData([dataset(4)])
+      render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 4 examples' })
+
+      expect(screen.getByTestId('experiment-step-done-dataset')).toBeInTheDocument()
+      expect(screen.queryByTestId('experiment-step-done-arms')).not.toBeInTheDocument()
+      expect(blocker()).toHaveTextContent('Step 2 · Control vs candidate: enter the control reference')
+
+      fireEvent.click(screen.getByTestId('experiment-step-next'))
+      expect(screen.getByLabelText('Comparison kind')).toHaveFocus()
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'a@1' } })
+      expect(blocker()).toHaveTextContent('Step 2 · Control vs candidate: enter the candidate reference')
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: '   ' } })
+      expect(blocker()).toHaveTextContent('enter the candidate reference')
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'a@2' } })
+      expect(screen.getByTestId('experiment-step-done-arms')).toBeInTheDocument()
+      expect(blocker()).toHaveTextContent('Step 3 · Scorer and run: name the experiment')
+
+      fireEvent.click(blocker())
+      expect(screen.getByLabelText('Experiment name')).toHaveFocus()
+      expect(screen.getByTestId('experiment-panel-run')).toBeInTheDocument()
+      expect(screen.queryByTestId('experiment-step-next')).not.toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Run' } })
+      expect(screen.queryByTestId('experiment-run-blocker')).not.toBeInTheDocument()
+      expect(runButton()).toBeEnabled()
+      expect(screen.getByTestId('experiment-step-done-run')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      expect(screen.getByTestId('experiment-panel-arms')).toBeInTheDocument()
+      expect(screen.getByLabelText('Control reference')).toHaveValue('a@1')
+      expect(runButton()).toBeEnabled()
+    })
+
+    it('sends an empty dataset back to step 1 and says why', async () => {
+      mockData([dataset(0)])
+      render(<ExperimentsPanel />)
+
+      await screen.findByRole('option', { name: 'Bed · 0 examples' })
+      expect(blocker()).toHaveTextContent('Step 1 · Dataset: choose a dataset with examples')
+      expect(screen.getByRole('alert')).toHaveTextContent('This dataset has no examples')
+      expect(runButton()).toHaveAttribute('aria-describedby', 'experiment-call-plan experiment-run-blocker')
+    })
+
+    it('names the step that can actually lower the provider calls', async () => {
+      mockData([dataset(6)], { maxProviderCalls: 20 })
+      const { unmount } = render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 6 examples' })
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'a' } })
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'b' } })
+      fireEvent.click(screen.getByTestId('experiment-step-run'))
+      fireEvent.change(screen.getByLabelText('Scorer'), { target: { value: 'llm_judge' } })
+      expect(blocker()).toHaveTextContent('Step 3 · Scorer and run: choose a scorer without LLM calls')
+      unmount()
+
+      mockData([dataset(11)], { maxProviderCalls: 20 })
+      render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 11 examples' })
+      expect(blocker()).toHaveTextContent('Step 1 · Dataset: choose a smaller dataset')
+    })
+
+    it('tells a read-only role why it cannot run and hides dataset creation', async () => {
+      mockData([dataset(4)])
+      render(<ExperimentsPanel canWrite={false} />)
+
+      await screen.findByRole('option', { name: 'Bed · 4 examples' })
+      expect(blocker()).toHaveTextContent('Your role can view experiments but not run them.')
+      expect(screen.queryByTestId('experiment-create-dataset')).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'a' } })
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'b' } })
+      fireEvent.click(screen.getByTestId('experiment-step-run'))
+      fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Run' } })
+      expect(runButton()).toBeDisabled()
+      expect(runButton()).toHaveAttribute('aria-describedby', 'experiment-call-plan experiment-run-blocker')
+    })
+
+    it('renders the missing step in Spanish', async () => {
+      changeAppLanguage('es')
+      mockData([])
+      render(<ExperimentsPanel />)
+
+      await waitFor(() => expect(blocker()).toHaveTextContent('Paso 1 · Conjunto de evaluación: primero crea un conjunto'))
+    })
   })
 })

@@ -385,6 +385,10 @@ The AI Studio header marks the current stage as the first incomplete one, with
 `aria-current="step"`. In Solution Packs, Install is disabled only by the
 `packs.install` permission; missing credentials are named under the button but
 never block it, because a pack installs as a draft that is wired afterwards.
+Experiments setup keeps every field in panel state across its three steps, and
+`getRunBlockers` is the single source for both the disabled Run reason and the
+step completion marks. Only that reason names a missing field; the provider-call
+plan stays visible on every step.
 
 Contextual authoring prefills never submit work. Replacing an intent invalidates
 pending compilation/proposal results and releases their loading state; late

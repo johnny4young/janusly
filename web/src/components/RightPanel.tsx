@@ -297,7 +297,7 @@ function RightPanelRouter(props: RightPanelProps) {
   )
   if (props.tab === 'experiments') return (
     <PanelChrome title={t('rightPanel.experiments.title')} description={t('rightPanel.experiments.description')}>
-      <ExperimentsPanel />
+      <ExperimentsPanel canWrite={can('evals.write')} />
     </PanelChrome>
   )
   if (props.tab === 'members') return (

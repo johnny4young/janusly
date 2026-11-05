@@ -161,6 +161,16 @@ describe('<RightPanel /> recovery task space', () => {
     expect(within(sectionNav).getByTestId('workspace-section-recover-count')).toHaveTextContent('2')
   })
 
+  it('gates experiment writes on the evals.write permission', async () => {
+    const { unmount } = render(<RightPanel {...props({ tab: 'experiments', permissions: ['evals.read'] })} />)
+    expect(await screen.findByTestId('experiment-run-blocker')).toHaveTextContent('Your role can view experiments')
+    expect(screen.queryByTestId('experiment-create-dataset')).not.toBeInTheDocument()
+    unmount()
+
+    render(<RightPanel {...props({ tab: 'experiments', permissions: ['evals.read', 'evals.write'] })} />)
+    expect(await screen.findByTestId('experiment-create-dataset')).toBeInTheDocument()
+  })
+
   it('leaves section navigation to the top bar on the Build layout', async () => {
     render(<RightPanel {...props({ tab: 'inspector', permissions: ['workflows.read'] })} />)
 

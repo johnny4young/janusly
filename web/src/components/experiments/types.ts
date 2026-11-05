@@ -90,6 +90,45 @@ export const INITIAL_RUN_FORM: RunForm = {
 
 export const DEFAULT_MAX_PROVIDER_CALLS = 20
 
+export const SETUP_STEPS = ['dataset', 'arms', 'run'] as const
+export type SetupStep = typeof SETUP_STEPS[number]
+export type DatasetsState = 'loading' | 'failed' | 'ready'
+
+export type RunBlocker = {
+  step: SetupStep
+  reason: 'datasetsLoading' | 'datasetsFailed' | 'noDataset' | 'chooseDataset' | 'emptyDataset' | 'datasetTooLarge' | 'control' | 'candidate' | 'callLimit' | 'name'
+  field: string
+}
+
+/** Everything still missing, in step order. The first entry names the run button's blocker. */
+export function getRunBlockers(
+  form: RunForm,
+  datasets: readonly EvalDataset[],
+  datasetsState: DatasetsState,
+  maxProviderCalls: number,
+): RunBlocker[] {
+  const blockers: RunBlocker[] = []
+  const dataset = datasets.find((item) => item.id === form.evalDatasetId)
+  if (!dataset) {
+    const reason = datasets.length > 0 ? 'chooseDataset'
+      : datasetsState === 'loading' ? 'datasetsLoading'
+        : datasetsState === 'failed' ? 'datasetsFailed' : 'noDataset'
+    blockers.push({ step: 'dataset', reason, field: reason === 'chooseDataset' ? 'experiment-dataset' : 'experiment-dataset-name' })
+  } else if (!(dataset.exampleCount > 0)) {
+    blockers.push({ step: 'dataset', reason: 'emptyDataset', field: 'experiment-dataset' })
+  } else if (estimateProviderCalls(dataset.exampleCount, 'string_equality') > maxProviderCalls) {
+    blockers.push({ step: 'dataset', reason: 'datasetTooLarge', field: 'experiment-dataset' })
+  }
+  if (!form.controlRef.trim()) blockers.push({ step: 'arms', reason: 'control', field: 'experiment-control' })
+  if (!form.candidateRef.trim()) blockers.push({ step: 'arms', reason: 'candidate', field: 'experiment-candidate' })
+  if (dataset && estimateProviderCalls(dataset.exampleCount, 'string_equality') <= maxProviderCalls
+    && estimateProviderCalls(dataset.exampleCount, form.scorerKind) > maxProviderCalls) {
+    blockers.push({ step: 'run', reason: 'callLimit', field: 'experiment-scorer' })
+  }
+  if (!form.name.trim()) blockers.push({ step: 'run', reason: 'name', field: 'experiment-name' })
+  return blockers
+}
+
 export function estimateProviderCalls(exampleCount: number, scorerKind: RunForm['scorerKind']): number {
   if (!Number.isFinite(exampleCount) || exampleCount <= 0) return 0
   return Math.floor(exampleCount) * (scorerKind === 'llm_judge' ? 4 : 2)

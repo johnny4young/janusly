@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Experiments now start from the dataset. Run a comparison has three steps,
+  Dataset, Control vs candidate, and Scorer and run, and the dataset form lives
+  in the first step. A disabled Run comparison names the missing step and field,
+  and selecting that message takes you there. Roles that can only read are told
+  so and no longer see the dataset form.
 - The AI budget in Settings now meters this month's spend against the limit,
   with the warning threshold marked on the bar. An Off / Limit switch replaces
   entering 0 to turn the budget off. A limit must be at least $0.01 and a warning
