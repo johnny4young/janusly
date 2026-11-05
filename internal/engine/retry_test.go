@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	"maps"
 	"math"
 	"reflect"
 	"strings"
@@ -45,6 +46,89 @@ func TestClassifyErrorLabels(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := classifyError(tc.serr); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRetryClassificationFailureMatrix(t *testing.T) {
+	cases := []struct {
+		name        string
+		serr        map[string]any
+		wantNetwork bool
+		wantTimeout bool
+	}{
+		// Go transport failures.
+		{name: "connection refused", serr: map[string]any{"message": `Post "https://api.example.com/v1": dial tcp 10.0.0.1:443: connect: connection refused`}, wantNetwork: true},
+		{name: "connection reset", serr: map[string]any{"message": "read tcp 10.0.0.2:5000->10.0.0.1:443: read: connection reset by peer"}, wantNetwork: true},
+		{name: "broken pipe", serr: map[string]any{"message": "write tcp 10.0.0.2:5000->10.0.0.1:443: write: broken pipe"}, wantNetwork: true},
+		{name: "no route to host", serr: map[string]any{"message": "connect: no route to host"}, wantNetwork: true},
+		{name: "network unreachable", serr: map[string]any{"message": "connect: network is unreachable"}, wantNetwork: true},
+		{name: "transport EOF", serr: map[string]any{"message": `Post "https://api.example.com/v1": EOF`}, wantNetwork: true},
+		{name: "wrapped mcp transport failure", serr: map[string]any{"message": "mcp_tool failed: dial tcp 10.0.0.1:443: connect: connection refused"}, wantNetwork: true},
+		// Go resolver failures.
+		{name: "no such host", serr: map[string]any{"message": `Get "https://demo.invalid/": dial tcp: lookup demo.invalid: no such host`}, wantNetwork: true},
+		{name: "server misbehaving", serr: map[string]any{"message": "lookup demo.invalid on 127.0.0.11:53: server misbehaving"}, wantNetwork: true},
+		{name: "empty resolver answer", serr: map[string]any{"message": "HTTP target did not resolve to any address: demo.invalid"}, wantNetwork: true},
+		// Node codes and wording that already matched or belong to the same class.
+		{name: "ECONNREFUSED code", serr: map[string]any{"message": "x", "code": "ECONNREFUSED"}, wantNetwork: true},
+		{name: "EAI_AGAIN code", serr: map[string]any{"message": "x", "code": "EAI_AGAIN"}, wantNetwork: true},
+		{name: "EHOSTUNREACH code", serr: map[string]any{"message": "x", "code": "EHOSTUNREACH"}, wantNetwork: true},
+		{name: "UND_ERR_SOCKET code", serr: map[string]any{"message": "x", "code": "UND_ERR_SOCKET"}, wantNetwork: true},
+		{name: "ENOTFOUND code", serr: map[string]any{"message": "x", "code": "ENOTFOUND"}, wantNetwork: true},
+		{name: "ECONNRESET code", serr: map[string]any{"message": "x", "code": "ECONNRESET"}, wantNetwork: true},
+		{name: "network wording", serr: map[string]any{"message": "network error"}, wantNetwork: true},
+		{name: "fetch failed", serr: map[string]any{"message": "fetch failed"}, wantNetwork: true},
+		// Timeouts stay timeouts unless the wording also proves a dial.
+		{name: "deadline exceeded", serr: map[string]any{"message": "context deadline exceeded"}, wantTimeout: true},
+		{name: "timed out wording", serr: map[string]any{"message": "HTTP request timed out after 100ms"}, wantTimeout: true},
+		{name: "TLS handshake timeout", serr: map[string]any{"message": "net/http: TLS handshake timeout"}, wantTimeout: true},
+		{name: "ETIMEDOUT code", serr: map[string]any{"message": "x", "code": "ETIMEDOUT"}, wantTimeout: true},
+		{name: "undici headers timeout code", serr: map[string]any{"message": "x", "code": "UND_ERR_HEADERS_TIMEOUT"}, wantTimeout: true},
+		{name: "dial timeout", serr: map[string]any{"message": "dial tcp 10.0.0.1:443: i/o timeout"}, wantNetwork: true, wantTimeout: true},
+		// A status means the peer answered.
+		{name: "4xx quoting a transport fault", serr: map[string]any{"message": "upstream said connection refused", "statusCode": 400}},
+		{name: "5xx quoting a transport fault", serr: map[string]any{"message": "dial tcp 10.0.0.1:443: connect: connection refused", "statusCode": 502}},
+		{name: "4xx with network wording", serr: map[string]any{"message": "invalid network id", "statusCode": 422}},
+		// Permanent failures must not read as transient.
+		{name: "ssrf private target", serr: map[string]any{"message": "HTTP target is private and blocked: 10.0.0.1"}},
+		{name: "ssrf private resolution", serr: map[string]any{"message": "HTTP target resolves to a private address and is blocked: internal.example"}},
+		{name: "ssrf pinned private", serr: map[string]any{"message": "Pinned HTTP target IP is private and blocked: 10.0.0.1"}},
+		{name: "unvalidated dial", serr: map[string]any{"message": "refusing to dial unvalidated host: example.com"}},
+		{name: "certificate failure", serr: map[string]any{"message": `Get "https://example.com/": tls: failed to verify certificate: x509: certificate signed by unknown authority`}},
+		{name: "cancelled", serr: map[string]any{"message": `Get "https://example.com/": context canceled`}},
+		{name: "decoder EOF", serr: map[string]any{"message": "unexpected EOF"}},
+		{name: "body cap", serr: map[string]any{"message": "HTTP response exceeds maxResponseBytes after 10 bytes (cap 5)"}},
+		{name: "invalid input", serr: map[string]any{"message": "Invalid tool input for json.parse: value is required"}},
+	}
+	network := policyFromConfig(t, map[string]any{"retry": map[string]any{
+		"maxAttempts": float64(3), "retryOn": []any{"network"},
+	}})
+	timeout := policyFromConfig(t, map[string]any{"retry": map[string]any{
+		"maxAttempts": float64(3), "retryOn": []any{"timeout"},
+	}})
+	ignoreNetwork := policyFromConfig(t, map[string]any{"retry": map[string]any{
+		"maxAttempts": float64(3), "ignoreOn": []any{"network"},
+	}})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRetry(tc.serr, network); got != tc.wantNetwork {
+				t.Fatalf("retryOn network: got %v want %v, labels %v", got, tc.wantNetwork, classifyError(tc.serr))
+			}
+			if got := shouldRetry(tc.serr, timeout); got != tc.wantTimeout {
+				t.Fatalf("retryOn timeout: got %v want %v, labels %v", got, tc.wantTimeout, classifyError(tc.serr))
+			}
+			if got := shouldRetry(tc.serr, ignoreNetwork); got == tc.wantNetwork {
+				t.Fatalf("ignoreOn network: got %v, labels %v", got, classifyError(tc.serr))
+			}
+
+			// The same failure after a possible external effect never retries.
+			written := maps.Clone(tc.serr)
+			written["writeSide"] = true
+			for _, policy := range []*RetryPolicy{network, timeout, ignoreNetwork} {
+				if shouldRetry(written, policy) {
+					t.Fatalf("write-side failure retried under %+v", policy)
+				}
 			}
 		})
 	}

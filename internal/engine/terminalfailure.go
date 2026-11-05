@@ -22,10 +22,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 	if policy != nil && policy.MaxAttempts > 0 {
 		maxAttempts = policy.MaxAttempts
 	}
-	// A writeSide error means external effects may already have happened —
-	// never whole-node retry it; operator-gated
-	// replay is safer than duplicate effects.
-	if serr["writeSide"] == true || int(claim.Attempt) >= maxAttempts || !shouldRetry(serr, policy) {
+	if int(claim.Attempt) >= maxAttempts || !shouldRetry(serr, policy) {
 		return e.FailNode(ctx, claim, execErr)
 	}
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Retrying on Network errors now covers connection refused, connection reset and
+  DNS failures, and retrying on Timeouts covers deadline exceeded. A policy that
+  ignores `network` now stops retries for those failures too. A write-side MCP
+  tool no longer retries after a failure, even with no retry filter: replay it
+  from the failure instead. The recovery dialog describes these failures the
+  same way.
 - Closing a failure without recovery now shows its workflow, step and
   occurrences and requires a short reason. The reason is saved to the audit log
   and appears in the audit log's details.

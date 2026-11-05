@@ -82,6 +82,24 @@ author omits `maxDelayMs`. Backoff is fixed or exponential; jitter is boolean;
 retry/ignore matcher lists are bounded. Invalid legacy policy data fails closed
 to no retry rather than being partially interpreted.
 
+`retryOn` and `ignoreOn` match labels derived from the failure: its name, its
+code, the exact HTTP status, the status family (`5xx`), and two synthetic labels.
+`network` covers resolver and connection failures, in Go wording (`connection
+refused`, `no such host`, a transport `EOF`) or as Node codes (`ECONNRESET`,
+`ENOTFOUND`). `timeout` covers timeout wording, `deadline exceeded`, and timeout
+codes. A dial that times out carries both. An error with an HTTP status never
+gets `network` from its message, because the peer answered. `internal/signature`
+owns the wording, so retries and failure clusters read a failure the same way.
+
+A failure marked `writeSide` never retries the whole node, whatever the policy
+says: external effects may already have happened, so replay stays with an
+operator. `http` marks non-safe methods once the request is dispatched, `tool`
+marks write-side tools under `require_ok`, `loop` marks write-side `for_each`
+failures, and `mcp_tool` marks every failure of a write-side descriptor. That
+includes failures before the call is sent, such as the local rate limit. An
+`agent` or `multi_agent` node observes tool failures as results and does not
+raise them.
+
 When a run flips to `failed`, its still-queued siblings go back to `pending`
 in the same transaction: a failed run can never claim again, and queued rows
 would otherwise sit at the head of the FIFO claim index forever, rejected by
