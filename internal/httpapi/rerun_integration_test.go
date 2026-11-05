@@ -680,3 +680,154 @@ func TestDeadLetterReplayAllowedForAStepTheRerunDidNotRun(t *testing.T) {
 		t.Fatalf("a step outside the rerun stays replayable: %d %+v", res.status, res.body)
 	}
 }
+
+// Reruns are an operator's attempts: they must neither pause production nor
+// reset its failure streak, and real production failures must still trip it.
+type rerunBreaker struct {
+	h       *apiHarness
+	healthy atomic.Bool
+	url     string
+	id      string
+}
+
+func newRerunBreaker(t *testing.T, h *apiHarness) *rerunBreaker {
+	t.Helper()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	b := &rerunBreaker{h: h, id: fmt.Sprintf("wf-rerun-breaker-%d", time.Now().UnixNano())}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !b.healthy.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(server.Close)
+	b.url = server.URL
+	if res := h.call("POST", "/workflows/save", b.doc(), ""); res.status != 200 {
+		t.Fatalf("save: %d %+v", res.status, res.body)
+	}
+	return b
+}
+
+func (b *rerunBreaker) config() map[string]any {
+	return map[string]any{"url": b.url, "method": "GET", "retry": map[string]any{"maxAttempts": 1}}
+}
+
+func (b *rerunBreaker) doc() map[string]any {
+	return map[string]any{
+		"id": b.id, "name": "Breaker", "dslVersion": "1.0",
+		"recovery": map[string]any{"circuitBreaker": 3},
+		"nodes":    []any{map[string]any{"id": "call", "type": "http", "config": b.config()}},
+		"edges":    []any{},
+	}
+}
+
+func (b *rerunBreaker) productionFailure() string {
+	b.h.t.Helper()
+	runID := extractRunID(b.h.t, b.h.call("POST", "/v1/start", map[string]any{"workflow": b.doc()}, ""))
+	b.h.waitRun(runID, "failed")
+	return runID
+}
+
+func (b *rerunBreaker) rerun(sourceRunID string, edited bool, want string) {
+	b.h.t.Helper()
+	body := map[string]any{"sourceRunId": sourceRunID, "nodeId": "call"}
+	if edited {
+		config := b.config()
+		config["timeoutMs"] = float64(4000)
+		body["inputOverride"] = config
+	}
+	res := b.h.call("POST", "/runs/rerun", body, "")
+	if res.status != 200 {
+		b.h.t.Fatalf("rerun: %d %+v", res.status, res.body)
+	}
+	b.h.waitRun(res.body["runId"].(string), want)
+}
+
+// The evaluation runs after the failure commits, so a settled status needs a beat.
+func (b *rerunBreaker) status() string {
+	b.h.t.Helper()
+	time.Sleep(300 * time.Millisecond)
+	var status string
+	if err := testPool(b.h.t).QueryRow(context.Background(), `SELECT status FROM workflows WHERE org_id=$1 AND id=$2`, b.h.org, b.id).Scan(&status); err != nil {
+		b.h.t.Fatalf("status: %v", err)
+	}
+	return status
+}
+
+func TestRerunFailuresDoNotCountTowardTheBreaker(t *testing.T) {
+	h := newAPIHarness(t)
+	b := newRerunBreaker(t, h)
+	source := b.productionFailure()
+	for _, edited := range []bool{false, false, false, true, true} {
+		b.rerun(source, edited, "failed")
+	}
+	if got := b.status(); got != "active" {
+		t.Fatalf("failing reruns must not pause production: %s", got)
+	}
+	b.productionFailure()
+	if got := b.status(); got != "active" {
+		t.Fatalf("two production failures are below the threshold of 3: %s", got)
+	}
+	b.productionFailure()
+	if got := b.status(); got != "paused_circuit_breaker" {
+		t.Fatalf("production failures must still trip the breaker: %s", got)
+	}
+}
+
+func TestRerunFailureDoesNotReevaluateAnOlderStreak(t *testing.T) {
+	for name, edited := range map[string]bool{"edited": true, "unedited": false} {
+		t.Run(name, func(t *testing.T) {
+			h := newAPIHarness(t)
+			b := newRerunBreaker(t, h)
+			source := b.productionFailure()
+			b.productionFailure()
+			b.productionFailure()
+			if got := b.status(); got != "paused_circuit_breaker" {
+				t.Fatalf("three production failures must trip the breaker: %s", got)
+			}
+			if res := h.call("POST", "/workflows/"+b.id+"/resume", map[string]any{}, ""); res.status != 200 {
+				t.Fatalf("resume: %d %+v", res.status, res.body)
+			}
+			b.rerun(source, edited, "failed")
+			if got := b.status(); got != "active" {
+				t.Fatalf("a failing rerun must not pause on an older streak: %s", got)
+			}
+			b.productionFailure()
+			if got := b.status(); got != "paused_circuit_breaker" {
+				t.Fatalf("the next production failure must still trip it: %s", got)
+			}
+		})
+	}
+}
+
+func TestRerunSuccessDoesNotResetTheBreakerStreak(t *testing.T) {
+	for name, edited := range map[string]bool{"edited": true, "unedited": false} {
+		t.Run(name, func(t *testing.T) {
+			h := newAPIHarness(t)
+			b := newRerunBreaker(t, h)
+			source := b.productionFailure()
+			b.productionFailure()
+			b.healthy.Store(true)
+			b.rerun(source, edited, "succeeded")
+			b.healthy.Store(false)
+			b.productionFailure()
+			if got := b.status(); got != "paused_circuit_breaker" {
+				t.Fatalf("a successful rerun must not hide production failures: %s", got)
+			}
+		})
+	}
+}
+
+// A production success is still what ends a streak.
+func TestProductionSuccessStillResetsTheBreakerStreak(t *testing.T) {
+	h := newAPIHarness(t)
+	b := newRerunBreaker(t, h)
+	b.productionFailure()
+	b.productionFailure()
+	b.healthy.Store(true)
+	h.waitRun(extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": b.doc()}, "")), "succeeded")
+	b.healthy.Store(false)
+	b.productionFailure()
+	if got := b.status(); got != "active" {
+		t.Fatalf("a production success must reset the streak: %s", got)
+	}
+}

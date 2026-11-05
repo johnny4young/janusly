@@ -147,9 +147,10 @@ write repeating. Its dead letter stays open until an operator closes it. A rerun
 start and a redrive serialize on the source's completion lock, so one always sees
 the other. A rerun that only cloned a step leaves that step replayable.
 
-The circuit breaker does not distinguish reruns. An unedited rerun keeps its
-version and counts in the failure streak, and a successful one resets it. An edited
-rerun is unbound, so it never counts, but its failure still evaluates the streak.
+Reruns stay out of the circuit breaker because they are operator-initiated
+attempts. A rerun neither counts in the failure streak nor resets it, and its
+failure does not evaluate the breaker, so it cannot pause production. Only
+production runs and redrives of them move the streak.
 
 Wake-ups carry a count: `janusly_wake` notifications and the wake sweeper
 say how many nodes just became claimable, and that many workers wake,

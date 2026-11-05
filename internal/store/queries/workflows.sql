@@ -186,6 +186,7 @@ LEFT JOIN workflow_versions v ON v.id = r.workflow_version_id AND v.org_id = r.o
 WHERE r.org_id = $1
   AND COALESCE(v.workflow_id, r.workflow_version_id) = sqlc.arg(workflow_id)
   AND r.replay_mode IS NULL
+  AND r.parent_link_kind IS DISTINCT FROM 'rerun'
   AND r.status IN ('succeeded', 'failed')
 ORDER BY r.created_at DESC
 LIMIT sqlc.arg(page_limit);

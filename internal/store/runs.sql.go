@@ -835,7 +835,7 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (GetRunRow, erro
 }
 
 const getRunExecution = `-- name: GetRunExecution :one
-SELECT status, org_id, workflow_version_id, input_json, replay_mode FROM runs WHERE id = $1
+SELECT status, org_id, workflow_version_id, input_json, replay_mode, parent_link_kind FROM runs WHERE id = $1
 `
 
 type GetRunExecutionRow struct {
@@ -844,6 +844,7 @@ type GetRunExecutionRow struct {
 	WorkflowVersionID string
 	InputJson         json.RawMessage
 	ReplayMode        pgtype.Text
+	ParentLinkKind    pgtype.Text
 }
 
 func (q *Queries) GetRunExecution(ctx context.Context, id string) (GetRunExecutionRow, error) {
@@ -855,6 +856,7 @@ func (q *Queries) GetRunExecution(ctx context.Context, id string) (GetRunExecuti
 		&i.WorkflowVersionID,
 		&i.InputJson,
 		&i.ReplayMode,
+		&i.ParentLinkKind,
 	)
 	return i, err
 }

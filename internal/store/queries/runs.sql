@@ -148,7 +148,7 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'running';
 
 -- name: GetRunExecution :one
-SELECT status, org_id, workflow_version_id, input_json, replay_mode FROM runs WHERE id = $1;
+SELECT status, org_id, workflow_version_id, input_json, replay_mode, parent_link_kind FROM runs WHERE id = $1;
 
 -- input_json carries the whole workflow snapshot, so the callers that only
 -- need to know whether this is a sandbox replay must not pay to transfer
