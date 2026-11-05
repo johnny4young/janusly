@@ -266,7 +266,8 @@ settings fail at boot and invalid new tenant/workflow writes are rejected.
 
 Tenant credentials are created through the credential API. Environment-backed
 credential references are restricted by the reserved namespace and optional
-`JANUSLY_CREDENTIAL_ENV_ALLOWLIST`.
+`JANUSLY_CREDENTIAL_ENV_ALLOWLIST`. Only `template_secret` credentials are
+reachable from `{{secret.NAME}}` templates; see [Templates](templates.md).
 
 ## Observability
 

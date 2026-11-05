@@ -288,7 +288,7 @@ func resolveSecret(expr string, state *renderState) (any, error) {
 	if !ok || resolved == "" {
 		return nil, &MissingSecretError{Name: name}
 	}
-	if len(resolved) >= 4 {
+	if len(resolved) >= MinRedactedLength {
 		state.trackRedacted(resolved)
 	}
 	return resolved, nil
@@ -305,7 +305,7 @@ func resolveEnv(expr string, state *renderState) any {
 		state.trackUnresolved(expr)
 		return ""
 	}
-	if value != "" && len(value) >= 4 {
+	if value != "" && len(value) >= MinRedactedLength {
 		state.trackRedacted(value)
 	}
 	return value
