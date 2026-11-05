@@ -1269,3 +1269,85 @@ func TestAgentAuthorsAndStartsWithoutExternalDocs(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentReadsAndManagesWorkflowLifecycle(t *testing.T) {
+	permissions := fullMCPTestPermissions()
+	permissions["runs.cancel"] = true
+	session, org := newMCPSessionWithPermissions(t, permissions)
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	id := "wf-lifecycle-" + org
+	document := func(note string) map[string]any {
+		return map[string]any{"id": id, "name": "Lifecycle", "nodes": []any{
+			map[string]any{"id": "cron", "type": "schedule", "config": map[string]any{"cronExpression": "0 9 * * *"}},
+			map[string]any{"id": "shape", "type": "transform", "config": map[string]any{
+				"mapping": map[string]any{"note": note, "token": "sk-abcdefghijklmnopqrstuv"}}},
+		}, "edges": []any{map[string]any{"from": "cron", "to": "shape"}}}
+	}
+	_, first := callTool(t, session, "workflows.save", map[string]any{"workflow": document("first")})
+	if _, second := callTool(t, session, "workflows.save", map[string]any{"workflow": document("second")}); second["version"] != float64(2) {
+		t.Fatalf("second save: %+v", second)
+	}
+
+	_, got := callTool(t, session, "workflows.get", map[string]any{"workflowId": id})
+	schedules, _ := got["schedules"].([]any)
+	if got["version"] != float64(2) || len(got["versions"].([]any)) != 2 || len(schedules) != 1 ||
+		schedules[0].(map[string]any)["nextFireAt"] == "" {
+		t.Fatalf("workflows.get: %+v", got)
+	}
+	if raw, _ := json.Marshal(got["document"]); !strings.Contains(string(raw), "second") || strings.Contains(string(raw), "sk-abcdefghijklmnopqrstuv") {
+		t.Fatalf("document must be the latest version with secret shapes removed: %s", raw)
+	}
+	if _, older := callTool(t, session, "workflows.get", map[string]any{"workflowId": id, "version": 1, "includeDocument": false}); older["versionId"] != first["versionId"] || older["document"] != nil {
+		t.Fatalf("exact version without document: %+v", older)
+	}
+
+	_, rolled := callTool(t, session, "workflows.rollback", map[string]any{"workflowId": id, "sourceVersionId": first["versionId"]})
+	if rolled["version"] != float64(3) || rolled["sourceVersion"] != float64(1) {
+		t.Fatalf("rollback: %+v", rolled)
+	}
+	_, started := callTool(t, session, "runs.start", map[string]any{"workflowId": id})
+	runID, _ := started["runId"].(string)
+	waitMCPRunStatus(t, pool, runID, "succeeded")
+	_, output := callTool(t, session, "runs.output", map[string]any{"runId": runID})
+	step, _ := output["steps"].(map[string]any)["shape"].(map[string]any)
+	if step["note"] != "first" || strings.Contains(fmt.Sprint(output), "sk-abcdefghijklmnopqrstuv") {
+		t.Fatalf("runs.output must show the rolled-back step output, scrubbed: %+v", output)
+	}
+
+	if result, _ := callTool(t, session, "workflows.deactivate", map[string]any{"workflowId": id}); result.IsError {
+		t.Fatalf("deactivate: %+v", result.Content)
+	}
+	var entries int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2`, org, id).Scan(&entries); err != nil || entries != 0 {
+		t.Fatalf("deactivated workflow kept %d schedule entries (%v)", entries, err)
+	}
+	if result, _ := callTool(t, session, "runs.start", map[string]any{"workflowId": id}); !result.IsError {
+		t.Fatal("a deactivated workflow must not start")
+	}
+	if result, _ := callTool(t, session, "workflows.reactivate", map[string]any{"workflowId": id}); result.IsError {
+		t.Fatalf("reactivate: %+v", result.Content)
+	}
+	if _, back := callTool(t, session, "workflows.get", map[string]any{"workflowId": id}); len(back["schedules"].([]any)) != 1 {
+		t.Fatalf("reactivation must rebuild schedules: %+v", back)
+	}
+
+	waiting := map[string]any{"id": "wf-wait-" + org, "nodes": []any{
+		map[string]any{"id": "pause", "type": "wait_until", "config": map[string]any{"duration": "PT1H"}},
+	}, "edges": []any{}}
+	_, pending := callTool(t, session, "runs.start", map[string]any{"workflow": waiting})
+	pendingID, _ := pending["runId"].(string)
+	if _, cancelled := callTool(t, session, "runs.cancel", map[string]any{"runId": pendingID, "reason": "no longer needed"}); cancelled["status"] != "cancelled" {
+		t.Fatalf("cancel: %+v", cancelled)
+	}
+	if again, _ := callTool(t, session, "runs.cancel", map[string]any{"runId": pendingID}); !again.IsError {
+		t.Fatal("cancelling a finished run must be an expected error")
+	}
+	if foreign, _ := callTool(t, session, "runs.cancel", map[string]any{"runId": "run-of-another-org"}); !foreign.IsError {
+		t.Fatal("unknown runs must not be cancellable")
+	}
+}

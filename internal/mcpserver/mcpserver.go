@@ -160,6 +160,7 @@ func NewServer(deps Deps) *mcp.Server {
 
 	registerOperatorTools(server, deps)
 	registerAuthoringTools(server, deps)
+	registerLifecycleTools(server, deps)
 	return server
 }
 
