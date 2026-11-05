@@ -13,6 +13,10 @@ import (
 // RedactedPlaceholder is the literal that replaces matched values.
 const RedactedPlaceholder = "[redacted]"
 
+// MinRedactedLength is the shortest resolved secret or env value the
+// renderer tracks for redaction; shorter values would redact ordinary text.
+const MinRedactedLength = 4
+
 // RedactValues recursively replaces any string occurrence of the given
 // values with the redaction placeholder. Non-string leaves pass through
 // untouched. Copy-on-write: containers are rebuilt ONLY on an actual

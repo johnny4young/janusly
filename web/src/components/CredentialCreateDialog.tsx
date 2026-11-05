@@ -10,6 +10,7 @@ const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 
 const CREDENTIAL_KINDS = [
   'generic',
+  'template_secret',
   'github_token',
   'slack_webhook',
   'slack_signing_secret',

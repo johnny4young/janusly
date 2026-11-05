@@ -177,6 +177,14 @@ LIMIT 201;
 SELECT id, org_id, name, kind, secret_ref, updated_at, expires_at
 FROM credentials WHERE org_id = $1 AND name = $2;
 
+-- Names are unique per org but compared case-insensitively here; callers
+-- treat more than one row as ambiguous.
+-- name: ListTemplateSecretCredentials :many
+SELECT secret_ref, expires_at FROM credentials
+WHERE org_id = sqlc.arg(org_id) AND kind = sqlc.arg(kind) AND upper(name) = sqlc.arg(upper_name)::text
+ORDER BY id
+LIMIT 2;
+
 -- name: LockCredentialByName :one
 SELECT id, kind, secret_ref, updated_at FROM credentials
 WHERE org_id = $1 AND name = $2 FOR UPDATE;
