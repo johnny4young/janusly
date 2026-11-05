@@ -41,13 +41,14 @@ vi.mock('../api', () => {
 })
 
 vi.mock('./RecoveryDialog', () => ({
-  RecoveryDialog: ({ dlq, clusterMembers, clusterSignature, onClose }: {
+  RecoveryDialog: ({ dlq, clusterMembers, clusterSignature, onClose, canReplayInLab }: {
     dlq: DeadLetter
     clusterMembers?: string[]
     clusterSignature?: string
     onClose: () => void
+    canReplayInLab?: boolean
   }) => (
-    <button type="button" data-testid="recovery-dialog" onClick={onClose}>
+    <button type="button" data-testid="recovery-dialog" data-lab={canReplayInLab} onClick={onClose}>
       {JSON.stringify({ id: dlq.id, clusterMembers, clusterSignature })}
     </button>
   ),
@@ -1788,6 +1789,18 @@ describe('<DeadLettersPanel /> — list and detail', () => {
     await screen.findByTestId(`dlq-cluster-${DNS_SIGNATURE}`)
     expect(screen.queryByTestId(`dlq-cluster-replay-${DNS_SIGNATURE}`)).toBeNull()
     expect(screen.queryByTestId(`dlq-cluster-investigate-${DNS_SIGNATURE}`)).toBeNull()
+  })
+
+  it('lets the Suggest fix dialog offer Replay Lab only when the operator may start runs', async () => {
+    mockQueue({ [DNS_SIGNATURE]: ['a', 'c'], [SECRET_SIGNATURE]: ['b'] })
+    const first = mount({ canStartRuns: false })
+    fireEvent.click(await screen.findByTestId(`dlq-cluster-investigate-${SECRET_SIGNATURE}`))
+    expect(await screen.findByTestId('recovery-dialog')).toHaveAttribute('data-lab', 'false')
+    first.unmount()
+
+    mount()
+    fireEvent.click(await screen.findByTestId(`dlq-cluster-investigate-${SECRET_SIGNATURE}`))
+    expect(await screen.findByTestId('recovery-dialog')).toHaveAttribute('data-lab', 'true')
   })
 
   it('groups every failure action in the bar and gives the queue the width while selecting', async () => {

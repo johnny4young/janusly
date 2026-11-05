@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ComponentType } from 'react'
 
 import { formatCompactDuration, formatStatusLabel } from '../constants'
 import { useT } from '../i18n'
 import { projectRunSteps, type RunStep, type StepAttempt } from '../run-steps'
-import type { RunEvent, RunNode } from '../types'
+import { isTerminalRunStatus } from '../lib/status'
+import type { RunEvent, RunNode, RunSummary } from '../types'
 import './RunStepTimeline.css'
 import { Button } from './ui/Button'
 
@@ -11,7 +12,7 @@ function attemptSpan(attempt: StepAttempt, endMs: number): number | null {
   return attempt.startedAt === null ? null : Math.max(0, (attempt.finishedAt ?? endMs) - attempt.startedAt)
 }
 
-function StepRow({ step, startMs, endMs }: { step: RunStep; startMs: number; endMs: number }) {
+function StepRow({ step, startMs, endMs, onRerun }: { step: RunStep; startMs: number; endMs: number; onRerun?: (nodeId: string) => void }) {
   const { t } = useT()
   const scale = 100 / Math.max(1, endMs - startMs)
   const first = step.attempts[0]?.startedAt ?? null
@@ -25,6 +26,11 @@ function StepRow({ step, startMs, endMs }: { step: RunStep; startMs: number; end
           <span className="we-pill" data-tone="warning" data-testid={`run-step-retries-${step.nodeId}`}>
             {t('runWorkspace.steps.retries', { count: step.retries })}
           </span>
+        )}
+        {onRerun && step.status !== 'pending' && step.status !== 'skipped' && (
+          <Button size="sm" variant="ghost" data-testid={`run-step-rerun-${step.nodeId}`} onClick={() => onRerun(step.nodeId)}>
+            {t('runWorkspace.rerun.title', { nodeId: step.nodeId })}
+          </Button>
         )}
       </div>
       <div className="we-run-step__track" aria-hidden="true">
@@ -74,14 +80,21 @@ export function RunStepTimeline({
   nodes,
   eventsHasMore,
   onLoadOlderEvents,
+  run,
+  RerunDialog,
 }: {
   events: RunEvent[]
   nodes: RunNode[]
   eventsHasMore?: boolean
   onLoadOlderEvents?: () => void | Promise<void>
+  run?: RunSummary
+  /** Injected so this lazy chunk does not preload everything the run panel needs. */
+  RerunDialog?: ComponentType<{ runId: string; nodeId: string; onClose: () => void }>
 }) {
   const { t } = useT()
   const [loadingOlder, setLoadingOlder] = useState(false)
+  const [rerunNodeId, setRerunNodeId] = useState<string | null>(null)
+  const canRerun = RerunDialog && run && !run.replayMode && isTerminalRunStatus(run.status)
   const { steps, startMs, endMs } = useMemo(() => projectRunSteps(events, nodes), [events, nodes])
 
   return (
@@ -95,7 +108,7 @@ export function RunStepTimeline({
             <span>{formatCompactDuration(endMs - startMs)}</span>
           </div>
           <ol aria-label={t('runWorkspace.steps.aria')}>
-            {steps.map(step => <StepRow key={step.nodeId} step={step} startMs={startMs} endMs={endMs} />)}
+            {steps.map(step => <StepRow key={step.nodeId} step={step} startMs={startMs} endMs={endMs} onRerun={canRerun ? setRerunNodeId : undefined} />)}
           </ol>
         </>
       )}
@@ -115,6 +128,9 @@ export function RunStepTimeline({
         >
           {t(loadingOlder ? 'common.loading' : 'rightPanel.reasoning.loadOlder')}
         </Button>
+      )}
+      {canRerun && rerunNodeId && (
+        <RerunDialog runId={run.id} nodeId={rerunNodeId} onClose={() => setRerunNodeId(null)} />
       )}
     </div>
   )

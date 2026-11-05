@@ -206,7 +206,11 @@ func (e *Engine) afterTerminalFailure(ctx context.Context, claim ClaimedNode) {
 	if err != nil {
 		return
 	}
-	e.maybeTripCircuitBreaker(ctx, run.OrgID, wf.ID, claim.RunID)
+	// A rerun is an operator's attempt, not production traffic: its failure must
+	// not pause the workflow, even by re-reading an older streak.
+	if run.ParentLinkKind.String != RerunLinkKind {
+		e.maybeTripCircuitBreaker(ctx, run.OrgID, wf.ID, claim.RunID)
+	}
 	// Rollout outcome receipt (idempotent; repair covers crash windows).
 	e.maybeRecordRolloutOutcome(ctx, claim.RunID)
 	e.maybeCommitRunSummaryMemory(ctx, claim.RunID)

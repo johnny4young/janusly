@@ -32,6 +32,7 @@ describe('<RecoveryAutomationDisclosure />', () => {
     render(
       <RecoveryAutomationDisclosure
         canRecover
+        canStartRuns
         canReadAutoHealing
         canDecideAutoHealing
       />,
@@ -53,6 +54,7 @@ describe('<RecoveryAutomationDisclosure />', () => {
     render(
       <RecoveryAutomationDisclosure
         canRecover={false}
+        canStartRuns={false}
         canReadAutoHealing={false}
         canDecideAutoHealing={false}
       />,

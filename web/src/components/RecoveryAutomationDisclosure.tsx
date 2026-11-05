@@ -13,6 +13,7 @@ const AutoHealingPendingCard = lazy(() => import('./AutoHealingPendingCard').the
 
 type RecoveryAutomationDisclosureProps = {
   canRecover: boolean
+  canStartRuns: boolean
   canReadAutoHealing: boolean
   canDecideAutoHealing: boolean
 }
@@ -23,6 +24,7 @@ type RecoveryAutomationDisclosureProps = {
  */
 export function RecoveryAutomationDisclosure({
   canRecover,
+  canStartRuns,
   canReadAutoHealing,
   canDecideAutoHealing,
 }: RecoveryAutomationDisclosureProps) {
@@ -57,7 +59,7 @@ export function RecoveryAutomationDisclosure({
       {open && (
         <div id={contentId} className="we-recovery-automation__content">
           <Suspense fallback={<p className="helper-text">{t('dlq.automation.loading')}</p>}>
-            <FailureClustersCard canRecover={canRecover} />
+            <FailureClustersCard canRecover={canRecover} canStartRuns={canStartRuns} />
             {canReadAutoHealing && <AutoHealingPendingCard canDecide={canDecideAutoHealing} />}
           </Suspense>
         </div>

@@ -31,6 +31,7 @@ describe('modal accessibility contract', () => {
       './components/ReplayLabDialog.tsx',
       './components/ReplayLabForkDialog.tsx',
       './components/ReportDeliveryDialog.tsx',
+      './components/RerunStepDialog.tsx',
       './components/RollbackConfirmDialog.tsx',
       './components/RunHistoryComparisonDialog.tsx',
       './components/RunInputDialog.tsx',
