@@ -52,8 +52,6 @@ type RerunRejection struct {
 	NodeID        string
 }
 
-func (r *RerunRejection) Error() string { return r.Message }
-
 // RunSnapshot parses the workflow and input a run actually executed, including
 // a fix a redrive swapped in, rather than its saved version.
 func RunSnapshot(inputJSON []byte) (*domain.Workflow, map[string]any, error) {

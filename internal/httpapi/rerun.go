@@ -19,6 +19,8 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
+func init() { audit.RegisterRuntimeAction("run.rerun_started") }
+
 type rerunRequest struct {
 	SourceRunID             string          `json:"sourceRunId"`
 	NodeID                  string          `json:"nodeId"`
