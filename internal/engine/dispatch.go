@@ -141,8 +141,8 @@ func authoredAgentWritesOptIn(config map[string]any) bool {
 
 // NewDispatcher wires the executor registry over this engine. Env access
 // defaults to the process environment filtered through the credential policy;
-// secrets default to none (every {{secret.X}} is a hard failure) until a
-// secret source is configured. Callers may still provide an explicit lookup.
+// secrets default to the claim organization's generic credentials. Callers
+// may still provide an explicit lookup.
 func (e *Engine) NewDispatcher(opts grammar.RenderOptions) *Dispatcher {
 	if opts.LookupEnv == nil {
 		opts.LookupEnv = secretstore.LookupAllowedEnv
@@ -177,6 +177,11 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		config = map[string]any{}
 	}
 	renderOpts := d.renderOpts
+	var secrets *templateSecretLookup
+	if renderOpts.LookupSecret == nil {
+		secrets = d.engine.newTemplateSecretLookup(ctx, claim.OrgID)
+		renderOpts.LookupSecret = secrets.find
+	}
 	if node.Type == "loop" {
 		// The loop's item/index scopes bind per iteration inside the
 		// executor; deferring them here mirrors the contract's
@@ -194,6 +199,9 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		"inputs":  config,
 	}, renderOpts)
 	if err != nil {
+		if secrets != nil && secrets.err != nil {
+			return nil, secrets.err
+		}
 		// A missing secret is already name-only — safe to surface verbatim.
 		return nil, err
 	}
