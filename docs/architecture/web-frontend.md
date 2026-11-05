@@ -297,8 +297,17 @@ server clusters with, so every filter, sort and page keeps applying.
 rows share one fixed height, so the queue stays virtualized in both views, and
 J/K and triage focus walk the rows in the order shown.
 Investigate and Replay cluster read `/dlq/cluster-members` when clicked and open
-the cluster recovery and campaign dialogs. The full rollup, with failed run nodes
-and suggested owners, remains under Automation and patterns.
+the cluster recovery and recovery job dialogs. The full rollup, with failed run
+nodes and suggested owners, remains under Automation and patterns.
+
+Recovery jobs is a second view of Recover, loaded when it opens. The queue stays
+mounted behind it so filters and selection survive. The list polls while any job
+runs, from a timer that outlives the view, so the end of a job raises a toast
+from any workspace tab until the page reloads or the session changes. Polls never
+overlap, an older response is dropped, a job is announced once, repeated failures
+back off and 401 or 403 stops the watch. A job started from
+the dialog opens this view; New recovery job returns to the queue in selection
+mode, because a job's cohort is always chosen there.
 
 Templates has two views over one shared search. Recipes groups by the category
 each template carries in `internal/httpapi/assets/templates.json`, so a new
@@ -338,7 +347,7 @@ breadcrumb names the routed area (the `operations.section.*` copy stays in the
 core catalog so it paints before the workspace catalog loads). The Find a setting
 index reads the counts on its cards only while it is open, each behind the
 permission of its panel; a denied or failed read omits that count. Attention dots
-carry their reason in the rail tab's `title` and the dot's accessible name. On narrow Connections views, the primary action stacks
+carry their reason in the rail tab's `title` and the dot's accessible name. The AI budget card meters spend from `/billing/budget` and reads workflow overrides one visible row at a time, because no list endpoint exists. Its filter searches the 100 workflows `GET /workflows` returns by default, and says so when a full list has no match. On narrow Connections views, the primary action stacks
 inside the card. The inventory is a virtualized table (name, type, health, used
 by, last used, expiry, owner) that scrolls sideways on its own, with Rotate and
 Revoke pinned to the right edge above phone width. A header counts connections
@@ -382,9 +391,22 @@ has one primary assisted start and keeps Add step as the manual, provider-free
 path. The teaching overlay still passes palette drops through outside its action.
 
 The AI Studio header marks the current stage as the first incomplete one, with
-`aria-current="step"`. In Solution Packs, Install is disabled only by the
-`packs.install` permission; missing credentials are named under the button but
-never block it, because a pack installs as a draft that is wired afterwards.
+`aria-current="step"`. Each Solution Pack lists its required credentials and
+organization settings in a Before installing checklist. A role with
+`credentials.write` connects a missing credential in place, through the create
+dialog with its name and kind locked, because readiness compares both. A row is
+ready only when the name holds the right kind, has not expired and, per one
+`/credentials/health` read for the panel, has its secret set. Otherwise the row
+says which and offers Review, which opens Connections, because names are unique
+per organization and a create would conflict. A failed create refreshes the list,
+and the dialog closes once the list holds the name. A list that could not be read,
+or a role without `credentials.read`, shows the status as unavailable rather than
+missing. Organization settings have no per-organization state in the
+pack API, so they are listed but not counted. Install is disabled only by the
+`packs.install` permission. Credentials that are not ready take away its primary
+weight and are named under the button but never block it: every pack installs as a draft
+that is wired afterwards, and `packs.install` is granted to editors while
+`credentials.write` is not.
 
 Contextual authoring prefills never submit work. Replacing an intent invalidates
 pending compilation/proposal results and releases their loading state; late
@@ -514,7 +536,7 @@ and a 0.5 KiB single-locale allowance for the fail-closed RecoveryDialog AI
 response parser. The complete-artifact cap remained 605 KiB for that security
 change; the parser stays in the existing lazy dialog rather than adding a
 network request. The cold path is what the caps protect: `index.css`, `workflow-workspace` and the
-route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB).
+route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB). In 2026-11 the owner approved moving the artifact, worst-locale and per-chunk caps by each workspace redesign change's measured cost, stated in its pull request.
 
 ## Closing failures without recovery
 

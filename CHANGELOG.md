@@ -5,6 +5,30 @@
 - Login has Forgot password?, which emails a reset link that ends at the
   set-password step. The answer is the same whether or not the email has an
   account, including when the auth server limits how often it sends.
+- Recover has a Recovery jobs view beside the queue. Name a paced replay after
+  the incident; before it starts you see how many failures and runs it touches,
+  the failed steps and later steps that may change external systems, and the
+  estimated time. Each job shows live progress and how many replays started,
+  could not start or were cancelled, with Abort while it runs and View runs to
+  open any run it touched. A started replay is not yet a recovered run, so check
+  the runs for their outcome. Janusly shows a notice when a job you have seen
+  running ends, even after you leave Recover. These jobs moved here from
+  Automation and patterns.
+- Solution packs show a Before installing checklist with each required credential,
+  its state and how many are ready. Connect opens the new connection dialog with
+  the name and kind filled in, and the row turns ready without leaving the page.
+  A credential that has expired, has no secret set on the server or is held under
+  another kind says so and offers Review, which opens Connections. Install becomes
+  the primary action once every credential is ready, and it still installs a draft
+  before then.
+- Failed actions that go through the platform's shared error toast now show the
+  message in your language when one exists, instead of the server's English.
+- The AI budget in Settings now meters this month's spend against the limit,
+  with the warning threshold marked on the bar. An Off / Limit switch replaces
+  entering 0 to turn the budget off. A limit must be at least $0.01 and a warning
+  threshold at least 1%. Workflow overrides are table rows with their limit,
+  warning, policy and spend, edited in place, and can be set back to the Org-wide
+  budget.
 - Permission grants is one matrix with permissions in rows and roles in
   columns, a filter, and one Save for every edited role. Cells that differ from
   the built-in default are tinted. If only some roles save, the panel says which
@@ -45,7 +69,7 @@
 - The recovery queue groups failures by cluster by default, with a switch to All
   items. Each cluster shows its signature, category, occurrences and affected
   workflows, plus Investigate, which opens the fix for every open failure in the
-  cluster, and Replay cluster, which starts a paced campaign after its preview.
+  cluster, and Replay cluster, which starts a recovery job after its preview.
 - Home's Operator prompt is now one compact field at the bottom of What needs
   you, and answers open in a side panel instead of pushing Home down. The panel
   links the run the answer is based on and opens its recovery case in one click.

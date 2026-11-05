@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { RightPanel, type RightPanelProps } from './RightPanel'
@@ -16,8 +16,8 @@ vi.mock('./AuthoringPanel', () => ({
   AuthoringPanel: () => <div data-testid="authoring-panel" />,
 }))
 vi.mock('./RunsPanel', () => ({
-  RunsPanel: ({ mode }: { mode?: string }) => (
-    <div data-testid="runs-panel-mode">{mode ?? 'runs'}</div>
+  RunsPanel: ({ mode, canReadRuns }: { mode?: string; canReadRuns?: boolean }) => (
+    <div data-testid="runs-panel-mode" data-can-read-runs={String(canReadRuns)}>{mode ?? 'runs'}</div>
   ),
 }))
 
@@ -69,6 +69,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       templates: [],
       solutionPacks: [],
       credentials: [],
+      credentialsKnown: true,
       workflows: [],
       onOpenWorkflow: vi.fn(),
       onOpenWorkflowVersion: vi.fn(async () => true),
@@ -110,6 +111,9 @@ beforeEach(() => {
 })
 
 describe('<RightPanel /> credentials', () => {
+  // The cold lazy chunks can outlast a query's timeout on a loaded machine.
+  beforeAll(() => Promise.all([import('./ConnectionsPanel'), import('./connection-dialogs')]))
+
   it('keeps creation focused and offers postgres for external DB tools', async () => {
     render(<RightPanel {...props()} />)
 
@@ -144,6 +148,12 @@ describe('<RightPanel /> recovery task space', () => {
       .not.toHaveAttribute('aria-current')
   })
 
+  it('passes the runs.read permission to Recover', async () => {
+    render(<RightPanel {...props({ tab: 'recover', permissions: ['dlq.read', 'recovery.read'] })} />)
+
+    expect(await screen.findByTestId('runs-panel-mode')).toHaveAttribute('data-can-read-runs', 'false')
+  })
+
   it('mounts Reports with each widget gate and counts only open failures on Recover', async () => {
     const base = props()
     render(<RightPanel {...props({
@@ -166,6 +176,33 @@ describe('<RightPanel /> recovery task space', () => {
 
     expect(await screen.findByTestId('authoring-panel')).toBeInTheDocument()
     expect(screen.queryByTestId('workspace-section-nav')).toBeNull()
+  })
+
+  it.each([
+    ['packs', 'with credentials.write', ['packs.read', 'credentials.write'], true],
+    ['packs', 'without credentials.write', ['packs.read'], false],
+    ['templates', 'with credentials.write', ['packs.read', 'credentials.write'], true],
+    ['templates', 'without credentials.write', ['packs.read'], false],
+  ] as const)('on %s, gates pack Connect by role (%s)', async (tab, _label, permissions, connects) => {
+    const base = props({ tab, permissions: [...permissions] })
+    render(<RightPanel {...base} catalog={{ ...base.catalog, solutionPacks: [{
+      id: 'p',
+      name: 'Pack',
+      description: 'd',
+      category: 'c',
+      version: '1',
+      assurance: { intentContract: false, recoveryContractVersion: '', qualificationFixtureCount: 0 },
+      requiredCredentials: [{ name: 'c', kind: 'k', purpose: 'x' }],
+      requiredOrgConfigs: [],
+      nodeCount: 1,
+      sampleCount: 0,
+      failureCount: 0,
+      samplePayloadIds: [],
+      failureFixtureIds: [],
+      failureFixtures: [],
+    }] }} />)
+    await screen.findByTestId('solution-pack-p')
+    expect(screen.queryAllByTestId('pack-connect-p-c')).toHaveLength(connects ? 1 : 0)
   })
 
   it('filters contextual sections with the same effective permissions as global navigation', () => {
