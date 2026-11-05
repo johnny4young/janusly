@@ -1102,3 +1102,160 @@ func TestRerunDoesNotReuseAHumanFormForAWrite(t *testing.T) {
 		t.Fatalf("a refused rerun must not send: %q", got)
 	}
 }
+
+// decideHumanStep answers the one human step waiting in a run.
+func (h *apiHarness) decideHumanStep(runID, nodeID, nodeType string) {
+	h.t.Helper()
+	pool := testPool(h.t)
+	var res apiResponse
+	if nodeType == "human_form" {
+		token := waitFormToken(h.t, pool, h.t.Context(), runID, nodeID)
+		res = h.call("POST", "/resume", map[string]any{"runId": runID, "nodeId": nodeID, "resumeToken": token, "input": map[string]any{"ok": "yes"}}, "")
+	} else {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			var status string
+			_ = pool.QueryRow(h.t.Context(), `SELECT status FROM run_nodes WHERE run_id=$1 AND node_id=$2`, runID, nodeID).Scan(&status)
+			if status == "waiting" {
+				break
+			}
+			if time.Now().After(deadline) {
+				h.t.Fatalf("%s never waited: %q", nodeID, status)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		res = h.call("POST", "/v1/resume", map[string]any{"runId": runID, "nodeId": nodeID}, "")
+	}
+	if res.status != 200 {
+		h.t.Fatalf("decide %s: %d %+v", nodeID, res.status, res.body)
+	}
+}
+
+// childRunOf waits for the run a subworkflow step started.
+func (h *apiHarness) childRunOf(runID, nodeID string) string {
+	h.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var child string
+		_ = testPool(h.t).QueryRow(h.t.Context(), `SELECT id FROM runs WHERE parent_run_id=$1 AND parent_node_id=$2 AND parent_link_kind='subworkflow'`, runID, nodeID).Scan(&child)
+		if child != "" {
+			return child
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	h.t.Fatalf("%s never started a child", nodeID)
+	return ""
+}
+
+// A decision made inside a child run covers that child's execution, so a write
+// after the reused subworkflow cannot fire on it.
+func TestRerunDoesNotReuseADecisionInsideASubworkflow(t *testing.T) {
+	for name, tc := range map[string]struct {
+		human    string
+		nested   bool
+		notTaken bool
+		viaRerun bool
+		refused  bool
+	}{
+		"child without a human step":       {},
+		"human step on a branch not taken": {human: "approval", notTaken: true},
+		"child with an approval":           {human: "approval", refused: true},
+		"child with a human form":          {human: "human_form", refused: true},
+		"approval in a nested child":       {human: "approval", nested: true, refused: true},
+		"source is itself a rerun":         {human: "approval", viaRerun: true, refused: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newAPIHarness(t)
+			target := newRerunTarget(t)
+			suffix := time.Now().UnixNano()
+			retry := map[string]any{"maxAttempts": 1}
+			save := func(id string, nodes, edges []any) {
+				t.Helper()
+				doc := map[string]any{"id": id, "name": id, "dslVersion": "1.0", "nodes": nodes, "edges": edges}
+				if res := h.call("POST", "/workflows/save", doc, ""); res.status != 200 {
+					t.Fatalf("save %s: %d %+v", id, res.status, res.body)
+				}
+			}
+			decide := map[string]any{"id": "decide", "type": "noop", "config": map[string]any{}}
+			switch tc.human {
+			case "approval":
+				decide = map[string]any{"id": "decide", "type": "approval", "config": map[string]any{"message": "Go"}}
+			case "human_form":
+				decide = map[string]any{"id": "decide", "type": "human_form", "config": map[string]any{
+					"title":  "Review",
+					"schema": map[string]any{"type": "object", "properties": map[string]any{"ok": map[string]any{"type": "string"}}},
+				}}
+			}
+			toDecide := map[string]any{"from": "begin", "to": "decide"}
+			if tc.notTaken {
+				toDecide["condition"] = "1 === 2"
+			}
+			inner := fmt.Sprintf("wf-rerun-inner-%d", suffix)
+			save(inner, []any{map[string]any{"id": "begin", "type": "noop", "config": map[string]any{}}, decide,
+				map[string]any{"id": "done", "type": "noop", "config": map[string]any{}}},
+				[]any{toDecide, map[string]any{"from": "begin", "to": "done"}, map[string]any{"from": "decide", "to": "done"}})
+			called := inner
+			if tc.nested {
+				called = fmt.Sprintf("wf-rerun-outer-%d", suffix)
+				save(called, []any{map[string]any{"id": "nest", "type": "subworkflow", "config": map[string]any{"workflowId": inner}}}, []any{})
+			}
+			workflow := map[string]any{
+				"id": fmt.Sprintf("wf-rerun-parent-%d", suffix), "name": "Parent", "dslVersion": "1.0",
+				"nodes": []any{
+					map[string]any{"id": "call", "type": "subworkflow", "config": map[string]any{"workflowId": called}},
+					map[string]any{"id": "shape", "type": "noop", "config": map[string]any{}},
+					map[string]any{"id": "send", "type": "http", "config": map[string]any{"url": target.URL + "/send", "method": "POST", "retry": retry}},
+					map[string]any{"id": "peek", "type": "http", "config": map[string]any{"url": target.URL + "/peek", "method": "GET", "retry": retry}},
+				},
+				"edges": []any{
+					map[string]any{"from": "call", "to": "shape"}, map[string]any{"from": "shape", "to": "send"},
+					map[string]any{"from": "call", "to": "peek"},
+				},
+			}
+			source := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, ""))
+			if tc.human != "" && !tc.notTaken {
+				holder := h.childRunOf(source, "call")
+				if tc.nested {
+					holder = h.childRunOf(holder, "nest")
+				}
+				h.decideHumanStep(holder, "decide", tc.human)
+			}
+			h.waitRun(source, "succeeded")
+			if target.writes.Load() != 1 {
+				t.Fatalf("source must write once: %d", target.writes.Load())
+			}
+			if tc.viaRerun {
+				// A read-only rerun clones the subworkflow, child id included.
+				first := h.call("POST", "/runs/rerun", map[string]any{"sourceRunId": source, "nodeId": "peek"}, "")
+				if first.status != 200 {
+					t.Fatalf("read-only rerun: %d %+v", first.status, first.body)
+				}
+				source = first.body["runId"].(string)
+				h.waitRun(source, "succeeded")
+			}
+
+			request := map[string]any{"sourceRunId": source, "nodeId": "shape", "acknowledgedSideEffects": []string{"send"}}
+			preview := h.call("POST", "/runs/rerun/preview", request, "")
+			started := h.call("POST", "/runs/rerun", request, "")
+			if !tc.refused {
+				if preview.status != 200 || started.status != 200 {
+					t.Fatalf("no decision to repeat: %d %+v / %d %+v", preview.status, preview.body, started.status, started.body)
+				}
+				h.waitRun(started.body["runId"].(string), "succeeded")
+				if target.writes.Load() != 2 {
+					t.Fatalf("rerun must write: %d", target.writes.Load())
+				}
+				return
+			}
+			for _, res := range []apiResponse{preview, started} {
+				params, _ := res.body["params"].(map[string]any)
+				if res.status != 422 || res.body["code"] != "rerun_needs_approval" || params["nodeId"] != "call" {
+					t.Fatalf("refusal: %d %+v", res.status, res.body)
+				}
+			}
+			if target.writes.Load() != 1 {
+				t.Fatalf("a refused rerun must not write: %d", target.writes.Load())
+			}
+		})
+	}
+}

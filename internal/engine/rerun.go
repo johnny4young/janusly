@@ -6,6 +6,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -66,6 +67,9 @@ type RerunPlan struct {
 	NotRun      []string      `json:"notRun"`
 	SideEffects []RerunEffect `json:"sideEffects"`
 	Seed        *RerunSeed    `json:"-"`
+	// Reused subworkflows upstream of a side effect: RerunChildDecision reads
+	// their child runs for a human decision.
+	ReusedSubworkflows []string `json:"-"`
 }
 
 // RerunRejection is an expected refusal; the API maps it to a 4xx with Code.
@@ -163,15 +167,93 @@ func PlanRerun(sourceRunID string, wf *domain.Workflow, rows []store.ListRunNode
 	}
 	// A human decision covers one execution, and only agents check approval at
 	// dispatch, so each write needs every decision upstream of it to run again.
+	gated := map[string]bool{}
 	for _, effect := range plan.SideEffects {
 		upstream := collectRelatives(wf, effect.NodeID, true)
 		for _, node := range wf.Nodes {
-			if domain.ConsumesHumanDecision(node.Type) && upstream[node.ID] && !closure[node.ID] {
+			if !upstream[node.ID] || closure[node.ID] {
+				continue
+			}
+			if domain.ConsumesHumanDecision(node.Type) {
 				return RerunPlan{}, &RerunRejection{Code: "rerun_needs_approval", Message: "Rerun from this human step so it is decided again", NodeID: node.ID}
+			}
+			if node.Type == "subworkflow" && plan.Seed.Nodes[node.ID].Status == "succeeded" {
+				gated[node.ID] = true
 			}
 		}
 	}
+	for _, node := range wf.Nodes {
+		if gated[node.ID] {
+			plan.ReusedSubworkflows = append(plan.ReusedSubworkflows, node.ID)
+		}
+	}
 	return plan, nil
+}
+
+// rerunChildReadMax bounds the child runs one rerun request reads.
+const rerunChildReadMax = 100
+
+// ErrRerunChildMissing reports a child run that is gone or has no valid snapshot.
+var ErrRerunChildMissing = errors.New("subworkflow child run cannot be read")
+
+// RerunChildReader loads a finished child run's executed document and steps.
+type RerunChildReader func(ctx context.Context, runID string) (*domain.Workflow, []store.ListRunNodesByRunForOrgRow, error)
+
+// RerunChildDecision refuses a plan whose reused subworkflow, or a run below it,
+// consumed a human decision. A child it cannot identify or read counts as one.
+func RerunChildDecision(ctx context.Context, plan RerunPlan, read RerunChildReader) (*RerunRejection, error) {
+	budget, seen := rerunChildReadMax, map[string]bool{}
+	for _, nodeID := range plan.ReusedSubworkflows {
+		decided, err := childDecided(ctx, plan.Seed.Nodes[nodeID].State, read, seen, &budget)
+		if err != nil {
+			return nil, err
+		}
+		if decided {
+			return &RerunRejection{Code: "rerun_needs_approval", Message: "Rerun from this subworkflow so its human step is decided again", NodeID: nodeID}, nil
+		}
+	}
+	return nil, nil
+}
+
+func childDecided(ctx context.Context, state json.RawMessage, read RerunChildReader, seen map[string]bool, budget *int) (bool, error) {
+	var fields struct {
+		Subworkflow struct {
+			ChildRunID string `json:"childRunId"`
+		} `json:"subworkflow"`
+	}
+	_ = json.Unmarshal(state, &fields)
+	childRunID := fields.Subworkflow.ChildRunID
+	if childRunID == "" || seen[childRunID] || *budget == 0 {
+		return true, nil
+	}
+	seen[childRunID] = true
+	*budget--
+	wf, rows, err := read(ctx, childRunID)
+	if errors.Is(err, ErrRerunChildMissing) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	byID := make(map[string]store.ListRunNodesByRunForOrgRow, len(rows))
+	for _, row := range rows {
+		byID[row.NodeID] = row
+	}
+	for _, node := range wf.Nodes {
+		row, present := byID[node.ID]
+		if present && row.Status == "skipped" {
+			continue
+		}
+		if domain.ConsumesHumanDecision(node.Type) {
+			return true, nil
+		}
+		if node.Type == "subworkflow" {
+			if decided, err := childDecided(ctx, row.StateJson, read, seen, budget); err != nil || decided {
+				return decided, err
+			}
+		}
+	}
+	return false, nil
 }
 
 // waitsOnChildRun reports a parked subworkflow whose child may still be writing.

@@ -55,8 +55,12 @@ does not need unrelated recovery visibility. Ranking, targets and evidence stay
 shared, while `allowedActions` is projected onto the actual MCP catalog: it
 never advertises the UI-only candidate or approval endpoints, and a diagnosed
 case remains actionable through the composite `recovery.cases.diagnose` tool.
+`catalog.describe` and `workflows.validate` let an agent discover step types,
+tools and credential names and check a draft without saving it.
 `workflows.propose` performs exact CapabilityCatalog binding without saving a
-workflow or returning its complete DAG. Semantic recovery is exposed as bounded
+workflow, and returns the bound draft only when `includeDocument` is true.
+`runs.start` runs a saved `workflowId` at its latest version and accepts an
+`idempotencyKey` for safe retries. Semantic recovery is exposed as bounded
 inspect/diagnose/validate/apply tools; apply requires a separately created,
 unexpired human approval and the immutable candidate's additional permissions.
 Diagnose is deterministic without a provider and can use bounded AI enrichment
