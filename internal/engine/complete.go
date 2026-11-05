@@ -538,16 +538,25 @@ func workflowFromRunInput(inputJSON []byte) (*domain.Workflow, map[string]any, e
 	if err := json.Unmarshal(inputJSON, &envelope); err != nil {
 		return nil, nil, fmt.Errorf("decode run input: %w", err)
 	}
-	wf, issues := domain.Parse(envelope.Workflow)
+	wf, err := WorkflowSnapshot(envelope.Workflow)
+	if err != nil {
+		return nil, nil, err
+	}
+	return wf, envelope.Input, nil
+}
+
+// WorkflowSnapshot parses the workflow document of a run's input envelope.
+func WorkflowSnapshot(raw []byte) (*domain.Workflow, error) {
+	wf, issues := domain.Parse(raw)
 	if wf == nil {
-		return nil, nil, fmt.Errorf("%w: %+v", ErrRunSnapshotInvalid, issues)
+		return nil, fmt.Errorf("%w: %+v", ErrRunSnapshotInvalid, issues)
 	}
 	for _, node := range wf.Nodes {
 		if !domain.ExecutableNodeTypes[node.Type] {
-			return nil, nil, fmt.Errorf("%w: node %q has unsupported type %q", ErrRunSnapshotInvalid, node.ID, node.Type)
+			return nil, fmt.Errorf("%w: node %q has unsupported type %q", ErrRunSnapshotInvalid, node.ID, node.Type)
 		}
 	}
-	return wf, envelope.Input, nil
+	return wf, nil
 }
 
 // eventNow stamps run events at MILLISECOND precision — the contract's

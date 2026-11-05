@@ -16,6 +16,7 @@ import { api, downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
+const ReplayCampaignsCard = lazy(() => import('./ReplayCampaignsCard').then((m) => ({ default: m.ReplayCampaignsCard })))
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { ReplayCampaignDialog } from './ReplayCampaignDialog'
 import { tApiError, useT } from '../i18n'
@@ -72,6 +73,7 @@ type DeadLettersPanelProps = {
   canUseRecovery?: boolean
   canReadAutoHealing?: boolean
   canDecideAutoHealing?: boolean
+  onOpenRun?: (runId: string) => void | Promise<void>
 }
 
 /** Render the DLQ list with status filter, replay, and resolve controls. */
@@ -85,6 +87,7 @@ export function DeadLettersPanel({
   canUseRecovery = true,
   canReadAutoHealing = true,
   canDecideAutoHealing = true,
+  onOpenRun,
 }: DeadLettersPanelProps) {
   const { t } = useT()
   // Filter/sort state + persistence + the cap-correct server fetch + the
@@ -187,6 +190,7 @@ export function DeadLettersPanel({
   // rows), so the operator can tell a transient blip from "already replayed".
   const [bulkErrors, setBulkErrors] = useState<BulkDeadLetterError[]>([])
   const [campaignDeadLetterIds, setCampaignDeadLetterIds] = useState<string[] | null>(null)
+  const [section, setSection] = useState<'queue' | 'jobs'>('queue')
 
   const handleRefresh = () => {
     refreshQueue()
@@ -326,6 +330,7 @@ export function DeadLettersPanel({
     refreshQueue()
     void onRefresh()
     exitSelection()
+    setSection('jobs')
   }
 
   // Org-wide open count drives the warning stripe — there are opens to work
@@ -620,6 +625,7 @@ export function DeadLettersPanel({
       setRequestedNotFoundId(null)
       setRequestedId(request.deadLetterId ?? null)
       setQueueFocusRequest(request)
+      setSection('queue')
     }
     const pendingRequest = consumeRecoveryQueueFocus()
     if (pendingRequest) adopt(pendingRequest)
@@ -710,65 +716,96 @@ export function DeadLettersPanel({
 
   return (
     <>
-      <DeadLetterQueueView
-        queue={queue}
-        queueItemCount={queueItems.length}
-        sectionRef={queueSectionRef}
-        rowRefs={queueRowRefs}
-        cardSeverity={cardSeverity}
-        virtual={{
-          containerRef: virtualContainerRef,
-          visibleItems: visibleDeadLetters,
-          totalHeight: virtualTotalHeight,
-          startOffset: virtualStartOffset,
-        }}
-        selection={{
-          selectionMode,
-          selectedIds,
-          selected,
-          selectedFull,
-          selectedDetailReady,
-          requestedNotFound,
-          replayingIds,
-          openRecoveryItem,
-          confirmBulkReplay,
-          closing: closeRequest !== null,
-          bulkErrors,
-          loadedIds,
-          allLoadedSelected,
-          showSuspectDiff,
-          clusterActionSignature,
-        }}
-        permissions={{ canReplay, canResolve, canStartRuns, canUseRecovery }}
-        actions={{
-          handleKeyDown: handleQueueKeyDown,
-          toggleSelectionMode: () => (selectionMode ? exitSelection() : enterSelection()),
-          refresh: handleRefresh,
-          toggleSelectAll,
-          toggleSelect,
-          setConfirmBulkReplay,
-          bulkReplay,
-          bulkResolve: async () => requestClose([...selectedIds]
-            .filter(id => !replayingIds.has(id))
-            .map(id => {
-              const row = filtered.find(item => item.id === id)
-              return row ? deadLetterCloseTarget(row) : { id }
-            }), true),
-          createReplayCampaign: setCampaignDeadLetterIds,
-          selectRow: (id) => { setQueueFocusRequest(null); setRequestedId(null); setSelectedId(id) },
-          openRecoveryItem: setOpenRecoveryItemId,
-          loadMore,
-          startRecovery: (dlq) => setRecovery({ dlq }),
-          replaySelected,
-          resolveSelected,
-          copySelectedError,
-          openReplayLab: setLabSourceRunId,
-          exportRunExplain: exportSelectedRunExplain,
-          toggleSuspectDiff: () => setShowSuspectDiff((value) => !value),
-          investigateCluster,
-          replayCluster,
-        }}
-      />
+      <div className="we-seg we-recover-sections" role="group" aria-label={t('dlq.sections.label')}>
+        {(['queue', 'jobs'] as const).map(option => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={section === option}
+            onClick={() => setSection(option)}
+            data-testid={`recover-section-${option}`}
+          >
+            {t(option === 'queue' ? 'dlq.sections.queue' : 'replayCampaign.title')}
+          </button>
+        ))}
+      </div>
+      {/* Hidden rather than unmounted: filters, selection and focus survive a look at the jobs. */}
+      <div className="we-recover-queue" hidden={section === 'jobs'}>
+        <DeadLetterQueueView
+          queue={queue}
+          queueItemCount={queueItems.length}
+          sectionRef={queueSectionRef}
+          rowRefs={queueRowRefs}
+          cardSeverity={cardSeverity}
+          virtual={{
+            containerRef: virtualContainerRef,
+            visibleItems: visibleDeadLetters,
+            totalHeight: virtualTotalHeight,
+            startOffset: virtualStartOffset,
+          }}
+          selection={{
+            selectionMode,
+            selectedIds,
+            selected,
+            selectedFull,
+            selectedDetailReady,
+            requestedNotFound,
+            replayingIds,
+            openRecoveryItem,
+            confirmBulkReplay,
+            closing: closeRequest !== null,
+            bulkErrors,
+            loadedIds,
+            allLoadedSelected,
+            showSuspectDiff,
+            clusterActionSignature,
+          }}
+          permissions={{ canReplay, canResolve, canStartRuns, canUseRecovery }}
+          actions={{
+            handleKeyDown: handleQueueKeyDown,
+            toggleSelectionMode: () => (selectionMode ? exitSelection() : enterSelection()),
+            refresh: handleRefresh,
+            toggleSelectAll,
+            toggleSelect,
+            setConfirmBulkReplay,
+            bulkReplay,
+            bulkResolve: async () => requestClose([...selectedIds]
+              .filter(id => !replayingIds.has(id))
+              .map(id => {
+                const row = filtered.find(item => item.id === id)
+                return row ? deadLetterCloseTarget(row) : { id }
+              }), true),
+            createReplayCampaign: setCampaignDeadLetterIds,
+            selectRow: (id) => { setQueueFocusRequest(null); setRequestedId(null); setSelectedId(id) },
+            openRecoveryItem: setOpenRecoveryItemId,
+            loadMore,
+            startRecovery: (dlq) => setRecovery({ dlq }),
+            replaySelected,
+            resolveSelected,
+            copySelectedError,
+            openReplayLab: setLabSourceRunId,
+            exportRunExplain: exportSelectedRunExplain,
+            toggleSuspectDiff: () => setShowSuspectDiff((value) => !value),
+            investigateCluster,
+            replayCluster,
+          }}
+        />
+        <RecoveryAutomationDisclosure
+          canRecover={canUseRecovery}
+          canStartRuns={canStartRuns}
+          canReadAutoHealing={canReadAutoHealing}
+          canDecideAutoHealing={canDecideAutoHealing}
+        />
+      </div>
+      {section === 'jobs' && (
+        <Suspense fallback={<p className="helper-text">{t('common.loading')}</p>}>
+          <ReplayCampaignsCard
+            canCancel={canReplay}
+            onNew={canReplay ? () => { setSection('queue'); enterSelection() } : undefined}
+            onOpenRun={onOpenRun}
+          />
+        </Suspense>
+      )}
       {closeRequest && (
         <DeadLetterCloseDialog targets={closeRequest.targets}
           onClose={() => setCloseRequest(current => current === closeRequest ? null : current)}
@@ -780,13 +817,6 @@ export function DeadLettersPanel({
             return runSelectedTriageAction(id => onResolve(id, reason), target)
           }} />
       )}
-      <RecoveryAutomationDisclosure
-        canRecover={canUseRecovery}
-        canStartRuns={canStartRuns}
-        canCancelCampaign={canReplay}
-        canReadAutoHealing={canReadAutoHealing}
-        canDecideAutoHealing={canDecideAutoHealing}
-      />
 
       {recovery && (
         <Suspense fallback={null}>

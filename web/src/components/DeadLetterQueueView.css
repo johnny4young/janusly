@@ -181,3 +181,6 @@
     z-index: 1;
   }
 }
+
+.we-recover-sections { align-self: flex-start; }
+.we-recover-queue:not([hidden]) { display: contents; }

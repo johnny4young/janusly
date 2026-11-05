@@ -206,9 +206,79 @@ describe('<DeadLettersPanel />', () => {
     fireEvent.click(screen.getByTestId('recovery-automation-toggle'))
     await waitFor(() => {
       const paths = vi.mocked(api).mock.calls.map(([path]) => String(path))
-      expect(paths).toContain('/recovery/campaigns?limit=8')
       expect(paths).toContain('/auto-healing/pending')
+      expect(paths.some((path) => path.startsWith('/recovery/campaigns'))).toBe(false)
     })
+  })
+
+  it('loads recovery jobs on demand and keeps the queue mounted behind them', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} canReplay />)
+    await screen.findByTestId('dlq-row-a')
+    expect(vi.mocked(api).mock.calls.some(([path]) => String(path).startsWith('/recovery/campaigns'))).toBe(false)
+
+    fireEvent.click(screen.getByTestId('recover-section-jobs'))
+
+    expect(await screen.findByTestId('replay-campaigns-card')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-queue')).not.toBeVisible()
+    expect(screen.getByTestId('recover-section-jobs')).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(await screen.findByTestId('recovery-jobs-new'))
+
+    expect(screen.getByTestId('recovery-queue')).toBeVisible()
+    expect(screen.queryByTestId('replay-campaigns-card')).not.toBeInTheDocument()
+    expect(screen.getByTestId('recover-section-queue')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('dlq-select-row-a')).toBeInTheDocument()
+  })
+
+  it('opens the jobs view after a job starts, and returns to the queue for a focus request', async () => {
+    const queueMock = dlqMock([mockDeadLetter('a'), mockDeadLetter('b')])
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/recovery/campaigns/preview') {
+        return {
+          canCreate: true,
+          clusterSignature: 'sig',
+          eligible: [
+            { deadLetterId: 'a', runId: 'run-a', nodeId: 'fetch', effects: [], effectsKnown: true },
+            { deadLetterId: 'b', runId: 'run-b', nodeId: 'fetch', effects: [], effectsKnown: true },
+          ],
+          rejected: [],
+        }
+      }
+      if (path === '/recovery/campaigns') {
+        return { campaign: { id: 'job-1', name: 'INC-12', totalCount: 2, pacingMs: 5_000 }, publicationDeferred: false }
+      }
+      if (path.startsWith('/recovery/campaigns?')) return { campaigns: [] }
+      return queueMock(path, options)
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} canReplay />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    fireEvent.click(screen.getByTestId('dlq-select-row-a'))
+    fireEvent.click(screen.getByTestId('dlq-select-row-b'))
+    fireEvent.click(screen.getByTestId('dlq-create-replay-campaign'))
+    await screen.findByText('2 of 2 eligible')
+    fireEvent.click(screen.getByTestId('replay-campaign-create'))
+
+    expect(await screen.findByTestId('replay-campaigns-card')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-queue')).not.toBeVisible()
+
+    act(() => requestRecoveryQueueFocus('a'))
+
+    await waitFor(() => expect(screen.getByTestId('recovery-queue')).toBeVisible())
+    expect(screen.queryByTestId('replay-campaigns-card')).not.toBeInTheDocument()
+  })
+
+  it('hides New recovery job from an operator who cannot replay', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} canReplay={false} />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('recover-section-jobs'))
+
+    expect(await screen.findByTestId('replay-campaigns-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('recovery-jobs-new')).not.toBeInTheDocument()
   })
 
   it('renders all rows under the jsdom 0-height fallback when the server returns 100', async () => {
