@@ -3553,7 +3553,7 @@
   "activity.reports.cost.col.cost": "Costo estimado",
   "activity.reports.cost.col.steps": "Pasos",
   "activity.reports.cost.empty.title": "Sin uso de IA en este periodo",
-  "activity.reports.cost.empty.noCalls": "No se registraron llamadas de IA en los últimos {{days}} días, así que no hay costo que estimar. Los flujos sin un paso de IA no registran uso.",
+  "activity.reports.cost.empty.noCalls": "No se registraron llamadas de IA en los últimos {{days}} días, así que no hay costo que estimar. Solo los pasos de IA tienen costo.",
   "activity.reports.cost.empty.notConfigured": "No hay un proveedor de IA configurado y no se registraron llamadas de IA en los últimos {{days}} días, así que no hay costo que estimar.",
   "activity.reports.cost.note.unknown_one": "{{count}} llamada no registró costo, por lo general un intento fallido, y queda fuera del estimado.",
   "activity.reports.cost.note.unknown_other": "{{count}} llamadas no registraron costo, por lo general intentos fallidos, y quedan fuera del estimado.",

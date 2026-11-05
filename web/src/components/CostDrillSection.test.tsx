@@ -47,7 +47,7 @@ describe('CostDrillSection', () => {
   })
 
   it.each([
-    [true, 'No AI calls were recorded in the last 7 days, so there is no cost to estimate. Flows without an AI step record no usage.'],
+    [true, 'No AI calls were recorded in the last 7 days, so there is no cost to estimate. Only AI steps have a cost.'],
     [false, 'No AI provider is configured, and no AI calls were recorded in the last 7 days, so there is no cost to estimate.'],
   ])('says why there is no usage instead of a zero (configured: %s)', async (aiConfigured, reason) => {
     await changeAppLanguage('en')

@@ -3553,7 +3553,7 @@
   "activity.reports.cost.col.cost": "Estimated cost",
   "activity.reports.cost.col.steps": "Steps",
   "activity.reports.cost.empty.title": "No AI usage in this window",
-  "activity.reports.cost.empty.noCalls": "No AI calls were recorded in the last {{days}} days, so there is no cost to estimate. Flows without an AI step record no usage.",
+  "activity.reports.cost.empty.noCalls": "No AI calls were recorded in the last {{days}} days, so there is no cost to estimate. Only AI steps have a cost.",
   "activity.reports.cost.empty.notConfigured": "No AI provider is configured, and no AI calls were recorded in the last {{days}} days, so there is no cost to estimate.",
   "activity.reports.cost.note.unknown_one": "{{count}} call recorded no cost, usually a failed attempt, and is left out of the estimate.",
   "activity.reports.cost.note.unknown_other": "{{count}} calls recorded no cost, usually failed attempts, and are left out of the estimate.",
