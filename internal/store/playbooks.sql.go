@@ -400,9 +400,11 @@ func (q *Queries) ListReplayCampaignDeadLetters(ctx context.Context, arg ListRep
 }
 
 const listReplayCampaignItems = `-- name: ListReplayCampaignItems :many
-SELECT id, org_id, campaign_id, dead_letter_id, position, status, attempt_count, claim_token, claimed_at, error, completed_at, created_at FROM replay_campaign_items
-WHERE org_id = $1 AND campaign_id = $2
-ORDER BY position
+SELECT i.id, i.org_id, i.campaign_id, i.dead_letter_id, i.position, i.status, i.attempt_count, i.claim_token, i.claimed_at, i.error, i.completed_at, i.created_at, d.run_id, d.node_id
+FROM replay_campaign_items i
+LEFT JOIN dead_letters d ON d.org_id = i.org_id AND d.id = i.dead_letter_id
+WHERE i.org_id = $1 AND i.campaign_id = $2
+ORDER BY i.position
 `
 
 type ListReplayCampaignItemsParams struct {
@@ -410,15 +412,32 @@ type ListReplayCampaignItemsParams struct {
 	CampaignID string
 }
 
-func (q *Queries) ListReplayCampaignItems(ctx context.Context, arg ListReplayCampaignItemsParams) ([]ReplayCampaignItem, error) {
+type ListReplayCampaignItemsRow struct {
+	ID           string
+	OrgID        string
+	CampaignID   string
+	DeadLetterID string
+	Position     int32
+	Status       string
+	AttemptCount int32
+	ClaimToken   pgtype.Text
+	ClaimedAt    *time.Time
+	Error        pgtype.Text
+	CompletedAt  *time.Time
+	CreatedAt    time.Time
+	RunID        pgtype.Text
+	NodeID       pgtype.Text
+}
+
+func (q *Queries) ListReplayCampaignItems(ctx context.Context, arg ListReplayCampaignItemsParams) ([]ListReplayCampaignItemsRow, error) {
 	rows, err := q.db.Query(ctx, listReplayCampaignItems, arg.OrgID, arg.CampaignID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ReplayCampaignItem
+	var items []ListReplayCampaignItemsRow
 	for rows.Next() {
-		var i ReplayCampaignItem
+		var i ListReplayCampaignItemsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrgID,
@@ -432,7 +451,51 @@ func (q *Queries) ListReplayCampaignItems(ctx context.Context, arg ListReplayCam
 			&i.Error,
 			&i.CompletedAt,
 			&i.CreatedAt,
+			&i.RunID,
+			&i.NodeID,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReplayCampaignWorkflowSnapshots = `-- name: ListReplayCampaignWorkflowSnapshots :many
+SELECT array_agg(id ORDER BY id)::text[] AS run_ids, (input_json -> 'workflow')::jsonb AS workflow
+FROM runs
+WHERE org_id = $1 AND id = ANY($2::text[])
+  AND input_json -> 'workflow' IS NOT NULL
+GROUP BY input_json -> 'workflow'
+ORDER BY min(id)
+LIMIT $3
+`
+
+type ListReplayCampaignWorkflowSnapshotsParams struct {
+	OrgID        string
+	RunIds       []string
+	MaxSnapshots int32
+}
+
+type ListReplayCampaignWorkflowSnapshotsRow struct {
+	RunIds   []string
+	Workflow json.RawMessage
+}
+
+// One row per distinct workflow document, so a cohort from one workflow parses once.
+func (q *Queries) ListReplayCampaignWorkflowSnapshots(ctx context.Context, arg ListReplayCampaignWorkflowSnapshotsParams) ([]ListReplayCampaignWorkflowSnapshotsRow, error) {
+	rows, err := q.db.Query(ctx, listReplayCampaignWorkflowSnapshots, arg.OrgID, arg.RunIds, arg.MaxSnapshots)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReplayCampaignWorkflowSnapshotsRow
+	for rows.Next() {
+		var i ListReplayCampaignWorkflowSnapshotsRow
+		if err := rows.Scan(&i.RunIds, &i.Workflow); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

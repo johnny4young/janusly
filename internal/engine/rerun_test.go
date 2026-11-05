@@ -220,8 +220,43 @@ func TestRerunSideEffectClassification(t *testing.T) {
 		"transform":        {domain.Node{Type: "transform"}, false},
 	}
 	for name, tc := range cases {
-		if got := rerunHasEffect(tc.node); got != tc.want {
+		if got := NodeMayHaveEffect(tc.node); got != tc.want {
 			t.Errorf("%s: got %v", name, got)
+		}
+	}
+}
+
+func TestClosureEffectsCoverTheStepAndDownstreamOnly(t *testing.T) {
+	wf := rerunDoc(t, rerunDiamond)
+	cases := map[string][]string{
+		"read":   {"notify"},
+		"write":  {"write", "notify"},
+		"start":  {"write", "notify"},
+		"lost":   {},
+		"notify": {"notify"},
+	}
+	for nodeID, want := range cases {
+		got := []string{}
+		for _, effect := range ClosureEffects(wf, nodeID) {
+			got = append(got, effect.NodeID)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: got %v, want %v", nodeID, got, want)
+		}
+	}
+}
+
+func TestReplayItemFailureCodeNeverPassesTextThrough(t *testing.T) {
+	cases := map[string]string{
+		ErrRedriveRerunExists.Error(): "rerun_exists",
+		ErrRedriveConflict.Error():    "already_claimed",
+		ErrDeadLetterNotFound.Error(): "not_found",
+		"claim replay: conn closed":   "replay_failed",
+		"":                            "replay_failed",
+	}
+	for message, want := range cases {
+		if got := ReplayItemFailureCode(message); got != want {
+			t.Errorf("%q: got %q, want %q", message, got, want)
 		}
 	}
 }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Recover has a Recovery jobs view beside the queue. Name a paced replay after
+  the incident; before it starts you see how many failures and runs it touches,
+  the failed steps and later steps that may change external systems, and the
+  estimated time. Each job shows live progress and how many replays started,
+  could not start or were cancelled, with Abort while it runs and View runs to
+  open any run it touched. A started replay is not yet a recovered run, so check
+  the runs for their outcome. Janusly shows a notice when a job you have seen
+  running ends, even after you leave Recover. These jobs moved here from
+  Automation and patterns.
 - Solution packs show a Before installing checklist with each required credential,
   its state and how many are ready. Connect opens the new connection dialog with
   the name and kind filled in, and the row turns ready without leaving the page.
@@ -62,7 +71,7 @@
 - The recovery queue groups failures by cluster by default, with a switch to All
   items. Each cluster shows its signature, category, occurrences and affected
   workflows, plus Investigate, which opens the fix for every open failure in the
-  cluster, and Replay cluster, which starts a paced campaign after its preview.
+  cluster, and Replay cluster, which starts a recovery job after its preview.
 - Home's Operator prompt is now one compact field at the bottom of What needs
   you, and answers open in a side panel instead of pushing Home down. The panel
   links the run the answer is based on and opens its recovery case in one click.

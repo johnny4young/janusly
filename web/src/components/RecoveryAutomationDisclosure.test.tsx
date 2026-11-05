@@ -5,7 +5,6 @@ import { RecoveryAutomationDisclosure } from './RecoveryAutomationDisclosure'
 
 const cardRenders = vi.hoisted(() => ({
   clusters: vi.fn(),
-  campaigns: vi.fn(),
   autoHealing: vi.fn(),
 }))
 
@@ -13,13 +12,6 @@ vi.mock('./FailureClustersCard', () => ({
   FailureClustersCard: () => {
     cardRenders.clusters()
     return <div data-testid="clusters-card" />
-  },
-}))
-
-vi.mock('./ReplayCampaignsCard', () => ({
-  ReplayCampaignsCard: () => {
-    cardRenders.campaigns()
-    return <div data-testid="campaigns-card" />
   },
 }))
 
@@ -33,7 +25,6 @@ vi.mock('./AutoHealingPendingCard', () => ({
 describe('<RecoveryAutomationDisclosure />', () => {
   beforeEach(() => {
     cardRenders.clusters.mockClear()
-    cardRenders.campaigns.mockClear()
     cardRenders.autoHealing.mockClear()
   })
 
@@ -42,7 +33,6 @@ describe('<RecoveryAutomationDisclosure />', () => {
       <RecoveryAutomationDisclosure
         canRecover
         canStartRuns
-        canCancelCampaign
         canReadAutoHealing
         canDecideAutoHealing
       />,
@@ -51,14 +41,12 @@ describe('<RecoveryAutomationDisclosure />', () => {
     const toggle = screen.getByTestId('recovery-automation-toggle')
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(cardRenders.clusters).not.toHaveBeenCalled()
-    expect(cardRenders.campaigns).not.toHaveBeenCalled()
     expect(cardRenders.autoHealing).not.toHaveBeenCalled()
 
     fireEvent.click(toggle)
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(await screen.findByTestId('clusters-card')).toBeInTheDocument()
-    expect(screen.getByTestId('campaigns-card')).toBeInTheDocument()
     expect(screen.getByTestId('auto-healing-card')).toBeInTheDocument()
   })
 
@@ -67,7 +55,6 @@ describe('<RecoveryAutomationDisclosure />', () => {
       <RecoveryAutomationDisclosure
         canRecover={false}
         canStartRuns={false}
-        canCancelCampaign={false}
         canReadAutoHealing={false}
         canDecideAutoHealing={false}
       />,
@@ -76,7 +63,6 @@ describe('<RecoveryAutomationDisclosure />', () => {
     fireEvent.click(screen.getByTestId('recovery-automation-toggle'))
 
     expect(await screen.findByTestId('clusters-card')).toBeInTheDocument()
-    expect(screen.getByTestId('campaigns-card')).toBeInTheDocument()
     expect(screen.queryByTestId('auto-healing-card')).not.toBeInTheDocument()
   })
 })
