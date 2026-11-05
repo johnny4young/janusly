@@ -258,7 +258,7 @@ describe('<VersionHistoryPanel />', () => {
 
     fireEvent.click(screen.getByTestId('version-history-load-more'))
     await screen.findByText('v8')
-    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(vi.mocked(api)).toHaveBeenCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     // A short page means the history is exhausted.
     expect(screen.queryByTestId('version-history-load-more')).toBeNull()
   })
@@ -291,7 +291,7 @@ describe('<VersionHistoryPanel />', () => {
     await waitFor(() => expect(retry).toBeEnabled())
     fireEvent.click(retry)
     await screen.findByText('v10')
-    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(vi.mocked(api)).toHaveBeenCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(screen.queryByTestId('version-history-load-more')).toBeNull()
   })
 

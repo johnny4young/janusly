@@ -60,9 +60,17 @@ async function seed(request: APIRequestContext, orgId: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 100))
   }
   // A waiting approval feeds the "needs action" surface.
-  await request.post(`${API_URL}/start`, {
+  const gate = await request.post(`${API_URL}/start`, {
     headers: headers(orgId), data: { workflow: approval },
   })
+  const { runId: gateRunId } = await gate.json() as { runId: string }
+  for (;;) {
+    const res = await request.get(`${API_URL}/v1/status?runId=${gateRunId}`, { headers: headers(orgId) })
+    const body = await res.json() as { data?: { nodes?: Array<{ status?: string }> } }
+    if (body.data?.nodes?.some((node) => node.status === 'waiting')) break
+    if (Date.now() > deadline) throw new Error('seed approval never started waiting')
+    await new Promise((r) => setTimeout(r, 100))
+  }
 }
 
 async function preparePage(page: Page, orgId: string): Promise<void> {
