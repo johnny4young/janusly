@@ -162,6 +162,7 @@ func TestToolNodeValidatesRenderedInputBeforeDryRunOrSpecialDispatch(t *testing.
 	output, err := exec(context.Background(), Input{
 		Config: map[string]any{
 			"tool": "test.typed-write", "input": map[string]any{"value": false},
+			"resultPolicy": "envelope",
 		},
 		DryRun: true,
 	})
@@ -183,6 +184,52 @@ func TestToolNodeValidatesRenderedInputBeforeDryRunOrSpecialDispatch(t *testing.
 	vectorResult := vectorOutput.(map[string]any)["result"].(map[string]any)
 	if vectorResult["ok"] != false || !strings.Contains(vectorResult["error"].(string), "query: Expected string") {
 		t.Fatalf("vector seam bypassed rendered validation: %+v", vectorResult)
+	}
+}
+
+func TestToolResultPolicyDefaultsByWriteSide(t *testing.T) {
+	registry := tools.NewRegistry()
+	for _, definition := range []tools.Definition{
+		{Name: "test.failing-write", WriteSide: true},
+		{Name: "test.failing-read"},
+	} {
+		definition.Required, definition.Fields = []string{}, []tools.Field{}
+		definition.Execute = func(context.Context, map[string]any) (map[string]any, error) {
+			return map[string]any{"ok": false, "error": "provider refused", "statusCode": 422}, nil
+		}
+		registry.Register(definition)
+	}
+	exec := NewToolExecutor(registry)
+	for _, test := range []struct {
+		name, tool, policy string
+		wantFailure        bool
+	}{
+		{name: "write without policy fails", tool: "test.failing-write", wantFailure: true},
+		{name: "write with require_ok fails", tool: "test.failing-write", policy: "require_ok", wantFailure: true},
+		{name: "write opting into envelope continues", tool: "test.failing-write", policy: "envelope"},
+		{name: "read without policy continues", tool: "test.failing-read"},
+		{name: "read with require_ok fails", tool: "test.failing-read", policy: "require_ok", wantFailure: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := map[string]any{"tool": test.tool}
+			if test.policy != "" {
+				config["resultPolicy"] = test.policy
+			}
+			output, err := exec(context.Background(), Input{Config: config})
+			var shape *ExecErrorShape
+			if test.wantFailure {
+				if !errors.As(err, &shape) || shape.Code != "TOOL_RESULT_NOT_OK" {
+					t.Fatalf("want TOOL_RESULT_NOT_OK, got output=%v err=%v", output, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("envelope policy must hand the result downstream: %v", err)
+			}
+			if result := output.(map[string]any)["result"].(map[string]any); result["ok"] != false {
+				t.Fatalf("unexpected envelope: %+v", result)
+			}
+		})
 	}
 }
 

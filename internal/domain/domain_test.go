@@ -320,6 +320,18 @@ func TestForkJoinAndTriggerConfigFailAtValidationInsteadOfRuntime(t *testing.T) 
 	}
 }
 
+func TestToolResultPolicyValues(t *testing.T) {
+	result := Validate(parseOK(t, `{"nodes":[
+		{"id":"typo","type":"tool","config":{"tool":"text.uppercase","resultPolicy":"require-ok"}},
+		{"id":"strict","type":"tool","config":{"tool":"text.uppercase","resultPolicy":"require_ok"}},
+		{"id":"envelope","type":"tool","config":{"tool":"text.uppercase","resultPolicy":"envelope"}}
+	],"edges":[]}`), nil)
+	issue := requireIssue(t, result, CodeToolInvalidInput, "require_ok or envelope")
+	if issue.NodeID != "typo" {
+		t.Fatalf("only the unknown policy is invalid: %+v", result.Issues)
+	}
+}
+
 func TestToolAndLoopStructuralConfigValidation(t *testing.T) {
 	result := Validate(parseOK(t, `{"nodes":[
 		{"id":"tool","type":"tool","config":{}},

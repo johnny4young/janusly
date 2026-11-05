@@ -165,6 +165,7 @@
      "type": "tool",
      "config": {
       "tool": "github.create_issue",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "bot-github",
        "owner": "janusly",
@@ -183,6 +184,7 @@
      "type": "tool",
      "config": {
       "tool": "slack.post",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "incidents-slack",
        "text": "New incident: {{context.trigger.output.alertName}} — tracked at {{context.github_issue.output.result.url}}"
@@ -257,6 +259,7 @@
      "type": "tool",
      "config": {
       "tool": "slack.post",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "incidents-slack",
        "text": "Customer feedback (low): {{context.trigger.output.customer}} — {{context.trigger.output.complaint}}"
@@ -268,6 +271,7 @@
      "type": "tool",
      "config": {
       "tool": "github.create_issue",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "bot-github",
        "owner": "your-org",
@@ -286,6 +290,7 @@
      "type": "tool",
      "config": {
       "tool": "slack.post",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "incidents-slack",
        "text": ":warning: Medium escalation logged for {{context.trigger.output.customer}}: {{context.med_track.output.result.url}}"
@@ -322,6 +327,7 @@
      "type": "tool",
      "config": {
       "tool": "github.create_issue",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "bot-github",
        "owner": "your-org",
@@ -341,6 +347,7 @@
      "type": "tool",
      "config": {
       "tool": "slack.post",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "incidents-slack",
        "text": ":rotating_light: HIGH escalation from {{context.trigger.output.customer}} — owner: {{context.high_review.output.owner}} — {{context.high_track.output.result.url}}"
@@ -449,6 +456,7 @@
      "type": "tool",
      "config": {
       "tool": "slack.post",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "incidents-slack",
        "text": ":dart: New qualified lead — {{context.trigger.output.email}} from {{context.trigger.output.company}} ({{context.trigger.output.role}}). AI rationale: {{context.score.output.response}}"
@@ -460,6 +468,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "{{context.trigger.output.email}}",
        "subject": "Welcome to Janusly — let's set up a quick call",
@@ -472,6 +481,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "{{context.trigger.output.email}}",
        "subject": "Janusly for {{context.trigger.output.company}} — when you're ready",
@@ -574,6 +584,7 @@
      "type": "tool",
      "config": {
       "tool": "webhook.send",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "partner-webhook",
        "url": "https://billing.example.com/refunds",
@@ -591,6 +602,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "{{context.trigger.output.customer}}",
        "subject": "Your refund for order {{context.trigger.output.orderId}} has been processed",
@@ -700,6 +712,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "{{context.trigger.output.customer}}",
        "subject": "Re: {{context.trigger.output.subject}}",
@@ -768,6 +781,7 @@
      "type": "tool",
      "config": {
       "tool": "slack.post",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "incidents-slack",
        "text": ":chart_with_upwards_trend: *Weekly churn-risk digest*\n\n{{context.rank.output.response}}"
@@ -822,6 +836,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "{{context.match_sender.output.sender}}",
        "subject": "Auto-reply",
@@ -898,6 +913,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "{{context.trigger.output.customer}}",
        "subject": "Your charge for ${{context.trigger.output.amountUsd}}",
@@ -960,6 +976,7 @@
      "type": "tool",
      "config": {
       "tool": "pdf.generate",
+      "resultPolicy": "require_ok",
       "input": {
        "format": "markdown",
        "filename": "monthly-report.pdf",
@@ -976,6 +993,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "ops@example.com",
        "subject": "Monthly metrics report",
@@ -1066,6 +1084,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "decisions@example.com",
        "subject": "Decision recommendation: {{context.trigger.output.proposal}}",
@@ -1143,6 +1162,7 @@
      "type": "tool",
      "config": {
       "tool": "slack.post",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "team-slack",
        "text": ":notebook: *Notion page summary*\n\n{{context.summarize.output.response}}"
@@ -1217,6 +1237,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "success@example.com",
        "subject": "Bulk customer classification digest ({{context.normalize.output.count}} customers)",
@@ -1312,6 +1333,7 @@
      "type": "tool",
      "config": {
       "tool": "webhook.send",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "partner-webhook",
        "url": "https://accounting.example.com/payables",
@@ -1330,6 +1352,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "{{context.trigger.output.vendor}}",
        "subject": "Invoice {{context.trigger.output.invoiceId}} approved for payment",
@@ -1423,6 +1446,7 @@
      "type": "tool",
      "config": {
       "tool": "github.create_issue",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "bot-github",
        "owner": "janusly",
@@ -1441,6 +1465,7 @@
      "type": "tool",
      "config": {
       "tool": "slack.post",
+      "resultPolicy": "require_ok",
       "input": {
        "credential": "incidents-slack",
        "text": "👋 {{context.trigger.output.name}} joins as {{context.trigger.output.role}} on {{context.trigger.output.startDate}}. IT provisioning: {{context.it_access_issue.output.result.url}}"
@@ -1452,6 +1477,7 @@
      "type": "tool",
      "config": {
       "tool": "email.send",
+      "resultPolicy": "require_ok",
       "input": {
        "to": "{{context.trigger.output.email}}",
        "subject": "Welcome to the team, {{context.trigger.output.name}}!",

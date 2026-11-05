@@ -24,6 +24,15 @@ The task grammar is defined in `internal/domain`, rendered by
 | `trigger` | Define event-driven entry behavior. |
 | `subworkflow` | Start a bounded child workflow. |
 
+## Tool results
+
+A `tool` node's `resultPolicy` decides what an unsuccessful result envelope
+(`ok: false`) does. `require_ok` fails the node, so the failure reaches the
+dead-letter queue and recovery. `envelope` passes the result downstream for a
+later step to branch on `result.ok`. Write-side tools, including a non-GET
+`http.request`, default to `require_ok`; read-side tools default to `envelope`.
+Any other value is rejected when the workflow is saved.
+
 ## Universal safeguards
 
 - Task configuration is validated before a workflow can be saved.
