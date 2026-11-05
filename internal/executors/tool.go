@@ -1,7 +1,8 @@
 // The `tool` node executor: renders its input, dispatches to the registry,
 // and returns the contract's envelope shape {tool, result}. resultPolicy
-// "require_ok" fails the node on an unsuccessful envelope; the default
-// "envelope" hands the result downstream for the workflow to branch on.
+// "require_ok" fails the node on an unsuccessful envelope; "envelope" hands
+// the result downstream for the workflow to branch on. Write-side tools
+// default to require_ok so a failed effect cannot finish as a success.
 //
 // executeRegisteredTool is the ONE interception ladder (vector seams →
 // dry-run write-side skip → integration chokepoint → plain registry) —
@@ -15,6 +16,7 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/tools"
 )
 
@@ -100,10 +102,16 @@ func NewToolExecutor(registry *tools.Registry, httpExecutors ...Func) Func {
 		if input == nil {
 			input = map[string]any{}
 		}
+		writeSide := registry.IsWriteSide(name)
+		if name == "http.request" {
+			method, _ := input["method"].(string)
+			writeSide = httpMethodWriteSide(method)
+		}
 		policy, _ := in.Config["resultPolicy"].(string)
+		requireOK := policy == domain.ResultPolicyRequireOK || (writeSide && policy != domain.ResultPolicyEnvelope)
 
 		result := executeRegisteredTool(ctx, registry, httpExec, name, input, in)
-		if result["ok"] == false && policy == "require_ok" {
+		if result["ok"] == false && requireOK {
 			message, _ := result["error"].(string)
 			statusCode := 0
 			switch value := result["statusCode"].(type) {
@@ -111,11 +119,6 @@ func NewToolExecutor(registry *tools.Registry, httpExecutors ...Func) Func {
 				statusCode = value
 			case float64:
 				statusCode = int(value)
-			}
-			writeSide := registry.IsWriteSide(name)
-			if name == "http.request" {
-				method, _ := input["method"].(string)
-				writeSide = httpMethodWriteSide(method)
 			}
 			var details any
 			if writeSide && (statusCode < 400 || statusCode >= 500) {

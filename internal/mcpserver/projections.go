@@ -82,3 +82,26 @@ func scalarString(value any) string {
 		return ""
 	}
 }
+
+// scrubSecretShapes removes secret-shaped literals from a JSON value before it
+// enters a model's context. Template references and credential names survive.
+func scrubSecretShapes(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return signature.ScrubSecretShapes(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = scrubSecretShapes(item)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = scrubSecretShapes(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
