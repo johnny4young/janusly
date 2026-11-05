@@ -1234,6 +1234,46 @@ func (q *Queries) ListSlackInteractionConnections(ctx context.Context, orgID str
 	return items, nil
 }
 
+const listTemplateSecretCredentials = `-- name: ListTemplateSecretCredentials :many
+SELECT secret_ref, expires_at FROM credentials
+WHERE org_id = $1 AND kind = $2 AND upper(name) = $3::text
+ORDER BY id
+LIMIT 2
+`
+
+type ListTemplateSecretCredentialsParams struct {
+	OrgID     string
+	Kind      string
+	UpperName string
+}
+
+type ListTemplateSecretCredentialsRow struct {
+	SecretRef string
+	ExpiresAt *time.Time
+}
+
+// Names are unique per org but compared case-insensitively here; callers
+// treat more than one row as ambiguous.
+func (q *Queries) ListTemplateSecretCredentials(ctx context.Context, arg ListTemplateSecretCredentialsParams) ([]ListTemplateSecretCredentialsRow, error) {
+	rows, err := q.db.Query(ctx, listTemplateSecretCredentials, arg.OrgID, arg.Kind, arg.UpperName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTemplateSecretCredentialsRow
+	for rows.Next() {
+		var i ListTemplateSecretCredentialsRow
+		if err := rows.Scan(&i.SecretRef, &i.ExpiresAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUpstreamHealthSources = `-- name: ListUpstreamHealthSources :many
 SELECT id, org_id, name, kind, url, expected_components, check_interval_seconds, enabled, last_status, last_degraded, last_checked_at, last_error_reason, created_by, created_at, updated_at FROM upstream_health_sources
 WHERE org_id = $1

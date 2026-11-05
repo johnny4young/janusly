@@ -52,8 +52,10 @@ func TestVectorToolsThroughRuns(t *testing.T) {
 	toolWorkflow := func(id, tool string, input map[string]any) *domain.Workflow {
 		return &domain.Workflow{
 			ID: id, Name: "Vector Tool", DSLVersion: "1.0",
+			// Best-effort memory: the consent-off envelope must reach the output
+			// instead of failing the write-side step.
 			Nodes: []domain.Node{{ID: "v", Type: "tool", Config: map[string]any{
-				"tool": tool, "input": input,
+				"tool": tool, "input": input, "resultPolicy": domain.ResultPolicyEnvelope,
 			}}},
 			Edges: []domain.Edge{},
 		}

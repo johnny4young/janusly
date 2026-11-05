@@ -48,7 +48,7 @@ func run() error {
 		return err
 	}
 	// Logs go to stderr — stdout belongs to the MCP transport.
-	logger := boot.NewLogger()
+	logger := boot.NewStderrLogger()
 
 	if err := migrate.AssertMigrated(ctx, cfg.DatabaseURL); err != nil {
 		return err

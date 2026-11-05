@@ -80,10 +80,16 @@ func TestReadinessRules(t *testing.T) {
 			wantCode: "external_node_missing_retry", severity: "fail",
 		},
 		{
-			name: "write-side tool without result policy fails", // checkToolResultPolicy
+			name: "write-side tool opting out with envelope fails", // checkToolResultPolicy
+			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"send","type":"tool",
+				"config":{"tool":"fake.write","input":{},"resultPolicy":"envelope"}}],"edges":[]}`,
+			wantCode: "tool_result_policy_missing", severity: "fail",
+		},
+		{
+			name: "write-side tool without result policy defaults to require_ok",
 			doc: `{"outputs":{"r":"x"},"nodes":[{"id":"send","type":"tool",
 				"config":{"tool":"fake.write","input":{}}}],"edges":[]}`,
-			wantCode: "tool_result_policy_missing", severity: "fail",
+			absentCode: "tool_result_policy_missing",
 		},
 		{
 			name: "registry write bit governs arbitrary tool approval",

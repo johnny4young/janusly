@@ -7,6 +7,9 @@
   in the first step. A disabled Run comparison names the missing step and field,
   and selecting that message takes you there. Roles that can only read are told
   so and no longer see the dataset form.
+- Settings > Usage now reports input served from cache as a share of all input
+  tokens. It used to divide by uncached input only, so it could read 100 % when
+  half the input came from cache.
 - Recover has a Recovery jobs view beside the queue. Name a paced replay after
   the incident; before it starts you see how many failures and runs it touches,
   the failed steps and later steps that may change external systems, and the
