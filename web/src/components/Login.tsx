@@ -41,25 +41,6 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
     document.getElementById('auth-email')?.focus()
   }
 
-  const requestReset = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setError(null)
-    setResetSent(false)
-    setPending(true)
-    try {
-      const { error: resetError } = await AuthProvider.requestPasswordReset(email)
-      // Email limits only answer for an existing account, so they must read as a send.
-      // The status decides: a gateway that hides the API version header also hides the code.
-      const emailLimit = resetError?.status === 429 && resetError.code !== 'over_request_rate_limit'
-      if (resetError && !emailLimit) setError(t('auth.login.resetFailed'))
-      else setResetSent(true)
-    } catch {
-      setError(t('auth.login.resetFailed'))
-    } finally {
-      setPending(false)
-    }
-  }
-
   const startSso = (event: React.FormEvent) => {
     event.preventDefault()
     const trimmed = ssoOrgId.trim()
@@ -75,8 +56,19 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     setError(null)
+    setResetSent(false)
     setPending(true)
     try {
+      if (mode === 'reset') {
+        const { error: resetError } = await AuthProvider.requestPasswordReset(email)
+        // Email limits only answer for an existing account, so they must read as a send.
+        // The status decides: a gateway that hides the API version header also hides the code.
+        if (resetError && (resetError.status !== 429 || resetError.code === 'over_request_rate_limit')) {
+          throw resetError
+        }
+        setResetSent(true)
+        return
+      }
       const fn = mode === 'login' ? AuthProvider.signIn : AuthProvider.signUp
       const { error: authError } = await fn(email, password)
       if (authError) {
@@ -85,7 +77,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
       }
       onAuthenticated()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('auth.login.authFailed'))
+      setError(mode === 'reset' ? t('auth.login.resetFailed') : err instanceof Error ? err.message : t('auth.login.authFailed'))
     } finally {
       setPending(false)
     }
@@ -94,7 +86,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
   return (
     <main className="auth-screen">
       <LocaleSwitcher variant="auth-corner" />
-      <form className="auth-card" onSubmit={mode === 'reset' ? requestReset : submit}>
+      <form className="auth-card" onSubmit={submit}>
         <div className="brand-lockup auth-card__brand">
           <BrandMark size={36} />
           <div>
@@ -105,7 +97,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
 
         <h1>
           {mode === 'reset'
-            ? t('auth.login.resetTitle')
+            ? t('auth.login.forgotPassword')
             : mode === 'login' ? t('auth.login.welcomeBack') : t('auth.login.createAccount')}
         </h1>
 
@@ -139,34 +131,23 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
         {error && <div className="issue issue-error" role="alert">{error}</div>}
         {resetSent && <div className="issue" role="status">{t('auth.login.resetSent')}</div>}
 
+        <Button
+          variant="primary"
+          type="submit"
+          className="auth-submit"
+          loading={pending}
+          loadingLabel={t('common.working')}
+          leadingIcon={mode === 'login' ? <LogIn size={16} /> : mode === 'signup' && <UserPlus size={16} />}
+        >
+          {mode === 'reset' ? t('auth.login.resetSend') : mode === 'login' ? t('auth.login.login') : t('auth.login.signUp')}
+        </Button>
+
         {mode === 'reset' ? (
-          <>
-            <Button
-              variant="primary"
-              type="submit"
-              className="auth-submit"
-              loading={pending}
-              loadingLabel={t('common.working')}
-            >
-              {t('auth.login.resetSend')}
-            </Button>
-            <button type="button" className="auth-toggle" onClick={() => switchMode('login')}>
-              {t('common.back')}
-            </button>
-          </>
+          <button type="button" className="auth-toggle" onClick={() => switchMode('login')}>
+            {t('common.back')}
+          </button>
         ) : (
           <>
-            <Button
-              variant="primary"
-              type="submit"
-              className="auth-submit"
-              loading={pending}
-              loadingLabel={t('common.working')}
-              leadingIcon={mode === 'login' ? <LogIn size={16} /> : <UserPlus size={16} />}
-            >
-              {mode === 'login' ? t('auth.login.login') : t('auth.login.signUp')}
-            </Button>
-
             {mode === 'login' && (
               <button type="button" className="auth-toggle" onClick={() => switchMode('reset')}>
                 {t('auth.login.forgotPassword')}

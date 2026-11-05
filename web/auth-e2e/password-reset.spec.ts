@@ -39,7 +39,7 @@ async function openReset(page: Page): Promise<void> {
   await page.goto('/')
   await page.locator('#auth-email').fill(EMAIL)
   await page.getByRole('button', { name: 'Forgot password?', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Reset your password' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Forgot password?' })).toBeVisible()
 }
 
 test('a request keeps the typed email and returns to this origin', async ({ page, baseURL }) => {
@@ -130,7 +130,7 @@ test.describe('in Spanish', () => {
     await page.goto('/')
     await page.locator('#auth-email').fill(EMAIL)
     await page.getByRole('button', { name: '¿Olvidaste tu contraseña?', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Restablece tu contraseña' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '¿Olvidaste tu contraseña?' })).toBeVisible()
 
     const send = page.getByRole('button', { name: 'Enviar enlace', exact: true })
     await send.click()

@@ -327,7 +327,6 @@
   "auth.login.callbackConfirm": "¿Continuar como {{email}}?",
   "auth.login.callbackContinue": "Continuar",
   "auth.login.forgotPassword": "¿Olvidaste tu contraseña?",
-  "auth.login.resetTitle": "Restablece tu contraseña",
   "auth.login.resetSend": "Enviar enlace",
   "auth.login.resetSent": "Si ese correo tiene una cuenta, te enviamos un enlace. Puedes pedir otro en un minuto.",
   "auth.login.resetFailed": "No se pudo enviar el enlace. Inténtalo de nuevo en un minuto.",
