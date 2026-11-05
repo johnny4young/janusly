@@ -1,0 +1,180 @@
+/* Styles for VersionCanvasCompare.tsx: shipped with the lazy chunk that renders them. */
+
+.version-compare {
+  background: linear-gradient(135deg, var(--we-surface) 0%, var(--we-surface-muted) 100%);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  inset: 0;
+  padding-right: 16px;
+  position: absolute;
+  z-index: 5;
+}
+
+.version-compare:focus {
+  outline: none;
+}
+
+.version-compare__flow {
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.version-compare__summary {
+  align-items: center;
+  background: var(--we-surface-glass);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px -18px var(--we-shadow-ink-35);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px 12px;
+  left: 16px;
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 12px;
+  position: absolute;
+  top: 16px;
+  z-index: 6;
+}
+
+.version-compare__counts {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.version-compare__detail {
+  align-self: start;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px -18px var(--we-shadow-ink-35);
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 12px;
+  margin-top: 16px;
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  padding: 12px;
+}
+
+.version-compare__side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.version-compare__json {
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 8px;
+}
+
+.version-compare__json > span {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.version-compare__json[data-side="before"] > [data-changed="true"] {
+  background: var(--we-danger-soft);
+}
+
+.version-compare__json[data-side="after"] > [data-changed="true"] {
+  background: var(--we-success-soft);
+}
+
+.version-compare-node {
+  position: relative;
+}
+
+/* Run status means nothing on a saved version; the mark takes its place. */
+.version-compare-node .workflow-node-status {
+  display: none;
+}
+
+.version-compare-node .workflow-handle {
+  visibility: hidden;
+}
+
+.version-compare-node[data-mark="added"] .workflow-node {
+  background: var(--we-success-soft);
+  border-color: var(--we-success);
+}
+
+.version-compare-node[data-mark="changed"] .workflow-node {
+  background: var(--we-warning-soft);
+  border-color: var(--we-warning);
+}
+
+.version-compare-node[data-mark="removed"] .workflow-node {
+  background: var(--we-danger-soft);
+  border-color: var(--we-danger);
+  border-style: dashed;
+}
+
+.version-compare-node__mark {
+  background: var(--we-surface);
+  border: 1.5px solid currentColor;
+  border-radius: var(--we-radius-pill);
+  box-sizing: border-box;
+  display: grid;
+  font-size: 11px;
+  font-weight: 700;
+  height: 22px;
+  place-items: center;
+  position: absolute;
+  right: 11px;
+  top: 12px;
+  width: 22px;
+}
+
+[data-mark="added"] > .version-compare-node__mark {
+  color: var(--we-success-text);
+}
+
+[data-mark="changed"] > .version-compare-node__mark {
+  color: var(--we-warning-text);
+}
+
+[data-mark="removed"] > .version-compare-node__mark {
+  color: var(--we-danger-text);
+}
+
+.version-compare-edge[data-mark="added"] path.react-flow__edge-path.we-edge[data-selected="false"] {
+  stroke: var(--we-success);
+}
+
+.version-compare-edge[data-mark="changed"] path.react-flow__edge-path.we-edge[data-selected="false"] {
+  stroke: var(--we-warning);
+}
+
+.version-compare-edge[data-mark="removed"] path.react-flow__edge-path.we-edge[data-selected="false"] {
+  stroke: var(--we-danger);
+  stroke-dasharray: 6 4;
+}
+
+@media (max-width: 720px) {
+  .version-compare {
+    gap: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 45%);
+    padding-right: 0;
+  }
+
+  .version-compare__detail {
+    border-radius: 0;
+    margin-top: 0;
+    max-height: none;
+    height: 100%;
+  }
+}
