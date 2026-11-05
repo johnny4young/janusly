@@ -492,13 +492,24 @@ all-clear celebration or promise undo of external effects.
 ### Home signals
 
 Home shows what needs a decision now; every trend, breakdown and history lives
-in Reports. Below the hero and the action inbox sit the Operator prompt and a
-Today strip. Today's runs and success come from the loaded run page in the
+in Reports. The Operator prompt closes the What needs you card, and a Today strip
+sits below it. Today's runs and success come from the loaded run page in the
 operator's timezone, so they read `100+` once a full page is today's and are
 absent without `runs.read`; open failures and pending approvals link to where
 they are acted on. A recurring failure reaches the inbox through the operator
 brief. An AI budget banner renders only once `/billing/budget` reports the
 warning threshold crossed.
+
+The Operator panel is a lazy chunk with its own stylesheet, loaded the first time
+the operator asks or opens Suggestions. It is a non-modal side panel: Home stays
+usable behind it, focus moves into it on open, and closing or Escape returns focus
+to the field. A typed question goes to `/ai/explain-workflow` when a draft is
+loaded, otherwise to `/ai/explain-run` for the most recent open failure. The
+panel cites only the run in the response's `report.summary.runId`. Its action opens
+the recovery case when that run is the failed run Home asked about; workflow
+answers return no run, so they cite nothing and offer only AI Studio. A fallback
+answer always says that no AI provider answered, and shows the report's root
+cause, failed step, error and next action with the full report one click away.
 
 ### Home evidence states
 

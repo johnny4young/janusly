@@ -26,6 +26,7 @@ export function HomeActionWorkspace({
   status,
   warnings,
   setup,
+  operator,
   onSelectAction,
   onOpenRun,
   onOpenActivity,
@@ -37,6 +38,7 @@ export function HomeActionWorkspace({
   warnings: string[]
   /** Pending setup step, ranked after real work in the same inbox. */
   setup?: ReactNode
+  operator?: ReactNode
   onSelectAction: (action: RecommendedAction) => void
   onOpenRun: (runId: string) => void | Promise<void>
   onOpenActivity: () => void
@@ -122,6 +124,7 @@ export function HomeActionWorkspace({
             {t('home.priority.degraded')}
           </p>
         ) : null}
+        {operator}
       </section>
 
       <section
