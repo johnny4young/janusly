@@ -195,6 +195,11 @@ func checkRawSecretsInConfig(node Node, issues *[]ReadinessIssue) {
 	})
 }
 
+// StripSecretReferences returns what a value carries besides named secrets.
+func StripSecretReferences(text string) string {
+	return secretTemplatePattern.ReplaceAllString(text, "")
+}
+
 func checkSensitiveApproval(node Node, wf *Workflow, opts ReadinessOptions, cache map[string]bool, issues *[]ReadinessIssue) {
 	if !isSensitiveAction(node, opts) {
 		return

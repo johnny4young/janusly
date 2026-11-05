@@ -199,6 +199,7 @@ export type RunSummary = {
    * Drives whether the "Open in Lab" button surfaces (no nested labs).
    */
   replayMode?: string | null
+  parentRunId?: string | null
   /** Strength of evidence produced by a validation run. */
   validationEvidenceLevel?: ValidationEvidenceLevel | null
 }

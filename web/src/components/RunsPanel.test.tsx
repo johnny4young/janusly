@@ -200,6 +200,7 @@ describe('<RunsPanel /> observability', () => {
           traceId: 'trace-abcdef1234',
           createdAt: '2026-07-12T10:00:00.000Z',
           outputJson: { total: 42 },
+          parentRunId: 'source-run-id-1',
         }]}
         runNodes={[]}
         usage={{}}
@@ -219,6 +220,8 @@ describe('<RunsPanel /> observability', () => {
     expect(screen.getByTestId('active-run-replay-in-lab')).toBeInTheDocument()
     expect(screen.getByTestId('run-sheet-export')).toHaveAccessibleName(/run-1234567890/)
     expect(screen.getByTestId('run-sheet-send')).toHaveAccessibleName(/run-1234567890/)
+    fireEvent.click(screen.getByTestId('run-sheet-source-run'))
+    expect(handlers.onOpenRun).toHaveBeenCalledWith('source-run-id-1')
     fireEvent.click(screen.getByTestId('run-sheet-close'))
     expect(onClose).toHaveBeenCalledTimes(1)
     // Outputs belong to the overview slot, and a finished run offers no cancel.

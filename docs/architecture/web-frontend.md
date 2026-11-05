@@ -281,6 +281,9 @@ lays both out through `renderSheet`. Timeline (`RunStepTimeline`, a lazy chunk)
 projects the loaded events and `run_nodes` rows with `projectRunSteps`: attempts
 grouped by step on one scale, with the row as the authority for the attempt in
 progress. No tab adds a fetch, and changing the run returns to Overview.
+Timeline offers Rerun from this step on finished production runs. `RunWorkspace`
+injects `RerunStepDialog`, which ships with the `RunsPanel` chunk, so the lazy
+timeline does not preload what the panel needs; see `run-model.md`.
 
 Recover keeps its filters above two panes once the queue section is at least
 760 px wide: the queue on the left and the selected failure on the right, each

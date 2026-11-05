@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Rerun a run from any step that ran, from the Timeline tab. Earlier steps reuse
+  their saved outputs, so nothing before the step repeats. The step's input is
+  edited beside the original, the steps with side effects are listed before you
+  confirm, and the run sheet links the new run to its source run. A step behind
+  an approval reruns from that approval when anything after it can write.
 - Suggest fix now opens with the failed step, the attempts and whether AI is
   connected. Without an API key it says so and leads with Replay in Lab; Review
   evidence still shows the deterministic evidence, with no patch. Once a
