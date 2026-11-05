@@ -11,10 +11,14 @@ import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 // The hook fetches `/dlq/queue?…` itself (server filters + sorts before the page
 // cap and returns a { items, nextCursor, hasMore } keyset envelope). The stub
 // returns an empty single page unless a case overrides it.
-vi.mock('../api', () => ({
-  api: vi.fn(async () => emptyPage()),
-  downloadFromApi: vi.fn(),
-}))
+vi.mock('../api', () => {
+  const api = vi.fn(async (..._args: unknown[]) => emptyPage())
+  return {
+    api,
+    contractApi: (_operation: string, path: string) => api(path),
+    downloadFromApi: vi.fn(),
+  }
+})
 
 const FILTERS_KEY = 'janusly:recoveryQueueFilters'
 const initialState = useWorkflowStore.getState()
@@ -92,6 +96,10 @@ function Harness() {
       <span data-testid="owner">{f.ownerScope}</span>
       <span data-testid="severity">{f.severityFilter}</span>
       <span data-testid="sort">{f.sortKey}</span>
+      <span data-testid="view">{f.view}</span>
+      <span data-testid="cluster-count">{f.clusters.length}</span>
+      <button data-testid="set-view-list" onClick={() => f.setView('list')}>view list</button>
+      <button data-testid="set-view-clusters" onClick={() => f.setView('clusters')}>view clusters</button>
       <span data-testid="day">{f.dayFilter ?? ''}</span>
       <span data-testid="filtered">{f.filtered.map((r) => r.id).join(',')}</span>
       <span data-testid="overlay-keys">{[...f.recoveryByDeadLetterId.keys()].join(',')}</span>
@@ -152,17 +160,18 @@ describe('useRecoveryQueueFilters', () => {
 
   it('refreshes queue rows and counts for recovery changes, not role edits', async () => {
     render(<Harness />)
-    await waitFor(() => expect(api).toHaveBeenCalledTimes(2))
+    // Queue, cluster rollup and counts.
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(3))
 
     act(() => invalidateTags(['roles', 'members']))
-    expect(api).toHaveBeenCalledTimes(2)
+    expect(api).toHaveBeenCalledTimes(3)
 
     act(() => invalidateTags(['dlq', 'recovery']))
-    await waitFor(() => expect(api).toHaveBeenCalledTimes(4))
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(6))
     expect(api).toHaveBeenLastCalledWith('/dlq/counts')
 
     act(() => invalidateTags([PLATFORM_TAG]))
-    await waitFor(() => expect(api).toHaveBeenCalledTimes(6))
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(9))
   })
 
   it('defaults to open / all / all / newest and fetches /dlq/queue with those params', async () => {
@@ -402,6 +411,7 @@ describe('useRecoveryQueueFilters', () => {
     let resolveQueue: (value: ReturnType<typeof emptyPage>) => void = () => { throw new Error('queue request did not start') }
     vi.mocked(api).mockImplementation((path) => {
       if (String(path).startsWith('/dlq/counts')) return Promise.resolve({ total: 0, open: 0, replayed: 0, resolved: 0 }) as unknown as Promise<unknown>
+      if (path === '/dlq/clusters') return Promise.resolve({ clusters: [], totalSamples: 0, windowDays: 30 }) as unknown as Promise<unknown>
       return new Promise((resolve) => {
         resolveQueue = resolve
       }) as unknown as Promise<unknown>
@@ -410,6 +420,37 @@ describe('useRecoveryQueueFilters', () => {
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('true'))
     resolveQueue(emptyPage())
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+  })
+
+  it('reads the cluster rollup only in the cluster view and degrades a bad payload to none', async () => {
+    const reads = () => vi.mocked(api).mock.calls.filter(([path]) => path === '/dlq/clusters').length
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ view: 'list' }))
+    const { unmount } = render(<Harness />)
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    expect(reads()).toBe(0)
+    fireEvent.click(screen.getByTestId('set-view-clusters'))
+    await waitFor(() => expect(reads()).toBe(1))
+    unmount()
+
+    const base = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation((path, init) => {
+      if (path === '/dlq/clusters') return Promise.resolve({ unexpected: true }) as unknown as Promise<unknown>
+      return base(path, init)
+    })
+    render(<Harness />)
+    await waitFor(() => expect(reads()).toBe(2))
+    expect(screen.getByTestId('cluster-count')).toHaveTextContent('0')
+  })
+
+  it('defaults to the cluster view, persists a change and ignores a corrupt stored view', async () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ view: 'bogus' }))
+    render(<Harness />)
+    expect(screen.getByTestId('view')).toHaveTextContent('clusters')
+    fireEvent.click(screen.getByTestId('set-view-list'))
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(FILTERS_KEY) ?? '{}').view).toBe('list')
+    })
+    expect(screen.getByTestId('view')).toHaveTextContent('list')
   })
 
   it('persists the sort key', async () => {
