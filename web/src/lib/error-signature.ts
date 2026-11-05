@@ -267,7 +267,7 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
 
   // 3. Network failures. DNS keeps its own cluster: the fix is the host, not a retry.
   const dnsFailure = DNS_FAILURE_PATTERN.test(message);
-  if (dnsFailure || NETWORK_FAILURE_PATTERN.test(message)) {
+  if (isNetworkFailure(message) || isTimeoutFailure(message)) {
     return {
       signature: `${dnsFailure ? "DNS lookup failed" : "Network timeout"} on ${nodeType} node`,
       category: "network_timeout",
@@ -353,7 +353,8 @@ const CREDENTIAL_MISSING_PATTERN = /credential\s+secret\s+missing\s+for\s+['"]?(
 const MISSING_SECRET_PATTERN = /Missing\s+secret[: ]+['"]?([\w\-_.]+)/i;
 const HTTP_STATUS_PATTERN = /\bHTTP\s+(\d{3})\b/i;
 const DNS_FAILURE_PATTERN = /\bno\s+such\s+host\b|\bserver\s+misbehaving\b|did\s+not\s+resolve\s+to\s+any\s+address|\b(?:ENOTFOUND|EAI_AGAIN)\b|getaddrinfo|name\s+resolution/i;
-const NETWORK_FAILURE_PATTERN = /\b(?:timeout|timed\s+out|deadline\s+exceeded|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ECONNABORTED|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET)|dial\s+tcp|connection\s+(?:refused|reset)|broken\s+pipe)\b|fetch\s+failed/i;
+const TIMEOUT_FAILURE_PATTERN = /\b(?:timeout|timed\s+out|deadline\s+exceeded|ETIMEDOUT|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT))\b/i;
+const CONNECTION_FAILURE_PATTERN = /\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_SOCKET|dial\s+tcp|connection\s+(?:refused|reset)|broken\s+pipe|no\s+route\s+to\s+host|network\s+is\s+unreachable)\b|fetch\s+failed|:\s+EOF$/i;
 const PARSE_ERROR_PATTERN = /\b(?:invalid\s+JSON|is\s+not\s+valid\s+JSON|JSON\.parse|unexpected\s+token|unexpected\s+end\s+of\s+JSON|parse\s+error|in\s+JSON\s+at\s+position|expected\s+property\s+name)\b/i;
 // http-policy.ts chokepoint guard failures (body-cap abort, redirect cap, SSRF
 // private block, unsupported protocol) — all reached the HTTP layer → http_error.
@@ -370,6 +371,16 @@ const AI_PROVIDER_REASONS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\brate[_\s]?limit(?:ed|s)?\b/i, reason: "rate limit" },
   { pattern: /\bmodel\s+not\s+found\b|\bunknown\s+model\b/i, reason: "model not found" },
 ];
+
+/** Resolver and connection wording or error codes. */
+export function isNetworkFailure(text: string): boolean {
+  return DNS_FAILURE_PATTERN.test(text) || CONNECTION_FAILURE_PATTERN.test(text);
+}
+
+/** Timeout wording or error codes. */
+export function isTimeoutFailure(text: string): boolean {
+  return TIMEOUT_FAILURE_PATTERN.test(text);
+}
 
 function matchSecretMissing(message: string): string | null {
   for (const pattern of [SECRET_NOT_FOUND_PATTERN, ENV_MISSING_PATTERN, CREDENTIAL_MISSING_PATTERN, MISSING_SECRET_PATTERN]) {

@@ -149,6 +149,46 @@ describe('classifyRecoveryError', () => {
     expect(classifyRecoveryError({ message: 'Request timed out after 30s' })).toBe('timeout')
     expect(classifyRecoveryError({ message: 'Invalid API key' })).toBe('auth')
   })
+  it.each([
+    // Go transport failures.
+    ['connection refused', { message: 'Post "https://api.example.com/v1": dial tcp 10.0.0.1:443: connect: connection refused' }, 'network'],
+    ['connection reset', { message: 'read tcp 10.0.0.2:5000->10.0.0.1:443: read: connection reset by peer' }, 'network'],
+    ['broken pipe', { message: 'write tcp 10.0.0.2:5000->10.0.0.1:443: write: broken pipe' }, 'network'],
+    ['no route to host', { message: 'connect: no route to host' }, 'network'],
+    ['network unreachable', { message: 'connect: network is unreachable' }, 'network'],
+    ['transport EOF', { message: 'Post "https://api.example.com/v1": EOF' }, 'network'],
+    ['wrapped mcp transport failure', { message: 'mcp_tool failed: dial tcp 10.0.0.1:443: connect: connection refused' }, 'network'],
+    // Go resolver failures.
+    ['no such host', { message: 'Get "https://demo.invalid/": dial tcp: lookup demo.invalid: no such host' }, 'network'],
+    ['server misbehaving', { message: 'lookup demo.invalid on 127.0.0.11:53: server misbehaving' }, 'network'],
+    ['empty resolver answer', { message: 'HTTP target did not resolve to any address: demo.invalid' }, 'network'],
+    // Node codes and wording of the same class.
+    ['EHOSTUNREACH code', { code: 'EHOSTUNREACH' }, 'network'],
+    ['UND_ERR_SOCKET code', { code: 'UND_ERR_SOCKET' }, 'network'],
+    ['fetch failed', { message: 'fetch failed' }, 'network'],
+    ['socket hang up', { message: 'socket hang up' }, 'network'],
+    ['dns wording', { message: 'DNS error' }, 'network'],
+    // Timeouts.
+    ['deadline exceeded', { message: 'context deadline exceeded' }, 'timeout'],
+    ['dial timeout', { message: 'dial tcp 10.0.0.1:443: i/o timeout' }, 'timeout'],
+    ['TLS handshake timeout', { message: 'net/http: TLS handshake timeout' }, 'timeout'],
+    ['undici headers timeout code', { code: 'UND_ERR_HEADERS_TIMEOUT' }, 'timeout'],
+    // A status means the peer answered.
+    ['401 quoting a transport fault', { statusCode: 401, message: 'connection refused' }, 'auth'],
+    ['404 with network wording', { statusCode: 404, message: 'network not found' }, 'notFound'],
+    ['502 quoting a transport fault', { statusCode: 502, message: 'dial tcp 10.0.0.1:443: connect: connection refused' }, 'serverError'],
+    ['503 with timeout wording', { statusCode: 503, message: 'upstream timeout' }, 'serverError'],
+    ['400 quoting a transport fault', { statusCode: 400, message: 'upstream said connection refused' }, null],
+    // Permanent failures must not read as transient.
+    ['ssrf private target', { message: 'HTTP target is private and blocked: 10.0.0.1' }, null],
+    ['unvalidated dial', { message: 'refusing to dial unvalidated host: example.com' }, null],
+    ['certificate failure', { message: 'Get "https://example.com/": tls: failed to verify certificate: x509: certificate signed by unknown authority' }, null],
+    ['cancelled', { message: 'Get "https://example.com/": context canceled' }, null],
+    ['decoder EOF', { message: 'unexpected EOF' }, null],
+    ['host name containing dns', { message: 'tls: bad certificate from dnsimple.example' }, null],
+  ])('classifies the failure matrix: %s', (_name, errorJson, want) => {
+    expect(classifyRecoveryError(errorJson)).toBe(want)
+  })
   it('returns null for unknown / non-object errors', () => {
     expect(classifyRecoveryError({ message: 'something odd happened' })).toBeNull()
     expect(classifyRecoveryError(null)).toBeNull()
