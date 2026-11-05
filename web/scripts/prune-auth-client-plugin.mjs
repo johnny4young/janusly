@@ -11,7 +11,7 @@ import { parseSync } from 'oxc-parser'
 const AUTH_MODULE = /\/@supabase\/auth-js\/dist\/module\/(GoTrueClient|GoTrueAdminApi)\.js$/
 const TARGETS = {
   GoTrueClient: {
-    roots: ['getSession', 'onAuthStateChange', 'setSession', 'signInWithPassword', 'signOut', 'signUp', 'updateUser'],
+    roots: ['getSession', 'onAuthStateChange', 'resetPasswordForEmail', 'setSession', 'signInWithPassword', 'signOut', 'signUp', 'updateUser'],
     clusters: ['mfa', 'oauth', 'passkey'],
     delegates: { admin: ['signOut'] },
   },

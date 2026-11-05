@@ -57,7 +57,7 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 // The production build removes every other GoTrueClient method.
 type SupabaseAuthClient = Pick<
   GoTrueClient,
-  'getSession' | 'onAuthStateChange' | 'setSession' | 'signInWithPassword' | 'signOut' | 'signUp' | 'updateUser'
+  'getSession' | 'onAuthStateChange' | 'resetPasswordForEmail' | 'setSession' | 'signInWithPassword' | 'signOut' | 'signUp' | 'updateUser'
 >
 type SupabaseAuthFacade = { auth: SupabaseAuthClient }
 
@@ -397,6 +397,13 @@ export const AuthProvider = {
     if (!client) return { error: null }
     const { error } = await client.auth.updateUser({ password })
     if (!error) clearPasswordSetup()
+    return { error }
+  },
+  requestPasswordReset: async (email: string) => {
+    const client = await getSupabaseClient()
+    if (!client) return { error: null }
+    // No trailing slash: the auth server compares this with its allow list as text.
+    const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
     return { error }
   },
   getSession: async () => {

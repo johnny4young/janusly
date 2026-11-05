@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Login has Forgot password?, which emails a reset link that ends at the
+  set-password step. The answer is the same whether or not the email has an
+  account, including when the auth server limits how often it sends.
 - Settings > Usage now reports input served from cache as a share of all input
   tokens. It used to divide by uncached input only, so it could read 100 % when
   half the input came from cache.

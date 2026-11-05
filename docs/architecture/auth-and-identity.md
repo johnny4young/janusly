@@ -25,6 +25,15 @@ the user signed in with the form and a fixed message, and a user id in
 clears on a saved password, a password sign-in, a sign-out, or a session for
 another user. The API accepts the session either way, so this step is a flow
 control, not an authorization boundary.
+Login requests a recovery link with `resetPasswordForEmail`, redirecting to
+`window.location.origin`. That origin must share a hostname with the Supabase
+site URL or match an allow-list entry exactly, with no trailing slash; otherwise
+the auth server still answers 200 and silently links to the site URL. A sent
+link and a 429 other than `over_request_rate_limit` read the same, because the
+per-user and hourly email limits only fire for an existing account. Past the hourly limit
+(`email_sent`) a user sees that confirmation with no email, so size it for
+expected recovery volume. A direct `/recover` caller can still see the
+difference; the client cannot close it.
 Browsers record the navigation in their visited-URL list before any page code
 runs, so an implicit-grant token can remain there; no client code can remove it.
 
