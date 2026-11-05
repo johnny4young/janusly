@@ -322,6 +322,8 @@
   "auth.login.ssoOrgRequired": "El id de la org es obligatorio para SSO",
   "auth.login.authFailed": "Falló la autenticación",
   "auth.login.callbackFailed": "Este enlace de inicio de sesión no es válido o ya venció. Solicita uno nuevo.",
+  "auth.login.callbackConfirm": "¿Continuar como {{email}}?",
+  "auth.login.callbackContinue": "Continuar",
   "auth.context.loadFailed": "Janusly no pudo cargar tu cuenta y espacios de trabajo",
   "auth.workspace.chooseTitle": "Elige un espacio de trabajo",
   "auth.workspace.chooseDescription": "Tu cuenta pertenece a más de una organización. Elige dónde quieres trabajar ahora.",

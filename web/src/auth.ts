@@ -37,7 +37,12 @@ import {
   rotateApiRequestLifecycle,
   suspendApiRequestLifecycle,
 } from './api-request-lifecycle'
-import { clearAuthCallback, markAuthCallbackFailed, takeAuthCallbackSession } from './auth-callback'
+import {
+  clearAuthCallback,
+  markAuthCallbackFailed,
+  pendingAuthCallbackToken,
+  takeAuthCallbackSession,
+} from './auth-callback'
 import { t } from './i18n/runtime'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
@@ -50,13 +55,41 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 // The production build removes every other GoTrueClient method.
 type SupabaseAuthClient = Pick<
   GoTrueClient,
-  'getSession' | 'onAuthStateChange' | 'signInWithPassword' | 'signOut' | 'signUp'
+  'getSession' | 'onAuthStateChange' | 'setSession' | 'signInWithPassword' | 'signOut' | 'signUp'
 >
 type SupabaseAuthFacade = { auth: SupabaseAuthClient }
 
 let supabaseClientPromise: Promise<SupabaseAuthFacade | null> | null = null
 
-/** A rejected link reports on the login form. auth-js drops any stored session if the link's own session is gone. */
+/**
+ * The email a captured callback would sign in as, or null when there is nothing
+ * to approve. Asks the auth server directly: the client's user lookup can drop
+ * the stored session when it rejects a token.
+ */
+export async function resolveAuthCallbackIdentity(): Promise<string | null> {
+  const token = pendingAuthCallbackToken()
+  if (!token) return null
+  if (!isSupabaseConfigured) {
+    clearAuthCallback()
+    return null
+  }
+  if (await ensureBrowserSession()) return null
+  try {
+    const base = supabaseUrl!.endsWith('/') ? supabaseUrl! : `${supabaseUrl}/`
+    const response = await fetch(new URL('auth/v1/user', base), {
+      headers: { apikey: supabaseAnonKey!, Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+    const user = response.ok ? await response.json() as { email?: unknown } : null
+    if (typeof user?.email === 'string' && user.email) return user.email
+  } catch {
+    // Reported below with every other rejected link.
+  }
+  markAuthCallbackFailed()
+  return null
+}
+
+/** A rejected link reports on the login form. */
 async function adoptAuthCallback(client: SupabaseAuthFacade): Promise<void> {
   const session = takeAuthCallbackSession()
   if (!session) return

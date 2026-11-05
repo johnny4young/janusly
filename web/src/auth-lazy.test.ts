@@ -40,9 +40,10 @@ describe('captured implicit-grant callback', () => {
     })
     const getSession = vi.fn(async () => ({ data: { session: { access_token: 'jwt-invite' } } }))
     runtime.createClient.mockReturnValue({ auth: { setSession, getSession } })
-    const { captureAuthCallback } = await import('./auth-callback')
+    const { approveAuthCallback, captureAuthCallback } = await import('./auth-callback')
     const auth = await import('./auth')
     captureAuthCallback()
+    approveAuthCallback()
 
     const token = auth.getSupabaseAccessToken()
     const secondToken = auth.getSupabaseAccessToken()
@@ -56,6 +57,81 @@ describe('captured implicit-grant callback', () => {
     expect(setSession).toHaveBeenCalledWith({ access_token: 'jwt-invite', refresh_token: 'refresh-invite' })
   })
 
+  it('never adopts a callback the user has not approved', async () => {
+    stubSupabaseEnv()
+    window.history.replaceState(null, '', CALLBACK)
+    const setSession = vi.fn()
+    const getSession = vi.fn(async () => ({ data: { session: null } }))
+    runtime.createClient.mockReturnValue({ auth: { setSession, getSession } })
+    const { captureAuthCallback } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+
+    await expect(auth.getSupabaseAccessToken()).resolves.toBeNull()
+    expect(setSession).not.toHaveBeenCalled()
+  })
+
+  it('resolves the identity from the auth server without loading the client', async () => {
+    stubSupabaseEnv()
+    window.history.replaceState(null, '', CALLBACK)
+    const fetchMock = vi.fn<typeof fetch>(async (input) => (
+      String(input).endsWith('/auth/session')
+        ? new Response('{}', { status: 401 })
+        : new Response(JSON.stringify({ id: 'user-1', email: 'invited@example.com' }), { status: 200 })
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+    const { captureAuthCallback, pendingAuthCallbackToken } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+
+    await expect(auth.resolveAuthCallbackIdentity()).resolves.toBe('invited@example.com')
+
+    const [url, init] = fetchMock.mock.calls.at(-1)!
+    expect(String(url)).toBe('https://example.supabase.co/auth/v1/user')
+    expect(init?.headers).toEqual({ apikey: 'anon-public-key', Authorization: 'Bearer jwt-invite' })
+    expect(runtime.createClient).not.toHaveBeenCalled()
+    expect(pendingAuthCallbackToken()).toBe('jwt-invite')
+  })
+
+  it.each([
+    ['rejects the token', async () => new Response('{}', { status: 401 })],
+    ['ended the session', async () => new Response(JSON.stringify({ error_code: 'session_not_found' }), { status: 403 })],
+    ['returns no email to show', async () => new Response(JSON.stringify({ id: 'user-1' }), { status: 200 })],
+    ['returns malformed JSON', async () => new Response('not json', { status: 200 })],
+    ['is unreachable', async () => { throw new TypeError('Failed to fetch') }],
+  ])('reports a failed link when the auth server %s', async (_name, respond) => {
+    stubSupabaseEnv()
+    window.history.replaceState(null, '', CALLBACK)
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input) => (
+      String(input).endsWith('/auth/session') ? new Response('{}', { status: 401 }) : respond()
+    )))
+    const { authCallbackFailed, captureAuthCallback, pendingAuthCallbackToken } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+
+    await expect(auth.resolveAuthCallbackIdentity()).resolves.toBeNull()
+
+    expect(authCallbackFailed()).toBe(true)
+    expect(pendingAuthCallbackToken()).toBeNull()
+    expect(runtime.createClient).not.toHaveBeenCalled()
+  })
+
+  it('discards the callback in a build without Supabase', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', '')
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', '')
+    window.history.replaceState(null, '', CALLBACK)
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+    const { captureAuthCallback, pendingAuthCallbackToken } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+
+    await expect(auth.resolveAuthCallbackIdentity()).resolves.toBeNull()
+
+    expect(pendingAuthCallbackToken()).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['returns an error', async () => ({ data: { session: null, user: null }, error: new Error('bad jwt') })],
     ['throws', async () => { throw new Error('network') }],
@@ -64,9 +140,10 @@ describe('captured implicit-grant callback', () => {
     window.history.replaceState(null, '', CALLBACK)
     const client = { auth: { setSession: vi.fn(setSession) } }
     runtime.createClient.mockReturnValue(client)
-    const { authCallbackFailed, captureAuthCallback } = await import('./auth-callback')
+    const { approveAuthCallback, authCallbackFailed, captureAuthCallback } = await import('./auth-callback')
     const auth = await import('./auth')
     captureAuthCallback()
+    approveAuthCallback()
 
     await expect(auth.getSupabaseClient()).resolves.toBe(client)
     expect(authCallbackFailed()).toBe(true)
@@ -86,11 +163,12 @@ describe('captured implicit-grant callback', () => {
       }
       return new Response('{}', { status: 200 })
     }))
-    const { captureAuthCallback } = await import('./auth-callback')
+    const { captureAuthCallback, pendingAuthCallbackToken } = await import('./auth-callback')
     const auth = await import('./auth')
     captureAuthCallback()
 
-    await expect(auth.AuthProvider.getAuth()).resolves.toMatchObject({ userId: 'sso-user' })
+    await expect(auth.resolveAuthCallbackIdentity()).resolves.toBeNull()
+    expect(pendingAuthCallbackToken()).toBeNull()
     await auth.AuthProvider.signOut()
 
     expect(signOut).toHaveBeenCalledOnce()
@@ -104,9 +182,10 @@ describe('captured implicit-grant callback', () => {
     const setSession = vi.fn()
     const signOut = vi.fn(async () => ({ error: null }))
     runtime.createClient.mockReturnValue({ auth: { setSession, signOut } })
-    const { captureAuthCallback } = await import('./auth-callback')
+    const { approveAuthCallback, captureAuthCallback } = await import('./auth-callback')
     const auth = await import('./auth')
     captureAuthCallback()
+    approveAuthCallback()
 
     await auth.AuthProvider.signOut()
 

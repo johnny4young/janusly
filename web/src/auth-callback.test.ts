@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  approveAuthCallback,
   authCallbackFailed,
   captureAuthCallback,
   clearAuthCallback,
   markAuthCallbackFailed,
+  pendingAuthCallbackToken,
   takeAuthCallbackSession,
 } from './auth-callback'
 import { readRoute } from './lib/route'
@@ -33,8 +35,20 @@ describe('captureAuthCallback', () => {
     expect(window.history.length).toBe(lengthBefore)
     expect(push).not.toHaveBeenCalled()
     expect(authCallbackFailed()).toBe(false)
+    expect(pendingAuthCallbackToken()).toBe('jwt-access')
+  })
+
+  it('releases the session only after approval, and only once', () => {
+    setLocation(`/${TOKEN_FRAGMENT}`)
+    captureAuthCallback()
+
+    expect(takeAuthCallbackSession()).toBeNull()
+    expect(pendingAuthCallbackToken()).toBe('jwt-access')
+
+    approveAuthCallback()
     expect(takeAuthCallbackSession()).toEqual({ access_token: 'jwt-access', refresh_token: 'jwt-refresh' })
     expect(takeAuthCallbackSession()).toBeNull()
+    expect(pendingAuthCallbackToken()).toBeNull()
   })
 
   it.each([
@@ -49,7 +63,7 @@ describe('captureAuthCallback', () => {
 
     expect(window.location.hash).toBe('')
     expect(authCallbackFailed()).toBe(true)
-    expect(takeAuthCallbackSession()).toBeNull()
+    expect(pendingAuthCallbackToken()).toBeNull()
   })
 
   it.each(['', '#', '#/home', '#/runs/dlq/access_token=look-alike', '#section', '#foo=bar'])(
@@ -63,7 +77,7 @@ describe('captureAuthCallback', () => {
       expect(replace).not.toHaveBeenCalled()
       expect(window.location.hash).toBe(fragment === '#' ? '' : fragment)
       expect(authCallbackFailed()).toBe(false)
-      expect(takeAuthCallbackSession()).toBeNull()
+      expect(pendingAuthCallbackToken()).toBeNull()
     },
   )
 
@@ -90,19 +104,27 @@ describe('captureAuthCallback', () => {
     captureAuthCallback()
 
     expect(replace).toHaveBeenCalledWith('#')
-    expect(takeAuthCallbackSession()?.access_token).toBe('jwt-access')
+    expect(pendingAuthCallbackToken()).toBe('jwt-access')
   })
 })
 
 describe('clearAuthCallback', () => {
-  it('drops a pending session and a recorded failure', () => {
+  it('drops a pending session, its approval and a recorded failure', () => {
     setLocation(`/${TOKEN_FRAGMENT}`)
     captureAuthCallback()
-    markAuthCallbackFailed()
+    approveAuthCallback()
 
     clearAuthCallback()
+    expect(pendingAuthCallbackToken()).toBeNull()
 
+    setLocation(`/${TOKEN_FRAGMENT}`)
+    captureAuthCallback()
     expect(takeAuthCallbackSession()).toBeNull()
+
+    markAuthCallbackFailed()
+    expect(pendingAuthCallbackToken()).toBeNull()
+    expect(authCallbackFailed()).toBe(true)
+    clearAuthCallback()
     expect(authCallbackFailed()).toBe(false)
   })
 })
