@@ -60,4 +60,32 @@ describe('<RunStepTimeline />', () => {
     expect(button).toBeEnabled()
     expect(onLoadOlderEvents).toHaveBeenCalledTimes(1)
   })
+
+  describe('rerun from a step', () => {
+    const RerunDialog = ({ nodeId }: { nodeId: string }) => <div data-testid="rerun-dialog">{nodeId}</div>
+    const nodes = [
+      { id: '1', runId: 'r', nodeId: 'fetch', status: 'failed' },
+      { id: '2', runId: 'r', nodeId: 'notify', status: 'pending' },
+      { id: '3', runId: 'r', nodeId: 'branch', status: 'skipped' },
+    ] as never[]
+    const run = (status: string, replayMode: string | null = null) => ({ id: 'r', status, replayMode }) as never
+
+    it('is offered on steps that ran in a finished production run', () => {
+      render(<RunStepTimeline events={[]} nodes={nodes} run={run('failed')} RerunDialog={RerunDialog} />)
+
+      expect(screen.queryByTestId('run-step-rerun-notify')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('run-step-rerun-branch')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByTestId('run-step-rerun-fetch'))
+      expect(screen.getByTestId('rerun-dialog')).toHaveTextContent('fetch')
+    })
+
+    it.each([
+      ['an open run', run('running'), RerunDialog],
+      ['a validation run', run('failed', 'validation'), RerunDialog],
+      ['a user who cannot start runs', run('failed'), undefined],
+    ])('is hidden for %s', (_name, activeRun, dialog) => {
+      render(<RunStepTimeline events={[]} nodes={nodes} run={activeRun} RerunDialog={dialog} />)
+      expect(screen.queryByTestId('run-step-rerun-fetch')).not.toBeInTheDocument()
+    })
+  })
 })

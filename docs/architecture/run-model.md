@@ -106,6 +106,36 @@ would otherwise sit at the head of the FIFO claim index forever, rejected by
 the running-run join on every claim. A redrive re-queues them through the
 ordinary readiness pass; cancellation marks its own nodes cancelled.
 
+## Rerun from a step
+
+`POST /runs/rerun` starts a new production run from one step of a finished run,
+linked to it by `parent_link_kind = 'rerun'`, which is trace-only like a replay.
+Only that step is queued, so only it and its downstream closure can execute.
+Earlier steps and other branches that succeeded are cloned with zero attempts,
+and anything else outside that closure is skipped. An earlier step that did not
+succeed, or an output the size bound truncated, refuses the rerun.
+
+`POST /runs/rerun/preview` returns the step's config with sensitive keys masked
+and the reused, rerun, not-run and side-effect steps. Side effects are classified
+from the document that will run, with static tool capability metadata, treating a
+subworkflow or unknown tool as effectful, and the start must acknowledge them, so
+an edit that adds a write returns 409 with the new list.
+
+`inputOverride` replaces the step's authored config in a copy of the run's
+snapshot. Rendered per-node input is not persisted, because it can hold resolved
+secrets, so operators edit references rather than values. A masked value keeps
+the authored one, a literal under a sensitive key is refused, and an override
+cannot enable `allowWriteTools`. The copy then passes `runstart`, the same
+admission as any start: validation, readiness, circuit breaker, saved-only policy
+and idempotency, with no rollout reassignment. An edited document is unbound from
+its version, so saved-only tenants refuse it.
+
+Executor gates are unchanged. Dispatch reads approval from the graph, so a reused
+approval would authorize new writes: a rerun with side effects behind one is
+refused until it starts at that approval. Validation runs cannot be rerun, which
+keeps a sandbox from becoming production. The audit row records whether the input
+was edited, never its values.
+
 Wake-ups carry a count: `janusly_wake` notifications and the wake sweeper
 say how many nodes just became claimable, and that many workers wake,
 rotating through the pool. Waking one worker left a fan-out waiting on the

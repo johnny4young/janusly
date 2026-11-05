@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Rerun a run from any step that ran, from the Timeline tab. Earlier steps reuse
+  their saved outputs, so nothing before the step repeats. The step's input is
+  edited beside the original, the steps with side effects are listed before you
+  confirm, and the run sheet links the new run to its source run. A step behind
+  an approval reruns from that approval when anything after it can write.
 - Run detail is one sheet. Its header shows the workflow, the actions and a data
   row with status, duration, start, version, trace and run ID, and it stays in
   place across the tabs Overview, Timeline, Events, Agents and Ask. Timeline now

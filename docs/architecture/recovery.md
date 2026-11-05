@@ -15,6 +15,9 @@ impact attribution, and feedback.
   Savepoint recovery failures abort completion rather than claiming success.
 - Replay claims are compare-and-set and bound to the exact failed task.
 - Validation replay suppresses external write effects.
+- Rerun from a step (`run-model.md`) is a new linked production run, unlike a
+  redrive, which revives the failed node in place. It claims no dead letter and
+  credits no recovery impact.
 - Circuit breaking pauses every run entry point and requires explicit resume.
 - Buffered event triggers resume oldest-first; missed schedule ticks are not
   synthesized.

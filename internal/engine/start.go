@@ -137,6 +137,8 @@ type StartInput struct {
 	// (subworkflow starts). Empty = a fresh id is stamped, so every root
 	// run gets one up front — the contract start-run posture.
 	TraceID string
+	// Rerun, when set, queues only its node, seeds the rest and links the source.
+	Rerun *RerunSeed
 }
 
 // ErrStartIdempotencyReplay reports a duplicate Idempotency-Key: the
@@ -216,6 +218,10 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	}
 	for _, edge := range in.Workflow.Edges {
 		delete(roots, edge.To)
+	}
+	if in.Rerun != nil {
+		roots = map[string]bool{in.Rerun.NodeID: true}
+		in.ParentRunID, in.ParentNodeID, in.ParentLinkKind = in.Rerun.SourceRunID, in.Rerun.NodeID, RerunLinkKind
 	}
 
 	// Root span per run: a no-op without a registered provider.
@@ -301,6 +307,10 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		}
 		if roots[node.ID] {
 			row.Status, row.Attempts = "queued", pgtype.Int4{Int32: 1, Valid: true}
+		} else if in.Rerun != nil {
+			if seed, ok := in.Rerun.Nodes[node.ID]; ok {
+				row.Status, row.StateJson = seed.Status, seed.State
+			}
 		}
 		nodeRows = append(nodeRows, row)
 	}
@@ -312,6 +322,9 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	if in.WorkflowRolloutID != "" {
 		startedFields["workflowRolloutId"] = in.WorkflowRolloutID
 		startedFields["workflowRolloutVariant"] = in.WorkflowRolloutVariant
+	}
+	if in.Rerun != nil {
+		startedFields["sourceRunId"], startedFields["rerunNodeId"] = in.Rerun.SourceRunID, in.Rerun.NodeID
 	}
 	startedPayload, _ := json.Marshal(startedFields)
 	startedAt := e.eventNow()

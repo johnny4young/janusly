@@ -26,6 +26,7 @@ import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
 import { DeadLettersPanel } from './DeadLettersPanel'
 export { DeadLetterCloseDialog } from './DeadLetterCloseDialog'
+export { RerunStepDialog } from './RerunStepDialog'
 export { RunExplainChat } from './RunExplainChat'
 import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
@@ -410,6 +411,16 @@ export function RunsPanel({
               <dt>{t('rightPanel.runs.runId')}</dt>
               <dd><code title={activeRunId}>{activeRunId.slice(0, 12)}…</code></dd>
             </div>
+            {activeRun?.parentRunId && (
+              <div>
+                <dt>{t('replayLab.sourceRun')}</dt>
+                <dd>
+                  <Button size="sm" variant="ghost" data-testid="run-sheet-source-run" onClick={() => onOpenRun(activeRun.parentRunId as string)}>
+                    {activeRun.parentRunId.slice(0, 12)}…
+                  </Button>
+                </dd>
+              </div>
+            )}
           </dl>
         </section>
     )

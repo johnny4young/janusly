@@ -13,6 +13,7 @@ import { RunWorkspace, type RunWorkspaceProps } from './RunWorkspace'
 
 vi.mock('./RunsPanel', () => ({
   RunExplainChat: ({ runId }: { runId: string }) => <textarea data-testid="ask-projection" defaultValue={runId} />,
+  RerunStepDialog: () => null,
   RunsPanel: ({ renderSheet }: { renderSheet: (parts: { header: ReactNode; overview: ReactNode }) => ReactNode }) => (
     renderSheet({
       header: <div data-testid="sheet-header-projection" />,

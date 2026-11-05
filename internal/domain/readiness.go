@@ -195,6 +195,11 @@ func checkRawSecretsInConfig(node Node, issues *[]ReadinessIssue) {
 	})
 }
 
+// IsSecretReference reports a value that names a secret instead of carrying one.
+func IsSecretReference(text string) bool {
+	return secretTemplatePattern.MatchString(text)
+}
+
 func checkSensitiveApproval(node Node, wf *Workflow, opts ReadinessOptions, cache map[string]bool, issues *[]ReadinessIssue) {
 	if !isSensitiveAction(node, opts) {
 		return

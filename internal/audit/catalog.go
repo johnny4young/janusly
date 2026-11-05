@@ -123,6 +123,7 @@ var knownActions = map[Action]bool{
 	"retention.purged":                         true,
 	"run.cancelled":                            true,
 	"run.redrive":                              true,
+	"run.rerun_started":                        true,
 	"run.resumed":                              true,
 	"run.started":                              true,
 	"run.started.adhoc":                        true,

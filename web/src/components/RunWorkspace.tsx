@@ -27,7 +27,7 @@ import { ExternalLink } from 'lucide-react'
 import type { RunEvent } from '../types'
 import { useT } from '../i18n'
 import { PanelChrome } from './panel-primitives'
-import { RunExplainChat, RunsPanel, type RunsPanelProps } from './RunsPanel'
+import { RerunStepDialog, RunExplainChat, RunsPanel, type RunsPanelProps } from './RunsPanel'
 import './RunWorkspace.css'
 import { Button } from './ui/Button'
 
@@ -230,6 +230,8 @@ export function RunWorkspace({
               nodes={runsProps.runNodes}
               eventsHasMore={eventsHasMore}
               onLoadOlderEvents={onLoadOlderEvents}
+              run={runsProps.runs.find(run => run.id === activeRunId)}
+              RerunDialog={runsProps.canStartRuns === false ? undefined : RerunStepDialog}
             />
           </Suspense>
         )}
