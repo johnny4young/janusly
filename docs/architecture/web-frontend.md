@@ -297,6 +297,11 @@ Investigate and Replay cluster read `/dlq/cluster-members` when clicked and open
 the cluster recovery and campaign dialogs. The full rollup, with failed run nodes
 and suggested owners, remains under Automation and patterns.
 
+Templates has two views over one shared search. Recipes groups by the category
+each template carries in `internal/httpapi/assets/templates.json`, so a new
+category gets its chip without a web change. Packs renders the embedded
+`SolutionPacksPanel` and is the only place packs appear on that page; `#/packs`
+remains the standalone route.
 The eager shell owns the core locale catalog. Non-home main and authoring-panel
 slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
 behind an accessible, height-preserving skeleton while the sidebar, top bar and
