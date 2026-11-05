@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Recover is now a list and a detail side by side. Filters stay above the queue,
+  the failures sit on the left and the selected failure on the right, each pane
+  scrolling on its own, so moving with J/K keeps both on screen and the action
+  bar in view. Actions are grouped: Suggest fix, Retry and Replay in Lab; Copy
+  error and Export; Close without recovery.
+- The recovery queue groups failures by cluster by default, with a switch to All
+  items. Each cluster shows its signature, category, occurrences and affected
+  workflows, plus Investigate, which opens the fix for every open failure in the
+  cluster, and Replay cluster, which starts a paced campaign after its preview.
 - Build shows a workflow's problems on the canvas. The Flow map card has a
   Problems chip with the count, workflow-level problems appear in a band above
   the steps, and a step with a problem has a dot on its corner. Each one opens

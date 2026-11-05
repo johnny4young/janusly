@@ -4,8 +4,8 @@
  * operator controls, virtualized rows, and selected-failure details.
  */
 
-import type { KeyboardEventHandler, RefObject } from 'react'
-import { CircleCheck, Inbox, RefreshCw, TimerReset, X } from 'lucide-react'
+import { lazy, Suspense, useEffect, useRef, type KeyboardEventHandler, type RefObject } from 'react'
+import { CircleCheck, RefreshCw, TimerReset, X } from 'lucide-react'
 
 import { formatStatusLabel } from '../constants'
 import {
@@ -26,16 +26,19 @@ import {
   TEXT_SEARCH_MIN_INDEXABLE_CHARACTERS,
 } from '../lib/text-search'
 import { downtimeSeverity, humanizeAge } from './recovery-center/recovery-center-model'
-import { BULK_ERROR_PREVIEW, deadLetterRowTone } from './dead-letter-model'
+import { BULK_ERROR_PREVIEW, deadLetterRowTone, type QueueClusterGroup, type QueueListItem } from './dead-letter-model'
 import type { BulkDeadLetterError, DeadLetter } from './dead-letter-types'
+import { DeadLetterClusterRow } from './DeadLetterClusterRow'
 import { DeadLetterDetail } from './DeadLetterDetail'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { RecoveryItemBadge } from './RecoveryItemBadge'
-import { RecoveryItemDrawer } from './RecoveryItemDrawer'
 import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
 import './DeadLetterQueueView.css'
 import { Button } from './ui/Button'
+
+// Opens only from a row's recovery badge, so triage does not pay for it up front.
+const RecoveryItemDrawer = lazy(() => import('./RecoveryItemDrawer').then((m) => ({ default: m.RecoveryItemDrawer })))
 
 type QueueSelectionState = {
   selectionMode: boolean
@@ -52,6 +55,7 @@ type QueueSelectionState = {
   loadedIds: string[]
   allLoadedSelected: boolean
   showSuspectDiff: boolean
+  clusterActionSignature: string | null
 }
 
 type QueuePermissions = {
@@ -81,6 +85,8 @@ type QueueActions = {
   openReplayLab: (runId: string) => void
   exportRunExplain: () => Promise<void>
   toggleSuspectDiff: () => void
+  investigateCluster: (group: QueueClusterGroup) => void
+  replayCluster: (group: QueueClusterGroup) => void
 }
 
 export type DeadLetterQueueViewProps = {
@@ -88,7 +94,8 @@ export type DeadLetterQueueViewProps = {
   sectionRef: RefObject<HTMLElement | null>
   rowRefs: RefObject<Map<string, HTMLLIElement>>
   cardSeverity: 'warning' | undefined
-  virtual: Pick<UseVirtualListResult<DeadLetter>, 'containerRef' | 'visibleItems' | 'totalHeight' | 'startOffset'>
+  queueItemCount: number
+  virtual: Pick<UseVirtualListResult<QueueListItem>, 'containerRef' | 'visibleItems' | 'totalHeight' | 'startOffset'>
   selection: QueueSelectionState
   permissions: QueuePermissions
   actions: QueueActions
@@ -99,6 +106,7 @@ export function DeadLetterQueueView({
   sectionRef,
   rowRefs,
   cardSeverity,
+  queueItemCount,
   virtual,
   selection,
   permissions,
@@ -111,6 +119,7 @@ export function DeadLetterQueueView({
     ownerScope,
     severityFilter,
     sortKey,
+    view,
     searchInput,
     searchState,
     filtered,
@@ -135,6 +144,7 @@ export function DeadLetterQueueView({
     loadedIds,
     allLoadedSelected,
     showSuspectDiff,
+    clusterActionSignature,
   } = selection
   const { canReplay, canResolve, canStartRuns, canUseRecovery } = permissions
   const searchHint = searchState.kind === 'too-short'
@@ -145,11 +155,17 @@ export function DeadLetterQueueView({
         ? t('apiErrors.search_query_invalid_characters')
         : null
   const searchInvalid = searchState.kind === 'too-long' || searchState.kind === 'invalid-characters'
+  const showDetail = !selectionMode && (selected !== null || requestedNotFound)
+  const detailPaneRef = useRef<HTMLDivElement | null>(null)
+  const selectedId = selected?.id
+  useEffect(() => {
+    if (detailPaneRef.current) detailPaneRef.current.scrollTop = 0
+  }, [selectedId])
 
   return (
       <section
         ref={sectionRef}
-        className="we-card"
+        className="we-card we-dlq-queue"
         data-severity={cardSeverity}
         data-testid="recovery-queue"
         tabIndex={-1}
@@ -167,7 +183,21 @@ export function DeadLetterQueueView({
           <div className="section-kicker">{t('dlq.kicker')}</div>
           <strong id="recovery-queue-heading">{t('dlq.queue')}</strong>
         </div>
-        <div className="split-row">
+        <div className="split-row we-dlq-queue__tools">
+          <kbd aria-hidden="true">J / K</kbd>
+          <div className="we-seg" role="group" aria-label={t('dlq.view.label')}>
+            {(['clusters', 'list'] as const).map(option => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={view === option}
+                onClick={() => queue.setView(option)}
+                data-testid={`dlq-view-${option}`}
+              >
+                {t(`dlq.view.${option}`)}
+              </button>
+            ))}
+          </div>
           {(canReplay || canResolve) && (
             <Button
               size="sm"
@@ -291,6 +321,8 @@ export function DeadLetterQueueView({
       </div>
       <p className="ui-field__hint" id="dlq-status-help">{t('dlq.statusHelp')}</p>
 
+      <div className="we-dlq-panes" data-detail={showDetail ? 'true' : undefined} data-testid="dlq-panes">
+      <div className="we-dlq-queue-pane" data-testid="dlq-queue-pane">
       {/* Bulk-select bar — a Select-all toggle (always, in selection mode) plus
           the count + "Resolve selected" once at least one row is ticked. Reuses
           the Flows-list bulk-bar styling. */}
@@ -444,9 +476,25 @@ export function DeadLetterQueueView({
                 aria-labelledby="recovery-queue-heading"
                 aria-describedby="dlq-status-help"
                 aria-multiselectable={selectionMode}
-                aria-rowcount={filtered.length}
+                aria-rowcount={queueItemCount}
               >
-                {virtual.visibleItems.map(({ item, index }) => {
+                {virtual.visibleItems.map(({ item: listItem, index }) => {
+                  if (listItem.kind === 'cluster') {
+                    return (
+                      <DeadLetterClusterRow
+                        key={`cluster:${listItem.group.signature}`}
+                        group={listItem.group}
+                        rowIndex={index + 1}
+                        busy={clusterActionSignature === listItem.group.signature}
+                        disabled={closing || clusterActionSignature !== null}
+                        canInvestigate={canUseRecovery}
+                        canReplay={canReplay}
+                        onInvestigate={actions.investigateCluster}
+                        onReplay={actions.replayCluster}
+                      />
+                    )
+                  }
+                  const item = listItem.item
                   const severity = deadLetterRowTone(item.status)
                   const isReplaying = replayingIds.has(item.id)
                   return (
@@ -486,12 +534,11 @@ export function DeadLetterQueueView({
                           </span>
                         )}
                         <div className="we-dlq-row__identity" role="gridcell">
-                          <span className="we-list-row__avatar" aria-hidden="true"><Inbox size={14} /></span>
                           <div className="we-list-row__body">
                             <strong>{item.nodeId}</strong>
                             <small>
                               {t('dlq.runMeta', { runIdShort: item.runId.slice(0, 8), attempt: item.attempt })}
-                              {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString(getResolvedLocale())}` : ''}
+                              {item.createdAt && <span className="we-dlq-row__date"> · {new Date(item.createdAt).toLocaleString(getResolvedLocale())}</span>}
                             </small>
                           </div>
                         </div>
@@ -516,6 +563,8 @@ export function DeadLetterQueueView({
                             {isReplaying && <RefreshCw size={11} className="we-spin" aria-hidden="true" />}
                             {isReplaying ? t('dlq.recovering') : (item.status === 'resolved' ? t('dlq.status.acceptedLoss') : formatStatusLabel(item.status))}
                           </span>
+                        </div>
+                        <div className="we-dlq-row__recovery" role="gridcell">
                           <RecoveryItemBadge
                             item={recoveryByDeadLetterId.get(item.id) ?? null}
                             onOpen={() => {
@@ -547,13 +596,18 @@ export function DeadLetterQueueView({
           </>
         )}
         {openRecoveryItem && (
-          <RecoveryItemDrawer
-            item={openRecoveryItem}
-            onClose={() => actions.openRecoveryItem(null)}
-          />
+          <Suspense fallback={null}>
+            <RecoveryItemDrawer
+              item={openRecoveryItem}
+              onClose={() => actions.openRecoveryItem(null)}
+            />
+          </Suspense>
         )}
       </div>
+      </div>
 
+      {showDetail && (
+      <div ref={detailPaneRef} className="we-dlq-detail-pane" data-testid="dlq-detail-pane">
       <DeadLetterDetail
         selection={{
           requestedNotFound,
@@ -576,6 +630,9 @@ export function DeadLetterQueueView({
           toggleSuspectDiff: actions.toggleSuspectDiff,
         }}
       />
+      </div>
+      )}
+      </div>
       </section>
   )
 }

@@ -66,17 +66,22 @@ export function DeadLetterDetail({
 
       {selected && !selectionMode && (
         <section className="detail-box" tabIndex={-1} aria-label={t('dlq.selected')}>
+          <div className="we-dlq-detail__head">
           <div className="split-row">
             <div>
               <div className="section-kicker">{t('dlq.selected')}</div>
               <strong>{selected.nodeId}</strong>
+              <small className="helper-text we-dlq-detail__context" data-testid="dlq-detail-context">
+                {[selected.workflowName, selected.createdAt && new Date(selected.createdAt).toLocaleString(getResolvedLocale())].filter(Boolean).join(' · ')}
+              </small>
             </div>
             <span className="status-pill" data-status={replayingIds.has(selected.id) ? 'running' : selected.status}>
               {replayingIds.has(selected.id) ? t('dlq.recovering') : (selected.status === 'resolved' ? t('dlq.status.acceptedLoss') : formatStatusLabel(selected.status))}
             </span>
           </div>
 
-          <div className="split-row">
+          <div className="we-dlq-actions" data-testid="dlq-action-bar">
+            <div className="we-dlq-actions" data-testid="dlq-actions-recover">
             {canUseRecovery && (
               <Button
                 size="sm"
@@ -107,6 +112,38 @@ export function DeadLetterDetail({
                 <span>{t('common.retry')}</span><kbd aria-hidden="true">R</kbd>
               </Button>
             )}
+            {canStartRuns && (
+              <Button
+                size="sm"
+               
+                onClick={() => actions.openReplayLab(selected.runId)}
+                data-testid="dlq-replay-in-lab"
+              >
+                <FlaskConical size={12} aria-hidden="true" /> {t('dlq.action.replayInLab')}
+              </Button>
+            )}
+            </div>
+            <div className="we-dlq-actions" data-testid="dlq-actions-evidence">
+            <Button
+              size="sm"
+             
+             
+              onClick={() => { void actions.copySelectedError() }}
+              data-testid="dlq-copy-error"
+            >
+              <Copy size={12} aria-hidden="true" /> {t('dlq.action.copyError')}
+            </Button>
+            <Button
+              size="sm"
+             
+              onClick={() => { void actions.exportRunExplain() }}
+              data-testid="dlq-export-run-explain"
+              aria-label={t('dlq.action.exportAria', { runId: selected.runId })}
+            >
+              <Download size={12} aria-hidden="true" /> {t('dlq.action.export')}
+            </Button>
+            </div>
+            <div className="we-dlq-actions" data-testid="dlq-actions-close">
             {canResolve && (
               <Button
                 size="sm"
@@ -118,34 +155,8 @@ export function DeadLetterDetail({
                 <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>
               </Button>
             )}
-            <Button
-              size="sm"
-             
-             
-              onClick={() => { void actions.copySelectedError() }}
-              data-testid="dlq-copy-error"
-            >
-              <Copy size={12} aria-hidden="true" /> {t('dlq.action.copyError')}
-            </Button>
-            {canStartRuns && (
-              <Button
-                size="sm"
-               
-                onClick={() => actions.openReplayLab(selected.runId)}
-                data-testid="dlq-replay-in-lab"
-              >
-                <FlaskConical size={12} aria-hidden="true" /> {t('dlq.action.replayInLab')}
-              </Button>
-            )}
-            <Button
-              size="sm"
-             
-              onClick={() => { void actions.exportRunExplain() }}
-              data-testid="dlq-export-run-explain"
-              aria-label={t('dlq.action.exportAria', { runId: selected.runId })}
-            >
-              <Download size={12} aria-hidden="true" /> {t('dlq.action.export')}
-            </Button>
+            </div>
+          </div>
           </div>
 
           {selectedFull?.drill && (

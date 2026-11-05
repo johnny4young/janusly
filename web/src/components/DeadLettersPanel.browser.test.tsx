@@ -45,6 +45,7 @@ describe('Recovery queue layout and focus in Chromium', () => {
   it.each(['en', 'es'] as const)('puts work before tall controls and retains all filters at narrow widths in %s', async locale => {
     initI18n(locale)
     await page.viewport(1280, 800)
+    localStorage.setItem('janusly:recoveryQueueFilters', JSON.stringify({ view: 'list' }))
     mountQueue()
     try {
       const row = await screen.findByTestId('dlq-row-invoice')
@@ -61,9 +62,68 @@ describe('Recovery queue layout and focus in Chromium', () => {
           expect(input.getBoundingClientRect().right).toBeLessThanOrEqual(width)
           expect(input).toHaveAccessibleName()
         }
-        expect(row.getBoundingClientRect().height).toBe(54)
+        expect(row.getBoundingClientRect().height).toBe(84)
         await page.getByTestId('recovery-queue').screenshot({ path: `../../test-results/queue-${locale}-${width}.png` })
       }
+    } finally { await page.viewport(1024, 768) }
+  })
+
+  it.each(['en', 'es'] as const)('triages side by side in %s: J/K moves neither pane and the action bar stays in view', async locale => {
+    initI18n(locale)
+    await page.viewport(1280, 800)
+    const tall = { message: 'Service unavailable', detail: 'x'.repeat(6_000) }
+    queueRows = Array.from({ length: 12 }, (_, index) => ({ ...rows[0]!, id: `r${index}`, runId: `run-${index}`, errorJson: tall }))
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === '/dlq/counts') return { total: 12, open: 12, replayed: 0, resolved: 0 }
+      if (path.startsWith('/dlq/queue')) return { items: queueRows, nextCursor: null, hasMore: false }
+      if (path.startsWith('/dlq/entries/')) return queueRows.find(row => path.endsWith(row.id))
+      return { clusters: [], totalSamples: 0, windowDays: 30 }
+    })
+    mountQueue()
+    try {
+      const first = await screen.findByTestId('dlq-row-r0')
+      const left = screen.getByTestId('dlq-queue-pane')
+      const right = screen.getByTestId('dlq-detail-pane')
+      const leftBox = left.getBoundingClientRect()
+      const rightBox = right.getBoundingClientRect()
+      expect(leftBox.right).toBeLessThanOrEqual(rightBox.left)
+      expect(leftBox.top).toBe(rightBox.top)
+      expect(leftBox.height).toBe(rightBox.height)
+      expect(screen.getByRole('grid').querySelector('.we-dlq-cluster')!.getBoundingClientRect().height).toBe(84)
+      expect(first.scrollWidth).toBeLessThanOrEqual(first.clientWidth)
+
+      await userEvent.click(first)
+      await userEvent.keyboard('jjjjjjjj')
+      await waitFor(() => expect(screen.getByTestId('dlq-row-r8')).toHaveFocus())
+      expect(left.getBoundingClientRect().top).toBe(leftBox.top)
+      expect(right.getBoundingClientRect().top).toBe(rightBox.top)
+
+      // The list scrolls inside its pane; the focused row is not left below it.
+      const list = screen.getByTestId('dlq-virtual-list')
+      expect(list.scrollTop).toBeGreaterThan(0)
+      expect(screen.getByTestId('dlq-row-r8').getBoundingClientRect().bottom).toBeLessThanOrEqual(list.getBoundingClientRect().bottom + 1)
+
+      right.scrollTop = right.scrollHeight
+      await waitFor(() => expect(right.scrollTop).toBeGreaterThan(0))
+      const bar = screen.getByTestId('dlq-action-bar').getBoundingClientRect()
+      expect(bar.top).toBeGreaterThanOrEqual(rightBox.top)
+      expect(bar.bottom).toBeLessThanOrEqual(rightBox.bottom)
+
+      // Selecting another failure starts its detail from the top.
+      await userEvent.keyboard('k')
+      await waitFor(() => expect(screen.getByTestId('dlq-row-r7')).toHaveFocus())
+      await waitFor(() => expect(right.scrollTop).toBe(0))
+
+      await userEvent.click(screen.getByTestId('dlq-select-toggle'))
+      await waitFor(() => expect(screen.queryByTestId('dlq-detail-pane')).toBeNull())
+      expect(list.clientHeight).toBeLessThanOrEqual(window.innerHeight * 0.6 + 1)
+      expect(list.scrollHeight).toBeGreaterThan(list.clientHeight)
+      await userEvent.click(screen.getByTestId('dlq-select-toggle'))
+
+      await page.viewport(640, 800)
+      await waitFor(() => expect(left.getBoundingClientRect().bottom).toBeLessThanOrEqual(screen.getByTestId('dlq-detail-pane').getBoundingClientRect().top))
+      const head = document.querySelector('.we-dlq-detail__head')!
+      expect(getComputedStyle(head).position).toBe('static')
     } finally { await page.viewport(1024, 768) }
   })
 
@@ -107,13 +167,13 @@ describe('Recovery queue layout and focus in Chromium', () => {
     await userEvent.click(await screen.findByTestId('dlq-row-invoice'))
 
     act(() => requestRecoveryQueueFocus('shipment'))
-    await waitFor(() => expect(document.querySelector('section.detail-box > .split-row strong'))
+    await waitFor(() => expect(document.querySelector('section.detail-box .we-dlq-detail__head strong'))
       .toHaveTextContent(rows[1]!.nodeId))
     await waitFor(() => expect(document.querySelector('section.detail-box')).toHaveFocus())
     expect(screen.getByTestId('recovery-queue')).not.toHaveFocus()
 
     act(() => requestRecoveryQueueFocus('gone'))
     await waitFor(() => expect(screen.getByTestId('dlq-requested-not-found')).toHaveFocus())
-    expect(document.querySelector('section.detail-box > .split-row strong')).toBeNull()
+    expect(document.querySelector('section.detail-box .we-dlq-detail__head strong')).toBeNull()
   })
 })

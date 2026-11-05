@@ -267,6 +267,20 @@ with no window control and no exports. Model calibration and AI spend
 are not windowed: their endpoints have no window parameter. A heatmap day opens
 Recover through `#/recover/day/<YYYY-MM-DD>`.
 
+Recover keeps its filters above two panes once the queue section is at least
+760 px wide: the queue on the left and the selected failure on the right, each
+scrolling inside a height tied to the viewport. Narrower sections stack them, and
+selecting rows gives the queue the full width. The default By cluster view groups
+the loaded rows client-side with `normalizeErrorSignature`, the normalizer the
+server clusters with, so every filter, sort and page keeps applying.
+`/dlq/clusters` only adds the totals on each header: a signature outside its
+30-day window, or a failed read, still groups from the loaded rows. Headers and
+rows share one fixed height, so the queue stays virtualized in both views, and
+J/K and triage focus walk the rows in the order shown.
+Investigate and Replay cluster read `/dlq/cluster-members` when clicked and open
+the cluster recovery and campaign dialogs. The full rollup, with failed run nodes
+and suggested owners, remains under Automation and patterns.
+
 The eager shell owns the core locale catalog. Non-home main and authoring-panel
 slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
 behind an accessible, height-preserving skeleton while the sidebar, top bar and
