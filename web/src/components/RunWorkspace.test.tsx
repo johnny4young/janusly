@@ -27,8 +27,8 @@ vi.mock('./ReasoningPanel', () => ({
 }))
 
 vi.mock('./RunStepTimeline', () => ({
-  RunStepTimeline: ({ events }: { events: unknown[] }) => (
-    <div data-testid="timeline-projection">{events.length}</div>
+  RunStepTimeline: ({ events, RerunDialog }: { events: unknown[]; RerunDialog?: unknown }) => (
+    <div data-testid="timeline-projection" data-can-rerun={Boolean(RerunDialog)}>{events.length}</div>
   ),
 }))
 
@@ -81,6 +81,17 @@ describe('<RunWorkspace />', () => {
     expect(screen.getByRole('tab', { name: 'Events, 3 events' })).toHaveTextContent('3')
     expect(screen.getByRole('tab', { name: 'Agents, 2 multi-agent events' })).toHaveTextContent('2')
     expect(screen.getByRole('tab', { name: 'Ask' })).toBeInTheDocument()
+  })
+
+  it('offers rerun from a step only to someone who can start runs', async () => {
+    const { unmount } = render(<RunWorkspace {...workspaceProps()} />)
+    fireEvent.click(screen.getByTestId('run-workspace-tab-timeline'))
+    expect(await screen.findByTestId('timeline-projection')).toHaveAttribute('data-can-rerun', 'true')
+    unmount()
+
+    render(<RunWorkspace {...workspaceProps({ canStartRuns: false })} />)
+    fireEvent.click(screen.getByTestId('run-workspace-tab-timeline'))
+    expect(await screen.findByTestId('timeline-projection')).toHaveAttribute('data-can-rerun', 'false')
   })
 
   it('keeps the sheet header on every tab and hands off the full views', async () => {

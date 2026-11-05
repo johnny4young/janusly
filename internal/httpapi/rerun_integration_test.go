@@ -111,17 +111,15 @@ func TestRerunReusesEarlierWritesAndLinksTheSource(t *testing.T) {
 	if target.writes.Load() != 2 || target.reads.Load() != 1 {
 		t.Fatalf("charge must not repeat and notify runs once: writes=%d reads=%d", target.writes.Load(), target.reads.Load())
 	}
-	var attempts int
-	var chargeState, shapeStatus string
-	if err := pool.QueryRow(ctx, `SELECT attempts, state_json::text FROM run_nodes WHERE run_id=$1 AND node_id='charge'`, rerunID).Scan(&attempts, &chargeState); err != nil {
-		t.Fatalf("charge row: %v", err)
-	}
-	if attempts != 0 || !strings.Contains(chargeState, "output") {
-		t.Fatalf("charge must be cloned, never attempted: attempts=%d %s", attempts, chargeState)
-	}
-	_ = pool.QueryRow(ctx, `SELECT status FROM run_nodes WHERE run_id=$1 AND node_id='shape'`, rerunID).Scan(&shapeStatus)
-	if shapeStatus != "succeeded" {
-		t.Fatalf("shape: %s", shapeStatus)
+	for _, nodeID := range []string{"shape", "charge"} {
+		var attempts int
+		var status, state string
+		if err := pool.QueryRow(ctx, `SELECT status, attempts, state_json::text FROM run_nodes WHERE run_id=$1 AND node_id=$2`, rerunID, nodeID).Scan(&status, &attempts, &state); err != nil {
+			t.Fatalf("%s row: %v", nodeID, err)
+		}
+		if status != "succeeded" || attempts != 0 || !strings.Contains(state, "output") {
+			t.Fatalf("%s must be cloned, never attempted: %s attempts=%d %s", nodeID, status, attempts, state)
+		}
 	}
 
 	detail := h.call("GET", "/v1/run?runId="+rerunID, nil, "")
@@ -443,5 +441,45 @@ func TestRerunAgentWritesKeepTheirGates(t *testing.T) {
 	h.waitRun(started.body["runId"].(string), "succeeded")
 	if hits.Load() != 0 {
 		t.Fatalf("a rerun must not bypass tenant consent: %d", hits.Load())
+	}
+}
+
+// A rerun repeats what the source executed: a rollout started since then must
+// not swap the document under its seeded nodes or consume canary traffic.
+func TestRerunIgnoresActiveRollouts(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	target := newRerunTarget(t)
+	wfID := fmt.Sprintf("wf-rerun-rollout-%d", time.Now().UnixNano())
+	doc := func(path string) map[string]any {
+		return map[string]any{
+			"id": wfID, "name": "Rollout", "dslVersion": "1.0",
+			"nodes": []any{map[string]any{"id": "call", "type": "http", "config": map[string]any{"url": target.URL + path, "method": "GET"}}},
+			"edges": []any{},
+		}
+	}
+	v1 := h.call("POST", "/workflows/save", doc("/one"), "").body["versionId"]
+	sourceRunID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": doc("/one"), "workflowVersionId": v1}, ""))
+	h.waitRun(sourceRunID, "succeeded")
+	v2 := h.call("POST", "/workflows/save", doc("/two"), "").body["versionId"]
+	if res := h.call("POST", "/workflows/"+wfID+"/rollout", map[string]any{
+		"baselineVersionId": v1, "canaryVersionId": v2,
+		"trafficPercent": 50, "minimumSampleSize": 100, "minimumSuccessRatePercent": 1,
+	}, ""); res.status != 200 {
+		t.Fatalf("rollout: %d %+v", res.status, res.body)
+	}
+	for range 10 {
+		started := h.call("POST", "/runs/rerun", map[string]any{"sourceRunId": sourceRunID, "nodeId": "call"}, "")
+		if started.status != 200 {
+			t.Fatalf("rerun: %d %+v", started.status, started.body)
+		}
+		var variant, version string
+		if err := pool.QueryRow(t.Context(), `SELECT COALESCE(workflow_rollout_variant,''), workflow_version_id FROM runs WHERE id=$1`,
+			started.body["runId"]).Scan(&variant, &version); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if variant != "" || version != v1 {
+			t.Fatalf("rerun must stay on the source version: variant=%q version=%s want %v", variant, version, v1)
+		}
 	}
 }

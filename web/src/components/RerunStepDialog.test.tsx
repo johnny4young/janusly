@@ -62,7 +62,7 @@ describe('<RerunStepDialog />', () => {
       inputOverride: { url: 'https://new.example', method: 'GET' },
       acknowledgedSideEffects: ['notify'],
     })
-    expect((vi.mocked(api).mock.calls[1]?.[1]?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy()
+    expect(vi.mocked(api).mock.calls[1]?.[1]?.headers).toEqual({ 'Idempotency-Key': expect.any(String) })
     expect(useWorkflowStore.getState().runId).toBe('run-2')
   })
 
