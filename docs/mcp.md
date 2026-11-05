@@ -36,6 +36,9 @@ explicit stdio service-account ceiling; when omitted it grants only
 also requires `JANUSLY_MCP_WRITES_ENABLED=true` plus tenant
 `mcp.writeConsent=true`.
 
+`cmd/mcp` speaks MCP over stdio: stdout carries only JSON-RPC messages and the
+process writes its JSON logs to stderr.
+
 The server uses durable Janusly run IDs for asynchronous work. It does not keep
 a second task database and never exposes secrets, identity configuration, or
 unscoped tenant administration.
