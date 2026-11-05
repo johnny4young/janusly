@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 614.7,
+  "artifactGzipKiB": 613.5,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 569.7
+    "maxGzipKiB": 568.6
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,7 +85,7 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 83.28,
+    "app-workspace.js": 83.26,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
@@ -98,13 +98,13 @@
     "BudgetSettingsPanel.js": 3.25,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 40.87,
+    "catalog-en.js": 40.83,
     "catalog-es.js": 45.56,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
-    "ExperimentsPanel.css": 0.89,
-    "ExperimentsPanel.js": 4.01,
+    "ExperimentsPanel.css": 0.69,
+    "ExperimentsPanel.js": 3.42,
     "ExternalRuntimePanel.css": 0.89,
     "ExternalRuntimePanel.js": 2.54,
     "FailureClustersCard.css": 0.61,

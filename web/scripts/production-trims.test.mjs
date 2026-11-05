@@ -97,6 +97,8 @@ const AUTH_SCENARIOS = {
   'unreachable password update': { updatePassword: () => { throw new TypeError('Failed to fetch') } },
   'rejected logout': { logout: () => authJson({ msg: 'forbidden' }, 403) },
   'failing logout': { logout: () => authJson({ msg: 'unavailable' }, 500) },
+  'rate-limited reset': { recover: () => authJson({ code: 429, error_code: 'over_email_send_rate_limit', msg: 'wait' }, 429) },
+  'unreachable reset': { recover: () => { throw new TypeError('Failed to fetch') } },
 }
 
 function comparable(value) {
@@ -130,6 +132,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
       if (pathname.endsWith('/signup')) return scenario.signup?.() ?? authJson(authSession('signup'))
       if (search.includes('grant_type=password')) return scenario.password?.() ?? authJson(authSession('password'))
       if (search.includes('grant_type=refresh_token')) return scenario.refresh?.() ?? authJson(authSession('refreshed'))
+      if (pathname.endsWith('/recover')) return scenario.recover?.() ?? authJson({})
       if (pathname.endsWith('/logout')) return scenario.logout?.() ?? new Response(null, { status: 204 })
       if (pathname.endsWith('/user') && init.method === 'PUT') return scenario.updatePassword?.() ?? authJson(AUTH_USER)
       if (pathname.endsWith('/user')) return scenario.user?.() ?? authJson(AUTH_USER)
@@ -152,6 +155,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
   const afterExpiry = comparable(await client.getSession())
   const signOut = comparable(await client.signOut())
   const afterSignOut = comparable(await client.getSession())
+  const reset = comparable(await client.resetPasswordForEmail('a@example.test', { redirectTo: 'https://app.example.test' }).catch((error) => error))
   await new Promise((done) => realSetTimeout(done, 20))
   listener.subscription.unsubscribe()
   const result = {
@@ -163,6 +167,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
     afterExpiry,
     signOut,
     afterSignOut,
+    reset,
     remaining: window.localStorage.getItem(storageKey),
     href: window.location.href,
     calls,
@@ -199,6 +204,7 @@ const syntheticClient = (member) => `class GoTrueClient {
   setSession() {}
   signInWithPassword() {}
   signOut() {}
+  resetPasswordForEmail() {}
   signUp() {}
   updateUser() {}
   unused() {}
