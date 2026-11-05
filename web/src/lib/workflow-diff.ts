@@ -266,7 +266,7 @@ function diffEdges(before: DiffableEdge[], after: DiffableEdge[]): EdgeChange[] 
 }
 
 /** Edge key — explicit `id` wins; fallback to `from->to` for unkeyed edges. */
-function edgeKeyFor(edge: DiffableEdge): string {
+export function edgeKeyFor(edge: DiffableEdge): string {
   return edge.id && edge.id.length > 0 ? edge.id : `${edge.from}->${edge.to}`;
 }
 
@@ -338,7 +338,7 @@ function isWalkable(value: unknown): boolean {
 
 /* ----------------------------- Tag classifier ----------------------------- */
 
-const SECRET_TEMPLATE_PATTERN = /\{\{(?:secret|env)\.[^}]+\}\}/;
+export const SECRET_TEMPLATE_PATTERN = /\{\{(?:secret|env)\.[^}]+\}\}/;
 
 /** Return the tag for a field change, or null when no rule matches. */
 export function classifyTag(path: string, before: unknown, after: unknown): ChangeTag | null {

@@ -162,6 +162,7 @@ export default defineConfig(({ mode }) => ({
             || id.endsWith('/src/components/WorkflowIoEditor.tsx')
             || id.endsWith('/src/components/AiUsageFooter.tsx')
             || id.endsWith('/src/components/workflow-io-loader.ts')
+            || id.endsWith('/src/components/version-compare-loader.ts')
             // Beside the error normalizer they call, which both recovery surfaces already load.
             || id.endsWith('/src/recovery-error-summary.ts')
             || id.endsWith('/src/components/recovery/RecoveryErrorBlock.tsx')

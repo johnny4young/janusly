@@ -80,6 +80,13 @@ to the same visible scope. Old success/error paths cannot populate or unlock the
 new history snapshot. Client abort remains local result invalidation, not proof
 of remote cancellation.
 
+A picked pair of versions, or the draft against its source version, opens over the
+author canvas as a read-only merged graph (`VersionCanvasCompare`, loaded on demand).
+It reuses `computeWorkflowDiff`, marks steps and paths as new, modified or deleted,
+and masks secrets in the before and after JSON as the field diff does. The history
+panel owns it through a portal, so leaving the workflow or tab closes it, and
+`canvasCovered` turns off the covered editor's keyboard edits while it is open.
+
 The authoring controller and source Apply lose ownership on the first identity,
 organization, canvas, navigation or grant change, even if the store returns to
 its original values before React paints. Registry results use the saved-history
@@ -297,6 +304,11 @@ from any workspace tab until the page reloads or the session changes. A job star
 the dialog opens this view; New recovery job returns to the queue in selection
 mode, because a job's cohort is always chosen there.
 
+Templates has two views over one shared search. Recipes groups by the category
+each template carries in `internal/httpapi/assets/templates.json`, so a new
+category gets its chip without a web change. Packs renders the embedded
+`SolutionPacksPanel` and is the only place packs appear on that page; `#/packs`
+remains the standalone route.
 The eager shell owns the core locale catalog. Non-home main and authoring-panel
 slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
 behind an accessible, height-preserving skeleton while the sidebar, top bar and
