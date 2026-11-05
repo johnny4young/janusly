@@ -11,6 +11,7 @@ import { injectBuildStamp } from './scripts/build-stamp'
 import { cssFloor } from './scripts/css-floor-plugin.mjs'
 import { reactEsmFacade } from './scripts/react-esm-facade-plugin.mjs'
 import { trimVendor } from './scripts/trim-vendor-plugin.mjs'
+import { pruneAuthClient } from './scripts/prune-auth-client-plugin.mjs'
 import { resolveWebTestWorkerLimit } from './vitest-worker-policy.js'
 
 /**
@@ -45,6 +46,7 @@ export default defineConfig(({ mode }) => ({
     }),
     reactEsmFacade(),
     trimVendor(),
+    pruneAuthClient(),
     react(),
     tailwindcss(),
     cssFloor(),
@@ -130,6 +132,7 @@ export default defineConfig(({ mode }) => ({
             id.endsWith('/src/lib/recovery-case-contract.ts')
             || id.endsWith('/src/lib/recovery-contract.ts')
             || id.endsWith('/src/lib/health-delta.ts')
+            || id.endsWith('/src/lib/schema-lite.ts')
           ) {
             return 'recovery-contract'
           }

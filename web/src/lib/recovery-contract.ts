@@ -6,7 +6,7 @@
  * stay in the engine/data packages; this module is pure and browser-safe.
  */
 
-import * as z from "zod/mini";
+import * as z from "./schema-lite";
 import {
   supportsAutonomousRecovery,
   ValidationEvidenceLevelSchema,
@@ -170,7 +170,7 @@ type RecoveryContractWithTechnicalFailure =
 
 function validateRecoveryContractCommon(
   contract: RecoveryContractWithTechnicalFailure,
-  context: z.core.$RefinementCtx<RecoveryContractWithTechnicalFailure>,
+  context: z.RefinementContext,
 ): void {
   const technicalAutonomy = contract.failure.technical.autonomy;
   for (const [failureClass, level] of Object.entries(
