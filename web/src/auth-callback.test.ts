@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   approveAuthCallback,
   authCallbackFailed,
+  authCallbackSetsPassword,
   captureAuthCallback,
   clearAuthCallback,
+  clearPasswordSetup,
   markAuthCallbackFailed,
+  markPasswordSetup,
+  passwordSetupUser,
   pendingAuthCallbackToken,
   takeAuthCallbackSession,
 } from './auth-callback'
@@ -49,6 +53,22 @@ describe('captureAuthCallback', () => {
     expect(takeAuthCallbackSession()).toEqual({ access_token: 'jwt-access', refresh_token: 'jwt-refresh' })
     expect(takeAuthCallbackSession()).toBeNull()
     expect(pendingAuthCallbackToken()).toBeNull()
+  })
+
+  it.each([
+    ['recovery', true],
+    ['invite', true],
+    ['magiclink', false],
+    ['signup', false],
+    ['', false],
+  ])('reads link type %j as setting a password: %s', (type, expected) => {
+    setLocation(`/#access_token=jwt-access&refresh_token=jwt-refresh&type=${type}`)
+
+    captureAuthCallback()
+
+    expect(authCallbackSetsPassword()).toBe(expected)
+    clearAuthCallback()
+    expect(authCallbackSetsPassword()).toBe(false)
   })
 
   it.each([
@@ -126,5 +146,29 @@ describe('clearAuthCallback', () => {
     expect(authCallbackFailed()).toBe(true)
     clearAuthCallback()
     expect(authCallbackFailed()).toBe(false)
+  })
+})
+
+describe('password setup marker', () => {
+  afterEach(() => clearPasswordSetup())
+
+  it('survives the callback state being cleared, until it is cleared itself', () => {
+    markPasswordSetup('user-1')
+    clearAuthCallback()
+    expect(passwordSetupUser()).toBe('user-1')
+
+    clearPasswordSetup()
+    expect(passwordSetupUser()).toBeNull()
+  })
+
+  it('tolerates storage that refuses access', () => {
+    const refuse = () => { throw new DOMException('Denied', 'SecurityError') }
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(refuse)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(refuse)
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(refuse)
+
+    expect(() => markPasswordSetup('user-1')).not.toThrow()
+    expect(() => clearPasswordSetup()).not.toThrow()
+    expect(passwordSetupUser()).toBeNull()
   })
 })

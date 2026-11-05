@@ -1862,6 +1862,13 @@
   overflow-wrap: anywhere;
 }
 
+.auth-card__account {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--we-ink-muted);
+  overflow-wrap: anywhere;
+}
+
 .auth-submit { margin-top: 6px; width: 100%; }
 
 .auth-toggle {

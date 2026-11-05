@@ -18,6 +18,13 @@ does `getSupabaseClient()` adopt the tokens with `setSession`, including over an
 existing session; `detectSessionInUrl` stays off. A rejected or expired link
 shows one fixed login message; the link's own error text is never rendered. An
 active WorkOS session outranks the callback, which is discarded.
+A recovery or invite link (`type` in the fragment) then requires a new password
+before the app mounts. The session is adopted first, so a failed update leaves
+the user signed in with the form and a fixed message, and a user id in
+`localStorage` (`janusly:passwordSetupUser`) keeps the step across reloads. It
+clears on a saved password, a password sign-in, a sign-out, or a session for
+another user. The API accepts the session either way, so this step is a flow
+control, not an authorization boundary.
 Browsers record the navigation in their visited-URL list before any page code
 runs, so an implicit-grant token can remain there; no client code can remove it.
 

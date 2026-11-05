@@ -91,6 +91,9 @@ const AUTH_SCENARIOS = {
   'rejected password': { password: () => authJson({ error_code: 'invalid_credentials', msg: 'bad' }, 400) },
   'signup awaiting confirmation': { signup: () => authJson(AUTH_USER) },
   'weak signup password': { signup: () => authJson({ error_code: 'weak_password', msg: 'weak' }, 422) },
+  'rejected password update': { updatePassword: () => authJson({ error_code: 'same_password', msg: 'same' }, 422) },
+  'password update for an ended session': { updatePassword: () => authJson({ error_code: 'session_not_found', msg: 'gone' }, 403) },
+  'unreachable password update': { updatePassword: () => { throw new TypeError('Failed to fetch') } },
   'rejected logout': { logout: () => authJson({ msg: 'forbidden' }, 403) },
   'failing logout': { logout: () => authJson({ msg: 'unavailable' }, 500) },
 }
@@ -127,6 +130,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
       if (search.includes('grant_type=password')) return scenario.password?.() ?? authJson(authSession('password'))
       if (search.includes('grant_type=refresh_token')) return scenario.refresh?.() ?? authJson(authSession('refreshed'))
       if (pathname.endsWith('/logout')) return scenario.logout?.() ?? new Response(null, { status: 204 })
+      if (pathname.endsWith('/user') && init.method === 'PUT') return scenario.updatePassword?.() ?? authJson(AUTH_USER)
       if (pathname.endsWith('/user')) return scenario.user?.() ?? authJson(AUTH_USER)
       return authJson({ msg: 'unexpected' }, 500)
     },
@@ -141,6 +145,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
   document.dispatchEvent(new window.Event('visibilitychange'))
   const signUp = comparable(await client.signUp({ email: 'a@example.test', password: 'pw-12345' }))
   const signIn = comparable(await client.signInWithPassword({ email: 'a@example.test', password: 'pw-12345' }))
+  const updatePassword = comparable(await client.updateUser({ password: 'pw-67890' }).catch((error) => error))
   const stored = window.localStorage.getItem(storageKey)
   if (stored) window.localStorage.setItem(storageKey, JSON.stringify({ ...JSON.parse(stored), expires_at: 1 }))
   const afterExpiry = comparable(await client.getSession())
@@ -153,6 +158,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
     adopted,
     signUp,
     signIn,
+    updatePassword,
     afterExpiry,
     signOut,
     afterSignOut,
@@ -178,6 +184,7 @@ test('auth pruning keeps session code and removes unused surfaces', () => {
   const code = readFileSync(join(AUTH_MODULE_DIR, 'GoTrueClient.js'), 'utf8')
   const { kept, removed } = pruneAuthClass(code, 'GoTrueClient')
   assert.ok(kept.includes('setSession'))
+  assert.ok(kept.includes('updateUser'))
   assert.ok(kept.includes('_refreshAccessToken'))
   assert.ok(removed.includes('signInWithOAuth'))
   const admin = readFileSync(join(AUTH_MODULE_DIR, 'GoTrueAdminApi.js'), 'utf8')
@@ -192,6 +199,7 @@ const syntheticClient = (member) => `class GoTrueClient {
   signInWithPassword() {}
   signOut() {}
   signUp() {}
+  updateUser() {}
   unused() {}
 }`
 
