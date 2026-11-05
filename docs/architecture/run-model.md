@@ -159,6 +159,27 @@ because it is an operator-initiated attempt. A subworkflow child started by a re
 is an ordinary child run and counts as usual for its own workflow. Only those runs,
 production runs and redrives of them move a streak.
 
+## Draft test runs
+
+`POST /runs/draft-test` runs the editor's draft of a saved workflow as a
+validation run with no version, so every executor gate suppresses writes, and
+reports, recovery and the circuit breaker ignore it like any sandbox run. Its
+evidence level is `writes_skipped`, which no playbook or recovery check accepts.
+It enters through `runstart` like any start, so validation, production
+readiness, the breaker pause, the saved-only policy and the start rate limit all
+apply; it only skips rollout assignment and never claims a version.
+
+The request may give a step a stand-in output: `sourceRunId` copies that step's
+saved output from a run of the same workflow in the organization, and `mock`
+takes a JSON value. Both are masked by sensitive key before they are stored in
+the run's `input_json.draftTest`, never in the workflow document. The worker
+completes a step with a stand-in without calling its executor, and only when the
+run's `replay_mode` is `validation`, so the same envelope on a production run is
+ignored. Approvals, human forms and routers cannot take one. A stand-in from an
+earlier test is not offered as a pin source. `stepNodeId` runs that step and its
+ancestors and starts every other step skipped. The audit row names the steps with
+stand-ins, never their values.
+
 Wake-ups carry a count: `janusly_wake` notifications and the wake sweeper
 say how many nodes just became claimable, and that many workers wake,
 rotating through the pool. Waking one worker left a fan-out waiting on the

@@ -77,6 +77,17 @@ describe('selected-run outcome evidence', () => {
     expect(screen.getByTestId('active-run-validation-evidence')).toHaveTextContent('Evidence unavailable')
     expect(screen.getByTestId('run-validation-evidence-run-validation')).toHaveTextContent('Evidence unavailable')
   })
+
+  it('marks a run that used pinned or mocked data', () => {
+    const run: RunSummary = { id: 'run-draft', status: 'succeeded', replayMode: 'validation', validationEvidenceLevel: 'writes_skipped', inputJson: { draftTest: { pins: {} } } }
+    const { unmount } = render(<RunsPanel {...handlers} activeRunId={run.id} runs={[run]} workflows={[]} runNodes={[]} usage={{}} />)
+    expect(screen.getByTestId('active-run-test-data')).toHaveTextContent('Test data')
+    expect(screen.getByTestId('active-run-validation-evidence')).toHaveTextContent('External writes skipped')
+    unmount()
+
+    render(<RunsPanel {...handlers} activeRunId="run-plain" runs={[{ id: 'run-plain', status: 'succeeded', inputJson: {} }]} workflows={[]} runNodes={[]} usage={{}} />)
+    expect(screen.queryByTestId('active-run-test-data')).toBeNull()
+  })
 })
 
 beforeEach(() => {

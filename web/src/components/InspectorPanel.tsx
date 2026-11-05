@@ -27,6 +27,7 @@ import {
   type AuthoringFocusRequest,
 } from './authoring-focus-bus'
 import { loadWorkflowIoEditor } from './workflow-io-loader'
+import { NodeTestData } from './NodeTestData'
 import { Button } from './ui/Button'
 import { FieldStack, FormActions, FormDisclosure, FormField } from './ui/Form'
 import { SwitchField } from './ui/SwitchField'
@@ -381,6 +382,8 @@ export function InspectorPanel({
             )}
           </FormDisclosure>
         </FieldStack>
+
+        <NodeTestData key={selectedNode.id} node={selectedNode} nodes={workflowNodes} edges={workflowEdges} readOnly={readOnly} />
 
         {nodeIssues.map(issue => <div key={`${issue.code}-${issue.message}`} className="issue issue-error">{issue.message}</div>)}
       </section>

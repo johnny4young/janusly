@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The step Inspector has a Test data section that shows the output of the step
+  and of every step before it from the open run. Pin a step's output or type a
+  mock, then Run this step or Test draft: those steps return the pinned or mocked
+  value instead of running, so earlier AI and tool calls are not repeated. Test
+  runs never change external systems, never publish a version and do not count
+  in reports, recovery or the circuit breaker. The run is marked Test data and
+  the canvas marks pinned and mocked steps. Pins stay in this browser tab only.
+  Approvals, forms and routers cannot be pinned or mocked.
 - Settings > Usage now reports input served from cache as a share of all input
   tokens. It used to divide by uncached input only, so it could read 100 % when
   half the input came from cache.

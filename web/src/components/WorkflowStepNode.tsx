@@ -15,9 +15,11 @@ import { openAuthoringProblem } from './open-authoring-problem'
 import { Button } from './ui/Button'
 import { workflowNodeIcon } from './workflow-node-icons'
 import type { WorkflowGraphNode } from '../types'
+import { useTestData } from '../lib/test-data'
+import { useWorkflowStore } from '../store'
 
 /** Render one workflow step on the canvas with icon, label, summary, and status pill. */
-export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode>) {
+export function WorkflowStepNode({ id, data, selected }: NodeProps<WorkflowGraphNode>) {
   // Subscribe to locale changes so `getNodeLabel` / `getNodeHelper` /
   // `getNodeConfigSummary` re-resolve through the catalog runtime
   // after a language toggle. The upstream `visibleNodes` memo
@@ -32,6 +34,8 @@ export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode
   const summary = getNodeConfigSummary(type, data.config ?? {})
   const tone = data.hasValidationError ? 'error' : status
   const problem = data.problem
+  const workflowId = useWorkflowStore(state => state.currentWorkflowId)
+  const standIn = useTestData(state => state.workflowId === workflowId ? state.pins[id]?.kind : undefined)
 
   return (
     <div className="workflow-node" data-status={tone} data-selected={selected ? 'true' : 'false'}>
@@ -56,6 +60,7 @@ export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode
         <span className="status-pill workflow-node-status" data-status={tone}>{formatStatusLabel(status)}</span>
       </div>
       <p>{helper}</p>
+      {standIn && <p><span className="we-pill" data-tone="primary" data-testid="workflow-node-stand-in">{t(`testData.badge.${standIn}`)}</span></p>}
       {data.errorSummary
         ? <div className="workflow-node-summary workflow-node-error" data-testid="workflow-node-error">{data.errorSummary}</div>
         : <div className="workflow-node-summary">{summary}</div>}
