@@ -11,10 +11,10 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// templateSecretKind is the only credential kind {{secret.X}} resolves.
-// Provider-bound kinds stay reachable only through their integration tools,
-// which pin where the secret may be sent.
-const templateSecretKind = "generic"
+// templateSecretKind is the only credential kind {{secret.X}} resolves, so an
+// admin opts each credential in. Other kinds stay reachable only through their
+// integration tools, which pin where the secret may be sent.
+const templateSecretKind = "template_secret"
 
 // errTemplateSecretUnavailable keeps a store or key outage distinct from a
 // missing secret without echoing any reference.

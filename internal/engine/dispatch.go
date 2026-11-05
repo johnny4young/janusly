@@ -141,7 +141,7 @@ func authoredAgentWritesOptIn(config map[string]any) bool {
 
 // NewDispatcher wires the executor registry over this engine. Env access
 // defaults to the process environment filtered through the credential policy;
-// secrets default to the claim organization's generic credentials. Callers
+// secrets default to the claim organization's template_secret credentials. Callers
 // may still provide an explicit lookup.
 func (e *Engine) NewDispatcher(opts grammar.RenderOptions) *Dispatcher {
 	if opts.LookupEnv == nil {

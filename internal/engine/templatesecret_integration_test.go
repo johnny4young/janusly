@@ -29,10 +29,10 @@ type templateCredential struct {
 
 // The binaries build their dispatcher with empty RenderOptions, so this is the
 // production resolution path for {{secret.X}}.
-func TestTemplateSecretsResolveGenericCredentials(t *testing.T) {
+func TestTemplateSecretsResolveOptedInCredentials(t *testing.T) {
 	ctx, pool, eng, org := newTemplateSecretHarness(t)
 	const secret = "tmpl-secret-value-5821947"
-	insertTemplateCredentials(t, ctx, pool, org, templateCredential{name: "billing_token", kind: "generic", value: secret})
+	insertTemplateCredentials(t, ctx, pool, org, templateCredential{name: "billing_token", kind: "template_secret", value: secret})
 
 	var seen atomic.Value
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,13 +72,14 @@ func TestTemplateSecretsFailClosed(t *testing.T) {
 		credentials []templateCredential
 	}{
 		{name: "absent"},
+		{name: "generic kind", credentials: []templateCredential{{name: "billing_token", kind: "generic", value: "generic-value-1234"}}},
 		{name: "provider-bound kind", credentials: []templateCredential{{name: "billing_token", kind: "github_token", value: "ghp-provider-token-1234"}}},
-		{name: "expired", credentials: []templateCredential{{name: "billing_token", kind: "generic", value: "expired-value-1234", expired: true}}},
+		{name: "expired", credentials: []templateCredential{{name: "billing_token", kind: "template_secret", value: "expired-value-1234", expired: true}}},
 		{name: "ambiguous case", credentials: []templateCredential{
-			{name: "billing_token", kind: "generic", value: "lower-value-1234"},
-			{name: "BILLING_TOKEN", kind: "generic", value: "upper-value-1234"},
+			{name: "billing_token", kind: "template_secret", value: "lower-value-1234"},
+			{name: "BILLING_TOKEN", kind: "template_secret", value: "upper-value-1234"},
 		}},
-		{name: "shorter than the redaction floor", credentials: []templateCredential{{name: "billing_token", kind: "generic", value: "abc"}}},
+		{name: "shorter than the redaction floor", credentials: []templateCredential{{name: "billing_token", kind: "template_secret", value: "abc"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, eng, org := newTemplateSecretHarness(t)
@@ -104,7 +105,7 @@ func TestTemplateSecretsFailClosed(t *testing.T) {
 // An unreadable store is an outage, not a missing secret.
 func TestTemplateSecretsReportStoreOutage(t *testing.T) {
 	ctx, pool, eng, org := newTemplateSecretHarness(t)
-	insertTemplateCredentials(t, ctx, pool, org, templateCredential{name: "billing_token", kind: "generic", value: "outage-value-1234"})
+	insertTemplateCredentials(t, ctx, pool, org, templateCredential{name: "billing_token", kind: "template_secret", value: "outage-value-1234"})
 	secretstore.ResetForTests()
 	t.Setenv("JANUSLY_CREDENTIAL_MASTER_KEY", "")
 	var calls atomic.Int32
@@ -126,7 +127,7 @@ func TestTemplateSecretsReportStoreOutage(t *testing.T) {
 func TestTemplateSecretsKeepPlatformNamesUnresolved(t *testing.T) {
 	ctx, pool, eng, org := newTemplateSecretHarness(t)
 	insertTemplateCredentials(t, ctx, pool, org, templateCredential{
-		name: runtimeDrillSecretName, kind: "generic", value: "must-stay-missing-1234",
+		name: runtimeDrillSecretName, kind: "template_secret", value: "must-stay-missing-1234",
 	})
 	wf := &domain.Workflow{
 		ID: "wf-template-secret-reserved", Name: "Reserved secret", DSLVersion: "1.0",
