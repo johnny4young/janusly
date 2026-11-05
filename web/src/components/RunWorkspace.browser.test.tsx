@@ -14,6 +14,7 @@ function NavigationFixture({ activeRun = true }: { activeRun?: boolean }) {
       <RunWorkspaceNavigation
         activeView={view}
         hasActiveRun={activeRun}
+        stepCount={3}
         eventCount={12}
         agentEventCount={4}
         onSelectView={setView}
@@ -29,8 +30,8 @@ describe('<RunWorkspaceNavigation /> (browser smoke)', () => {
     render(<NavigationFixture />)
 
     const overview = screen.getByRole('tab', { name: 'Overview' })
-    const timeline = screen.getByRole('tab', { name: 'Timeline, 12 events' })
-    const agents = screen.getByRole('tab', { name: 'Agents, 4 multi-agent events' })
+    const timeline = screen.getByRole('tab', { name: 'Timeline, 3 steps' })
+    const ask = screen.getByRole('tab', { name: 'Ask' })
 
     expect(overview).toHaveAttribute('tabindex', '0')
     expect(timeline).toHaveAttribute('tabindex', '-1')
@@ -43,10 +44,10 @@ describe('<RunWorkspaceNavigation /> (browser smoke)', () => {
     expect(screen.getByRole('tabpanel')).toHaveTextContent('timeline')
 
     fireEvent.keyDown(timeline, { key: 'End' })
-    await waitFor(() => expect(agents).toHaveFocus())
-    expect(agents).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(ask).toHaveFocus())
+    expect(ask).toHaveAttribute('aria-selected', 'true')
 
-    fireEvent.keyDown(agents, { key: 'Home' })
+    fireEvent.keyDown(ask, { key: 'Home' })
     await waitFor(() => expect(overview).toHaveFocus())
     expect(overview).toHaveAttribute('aria-selected', 'true')
   })
@@ -54,7 +55,7 @@ describe('<RunWorkspaceNavigation /> (browser smoke)', () => {
   it('keeps unavailable run-bound tabs disabled', () => {
     render(<NavigationFixture activeRun={false} />)
 
-    expect(screen.getByRole('tab', { name: 'Timeline, 12 events' })).toBeDisabled()
+    expect(screen.getByRole('tab', { name: 'Timeline, 3 steps' })).toBeDisabled()
     expect(screen.getByRole('tab', { name: 'Agents, 4 multi-agent events' })).toBeDisabled()
   })
 })

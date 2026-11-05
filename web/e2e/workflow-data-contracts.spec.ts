@@ -26,7 +26,6 @@ type LocaleContract = {
   locale: 'en' | 'es'
   flows: string
   runs: string
-  viewTimeline: string
   strictLabel: string
   lenientStatus: string
   strictStatus: string
@@ -40,7 +39,6 @@ const LOCALES: LocaleContract[] = [
     locale: 'en',
     flows: 'Workflows',
     runs: 'Runs',
-    viewTimeline: 'View timeline',
     strictLabel: 'Fail on a missing value',
     lenientStatus: 'Continue with an empty value and record a warning in Reasoning.',
     strictStatus: 'Stop before using a missing value and record its path in Reasoning.',
@@ -52,7 +50,6 @@ const LOCALES: LocaleContract[] = [
     locale: 'es',
     flows: 'Flujos',
     runs: 'Ejecuciones',
-    viewTimeline: 'Ver cronología',
     strictLabel: 'Fallar ante un valor ausente',
     lenientStatus: 'Continúa con un valor vacío y registra una advertencia en Razonamiento.',
     strictStatus: 'Se detiene antes de usar un valor ausente y registra su ruta en Razonamiento.',
@@ -202,7 +199,7 @@ async function captureUnresolvedEvent(
   name: string,
 ): Promise<void> {
   await openRunFromHistory(page, contract, runId)
-  await page.getByTestId('run-overview').getByRole('button', { name: contract.viewTimeline, exact: true }).click()
+  await page.getByTestId('run-workspace-tab-events').click()
   const timeline = page.getByTestId('run-event-timeline')
   await timeline.getByTestId('run-event-filter').fill('template.unresolved_path')
   const event = timeline.getByRole('listitem').filter({ hasText: expectedText }).first()

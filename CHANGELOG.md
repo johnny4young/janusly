@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Run detail is one sheet. Its header shows the workflow, the actions and a data
+  row with status, duration, start, version, trace and run ID, and it stays in
+  place across the tabs Overview, Timeline, Events, Agents and Ask. Timeline now
+  groups this run's attempts by step on one time scale and marks retries; the
+  event list moved to Events, and the conversation with Janusly to Ask, where it
+  survives a look at another tab. View timeline is gone in favor of the tabs,
+  Cancel run only appears while a run can still stop, and a Close button returns
+  to the activity feed.
 - Recover is now a list and a detail side by side. Filters stay above the queue,
   the failures sit on the left and the selected failure on the right, each pane
   scrolling on its own, so moving with J/K keeps both on screen and the action

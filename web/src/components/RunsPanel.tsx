@@ -1,8 +1,8 @@
 /**
  * Right-side Runs tab body. Renders:
+ *  - Run sheet header: identity, actions and the data row.
  *  - Metric strip (shared VitalSignsStrip): total / active / done / failed.
- *  - Active-run card with cancel + open-in-Lab + workflow-output details.
- *  - RunExplainChat for the active run ("Ask Janusly", above usage).
+ *  - Trigger input and workflow output of the active run.
  *  - Usage summary card (per-org cost/quota breakdown).
  *  - Classified paused-node cards with safe resume actions.
  *  - Failed-nodes action cards (per-node retry).
@@ -16,8 +16,8 @@
  * - `RightPanel.tsx` (mounted in the runs branch of the dispatcher).
  */
 
-import { useEffect, useState } from 'react'
-import { Activity, CheckCircle2, CircleX, Copy, Download, FlaskConical, GitBranch, ListChecks, Send } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Activity, CheckCircle2, CircleX, Copy, Download, FlaskConical, GitBranch, ListChecks, Send, X } from 'lucide-react'
 import type { RunEvent, RunNode, RunSummary, SavedWorkflow, WorkflowInputSchemaShape } from '../types'
 import { isOpenRunStatus, isTerminalRunStatus } from '@/lib/status'
 import { formatCompactDuration, formatStatusLabel, formatNodeDuration } from '../constants'
@@ -26,7 +26,7 @@ import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
 import { DeadLettersPanel } from './DeadLettersPanel'
 export { DeadLetterCloseDialog } from './DeadLetterCloseDialog'
-import { RunExplainChat } from './RunExplainChat'
+export { RunExplainChat } from './RunExplainChat'
 import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { ReplayLabForkDialog } from './ReplayLabForkDialog'
@@ -108,9 +108,9 @@ export type RunsPanelProps = {
   canUseRecovery?: boolean
   canReadAutoHealing?: boolean
   canDecideAutoHealing?: boolean
-  /** Opens the run's timeline. RunWorkspace overrides this to stay in-context;
-   * direct/legacy mounts retain the Reasoning-tab fallback. */
-  onViewTimeline?: () => void
+  onClose?: () => void
+  /** Lays out the sheet: the host places the header and overview between its tabs. */
+  renderSheet?: (parts: { header: ReactNode; overview: ReactNode }) => ReactNode
 }
 
 type SubmitHumanFormResult = string[] | undefined
@@ -165,7 +165,8 @@ export function RunsPanel({
   canUseRecovery = true,
   canReadAutoHealing = true,
   canDecideAutoHealing = true,
-  onViewTimeline,
+  onClose,
+  renderSheet,
 }: RunsPanelProps) {
   const { t } = useT()
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
@@ -278,74 +279,37 @@ export function RunsPanel({
     },
   ]
   const recoveryMode = mode === 'recovery'
+  const hasWorkflowOutput = activeRun?.status === 'succeeded' && Object.keys(activeRun.outputJson ?? {}).length > 0
   const activityDetail = variant === 'activity-detail'
   const showRunActions = recoveryMode || activityDetail
 
-  return (
-    <PanelChrome
-      title={t(recoveryMode ? 'rightPanel.recover.title' : 'rightPanel.runs.title')}
-      description={t(recoveryMode ? 'rightPanel.recover.description' : 'rightPanel.runs.description')}
-    >
-      {!recoveryMode && !activityDetail && <VitalSignsStrip
-        tiles={withSeverityLabels(runMetricTiles, t)}
-        ariaLabel={t('rightPanel.runs.summaryAria')}
-        testId="runs-metric-strip"
-      />}
-
-      {!recoveryMode && activeRunId && (
-        <section className="we-card we-run-overview" data-testid="run-overview">
+  const sheetHeader = !recoveryMode && activeRunId
+    ? (
+        <section className="we-run-overview" data-testid="run-overview">
           <div className="split-row we-run-overview__header">
-            <span className="we-run-overview__title">
-              <strong>{activeRunIdentity?.name ?? activeRunIdentity?.id ?? t('rightPanel.runs.activeRun')}</strong>
-              {activeRun && <span className="status-pill" data-status={activeRun.status}>{formatStatusLabel(activeRun.status)}</span>}
-              {activeRun?.outcomeStatus && (
-                <SemanticOutcomePill status={activeRun.outcomeStatus} testId="active-run-semantic-outcome" />
-              )}
-              {activeRun?.replayMode === 'validation' && (
-                <ValidationEvidencePill
-                  level={activeRun.validationEvidenceLevel}
-                  testId="active-run-validation-evidence"
-                />
-              )}
+            <div className="we-run-overview__title">
+              <h2>{activeRunIdentity?.name ?? activeRunIdentity?.id ?? t('rightPanel.runs.activeRun')}</h2>
               <RunStreamChip />
-            </span>
+            </div>
             <div className="we-run-overview__actions">
-              <Button
-                size="sm"
-               
-               
-                onClick={() => onViewTimeline ? onViewTimeline() : setActiveTab('reasoning')}
-              >
-                <Activity size={12} aria-hidden="true" /> {t('rightPanel.runs.viewTimeline')}
-              </Button>
               {canStartRuns && activeRun && !activeRun.replayMode && isTerminalRunStatus(activeRun.status) && (
                 <Button
                   size="sm"
-                 
-                 
                   onClick={() => setLabSourceRun(activeRun)}
                   data-testid="active-run-replay-in-lab"
                 >
                   <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.openInLab')}
                 </Button>
               )}
-              {canCancelRuns && (
-                <Button
-                  size="sm"
-                 
-                 
-                  onClick={() => onCancelActiveRun?.()}
-                  disabled={!isActiveRunCancellable}
-                >
+              {isActiveRunCancellable && (
+                <Button size="sm" onClick={() => onCancelActiveRun?.()}>
                   {t('rightPanel.runs.cancelRun')}
                 </Button>
               )}
               {activeRun && (
                 <>
                   <Button
-                    size="sm"
-                   
-                   
+                    size="icon"
                     onClick={async () => {
                       try {
                         await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(activeRun.id)}`)
@@ -355,28 +319,60 @@ export function RunsPanel({
                       }
                     }}
                     aria-label={t('rightPanel.runs.exportAria', { id: activeRun.id })}
+                    title={t('rightPanel.runs.export')}
+                    data-testid="run-sheet-export"
                   >
-                    <Download size={12} aria-hidden="true" />
-                    {t('rightPanel.runs.export')}
+                    <Download size={13} aria-hidden="true" />
                   </Button>
                   <Button
-                    size="sm"
-                   
-                   
+                    size="icon"
                     onClick={() => setDeliveryRun(activeRun)}
                     aria-label={t('rightPanel.runs.sendAria', { id: activeRun.id })}
+                    title={t('rightPanel.runs.send')}
+                    data-testid="run-sheet-send"
                   >
-                    <Send size={12} aria-hidden="true" />
-                    {t('rightPanel.runs.send')}
+                    <Send size={13} aria-hidden="true" />
                   </Button>
                 </>
+              )}
+              {onClose && (
+                <Button
+                  size="icon"
+                  onClick={onClose}
+                  aria-label={t('common.close')}
+                  title={t('common.close')}
+                  data-testid="run-sheet-close"
+                >
+                  <X size={13} aria-hidden="true" />
+                </Button>
               )}
             </div>
           </div>
           <dl className="we-run-overview__facts">
             <div>
-              <dt>{t('rightPanel.runs.runId')}</dt>
-              <dd><code title={activeRunId}>{activeRunId.slice(0, 12)}…</code></dd>
+              <dt>{t('rightPanel.runs.status')}</dt>
+              <dd className="we-run-overview__status" data-testid="run-sheet-status">
+                {activeRun
+                  ? <span className="status-pill" data-status={activeRun.status}>{formatStatusLabel(activeRun.status)}</span>
+                  : t('rightPanel.runs.activeRunLoading')}
+                {activeRun?.outcomeStatus && (
+                  <SemanticOutcomePill status={activeRun.outcomeStatus} testId="active-run-semantic-outcome" />
+                )}
+                {activeRun?.replayMode === 'validation' && (
+                  <ValidationEvidencePill
+                    level={activeRun.validationEvidenceLevel}
+                    testId="active-run-validation-evidence"
+                  />
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>{t('rightPanel.runs.duration')}</dt>
+              <dd>{activeRunDuration ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>{t('rightPanel.runs.startedAt')}</dt>
+              <dd>{activeRun?.createdAt ? new Date(activeRun.createdAt).toLocaleString(getResolvedLocale()) : '—'}</dd>
             </div>
             {activeRun?.workflowVersionId && (
               <div>
@@ -384,14 +380,6 @@ export function RunsPanel({
                 <dd><code title={activeRun.workflowVersionId}>{activeRun.workflowVersionId.slice(0, 12)}…</code></dd>
               </div>
             )}
-            <div>
-              <dt>{t('rightPanel.runs.startedAt')}</dt>
-              <dd>{activeRun?.createdAt ? new Date(activeRun.createdAt).toLocaleString(getResolvedLocale()) : '—'}</dd>
-            </div>
-            <div>
-              <dt>{t('rightPanel.runs.duration')}</dt>
-              <dd>{activeRunDuration ?? '—'}</dd>
-            </div>
             {activeRunTraceId && (
               <div className="we-run-overview__trace">
                 <dt>{t('rightPanel.runs.traceId')}</dt>
@@ -418,21 +406,35 @@ export function RunsPanel({
                 </dd>
               </div>
             )}
+            <div>
+              <dt>{t('rightPanel.runs.runId')}</dt>
+              <dd><code title={activeRunId}>{activeRunId.slice(0, 12)}…</code></dd>
+            </div>
           </dl>
-          <p className="helper-text we-run-overview__status-copy">
-            {activeRun
-              ? (isActiveRunCancellable
-                ? t('rightPanel.runs.activeRunStatusCancellable', { status: formatStatusLabel(activeRun.status) })
-                : t('rightPanel.runs.activeRunStatusFinished', { status: formatStatusLabel(activeRun.status) }))
-              : t('rightPanel.runs.activeRunLoading')}
-          </p>
+        </section>
+    )
+    : null
+
+  const overview = (
+    <PanelChrome
+      title={t(recoveryMode ? 'rightPanel.recover.title' : 'rightPanel.runs.title')}
+      description={t(recoveryMode ? 'rightPanel.recover.description' : 'rightPanel.runs.description')}
+    >
+      {!recoveryMode && !activityDetail && <VitalSignsStrip
+        tiles={withSeverityLabels(runMetricTiles, t)}
+        ariaLabel={t('rightPanel.runs.summaryAria')}
+        testId="runs-metric-strip"
+      />}
+
+      {!recoveryMode && (activeRunInput !== undefined || hasWorkflowOutput) && (
+        <section className="we-card we-run-overview__payloads">
           {activeRunInput !== undefined && (
             <details data-testid="run-trigger-input" className="we-run-overview__payload">
               <summary>{t('rightPanel.runs.triggerInput')}</summary>
               <pre className="code-field">{JSON.stringify(activeRunInput, null, 2)}</pre>
             </details>
           )}
-          {activeRun?.status === 'succeeded' && activeRun.outputJson && Object.keys(activeRun.outputJson).length > 0 && (
+          {hasWorkflowOutput && (
             <details data-testid="workflow-output" className="we-run-overview__payload">
               <summary>{t('rightPanel.runs.workflowOutput')}</summary>
               <pre className="code-field">
@@ -442,8 +444,6 @@ export function RunsPanel({
           )}
         </section>
       )}
-
-      {!recoveryMode && activeRunId && <RunExplainChat runId={activeRunId} />}
 
       {!recoveryMode && !activityDetail && (
         <UsageSummaryCard usage={usage} onRefreshPlatform={onRefreshPlatform} />
@@ -665,8 +665,16 @@ export function RunsPanel({
         onOpenLab={canStartRuns ? setLabSourceRun : undefined}
         onSend={setDeliveryRun}
       />}
+    </PanelChrome>
+  )
 
-      {!recoveryMode && labSourceRun && (
+  if (recoveryMode) return overview
+
+  return (
+    <>
+      {renderSheet ? renderSheet({ header: sheetHeader, overview }) : <>{sheetHeader}{overview}</>}
+
+      {labSourceRun && (
         <ReplayLabDialog
           sourceRun={{
             id: labSourceRun.id,
@@ -678,7 +686,7 @@ export function RunsPanel({
         />
       )}
 
-      {!recoveryMode && forkTargetNodeId && activeRun && (
+      {forkTargetNodeId && activeRun && (
         <ReplayLabForkDialog
           sourceRun={{
             id: activeRun.id,
@@ -690,7 +698,7 @@ export function RunsPanel({
         />
       )}
 
-      {!recoveryMode && deliveryRun && (
+      {deliveryRun && (
         <ReportDeliveryDialog
           sourceRun={{
             id: deliveryRun.id,
@@ -699,6 +707,6 @@ export function RunsPanel({
           onClose={() => setDeliveryRun(null)}
         />
       )}
-    </PanelChrome>
+    </>
   )
 }
