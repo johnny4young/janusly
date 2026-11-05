@@ -3,10 +3,8 @@
 /* One authoring entry for every step type. The searchable menu stays inside
    the lazy canvas chunk so the catalog never grows the application boot path. */
 .canvas-step-picker {
-  position: absolute;
-  top: 16px;
-  left: 220px;
-  z-index: 4;
+  position: relative;
+  z-index: 1;
 }
 
 .canvas-step-picker__trigger {

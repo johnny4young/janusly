@@ -14,6 +14,7 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { ApiResponses, RecoveryActorKind, RecoveryArtifact, RecoveryCaseState, RecoveryCase as WireRecoveryCase } from './lib/api-types.generated'
 import type { WorkflowRecovery } from './lib/recovery-contract'
+import type { AuthoringProblem } from './components/authoring-problems'
 
 export type JsonObject = Record<string, unknown>
 export type RunNode = {
@@ -38,6 +39,8 @@ type WorkflowNodeData = {
   /** One-line error of a failed step while observing a run. */
   errorSummary?: string | null
   onRecover?: () => void
+  /** The step's worst authoring problem; projected for display, never persisted. */
+  problem?: AuthoringProblem
 }
 type WorkflowEdgeData = {
   condition?: string

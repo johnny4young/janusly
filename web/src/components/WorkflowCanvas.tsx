@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useReactFlow } from '@xyflow/react'
 import type { AriaLabelConfig, EdgeMouseHandler, NodeMouseHandler, OnBeforeDelete, OnConnect, OnEdgesChange, OnMove, OnMoveEnd, OnNodesChange, Viewport } from '@xyflow/react'
-import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
+import type { AiReviewIssue, ReadinessResult, ValidationIssue, WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
 import { workflowEdgeTypes } from './WorkflowEdge'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -22,6 +22,8 @@ import { useT } from '../i18n'
 import { registerNodePlacementResolver, useWorkflowStore } from '../store'
 import { Redo2, Undo2 } from 'lucide-react'
 import { hasNodePaletteDrag, readNodePaletteDrag } from '../canvas-node-drag'
+import { buildAuthoringProblems, type AuthoringProblem } from './authoring-problems'
+import { CanvasProblemsBand, CanvasProblemsChip } from './CanvasProblems'
 import { CanvasStepPicker } from './CanvasStepPicker'
 import '@xyflow/react/dist/style.css'
 import { Button } from '@/components/ui/Button'
@@ -50,8 +52,12 @@ type WorkflowCanvasProps = {
    *  viewport/selection without letting its document-level keyboard handlers
    *  react to an interaction in a different workspace. */
   active?: boolean
+  validationIssues?: ValidationIssue[]
+  readiness?: ReadinessResult | null
+  aiReviewIssues?: AiReviewIssue[]
 }
 
+const NO_ISSUES: never[] = []
 const DEFAULT_WORKFLOW_NODE_SCREEN_SIZE = { width: 238, height: 96 }
 export const MINIMAP_NODE_THRESHOLD = 6
 
@@ -63,7 +69,7 @@ function acceptsCanvasDrop(target: EventTarget | null): boolean {
 /** Render the workflow editor canvas with React Flow + custom step nodes.
  *  Memoized so it only re-renders when its (stable) graph + handler props
  *  actually change, not on every unrelated store tick from the App root. */
-export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, onAddNode, onOpenAiStudio, viewportWorkflowId, mode = 'author', readOnly = false, active = true }: WorkflowCanvasProps) {
+export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, onAddNode, onOpenAiStudio, viewportWorkflowId, mode = 'author', readOnly = false, active = true, validationIssues = NO_ISSUES, readiness = null, aiReviewIssues = NO_ISSUES }: WorkflowCanvasProps) {
   const { t } = useT()
   const confirmDialog = useConfirm()
   const observing = mode === 'observe'
@@ -128,6 +134,18 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
     const position = resolveNodeTopLeft({ x: event.clientX, y: event.clientY })
     onAddNode(type, position ?? undefined)
   }, [editing, onAddNode, resolveNodeTopLeft])
+  const problems = useMemo(
+    () => observing ? [] : buildAuthoringProblems({ validationIssues, readiness, aiReviewIssues, workflowEdges: edges }),
+    [aiReviewIssues, edges, observing, readiness, validationIssues],
+  )
+  // Problems are sorted worst first, so the first one per step sets its dot.
+  const nodeProblems = useMemo(() => {
+    const byNode = new Map<string, AuthoringProblem>()
+    for (const problem of problems) {
+      if (problem.nodeId && !byNode.has(problem.nodeId)) byNode.set(problem.nodeId, problem)
+    }
+    return byNode
+  }, [problems])
   // Give every node a meaningful screen-reader name. React Flow's default node
   // aria-label is just "Node <id>"; announce the step's localized label instead
   // ("Step: Call an API"). Derived here, not in the store, so it stays localized
@@ -137,12 +155,13 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
     () =>
       nodes.map((node) => ({
         ...node,
+        data: { ...node.data, problem: nodeProblems.get(node.id) },
         ariaLabel: t(observing ? 'canvas.runNodeAria' : 'canvas.nodeAria', {
           label: node.data.label?.trim() || getNodeLabel(node.data.type),
           status: formatStatusLabel(node.data.status ?? 'pending'),
         }),
       })),
-    [nodes, observing, t],
+    [nodeProblems, nodes, observing, t],
   )
   const a11yEdges = useMemo(() => {
     const nodeLabels = new Map(nodes.map(node => [
@@ -244,43 +263,47 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
       tabIndex={observing ? undefined : -1}
       aria-label={observing ? undefined : t('canvas.flowMapSummary')}
     >
-      <div className="canvas-toolbar" aria-label={t(observing ? 'canvas.runMap' : 'canvas.flowMapSummary')}>
-        <div>
-          <div className="section-kicker">{t(observing ? 'canvas.runMap' : 'canvas.flowMap')}</div>
-          <strong>{t('canvas.steps', { count: nodes.length })}</strong>
+      <div className="canvas-chrome">
+        <div className="canvas-toolbar" aria-label={t(observing ? 'canvas.runMap' : 'canvas.flowMapSummary')}>
+          <div>
+            <div className="section-kicker">{t(observing ? 'canvas.runMap' : 'canvas.flowMap')}</div>
+            <strong>{t('canvas.steps', { count: nodes.length })}</strong>
+          </div>
+          <div className="canvas-toolbar__meta">
+            {editing && (
+              <div className="canvas-toolbar__history" role="group" aria-label={t('canvas.history.aria')}>
+                <Button
+                  size="sm"
+               
+               
+                  disabled={!canUndo}
+                  onClick={undoCanvas}
+                  title={t('canvas.history.undo')}
+                  aria-label={t('canvas.history.undo')}
+                >
+                  <Undo2 size={13} />
+                </Button>
+                <Button
+                  size="sm"
+               
+               
+                  disabled={!canRedo}
+                  onClick={redoCanvas}
+                  title={t('canvas.history.redo')}
+                  aria-label={t('canvas.history.redo')}
+                >
+                  <Redo2 size={13} />
+                </Button>
+              </div>
+            )}
+            <span>{t('canvas.paths', { count: edges.length })}</span>
+            <CanvasProblemsChip problems={problems} />
+            {observing && <span className="we-pill" data-tone="info">{t('canvas.readOnly')}</span>}
+          </div>
         </div>
-        <div className="canvas-toolbar__meta">
-          {editing && (
-            <div className="canvas-toolbar__history" role="group" aria-label={t('canvas.history.aria')}>
-              <Button
-                size="sm"
-               
-               
-                disabled={!canUndo}
-                onClick={undoCanvas}
-                title={t('canvas.history.undo')}
-                aria-label={t('canvas.history.undo')}
-              >
-                <Undo2 size={13} />
-              </Button>
-              <Button
-                size="sm"
-               
-               
-                disabled={!canRedo}
-                onClick={redoCanvas}
-                title={t('canvas.history.redo')}
-                aria-label={t('canvas.history.redo')}
-              >
-                <Redo2 size={13} />
-              </Button>
-            </div>
-          )}
-          <span>{t('canvas.paths', { count: edges.length })}</span>
-          {observing && <span className="we-pill" data-tone="info">{t('canvas.readOnly')}</span>}
-        </div>
+        {editing && onAddNode && <CanvasStepPicker onAddNode={onAddNode} />}
+        {nodes.length > 0 && <CanvasProblemsBand problems={problems} />}
       </div>
-      {editing && onAddNode && <CanvasStepPicker onAddNode={onAddNode} />}
       <div className="canvas-flow-surface" onDragOver={handleDragOver} onDrop={handleDrop}>
         <ErrorBoundary fallback={canvasErrorFallback} resetKey={viewportWorkflowId} logTag="canvas">
           <ReactFlow

@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { requestAuthoringScope } from './authoring-focus-bus'
 import { WorkflowOperationsPanel } from './WorkflowOperationsPanel'
 
 vi.mock('./VersionHistoryPanel', () => ({
@@ -35,5 +36,27 @@ describe('<WorkflowOperationsPanel />', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deployment' }))
     expect(await screen.findByTestId('deployment-panel')).toHaveAttribute('data-read-only', 'true')
     expect(screen.queryByTestId('versions-panel')).not.toBeInTheDocument()
+  })
+
+  it('opens and focuses Versions when a jump names it, once', async () => {
+    requestAuthoringScope('workflow', 'versions')
+    const first = render(<WorkflowOperationsPanel readOnly />)
+    expect(await screen.findByTestId('versions-panel')).toBeInTheDocument()
+    expect(document.activeElement).toHaveClass('authoring-workflow-tools')
+    first.unmount()
+
+    render(<WorkflowOperationsPanel readOnly />)
+    expect(screen.queryByTestId('versions-panel')).not.toBeInTheDocument()
+
+    act(() => requestAuthoringScope('workflow', 'versions'))
+    expect(await screen.findByTestId('versions-panel')).toBeInTheDocument()
+  })
+
+  it('ignores a jump to another target', () => {
+    requestAuthoringScope('workflow', 'outputs')
+    render(<WorkflowOperationsPanel readOnly />)
+    expect(screen.queryByTestId('versions-panel')).not.toBeInTheDocument()
+    expect(document.activeElement).not.toHaveClass('authoring-workflow-tools')
+    requestAuthoringScope('step')
   })
 })

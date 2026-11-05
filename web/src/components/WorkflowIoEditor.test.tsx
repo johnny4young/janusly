@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { WorkflowDefinition } from '../types'
+import { requestAuthoringScope } from './authoring-focus-bus'
 import { WorkflowIoEditor } from './WorkflowIoEditor'
 
 function Harness({ initialInputs, initialOutputs, initialTemplatePolicy }: {
@@ -297,5 +298,11 @@ describe('<WorkflowIoEditor /> — declared defaults', () => {
     }} />)
 
     expect(screen.queryByLabelText('Default value for window')).not.toBeInTheDocument()
+  })
+
+  it('focuses the outputs section when a jump requested before mount names it', () => {
+    requestAuthoringScope('workflow', 'outputs')
+    render(<Harness />)
+    expect(screen.getByTestId('workflow-outputs-editor')).toHaveFocus()
   })
 })

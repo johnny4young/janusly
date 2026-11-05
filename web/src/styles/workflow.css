@@ -159,6 +159,11 @@
   font: 700 9px/1 var(--font-mono);
 }
 
+.authoring-workflow-tools:focus {
+  outline: 2px solid var(--we-primary-ring);
+  outline-offset: -2px;
+}
+
 .authoring-workflow-tools {
   display: grid;
   gap: 12px;
