@@ -89,6 +89,12 @@ export async function openWorkspaceSection(
   }
 }
 
+/** Solution packs live in the Packs view of the Templates section. */
+export async function openTemplatePacks(page: Page, spanish = false): Promise<void> {
+  await openWorkspaceSection(page, spanish ? 'Flujos' : 'Workflows', spanish ? 'Plantillas' : 'Templates')
+  await page.getByTestId('template-view-packs').click()
+}
+
 export async function openWorkflowAiAction(
   page: Page,
   destination: 'Workflows' | 'Flujos',

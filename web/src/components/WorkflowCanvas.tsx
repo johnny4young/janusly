@@ -73,7 +73,8 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
   const { t } = useT()
   const confirmDialog = useConfirm()
   const observing = mode === 'observe'
-  const editing = active && !observing && !readOnly
+  const covered = useWorkflowStore((s) => s.canvasCovered)
+  const editing = active && !covered && !observing && !readOnly
   const canUndo = useWorkflowStore((s) => s.historyPast.length > 0)
   const canRedo = useWorkflowStore((s) => s.historyFuture.length > 0)
   const undoCanvas = useWorkflowStore((s) => s.undoCanvas)

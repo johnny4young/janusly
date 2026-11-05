@@ -199,6 +199,9 @@ type WorkflowStore = {
    * (confirm-before-replace, beforeunload) and the local draft autosave.
    */
   workflowDirty: boolean
+  /** A read-only view covers the author canvas, so its keyboard edits must stay off. */
+  canvasCovered: boolean
+  setCanvasCovered: (covered: boolean) => void
   /** Monotonic semantic-workflow revision. Canvas position/selection changes
    * never increment it; authoring checks use it to invalidate stale findings. */
   workflowRevision: number
@@ -485,6 +488,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   currentWorkflowSaved: false,
   currentWorkflowVersion: null,
   workflowDirty: false,
+  canvasCovered: false,
+  setCanvasCovered: (covered) => set({ canvasCovered: covered }),
   workflowRevision: 0,
   historyPast: [],
   historyFuture: [],

@@ -1,4 +1,4 @@
-import { openActivityRecoveryDetail, openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openActivityRecoveryDetail, openTemplatePacks } from './_helpers/workspace-navigation'
 import { expect, test, type APIRequestContext, type Page, type Response } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 
@@ -474,12 +474,12 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // same dialog stays useful without an AI provider and never enables the
   // sandbox/apply actions for a no-op suggestion.
   await page.reload()
-  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  await openTemplatePacks(page, true)
   const spanishPack = page.getByTestId('solution-pack-support-escalation')
   await spanishPack.getByRole('button', { name: 'Instalar', exact: true }).click()
   await expect(page.getByText(/Pack instalado/)).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Crear', exact: true })).toBeVisible()
-  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  await openTemplatePacks(page, true)
   const selectedBeforeFallbackFailure = await currentActivityRecoveryId(page)
   await spanishPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   const spanishFailure = await waitForNewActivityRecovery(page, selectedBeforeFallbackFailure)

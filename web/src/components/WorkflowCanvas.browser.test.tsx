@@ -1,6 +1,6 @@
 
 import { describe, expect, it, vi } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { WorkflowCanvas } from './WorkflowCanvas'
 import '../styles/canvas.css'
@@ -56,6 +56,21 @@ function mountCanvas(overrides: Partial<Parameters<typeof WorkflowCanvas>[0]> = 
 }
 
 describe('WorkflowCanvas (browser mode)', () => {
+  it('stops editing while another view covers it', async () => {
+    useWorkflowStore.setState({ canvasCovered: true })
+    try {
+      const { props, container } = mountCanvas({ onAddNode: vi.fn() })
+      await waitFor(() => expect(container.querySelector('.react-flow__node')).not.toBeNull())
+      expect(container.querySelector('.canvas-toolbar__history')).toBeNull()
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }))
+      expect(props.onNodesChange).not.toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ type: 'remove' })]))
+      act(() => useWorkflowStore.setState({ canvasCovered: false }))
+      await waitFor(() => expect(container.querySelector('.canvas-toolbar__history')).not.toBeNull())
+    } finally {
+      useWorkflowStore.setState({ canvasCovered: false })
+    }
+  })
+
   it('paints the zoom controls and attribution from the dark tokens', () => {
     document.documentElement.dataset.theme = 'dark'
     try {
