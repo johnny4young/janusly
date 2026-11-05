@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -83,16 +82,11 @@ func NewServer(deps Deps) *mcp.Server {
 		return deps.saveWorkflow(ctx, args.Workflow)
 	})
 
-	type startArgs struct {
-		Workflow          map[string]any `json:"workflow" jsonschema:"the workflow document to execute"`
-		WorkflowVersionID string         `json:"workflowVersionId,omitempty" jsonschema:"optional immutable version id that must exactly match the workflow document"`
-		Input             map[string]any `json:"input,omitempty" jsonschema:"optional run input payload"`
-	}
 	mcp.AddTool(server, writeTool(
 		"runs.start", "Start run",
-		"Start a run for the given workflow document; returns the run id.", false,
+		"Start a run from a saved workflowId or a workflow document; returns the run id. Pass idempotencyKey to make retries safe.", false,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args startArgs) (*mcp.CallToolResult, any, error) {
-		return deps.startRun(ctx, args.Workflow, args.WorkflowVersionID, args.Input)
+		return deps.startRun(ctx, args)
 	})
 
 	type runArgs struct {
@@ -165,6 +159,7 @@ func NewServer(deps Deps) *mcp.Server {
 	})
 
 	registerOperatorTools(server, deps)
+	registerAuthoringTools(server, deps)
 	return server
 }
 
@@ -200,22 +195,17 @@ func (d Deps) saveWorkflow(ctx context.Context, document map[string]any) (*mcp.C
 	if err != nil || len(raw) > maxMCPWorkflowDocumentBytes {
 		return expected("workflow document is invalid or exceeds 128000 bytes")
 	}
-	wf, issues := domain.Parse(raw)
+	wf, _ := domain.Parse(raw)
 	if wf == nil {
-		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
+		return expectedReport("workflow contract invalid", d.validationReport(ctx, document))
 	}
 	if !validOptionalMCPIdentifier(wf.ID) {
 		return expected("workflow id must be at most 256 characters")
 	}
-	result := workflowvalidation.Validate(wf)
-	var blocking []domain.Issue
-	for _, issue := range result.Issues {
+	for _, issue := range workflowvalidation.Validate(wf).Issues {
 		if issue.Code != domain.CodeNodeTypeNotExecutable {
-			blocking = append(blocking, issue)
+			return expectedReport("workflow validation failed", d.validationReport(ctx, document))
 		}
-	}
-	if len(blocking) > 0 {
-		return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(blocking)))
 	}
 
 	workflowID := wf.ID
@@ -256,18 +246,38 @@ func (d Deps) saveWorkflow(ctx context.Context, document map[string]any) (*mcp.C
 	})
 }
 
-func (d Deps) startRun(
-	ctx context.Context,
-	document map[string]any,
-	requestedVersionID string,
-	input map[string]any,
-) (*mcp.CallToolResult, any, error) {
+type startArgs struct {
+	WorkflowID        string         `json:"workflowId,omitempty" jsonschema:"saved workflow to run at its latest version; pass this or workflow"`
+	Workflow          map[string]any `json:"workflow,omitempty" jsonschema:"the workflow document to execute; pass this or workflowId"`
+	WorkflowVersionID string         `json:"workflowVersionId,omitempty" jsonschema:"optional immutable version id that must exactly match the workflow document"`
+	Input             map[string]any `json:"input,omitempty" jsonschema:"optional run input payload"`
+	IdempotencyKey    string         `json:"idempotencyKey,omitempty" jsonschema:"retrying with the same key returns the first run instead of starting another"`
+}
+
+func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "runs.start", "runs.start", true); !allowed {
 		return expected(message)
 	}
-	requestedVersionID = strings.TrimSpace(requestedVersionID)
-	if !validOptionalMCPIdentifier(requestedVersionID) {
-		return expected("workflowVersionId must be at most 256 characters")
+	document, input := args.Workflow, args.Input
+	requestedVersionID := strings.TrimSpace(args.WorkflowVersionID)
+	workflowID := strings.TrimSpace(args.WorkflowID)
+	idempotencyKey := strings.TrimSpace(args.IdempotencyKey)
+	if !validOptionalMCPIdentifier(requestedVersionID) || !validOptionalMCPIdentifier(workflowID) ||
+		!validOptionalMCPIdentifier(idempotencyKey) {
+		return expected("workflowId, workflowVersionId and idempotencyKey must be at most 256 characters")
+	}
+	if (workflowID == "") == (document == nil) {
+		return expected("pass exactly one of workflowId or workflow; workflows.list shows saved ids")
+	}
+	if workflowID != "" {
+		if requestedVersionID != "" {
+			return expected("workflowVersionId only applies to a workflow document; workflowId runs the latest version")
+		}
+		latest, result := d.latestWorkflowDocument(ctx, workflowID)
+		if result != nil {
+			return result, nil, nil
+		}
+		document, requestedVersionID = latest.document, latest.versionID
 	}
 	requestRaw, err := json.Marshal(map[string]any{
 		"workflow": document, "workflowVersionId": requestedVersionID, "input": input,
@@ -279,9 +289,9 @@ func (d Deps) startRun(
 	if err != nil || len(raw) > maxMCPWorkflowDocumentBytes {
 		return expected("workflow document is invalid or exceeds 128000 bytes")
 	}
-	wf, issues := domain.Parse(raw)
+	wf, _ := domain.Parse(raw)
 	if wf == nil {
-		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
+		return expectedReport("workflow contract invalid", d.validationReport(ctx, document))
 	}
 	if !validOptionalMCPIdentifier(wf.ID) {
 		return expected("workflow id must be at most 256 characters")
@@ -294,13 +304,13 @@ func (d Deps) startRun(
 		Engine: d.Engine, Pool: d.Pool, NewID: d.NewID,
 	}).Start(ctx, runstart.Request{
 		OrgID: d.OrgID, CreatedBy: d.UserID, Workflow: wf,
-		RequestedVersionID: requestedVersionID, Input: startInput,
+		RequestedVersionID: requestedVersionID, Input: startInput, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
 		var rejection *runstart.Rejection
 		if errors.As(err, &rejection) {
 			if rejection.Code == runstart.CodeValidationFailed {
-				return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(rejection.Issues)))
+				return expectedReport("workflow validation failed", d.validationReport(ctx, document))
 			}
 			return expected(rejection.Code + ": " + rejection.Message)
 		}
@@ -311,7 +321,7 @@ func (d Deps) startRun(
 		return nil, nil, err
 	}
 	if started.Replayed {
-		return ok(map[string]any{"runId": started.RunID})
+		return ok(map[string]any{"runId": started.RunID, "replayed": true})
 	}
 	startAction := audit.Action("run.started")
 	if !started.Binding.Bound {
@@ -325,6 +335,39 @@ func (d Deps) startRun(
 		},
 	})
 	return ok(map[string]any{"runId": started.RunID})
+}
+
+type latestWorkflow struct {
+	document  map[string]any
+	versionID string
+}
+
+// latestWorkflowDocument loads the active workflow's newest immutable version
+// so a start by id binds to it exactly like a start with that document.
+func (d Deps) latestWorkflowDocument(ctx context.Context, workflowID string) (latestWorkflow, *mcp.CallToolResult) {
+	q := store.New(d.Pool)
+	reject := func(message string) (latestWorkflow, *mcp.CallToolResult) {
+		result, _, _ := expected(message)
+		return latestWorkflow{}, result
+	}
+	if _, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: d.OrgID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return reject("workflow not found or deactivated; workflows.list shows active workflows")
+		}
+		return reject("workflow lookup failed")
+	}
+	latest, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: d.OrgID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return reject("workflow has no saved version")
+		}
+		return reject("workflow lookup failed")
+	}
+	var document map[string]any
+	if json.Unmarshal(latest.DagJson, &document) != nil || document == nil {
+		return reject("saved workflow version is unreadable")
+	}
+	return latestWorkflow{document: document, versionID: latest.ID}, nil
 }
 
 func (d Deps) runStatus(ctx context.Context, runID string) (*mcp.CallToolResult, any, error) {
@@ -464,17 +507,6 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	default:
 		return nil, nil, err
 	}
-}
-
-func issueSummary(issues []domain.Issue) string {
-	if len(issues) == 0 {
-		return "unknown issue"
-	}
-	summary := boundedMCPText(issues[0].Message, maxMCPErrorSummaryRunes)
-	if len(issues) > 1 {
-		summary = fmt.Sprintf("%s (+%d more)", summary, len(issues)-1)
-	}
-	return summary
 }
 
 func farFuture() time.Time {
