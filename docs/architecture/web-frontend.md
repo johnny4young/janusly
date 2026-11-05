@@ -336,9 +336,17 @@ has one primary assisted start and keeps Add step as the manual, provider-free
 path. The teaching overlay still passes palette drops through outside its action.
 
 The AI Studio header marks the current stage as the first incomplete one, with
-`aria-current="step"`. In Solution Packs, Install is disabled only by the
-`packs.install` permission; missing credentials are named under the button but
-never block it, because a pack installs as a draft that is wired afterwards.
+`aria-current="step"`. Each Solution Pack lists its required credentials and
+organization settings in a Before installing checklist. A role with
+`credentials.write` connects a missing credential in place, through the create
+dialog with its name and kind locked, because readiness compares both. A name
+already taken by another kind shows that kind and offers no Connect, since names
+are unique per organization. Organization settings have no per-organization state in the
+pack API, so they are listed but not counted. Install is disabled only by the
+`packs.install` permission. Missing credentials take away its primary weight and
+are named under the button but never block it: every pack installs as a draft
+that is wired afterwards, and `packs.install` is granted to editors while
+`credentials.write` is not.
 
 Contextual authoring prefills never submit work. Replacing an intent invalidates
 pending compilation/proposal results and releases their loading state; late

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Solution packs show a Before installing checklist with each required credential,
+  its state and how many are ready. Connect opens the new connection dialog with
+  the name and kind filled in, and the row turns ready without leaving the page.
+  Install becomes the primary action once every credential is connected, and it
+  still installs a draft before then.
 - Retrying on Network errors now covers connection refused, connection reset and
   DNS failures, and retrying on Timeouts covers deadline exceeded. A policy that
   ignores `network` now stops retries for those failures too. A write-side MCP

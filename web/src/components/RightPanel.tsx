@@ -321,6 +321,7 @@ function RightPanelRouter(props: RightPanelProps) {
       onInstallPack={catalog.onInstallPack}
       onSampleRunPack={catalog.onSampleRunPack}
       onInjectPackFailure={catalog.onInjectPackFailure}
+      onCreateCredential={can('credentials.write') ? catalog.onCreateCredential : undefined}
       canUse={can('workflows.write')}
       canInstallPacks={can('packs.install')}
     />
@@ -332,6 +333,7 @@ function RightPanelRouter(props: RightPanelProps) {
       onInstall={catalog.onInstallPack}
       onSampleRun={catalog.onSampleRunPack}
       onInjectFailure={catalog.onInjectPackFailure}
+      onCreateCredential={can('credentials.write') ? catalog.onCreateCredential : undefined}
       canInstall={can('packs.install')}
     />
   )
@@ -396,6 +398,7 @@ export function TemplatesPanel({
   onInstallPack,
   onSampleRunPack,
   onInjectPackFailure,
+  onCreateCredential,
   canUse = true,
   canInstallPacks = true,
 }: Pick<
@@ -408,6 +411,7 @@ export function TemplatesPanel({
   | 'onSampleRunPack'
   | 'onInjectPackFailure'
 > & {
+  onCreateCredential?: RightPanelCatalog['onCreateCredential']
   canUse?: boolean
   canInstallPacks?: boolean
 }) {
@@ -467,6 +471,7 @@ export function TemplatesPanel({
               onInstall={onInstallPack}
               onSampleRun={onSampleRunPack}
               onInjectFailure={onInjectPackFailure}
+              onCreateCredential={onCreateCredential}
               canInstall={canInstallPacks}
             />
           </section>
