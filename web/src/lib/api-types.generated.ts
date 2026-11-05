@@ -1053,6 +1053,65 @@ export type TriggerIngestResponse = {
   "duplicate"?: never
 }
 
+export type UsageCosts = {
+  "aiConfigured": boolean
+  "models": ({
+    "cacheCreationInputTokens": number
+    "cachedInputTokens": number
+    "calls": number
+    "costUsd": number | null
+    "model": string
+    "outputTokens": number
+    "provider": string
+    "simulatedCalls": number
+    "uncachedInputTokens": number
+    "unknownCostCalls": number
+  })[]
+  "modelsTotal": number
+  "retentionDays": number
+  "rowCap": number
+  "steps": ({
+    "cacheCreationInputTokens": number
+    "cachedInputTokens": number
+    "calls": number
+    "costUsd": number | null
+    "model": string
+    "nodeId": string | null
+    "outputTokens": number
+    "provider": string
+    "runAvailable": boolean
+    "runId": string
+    "simulatedCalls": number
+    "uncachedInputTokens": number
+    "unknownCostCalls": number
+    "workflowName": string
+  })[]
+  "stepsCoveredSince": string | null
+  "stepsTotal": number
+  "stepsTruncated": boolean
+  "totals": {
+    "cacheCreationInputTokens": number
+    "cachedInputTokens": number
+    "calls": number
+    "costUsd": number | null
+    "outputTokens": number
+    "simulatedCalls": number
+    "uncachedInputTokens": number
+    "unknownCostCalls": number
+  }
+  "windowDays": number
+  "withoutRun": {
+    "cacheCreationInputTokens": number
+    "cachedInputTokens": number
+    "calls": number
+    "costUsd": number | null
+    "outputTokens": number
+    "simulatedCalls": number
+    "uncachedInputTokens": number
+    "unknownCostCalls": number
+  }
+}
+
 export type ValidationBreakdown = {
   "acceptedLoss": number
   "completed": number
@@ -1434,6 +1493,8 @@ export interface ApiRequests {
   "GET /templates": undefined
   /** The AI Studio tool catalog */
   "GET /tools": undefined
+  /** Estimated AI cost of a bounded window: most expensive steps and cost by model */
+  "GET /usage/costs": undefined
   /** Keyset-paginated workflow list */
   "GET /workflows": undefined
   /** Recorded recovery qualification for a version pair */
@@ -1667,6 +1728,8 @@ export interface ApiResponses {
   "GET /templates": TemplateCatalogEntry[]
   /** The AI Studio tool catalog */
   "GET /tools": ToolCatalogEntry[]
+  /** Estimated AI cost of a bounded window: most expensive steps and cost by model */
+  "GET /usage/costs": UsageCosts
   /** Keyset-paginated workflow list */
   "GET /workflows": WorkflowListItem[]
   /** Recorded recovery qualification for a version pair */
@@ -1855,6 +1918,8 @@ export interface ApiSuccessStatuses {
   "GET /templates": 200
   /** The AI Studio tool catalog */
   "GET /tools": 200
+  /** Estimated AI cost of a bounded window: most expensive steps and cost by model */
+  "GET /usage/costs": 200
   /** Keyset-paginated workflow list */
   "GET /workflows": 200
   /** Recorded recovery qualification for a version pair */

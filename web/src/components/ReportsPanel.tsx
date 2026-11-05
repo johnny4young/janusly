@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { api, contractApi } from '../api'
 import { useT } from '../i18n'
+import { isGetUsageCostsResponse } from '../lib/api-guards/operations/GetUsageCosts'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import {
   parseRecoveryHomeSnapshot,
@@ -17,6 +18,7 @@ import {
 } from '../recovery-home-sections'
 import { useWorkflowStore } from '../store'
 import type { ActiveTab } from '../types'
+import { CostDrillSection } from './CostDrillSection'
 import { RecoveryValidationSection } from './RecoveryValidationSection'
 import { Button } from './ui/Button'
 import { ValueDashboardSection } from './ValueDashboardSection'
@@ -64,16 +66,22 @@ const loadHistory = (_windowDays: number, signal: AbortSignal) =>
     }
   })
 
+const costLoader = (model: string | null) => (windowDays: number, signal: AbortSignal) => {
+  const query = new URLSearchParams({ windowDays: String(windowDays), ...(model ? { model } : {}) })
+  return contractApi('GET /usage/costs', `/v1/usage/costs?${query}`, undefined, { signal, guard: isGetUsageCostsResponse })
+}
+const loadCosts = costLoader(null)
+
 /** `undefined` while the first read for this org and window is pending, `null` once it failed.
  *  A refresh replaces the value in place; a new org or window never shows the old one. */
 function useReportRead<T>(
   load: (windowDays: number, signal: AbortSignal) => Promise<T | null>,
   enabled: boolean,
-  orgId: string,
+  scopeKey: string,
   windowDays: number,
   refresh: number,
 ): T | null | undefined {
-  const scope = `${orgId}:${windowDays}`
+  const scope = `${scopeKey}:${windowDays}`
   const [read, setRead] = useState<{ scope: string; value: T | null } | null>(null)
   useEffect(() => {
     if (!enabled) return
@@ -89,26 +97,38 @@ function useReportRead<T>(
 }
 
 export function ReportsPanel({
-  canReadDeadLetters,
-  canReadReports,
+  permissions,
   onOpenTab,
+  onOpenRun,
 }: {
-  canReadDeadLetters: boolean
-  canReadReports: boolean
+  /** Absent means every permission, as in the rest of the right panel. */
+  permissions?: readonly string[]
   onOpenTab: (tab: ActiveTab) => void
+  onOpenRun: (runId: string) => void
 }) {
   const { t } = useT()
+  const can = (permission: string) => !permissions || permissions.includes(permission)
+  const canReadDeadLetters = can('dlq.read')
+  const canReadReports = can('reports.read')
+  const canReadRuns = can('runs.read')
   const orgId = useWorkflowStore((state) => state.orgId) ?? 'default'
   const invalidation = useInvalidationNonce(REPORT_TAGS)
   const [retries, setRetries] = useState(0)
   const refresh = invalidation + retries
   const [windowDays, setWindowDays] = useState<number>(30)
   const [nowMs] = useState(() => Date.now())
+  // Tied to the org and window it was picked in, so it never outlives them.
+  const costScope = `${orgId}:${windowDays}`
+  const [costSelection, setCostSelection] = useState<{ scope: string; model: string } | null>(null)
+  const costModel = costSelection?.scope === costScope ? costSelection.model : null
 
   const windowedMetrics = useReportRead(loadMetrics, canReadDeadLetters, orgId, windowDays, refresh)
   const windowedClusters = useReportRead(loadClusters, canReadDeadLetters, orgId, windowDays, refresh)
   const windowedValidation = useReportRead(loadValidation, canReadReports, orgId, windowDays, refresh)
   const history = useReportRead(loadHistory, true, orgId, WHOLE_HISTORY, refresh)
+  const loadModelCosts = useMemo(() => costLoader(costModel), [costModel])
+  const costs = useReportRead(loadCosts, canReadRuns, orgId, windowDays, refresh)
+  const modelCosts = useReportRead(loadModelCosts, canReadRuns && costModel !== null, `${orgId}:${costModel}`, windowDays, refresh)
   // The focused routes need dlq.read and reports.read; recovery.read alone gets
   // the read model's fixed 30-day projections of the same reports.
   const metrics = canReadDeadLetters ? windowedMetrics : history?.metrics
@@ -123,6 +143,7 @@ export function ReportsPanel({
   const recoveryTime = metrics ? selectRecoveryTimeMetric(metrics) : null
   const failed = metrics === null || clusters === null || validation === null
     || history === null || history?.days === null
+    || costs === null || (costModel !== null && modelCosts === null)
 
   return (
     <div className="we-reports" data-testid="reports-panel">
@@ -177,6 +198,16 @@ export function ReportsPanel({
           clusters={[...clusters.clusters].sort((a, b) => b.frequency - a.frequency)}
           totalSamples={clusters.totalSamples}
           onOpenTab={onOpenTab}
+        />
+      )}
+
+      {canReadRuns && (
+        <CostDrillSection
+          costs={costs}
+          stepsRead={costModel === null ? costs : modelCosts}
+          selectedModel={costModel}
+          onSelectModel={(model) => setCostSelection(model === null ? null : { scope: costScope, model })}
+          onOpenRun={onOpenRun}
         />
       )}
 

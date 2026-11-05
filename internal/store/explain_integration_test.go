@@ -80,6 +80,9 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 		{"cleanupExpiredSsoNonces", cleanupExpiredSsoNonces, []any{}},
 		{"listOrgsWithRetainableData", listOrgsWithRetainableData, []any{}},
 		{"deleteExpiredDeadLettersBatch", deleteExpiredDeadLettersBatch, []any{"org-x", now, int32(100)}},
+		{"listUsageCostModels", listUsageCostModels, []any{"org-x", now}},
+		{"listUsageCostSteps", listUsageCostSteps, []any{"org-x", now, "model-x", int32(10000)}},
+		{"listUsageCostRuns", listUsageCostRuns, []any{"org-x", []string{"run-x"}}},
 	}
 	// Only queries whose predicate no other index can serve pin their index:
 	// on the empty controlled keys the planner is indifferent between two

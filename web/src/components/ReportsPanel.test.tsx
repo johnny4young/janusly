@@ -77,6 +77,23 @@ const home = {
   },
 }
 
+const costTally = {
+  calls: 2, uncachedInputTokens: 10, cachedInputTokens: 20, cacheCreationInputTokens: 0, outputTokens: 5,
+  costUsd: 0.5, unknownCostCalls: 0, simulatedCalls: 0,
+}
+const costStep = (runId: string, model: string) => ({
+  ...costTally, runId, runAvailable: true, workflowName: 'Flow', nodeId: 'step', provider: 'Anthropic', model,
+})
+function usageCosts(path: string) {
+  const model = new URL(path, 'http://x').searchParams.get('model')
+  const steps = model ? [costStep('run-of-model', model)] : [costStep('run-of-all', 'haiku')]
+  return {
+    windowDays: windowOf(path), retentionDays: 90, aiConfigured: true, stepsTruncated: false, stepsCoveredSince: null, rowCap: 10000,
+    stepsTotal: 1, modelsTotal: 1, totals: costTally, withoutRun: { ...costTally, calls: 0, costUsd: null }, steps,
+    models: [{ ...costTally, provider: 'Anthropic', model: 'haiku' }],
+  }
+}
+
 function respond(path: string): unknown {
   if (path.startsWith('/recovery/metrics')) return { windowDays: windowOf(path), terminalRuns: 4 }
   if (path.startsWith('/dlq/clusters')) {
@@ -86,13 +103,17 @@ function respond(path: string): unknown {
   if (path === '/recovery/home') return home
   if (path === '/billing/budget') return { monthlyUsdLimit: null, monthlyUsdSpent: 0 }
   if (path === '/recovery/calibration-status') return { enabled: false, calibrations: [] }
+  if (path.startsWith('/v1/usage/costs')) return usageCosts(path)
   throw new Error(`unexpected ${path}`)
 }
 
 const called = (prefix: string) => vi.mocked(api).mock.calls.map(([path]) => path).filter((path) => path.startsWith(prefix))
-const renderPanel = (props: Partial<Parameters<typeof ReportsPanel>[0]> = {}) => {
+const renderPanel = ({ canReadDeadLetters = true, canReadReports = true, canReadRuns = false, onOpenRun = vi.fn() } = {}) => {
   const onOpenTab = vi.fn()
-  render(<ReportsPanel canReadDeadLetters canReadReports onOpenTab={onOpenTab} {...props} />)
+  const permissions = [
+    ...(canReadDeadLetters ? ['dlq.read'] : []), ...(canReadReports ? ['reports.read'] : []), ...(canReadRuns ? ['runs.read'] : []),
+  ]
+  render(<ReportsPanel permissions={permissions} onOpenTab={onOpenTab} onOpenRun={onOpenRun} />)
   return onOpenTab
 }
 
@@ -307,6 +328,51 @@ describe('ReportsPanel', () => {
 
     expect(screen.queryByTestId('recovery-center-watch-row-stale')).toBeNull()
     expect(within(tile).getByTestId('recovery-center-watch-row-d')).toBeInTheDocument()
+  })
+
+  it('reads cost for the selected window only with runs.read and opens the run of a row', async () => {
+    const onOpenRun = vi.fn()
+    renderPanel({ canReadRuns: true, onOpenRun })
+    fireEvent.click(await screen.findByTestId('cost-drill-open-run'))
+    expect(onOpenRun).toHaveBeenCalledWith('run-of-all')
+    expect(called('/v1/usage/costs')).toEqual(['/v1/usage/costs?windowDays=30'])
+
+    fireEvent.click(screen.getByTestId('reports-window-7'))
+    await waitFor(() => expect(called('/v1/usage/costs')).toContain('/v1/usage/costs?windowDays=7'))
+    expect(await screen.findByText('Last 7 days')).toBeInTheDocument()
+  })
+
+  it('never reads cost without runs.read', async () => {
+    renderPanel({ canReadRuns: false })
+    await screen.findByTestId('recovery-center-tile-clusters')
+    expect(called('/v1/usage/costs')).toEqual([])
+    expect(screen.queryByTestId('cost-drill')).toBeNull()
+  })
+
+  it('reads every report when the panel gets no permission list', async () => {
+    render(<ReportsPanel onOpenTab={vi.fn()} onOpenRun={vi.fn()} />)
+    expect(await screen.findByTestId('cost-drill')).toBeInTheDocument()
+    expect(screen.getByTestId('reports-window-30')).toBeInTheDocument()
+  })
+
+  it('reads the steps of a model without losing the totals, and resets it with the window', async () => {
+    renderPanel({ canReadRuns: true })
+    fireEvent.click(await screen.findByTestId('cost-drill-model-steps'))
+    await waitFor(() => expect(called('/v1/usage/costs')).toContain('/v1/usage/costs?windowDays=30&model=haiku'))
+    expect(screen.getByTestId('cost-drill-summary')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Open run run-of-m')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('reports-window-7'))
+    await screen.findByLabelText('Open run run-of-a')
+    expect(screen.queryByTestId('cost-drill-clear-model')).toBeNull()
+    expect(called('/v1/usage/costs')).not.toContain('/v1/usage/costs?windowDays=7&model=haiku')
+  })
+
+  it('reports a malformed cost payload as unavailable, never as zero', async () => {
+    vi.mocked(api).mockImplementation(async (path) => path.startsWith('/v1/usage/costs') ? { totals: {} } : respond(path))
+    renderPanel({ canReadRuns: true })
+    expect(await screen.findByTestId('reports-unavailable')).toBeInTheDocument()
+    expect(screen.queryByTestId('cost-drill')).toBeNull()
   })
 
   it('hides the previous window until the new one answers', async () => {

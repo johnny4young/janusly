@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 613.5,
+  "artifactGzipKiB": 616.8,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 568.6
+    "maxGzipKiB": 571.5
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,7 +85,7 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 83.26,
+    "app-workspace.js": 83.44,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
@@ -98,8 +98,8 @@
     "BudgetSettingsPanel.js": 3.25,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 40.83,
-    "catalog-es.js": 45.56,
+    "catalog-en.js": 41.23,
+    "catalog-es.js": 45.91,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
@@ -124,7 +124,7 @@
     "MultiAgentTimeline.css": 1.06,
     "MultiAgentTimeline.js": 1.78,
     "OperationsPage.css": 1.36,
-    "OperationsPage.js": 5.76,
+    "OperationsPage.js": 5.85,
     "PermissionGrantsPanel.css": 0.88,
     "PermissionGrantsPanel.js": 3.19,
     "PlaybookMatchCard.js": 0.95,
@@ -162,7 +162,7 @@
     "SlackInteractionsPanel.js": 2.56,
     "SnippetInsertMenu.js": 3.92,
     "SolutionPacksPanel.css": 0.43,
-    "SolutionPacksPanel.js": 2.32,
+    "SolutionPacksPanel.js": 2.33,
     "supabase-runtime.js": 21.13,
     "ToolInputFields.js": 1.51,
     "UpstreamHealthPanel.js": 2.39,

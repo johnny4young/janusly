@@ -309,6 +309,8 @@ var Routes = []Route{
 		Response: memoryConsentStatus},
 	{Method: "GET", Path: "/v1/run/usage", Summary: "Bounded per-run AI and memory usage",
 		Response: runUsage},
+	{Method: "GET", Path: "/v1/usage/costs", Summary: "Estimated AI cost of a bounded window: most expensive steps and cost by model",
+		Response: usageCosts},
 	{Method: "GET", Path: "/v1/workflows/schedule-preview", Summary: "Validate a cron expression and preview its next fires",
 		Response: closedObj(map[string]any{"valid": boolT(), "nextFires": arr(str())}, "valid", "nextFires")},
 	{Method: "GET", Path: "/v1/tools", Summary: "The AI Studio tool catalog",

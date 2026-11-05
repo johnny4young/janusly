@@ -108,6 +108,7 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 	rec.record("GET /v1/status", h.call("GET", "/v1/status?runId="+runID, nil, ""), http.StatusOK)
 	rec.record("GET /v1/runs", h.call("GET", "/v1/runs?workflowId="+workflowID, nil, ""), http.StatusOK)
 	rec.record("GET /v1/run/usage", h.call("GET", "/v1/run/usage?runId="+runID, nil, ""), http.StatusOK)
+	rec.record("GET /v1/usage/costs", h.call("GET", "/v1/usage/costs", nil, ""), http.StatusOK)
 	formRun, token := conformanceFormRun(t, h, "conformance-form-"+suffix)
 	rec.record("POST /v1/resume", h.call("POST", "/v1/resume", map[string]any{
 		"runId": formRun, "nodeId": "form", "input": map[string]any{"amount": 5}, "resumeToken": token,
