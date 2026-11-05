@@ -21,6 +21,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AlertCircle, KeyRound, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 
 import { api } from "../api";
+import { getActiveOrg } from "../auth";
 import { useWorkflowStore } from "../store";
 import { tApiError, useT } from "../i18n";
 import { useConfirm } from "./ConfirmDialog";
@@ -29,6 +30,7 @@ import { FormActions, FormField, FormGrid, TextInput } from "./ui/Form";
 import { StatusSummary } from "./ui/StatusSummary";
 import './PermissionGrantsPanel.css'
 import { PLATFORM_TAG, useInvalidationNonce, type ResourceTag } from '../lib/query-cache'
+import { useAliveRef } from '../hooks/useAliveRef'
 
 const PERMISSION_TAGS = [PLATFORM_TAG, 'roles'] as const
 
@@ -52,7 +54,7 @@ type RoleEntry = {
   grantedPermissions: string[] | null;
 };
 
-type SaveFailure = { role: string; message: string };
+type SaveFailure = { role: string; message: string; attempted: Set<string> };
 
 const ROLE_ORDER: Role[] = ["viewer", "editor", "admin"];
 
@@ -64,8 +66,14 @@ function sameKeys(a: Set<string>, b: Set<string>) {
   return a.size === b.size && [...a].every((key) => b.has(key));
 }
 
-export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean } = {}) {
+export function PermissionGrantsPanel({ canWrite }: { canWrite?: boolean } = {}) {
+  const organizationId = useWorkflowStore((s) => s.identityContext?.currentOrganizationId ?? "");
+  return <OrganizationPermissions key={organizationId} canWrite={canWrite} />;
+}
+
+function OrganizationPermissions({ canWrite = true }: { canWrite?: boolean }) {
   const { t } = useT();
+  const aliveRef = useAliveRef();
   const confirmDialog = useConfirm();
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion);
   const addToast = useWorkflowStore((s) => s.addToast);
@@ -82,10 +90,11 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
   const [newRoleDescription, setNewRoleDescription] = useState("");
   const [newRolePermissions, setNewRolePermissions] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
-  // Unsaved grants per role. Roles without a draft always show the server state,
-  // so a refetch keeps in-progress edits without freezing untouched roles.
-  const [drafts, setDrafts] = useState<Record<string, Set<string>>>({});
+  // Unsaved grants per role, keyed by a Map because role names are user-defined
+  // and may collide with Object.prototype. A role without a draft shows the server state.
+  const [drafts, setDrafts] = useState<ReadonlyMap<string, Set<string>>>(new Map());
   const [saving, setSaving] = useState(false);
   const [saveReport, setSaveReport] = useState<{ total: number; failures: SaveFailure[] } | null>(null);
   const [filter, setFilter] = useState("");
@@ -104,7 +113,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
         setRoles(r.roles ?? []);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : (t("permissions.errorLoad")));
+        if (!cancelled) setError(tApiError(err) || t("permissions.errorLoad"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -137,39 +146,60 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
   }, [grouped, filter]);
 
   const savedGrants = useMemo(() => {
-    const out: Record<string, Set<string>> = {};
+    const out = new Map<string, Set<string>>();
     for (const role of roles) {
       const granted = Array.isArray(role.grantedPermissions)
         ? role.grantedPermissions
         : role.isBuiltin
           ? catalog.filter((entry) => entry.defaultRoles.includes(role.name as Role)).map((entry) => entry.key)
           : [];
-      out[role.name] = new Set(granted);
+      out.set(role.name, new Set(granted));
     }
     return out;
   }, [roles, catalog]);
 
+  // A draft equal to the server state is no edit: keeping it would overwrite a later server change.
+  useEffect(() => {
+    setDrafts((prev) => {
+      const next = new Map([...prev].filter(([name, draft]) => {
+        const saved = savedGrants.get(name);
+        return saved && !sameKeys(draft, saved);
+      }));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [savedGrants]);
+
   function toggleGrant(roleName: string, key: string) {
     setDrafts((prev) => {
-      const set = new Set(prev[roleName] ?? savedGrants[roleName]);
+      const saved = savedGrants.get(roleName) ?? new Set<string>();
+      const set = new Set(prev.get(roleName) ?? saved);
       if (set.has(key)) set.delete(key);
       else set.add(key);
-      return { ...prev, [roleName]: set };
+      const next = new Map(prev);
+      if (sameKeys(set, saved)) next.delete(roleName);
+      else next.set(roleName, set);
+      return next;
     });
   }
 
   function dropDrafts(roleNames: readonly string[]) {
-    setDrafts((prev) => Object.fromEntries(Object.entries(prev).filter(([name]) => !roleNames.includes(name))));
+    setDrafts((prev) => new Map([...prev].filter(([name]) => !roleNames.includes(name))));
   }
 
   // The API saves one role per request, so roles can succeed and fail independently.
   async function saveChanges(edited: readonly RoleEntry[]) {
+    // api() reads the active org per request, so a later POST would land in the newly active workspace.
+    const org = getActiveOrg();
+    const leftView = () => !aliveRef.current || getActiveOrg() !== org;
     setSaving(true);
     setSaveReport(null);
     const failures: SaveFailure[] = [];
     const saved = new Map<string, Partial<RoleEntry>>();
     for (const role of edited) {
-      const granted = Array.from(drafts[role.name]).sort();
+      if (leftView()) break;
+      const attempted = drafts.get(role.name);
+      if (!attempted) continue;
+      const granted = Array.from(attempted).sort();
       try {
         const response = (await api(`/org/roles/${encodeURIComponent(role.name)}`, {
           method: "POST",
@@ -177,7 +207,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
         })) as Partial<RoleEntry> | null;
         saved.set(role.name, { ...response, grantedPermissions: response?.grantedPermissions ?? granted });
       } catch (err) {
-        failures.push({ role: role.name, message: tApiError(err) || t("permissions.errorSave") });
+        failures.push({ role: role.name, message: tApiError(err) || t("permissions.errorSave"), attempted });
       }
     }
     if (saved.size > 0) {
@@ -185,7 +215,13 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
       dropDrafts([...saved.keys()]);
       bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     }
-    if (failures.length > 0) setSaveReport({ total: edited.length, failures });
+    const unconfirmed = edited.filter((role) => !saved.has(role.name)).map((role) => role.name);
+    if (unconfirmed.length > 0 && leftView()) {
+      addToast(t("permissions.saveStopped", {
+        saved: [...saved.keys()].join(", ") || "—",
+        unconfirmed: unconfirmed.join(", "),
+      }), "error");
+    } else if (failures.length > 0) setSaveReport({ total: edited.length, failures });
     else addToast(t("permissions.toastUpdated", { role: [...saved.keys()].join(", ") }), "success");
     setSaving(false);
   }
@@ -196,7 +232,6 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
       addToast(t("permissions.toastReverted", { role: role.name }), "success");
       dropDrafts([role.name]);
-      setSaveReport(null);
       bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
       addToast(tApiError(err) || (t("permissions.errorRevert")), "error");
@@ -209,7 +244,6 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
       addToast(t("permissions.toastDeleted", { role: role.name }), "success");
       dropDrafts([role.name]);
-      setSaveReport(null);
       bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
       addToast(tApiError(err) || (t("permissions.errorDelete")), "error");
@@ -228,12 +262,9 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
   async function createRole(event: React.FormEvent) {
     event.preventDefault();
     const name = newRoleName.trim().toLowerCase();
-    if (!ROLE_NAME_RE.test(name)) {
-      setError(t("permissions.errorName"));
-      return;
-    }
+    if (!ROLE_NAME_RE.test(name)) return;
     setCreating(true);
-    setError(null);
+    setCreateError(null);
     try {
       await api("/org/roles", {
         method: "POST",
@@ -251,7 +282,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
       setNewRoleInherits("viewer");
       bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
-      setError(err instanceof Error ? err.message : (t("permissions.errorCreate")));
+      setCreateError(tApiError(err) || t("permissions.errorCreate"));
     } finally {
       setCreating(false);
     }
@@ -272,8 +303,11 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
   const builtins = ROLE_ORDER.map((r) => roles.find((row) => row.name === r)).filter((r): r is RoleEntry => r !== undefined);
   const customs = roles.filter((r) => !r.isBuiltin);
   const columns = [...builtins, ...customs];
-  const grantsOf = (role: RoleEntry) => drafts[role.name] ?? savedGrants[role.name];
-  const editedRoles = columns.filter((role) => drafts[role.name] && !sameKeys(drafts[role.name], savedGrants[role.name]));
+  const savedOf = (role: RoleEntry) => savedGrants.get(role.name) ?? new Set<string>();
+  const grantsOf = (role: RoleEntry) => drafts.get(role.name) ?? savedOf(role);
+  const editedRoles = columns.filter((role) => drafts.has(role.name));
+  // A failure stays on screen only while that exact attempt is still the role's draft.
+  const liveFailures = saveReport?.failures.filter((failure) => drafts.get(failure.role) === failure.attempted) ?? [];
   const differsFromDefault = (role: RoleEntry, entry: CatalogEntry) =>
     role.isBuiltin && grantsOf(role).has(entry.key) !== entry.defaultRoles.includes(role.name as Role);
   const changesFromDefault = columns.reduce(
@@ -317,10 +351,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
             {canWrite && (
               <>
                 <Button
-                  onClick={() => {
-                    setDrafts({});
-                    setSaveReport(null);
-                  }}
+                  onClick={() => setDrafts(new Map())}
                   disabled={editedRoles.length === 0 || saving}
                   data-testid="permissions-discard"
                 >
@@ -347,7 +378,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
         <StatusSummary role="alert" tone="danger" icon={<AlertCircle size={16} />} title={error} />
       )}
 
-      {saveReport && (
+      {saveReport && liveFailures.length > 0 && (
         <StatusSummary
           role="alert"
           tone="danger"
@@ -356,7 +387,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
             saved: saveReport.total - saveReport.failures.length,
             total: saveReport.total,
           })}
-          description={saveReport.failures.map((failure) => (
+          description={liveFailures.map((failure) => (
             <div key={failure.role}><code>{failure.role}</code>: {failure.message}</div>
           ))}
         />
@@ -418,11 +449,12 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
                       const isMandatory = role.isBuiltin && role.name === "admin" && mandatoryAdmin.includes(entry.key);
                       const checked = grantsOf(role).has(entry.key);
                       const changed = differsFromDefault(role, entry);
+                      const unsaved = checked !== savedOf(role).has(entry.key);
                       return (
                         <td
                           key={role.name}
                           data-changed={changed || undefined}
-                          data-unsaved={checked !== savedGrants[role.name].has(entry.key) || undefined}
+                          data-unsaved={unsaved || undefined}
                         >
                           <label>
                             <input
@@ -431,7 +463,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
                               disabled={!canWrite || isMandatory || saving}
                               onChange={() => toggleGrant(role.name, entry.key)}
                               aria-label={t("permissions.entryAria", { role: role.name, key: entry.key })}
-                              aria-description={changed ? t("permissions.changedNote") : undefined}
+                              aria-description={[changed && t("permissions.changedNote"), unsaved && t("permissions.unsavedNote")].filter(Boolean).join(". ") || undefined}
                               data-testid={`permissions-toggle-${role.name}-${entry.key}`}
                             />
                             {isMandatory && <span className="we-pill" data-tone="warning">{t("permissions.required")}</span>}
@@ -454,7 +486,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
         </div>
       )}
 
-      {canWrite && <details className="we-permissions-role-card">
+      {canWrite && columns.length > 0 && <details className="we-permissions-role-card">
         <summary data-testid="permissions-add-role"><h4>{t("permissions.add.heading")}</h4></summary>
         <p>{t("permissions.add.intro")}</p>
         <form className="ui-form-layout" onSubmit={createRole} noValidate>
@@ -526,6 +558,9 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
               </div>
             ))}
           </div>
+          {createError && (
+            <StatusSummary role="alert" tone="danger" icon={<AlertCircle size={16} />} title={createError} />
+          )}
           <FormActions>
             <Button
               type="submit"

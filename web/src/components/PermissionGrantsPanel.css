@@ -136,6 +136,7 @@
   cursor: pointer;
 }
 
+.we-permissions-matrix td label:has(input:disabled),
 .we-permissions-matrix td input:disabled {
   cursor: not-allowed;
 }

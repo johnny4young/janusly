@@ -318,10 +318,14 @@ rail. The configuration-first order is Organization, Access, Connections and
 AI configuration, followed by Reliability, Usage and Infrastructure. Organization
 owns workspace-wide data governance and audit history; Access owns membership,
 roles, authentication, SSO and SCIM. Its permission matrix holds unsaved grants
-per role apart from server state, so a refetch keeps edits and untouched roles
-follow the server. Save posts only edited roles, one request per role with
-custom roles last, and names each role that failed while keeping its edits; the
-API's floor and route gates remain the authority. Connections is the stable
+per role apart from server state and drops a draft once it matches that state,
+so a refetch keeps edits and untouched roles follow the server. Drafts belong
+to one organization. Save posts only edited roles, one request per role with
+custom roles last, and names each role that failed while keeping its edits.
+Because `api()` reads the active organization per request, Save captures it
+first and stops if it changes or the panel unmounts, then reports which roles
+saved and which are unconfirmed; the API's floor and route gates remain the
+authority. Connections is the stable
 user-facing name for credentials and external services, while the existing `integrations` route
 identifier remains compatible with saved deep links. The canonical Connections
 inventory stays list-first with a separate add dialog; Settings links to it

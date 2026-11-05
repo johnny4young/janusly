@@ -1,10 +1,15 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import es from '../i18n/locales/es/common.json'
 import { useWorkflowStore } from '../store'
 import { PermissionGrantsPanel } from './PermissionGrantsPanel'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
+
+// The matrix is a large DOM: on a busy host its queries outlast the default wait budgets.
+configure({ asyncUtilTimeout: 5_000 })
+vi.setConfig({ testTimeout: 30_000 })
 
 const initialState = useWorkflowStore.getState()
 
@@ -51,10 +56,33 @@ function posts() {
     .map(([path, init]) => [path, JSON.parse(String(init?.body))])
 }
 
+function toastMessages() {
+  return useWorkflowStore.getState().toasts.map(toast => toast.message)
+}
+
+function apiError(message: string, code: string, params?: Record<string, unknown>) {
+  return Object.assign(new Error(message), { error: message, code, params })
+}
+
+// Role writes wait for the test to release them; reads and deletes answer at once.
+function deferRoleWrites(rolesResp: unknown) {
+  const pending: Array<{ resolve: (value: unknown) => void; reject: (reason: unknown) => void }> = []
+  vi.mocked(api).mockImplementation((path: string) => {
+    if (path === '/org/permissions/catalog') return Promise.resolve(CATALOG)
+    if (path === '/org/roles') return Promise.resolve(rolesResp)
+    return new Promise((resolve, reject) => { pending.push({ resolve, reject }) })
+  })
+  return pending
+}
+
 describe('<PermissionGrantsPanel />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
+  })
+
+  afterEach(() => {
+    localStorage.removeItem('janusly:activeOrg')
   })
 
   it('renders all three built-ins with no overrides', async () => {
@@ -444,5 +472,312 @@ describe('<PermissionGrantsPanel />', () => {
     })
     await waitFor(() => expect(screen.getByTestId('permissions-save')).toBeDisabled())
     confirmSpy.mockRestore()
+  })
+
+  describe('when the workspace changes during a save', () => {
+    async function startTwoRoleSave() {
+      localStorage.setItem('janusly:activeOrg', 'org-a')
+      const pending = deferRoleWrites(ROLES_DEFAULT)
+      const view = render(<PermissionGrantsPanel />)
+      await screen.findByTestId('permissions-matrix')
+      fireEvent.click(screen.getByLabelText('viewer - workflows.write'))
+      fireEvent.click(screen.getByLabelText('editor - members.write'))
+      await act(async () => { fireEvent.click(screen.getByTestId('permissions-save')) })
+      expect(posts().map(([path]) => path)).toEqual(['/org/roles/viewer'])
+      return { pending, view }
+    }
+
+    it('stops before writing the remaining roles into the new workspace', async () => {
+      const { pending } = await startTwoRoleSave()
+      localStorage.setItem('janusly:activeOrg', 'org-b')
+      await act(async () => { pending[0].resolve({ ok: true }) })
+
+      expect(posts().map(([path]) => path)).toEqual(['/org/roles/viewer'])
+      expect(toastMessages()).toEqual([
+        'Save stopped because the workspace or view changed. Saved: viewer. Not confirmed: editor.',
+      ])
+      expect(screen.getByTestId('permissions-status')).toHaveTextContent(/Unsaved: editor$/)
+      expect(screen.getByTestId('permissions-save')).toBeEnabled()
+    })
+
+    it('does not claim a write aborted by the switch was saved', async () => {
+      const { pending } = await startTwoRoleSave()
+      localStorage.setItem('janusly:activeOrg', 'org-b')
+      await act(async () => { pending[0].reject(new DOMException('Identity changed', 'AbortError')) })
+
+      expect(posts()).toHaveLength(1)
+      expect(toastMessages()).toEqual([
+        'Save stopped because the workspace or view changed. Saved: —. Not confirmed: viewer, editor.',
+      ])
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('stops when the panel unmounts', async () => {
+      const { pending, view } = await startTwoRoleSave()
+      view.unmount()
+      await act(async () => { pending[0].resolve({ ok: true }) })
+
+      expect(posts()).toHaveLength(1)
+      expect(toastMessages()).toEqual([
+        'Save stopped because the workspace or view changed. Saved: viewer. Not confirmed: editor.',
+      ])
+    })
+
+    it('reports success when every role was already written', async () => {
+      localStorage.setItem('janusly:activeOrg', 'org-a')
+      const pending = deferRoleWrites(ROLES_DEFAULT)
+      render(<PermissionGrantsPanel />)
+      await screen.findByTestId('permissions-matrix')
+      fireEvent.click(screen.getByLabelText('viewer - workflows.write'))
+      await act(async () => { fireEvent.click(screen.getByTestId('permissions-save')) })
+      localStorage.setItem('janusly:activeOrg', 'org-b')
+      await act(async () => { pending[0].resolve({ ok: true }) })
+
+      expect(toastMessages()).toEqual(['Updated permissions for "viewer"'])
+    })
+
+    it('never carries edits into the next workspace', async () => {
+      setupApi(CATALOG, ROLES_DEFAULT)
+      const identity = (id: string) => ({ currentOrganizationId: id }) as ReturnType<typeof useWorkflowStore.getState>['identityContext']
+      useWorkflowStore.setState({ identityContext: identity('org-a') })
+      render(<PermissionGrantsPanel />)
+      await screen.findByTestId('permissions-matrix')
+      fireEvent.click(screen.getByLabelText('viewer - workflows.write'))
+      expect(screen.getByTestId('permissions-save')).toBeEnabled()
+
+      await act(async () => { useWorkflowStore.setState({ identityContext: identity('org-b') }) })
+
+      expect(await screen.findByLabelText('viewer - workflows.write')).not.toBeChecked()
+      expect(screen.getByTestId('permissions-save')).toBeDisabled()
+    })
+  })
+
+  it.each(['constructor', '__proto__'])('keeps working with a custom role named %s', async (name) => {
+    setupApi(CATALOG, {
+      roles: [...ROLES_DEFAULT.roles, { name, isBuiltin: false, inheritsFrom: 'viewer', description: null, grantedPermissions: null }],
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+    render(<PermissionGrantsPanel />)
+    await screen.findByTestId('permissions-matrix')
+    const box = screen.getByLabelText(`${name} - dlq.replay`)
+    expect(box).not.toBeChecked()
+    expect(screen.getByTestId('permissions-save')).toBeDisabled()
+
+    fireEvent.click(box)
+    expect(box).toBeChecked()
+    expect(screen.getByTestId('permissions-status')).toHaveTextContent(`Unsaved: ${name}`)
+    await act(async () => { fireEvent.click(screen.getByTestId('permissions-save')) })
+    expect(posts()).toEqual([[`/org/roles/${name}`, { grantedPermissions: ['dlq.replay'] }]])
+
+    await act(async () => { fireEvent.click(screen.getByTestId(`permissions-delete-${name}`)) })
+    await waitFor(() => expect(api).toHaveBeenCalledWith(`/org/roles/${name}`, { method: 'DELETE' }))
+    confirmSpy.mockRestore()
+  })
+
+  describe('drafts that match the server', () => {
+    function serveRoles(initial: unknown) {
+      const state = { rolesResp: initial }
+      vi.mocked(api).mockImplementation(async (path: string) => {
+        if (path === '/org/permissions/catalog') return CATALOG
+        if (path === '/org/roles') return state.rolesResp
+        return { ok: true }
+      })
+      return state
+    }
+    const withViewerGrants = (grantedPermissions: string[]) => ({
+      roles: ROLES_DEFAULT.roles.map(role => role.name === 'viewer' ? { ...role, id: 'r-viewer', grantedPermissions } : role),
+    })
+    const refetch = () => act(async () => { useWorkflowStore.getState().bumpPlatformVersion(['roles']) })
+
+    it('follows another admin after a toggle back instead of overwriting them', async () => {
+      const server = serveRoles(ROLES_DEFAULT)
+      render(<PermissionGrantsPanel />)
+      await screen.findByTestId('permissions-matrix')
+      const box = screen.getByLabelText('viewer - workflows.write')
+      fireEvent.click(box)
+      fireEvent.click(box)
+
+      server.rolesResp = withViewerGrants(['workflows.read', 'dlq.replay'])
+      await refetch()
+
+      await waitFor(() => expect(screen.getByLabelText('viewer - dlq.replay')).toBeChecked())
+      expect(screen.getByTestId('permissions-save')).toBeDisabled()
+      expect(screen.getByTestId('permissions-status')).not.toHaveTextContent('Unsaved')
+    })
+
+    it('drops a draft once a refetch makes it match, so a later change still shows', async () => {
+      const server = serveRoles(ROLES_DEFAULT)
+      render(<PermissionGrantsPanel />)
+      await screen.findByTestId('permissions-matrix')
+      fireEvent.click(screen.getByLabelText('viewer - dlq.replay'))
+
+      server.rolesResp = withViewerGrants(['workflows.read', 'dlq.replay'])
+      await refetch()
+      await waitFor(() => expect(screen.getByTestId('permissions-save')).toBeDisabled())
+
+      server.rolesResp = withViewerGrants(['workflows.read'])
+      await refetch()
+      await waitFor(() => expect(screen.getByLabelText('viewer - dlq.replay')).not.toBeChecked())
+      expect(screen.getByTestId('permissions-save')).toBeDisabled()
+    })
+  })
+
+  describe('partial-failure alert', () => {
+    async function failViewerSave() {
+      setupApi(CATALOG, { roles: [ROLES_DEFAULT.roles[0], { ...ROLES_DEFAULT.roles[1], id: 'r-editor' }, ROLES_DEFAULT.roles[2]] })
+      const passthrough = vi.mocked(api).getMockImplementation()!
+      vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+        if (path === '/org/roles/viewer' && init?.method === 'POST') throw new Error('Forbidden')
+        return passthrough(path, init)
+      })
+      render(<PermissionGrantsPanel />)
+      await screen.findByTestId('permissions-matrix')
+      fireEvent.click(screen.getByLabelText('viewer - workflows.write'))
+      fireEvent.click(screen.getByLabelText('editor - members.write'))
+      await act(async () => { fireEvent.click(screen.getByTestId('permissions-save')) })
+      expect(screen.getByRole('alert')).toHaveTextContent('viewer: Forbidden')
+    }
+
+    it('goes away when the failed edit is toggled back and stays away on a new edit', async () => {
+      await failViewerSave()
+      const box = screen.getByLabelText('viewer - workflows.write')
+      fireEvent.click(box)
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      fireEvent.click(box)
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('goes away on discard', async () => {
+      await failViewerSave()
+      fireEvent.click(screen.getByTestId('permissions-discard'))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('stays while the failed role is unsaved even if another role is reverted', async () => {
+      await failViewerSave()
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+      await act(async () => { fireEvent.click(screen.getByTestId('permissions-revert-editor')) })
+      await waitFor(() => expect(api).toHaveBeenCalledWith('/org/roles/editor', { method: 'DELETE' }))
+      await waitFor(() => expect(toastMessages()).toEqual(['Reverted "editor" to defaults']))
+      expect(screen.getByRole('alert')).toHaveTextContent('viewer: Forbidden')
+      expect(screen.getByTestId('permissions-status')).toHaveTextContent(/Unsaved: viewer$/)
+      confirmSpy.mockRestore()
+    })
+  })
+
+  describe('failures outside Save', () => {
+    function failing(method: string, path: string, error: Error, rolesResp: unknown = ROLES_WITH_CUSTOM) {
+      setupApi(CATALOG, rolesResp)
+      const passthrough = vi.mocked(api).getMockImplementation()!
+      vi.mocked(api).mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === path && init?.method === method) throw error
+        return passthrough(url, init)
+      })
+    }
+
+    it('shows a create failure translated, at the form, and keeps the input', async () => {
+      failing('POST', '/org/roles', apiError('role with this name already exists', 'role_already_exists', { name: 'taken' }))
+      render(<PermissionGrantsPanel />)
+      const input = await screen.findByPlaceholderText('compliance')
+      fireEvent.change(input, { target: { value: 'taken' } })
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Create role/ })) })
+
+      const form = input.closest('form')!
+      expect(within(form).getByRole('alert')).toHaveTextContent('A role named "taken" already exists')
+      expect(screen.getAllByRole('alert')).toHaveLength(1)
+      expect(input).toHaveValue('taken')
+      expect(toastMessages()).toEqual([])
+
+      vi.mocked(api).mockImplementation(async () => ({ id: 'r-new' }))
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Create role/ })) })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('keeps edits and tells the operator when a revert fails', async () => {
+      failing('DELETE', '/org/roles/editor', new Error('revert refused'), {
+        roles: [ROLES_DEFAULT.roles[0], { ...ROLES_DEFAULT.roles[1], id: 'r-editor' }, ROLES_DEFAULT.roles[2]],
+      })
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+      render(<PermissionGrantsPanel />)
+      await screen.findByTestId('permissions-matrix')
+      fireEvent.click(screen.getByLabelText('editor - members.write'))
+      await act(async () => { fireEvent.click(screen.getByTestId('permissions-revert-editor')) })
+
+      await waitFor(() => expect(toastMessages()).toEqual(['revert refused']))
+      expect(screen.getByTestId('permissions-status')).toHaveTextContent(/Unsaved: editor$/)
+      expect(screen.getByLabelText('editor - members.write')).toBeChecked()
+      confirmSpy.mockRestore()
+    })
+
+    it('keeps the role and its edits when delete answers role_in_use', async () => {
+      failing('DELETE', '/org/roles/compliance', apiError('cannot delete a role with active members', 'role_in_use', { membersAffected: 2 }))
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+      render(<PermissionGrantsPanel />)
+      await screen.findByTestId('permissions-matrix')
+      fireEvent.click(screen.getByLabelText('compliance - dlq.replay'))
+      await act(async () => { fireEvent.click(screen.getByTestId('permissions-delete-compliance')) })
+
+      await waitFor(() => expect(toastMessages()).toEqual(['Cannot delete this role — 2 member(s) still use it']))
+      expect(screen.getByTestId('permissions-role-compliance')).toBeInTheDocument()
+      expect(screen.getByTestId('permissions-status')).toHaveTextContent(/Unsaved: compliance$/)
+      expect(screen.getByLabelText('compliance - dlq.replay')).toBeChecked()
+      confirmSpy.mockRestore()
+    })
+
+    it('shows a translated load failure without an empty matrix or create form', async () => {
+      vi.mocked(api).mockImplementation(async () => { throw apiError('raw server text', 'role_in_use', { membersAffected: 2 }) })
+      render(<PermissionGrantsPanel />)
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Cannot delete this role — 2 member(s) still use it')
+      expect(screen.queryByText('Loading permissions…')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('permissions-matrix')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('permissions-add-role')).not.toBeInTheDocument()
+    })
+
+    it('keeps the matrix and edits through a failed refetch and recovers on the next one', async () => {
+      let rolesFail = false
+      vi.mocked(api).mockImplementation(async (path: string) => {
+        if (path === '/org/permissions/catalog') return CATALOG
+        if (rolesFail) throw new Error('refetch failed')
+        return ROLES_DEFAULT
+      })
+      render(<PermissionGrantsPanel />)
+      await screen.findByTestId('permissions-matrix')
+      fireEvent.click(screen.getByLabelText('viewer - workflows.write'))
+
+      rolesFail = true
+      await act(async () => { useWorkflowStore.getState().bumpPlatformVersion(['roles']) })
+      expect((await screen.findByText('refetch failed')).closest('[role="alert"]')).not.toBeNull()
+      expect(screen.getByTestId('permissions-matrix')).toBeInTheDocument()
+      expect(screen.getByLabelText('viewer - workflows.write')).toBeChecked()
+      expect(screen.getByTestId('permissions-status')).toHaveTextContent(/Unsaved: viewer$/)
+
+      rolesFail = false
+      await act(async () => { useWorkflowStore.getState().bumpPlatformVersion(['roles']) })
+      await waitFor(() => expect(screen.queryByText('refetch failed')).not.toBeInTheDocument())
+      expect(screen.getByLabelText('viewer - workflows.write')).toBeChecked()
+    })
+  })
+
+  it('words the Spanish copy without an English term or a broken singular', () => {
+    expect(es['permissions.savePartial'].replace('{{saved}}', '1').replace('{{total}}', '2')).toBe('Roles guardados: 1 de 2')
+    expect(es['permissions.add.inheritOption.viewer']).toBe('viewer (recomendado)')
+  })
+
+  it('names unsaved cells for screen readers, not only with an outline', async () => {
+    setupApi(CATALOG, ROLES_WITH_CUSTOM)
+    render(<PermissionGrantsPanel />)
+    await screen.findByTestId('permissions-matrix')
+    const custom = screen.getByLabelText('compliance - dlq.replay')
+    const builtin = screen.getByLabelText('viewer - dlq.replay')
+    expect(custom).not.toHaveAttribute('aria-description')
+
+    fireEvent.click(custom)
+    expect(custom).toHaveAttribute('aria-description', 'Unsaved')
+    fireEvent.click(custom)
+    expect(custom).not.toHaveAttribute('aria-description')
+
+    fireEvent.click(builtin)
+    expect(builtin).toHaveAttribute('aria-description', 'Changed from default. Unsaved')
   })
 })
