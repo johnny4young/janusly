@@ -80,6 +80,13 @@ to the same visible scope. Old success/error paths cannot populate or unlock the
 new history snapshot. Client abort remains local result invalidation, not proof
 of remote cancellation.
 
+A picked pair of versions, or the draft against its source version, opens over the
+author canvas as a read-only merged graph (`VersionCanvasCompare`, loaded on demand).
+It reuses `computeWorkflowDiff`, marks steps and paths as new, modified or deleted,
+and masks secrets in the before and after JSON as the field diff does. The history
+panel owns it through a portal, so leaving the workflow or tab closes it, and
+`canvasCovered` turns off the covered editor's keyboard edits while it is open.
+
 The authoring controller and source Apply lose ownership on the first identity,
 organization, canvas, navigation or grant change, even if the store returns to
 its original values before React paints. Registry results use the saved-history
