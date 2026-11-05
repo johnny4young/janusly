@@ -14,6 +14,7 @@ import { expectNoBlockingAccessibilityViolations } from './_helpers/accessibilit
 import {
   addCanvasStep,
   openWorkflowAiAction,
+  openTemplatePacks,
   openWorkspaceSection,
 } from './_helpers/workspace-navigation'
 import {
@@ -135,7 +136,7 @@ test('Solution Packs recovery-drill selection meets the accessibility floor', as
   const errors = installBrowserErrorGuards(page)
   await page.goto('/')
 
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await openTemplatePacks(page)
   const pack = page.getByTestId('solution-pack-incident-triage')
   await expect(pack).toBeVisible()
   await pack.getByLabel('Failure scenario').selectOption('worker_interrupted_during_page')
