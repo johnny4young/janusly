@@ -56,7 +56,7 @@ func rerunIdempotencyKey(key string, body rerunRequest) string {
 	}
 	sum := sha256.New()
 	for _, part := range [][]byte{[]byte(key), []byte(body.SourceRunID), []byte(body.NodeID), body.InputOverride} {
-		fmt.Fprintf(sum, "%d:%s", len(part), part)
+		_, _ = fmt.Fprintf(sum, "%d:%s", len(part), part)
 	}
 	return "rerun:" + hex.EncodeToString(sum.Sum(nil))
 }
