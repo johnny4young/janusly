@@ -7,12 +7,15 @@
 
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import { captureAuthCallback } from './auth-callback'
 import { bootstrapI18n, FALLBACK_LOCALE, getStoredLanguage, resolveAppLanguage } from './i18n'
 import { bootTheme } from './theme'
 import { ConfirmProvider } from './components/ConfirmDialog'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { PanelErrorFallback } from './components/PanelErrorFallback'
 import './index.css'
+
+captureAuthCallback()
 
 // Resolve the user's preferred locale BEFORE React mounts so the very first
 // render (boot screen, login form) is already in the right language. The

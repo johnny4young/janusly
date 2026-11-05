@@ -24,7 +24,8 @@ export function createClient(url: string, key: string): { auth: GoTrueClient } {
       storageKey: `sb-${projectRef(baseUrl)}-auth-token`,
       autoRefreshToken: true,
       persistSession: true,
-      detectSessionInUrl: true,
+      // `auth-callback.ts` owns the URL: auth-js clears it with a history push.
+      detectSessionInUrl: false,
       flowType: 'implicit',
     }),
   }

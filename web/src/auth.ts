@@ -37,6 +37,7 @@ import {
   rotateApiRequestLifecycle,
   suspendApiRequestLifecycle,
 } from './api-request-lifecycle'
+import { clearAuthCallback, markAuthCallbackFailed, takeAuthCallbackSession } from './auth-callback'
 import { t } from './i18n/runtime'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
@@ -50,15 +51,32 @@ type SupabaseAuthFacade = { auth: GoTrueClient }
 
 let supabaseClientPromise: Promise<SupabaseAuthFacade | null> | null = null
 
+/** A rejected link reports on the login form. auth-js drops any stored session if the link's own session is gone. */
+async function adoptAuthCallback(client: SupabaseAuthFacade): Promise<void> {
+  const session = takeAuthCallbackSession()
+  if (!session) return
+  try {
+    const { error } = await client.auth.setSession(session)
+    if (error) markAuthCallbackFailed()
+  } catch {
+    markAuthCallbackFailed()
+  }
+}
+
 /**
  * Demand-load the singleton Supabase client. Dev-header builds return before
  * evaluating the dynamic import, so the vendor chunk stays off the cold path.
+ * Callers receive it only after a captured callback has been adopted.
  */
 export function getSupabaseClient(): Promise<SupabaseAuthFacade | null> {
   if (!isSupabaseConfigured) return Promise.resolve(null)
   if (!supabaseClientPromise) {
     supabaseClientPromise = import('./supabase-runtime')
-      .then(({ createClient }) => createClient(supabaseUrl!, supabaseAnonKey!))
+      .then(async ({ createClient }) => {
+        const client = createClient(supabaseUrl!, supabaseAnonKey!)
+        await adoptAuthCallback(client)
+        return client
+      })
       .catch((error: unknown) => {
         // Allow a later retry after a transient chunk-loading failure.
         supabaseClientPromise = null
@@ -145,6 +163,8 @@ async function probeBrowserSession(): Promise<BrowserSessionIdentity | null> {
       email: payload.email ?? null,
       organizationId: payload.organizationId,
     }
+    // The cookie session outranks Supabase, so a captured callback is never adopted.
+    clearAuthCallback()
     writeToStorage(ACTIVE_ORG_STORAGE_KEY, payload.organizationId)
     return browserSessionIdentity
   } catch {
@@ -296,6 +316,7 @@ export const AuthProvider = {
     // panel request that resolves auth concurrently with logout must never be
     // sent with a missing or departing identity.
     suspendApiRequestLifecycle()
+    clearAuthCallback()
     if (browserSessionIdentity) {
       try {
         await fetch(`${apiUrl}/auth/session/logout`, {

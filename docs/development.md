@@ -35,6 +35,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 | Go integration | `make test-integration` | `JANUSLY_DATABASE_URL` pointing at a migrated PostgreSQL test role with `CREATEDB`; runs `-p 1` |
 | Web unit (jsdom) | `cd web && pnpm test` | nothing; CSS is not parsed |
 | Web browser (Chromium) | `cd web && pnpm test:browser` | Playwright browsers |
+| Web auth callback | `cd web && pnpm test:auth-e2e` | Playwright browsers; builds its own Supabase-configured bundle and fakes the auth server |
 | Web scripts | `cd web && pnpm test:scripts` | nothing |
 | Web e2e | `make test-e2e` | Docker (fresh compose stack, built image) |
 | Everything | `make verify` | Docker plus the host test/lint toolchains |
@@ -43,7 +44,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 compose project, migrates twice (the second run must be a no-op), regenerates
 `schema.sql` and checks it for drift, runs `make generate` drift, lint, deadcode, vuln,
 Go unit, integration and two-instance HA, the web verify (`audit:ci`, lint,
-app/unit/E2E typecheck, unit, scripts, browser, build, `bundle-check`) and the
+app/unit/E2E typecheck, unit, scripts, browser, auth callback, build, `bundle-check`) and the
 e2e lane, then ends with
 `git diff --exit-code`. Commit first, verify after, and do not touch tracked
 files while it runs.
