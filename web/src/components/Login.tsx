@@ -7,9 +7,10 @@
  * BEFORE signing in.
  */
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Building2, LogIn, UserPlus } from 'lucide-react'
 import { AuthProvider } from '../auth'
+import { authCallbackFailed, clearAuthCallback } from '../auth-callback'
 import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
 import { useT } from '../i18n'
 import { BrandMark } from './BrandMark'
@@ -24,9 +25,12 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [mode, setMode] = useState<LoginMode>('login')
-  const [error, setError] = useState<string | null>(null)
+  // A fixed message: the link's own `error_description` is attacker-writable text.
+  const [error, setError] = useState<string | null>(() => (authCallbackFailed() ? t('auth.login.callbackFailed') : null))
   const [pending, setPending] = useState(false)
   const [ssoOrgId, setSsoOrgId] = useState('')
+
+  useEffect(() => clearAuthCallback(), [])
 
   const startSso = (event: React.FormEvent) => {
     event.preventDefault()

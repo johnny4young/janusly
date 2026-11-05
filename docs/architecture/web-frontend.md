@@ -80,6 +80,13 @@ to the same visible scope. Old success/error paths cannot populate or unlock the
 new history snapshot. Client abort remains local result invalidation, not proof
 of remote cancellation.
 
+A picked pair of versions, or the draft against its source version, opens over the
+author canvas as a read-only merged graph (`VersionCanvasCompare`, loaded on demand).
+It reuses `computeWorkflowDiff`, marks steps and paths as new, modified or deleted,
+and masks secrets in the before and after JSON as the field diff does. The history
+panel owns it through a portal, so leaving the workflow or tab closes it, and
+`canvasCovered` turns off the covered editor's keyboard edits while it is open.
+
 The authoring controller and source Apply lose ownership on the first identity,
 organization, canvas, navigation or grant change, even if the store returns to
 its original values before React paints. Registry results use the saved-history
@@ -267,6 +274,37 @@ with no window control and no exports. Model calibration and AI spend
 are not windowed: their endpoints have no window parameter. A heatmap day opens
 Recover through `#/recover/day/<YYYY-MM-DD>`.
 
+Opening a run shows one run sheet (`RunWorkspace`). `RunsPanel` owns the header
+(identity, actions, data row) and its dialogs, so they stay available on every
+tab; `RunWorkspace` owns the tabs Overview, Timeline, Events, Agents and Ask and
+lays both out through `renderSheet`. Timeline (`RunStepTimeline`, a lazy chunk)
+projects the loaded events and `run_nodes` rows with `projectRunSteps`: attempts
+grouped by step on one scale, with the row as the authority for the attempt in
+progress. No tab adds a fetch, and changing the run returns to Overview.
+Timeline offers Rerun from this step on finished production runs. `RunWorkspace`
+injects `RerunStepDialog`, which ships with the `RunsPanel` chunk, so the lazy
+timeline does not preload what the panel needs; see `run-model.md`.
+
+Recover keeps its filters above two panes once the queue section is at least
+760 px wide: the queue on the left and the selected failure on the right, each
+scrolling inside a height tied to the viewport. Narrower sections stack them, and
+selecting rows gives the queue the full width. A row's recovery item drawer opens
+in the detail pane. The default By cluster view groups
+the loaded rows client-side with `normalizeErrorSignature`, the normalizer the
+server clusters with, so every filter, sort and page keeps applying.
+`/dlq/clusters` only adds the totals on each header: a signature outside its
+30-day window, or a failed read, still groups from the loaded rows. Headers and
+rows share one fixed height, so the queue stays virtualized in both views, and
+J/K and triage focus walk the rows in the order shown.
+Investigate and Replay cluster read `/dlq/cluster-members` when clicked and open
+the cluster recovery and campaign dialogs. The full rollup, with failed run nodes
+and suggested owners, remains under Automation and patterns.
+
+Templates has two views over one shared search. Recipes groups by the category
+each template carries in `internal/httpapi/assets/templates.json`, so a new
+category gets its chip without a web change. Packs renders the embedded
+`SolutionPacksPanel` and is the only place packs appear on that page; `#/packs`
+remains the standalone route.
 The eager shell owns the core locale catalog. Non-home main and authoring-panel
 slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
 behind an accessible, height-preserving skeleton while the sidebar, top bar and
@@ -347,6 +385,15 @@ Focus returns after the input is enabled. An in-flight Apply retains its exact
 snapshot and stays pending until it settles; a prefill does not cancel it or
 start another operation. Identity and unrelated canvas changes discard pending
 focus alongside the old authoring state.
+
+Authoring problems have one source, `buildAuthoringProblems`, and one route to
+the element that resolves them, `openAuthoringProblem`. The canvas projects them
+without persisting anything: a chip on the Flow map opens the Problems scope, a
+step's worst problem sets its dot, and the rest fill a band capped at two entries
+with the overflow left to the Problems scope. A problem without a step or path
+opens its Workflow scope target when its code has one (Outputs, Versions) and the
+Problems scope otherwise. The canvas can precede the lazy panel, so
+`requestAuthoringScope` holds the scope and target until they mount and read them.
 
 The Home hero is a named region inside workspace main, not a second page banner.
 The authoring canvas is an explicitly named programmatic focus target, JSON
@@ -483,13 +530,24 @@ all-clear celebration or promise undo of external effects.
 ### Home signals
 
 Home shows what needs a decision now; every trend, breakdown and history lives
-in Reports. Below the hero and the action inbox sit the Operator prompt and a
-Today strip. Today's runs and success come from the loaded run page in the
+in Reports. The Operator prompt closes the What needs you card, and a Today strip
+sits below it. Today's runs and success come from the loaded run page in the
 operator's timezone, so they read `100+` once a full page is today's and are
 absent without `runs.read`; open failures and pending approvals link to where
 they are acted on. A recurring failure reaches the inbox through the operator
 brief. An AI budget banner renders only once `/billing/budget` reports the
 warning threshold crossed.
+
+The Operator panel is a lazy chunk with its own stylesheet, loaded the first time
+the operator asks or opens Suggestions. It is a non-modal side panel: Home stays
+usable behind it, focus moves into it on open, and closing or Escape returns focus
+to the field. A typed question goes to `/ai/explain-workflow` when a draft is
+loaded, otherwise to `/ai/explain-run` for the most recent open failure. The
+panel cites only the run in the response's `report.summary.runId`. Its action opens
+the recovery case when that run is the failed run Home asked about; workflow
+answers return no run, so they cite nothing and offer only AI Studio. A fallback
+answer always says that no AI provider answered, and shows the report's root
+cause, failed step, error and next action with the full report one click away.
 
 ### Home evidence states
 

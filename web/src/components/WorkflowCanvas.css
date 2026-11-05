@@ -67,6 +67,22 @@
 
 .canvas-error strong { color: var(--we-ink); }
 
+/* Flow map, Add step and the problems band share a row and wrap instead of overlapping. */
+.canvas-chrome {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  inset: 16px 16px auto;
+  pointer-events: none;
+  position: absolute;
+  z-index: 4;
+}
+
+.canvas-chrome > * {
+  pointer-events: auto;
+}
+
 .canvas-toolbar {
   align-items: center;
   background: var(--we-surface-glass);
@@ -76,12 +92,8 @@
   display: flex;
   gap: 12px;
   justify-content: space-between;
-  left: 16px;
   min-width: 190px;
   padding: 10px 12px;
-  position: absolute;
-  top: 16px;
-  z-index: 3;
   backdrop-filter: blur(10px);
 }
 
@@ -102,6 +114,74 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.canvas-problems-chip,
+.canvas-problems-band {
+  --problem-border: color-mix(in srgb, var(--we-accent) 30%, transparent);
+  --problem-soft: var(--we-accent-soft);
+  --problem-text: var(--we-accent-text);
+  background: var(--problem-soft);
+  border: 1px solid var(--problem-border);
+  color: var(--problem-text);
+}
+
+[data-severity="warn"]:is(.canvas-problems-chip, .canvas-problems-band) {
+  --problem-border: var(--we-warning-border-35);
+  --problem-soft: var(--we-warning-soft);
+  --problem-text: var(--we-warning-text);
+}
+
+[data-severity="fail"]:is(.canvas-problems-chip, .canvas-problems-band) {
+  --problem-border: var(--we-danger-border-40);
+  --problem-soft: var(--we-danger-soft);
+  --problem-text: var(--we-danger-text);
+}
+
+.canvas-toolbar .canvas-problems-chip {
+  min-height: 22px;
+  padding: 0 8px;
+}
+
+.canvas-toolbar .canvas-problems-chip span {
+  color: inherit;
+  font-size: 11px;
+}
+
+.canvas-problems-band {
+  align-items: center;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px -18px var(--we-shadow-ink-35);
+  display: flex;
+  flex: 0 1 auto;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 34px;
+  min-width: 0;
+  padding: 0 6px 0 12px;
+}
+
+.canvas-problems-band > svg {
+  flex: none;
+}
+
+.canvas-problems-band .ui-button {
+  color: inherit;
+  flex: 0 1 auto;
+  font-size: 12px;
+  min-height: 26px;
+  min-width: 0;
+  padding: 0 6px;
+}
+
+.canvas-problems-band .ui-button__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-problems-band .ui-button:hover:not(:disabled) {
+  background: var(--problem-border);
 }
 
 .workflow-minimap {

@@ -346,6 +346,7 @@ export function ActivityRecoveryDetail({
           <RecoveryDialog
             dlq={current}
             onClose={() => setShowRecoveryDialog(false)}
+            canReplayInLab={canStartRuns}
           />
         </Suspense>
       )}

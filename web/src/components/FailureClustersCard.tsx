@@ -17,11 +17,11 @@
  * Loaded by `RecoveryAutomationDisclosure.tsx` after explicit expansion.
  */
 
-import { readDeadLetterDetail } from '../lib/dead-letter-contract'
+import { readClusterRecovery, type ClusterRecovery } from '../lib/dead-letter-contract'
 
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
-import { api, contractApi } from '../api'
+import { contractApi } from '../api'
 import { parseFailureClusters } from '../lib/recovery-metrics-model'
 import type {
   ClusterCategory,
@@ -31,7 +31,6 @@ import type {
 import { EmptyState } from './EmptyState'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
-import type { DeadLetter } from './dead-letter-types'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { Button } from '@/components/ui/Button'
@@ -49,7 +48,7 @@ type ClusterData = ClustersResponse & {
 /** State held while loading + driving the cluster-recovery dialog. */
 type ClusterRecoveryState =
   | { kind: 'loading'; signature: string }
-  | { kind: 'open'; signature: string; dlq: DeadLetter; members: string[]; capped: boolean; total: number }
+  | ({ kind: 'open'; signature: string } & ClusterRecovery)
   | { kind: 'error'; signature: string; message: string }
 
 const MIN_FREQUENCY_FOR_BULK_RECOVER = 2
@@ -71,7 +70,7 @@ function severityForCategory(category: ClusterCategory): 'pass' | 'warn' | 'fail
   return 'warn'
 }
 
-export function FailureClustersCard({ canRecover = true }: { canRecover?: boolean }) {
+export function FailureClustersCard({ canRecover = true, canStartRuns = false }: { canRecover?: boolean; canStartRuns?: boolean }) {
   const { t } = useT()
   const platformVersion = useInvalidationNonce(FAILURE_CLUSTER_TAGS)
   const [data, setData] = useState<ClusterData | null>(null)
@@ -93,39 +92,12 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
     if (!representative) return
     setRecovery({ kind: 'loading', signature: cluster.signature })
     try {
-      // Fetch the bounded member list and the representative DLQ row in
-      // parallel. The members route enforces the same 100-row cap as
-      // the apply route — the dialog renders "100 of 247" when the
-      // window has more matching rows than fit in one batch.
-      const [membersResp, dlqResp] = await Promise.all([
-        api(`/dlq/cluster-members?signature=${encodeURIComponent(cluster.signature)}`) as Promise<{
-          deadLetterIds: string[]
-          total: number
-          capped: boolean
-        }>,
-        readDeadLetterDetail(representative.id),
-      ])
-      let selectedDlq = dlqResp
-      if (!membersResp.deadLetterIds.includes(representative.id)) {
-        // Defensive: representative should always be in the member list,
-        // but if a race replayed/resolved it between cluster fetch and
-        // now, fall back to the first still-open member and validate the
-        // patch against that row instead.
-        const fallback = membersResp.deadLetterIds[0]
-        if (!fallback) {
-          setRecovery({ kind: 'error', signature: cluster.signature, message: t('clusters.noOpenMembers') })
-          return
-        }
-        selectedDlq = await readDeadLetterDetail(fallback)
+      const loaded = await readClusterRecovery(cluster.signature, representative.id)
+      if (!loaded) {
+        setRecovery({ kind: 'error', signature: cluster.signature, message: t('clusters.noOpenMembers') })
+        return
       }
-      setRecovery({
-        kind: 'open',
-        signature: cluster.signature,
-        dlq: selectedDlq,
-        members: membersResp.deadLetterIds,
-        capped: membersResp.capped,
-        total: membersResp.total,
-      })
+      setRecovery({ kind: 'open', signature: cluster.signature, ...loaded })
     } catch (err) {
       setRecovery({
         kind: 'error',
@@ -173,6 +145,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
         clusterMembersCapped={recovery.capped}
         clusterMembersTotal={recovery.total}
         onClose={() => setRecovery(null)}
+        canReplayInLab={canStartRuns}
       />
     </Suspense>
   ) : null

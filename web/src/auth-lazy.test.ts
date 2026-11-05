@@ -10,9 +10,188 @@ vi.mock('./supabase-runtime', () => ({
 
 afterEach(() => {
   window.localStorage.clear()
+  window.history.replaceState(null, '', '/')
   runtime.createClient.mockReset()
   vi.unstubAllEnvs()
   vi.resetModules()
+})
+
+const CALLBACK = '/#access_token=jwt-invite&refresh_token=refresh-invite&expires_in=3600&token_type=bearer'
+
+function stubSupabaseEnv() {
+  vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co')
+  vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-public-key')
+}
+
+function stubNoCookieSession() {
+  vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response('{}', { status: 401 })))
+}
+
+describe('captured implicit-grant callback', () => {
+  it('adopts the session once, before any caller receives the client', async () => {
+    stubSupabaseEnv()
+    stubNoCookieSession()
+    window.history.replaceState(null, '', CALLBACK)
+    let release: (() => void) | undefined
+    const adopted = new Promise<void>((resolve) => { release = resolve })
+    const setSession = vi.fn(async () => {
+      await adopted
+      return { data: { session: null, user: null }, error: null }
+    })
+    const getSession = vi.fn(async () => ({ data: { session: { access_token: 'jwt-invite' } } }))
+    runtime.createClient.mockReturnValue({ auth: { setSession, getSession } })
+    const { approveAuthCallback, captureAuthCallback } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+    approveAuthCallback()
+
+    const token = auth.getSupabaseAccessToken()
+    const secondToken = auth.getSupabaseAccessToken()
+    await vi.waitFor(() => expect(setSession).toHaveBeenCalledOnce())
+    expect(getSession).not.toHaveBeenCalled()
+    release?.()
+
+    await expect(token).resolves.toBe('jwt-invite')
+    await expect(secondToken).resolves.toBe('jwt-invite')
+    expect(setSession).toHaveBeenCalledOnce()
+    expect(setSession).toHaveBeenCalledWith({ access_token: 'jwt-invite', refresh_token: 'refresh-invite' })
+  })
+
+  it('never adopts a callback the user has not approved', async () => {
+    stubSupabaseEnv()
+    window.history.replaceState(null, '', CALLBACK)
+    const setSession = vi.fn()
+    const getSession = vi.fn(async () => ({ data: { session: null } }))
+    runtime.createClient.mockReturnValue({ auth: { setSession, getSession } })
+    const { captureAuthCallback } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+
+    await expect(auth.getSupabaseAccessToken()).resolves.toBeNull()
+    expect(setSession).not.toHaveBeenCalled()
+  })
+
+  it('resolves the identity from the auth server without loading the client', async () => {
+    stubSupabaseEnv()
+    window.history.replaceState(null, '', CALLBACK)
+    const fetchMock = vi.fn<typeof fetch>(async (input) => (
+      String(input).endsWith('/auth/session')
+        ? new Response('{}', { status: 401 })
+        : new Response(JSON.stringify({ id: 'user-1', email: 'invited@example.com' }), { status: 200 })
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+    const { captureAuthCallback, pendingAuthCallbackToken } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+
+    await expect(auth.resolveAuthCallbackIdentity()).resolves.toBe('invited@example.com')
+
+    const [url, init] = fetchMock.mock.calls.at(-1)!
+    expect(String(url)).toBe('https://example.supabase.co/auth/v1/user')
+    expect(init?.headers).toEqual({ apikey: 'anon-public-key', Authorization: 'Bearer jwt-invite' })
+    expect(runtime.createClient).not.toHaveBeenCalled()
+    expect(pendingAuthCallbackToken()).toBe('jwt-invite')
+  })
+
+  it.each([
+    ['rejects the token', async () => new Response('{}', { status: 401 })],
+    ['ended the session', async () => new Response(JSON.stringify({ error_code: 'session_not_found' }), { status: 403 })],
+    ['returns no email to show', async () => new Response(JSON.stringify({ id: 'user-1' }), { status: 200 })],
+    ['returns malformed JSON', async () => new Response('not json', { status: 200 })],
+    ['is unreachable', async () => { throw new TypeError('Failed to fetch') }],
+  ])('reports a failed link when the auth server %s', async (_name, respond) => {
+    stubSupabaseEnv()
+    window.history.replaceState(null, '', CALLBACK)
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input) => (
+      String(input).endsWith('/auth/session') ? new Response('{}', { status: 401 }) : respond()
+    )))
+    const { authCallbackFailed, captureAuthCallback, pendingAuthCallbackToken } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+
+    await expect(auth.resolveAuthCallbackIdentity()).resolves.toBeNull()
+
+    expect(authCallbackFailed()).toBe(true)
+    expect(pendingAuthCallbackToken()).toBeNull()
+    expect(runtime.createClient).not.toHaveBeenCalled()
+  })
+
+  it('discards the callback in a build without Supabase', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', '')
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', '')
+    window.history.replaceState(null, '', CALLBACK)
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+    const { captureAuthCallback, pendingAuthCallbackToken } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+
+    await expect(auth.resolveAuthCallbackIdentity()).resolves.toBeNull()
+
+    expect(pendingAuthCallbackToken()).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['returns an error', async () => ({ data: { session: null, user: null }, error: new Error('bad jwt') })],
+    ['throws', async () => { throw new Error('network') }],
+  ])('records a failure and keeps the client usable when setSession %s', async (_name, setSession) => {
+    stubSupabaseEnv()
+    window.history.replaceState(null, '', CALLBACK)
+    const client = { auth: { setSession: vi.fn(setSession) } }
+    runtime.createClient.mockReturnValue(client)
+    const { approveAuthCallback, authCallbackFailed, captureAuthCallback } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+    approveAuthCallback()
+
+    await expect(auth.getSupabaseClient()).resolves.toBe(client)
+    expect(authCallbackFailed()).toBe(true)
+  })
+
+  it('discards the callback when a cookie session outranks Supabase', async () => {
+    stubSupabaseEnv()
+    window.history.replaceState(null, '', CALLBACK)
+    const setSession = vi.fn()
+    const signOut = vi.fn(async () => ({ error: null }))
+    runtime.createClient.mockReturnValue({ auth: { setSession, signOut } })
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith('/auth/session')) {
+        return new Response(JSON.stringify({
+          userId: 'sso-user', email: 'sso@example.com', organizationId: 'org-sso',
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response('{}', { status: 200 })
+    }))
+    const { captureAuthCallback, pendingAuthCallbackToken } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+
+    await expect(auth.resolveAuthCallbackIdentity()).resolves.toBeNull()
+    expect(pendingAuthCallbackToken()).toBeNull()
+    await auth.AuthProvider.signOut()
+
+    expect(signOut).toHaveBeenCalledOnce()
+    expect(setSession).not.toHaveBeenCalled()
+  })
+
+  it('does not adopt a callback that sign-out already abandoned', async () => {
+    stubSupabaseEnv()
+    stubNoCookieSession()
+    window.history.replaceState(null, '', CALLBACK)
+    const setSession = vi.fn()
+    const signOut = vi.fn(async () => ({ error: null }))
+    runtime.createClient.mockReturnValue({ auth: { setSession, signOut } })
+    const { approveAuthCallback, captureAuthCallback } = await import('./auth-callback')
+    const auth = await import('./auth')
+    captureAuthCallback()
+    approveAuthCallback()
+
+    await auth.AuthProvider.signOut()
+
+    expect(signOut).toHaveBeenCalledOnce()
+    expect(setSession).not.toHaveBeenCalled()
+  })
 })
 
 describe('demand-loaded Supabase auth', () => {

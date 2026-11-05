@@ -7,6 +7,57 @@
   entering 0 to turn the budget off, and a limit must be above 0. Workflow
   overrides are table rows with their limit, warning, policy and spend, edited
   in place, and can be set back to the Org-wide budget.
+- Rerun a run from any step that ran, from the Timeline tab. Earlier steps reuse
+  their saved outputs, so nothing before the step repeats. The step's input is
+  edited beside the original, the steps with side effects are listed before you
+  confirm, and the run sheet links the new run to its source run. A step behind
+  an approval reruns from that approval when anything after it can write.
+- Suggest fix now opens with the failed step, the attempts and whether AI is
+  connected. Without an API key it says so and leads with Replay in Lab; Review
+  evidence still shows the deterministic evidence, with no patch. Once a
+  suggestion is under way, the dialog shows Patch, Validate and Apply, and marks
+  Validate done only after a sandbox run passes.
+- Build can compare versions on the canvas. In Versions, pick two versions and
+  choose Open on canvas, or use Compare draft to check unsaved edits against the
+  version they started from, including when only one version is saved. Steps and
+  paths are marked new, modified or deleted, a counter steps through each change,
+  and each one shows its before and after JSON with secrets masked.
+- Run detail is one sheet. Its header shows the workflow, the actions and a data
+  row with status, duration, start, version, trace and run ID, and it stays in
+  place across the tabs Overview, Timeline, Events, Agents and Ask. Timeline now
+  groups this run's attempts by step on one time scale and marks retries; the
+  event list moved to Events, and the conversation with Janusly to Ask, where it
+  survives a look at another tab. View timeline is gone in favor of the tabs,
+  Cancel run only appears while a run can still stop, and a Close button returns
+  to the activity feed.
+- Recover is now a list and a detail side by side. Filters stay above the queue,
+  the failures sit on the left and the selected failure on the right, each pane
+  scrolling on its own, so moving with J/K keeps both on screen and the action
+  bar in view. Actions are grouped: Suggest fix, Retry and Replay in Lab; Copy
+  error and Export; Close without recovery.
+- The recovery queue groups failures by cluster by default, with a switch to All
+  items. Each cluster shows its signature, category, occurrences and affected
+  workflows, plus Investigate, which opens the fix for every open failure in the
+  cluster, and Replay cluster, which starts a paced campaign after its preview.
+- Home's Operator prompt is now one compact field at the bottom of What needs
+  you, and answers open in a side panel instead of pushing Home down. The panel
+  links the run the answer is based on and opens its recovery case in one click.
+  Without an AI provider it says so and shows the root cause, failed step, error
+  and next action, with the full report one click away. A question typed on Home
+  with no draft loaded now answers about the most recent open failure instead of
+  sending you to AI Studio. The five suggested questions moved to the panel.
+- Templates now filters recipes by category, with a chip and a count for each
+  category in the catalog, and shows them in compact three-column cards whose
+  icons trace each recipe's steps. Solution packs moved to a Packs view next to
+  Recipes on the same page; the search covers both, and each view's count
+  follows it.
+- Build shows a workflow's problems on the canvas. The Flow map card has a
+  Problems chip with the count, workflow-level problems appear in a band above
+  the steps, and a step with a problem has a dot on its corner. Each one opens
+  what needs fixing: the step, the path, the Outputs section or Versions.
+  Outputs and Versions problems also open from the Problems tab, whose count now
+  lists a problem reported by two checks once. Add step no longer overlaps the
+  Flow map card in Spanish.
 - Retrying on Network errors now covers connection refused, connection reset and
   DNS failures, and retrying on Timeouts covers deadline exceeded. A policy that
   ignores `network` now stops retries for those failures too. A write-side MCP

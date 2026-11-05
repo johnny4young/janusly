@@ -34,9 +34,14 @@ test('Home leads with priorities and active work', async ({ page }) => {
   await expect(page.getByTestId('home-priority-inbox')).toBeVisible()
   await expect(page.getByTestId('home-active-work')).toBeVisible()
   await expect(page.getByTestId('home-today')).toBeVisible()
-  await expect(page.getByTestId('recovery-center-composer')).toBeVisible()
+  await expect(page.getByTestId('home-operator-field')).toBeVisible()
   await expect(page.getByTestId('recovery-heatmap')).toHaveCount(0)
   await captureWorkspace(page, 'web-en-home-caught-up')
+
+  await page.getByTestId('home-operator-suggestions').click()
+  await expect(page.getByTestId('home-operator-suggestion-summarize')).toBeVisible()
+  await page.getByTestId('home-operator-close').click()
+  await expect(page.getByTestId('home-operator-panel')).toHaveCount(0)
 
   await page.getByTestId('home-active-work').getByRole('button', { name: 'Activity' }).click()
   await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible()

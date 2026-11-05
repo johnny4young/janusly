@@ -1,12 +1,12 @@
 /**
- * Run inspection workspace for one active execution.
+ * One run sheet: `RunsPanel` owns identity and actions, this component the tabs.
  *
  * Used by:
- * - `RightPanel.tsx` for the primary Runs destination.
+ * - `ActivityWorkspace.tsx` for the run detail and the detailed run history.
  *
  * Invariants:
- * - Overview, Timeline, and Agents reuse the existing run projections; this
- *   component introduces no second data fetch or run authority path.
+ * - Every tab reuses the loaded run projections; this component introduces no
+ *   second data fetch or run authority path.
  * - The legacy Reasoning and Multi-agent tabs remain directly reachable from
  *   the command palette and the explicit "full view" action.
  * - Changing the active run resets to Overview so controls for a prior run
@@ -22,26 +22,27 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react'
-import { Activity, ExternalLink, Layers3, ListChecks } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 
 import type { RunEvent } from '../types'
 import { useT } from '../i18n'
 import { PanelChrome } from './panel-primitives'
-import { RunsPanel, type RunsPanelProps } from './RunsPanel'
+import { RerunStepDialog, RunExplainChat, RunsPanel, type RunsPanelProps } from './RunsPanel'
 import './RunWorkspace.css'
 import { Button } from './ui/Button'
 
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then(module => ({ default: module.ReasoningPanel })))
 const MultiAgentTimeline = lazy(() => import('../MultiAgentTimeline').then(module => ({ default: module.MultiAgentTimeline })))
+const RunStepTimeline = lazy(() => import('./RunStepTimeline').then(module => ({ default: module.RunStepTimeline })))
 
-export type RunWorkspaceView = 'overview' | 'timeline' | 'agents'
+export type RunWorkspaceView = 'overview' | 'timeline' | 'events' | 'agents' | 'ask'
 
 type LoadRunUsage = (runId: string, signal: AbortSignal) => Promise<unknown>
 type ReplayDecision = (eventId: string, nodeId: string, signal: AbortSignal) => Promise<unknown>
 
 export type RunWorkspaceProps = Omit<
   RunsPanelProps,
-  'mode' | 'onViewTimeline' | 'variant'
+  'mode' | 'renderSheet' | 'variant'
 > & {
   eventsHasMore?: boolean
   onLoadOlderEvents?: () => void | Promise<void>
@@ -51,7 +52,7 @@ export type RunWorkspaceProps = Omit<
   runsPanelVariant?: RunsPanelProps['variant']
 }
 
-const VIEW_ORDER: readonly RunWorkspaceView[] = ['overview', 'timeline', 'agents']
+const VIEW_ORDER: readonly RunWorkspaceView[] = ['overview', 'timeline', 'events', 'agents', 'ask']
 const EMPTY_RUN_EVENTS: RunEvent[] = []
 
 function countAgentEvents(events: RunEvent[]): number {
@@ -61,6 +62,7 @@ function countAgentEvents(events: RunEvent[]): number {
 export type RunWorkspaceNavigationProps = {
   activeView: RunWorkspaceView
   hasActiveRun: boolean
+  stepCount: number
   eventCount: number
   agentEventCount: number
   onSelectView: (view: RunWorkspaceView) => void
@@ -71,6 +73,7 @@ export type RunWorkspaceNavigationProps = {
 export function RunWorkspaceNavigation({
   activeView,
   hasActiveRun,
+  stepCount,
   eventCount,
   agentEventCount,
   onSelectView,
@@ -99,74 +102,63 @@ export function RunWorkspaceNavigation({
     if (nextView) selectView(nextView, true)
   }
 
-  const tabLabel = (tab: RunWorkspaceView): string => {
-    if (tab === 'timeline') return t('runWorkspace.tab.timelineAria', { count: eventCount })
-    if (tab === 'agents') return t('runWorkspace.tab.agentsAria', { count: agentEventCount })
-    return t('runWorkspace.tab.overview')
+  const counts: Partial<Record<RunWorkspaceView, number>> = {
+    timeline: stepCount,
+    events: eventCount,
+    agents: agentEventCount,
   }
+  const fullView = activeView === 'agents'
+    ? 'multiAgent'
+    : activeView === 'timeline' || activeView === 'events' ? 'reasoning' : null
+  const fullViewLabel = t(fullView === 'multiAgent' ? 'runWorkspace.openFullAgents' : 'runWorkspace.openFullTimeline')
 
   return (
-    <header className="we-card we-run-workspace__navigation">
-      <div className="we-run-workspace__heading">
-        <span className="section-kicker">{t('runWorkspace.kicker')}</span>
-        <div>
-          <h2>{t('runWorkspace.title')}</h2>
-          <p>{t('runWorkspace.description')}</p>
-        </div>
+    <div className="we-run-workspace__controls">
+      <div className="we-run-workspace__tabs" role="tablist" aria-label={t('runWorkspace.tabsAria')}>
+        {VIEW_ORDER.map(tab => {
+          const selected = activeView === tab
+          const count = counts[tab]
+          return (
+            <button
+              key={tab}
+              ref={element => { tabRefs.current[tab] = element }}
+              type="button"
+              role="tab"
+              id={`run-workspace-tab-${tab}`}
+              aria-controls={`run-workspace-panel-${tab}`}
+              aria-selected={selected}
+              aria-label={count === undefined ? undefined : t(`runWorkspace.tab.${tab}Aria`, { count })}
+              tabIndex={selected ? 0 : -1}
+              disabled={tab !== 'overview' && !hasActiveRun}
+              className="we-run-workspace__tab"
+              data-testid={`run-workspace-tab-${tab}`}
+              onClick={() => selectView(tab)}
+              onKeyDown={handleTabKeyDown}
+            >
+              {t(`runWorkspace.tab.${tab}`)}
+              {count !== undefined && <span aria-hidden="true">{count}</span>}
+            </button>
+          )
+        })}
       </div>
 
-      <div className="we-run-workspace__controls">
-        <div className="we-run-workspace__tabs" role="tablist" aria-label={t('runWorkspace.tabsAria')}>
-          {VIEW_ORDER.map(tab => {
-            const selected = activeView === tab
-            const disabled = tab !== 'overview' && !hasActiveRun
-            const count = tab === 'timeline' ? eventCount : tab === 'agents' ? agentEventCount : null
-            const Icon = tab === 'overview' ? ListChecks : tab === 'timeline' ? Activity : Layers3
-            return (
-              <button
-                key={tab}
-                ref={element => { tabRefs.current[tab] = element }}
-                type="button"
-                role="tab"
-                id={`run-workspace-tab-${tab}`}
-                aria-controls={`run-workspace-panel-${tab}`}
-                aria-selected={selected}
-                aria-label={tabLabel(tab)}
-                tabIndex={selected ? 0 : -1}
-                disabled={disabled}
-                className="we-run-workspace__tab"
-                data-testid={`run-workspace-tab-${tab}`}
-                onClick={() => selectView(tab)}
-                onKeyDown={handleTabKeyDown}
-              >
-                <Icon size={14} aria-hidden="true" />
-                {t(`runWorkspace.tab.${tab}`)}
-                {count !== null && <span aria-hidden="true">{count}</span>}
-              </button>
-            )
-          })}
-        </div>
-
-        {activeView !== 'overview' && (
-          <Button
-            size="sm"
-            className="we-run-workspace__full-view"
-           
-           
-            onClick={() => onOpenFullView(activeView === 'timeline' ? 'reasoning' : 'multiAgent')}
-          >
-            <ExternalLink size={13} aria-hidden="true" />
-            {activeView === 'timeline'
-              ? t('runWorkspace.openFullTimeline')
-              : t('runWorkspace.openFullAgents')}
-          </Button>
-        )}
-      </div>
-    </header>
+      {fullView && (
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={fullViewLabel}
+          title={fullViewLabel}
+          data-testid="run-workspace-full-view"
+          onClick={() => onOpenFullView(fullView)}
+        >
+          <ExternalLink size={13} aria-hidden="true" />
+        </Button>
+      )}
+    </div>
   )
 }
 
-/** Primary Runs destination with accessible, keyboard-navigable inner views. */
+/** Run sheet with accessible, keyboard-navigable tabs. */
 export function RunWorkspace({
   onOpenFullView,
   onLoadRunUsage,
@@ -177,89 +169,134 @@ export function RunWorkspace({
   ...runsProps
 }: RunWorkspaceProps) {
   const { t } = useT()
+  const { activeRunId } = runsProps
   const [selection, setSelection] = useState<{
     runId: string | null | undefined
     view: RunWorkspaceView
-  }>({ runId: runsProps.activeRunId, view: 'overview' })
+    askOpened?: boolean
+  }>({ runId: activeRunId, view: 'overview' })
   const events = runsProps.runEvents ?? EMPTY_RUN_EVENTS
   const agentEventCount = useMemo(() => countAgentEvents(events), [events])
-  const hasActiveRun = Boolean(runsProps.activeRunId)
-  const effectiveView = hasActiveRun && selection.runId === runsProps.activeRunId
-    ? selection.view
-    : 'overview'
+  const stepCount = useMemo(() => new Set([
+    ...runsProps.runNodes.map(node => node.nodeId),
+    ...events.flatMap(event => event.nodeId ?? []),
+  ]).size, [events, runsProps.runNodes])
+  const hasActiveRun = Boolean(activeRunId)
+  const currentSelection = hasActiveRun && selection.runId === activeRunId ? selection : null
+  const effectiveView = currentSelection?.view ?? 'overview'
 
   useEffect(() => {
-    if (selection.runId === runsProps.activeRunId) return
-    setSelection({ runId: runsProps.activeRunId, view: 'overview' })
-  }, [runsProps.activeRunId, selection.runId])
+    if (selection.runId === activeRunId) return
+    setSelection({ runId: activeRunId, view: 'overview' })
+  }, [activeRunId, selection.runId])
 
   const selectView = (nextView: RunWorkspaceView) => {
     if (nextView !== 'overview' && !hasActiveRun) return
-    setSelection({ runId: runsProps.activeRunId, view: nextView })
+    setSelection(current => ({
+      runId: activeRunId,
+      view: nextView,
+      askOpened: nextView === 'ask' || current.askOpened,
+    }))
   }
+
+  const panelProps = (view: RunWorkspaceView) => ({
+    id: `run-workspace-panel-${view}`,
+    role: 'tabpanel',
+    'aria-labelledby': `run-workspace-tab-${view}`,
+    'data-testid': `run-workspace-panel-${view}`,
+    hidden: effectiveView !== view,
+  })
+  const fallback = <p className="helper-text">{t('common.working')}</p>
+
+  // Built here, not in renderSheet, so the sheet's one-second clock leaves them alone.
+  const navigation = (
+    <RunWorkspaceNavigation
+      activeView={effectiveView}
+      hasActiveRun={hasActiveRun}
+      stepCount={stepCount}
+      eventCount={events.length}
+      agentEventCount={agentEventCount}
+      onSelectView={selectView}
+      onOpenFullView={onOpenFullView}
+    />
+  )
+  const panels = (
+    <>
+      <section {...panelProps('timeline')}>
+        {effectiveView === 'timeline' && (
+          <Suspense fallback={fallback}>
+            <RunStepTimeline
+              events={events}
+              nodes={runsProps.runNodes}
+              eventsHasMore={eventsHasMore}
+              onLoadOlderEvents={onLoadOlderEvents}
+              run={runsProps.runs.find(run => run.id === activeRunId)}
+              RerunDialog={runsProps.canStartRuns === false ? undefined : RerunStepDialog}
+            />
+          </Suspense>
+        )}
+      </section>
+      <section {...panelProps('events')}>
+        {effectiveView === 'events' && (
+          <Suspense fallback={fallback}>
+            <PanelChrome
+              title={t('rightPanel.reasoning.title')}
+              description={t('rightPanel.reasoning.description')}
+            >
+              <ReasoningPanel
+                events={events}
+                eventsHasMore={eventsHasMore}
+                onLoadOlderEvents={onLoadOlderEvents}
+                activeRunId={activeRunId}
+                onLoadRunUsage={onLoadRunUsage}
+                onReplayDecision={onReplayDecision}
+              />
+            </PanelChrome>
+          </Suspense>
+        )}
+      </section>
+      <section {...panelProps('agents')}>
+        {effectiveView === 'agents' && (
+          <Suspense fallback={fallback}>
+            <PanelChrome
+              title={t('rightPanel.multiAgent.title')}
+              description={t('rightPanel.multiAgent.description')}
+            >
+              <MultiAgentTimeline
+                events={events}
+                eventsHasMore={eventsHasMore}
+                onLoadOlderEvents={onLoadOlderEvents}
+                showHeader={false}
+              />
+            </PanelChrome>
+          </Suspense>
+        )}
+      </section>
+      {/* Stays mounted once opened: the conversation survives a look at another tab. */}
+      <section {...panelProps('ask')}>
+        {currentSelection?.askOpened && <RunExplainChat runId={activeRunId} />}
+      </section>
+    </>
+  )
 
   return (
     <div className="we-run-workspace" data-testid="run-workspace">
-      <RunWorkspaceNavigation
-        activeView={effectiveView}
-        hasActiveRun={hasActiveRun}
-        eventCount={events.length}
-        agentEventCount={agentEventCount}
-        onSelectView={selectView}
-        onOpenFullView={onOpenFullView}
+      <RunsPanel
+        {...runsProps}
+        variant={runsPanelVariant}
+        renderSheet={({ header, overview }) => (
+          <>
+            <header className="we-card we-run-sheet">
+              {header}
+              {navigation}
+            </header>
+            <section {...panelProps('overview')}>
+              {effectiveView === 'overview' && overview}
+            </section>
+            {panels}
+          </>
+        )}
       />
-
-      {VIEW_ORDER.map(panelView => (
-        <section
-          key={panelView}
-          id={`run-workspace-panel-${panelView}`}
-          role="tabpanel"
-          aria-labelledby={`run-workspace-tab-${panelView}`}
-          className="we-run-workspace__panel"
-          data-testid={`run-workspace-panel-${panelView}`}
-          hidden={effectiveView !== panelView}
-        >
-          {effectiveView === 'overview' && panelView === 'overview' && (
-            <RunsPanel
-              {...runsProps}
-              variant={runsPanelVariant}
-              onViewTimeline={() => selectView('timeline')}
-            />
-          )}
-          {effectiveView === 'timeline' && panelView === 'timeline' && (
-            <Suspense fallback={<p className="helper-text">{t('common.working')}</p>}>
-              <PanelChrome
-                title={t('rightPanel.reasoning.title')}
-                description={t('rightPanel.reasoning.description')}
-              >
-                <ReasoningPanel
-                  events={events}
-                  eventsHasMore={eventsHasMore}
-                  onLoadOlderEvents={onLoadOlderEvents}
-                  activeRunId={runsProps.activeRunId}
-                  onLoadRunUsage={onLoadRunUsage}
-                  onReplayDecision={onReplayDecision}
-                />
-              </PanelChrome>
-            </Suspense>
-          )}
-          {effectiveView === 'agents' && panelView === 'agents' && (
-            <Suspense fallback={<p className="helper-text">{t('common.working')}</p>}>
-              <PanelChrome
-                title={t('rightPanel.multiAgent.title')}
-                description={t('rightPanel.multiAgent.description')}
-              >
-                <MultiAgentTimeline
-                  events={events}
-                  eventsHasMore={eventsHasMore}
-                  onLoadOlderEvents={onLoadOlderEvents}
-                  showHeader={false}
-                />
-              </PanelChrome>
-            </Suspense>
-          )}
-        </section>
-      ))}
     </div>
   )
 }
