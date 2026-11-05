@@ -26,6 +26,9 @@ export const panelLoaders = {
   reports: () => import('./ReportsPanel'),
 } satisfies Partial<Record<ActiveTab, () => Promise<unknown>>>
 
+/** The connection dialogs open from both Connections and a pack's checklist. */
+export const loadConnectionDialogs = () => import('./connection-dialogs')
+
 const preloaded = new Set<string>()
 
 /** Start fetching a tab's panel chunk; repeated calls and unknown tabs are no-ops. */

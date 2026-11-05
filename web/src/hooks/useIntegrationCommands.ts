@@ -16,6 +16,7 @@ export function useIntegrationCommands(
   const {
     store,
     refreshPlatform,
+    setCredentials,
     runPlatformMutation,
     t,
   } = options
@@ -43,21 +44,24 @@ export function useIntegrationCommands(
     secretRef?: string
     expiresAt?: string
   }): Promise<boolean> => {
-    const result = await runPlatformMutation({
+    const result = await runPlatformMutation<{ id: string }>({
       request: () => api('/credentials', {
         method: 'POST',
         body: JSON.stringify(credential),
-      }),
+      }) as Promise<{ id: string }>,
       failureMessage: t('toasts.credentialFailed'),
       successToast: {
         message: t('toasts.credentialAdded', { name: credential.name }),
         tone: 'success',
       },
       successToastTiming: 'before-effect',
-      onSuccess: refreshPlatform,
+      // Listed at once: the refresh below can fail or lose to a newer one.
+      onSuccess: ({ id }) => setCredentials((current) => [...current, { id, name: credential.name, kind: credential.kind }]),
     })
+    // After a failure too: a conflict means the list was stale, and a row only corrects itself from a fresh one.
+    await refreshPlatform()
     return result.ok
-  }, [refreshPlatform, runPlatformMutation, t])
+  }, [refreshPlatform, runPlatformMutation, setCredentials, t])
 
   const revokeCredential = useCallback(async (name: string): Promise<boolean> => {
     const result = await runPlatformMutation({

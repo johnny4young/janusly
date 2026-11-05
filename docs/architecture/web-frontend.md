@@ -382,9 +382,22 @@ has one primary assisted start and keeps Add step as the manual, provider-free
 path. The teaching overlay still passes palette drops through outside its action.
 
 The AI Studio header marks the current stage as the first incomplete one, with
-`aria-current="step"`. In Solution Packs, Install is disabled only by the
-`packs.install` permission; missing credentials are named under the button but
-never block it, because a pack installs as a draft that is wired afterwards.
+`aria-current="step"`. Each Solution Pack lists its required credentials and
+organization settings in a Before installing checklist. A role with
+`credentials.write` connects a missing credential in place, through the create
+dialog with its name and kind locked, because readiness compares both. A row is
+ready only when the name holds the right kind, has not expired and, per one
+`/credentials/health` read for the panel, has its secret set. Otherwise the row
+says which and offers Review, which opens Connections, because names are unique
+per organization and a create would conflict. A failed create refreshes the list,
+and the dialog closes once the list holds the name. A list that could not be read,
+or a role without `credentials.read`, shows the status as unavailable rather than
+missing. Organization settings have no per-organization state in the
+pack API, so they are listed but not counted. Install is disabled only by the
+`packs.install` permission. Credentials that are not ready take away its primary
+weight and are named under the button but never block it: every pack installs as a draft
+that is wired afterwards, and `packs.install` is granted to editors while
+`credentials.write` is not.
 
 Contextual authoring prefills never submit work. Replacing an intent invalidates
 pending compilation/proposal results and releases their loading state; late
@@ -514,7 +527,7 @@ and a 0.5 KiB single-locale allowance for the fail-closed RecoveryDialog AI
 response parser. The complete-artifact cap remained 605 KiB for that security
 change; the parser stays in the existing lazy dialog rather than adding a
 network request. The cold path is what the caps protect: `index.css`, `workflow-workspace` and the
-route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB).
+route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB). In 2026-11 the owner approved moving the artifact, worst-locale and per-chunk caps by each workspace redesign change's measured cost, stated in its pull request.
 
 ## Closing failures without recovery
 
