@@ -16,7 +16,7 @@ function contract(options: {
   detectorLevel?: 0 | 1 | 2 | 3 | 4;
 } = {}) {
   const workflowLevel = options.workflowLevel ?? 3;
-  return RecoveryContractV2Schema.parse({
+  const parsed = RecoveryContractV2Schema.safeParse({
     version: "2",
     failure: {
       technical: {
@@ -75,6 +75,8 @@ function contract(options: {
     },
     recurrence: { windowDays: 7 },
   });
+  if (!parsed.success) throw new Error("Invalid contract fixture");
+  return parsed.data;
 }
 
 describe("resolveRecoveryAutonomyProfile", () => {

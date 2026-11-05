@@ -1,5 +1,5 @@
 /** Metadata write-body contracts; the editor imports only its own shape validator. */
-import * as z from 'zod/mini'
+import * as z from './schema-lite'
 import {
   WorkflowMetadataSchema,
   WORKFLOW_METADATA_FOLDER_MAX_LENGTH,

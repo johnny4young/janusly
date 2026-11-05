@@ -125,7 +125,9 @@ and tenant snippets from the existing API; importing it does not construct a
 second unused recipe index. The original library exports and recipes remain
 available to explicit catalog consumers.
 
-Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
+Live browser validators use `src/lib/schema-lite.ts`, a `zod/mini`-shaped subset
+held to Zod by a differential test. Schemas production never reaches keep the
+tree-shakeable `zod/mini` entry point.
 They must preserve the same strict-object, bound, default, transform, and
 refinement semantics as the API contract; do not trade validation coverage for
 bundle size. Read-only UI imports shared enums, constants and pure insertion helpers from
