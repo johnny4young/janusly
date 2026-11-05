@@ -3464,7 +3464,7 @@ button.we-authoring-problems__row:focus-visible {
   cursor: default;
 }
 
-/* Recipes — even 2-col gallery so patterns compare side by side. */
+/* Solution packs — even 2-col gallery so packs compare side by side. */
 .we-recipe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 760px) { .we-recipe-grid { grid-template-columns: 1fr; } }
 

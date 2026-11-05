@@ -9,6 +9,11 @@
   and next action, with the full report one click away. A question typed on Home
   with no draft loaded now answers about the most recent open failure instead of
   sending you to AI Studio. The five suggested questions moved to the panel.
+- Templates now filters recipes by category, with a chip and a count for each
+  category in the catalog, and shows them in compact three-column cards whose
+  icons trace each recipe's steps. Solution packs moved to a Packs view next to
+  Recipes on the same page; the search covers both, and each view's count
+  follows it.
 - Build shows a workflow's problems on the canvas. The Flow map card has a
   Problems chip with the count, workflow-level problems appear in a band above
   the steps, and a step with a problem has a dot on its corner. Each one opens

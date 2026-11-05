@@ -340,6 +340,12 @@ The AI Studio header marks the current stage as the first incomplete one, with
 `packs.install` permission; missing credentials are named under the button but
 never block it, because a pack installs as a draft that is wired afterwards.
 
+Templates has two views over one shared search. Recipes groups by the category
+each template carries in `internal/httpapi/assets/templates.json`, so a new
+category gets its chip without a web change. Packs renders the embedded
+`SolutionPacksPanel` and is the only place packs appear on that page; `#/packs`
+remains the standalone route.
+
 Contextual authoring prefills never submit work. Replacing an intent invalidates
 pending compilation/proposal results and releases their loading state; late
 responses cannot clear a newer request's loading or restore the old proposal.
