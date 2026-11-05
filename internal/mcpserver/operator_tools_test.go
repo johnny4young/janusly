@@ -91,7 +91,7 @@ func TestMCPToolCatalogHasTruthfulAnnotationsAndNoApprovalTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tools) != 15 {
+	if len(listed.Tools) != 17 {
 		t.Fatalf("tool catalog drifted: got %d", len(listed.Tools))
 	}
 	byName := map[string]*mcp.Tool{}
@@ -104,7 +104,7 @@ func TestMCPToolCatalogHasTruthfulAnnotationsAndNoApprovalTool(t *testing.T) {
 	if byName["recovery.cases.approve"] != nil {
 		t.Fatal("MCP must never expose human approval")
 	}
-	for _, name := range []string{"operations.brief", "workflows.propose", "recovery.cases.inspect"} {
+	for _, name := range []string{"operations.brief", "workflows.propose", "recovery.cases.inspect", "catalog.describe", "workflows.validate"} {
 		if tool := byName[name]; tool == nil || !tool.Annotations.ReadOnlyHint {
 			t.Fatalf("read tool annotation drifted: %s %+v", name, tool)
 		}
@@ -246,6 +246,62 @@ func TestMCPRawToolRequestsAreBoundedBeforeTypedDispatch(t *testing.T) {
 	message := result.Content[0].(*mcp.TextContent).Text
 	if message != "MCP tool request is invalid or exceeds 256000 bytes" {
 		t.Fatalf("unexpected request-bound response: %q", message)
+	}
+}
+
+func TestMCPSchemaRejectionsTellTheCallerWhatToFix(t *testing.T) {
+	server := NewServer(Deps{
+		OrgID: "org-1", UserID: "operator-1",
+		Permissions: map[string]bool{"runs.read": true},
+	})
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		_ = server.Run(context.Background(), serverTransport)
+	}()
+	client := mcp.NewClient(&mcp.Implementation{Name: "schema-error-test", Version: "1"}, nil)
+	session, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close(); <-serverDone })
+
+	for _, test := range []struct {
+		name, tool string
+		arguments  map[string]any
+		want       []string
+	}{
+		{name: "missing argument", tool: "runs.status", arguments: map[string]any{},
+			want: []string{"invalid arguments for runs.status", "runId"}},
+		{name: "wrong type", tool: "runs.status", arguments: map[string]any{"runId": 7},
+			want: []string{"invalid arguments for runs.status", "runId"}},
+		{name: "unexpected argument", tool: "runs.status", arguments: map[string]any{"runId": "r", "verbose": true},
+			want: []string{"invalid arguments for runs.status", "verbose"}},
+		{name: "unknown tool", tool: "runs.explode", arguments: map[string]any{},
+			want: []string{`unknown tool "runs.explode"`, "tools/list"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: test.tool, Arguments: test.arguments,
+			})
+			if err != nil {
+				t.Fatalf("rejection became a transport failure: %v", err)
+			}
+			if result == nil || !result.IsError || len(result.Content) != 1 {
+				t.Fatalf("rejection must stay an expected tool error: %+v", result)
+			}
+			message := result.Content[0].(*mcp.TextContent).Text
+			t.Log(message)
+			for _, fragment := range test.want {
+				if !strings.Contains(message, fragment) {
+					t.Fatalf("message %q lacks %q", message, fragment)
+				}
+			}
+			if len([]rune(message)) > maxMCPErrorSummaryRunes {
+				t.Fatalf("message is not bounded: %d runes", len([]rune(message)))
+			}
+		})
 	}
 }
 
