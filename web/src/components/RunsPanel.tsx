@@ -636,7 +636,6 @@ export function RunsPanel({
         <section className="we-card action-card">
           <div>
             <strong>{t('replayLab.fork.sectionKicker')}</strong>
-            <p className="helper-text">{t('replayLab.fork.sectionDescription')}</p>
           </div>
           {forkableNodes.map(node => (
             <Button

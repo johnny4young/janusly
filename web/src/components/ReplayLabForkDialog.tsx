@@ -165,7 +165,6 @@ export function ReplayLabForkDialog({
               <FlaskConical size={12} aria-hidden="true" /> {t('replayLab.fork.sectionKicker')}
             </div>
             <h2 id="replay-lab-fork-title">{t('replayLab.fork.modalTitle', { nodeId: forkNodeId })}</h2>
-            <p className="helper-text">{t('replayLab.fork.modalDescription')}</p>
           </div>
           <button
             type="button"
@@ -180,7 +179,7 @@ export function ReplayLabForkDialog({
 
         <div className="run-input-dialog__body">
           <section className="we-replay-lab-source">
-            <div className="section-kicker">{t('replayLab.fork.sourceRun')}</div>
+            <div className="section-kicker">{t('replayLab.sourceRun')}</div>
             <dl className="we-replay-lab-source-grid">
               <div>
                 <dt>{t('replayLab.runId')}</dt>
@@ -207,7 +206,6 @@ export function ReplayLabForkDialog({
             <label htmlFor="replay-lab-fork-override" className="section-kicker">
               {t('replayLab.fork.overrideLabel')}
             </label>
-            <p className="helper-text">{t('replayLab.fork.overrideHint')}</p>
             <textarea
               id="replay-lab-fork-override"
               className="code-field"

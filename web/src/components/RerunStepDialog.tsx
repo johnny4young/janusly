@@ -40,7 +40,6 @@ export function RerunStepDialog({ runId, nodeId, onClose }: { runId: string; nod
   }, [runId, nodeId])
 
   const submit = async () => {
-    if (!plan) return
     let override: unknown
     try {
       override = JSON.parse(inputRef.current?.value ?? '')
@@ -55,7 +54,7 @@ export function RerunStepDialog({ runId, nodeId, onClose }: { runId: string; nod
         sourceRunId: runId,
         nodeId,
         inputOverride: override,
-        acknowledgedSideEffects: plan.sideEffects.map(effect => effect.nodeId),
+        acknowledgedSideEffects: plan?.sideEffects.map(effect => effect.nodeId),
       }, { 'Idempotency-Key': idempotencyKey }) as { runId: string }
       setRunId(nextRunId)
       bumpPlatformVersion()
@@ -63,7 +62,7 @@ export function RerunStepDialog({ runId, nodeId, onClose }: { runId: string; nod
     } catch (failure) {
       const { code, params } = failure as { code?: string; params?: { sideEffects?: RerunPlan['sideEffects'] } }
       // The edit changed what writes: show the new list and ask again.
-      if (code === 'rerun_side_effects_unconfirmed' && params?.sideEffects) {
+      if (plan && code === 'rerun_side_effects_unconfirmed' && params?.sideEffects) {
         setPlan({ ...plan, sideEffects: params.sideEffects })
       } else {
         setError(tApiError(failure))
@@ -93,7 +92,7 @@ export function RerunStepDialog({ runId, nodeId, onClose }: { runId: string; nod
                   <pre className="code-field">{JSON.stringify(plan.input, null, 2)}</pre>
                 </div>
                 <label>
-                  <span className="section-kicker">{t('runWorkspace.rerun.next')}</span>
+                  <span className="section-kicker">{t('replayLab.fork.overrideLabel')}</span>
                   <textarea
                     className="code-field"
                     rows={10}

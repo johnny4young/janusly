@@ -94,7 +94,7 @@ export function RunStepTimeline({
   const { t } = useT()
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [rerunNodeId, setRerunNodeId] = useState<string | null>(null)
-  const rerunRun = RerunDialog && run && !run.replayMode && isTerminalRunStatus(run.status) ? run : null
+  const canRerun = RerunDialog && run && !run.replayMode && isTerminalRunStatus(run.status)
   const { steps, startMs, endMs } = useMemo(() => projectRunSteps(events, nodes), [events, nodes])
 
   return (
@@ -108,7 +108,7 @@ export function RunStepTimeline({
             <span>{formatCompactDuration(endMs - startMs)}</span>
           </div>
           <ol aria-label={t('runWorkspace.steps.aria')}>
-            {steps.map(step => <StepRow key={step.nodeId} step={step} startMs={startMs} endMs={endMs} onRerun={rerunRun ? setRerunNodeId : undefined} />)}
+            {steps.map(step => <StepRow key={step.nodeId} step={step} startMs={startMs} endMs={endMs} onRerun={canRerun ? setRerunNodeId : undefined} />)}
           </ol>
         </>
       )}
@@ -129,8 +129,8 @@ export function RunStepTimeline({
           {t(loadingOlder ? 'common.loading' : 'rightPanel.reasoning.loadOlder')}
         </Button>
       )}
-      {RerunDialog && rerunRun && rerunNodeId && (
-        <RerunDialog runId={rerunRun.id} nodeId={rerunNodeId} onClose={() => setRerunNodeId(null)} />
+      {canRerun && rerunNodeId && (
+        <RerunDialog runId={run.id} nodeId={rerunNodeId} onClose={() => setRerunNodeId(null)} />
       )}
     </div>
   )
