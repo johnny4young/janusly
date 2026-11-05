@@ -265,7 +265,7 @@ function RightPanelRouter(props: RightPanelProps) {
         canReadReports={can('reports.read')}
         canReadRuns={can('runs.read')}
         onOpenTab={navigation.onOpenTab}
-        onOpenRun={execution.onOpenRun}
+        onOpenRun={onOpenRun}
       />
     </PanelChrome>
   )
