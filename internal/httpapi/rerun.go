@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
@@ -129,8 +131,34 @@ func (s *V1Server) prepareRerun(r *http.Request, rc v1Request, body rerunRequest
 	if refused != nil {
 		return fail(rerunRejected(refused))
 	}
+	refused, err = engine.RerunChildDecision(r.Context(), plan, s.rerunChildReader(rc.orgID))
+	if err != nil {
+		return fail(opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+	}
+	if refused != nil {
+		return fail(rerunRejected(refused))
+	}
 	prepared.plan = plan
 	return prepared, nil
+}
+
+func (s *V1Server) rerunChildReader(orgID string) engine.RerunChildReader {
+	q := store.New(s.pool)
+	return func(ctx context.Context, runID string) (*domain.Workflow, []store.ListRunNodesByRunForOrgRow, error) {
+		run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: orgID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, engine.ErrRerunChildMissing
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		wf, _, err := engine.RunSnapshot(run.InputJson)
+		if err != nil {
+			return nil, nil, engine.ErrRerunChildMissing
+		}
+		rows, err := q.ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: runID, OrgID: orgID})
+		return wf, rows, err
+	}
 }
 
 func (s *V1Server) rerunPreviewCore(r *http.Request, rc v1Request) opResult {
