@@ -17,7 +17,10 @@ Every tool is tenant-scoped in process and passes the same authority envelope:
 
 Tool requests are explicitly bounded before business parsing and every result
 passes a final 256000-byte fail-closed response gate. Expected errors are
-secret-scrubbed and truncated. Individual projections remain substantially
+secret-scrubbed and truncated. A call rejected before any handler runs, for an
+unknown tool name or a schema violation, still fails closed, is denial-rate
+limited and is audited with a fixed reason; the caller additionally receives the
+tool name and the schema violation, which `tools/list` already exposes. Individual projections remain substantially
 smaller where their contract permits it; the global gate is a backstop, not a
 pagination substitute.
 
