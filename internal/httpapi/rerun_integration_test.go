@@ -1094,7 +1094,8 @@ func TestRerunDoesNotReuseAHumanFormForAWrite(t *testing.T) {
 		_ = pool.QueryRow(ctx, `SELECT coalesce(attempts,0) FROM run_nodes WHERE run_id=$1 AND node_id='review'`, rerunID).Scan(&attempts)
 		t.Fatalf("write fired on a reused form: form attempts=%d, target received %q", attempts, sends())
 	}
-	if started.body["code"] != "rerun_needs_approval" || started.body["nodeId"] != "review" {
+	params, _ := started.body["params"].(map[string]any)
+	if started.body["code"] != "rerun_needs_approval" || params["nodeId"] != "review" {
 		t.Fatalf("refusal: %d %+v", started.status, started.body)
 	}
 	if got := sends(); len(got) != 1 {
