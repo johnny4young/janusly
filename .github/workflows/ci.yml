@@ -79,6 +79,7 @@ jobs:
       - if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: pnpm exec playwright install-deps chromium
       - run: pnpm test:browser
+      - run: pnpm test:auth-e2e
       - run: pnpm build
       - run: pnpm bundle-check
 

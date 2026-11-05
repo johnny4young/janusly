@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "node scripts/build.mjs",
     "preview": "vite preview",
-    "lint": "oxlint --max-warnings 0 src e2e performance scripts/build-stamp.ts vite.config.ts vitest.browser.config.ts playwright.config.ts playwright.performance.config.ts && node scripts/check-i18n-casts.mjs && node scripts/check-css-classes.mjs && node scripts/check-ui-legacy.mjs && node scripts/check-e2e-selectors.mjs && node scripts/check-raw-v1-reads.mjs && node scripts/check-duplicate-guards.mjs && node scripts/check-wire-policy.mjs && knip --reporter compact --no-progress",
+    "lint": "oxlint --max-warnings 0 src e2e auth-e2e performance scripts/build-stamp.ts vite.config.ts vitest.browser.config.ts playwright.config.ts playwright.auth.config.ts playwright.performance.config.ts && node scripts/check-i18n-casts.mjs && node scripts/check-css-classes.mjs && node scripts/check-ui-legacy.mjs && node scripts/check-e2e-selectors.mjs && node scripts/check-raw-v1-reads.mjs && node scripts/check-duplicate-guards.mjs && node scripts/check-wire-policy.mjs && knip --reporter compact --no-progress",
     "typecheck:app": "tsc --noEmit -p tsconfig.app.json",
     "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json",
@@ -22,10 +22,11 @@
     "test:accessibility": "playwright test --config playwright.config.ts accessibility.spec.ts",
     "test:performance": "playwright test --config playwright.performance.config.ts",
     "test:e2e": "playwright test --config playwright.config.ts",
+    "test:auth-e2e": "playwright test --config playwright.auth.config.ts",
     "audit:ci": "pnpm audit --audit-level=moderate",
     "bundle-report": "node scripts/bundle-report.mjs",
     "bundle-check": "node scripts/bundle-report.mjs --check --markdown ../artifacts/web-bundle-report.md --json ../artifacts/web-bundle-report.json",
-    "verify": "pnpm audit:ci && pnpm lint && pnpm typecheck && pnpm test && pnpm test:scripts && pnpm test:browser && pnpm build && pnpm bundle-check"
+    "verify": "pnpm audit:ci && pnpm lint && pnpm typecheck && pnpm test && pnpm test:scripts && pnpm test:browser && pnpm test:auth-e2e && pnpm build && pnpm bundle-check"
   },
   "dependencies": {
     "@supabase/auth-js": "2.110.7",

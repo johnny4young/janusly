@@ -8,6 +8,19 @@ The organization hint selects a candidate scope. Authority comes from the
 resolved `org_members` grant. Every handler scopes reads and writes by the
 resolved organization.
 
+Supabase email links return an implicit-grant session in the URL fragment.
+`web/src/auth-callback.ts` captures it at boot, before the hash router writes
+the fragment, and removes it with `replaceState` so the token leaves both the
+URL and session history. Nothing ties a link to a sign-in this browser started,
+so sign-in needs consent: the token is checked against the auth server, and
+`AuthCallbackGate` asks "Continue as <email>?" before the app mounts. Only then
+does `getSupabaseClient()` adopt the tokens with `setSession`, including over an
+existing session; `detectSessionInUrl` stays off. A rejected or expired link
+shows one fixed login message; the link's own error text is never rendered. An
+active WorkOS session outranks the callback, which is discarded.
+Browsers record the navigation in their visited-URL list before any page code
+runs, so an implicit-grant token can remain there; no client code can remove it.
+
 Authorization has two layers: minimum role rank and a closed permission
 catalog. When both are configured, both must pass. Custom roles derive a rank
 and a bounded permission set from organization-owned configuration.
