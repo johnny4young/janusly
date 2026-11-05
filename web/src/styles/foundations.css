@@ -285,7 +285,7 @@ a { color: var(--we-primary); }
 }
 
 .app-shell--with-status {
-  grid-template-rows: 56px 1fr 32px;
+  grid-template-rows: minmax(56px, auto) 1fr 32px;
 }
 
 .mobile-nav-bar,

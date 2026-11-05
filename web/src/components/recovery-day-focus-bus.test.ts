@@ -22,6 +22,13 @@ describe('recovery day focus bus', () => {
     expect(consumeRecoveryFocusDay()).toBeNull()
   })
 
+  it('keeps a Recover tab handoff on Recover when it is consumed', () => {
+    requestRecoveryDayFocus('2026-07-06', 'recover')
+    expect(window.location.hash).toBe('#/recover/day/2026-07-06')
+    expect(consumeRecoveryFocusDay()).toBe('2026-07-06')
+    expect(window.location.hash).toBe('#/recover')
+  })
+
   it('dispatches the focus event for an already-mounted listener', () => {
     const handler = vi.fn()
     window.addEventListener(RECOVERY_DAY_FOCUS_EVENT, handler)

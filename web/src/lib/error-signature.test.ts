@@ -414,6 +414,9 @@ describe("normalizeErrorSignature — network_timeout (DNS + undici codes)", () 
     "dial tcp 10.0.0.1:443: connect: connection refused",
     "read tcp 10.0.0.2:5000->10.0.0.1:443: read: connection reset by peer",
     "dial tcp 10.0.0.1:443: connect: no route to host",
+    "connect: no route to host",
+    "connect: network is unreachable",
+    'Post "https://api.example.com/v1": EOF',
     "context deadline exceeded",
   ])("clusters the Go network failure %s", (message) => {
     expect(normalizeErrorSignature(new Error(message), { nodeType: "http" })).toEqual({

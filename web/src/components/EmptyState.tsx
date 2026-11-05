@@ -9,6 +9,8 @@ export type EmptyStateProps = {
     label: string
     onClick: () => void
   }
+  /** Several equal choices, in place of a single `cta`. */
+  actions?: ReactNode
   /** Optional link beside the primary action, such as related documentation. */
   secondary?: {
     label: string
@@ -20,7 +22,7 @@ export type EmptyStateProps = {
   testId?: string
 }
 
-export function EmptyState({ icon, kicker, body, cta, secondary, testId }: EmptyStateProps) {
+export function EmptyState({ icon, kicker, body, cta, actions, secondary, testId }: EmptyStateProps) {
   return (
     <div className="we-empty-state" data-testid={testId ?? 'empty-state'}>
       <div className="we-empty-state__icon" aria-hidden>
@@ -40,6 +42,7 @@ export function EmptyState({ icon, kicker, body, cta, secondary, testId }: Empty
           {cta.label}
         </Button>
       ) : null}
+      {actions}
       {secondary ? (
         <a
           className="we-empty-state__link"

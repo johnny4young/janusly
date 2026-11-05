@@ -14,7 +14,6 @@ const locales = {
     allWorkflows: 'All workflows',
     build: 'Build',
     newWorkflow: 'New workflow',
-    creationTitle: 'How do you want to start?',
     creationChoices: ['Describe it', 'Start blank', 'Use a template'],
     addStep: 'Add step',
     describeOutcome: 'Describe the outcome',
@@ -40,7 +39,6 @@ const locales = {
     allWorkflows: 'Todos los flujos',
     build: 'Crear',
     newWorkflow: 'Nuevo flujo',
-    creationTitle: '¿Cómo quieres empezar?',
     creationChoices: ['Descríbelo', 'Empezar vacío', 'Usar una plantilla'],
     addStep: 'Agregar paso',
     describeOutcome: 'Describir el resultado',
@@ -117,15 +115,14 @@ for (const locale of ['en', 'es'] as const) {
     await page.locator('button[aria-controls="workflow-creation-choices"]').click()
 
     const creation = page.getByTestId('workflow-creation-choices')
-    await expect(creation.getByRole('heading', { name: copy.creationTitle, exact: true })).toBeVisible()
-    await expect(creation.locator('.workflow-creation__choices > button')).toHaveCount(3)
+    await expect(creation.getByRole('menuitem')).toHaveCount(3)
     for (const choice of copy.creationChoices) {
-      await expect(creation.getByRole('button', { name: new RegExp(`^${choice}`) })).toBeVisible()
+      await expect(creation.getByRole('menuitem', { name: new RegExp(`^${choice}`) })).toBeVisible()
     }
-    await expectReadablePrimaryText(creation.locator('.workflow-creation__choice strong, .workflow-creation__choice small'))
+    await expectReadablePrimaryText(creation.locator('.ui-menu__item strong, .ui-menu__item small'))
     await captureViewport(page, `web-${locale}-workflow-creation-paths`)
 
-    const startBlank = creation.getByRole('button', {
+    const startBlank = creation.getByRole('menuitem', {
       name: new RegExp(`^${copy.creationChoices[1]}`),
     })
     await startBlank.focus()

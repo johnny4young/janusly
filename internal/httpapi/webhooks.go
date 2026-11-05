@@ -540,7 +540,7 @@ func (s *V1Server) runsRedriveCore(r *http.Request, rc v1Request) opResult {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			return opError(http.StatusNotFound, "dlq_not_found", "Not found", nil)
 		case errors.Is(err, engine.ErrRedriveConflict):
-			return opError(http.StatusConflict, "dlq_replay_conflict", "Dead letter replay already claimed", nil)
+			return opError(http.StatusConflict, "dlq_replay_conflict", redriveConflictMessage(err, "Dead letter replay already claimed"), nil)
 		default:
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}

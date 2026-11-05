@@ -52,6 +52,13 @@ function metadataPreview(metadata: unknown): string {
   }
 }
 
+/** The operator's accepted-loss note: free text, shown whole and apart from the JSON preview. */
+function closeReason(row: AuditLogRow): string | null {
+  if (row.action !== "dlq.resolved" || typeof row.metadata !== "object" || row.metadata === null) return null;
+  const reason = (row.metadata as { reason?: unknown }).reason;
+  return typeof reason === "string" ? reason : null;
+}
+
 function buildAuditQuery(action: string, cursor: string | null): string {
   const qs = new URLSearchParams();
   if (action) qs.set("action", action);
@@ -197,14 +204,18 @@ export function AuditLogPanel() {
                   const target = row.targetType
                     ? `${row.targetType}${row.targetId ? `:${row.targetId}` : ""}`
                     : "—";
-                  const details = metadataPreview(row.metadata);
+                  const reason = closeReason(row);
+                  const details = metadataPreview(reason === null ? row.metadata : { ...(row.metadata as object), reason: undefined });
                   return (
                     <tr key={row.id}>
                       <td>{row.createdAt ? new Date(row.createdAt).toLocaleString(getResolvedLocale()) : "—"}</td>
                       <td><code>{row.action}</code></td>
                       <td>{row.userId || "—"}</td>
                       <td>{target}</td>
-                      <td>{details ? <code>{details}</code> : "—"}</td>
+                      <td>
+                        {reason !== null && <p className="we-audit-reason" data-testid="audit-close-reason"><strong>{t("audit.reason")}</strong> {reason}</p>}
+                        {details ? <code>{details}</code> : reason === null && "—"}
+                      </td>
                     </tr>
                   );
                 })}

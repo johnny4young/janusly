@@ -52,12 +52,12 @@ describe('dead letter boundaries', () => {
 
   it.each([{}, null, { ok: false }, { ok: 'true' }])('does not confirm an invalid resolution receipt: %j', async value => {
     respond(value)
-    await expect(resolveDeadLetterEntry('dead-letter')).rejects.toThrow()
+    await expect(resolveDeadLetterEntry('dead-letter', 'accepted')).rejects.toThrow()
   })
 
-  it('sends exactly the selected id and accepts only an affirmative receipt', async () => {
+  it('sends exactly the selected id and reason and accepts only an affirmative receipt', async () => {
     vi.mocked(contractApi).mockResolvedValue({ ok: true })
-    await expect(resolveDeadLetterEntry('dead-letter')).resolves.toBeUndefined()
-    expect(contractApi).toHaveBeenCalledWith('POST /dlq/resolve', '/dlq/resolve', { id: 'dead-letter' }, { guard: isPostDlqResolveResponse })
+    await expect(resolveDeadLetterEntry('dead-letter', 'accepted')).resolves.toBeUndefined()
+    expect(contractApi).toHaveBeenCalledWith('POST /dlq/resolve', '/dlq/resolve', { id: 'dead-letter', reason: 'accepted' }, { guard: isPostDlqResolveResponse })
   })
 })

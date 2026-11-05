@@ -13,6 +13,7 @@
  */
 
 import type { RunNode } from '../../types'
+import { isNetworkFailure, isTimeoutFailure } from '@/lib/error-signature'
 import { computeWorkflowDiff } from '@/lib/workflow-diff'
 import type { EvidenceKind } from '@/lib/ai-evidence-runtime'
 import { scrubOperatorGuidanceSecrets } from '@/lib/operator-guidance'
@@ -22,8 +23,28 @@ import type {
   PatchApproachLabel,
   ConsideredAlternative,
   PatchSuggestion,
+  Step,
   SuggestionTab,
 } from './types'
+
+/** `review` waits on the operator; `active` is work in flight. */
+export type RecoveryStageState = 'pending' | 'review' | 'active' | 'done' | 'failed'
+
+/**
+ * Patch, Validate and Apply states for a step. Validate reads done only after a
+ * sandbox pass; steps that make no progress claim return null.
+ */
+export function recoveryStages(step: Step): [RecoveryStageState, RecoveryStageState, RecoveryStageState] | null {
+  switch (step.kind) {
+    case 'loading': return ['active', 'pending', 'pending']
+    case 'review': return ['review', 'pending', 'pending']
+    case 'validating': return ['done', 'active', 'pending']
+    case 'validation-failed': return ['done', 'failed', 'pending']
+    case 'validated': return ['done', 'done', 'review']
+    case 'applying': return ['done', 'done', 'active']
+    default: return null
+  }
+}
 
 function oneLineAlternative(value: unknown, maxChars: number): string {
   if (typeof value !== 'string') return ''
@@ -155,18 +176,19 @@ export function classifyRecoveryError(errorJson: unknown): RecoveryErrorCategory
         : undefined
   const msg = typeof o.message === 'string' ? o.message.toLowerCase() : ''
 
-  if (
-    code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ECONNRESET' || code === 'EAI_AGAIN'
-    || /econnrefused|enotfound|getaddrinfo|dns|network|socket hang up/.test(msg)
-  ) return 'network'
-  if (
-    code === 'ETIMEDOUT' || code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT'
-    || status === 408 || status === 504 || /timed?\s?out|timeout/.test(msg)
-  ) return 'timeout'
-  if (status === 401 || status === 403 || /unauthor|forbidden|invalid (api )?key|invalid credential|authentication/.test(msg)) return 'auth'
-  if (status === 429 || /rate.?limit|too many requests/.test(msg)) return 'rateLimit'
-  if (status === 404 || /\bnot found\b/.test(msg)) return 'notFound'
+  if (status === 408 || status === 504) return 'timeout'
+  if (status === 401 || status === 403) return 'auth'
+  if (status === 429) return 'rateLimit'
+  if (status === 404) return 'notFound'
   if (typeof status === 'number' && status >= 500 && status <= 599) return 'serverError'
+  // A status means the peer answered, so message wording cannot prove a transport fault.
+  if (status === undefined) {
+    if (isTimeoutFailure(code) || isTimeoutFailure(msg) || /timed?\s?out/.test(msg)) return 'timeout'
+    if (isNetworkFailure(code) || isNetworkFailure(msg) || /\bdns\b|network|socket hang up/.test(msg)) return 'network'
+  }
+  if (/unauthor|forbidden|invalid (api )?key|invalid credential|authentication/.test(msg)) return 'auth'
+  if (/rate.?limit|too many requests/.test(msg)) return 'rateLimit'
+  if (/\bnot found\b/.test(msg)) return 'notFound'
   return null
 }
 

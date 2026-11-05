@@ -386,6 +386,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.mountAiSurfaceRoutes(mux)
 	s.mountBillingRoutes(mux)
 	s.mountReplayLabRoutes(mux)
+	s.mountRerunRoutes(mux)
 	s.mountRecoveryReadRoutes(mux)
 	s.mountSemanticRecoveryRoutes(mux)
 	s.mountSsoRoutes(mux)

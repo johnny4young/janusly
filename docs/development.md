@@ -35,6 +35,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 | Go integration | `make test-integration` | `JANUSLY_DATABASE_URL` pointing at a migrated PostgreSQL test role with `CREATEDB`; runs `-p 1` |
 | Web unit (jsdom) | `cd web && pnpm test` | nothing; CSS is not parsed |
 | Web browser (Chromium) | `cd web && pnpm test:browser` | Playwright browsers |
+| Web auth callback | `cd web && pnpm test:auth-e2e` | Playwright browsers; builds its own Supabase-configured bundle and fakes the auth server |
 | Web scripts | `cd web && pnpm test:scripts` | nothing |
 | Web e2e | `make test-e2e` | Docker (fresh compose stack, built image) |
 | Everything | `make verify` | Docker plus the host test/lint toolchains |
@@ -43,7 +44,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 compose project, migrates twice (the second run must be a no-op), regenerates
 `schema.sql` and checks it for drift, runs `make generate` drift, lint, deadcode, vuln,
 Go unit, integration and two-instance HA, the web verify (`audit:ci`, lint,
-app/unit/E2E typecheck, unit, scripts, browser, build, `bundle-check`) and the
+app/unit/E2E typecheck, unit, scripts, browser, auth callback, build, `bundle-check`) and the
 e2e lane, then ends with
 `git diff --exit-code`. Commit first, verify after, and do not touch tracked
 files while it runs.
@@ -241,9 +242,14 @@ are not raised for features. The bundle holds no duplicated first-party modules
 and the i18n catalogs are prefix-compressed, so dead bytes live in vendor code and
 interop. Production-only plugins remove them: named React bindings instead of
 CommonJS interop (`react-esm-facade-plugin.mjs`), `d3-color` and Lucide's React
-keys (`trim-vendor-plugin.mjs`), and always-true `color-mix` guards
+keys (`trim-vendor-plugin.mjs`), unused GoTrueClient methods
+(`prune-auth-client-plugin.mjs`), and always-true `color-mix` guards
 (`css-floor-plugin.mjs`). `scripts/production-trims.test.mjs` exercises them
-against the untrimmed vendors. Together with dropping the modulepreload polyfill
+against the untrimmed vendors. Calling another auth method means adding it to
+the `Pick` in `src/auth.ts` and to the plugin's roots; the test holds both lists
+equal. Live browser validators use `src/lib/schema-lite.ts`, held to `zod/mini`
+by a differential test; importing a Zod-built schema into a production path
+brings about 8 KiB of Zod back. Together with dropping the modulepreload polyfill
 they measured 11.3 KiB off both totals; the caps did not move with them, so that
 room stays available until the caps are next lowered to the measured size.
 The artifact and worst-locale caps were rebased once more in 2026-10, by the

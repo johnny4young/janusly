@@ -22,14 +22,12 @@ import {
   type RecoveryHomeSnapshot,
 } from '../recovery-home-snapshot'
 import {
-  decodeClustersResponse,
   decodeHeatmap,
   decodeOperatorWins,
   decodeRecoveryCases,
   decodeRecoveryLedger,
   decodeRecoveryMetrics,
   decodeRecoveryQueue,
-  decodeRecoveryValidationReport,
   type RecoveryHomeCase,
 } from '../recovery-home-sections'
 import { useWorkflowStore } from '../store'
@@ -37,7 +35,6 @@ import type { DeadLetter } from './dead-letter-types'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { RecoveryCenterView } from './RecoveryCenterView'
-import type { RecoveryValidationReport } from './RecoveryValidationSection'
 import { requestOperationsSection } from './operations-section-bus'
 import {
   buildGreeting,
@@ -52,7 +49,7 @@ import {
   homeEvidenceStatus,
   HOME_EVIDENCE_STALE_MS,
   shouldShowOnboarding,
-  type ClustersResponse,
+  summarizeRunsToday,
   type HeatmapDay,
   type OperatorWins,
   type OperatorBrief,
@@ -78,6 +75,7 @@ const EMPTY_SEMANTIC_CASES: RecoveryHomeCase[] = []
 export type RecoveryCenterPanelProps = {
   runs: RunSummary[]
   runNodes: RunNode[]
+  canReadRuns: boolean
   deadLetters: DeadLetter[]
   onSemanticBlockerRunsChange?: (runIds: string[]) => void
   onOpenTab: (tab: ActiveTab) => void
@@ -127,9 +125,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     (state) => state.dismissRecoveryIntroThisSession,
   )
   const [metricsSnapshot, setMetricsSnapshot] = useState<(OrgSnapshot<RecoveryMetrics> & { receivedAt: number }) | null>(null)
-  const [clustersSnapshot, setClustersSnapshot] = useState<OrgSnapshot<ClustersResponse | null> | null>(null)
   const [heatmapSnapshot, setHeatmapSnapshot] = useState<OrgSnapshot<HeatmapDay[]> | null>(null)
-  const [validationSnapshot, setValidationSnapshot] = useState<OrgSnapshot<RecoveryValidationReport | null> | null>(null)
   const [semanticCasesSnapshot, setSemanticCasesSnapshot] = useState<OrgSnapshot<{
     cases: RecoveryHomeCase[]
     status: HomeReadStatus
@@ -142,9 +138,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   const [winsSnapshot, setWinsSnapshot] = useState<IdentitySnapshot<OperatorWins | null> | null>(null)
   const [impactPollVersion, setImpactPollVersion] = useState(0)
   const metrics = metricsSnapshot?.orgId === resolvedOrgId ? metricsSnapshot.value : null
-  const clusters = clustersSnapshot?.orgId === resolvedOrgId ? clustersSnapshot.value : null
   const heatmap = heatmapSnapshot?.orgId === resolvedOrgId ? heatmapSnapshot.value : EMPTY_HEATMAP
-  const validation = validationSnapshot?.orgId === resolvedOrgId ? validationSnapshot.value : undefined
   const semanticCases = semanticCasesSnapshot?.orgId === resolvedOrgId
     ? semanticCasesSnapshot.value.cases
     : EMPTY_SEMANTIC_CASES
@@ -186,7 +180,6 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   // may replace the queue/ledger, including their availability.
   const impactReadGeneration = useRef(0)
   const [metricsLoading, setMetricsLoading] = useState(false)
-  const [insightsOpen, setInsightsOpen] = useState(false)
   const [metricsErrorSnapshot, setMetricsErrorSnapshot] = useState<OrgSnapshot<string> | null>(null)
   const metricsError = metricsErrorSnapshot?.orgId === resolvedOrgId
     ? metricsErrorSnapshot.value
@@ -205,9 +198,6 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   observedOpenIdsRef.current = props.deadLetters
     .filter((deadLetter) => deadLetter.status === 'open')
     .map((deadLetter) => deadLetter.id)
-  useEffect(() => {
-    setInsightsOpen(false)
-  }, [resolvedOrgId, resolvedUserId])
   useEffect(() => {
     const listener = props.onSemanticBlockerRunsChange
     if (!listener) {
@@ -306,20 +296,10 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
           'metrics',
           decodeRecoveryMetrics,
         )
-        const clustersValue = readRecoveryHomeSection(
-          snapshot,
-          'clusters',
-          decodeClustersResponse,
-        )
         const heatmapValue = readRecoveryHomeSection(
           snapshot,
           'heatmap',
           decodeHeatmap,
-        )
-        const validationValue = readRecoveryHomeSection(
-          snapshot,
-          'validation',
-          decodeRecoveryValidationReport,
         )
         const casesValue = readRecoveryHomeSection(
           snapshot,
@@ -337,17 +317,9 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
         }
 
         startTransition(() => {
-          setClustersSnapshot({
-            orgId: resolvedOrgId,
-            value: clustersValue,
-          })
           setHeatmapSnapshot({
             orgId: resolvedOrgId,
             value: heatmapValue?.days ?? [],
-          })
-          setValidationSnapshot({
-            orgId: resolvedOrgId,
-            value: validationValue,
           })
         })
 
@@ -381,9 +353,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
               : runtimeT('recoveryCenter.empty.metricsUnavailableFallback'),
         })
         startTransition(() => {
-          setClustersSnapshot({ orgId: resolvedOrgId, value: null })
           setHeatmapSnapshot({ orgId: resolvedOrgId, value: [] })
-          setValidationSnapshot({ orgId: resolvedOrgId, value: null })
           if (generation === impactReadGeneration.current) {
             setLedgerSnapshot({ orgId: resolvedOrgId, value: null })
             setWinsSnapshot({ orgId: resolvedOrgId, userId: resolvedUserId, value: null })
@@ -600,6 +570,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     () => props.runNodes.filter((node) => node.status === 'waiting'),
     [props.runNodes],
   )
+  const approvalsPending = Math.max(waitingNodes.length, metrics?.approvalsPending.value ?? 0)
   const heatmapCells = useMemo(
     () => nowMs === null ? [] : buildHeatmapCells(heatmap, 90, nowMs),
     [heatmap, nowMs],
@@ -674,6 +645,10 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
     [props.runs],
   )
   const activeRuns = allActiveRuns.slice(0, 3)
+  const runsToday = useMemo(
+    () => props.canReadRuns && nowMs !== null ? summarizeRunsToday(props.runs, nowMs) : null,
+    [nowMs, props.canReadRuns, props.runs],
+  )
   const handleRecommendedAction = useCallback((action: RecommendedAction) => {
     const { target } = action
     if (target.destination === 'recoveryCase') {
@@ -706,17 +681,16 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   }, [onOpenTab])
 
   return {
-    activeRuns, allActiveRuns, allClear, allClearDowntimeOverride, bumpPlatformVersion,
-    celebrationTrigger, clusters, dismissIntro, greeting, handleRecommendedAction,
-    healthScore, heatmap, heatmapCells, insightsOpen, ledger, longestOpen, memoryPurgeCountdownLabel,
+    activeRuns, allActiveRuns, allClear, allClearDowntimeOverride, approvalsPending, bumpPlatformVersion,
+    celebrationTrigger, dismissIntro, greeting, handleRecommendedAction,
+    healthScore, longestOpen, memoryPurgeCountdownLabel,
     metrics, metricsError, metricsLoading, metricsStatus, nowMs,
     onOpenActivity: () => props.onOpenTab('runs'), onOpenMemoryGovernance: openMemoryGovernance,
     onOpenRecoveryQueue: props.onOpenRecoveryQueue,
     onOpenRun: (runId: string) => props.onOpenRun(runId, 'runs'), onOpenTab: props.onOpenTab,
     onStartRecoveryDrill: props.onStartRecoveryDrill, openDeadLetters, openFailureCount,
     operatorBriefStatus, operatorBriefWarnings: operatorBrief?.warnings ?? [], operatorWins,
-    recommendedActions, recoveryClearEligible, setInsightsOpen, showOnboarding,
-    streak, validation, waitingNodes,
+    recommendedActions, recoveryClearEligible, runsToday, showOnboarding, streak,
   }
 }
 

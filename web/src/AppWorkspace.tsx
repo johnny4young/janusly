@@ -61,6 +61,10 @@ const RecoveryCenterPanel = lazy(() => import('./components/RecoveryCenterPanel'
 const RightPanel = lazy(() => import('./components/RightPanel').then((module) => ({
   default: module.RightPanel,
 })))
+// Ships with the panel beside it, so the top bar adds no chunk or eager code.
+const WorkspaceSectionNav = lazy(() => import('./components/RightPanel').then((module) => ({
+  default: module.WorkspaceSectionNav,
+})))
 const RunInputDialog = lazy(() => import('./components/RunInputDialog').then((module) => ({
   default: module.RunInputDialog,
 })))
@@ -219,6 +223,9 @@ function WorkspaceContent(props: AppWorkspaceProps) {
                 readOnly={canvas.readOnly}
                 viewportWorkflowId={canvas.viewportWorkflowId}
                 active={visibility.visible}
+                validationIssues={props.rightPanel.authoring.validationIssues}
+                readiness={props.rightPanel.authoring.readinessResult}
+                aiReviewIssues={props.rightPanel.authoring.aiReviewIssues}
               />
             </Suspense>
           </div>
@@ -295,6 +302,13 @@ function WorkspaceContent(props: AppWorkspaceProps) {
               )}
             </nav>
           </div>
+          {authoringMode && (
+            <ErrorBoundary resetKey={activeTab} logTag="top-bar:sections" fallback={null}>
+              <Suspense fallback={null}>
+                <WorkspaceSectionNav activeTab={activeTab} permissions={permissions} onOpenTab={props.onOpenTab} />
+              </Suspense>
+            </ErrorBoundary>
+          )}
           <div className="top-bar-right">
             <div className="top-bar-pill-group">
               {activeTab === 'inspector' && canWriteWorkflows && (

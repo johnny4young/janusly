@@ -7,8 +7,91 @@
   the built-in default are tinted. If only some roles save, the panel says which
   failed and keeps their edits to retry.
 - Revert to defaults now appears on built-in roles that have saved changes.
+- Rerun a run from any step that ran, from the Timeline tab. Earlier steps reuse
+  their saved outputs, so nothing before the step repeats. The step's input is
+  edited beside the original, the steps with side effects are listed before you
+  confirm, and the run sheet links the new run to its source run. A step behind
+  an approval reruns from that approval when anything after it can write.
+- Suggest fix now opens with the failed step, the attempts and whether AI is
+  connected. Without an API key it says so and leads with Replay in Lab; Review
+  evidence still shows the deterministic evidence, with no patch. Once a
+  suggestion is under way, the dialog shows Patch, Validate and Apply, and marks
+  Validate done only after a sandbox run passes.
+- Build can compare versions on the canvas. In Versions, pick two versions and
+  choose Open on canvas, or use Compare draft to check unsaved edits against the
+  version they started from, including when only one version is saved. Steps and
+  paths are marked new, modified or deleted, a counter steps through each change,
+  and each one shows its before and after JSON with secrets masked.
+- Run detail is one sheet. Its header shows the workflow, the actions and a data
+  row with status, duration, start, version, trace and run ID, and it stays in
+  place across the tabs Overview, Timeline, Events, Agents and Ask. Timeline now
+  groups this run's attempts by step on one time scale and marks retries; the
+  event list moved to Events, and the conversation with Janusly to Ask, where it
+  survives a look at another tab. View timeline is gone in favor of the tabs,
+  Cancel run only appears while a run can still stop, and a Close button returns
+  to the activity feed.
+- Recover is now a list and a detail side by side. Filters stay above the queue,
+  the failures sit on the left and the selected failure on the right, each pane
+  scrolling on its own, so moving with J/K keeps both on screen and the action
+  bar in view. Actions are grouped: Suggest fix, Retry and Replay in Lab; Copy
+  error and Export; Close without recovery.
+- The recovery queue groups failures by cluster by default, with a switch to All
+  items. Each cluster shows its signature, category, occurrences and affected
+  workflows, plus Investigate, which opens the fix for every open failure in the
+  cluster, and Replay cluster, which starts a paced campaign after its preview.
+- Home's Operator prompt is now one compact field at the bottom of What needs
+  you, and answers open in a side panel instead of pushing Home down. The panel
+  links the run the answer is based on and opens its recovery case in one click.
+  Without an AI provider it says so and shows the root cause, failed step, error
+  and next action, with the full report one click away. A question typed on Home
+  with no draft loaded now answers about the most recent open failure instead of
+  sending you to AI Studio. The five suggested questions moved to the panel.
+- Templates now filters recipes by category, with a chip and a count for each
+  category in the catalog, and shows them in compact three-column cards whose
+  icons trace each recipe's steps. Solution packs moved to a Packs view next to
+  Recipes on the same page; the search covers both, and each view's count
+  follows it.
+- Build shows a workflow's problems on the canvas. The Flow map card has a
+  Problems chip with the count, workflow-level problems appear in a band above
+  the steps, and a step with a problem has a dot on its corner. Each one opens
+  what needs fixing: the step, the path, the Outputs section or Versions.
+  Outputs and Versions problems also open from the Problems tab, whose count now
+  lists a problem reported by two checks once. Add step no longer overlaps the
+  Flow map card in Spanish.
+- Retrying on Network errors now covers connection refused, connection reset and
+  DNS failures, and retrying on Timeouts covers deadline exceeded. A policy that
+  ignores `network` now stops retries for those failures too. A write-side MCP
+  tool no longer retries after a failure, even with no retry filter: replay it
+  from the failure instead. The recovery dialog describes these failures the
+  same way.
+- Closing a failure without recovery now shows its workflow, step and
+  occurrences and requires a short reason. The reason is saved to the audit log
+  and appears in the audit log's details.
+- Workflow rows open with a click and keep delete behind a ⋯ menu. Move to
+  Trash happens at once and its toast offers Undo for six seconds.
+- Active and Trash are now a segmented control with counts above the workflow
+  list. Deleted workflows appear in the same table, with their expiry date and
+  Restore.
+- New workflow opens a menu with Describe it, Start blank and Use a template,
+  selectable with keys 1 to 3. The empty list shows the same three choices.
+- Activity shows its sections as tabs: Runs, Recover with the number of open
+  failures, Agent activity and Reports.
+- Reports shows recovery trends for the last 7, 30 or 90 days: recovery KPIs,
+  the activity heatmap, failure clusters, model calibration, AI spend, and
+  Recovery validation and the Value dashboard with Markdown and JSON exports.
+- Home keeps only what needs a decision now: the collapsed Insights and history
+  section is gone, replaced by a Today strip with today's runs and success, open
+  failures and pending approvals, plus the Operator prompt and a link to Reports.
+  An AI budget banner appears only at the warning threshold.
 - Build opens with the sidebar collapsed to a rail for more canvas; the flow
   name and version move to the top bar.
+- Connections is now a table with type, health, the workflows known to use each
+  connection, last used, expiry and owner. A header counts connections that are
+  expiring or expired, with errors, and unused for 30 days. Long lists now scroll
+  when Settings is opened directly.
+- The Build panel opens on Step, Workflow and Problems. Its section tabs moved
+  to the top bar, and Generate, Explain, Review and Fix sit on one line that
+  fits in English and Spanish.
 
 - Canvas connections drop the repeated "default" label; named branches show a
   pill on the connection.
@@ -43,6 +126,10 @@
   install or run packs.
 - AI Studio has a smaller header and a horizontal 1-2-3-4 stepper that marks the
   current step.
+- The Tools catalog fits one screen: tools are grouped by namespace in a
+  three-column grid, filterable by Read-only, May change external systems and
+  Installed. Install state now survives a reload, and a tool's description and
+  Install action open from its row.
 - Each view has one header row with its section title and tabs; descriptions
   moved to a tooltip on the title, so content starts about 110 px higher.
 - Headings that receive focus for screen readers no longer show a focus ring

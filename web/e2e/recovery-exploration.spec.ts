@@ -7,7 +7,7 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { execPostgresSql } from './_helpers/postgres'
-import {
+import { openReports,
   openRecoveryAutomation,
   openWorkspaceSection,
 } from './_helpers/workspace-navigation'
@@ -195,7 +195,6 @@ for (const contract of LOCALES) {
 
     const sessionOrgId = await prepareSession(page, contract.locale)
     await page.goto('/')
-    await page.getByTestId('home-insights-toggle').click()
 
     const labEntry = page.getByTestId('recovery-lab-entry')
     await expect(labEntry).toBeVisible()
@@ -204,7 +203,6 @@ for (const contract of LOCALES) {
     expect(await page.evaluate(() => localStorage.getItem('janusly:recovery:hideIntro'))).toBeNull()
 
     await page.reload()
-    await page.getByTestId('home-insights-toggle').click()
     await expect(labEntry).toBeVisible()
     await hideUnrelatedOverlays(page)
     await capture(labEntry, `web-${contract.locale}-recovery-lab-restored`)
@@ -235,9 +233,11 @@ for (const contract of LOCALES) {
       localStorage.removeItem('janusly:recovery:hideIntro')
     }, historyOrgId)
     await page.reload()
-    await page.getByTestId('home-insights-toggle').click()
+    await expect(page.getByTestId('home-today')).toBeVisible()
     await expect(labEntry).toBeHidden()
     expect(await page.evaluate(() => localStorage.getItem('janusly:recovery:hideIntro'))).toBeNull()
+
+    await openReports(page)
 
     const metricAction = page.getByTestId('recovery-center-metric-verified-recovery')
     const metricCard = metricAction.locator('..')
@@ -260,17 +260,18 @@ for (const contract of LOCALES) {
     const queue = page.getByTestId('recovery-queue')
     const dayChip = page.getByTestId('dlq-day-filter-chip')
     await expect(queue).toBeVisible()
+    await expect(page).toHaveURL(/#\/recover/)
     await expect(dayChip).toContainText(days[0] ?? '')
     await page.locator('#dlq-filter').selectOption('all')
     await expect(page.getByTestId(`dlq-row-${ids[0]}`)).toBeVisible()
     await capture(queue, `web-${contract.locale}-recovery-sparkline-drill-in`)
 
-    await page.getByRole('button', { name: contract.homeName }).click()
-    await page.getByTestId('home-insights-toggle').click()
+    await openReports(page)
+    await page.getByTestId('reports-window-90').click()
     const heatmap = page.getByTestId('recovery-heatmap')
     const latestCell = page.getByTestId(`recovery-heatmap-cell-${days[2]}`)
     const previousDayCell = page.getByTestId(`recovery-heatmap-cell-${days[1]}`)
-    // The densified grid renders empty cells before the remounted Home panel's
+    // The densified grid renders empty cells before the remounted Reports panel's
     // history request settles. Wait for the seeded days to become actionable
     // so Enter proves keyboard drill-in instead of racing the transient shell.
     await expect(latestCell).toHaveAttribute('aria-disabled', 'false')

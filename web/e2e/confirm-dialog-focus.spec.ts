@@ -81,14 +81,14 @@ for (const contract of LOCALES) {
     await openWorkspaceSection(page, contract.workflows, contract.allWorkflows)
 
     await page.locator('button[aria-controls="workflow-creation-choices"]').click()
-    await page.getByRole('button', { name: new RegExp(`^${contract.startBlank}`) }).click()
+    await page.getByRole('menuitem', { name: new RegExp(`^${contract.startBlank}`) }).click()
     const workflowName = page.getByRole('textbox', { name: contract.workflowName, exact: true })
     const dirtyName = `Focus contract ${contract.locale} ${Date.now()}`
     await workflowName.fill(dirtyName)
     await openWorkspaceSection(page, contract.workflows, contract.allWorkflows)
-    await page.locator('button[aria-controls="workflow-creation-choices"]').click()
-    const startBlankTrigger = page.getByRole('button', { name: new RegExp(`^${contract.startBlank}`) })
-    await startBlankTrigger.click()
+    const newWorkflowTrigger = page.locator('button[aria-controls="workflow-creation-choices"]')
+    await newWorkflowTrigger.click()
+    await page.getByRole('menuitem', { name: new RegExp(`^${contract.startBlank}`) }).click()
 
     const dialog = page.getByRole('alertdialog')
     const confirmButton = dialog.getByRole('button', { name: contract.confirm, exact: true })
@@ -108,7 +108,7 @@ for (const contract of LOCALES) {
 
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
-    await expect(startBlankTrigger).toBeFocused()
+    await expect(newWorkflowTrigger).toBeFocused()
     await openWorkspaceSection(page, contract.workflows, contract.build)
     await expect(page.getByRole('textbox', { name: contract.workflowName, exact: true })).toHaveValue(dirtyName)
     expect(browserErrors).toEqual([])

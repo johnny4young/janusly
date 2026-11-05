@@ -82,11 +82,79 @@ author omits `maxDelayMs`. Backoff is fixed or exponential; jitter is boolean;
 retry/ignore matcher lists are bounded. Invalid legacy policy data fails closed
 to no retry rather than being partially interpreted.
 
+`retryOn` and `ignoreOn` match labels derived from the failure: its name, its
+code, the exact HTTP status, the status family (`5xx`), and two synthetic labels.
+`network` covers resolver and connection failures, in Go wording (`connection
+refused`, `no such host`, a transport `EOF`) or as Node codes (`ECONNRESET`,
+`ENOTFOUND`). `timeout` covers timeout wording, `deadline exceeded`, and timeout
+codes. A dial that times out carries both. An error with an HTTP status never
+gets `network` from its message, because the peer answered. `internal/signature`
+owns the wording, so retries and failure clusters read a failure the same way.
+
+A failure marked `writeSide` never retries the whole node, whatever the policy
+says: external effects may already have happened, so replay stays with an
+operator. `http` marks non-safe methods once the request is dispatched, `tool`
+marks write-side tools under `require_ok`, `loop` marks write-side `for_each`
+failures, and `mcp_tool` marks every failure of a write-side descriptor. That
+includes failures before the call is sent, such as the local rate limit. An
+`agent` or `multi_agent` node observes tool failures as results and does not
+raise them.
+
 When a run flips to `failed`, its still-queued siblings go back to `pending`
 in the same transaction: a failed run can never claim again, and queued rows
 would otherwise sit at the head of the FIFO claim index forever, rejected by
 the running-run join on every claim. A redrive re-queues them through the
 ordinary readiness pass; cancellation marks its own nodes cancelled.
+
+## Rerun from a step
+
+`POST /runs/rerun` starts a new production run from one step of a finished run,
+linked to it by `parent_link_kind = 'rerun'`, which is trace-only like a replay.
+Only that step is queued, so only it and its downstream closure can execute.
+The selected step must have succeeded, failed or been cancelled, and no source
+step may still be running or waiting on a child run. A subworkflow child cannot
+be rerun, because its writes rest on its parent's approvals and input.
+
+Readiness accepts a skipped predecessor, so every step upstream of the closure
+must have succeeded with a saved output and is cloned with zero attempts. A branch
+the source did not take stays skipped. Anything else upstream refuses the rerun.
+A step with no path into the closure is cloned if it succeeded, otherwise skipped.
+
+`POST /runs/rerun/preview` returns the step's config with sensitive keys masked
+and the reused, rerun, not-run and side-effect steps. Side effects are classified
+from the document that will run, with static tool capability metadata, treating a
+subworkflow or unknown tool as effectful, and the start must acknowledge them, so
+an edit that adds a write returns 409 with the new list. Only agents check
+approval at dispatch, so a side effect with any approval upstream that is not in
+the closure refuses the rerun until it starts at that approval.
+
+`inputOverride` replaces the step's authored config in a copy of the run's
+snapshot. Rendered per-node input is not persisted, because it can hold resolved
+secrets, so operators edit references rather than values. A masked value keeps
+the authored one, unless it sits in an array whose length or element changed,
+because masks restore by position. Sensitive keys accept only references, with an
+optional `Bearer`, `Basic` or `Token` scheme, and values that are not text. An
+override cannot enable `allowWriteTools`. The copy then passes `runstart`, the
+same admission as any start, with no rollout reassignment. An edited document is
+unbound from its version, so saved-only tenants refuse it. An `Idempotency-Key`
+is bound to the source, step and override, so an edited resubmit starts its own
+run. Validation runs cannot be rerun, which keeps a sandbox from becoming
+production. The audit row records whether the input was edited, never its values.
+
+Replays of a step are checked across the whole rerun lineage, siblings included,
+because no provider idempotency key would stop a write repeating. A replay returns
+a conflict if a later run in the lineage ran or will run the step, or if any other
+run in it completed the step. A step no other run executed stays replayable, and
+so does the newest failed attempt. A superseded dead letter stays open until an
+operator closes it. A rerun start and a redrive of the same run serialize on its
+completion lock, where the start also refuses if the selected step's row moved
+since planning. A source with a live subworkflow child cannot be rerun.
+
+A rerun itself cannot pause production: it neither counts in the circuit breaker's
+failure streak nor resets it, and its failure does not evaluate the breaker,
+because it is an operator-initiated attempt. A subworkflow child started by a rerun
+is an ordinary child run and counts as usual for its own workflow. Only those runs,
+production runs and redrives of them move a streak.
 
 Wake-ups carry a count: `janusly_wake` notifications and the wake sweeper
 say how many nodes just became claimable, and that many workers wake,

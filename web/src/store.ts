@@ -28,7 +28,7 @@
 import { create } from 'zustand'
 import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import type { Session, User } from '@supabase/auth-js'
-import type { ActiveTab, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { ActiveTab, AiHealth, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import type { OnboardingState } from '@/lib/onboarding'
 import type { SessionContext } from './identity-context'
 import { getNodePreset } from './constants'
@@ -153,7 +153,8 @@ type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
  */
 type StreamTransport = 'idle' | 'sse' | 'polling'
 type ToastTone = 'success' | 'error' | 'info'
-type Toast = { id: string; message: string; tone: ToastTone }
+type ToastAction = { label: string; onClick: () => void }
+type Toast = { id: string; message: string; tone: ToastTone; action?: ToastAction }
 type BudgetBlockedEnvelope = {
   monthlyUsdSpent?: number
   monthlyUsdLimit?: number | null
@@ -175,6 +176,8 @@ type WorkflowStore = {
   authReady: boolean
   identityContext: SessionContext | null
   identityReady: boolean
+  aiHealth: AiHealth | null
+  setAiHealth: (aiHealth: AiHealth | null) => void
 
   currentWorkflowId: string
   currentWorkflowName: string
@@ -196,6 +199,9 @@ type WorkflowStore = {
    * (confirm-before-replace, beforeunload) and the local draft autosave.
    */
   workflowDirty: boolean
+  /** A read-only view covers the author canvas, so its keyboard edits must stay off. */
+  canvasCovered: boolean
+  setCanvasCovered: (covered: boolean) => void
   /** Monotonic semantic-workflow revision. Canvas position/selection changes
    * never increment it; authoring checks use it to invalidate stale findings. */
   workflowRevision: number
@@ -300,7 +306,7 @@ type WorkflowStore = {
   setStreamStatus: (status: StreamStatus) => void
   setStreamTransport: (transport: StreamTransport) => void
   resetRun: () => void
-  addToast: (message: string, tone?: ToastTone) => void
+  addToast: (message: string, tone?: ToastTone, action?: ToastAction) => void
   removeToast: (id: string) => void
   setBudgetBlocked: (envelope: BudgetBlockedEnvelope | null) => void
   clearBudgetBlocked: () => void
@@ -472,6 +478,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   authReady: false,
   identityContext: null,
   identityReady: false,
+  aiHealth: null,
 
   currentWorkflowId: initialWorkflowId,
   // `main.tsx` starts downloading App in parallel with the locale catalog, so
@@ -481,6 +488,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   currentWorkflowSaved: false,
   currentWorkflowVersion: null,
   workflowDirty: false,
+  canvasCovered: false,
+  setCanvasCovered: (covered) => set({ canvasCovered: covered }),
   workflowRevision: 0,
   historyPast: [],
   historyFuture: [],
@@ -523,6 +532,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       ? {
           identityContext: null,
           identityReady: false,
+          aiHealth: null,
           toasts: [],
           activeRecoveryCaseId: null,
           activeTab: state.activeTab === 'recoveryCase' ? 'home' : state.activeTab,
@@ -543,6 +553,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     authReady: true,
     identityContext: null,
     identityReady: true,
+    aiHealth: null,
     // Notifications belong to the departing identity/workspace. Keeping them
     // after logout can disclose stale operational details to the next user.
     toasts: [],
@@ -553,6 +564,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     ...clearedRunProjection(state.runTransitionGeneration),
   })),
   setAuthReady: (authReady) => set({ authReady }),
+  setAiHealth: (aiHealth) => set({ aiHealth }),
   setIdentityContext: (identityContext) => set({ identityContext, identityReady: true }),
   setIdentityPending: () => set({ identityReady: false }),
   dismissRecoveryIntroThisSession: () => set({ recoveryIntroDismissedThisSession: true }),
@@ -899,16 +911,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   setStreamTransport: (streamTransport) => set({ streamTransport }),
   resetRun: () => set((state) => clearedRunProjection(state.runTransitionGeneration)),
-  addToast: (message, tone = 'info') => {
+  addToast: (message, tone = 'info', action) => {
     // Polling callers can emit the same failure every tick during an
     // outage; a visible duplicate adds noise without information, so an
     // identical (message, tone) refreshes nothing and is dropped.
-    if (get().toasts.some((toast) => toast.message === message && toast.tone === tone)) return
+    if (!action && get().toasts.some((toast) => toast.message === message && toast.tone === tone)) return
     const id = crypto.randomUUID()
-    set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))
+    set((state) => ({ toasts: [...state.toasts, { id, message, tone, action }] }))
     // Errors need longer on screen than success/info: an error often asks the
-    // reader to act (switch panel, fix a field) before it auto-dismisses.
-    setTimeout(() => get().removeToast(id), tone === 'error' ? TOAST_TTL_ERROR_MS : TOAST_TTL_DEFAULT_MS)
+    // reader to act (switch panel, fix a field) before it auto-dismisses. So
+    // does a toast offering an action.
+    setTimeout(() => get().removeToast(id), tone === 'error' || action ? TOAST_TTL_ERROR_MS : TOAST_TTL_DEFAULT_MS)
   },
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
   bumpPlatformVersion: (tags = [PLATFORM_TAG]) => {

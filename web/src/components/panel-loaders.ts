@@ -13,6 +13,8 @@ export const panelLoaders = {
   workflows: () => import('./WorkflowsDashboard'),
   members: () => import('./MembersPanel'),
   credentials: () => import('./ConnectionsPanel'),
+  marketplace: () => import('./ToolsPanel'),
+  templates: () => import('./RecipeCatalog'),
   packs: () => import('./SolutionPacksPanel'),
   operations: () => import('./OperationsPage'),
   experiments: () => import('./ExperimentsPanel'),
@@ -21,6 +23,7 @@ export const panelLoaders = {
   recoveryCase: () => import('./RecoveryCasePanel'),
   reasoning: () => import('./ReasoningPanel'),
   multiAgent: () => import('../MultiAgentTimeline'),
+  reports: () => import('./ReportsPanel'),
 } satisfies Partial<Record<ActiveTab, () => Promise<unknown>>>
 
 const preloaded = new Set<string>()

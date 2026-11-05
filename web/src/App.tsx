@@ -638,6 +638,7 @@ export default function App() {
       home={{
         runs: projectedRuns,
         runNodes,
+        canReadRuns: tenantPermissions.includes('runs.read'),
         deadLetters,
         onSemanticBlockerRunsChange: setSemanticBlockerRunIds,
         onOpenTab: openHomeTab,

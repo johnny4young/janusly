@@ -124,7 +124,7 @@ export function useBootstrapData(
   const [savedWorkflows, setSavedWorkflows] = useState<SavedWorkflow[]>([])
   const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
   const [usage, setUsage] = useState<Record<string, number>>({})
-  const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
+  const aiHealth = useWorkflowStore(state => state.aiHealth)
   const activeTab = useWorkflowStore(state => state.activeTab)
   const tenantScopeRef = useRef<string | null>(tenantScope)
   const permissionsRef = useRef<ReadonlySet<string>>(new Set(permissions))
@@ -232,7 +232,7 @@ export function useBootstrapData(
       setUsage(usageData.value as Record<string, number>)
     }
     if (aiHealthData.status === 'fulfilled' && aiHealthData.value && typeof aiHealthData.value === 'object') {
-      setAiHealth(aiHealthData.value as AiHealth)
+      useWorkflowStore.getState().setAiHealth(aiHealthData.value as AiHealth)
     }
     if (workflowsData.status === 'fulfilled') setSavedWorkflows(workflowsData.value)
   }, [])
@@ -252,7 +252,7 @@ export function useBootstrapData(
     setSavedWorkflows([])
     setDeadLetters([])
     setUsage({})
-    setAiHealth(null)
+    useWorkflowStore.getState().setAiHealth(null)
     if (tenantScope) void refreshPlatform()
   }, [tenantScope, permissionKey, refreshPlatform])
 

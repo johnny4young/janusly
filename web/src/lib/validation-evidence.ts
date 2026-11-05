@@ -1,4 +1,4 @@
-import * as z from "zod/mini";
+import * as z from './schema-lite'
 
 export const VALIDATION_EVIDENCE_LEVELS = [
   "static",

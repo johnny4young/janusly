@@ -14,6 +14,7 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { ApiResponses, RecoveryActorKind, RecoveryArtifact, RecoveryCaseState, RecoveryCase as WireRecoveryCase } from './lib/api-types.generated'
 import type { WorkflowRecovery } from './lib/recovery-contract'
+import type { AuthoringProblem } from './components/authoring-problems'
 
 export type JsonObject = Record<string, unknown>
 export type RunNode = {
@@ -38,6 +39,8 @@ type WorkflowNodeData = {
   /** One-line error of a failed step while observing a run. */
   errorSummary?: string | null
   onRecover?: () => void
+  /** The step's worst authoring problem; projected for display, never persisted. */
+  problem?: AuthoringProblem
 }
 type WorkflowEdgeData = {
   condition?: string
@@ -196,6 +199,7 @@ export type RunSummary = {
    * Drives whether the "Open in Lab" button surfaces (no nested labs).
    */
   replayMode?: string | null
+  parentRunId?: string | null
   /** Strength of evidence produced by a validation run. */
   validationEvidenceLevel?: ValidationEvidenceLevel | null
 }
@@ -413,7 +417,7 @@ export function parseAiCandidateBackoff(value: unknown): AiCandidateBackoff | un
   return { from, to }
 }
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
-export type ActiveTab = 'home' | 'recover' | 'workflows' | 'members' | 'ai-studio' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations' | 'recoveryCase'
+export type ActiveTab = 'home' | 'recover' | 'workflows' | 'members' | 'ai-studio' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'reports' | 'operations' | 'recoveryCase'
 
 /**
  * Tabs that NEED the React Flow canvas mounted as their main slot. Today

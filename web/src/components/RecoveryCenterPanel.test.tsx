@@ -6,7 +6,6 @@ import {
   consumeRecoveryAllClear,
   requestRecoveryAllClear,
 } from './recovery-all-clear-bus'
-import { consumeRecoveryFocusDay } from './recovery-day-focus-bus'
 import {
   buildGreeting,
   countActiveRecoveryBlockers,
@@ -60,6 +59,7 @@ vi.mock('../store', () => ({
 const baseProps = {
   runs: [],
   runNodes: [],
+  canReadRuns: true,
   deadLetters: [],
   onOpenTab: vi.fn(),
   onOpenRecoveryCase: vi.fn(),
@@ -242,7 +242,6 @@ function mockRecoveryApi(handler: ApiMockHandler) {
 
 beforeEach(() => {
   consumeRecoveryAllClear()
-  consumeRecoveryFocusDay()
   vi.mocked(api).mockReset()
   bumpPlatformVersion.mockReset()
   addToast.mockReset()
@@ -254,11 +253,6 @@ beforeEach(() => {
   baseProps.onOpenRun = vi.fn()
   baseProps.onOpenRecoveryQueue = vi.fn()
 })
-
-async function openHomeInsights() {
-  fireEvent.click(screen.getByTestId('home-insights-toggle'))
-  await screen.findByTestId('home-insights-content', {}, { timeout: 5_000 })
-}
 
 describe('countActiveRecoveryBlockers', () => {
   it('counts semantic quarantine from the run projection even when every node is terminal', () => {
@@ -466,29 +460,15 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
   it('loads the coordinated Home snapshot through one recovery request', async () => {
     let releaseHeatmap: ((value: unknown) => void) | undefined
     const pendingHeatmap = new Promise((resolve) => { releaseHeatmap = resolve })
-    const readyClusters = {
-      clusters: [{
-        signature: 'Slow heatmap cluster',
-        category: 'unknown' as const,
-        frequency: 2,
-        suggestedOwner: 'platform' as const,
-        lastSeen: new Date().toISOString(),
-      }],
-      totalSamples: 2,
-      windowDays: 30,
-    }
     mockRecoveryApi(async (path: string) => {
       if (path === '/dlq/counts') return { open: 0 }
       if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
-      if (path === '/dlq/clusters') return readyClusters
+      if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return pendingHeatmap
       if (path === '/recovery/validation?windowDays=30') return baseValidation
-      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
-        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
-      }
       throw new Error(`unexpected fetch: ${path}`)
     })
 
@@ -496,70 +476,36 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
     expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home', { signal: expect.any(AbortSignal) })
     expect(vi.mocked(api)).not.toHaveBeenCalledWith('/recovery/metrics')
-    await openHomeInsights()
-    expect(screen.getByTestId('recovery-center-metric-verified-recovery'))
-      .not.toHaveTextContent('7m')
+    expect(screen.queryByTestId('home-contributor-success')).toBeNull()
     await act(async () => {
       releaseHeatmap?.({ days: [] })
       await pendingHeatmap
     })
-    await waitFor(() => {
-      expect(screen.getByTestId('recovery-center-metric-verified-recovery')).toHaveTextContent('7m')
-      expect(screen.getByText('Slow heatmap cluster')).toBeInTheDocument()
-      expect(screen.getByTestId('recovery-validation-section')).toHaveTextContent('1/1')
-    })
+    expect(await screen.findByTestId('home-contributor-success')).toHaveTextContent('87%')
+    expect(vi.mocked(api)).not.toHaveBeenCalledWith('/recovery/calibration-status')
   })
 
-  it('keeps healthy Home sections visible when one section is unavailable', async () => {
-    const healthyClusters = {
-      clusters: [{
-        signature: 'http:rate-limit',
-        category: 'http_error' as const,
-        frequency: 2,
-        suggestedOwner: 'ops' as const,
-        lastSeen: '2026-07-27T12:00:00.000Z',
-      }],
-      totalSamples: 2,
-      windowDays: 30,
-    }
+  it('keeps Home usable and flags the gap when one section is unavailable', async () => {
     mockRecoveryApi(async (path: string) => {
       if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') throw new Error('metrics section unavailable')
-      if (path === '/dlq/clusters') return healthyClusters
+      if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
       if (path === '/recovery/validation?windowDays=30') return baseValidation
       if (path === '/recovery/cases?limit=50') return { cases: [] }
-      if (path === '/recovery/ledger') {
-        return {
-          totalRecovered: 0,
-          downtimeEndedMs: 0,
-          sinceIso: null,
-        }
-      }
-      if (path === '/recovery/my-wins?days=30') {
-        return { recovered: 0, windowDays: 30 }
-      }
+      if (path === '/recovery/ledger') return { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }
+      if (path === '/recovery/my-wins?days=30') return { recovered: 0, windowDays: 30 }
       if (path === '/dlq/counts') return { open: 0 }
-      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
-        return {
-          allowed: true,
-          monthlyUsdSpent: 0,
-          monthlyUsdLimit: null,
-          policy: 'warn',
-        }
-      }
       throw new Error(`unexpected fetch: ${path}`)
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
 
-    expect(await screen.findByText('http:rate-limit')).toBeInTheDocument()
-    expect(screen.getByTestId('recovery-validation-section'))
-      .toHaveTextContent('1/1')
-    expect(screen.getByTestId('recovery-center-metric-verified-recovery'))
-      .not.toHaveTextContent('7m')
+    expect(await screen.findByText(/Metrics unavailable/i)).toBeInTheDocument()
+    expect(screen.getByTestId('home-today')).toBeInTheDocument()
+    expect(screen.getByTestId('home-operator-field')).toBeInTheDocument()
+    expect(screen.queryByTestId('home-contributor-success')).toBeNull()
   })
 
   it('waits for terminal-run history before exposing the walkthrough dismissal', async () => {
@@ -580,7 +526,6 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
     expect(screen.queryByTestId('recovery-lab-entry')).not.toBeInTheDocument()
 
     releaseMetrics?.({ ...baseMetrics, terminalRuns: 0 })
@@ -599,14 +544,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
       if (path === '/recovery/metrics') {
         metricsCalls += 1
         if (metricsCalls === 1) return firstMetrics
-        return {
-          ...baseMetrics,
-          verifiedRecovery: {
-            ...baseMetrics.verifiedRecovery,
-            value: 22 * 60_000,
-            display: '22m',
-          },
-        }
+        return { ...baseMetrics, successRate: { ...baseMetrics.successRate, display: '22%' } }
       }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -617,26 +555,17 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
     await waitFor(() => expect(metricsCalls).toBe(1))
     activeOrgId = 'org-b'
     rerender(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
     await waitFor(() => {
       expect(metricsCalls).toBe(2)
-      expect(screen.getByTestId('recovery-center-metric-verified-recovery')).toHaveTextContent('22m')
+      expect(screen.getByTestId('home-contributor-success')).toHaveTextContent('22%')
     })
 
-    releaseFirstMetrics?.({
-      ...baseMetrics,
-      verifiedRecovery: {
-        ...baseMetrics.verifiedRecovery,
-        value: 99 * 60_000,
-        display: '99m',
-      },
-    })
+    releaseFirstMetrics?.({ ...baseMetrics, successRate: { ...baseMetrics.successRate, display: '99%' } })
     await Promise.resolve()
-    expect(screen.getByTestId('recovery-center-metric-verified-recovery')).not.toHaveTextContent('99m')
+    expect(screen.getByTestId('home-contributor-success')).not.toHaveTextContent('99%')
   })
 
   it('does not render a previous organization metrics error during an org switch', async () => {
@@ -662,7 +591,6 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
     expect(await screen.findByText(/Metrics unavailable/i)).toBeInTheDocument()
 
     activeOrgId = 'org-b'
@@ -689,7 +617,6 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
     fireEvent.click(await screen.findByTestId('recovery-lab-entry-dismiss'))
 
     expect(dismissRecoveryIntroThisSession).toHaveBeenCalledOnce()
@@ -728,7 +655,6 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
 
     await waitFor(() => {
       expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument()
@@ -755,7 +681,6 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
     await waitFor(() => expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId('recovery-center-empty-cta-studio'))
@@ -777,7 +702,6 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
     await waitFor(() => expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId('recovery-center-empty-cta-recipes'))
@@ -814,15 +738,11 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
     })
   }
 
-  it('renders lifetime organization value and the authenticated operator wins', async () => {
+  it('renders the authenticated operator wins', async () => {
     mockImpactReads()
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
 
-    expect(await screen.findByTestId('recovery-lifetime-ledger')).toHaveTextContent(
-      'Since day one: 12 failures recovered · 3h 15m of downtime ended',
-    )
-    expect(screen.getByTestId('recovery-center-personal-wins')).toHaveTextContent(
+    expect(await screen.findByTestId('recovery-center-personal-wins')).toHaveTextContent(
       'You recovered 3 failures in the last 30 days',
     )
   })
@@ -830,19 +750,8 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
   it('keeps personal wins visible when the lifetime ledger fails independently', async () => {
     mockImpactReads({ ledgerFails: true })
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
 
     expect(await screen.findByTestId('recovery-center-personal-wins')).toBeInTheDocument()
-    expect(screen.queryByTestId('recovery-lifetime-ledger')).not.toBeInTheDocument()
-  })
-
-  it('keeps lifetime value visible when personal wins fail independently', async () => {
-    mockImpactReads({ winsFails: true })
-    render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
-
-    expect(await screen.findByTestId('recovery-lifetime-ledger')).toBeInTheDocument()
-    expect(screen.queryByTestId('recovery-center-personal-wins')).not.toBeInTheDocument()
   })
 
   function editHomeEnvelope(edit: (payload: { sections: Record<string, unknown> }) => unknown) {
@@ -860,13 +769,11 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
       sections: { ...payload.sections, ledger: { status: 'ok', value: { totalRecovered: 'twelve' } } },
     }))
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
 
     expect(await screen.findByTestId('recovery-center-personal-wins')).toHaveTextContent(
       'You recovered 3 failures in the last 30 days',
     )
-    expect(screen.getByText('SLA attainment')).toBeInTheDocument()
-    expect(screen.queryByTestId('recovery-lifetime-ledger')).not.toBeInTheDocument()
+    expect(screen.getByTestId('home-contributor-success')).toBeInTheDocument()
     expect(screen.queryByText(/Metrics unavailable/i)).not.toBeInTheDocument()
   })
 
@@ -877,10 +784,8 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
       sections: { ...payload.sections, forecast: { status: 'ok', value: { anything: true } } },
     }))
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
 
-    expect(await screen.findByTestId('recovery-lifetime-ledger')).toBeInTheDocument()
-    expect(screen.getByTestId('recovery-center-personal-wins')).toBeInTheDocument()
+    expect(await screen.findByTestId('recovery-center-personal-wins')).toBeInTheDocument()
     expect(screen.queryByText(/Metrics unavailable/i)).not.toBeInTheDocument()
   })
 
@@ -888,7 +793,6 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
     mockImpactReads()
     editHomeEnvelope(payload => ({ ...payload, sections: [] }))
     render(<RecoveryCenterPanel {...baseProps} />)
-    await openHomeInsights()
 
     expect(await screen.findByText(/Metrics unavailable — the recovery Home response was invalid/i)).toBeInTheDocument()
   })
@@ -948,7 +852,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     windowDays: 30,
   }
 
-  it('keeps priority work above the fold and diagnostics behind one disclosure', async () => {
+  it('keeps priority work above the fold and leaves trends to Reports', async () => {
     mockRecoveryApi(async (path: string) => {
       if (path === '/dlq/counts') return { open: 0 }
       if (path.startsWith('/dlq/queue?')) return { items: [] }
@@ -982,20 +886,14 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     // The inbox shell exists before its asynchronously fetched actions.
     expect(await screen.findByTestId('recovery-center-action-resolve_approvals')).toBeInTheDocument()
     expect(await screen.findByTestId('recovery-center-action-recover_cluster')).toBeInTheDocument()
-    expect(screen.queryByTestId('recovery-center-metric-strip')).not.toBeInTheDocument()
-
-    await openHomeInsights()
-    expect(await screen.findByText('Missing secret: GITHUB_TOKEN')).toBeInTheDocument()
-    // SLA attainment metric tile renders from metrics.slaAttainment. Assert on
-    // the label + stable testId, not the display value — the count-up animation
-    // means the numeric text isn't settled synchronously in jsdom.
-    expect(screen.getByText('SLA attainment')).toBeInTheDocument()
-    expect(screen.getByTestId('recovery-center-metric-sla')).toBeInTheDocument()
-    expect(screen.getByText('Time to first action')).toBeInTheDocument()
-    expect(screen.getByTestId('recovery-center-metric-first-action')).toBeInTheDocument()
-    expect(screen.getByText('Fixes that held')).toBeInTheDocument()
-    expect(screen.getByTestId('recovery-center-metric-durability')).toBeInTheDocument()
-    expect(screen.getByText('Re-failed after fix')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-center-action-recover_cluster')).toHaveTextContent('Open recovery queue')
+    expect(screen.getByTestId('home-today')).toBeInTheDocument()
+    expect(screen.getByTestId('home-operator-field')).toBeInTheDocument()
+    for (const trend of [
+      'recovery-center-metric-verified-recovery', 'recovery-center-metric-sla', 'recovery-heatmap',
+      'recovery-center-tile-clusters', 'recovery-center-tile-calibration', 'recovery-validation-section',
+    ]) expect(screen.queryByTestId(trend)).toBeNull()
+    expect(vi.mocked(api)).not.toHaveBeenCalledWith('/recovery/calibration-status')
   })
 
   it('opens the exact oldest visible failure from the priority inbox', async () => {
@@ -1087,7 +985,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     expect(baseProps.onOpenRun).toHaveBeenCalledWith('run-active', 'runs')
   })
 
-  it('clicking a metric strip cell routes to the expected detail tab', async () => {
+  it('routes the Today cells to where each signal is acted on', async () => {
     mockRecoveryApi(async (path: string) => {
       if (path === '/dlq/counts') return { open: 0 }
       if (path.startsWith('/dlq/queue?')) return { items: [] }
@@ -1095,9 +993,6 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       if (path === '/operations/brief') return operatorBrief()
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
-      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
-        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
-      }
       throw new Error(`unexpected fetch: ${path}`)
     })
     render(<RecoveryCenterPanel
@@ -1106,44 +1001,111 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       runNodes={populatedNodes as never}
       deadLetters={populatedDlq as never}
     />)
-    await openHomeInsights()
-    await waitFor(() => expect(screen.getByTestId('recovery-center-metric-failures')).toBeInTheDocument())
-    fireEvent.click(screen.getByTestId('recovery-center-metric-failures'))
+    fireEvent.click(await screen.findByTestId('recovery-center-metric-failures'))
     expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByTestId('recovery-center-metric-verified-recovery'))
-    expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('operations')
     fireEvent.click(screen.getByTestId('recovery-center-metric-approvals'))
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('runs')
-    fireEvent.click(screen.getByTestId('recovery-center-metric-replay'))
-    expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('operations')
+    fireEvent.click(screen.getByTestId('home-today-open-reports'))
+    expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('reports')
   })
 
-  it('drills a verified-recovery trend point into the matching recovery day', async () => {
-    const trend = [
-      { day: '2026-07-01', seconds: 300 },
-      { day: '2026-07-02', seconds: 240 },
-      { day: '2026-07-03', seconds: 180 },
-    ]
-    mockRecoveryApi(async (path: string) => {
+  describe('Today strip', () => {
+    const homeReads = (metrics: unknown = baseMetrics) => mockRecoveryApi(async (path: string) => {
       if (path === '/dlq/counts') return { open: 0 }
       if (path.startsWith('/dlq/queue?')) return { items: [] }
       if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/operations/brief') return operatorBrief()
-      if (path === '/recovery/metrics') return { ...baseMetrics, mttrTrend: trend }
+      if (path === '/recovery/metrics') return metrics
       if (path === '/dlq/clusters') return baseClusters
-      if (path === '/recovery/heatmap?days=90') return { days: [] }
-      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
-        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
-      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+    const at = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString()
+
+    it('counts only today\'s runs, and success only among the finished ones', async () => {
+      homeReads()
+      render(<RecoveryCenterPanel
+        {...baseProps}
+        runs={[
+          { id: 'a', status: 'succeeded', createdAt: at(0) },
+          { id: 'b', status: 'failed', createdAt: at(0) },
+          { id: 'c', status: 'running', createdAt: at(0) },
+          { id: 'old', status: 'failed', createdAt: at(2) },
+          { id: 'undated', status: 'failed' },
+        ] as never}
+      />)
+      expect(await screen.findByTestId('home-today-runs')).toHaveTextContent(/3$/)
+      expect(screen.getByTestId('home-today-success')).toHaveTextContent(/50%$/)
+    })
+
+    it('marks a run page full of today\'s runs as a lower bound', async () => {
+      homeReads()
+      const runs = Array.from({ length: 100 }, (_, index) => ({ id: `r${index}`, status: 'running', createdAt: at(0) }))
+      render(<RecoveryCenterPanel {...baseProps} runs={runs as never} />)
+      expect(await screen.findByTestId('home-today-runs')).toHaveTextContent(/100\+$/)
+      expect(screen.getByTestId('home-today-success')).toHaveTextContent(/—$/)
+    })
+
+    it('shows no run figures to an operator who cannot read runs', async () => {
+      homeReads()
+      render(<RecoveryCenterPanel {...baseProps} canReadRuns={false} />)
+      await screen.findByTestId('recovery-center-metric-failures')
+      expect(screen.queryByTestId('home-today-runs')).toBeNull()
+      expect(screen.queryByTestId('home-today-success')).toBeNull()
+    })
+
+    it('counts approvals across the workspace, not only the open run', async () => {
+      homeReads({ ...baseMetrics, approvalsPending: { value: 4, display: '4', severity: 'warn', rationale: '' } })
+      render(<RecoveryCenterPanel {...baseProps} />)
+      await waitFor(() => expect(screen.getByTestId('recovery-center-metric-approvals')).toHaveTextContent(/4$/))
+    })
+  })
+
+  describe('AI budget banner', () => {
+    const budgetReads = (budget: unknown) => mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
+      if (path === '/operations/brief') return operatorBrief()
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/billing/budget') return budget
       throw new Error(`unexpected fetch: ${path}`)
     })
 
-    render(<RecoveryCenterPanel {...baseProps} runs={populatedRuns as never} />)
-    await openHomeInsights()
-    fireEvent.click(await screen.findByTestId('vitals-sparkline-point-1'))
+    it('stays hidden below the warning threshold', async () => {
+      budgetReads({ monthlyUsdSpent: 5, monthlyUsdLimit: 10, warningPercent: 80, warningThresholdCrossed: false })
+      render(<RecoveryCenterPanel {...baseProps} />)
+      await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/billing/budget'))
+      await screen.findByTestId('home-contributor-success')
+      expect(screen.queryByTestId('home-budget-banner')).toBeNull()
+    })
 
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('recover')
-    expect(consumeRecoveryFocusDay()).toBe('2026-07-02')
+    it('appears at the threshold and opens the budget settings', async () => {
+      budgetReads({ monthlyUsdSpent: 8.5, monthlyUsdLimit: 10, warningPercent: 80, warningThresholdCrossed: true })
+      render(<RecoveryCenterPanel {...baseProps} />)
+      const banner = await screen.findByTestId('home-budget-banner')
+      expect(banner).toHaveTextContent('85% used · $8.50 / $10.00')
+      expect(banner.querySelector('.ui-status-summary--warning')).not.toBeNull()
+      fireEvent.click(screen.getByTestId('home-budget-banner-open-settings'))
+      expect(baseProps.onOpenTab).toHaveBeenCalledWith('operations')
+    })
+
+    it('escalates once the limit is reached', async () => {
+      budgetReads({ monthlyUsdSpent: 12, monthlyUsdLimit: 10, warningPercent: 80, warningThresholdCrossed: true })
+      render(<RecoveryCenterPanel {...baseProps} />)
+      const banner = await screen.findByTestId('home-budget-banner')
+      expect(banner.querySelector('.ui-status-summary--danger')).not.toBeNull()
+    })
+
+    it('does not show the previous organization\'s banner after a switch', async () => {
+      budgetReads({ monthlyUsdSpent: 9, monthlyUsdLimit: 10, warningPercent: 80, warningThresholdCrossed: true })
+      const { rerender } = render(<RecoveryCenterPanel {...baseProps} />)
+      await screen.findByTestId('home-budget-banner')
+      activeOrgId = 'org-b'
+      budgetReads({ monthlyUsdSpent: 0, monthlyUsdLimit: 10, warningPercent: 80, warningThresholdCrossed: false })
+      rerender(<RecoveryCenterPanel {...baseProps} />)
+      expect(screen.queryByTestId('home-budget-banner')).toBeNull()
+    })
   })
 
   it('leads with approval work and opens the exact waiting run', async () => {
@@ -1295,7 +1257,6 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
     render(<RecoveryCenterPanel {...baseProps} />)
 
-    await openHomeInsights()
     await waitFor(() => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track'))
     expect(screen.queryByTestId('recovery-center-clean-streak')).toBeNull()
   })
@@ -1476,7 +1437,6 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }
     mockAllClearApis()
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
-    await openHomeInsights()
     await waitFor(() => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track'))
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home', { signal: expect.any(AbortSignal) }))
 
@@ -1615,7 +1575,6 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       workflowJson: {}, nodeJson: {}, errorJson: {}, createdAt: new Date().toISOString(),
     }
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} deadLetters={[failure] as never} />)
-    await openHomeInsights()
     await screen.findByTestId('recovery-center-longest-downtime')
 
     recoveryLedger = {
@@ -1626,7 +1585,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     act(() => invalidateTags([PLATFORM_TAG]))
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[failure] as never} />)
     await waitFor(
-      () => expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('1 failure recovered'),
+      () => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Needs attention'),
       { timeout: 5_000 },
     )
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
@@ -1647,7 +1606,6 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
 
     render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
 
-    await openHomeInsights()
     await waitFor(() => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('No evidence yet'))
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
     expect(screen.queryByTestId('celebration-burst')).toBeNull()
@@ -1665,7 +1623,6 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     unmount()
 
     render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
-    await openHomeInsights()
     await waitFor(() => expect(screen.getByTestId('home-health-summary')).toHaveTextContent('On track'))
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
   })
@@ -1734,19 +1691,18 @@ describe('Home partial dependencies', () => {
     let rejectFull: (reason: Error) => void = () => { throw new Error('not requested') }
     const pending = new Promise((_, reject) => { rejectFull = reject })
     mockRecoveryApi(async path => {
-      if (path === '/recovery/ledger') return { totalRecovered: 12, downtimeEndedMs: 60_000, sinceIso: null }
-      if (path === '/recovery/my-wins?days=30') return { recovered: 3, windowDays: 30 }
+      if (path === '/dlq/counts') return { open: 2 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
       return healthyRead(path)
     })
     const read = vi.mocked(api).getMockImplementation()!
     vi.mocked(api).mockImplementation((path, options) => path === '/recovery/home' ? pending : read(path, options))
     const view = render(<RecoveryCenterPanel {...baseProps} />)
     try {
-      fireEvent.click(screen.getByTestId('home-insights-toggle'))
-      await act(async () => { await vi.dynamicImportSettled(); await vi.advanceTimersByTimeAsync(60_000) })
-      expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('12 failures recovered')
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+      expect(screen.getByTestId('recovery-center-metric-failures')).toHaveTextContent(/2$/)
       await act(async () => rejectFull(new Error('old full request failed')))
-      expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('12 failures recovered')
+      expect(screen.getByTestId('recovery-center-metric-failures')).toHaveTextContent(/2$/)
       expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
     } finally { view.unmount(); vi.useRealTimers() }
   })
@@ -1945,7 +1901,6 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
       runNodes={[]}
       deadLetters={[{ id: 'dlq-x', runId: 'r1', nodeId: 'http', attempt: 1, status: 'open', workflowJson: { name: 'Demo' }, nodeJson: {}, errorJson: { signature: 'HTTP 401' }, createdAt: new Date().toISOString() }] as never}
     />)
-    await openHomeInsights()
 
     await waitFor(() => {
       // Targeted match — the empty-budget tile also exposes role="status"

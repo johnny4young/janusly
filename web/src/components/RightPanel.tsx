@@ -5,8 +5,8 @@
  *
  * Heavier tabs live in sibling files (`InspectorPanel.tsx`, `RunWorkspace.tsx`,
  * `UsageSummaryCard.tsx`, `QuickConfigEditor.tsx`, `McpToolConfigField.tsx`,
- * `AiUsageFooter.tsx`). The thinner tabs (Templates / Tools /
- * Reasoning) stay here because they're small and single-purpose. `PanelChrome`
+ * `AiUsageFooter.tsx`). The thinner Templates tab stays here because it's small
+ * and single-purpose. `PanelChrome`
  * + `EmptyView` live in the sibling `panel-primitives.tsx` file so the
  * extracted sub-panels reuse them without a circular `./RightPanel` import.
  *
@@ -20,17 +20,19 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import { lazy, memo, Suspense, useCallback, useState } from 'react'
-import { Plug, Workflow } from 'lucide-react'
+import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react'
+import { Workflow } from 'lucide-react'
+import { isCanvasTab } from '../types'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
 import type { AuthoringPanelModel } from './AuthoringPanel'
-import { panelLoaders } from './panel-loaders'
+import { panelLoaders, preloadPanel } from './panel-loaders'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { ErrorBoundary } from './ErrorBoundary'
 import { PanelErrorFallback } from './PanelErrorFallback'
 import { RunEventsPicker } from './RunEventsPicker'
 import { WorkspaceSectionNav } from './WorkspaceSectionNav'
+export { WorkspaceSectionNav }
 // Every tab panel is code-split out of the eager shell: each renders only when
 // the operator navigates to its tab, behind the shared <Suspense> below. AI
 // Studio and the Inspector (node/edge config) are lazy too — their chunk is
@@ -42,21 +44,23 @@ const MultiAgentTimeline = lazy(() => panelLoaders.multiAgent().then((m) => ({ d
 const WorkflowsDashboard = lazy(() => panelLoaders.workflows().then((m) => ({ default: m.WorkflowsDashboard })))
 const MembersPanel = lazy(() => panelLoaders.members().then((m) => ({ default: m.MembersPanel })))
 const ConnectionsPanel = lazy(() => panelLoaders.credentials().then((m) => ({ default: m.ConnectionsPanel })))
+const ToolsPanel = lazy(() => panelLoaders.marketplace().then((m) => ({ default: m.ToolsPanel })))
 const SolutionPacksPanel = lazy(() => panelLoaders.packs().then((m) => ({ default: m.SolutionPacksPanel })))
+const RecipeCatalog = lazy(() => panelLoaders.templates().then((m) => ({ default: m.RecipeCatalog })))
 const OperationsPage = lazy(() => panelLoaders.operations().then((m) => ({ default: m.OperationsPage })))
 const ExperimentsPanel = lazy(() => panelLoaders.experiments().then((m) => ({ default: m.ExperimentsPanel })))
 const ActivityWorkspace = lazy(() => panelLoaders.recover().then((m) => ({ default: m.ActivityWorkspace })))
 const RunsPanel = lazy(() => panelLoaders.runs().then((m) => ({ default: m.RunsPanel })))
 const RecoveryCasePanel = lazy(() => panelLoaders.recoveryCase().then((m) => ({ default: m.RecoveryCasePanel })))
 const ReasoningPanel = lazy(() => panelLoaders.reasoning().then((m) => ({ default: m.ReasoningPanel })))
+const ReportsPanel = lazy(() => panelLoaders.reports().then((m) => ({ default: m.ReportsPanel })))
 const AiStudioPanel = lazy(() => panelLoaders['ai-studio']().then((m) => ({ default: m.AiStudioPanel })))
 const AuthoringPanel = lazy(() => panelLoaders.inspector().then((m) => ({ default: m.AuthoringPanel })))
 import { api, contractApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { workspaceDestinationForTab } from '../workspace-locations'
-import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
+import { tTemplateCategory, tTemplateDescription, tTemplateName, useT } from '../i18n'
 import type { WorkflowCreationMode } from './WorkflowsDashboard'
-import { Button } from './ui/Button'
 import { isGetRunUsageResponse } from '../lib/api-guards/operations/GetRunUsage'
 
 export type RightPanelAuthoring = AuthoringPanelModel & {
@@ -87,7 +91,7 @@ export type RightPanelCatalog = {
   onOpenWorkflowVersion: (workflowId: string, versionId: string, targetTab?: ActiveTab) => Promise<boolean>
   onCreateWorkflow: (mode: WorkflowCreationMode) => void
   onUseTemplate: (workflow: WorkflowDefinition) => void
-  onInstallPlugin: (pluginId: string) => void
+  onInstallPlugin: (pluginId: string) => Promise<boolean>
   onInstallPack: (packId: string) => void
   onSampleRunPack: (packId: string) => void
   onInjectPackFailure: (packId: string, fixtureId: string) => void
@@ -123,7 +127,7 @@ export type RightPanelExecution = {
   onSelectRecovery: (id: string | null) => void
   onClearActiveRun: () => void
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
-  onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
+  onResolveDeadLetter: (id: string, reason: string) => boolean | Promise<boolean> | undefined
 }
 
 export type RightPanelNavigation = {
@@ -155,16 +159,24 @@ export type RightPanelProps = {
 export const RightPanel = memo(function RightPanel(props: RightPanelProps) {
   const { t } = useT()
   const destination = workspaceDestinationForTab(props.tab)
+  const openRecoveryCount = useMemo(
+    () => props.execution.deadLetters.filter((deadLetter) => deadLetter.status === 'open').length,
+    [props.execution.deadLetters],
+  )
   return (
     <div
       className="workspace-panel-stack"
       data-destination={destination}
     >
-      <WorkspaceSectionNav
-        activeTab={props.tab}
-        permissions={props.permissions}
-        onOpenTab={props.navigation.onOpenTab}
-      />
+      {/* The Build layout shows this navigation in the top bar. */}
+      {!isCanvasTab(props.tab) && (
+        <WorkspaceSectionNav
+          activeTab={props.tab}
+          permissions={props.permissions}
+          openRecoveryCount={openRecoveryCount}
+          onOpenTab={props.navigation.onOpenTab}
+        />
+      )}
       <ErrorBoundary
         resetKey={props.tab}
         logTag={`panel:${props.tab}`}
@@ -243,6 +255,15 @@ function RightPanelRouter(props: RightPanelProps) {
   if (props.tab === 'multiAgent') return (
     <PanelChrome title={t('rightPanel.multiAgent.title')} description={t('rightPanel.multiAgent.description')}>
       <MultiAgentTimeline events={execution.events} eventsHasMore={execution.eventsHasMore} onLoadOlderEvents={execution.onLoadOlderEvents} />
+    </PanelChrome>
+  )
+  if (props.tab === 'reports') return (
+    <PanelChrome title={t('workspace.section.reports.label')} description={t('workspace.section.reports.helper')}>
+      <ReportsPanel
+        canReadDeadLetters={can('dlq.read')}
+        canReadReports={can('reports.read')}
+        onOpenTab={navigation.onOpenTab}
+      />
     </PanelChrome>
   )
   if (props.tab === 'workflows') return (
@@ -394,12 +415,28 @@ export function TemplatesPanel({
   const { t } = useT()
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   const [query, setQuery] = useState('')
+  const [view, setView] = useState<'recipes' | 'packs'>('recipes')
+  const [category, setCategory] = useState('all')
+  const activeView = templates.length === 0 ? 'packs' : view
   const q = query.trim().toLowerCase()
   const filtered = q
     ? templates.filter(template =>
       `${tTemplateName(template)} ${tTemplateDescription(template)} ${tTemplateCategory(template)}`.toLowerCase().includes(q),
     )
     : templates
+  // Same fields SolutionPacksPanel searches, so a search can point at the other view.
+  const matchingPacks = q
+    ? solutionPacks.filter(pack => [
+      t(`packs.${pack.id}.name`, { defaultValue: pack.name }),
+      t(`packs.${pack.id}.description`, { defaultValue: pack.description }),
+      t(`packs.category.${pack.category}`, { defaultValue: pack.category }),
+      ...pack.failureFixtures.flatMap(fixture => [
+        t(`packs.${pack.id}.drills.${fixture.id}.label`, { defaultValue: fixture.label }),
+        t(`packs.${pack.id}.drills.${fixture.id}.description`, { defaultValue: fixture.description }),
+        t(`packs.drill.mode.${fixture.failureMode}`, { defaultValue: fixture.failureMode }),
+      ]),
+    ].join(' ').toLowerCase().includes(q))
+    : solutionPacks
 
   return (
     <PanelChrome title={t('rightPanel.templates.title')} description={t('rightPanel.templates.description')}>
@@ -414,29 +451,35 @@ export function TemplatesPanel({
         </div>
       ) : (
         <>
-          <PanelSearch value={query} onChange={setQuery} placeholder={t('rightPanel.templates.searchPlaceholder')} />
-          <section className="template-catalog-section">
-            <div className="section-kicker">{t('rightPanel.templates.recipes')}</div>
-            {filtered.length === 0 ? (
-              <p className="helper-text">{t('rightPanel.templates.noRecipeMatches')}</p>
-            ) : (
-              <div className="we-recipe-grid">
-                {filtered.map(template => (
-                  <button key={template.id} className="list-card list-card-button" disabled={!canUse} onClick={() => onUseTemplate(template.workflow)}>
-                    <div className="split-row" style={{ width: '100%' }}>
-                      <span className="mode-pill mode-pill-neutral">{tTemplateCategory(template)}</span>
-                      <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
-                    </div>
-                    <strong>{tTemplateName(template)}</strong>
-                    <span>{tTemplateDescription(template)}</span>
-                    <span className="list-card-action">{t('rightPanel.templates.useRecipe')}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-          <section className="template-catalog-section">
-            <div className="section-kicker">{t('rightPanel.templates.solutionPacks')}</div>
+          <div className="template-catalog-toolbar">
+            <PanelSearch value={query} onChange={setQuery} placeholder={t('rightPanel.templates.searchPlaceholder')} />
+            <div className="we-seg" role="group" aria-label={t('rightPanel.templates.viewAria')}>
+              <button type="button" aria-pressed={activeView === 'recipes'} onClick={() => setView('recipes')} data-testid="template-view-recipes">
+                {t('rightPanel.templates.recipes')} <strong>{filtered.length}</strong>
+              </button>
+              <button
+                type="button"
+                aria-pressed={activeView === 'packs'}
+                onClick={() => setView('packs')}
+                onPointerEnter={() => preloadPanel('packs')}
+                onFocus={() => preloadPanel('packs')}
+                data-testid="template-view-packs"
+              >
+                {t('workspace.section.packs.label')} <strong>{matchingPacks.length}</strong>
+              </button>
+            </div>
+          </div>
+          {activeView === 'recipes' && (
+            <RecipeCatalog
+              templates={templates}
+              matches={filtered}
+              category={category}
+              onCategoryChange={setCategory}
+              canUse={canUse}
+              onUseTemplate={onUseTemplate}
+            />
+          )}
+          {activeView === 'packs' && <section className="template-catalog-section">
             <SolutionPacksPanel
               embedded
               showSearch={false}
@@ -449,36 +492,9 @@ export function TemplatesPanel({
               onInjectFailure={onInjectPackFailure}
               canInstall={canInstallPacks}
             />
-          </section>
+          </section>}
         </>
       )}
-    </PanelChrome>
-  )
-}
-
-function ToolsPanel({ tools, onInstallPlugin, canInstall }: Pick<RightPanelCatalog, 'tools' | 'onInstallPlugin'> & { canInstall: boolean }) {
-  const { t } = useT()
-  return (
-    <PanelChrome title={t('rightPanel.tools.title')} description={t('rightPanel.tools.description')}>
-      <div className="panel-list">
-        {tools.length === 0 && <EmptyView icon={<Plug size={22} />} title={t('rightPanel.tools.empty.title')} body={t('rightPanel.tools.empty.body')} />}
-        {tools.map(tool => (
-          <div key={tool.name} className="list-card">
-            <div className="split-row" style={{ width: '100%' }}>
-              <strong>{tool.name}</strong>
-              <div className="we-tool-params">
-                <span className="we-pill" data-tone={tool.writeSide ? 'warning' : 'success'}>
-                  {t(tool.writeSide
-                    ? 'rightPanel.quickConfig.toolWriteCapable'
-                    : 'rightPanel.quickConfig.toolReadOnly')}
-                </span>
-              </div>
-            </div>
-            <span>{tToolDescription(tool)}</span>
-            <Button size="sm" disabled={!canInstall} onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</Button>
-          </div>
-        ))}
-      </div>
     </PanelChrome>
   )
 }

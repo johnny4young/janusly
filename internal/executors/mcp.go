@@ -108,7 +108,10 @@ func NewMcpToolExecutor() Func {
 			if errText == "" {
 				errText = "unknown"
 			}
-			return nil, fmt.Errorf("mcp_tool failed: %s", errText)
+			return nil, &ExecErrorShape{
+				Message:   fmt.Sprintf("mcp_tool failed: %s", errText),
+				WriteSide: envelope.WriteSide,
+			}
 		}
 		output := envelope.Output
 		if output == nil {

@@ -15,7 +15,12 @@ import { requestRecoveryQueueFocus } from './recovery-queue-focus-bus'
 // filters + sorts before the page cap, folds the recovery overlay inline, and
 // returns a { items, nextCursor, hasMore } keyset envelope. The default stub
 // returns an empty page; `dlqMock` simulates the server for filter/sort cases.
-// Supplementary recovery cards are deferred until the operator expands them.
+// Supplementary recovery cards are deferred until the operator expands them;
+// the default By cluster view reads only the cluster rollup up front.
+function fillCloseReason(reason = 'Refunded by hand') {
+  fireEvent.change(screen.getByTestId('dlq-close-reason'), { target: { value: reason } })
+}
+
 vi.mock('../api', () => {
   const module = ({
   api: vi.fn(async (path?: unknown, _init?: RequestInit) => {
@@ -34,6 +39,20 @@ vi.mock('../api', () => {
       options === undefined ? module.api(path) : module.api(path, options),
   }
 })
+
+vi.mock('./RecoveryDialog', () => ({
+  RecoveryDialog: ({ dlq, clusterMembers, clusterSignature, onClose, canReplayInLab }: {
+    dlq: DeadLetter
+    clusterMembers?: string[]
+    clusterSignature?: string
+    onClose: () => void
+    canReplayInLab?: boolean
+  }) => (
+    <button type="button" data-testid="recovery-dialog" data-lab={canReplayInLab} onClick={onClose}>
+      {JSON.stringify({ id: dlq.id, clusterMembers, clusterSignature })}
+    </button>
+  ),
+}))
 
 vi.mock('../clipboard', () => ({
   copyText: vi.fn(async () => true),
@@ -79,6 +98,10 @@ function mockDeadLetter(id: string, overrides: Partial<DeadLetter> = {}): DeadLe
     createdAt: '2026-05-25T12:00:00Z',
     ...overrides,
   }
+}
+
+function useListView() {
+  localStorage.setItem('janusly:recoveryQueueFilters', JSON.stringify({ view: 'list' }))
 }
 
 const SEVERITY_RANK: Record<string, number> = { p1: 0, p2: 1, p3: 2, p4: 3 }
@@ -176,14 +199,13 @@ describe('<DeadLettersPanel />', () => {
     const initialPaths = vi.mocked(api).mock.calls.map(([path]) => String(path))
     expect(initialPaths.some((path) => path.startsWith('/dlq/queue'))).toBe(true)
     expect(initialPaths).toContain('/dlq/counts')
-    expect(initialPaths.some((path) => path.startsWith('/dlq/clusters'))).toBe(false)
+    expect(initialPaths).toContain('/dlq/clusters')
     expect(initialPaths.some((path) => path.startsWith('/recovery/campaigns'))).toBe(false)
     expect(initialPaths.some((path) => path.startsWith('/auto-healing'))).toBe(false)
 
     fireEvent.click(screen.getByTestId('recovery-automation-toggle'))
     await waitFor(() => {
       const paths = vi.mocked(api).mock.calls.map(([path]) => String(path))
-      expect(paths).toContain('/dlq/clusters')
       expect(paths).toContain('/recovery/campaigns?limit=8')
       expect(paths).toContain('/auto-healing/pending')
     })
@@ -396,6 +418,7 @@ describe('<DeadLettersPanel />', () => {
       mockDeadLetter('other-search', { nodeId: 'shipment', recovery: overlay('shipment', 'p1') }),
     ]
     vi.mocked(api).mockImplementation(dlqMock(rows))
+    useListView()
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await screen.findByTestId('dlq-row-match')
     fireEvent.click(screen.getByTestId('dlq-owner-mine'))
@@ -540,7 +563,7 @@ describe('<DeadLettersPanel />', () => {
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     fireEvent.click(await screen.findByTestId('dlq-row-unrelated'))
 
-    const detailNode = () => document.querySelector('section.detail-box > .split-row strong')?.textContent
+    const detailNode = () => document.querySelector('section.detail-box .we-dlq-detail__head strong')?.textContent
     expect(detailNode()).toBe('node-unrelated')
     fireEvent.click(screen.getByTestId('dlq-select-toggle'))
     expect(detailNode()).toBeUndefined()
@@ -837,11 +860,12 @@ describe('<DeadLettersPanel /> — sort', () => {
     expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('2 selected')
 
     fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
     await waitFor(() => {
       const call = vi.mocked(api).mock.calls.find(([p]) => p === '/dlq/bulk-resolve')
       expect(call).toBeTruthy()
-      expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ deadLetterIds: ['a', 'b'] })
+      expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ deadLetterIds: ['a', 'b'], reason: 'Refunded by hand' })
     })
     // A successful bulk resolve exits selection mode → the bar disappears.
     await waitFor(() => expect(screen.queryByTestId('dlq-bulk-bar')).not.toBeInTheDocument())
@@ -851,7 +875,7 @@ describe('<DeadLettersPanel /> — sort', () => {
     const rows = [mockDeadLetter('a'), mockDeadLetter('b')]
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/dlq/bulk-resolve') {
-        expect(JSON.parse(String(options?.body))).toEqual({ deadLetterIds: ['a', 'b'] })
+        expect(JSON.parse(String(options?.body))).toEqual({ deadLetterIds: ['a', 'b'], reason: 'Refunded by hand' })
         return { resolved: 1, failed: 1, errors: [{ deadLetterId: 'b', error: 'DLQ entry not found' }] }
       }
       return dlqMock(rows)(path, options)
@@ -863,6 +887,7 @@ describe('<DeadLettersPanel /> — sort', () => {
     fireEvent.click(await screen.findByTestId('dlq-select-row-a'))
     fireEvent.click(screen.getByTestId('dlq-select-row-b'))
     fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
 
     await waitFor(() => {
@@ -1063,6 +1088,7 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
 
   it('exposes virtual row selection and position to assistive technology', async () => {
     vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a'), mockDeadLetter('b')]))
+    useListView()
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     const grid = await screen.findByRole('grid', { name: /dlq\.queue|recovery queue/i })
     const first = screen.getByTestId('dlq-row-a')
@@ -1077,9 +1103,11 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     expect(Array.from(first.children).every((child) => child.getAttribute('role') === 'gridcell')).toBe(true)
   })
 
-  it('keeps virtual offsets aligned while keyboard focus crosses the rendered window', async () => {
-    const rows = Array.from({ length: 20 }, (_, index) => mockDeadLetter(String(index + 1)))
+  // By cluster, one shared signature puts its header at row 1.
+  it.each([['list', 2], ['clusters', 3]] as const)('keeps virtual offsets aligned while keyboard focus crosses the rendered window in the %s view', async (view, rowIndexOffset) => {
+    const rows = Array.from({ length: 20 }, (_, index) => mockDeadLetter(String(index + 1), { errorJson: { message: 'same' } }))
     vi.mocked(api).mockImplementation(dlqMock(rows))
+    if (view === 'list') useListView()
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     const virtualList = await screen.findByTestId('dlq-virtual-list')
     await act(async () => {
@@ -1092,7 +1120,7 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
 
     for (let index = 0; index < 8; index += 1) {
       fireEvent.keyDown(document.activeElement ?? first, { key: 'j' })
-      await waitFor(() => expect(document.activeElement).toHaveAttribute('aria-rowindex', String(index + 2)))
+      await waitFor(() => expect(document.activeElement).toHaveAttribute('aria-rowindex', String(index + rowIndexOffset)))
     }
 
     expect(document.activeElement).toHaveAttribute('data-dead-letter-id', '9')
@@ -1118,9 +1146,10 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     expect(onReplay).toHaveBeenCalledWith('a', '2026-05-25T12:00:00Z')
     expect(onResolve).not.toHaveBeenCalled()
     expect(screen.getAllByRole('alertdialog')).toHaveLength(1)
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
     await waitFor(() => expect(onResolve).toHaveBeenCalledOnce())
-    expect(onResolve).toHaveBeenCalledWith('a')
+    expect(onResolve).toHaveBeenCalledWith('a', 'Refunded by hand')
   })
 
   it('shows Recovering immediately, blocks duplicate actions, and clears after failure', async () => {
@@ -1346,7 +1375,7 @@ describe('DLQ close acknowledgement', () => {
     ]))
   })
 
-  it('shows exact single scope, defaults focus to Cancel and cancels without mutation', async () => {
+  it('shows exact single scope, defaults focus to the reason and cancels without mutation', async () => {
     const onResolve = vi.fn()
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={onResolve} />)
     const row = await screen.findByTestId('dlq-row-a')
@@ -1356,9 +1385,10 @@ describe('DLQ close acknowledgement', () => {
     expect(dialog).toHaveTextContent('Customer invoices')
     expect(dialog).toHaveTextContent('Failure: a')
     expect(dialog).toHaveTextContent('Run: run-a')
-    expect(dialog).toHaveTextContent('Step: node-a')
+    expect(dialog).toHaveTextContent('Stepnode-a')
     expect(dialog).toHaveTextContent('accepted loss')
-    expect(screen.getByTestId('dlq-close-cancel')).toHaveFocus()
+    expect(screen.getByTestId('dlq-close-reason')).toHaveFocus()
+    expect(screen.getByTestId('dlq-close-confirm')).toBeDisabled()
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     await waitFor(() => expect(row).toHaveFocus())
@@ -1372,8 +1402,9 @@ describe('DLQ close acknowledgement', () => {
     fireEvent.click(screen.getByRole('button', { name: /close without recovery/i }))
     fireEvent.click(screen.getByTestId('dlq-row-b'))
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Failure: a')
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
-    await waitFor(() => expect(onResolve).toHaveBeenCalledWith('a'))
+    await waitFor(() => expect(onResolve).toHaveBeenCalledWith('a', 'Refunded by hand'))
     expect(onResolve).toHaveBeenCalledOnce()
   })
 
@@ -1390,6 +1421,7 @@ describe('DLQ close acknowledgement', () => {
     fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
     // An external selection update cannot rewrite the acknowledged payload.
     fireEvent.click(screen.getByTestId('dlq-select-row-b'))
+    fillCloseReason('  Refunded by hand  ')
     const submit = screen.getByTestId('dlq-close-confirm')
     fireEvent.click(submit)
     fireEvent.click(submit)
@@ -1399,7 +1431,7 @@ describe('DLQ close acknowledgement', () => {
     expect(screen.getByTestId('dlq-close-cancel')).toBeDisabled()
     const requests = vi.mocked(api).mock.calls.filter(([path]) => path === '/dlq/bulk-resolve')
     expect(requests).toHaveLength(1)
-    expect(JSON.parse(String(requests[0][1]?.body))).toEqual({ deadLetterIds: ['a', 'b'] })
+    expect(JSON.parse(String(requests[0][1]?.body))).toEqual({ deadLetterIds: ['a', 'b'], reason: 'Refunded by hand' })
     await act(async () => finish({ resolved: 2, failed: 0, errors: [] }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('closed without recovery')
@@ -1411,6 +1443,7 @@ describe('DLQ close acknowledgement', () => {
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={onResolve} />)
     fireEvent.click(await screen.findByTestId('dlq-row-a'))
     fireEvent.click(screen.getByRole('button', { name: /close without recovery/i }))
+    fillCloseReason()
     fireEvent.click(screen.getByTestId('dlq-close-confirm'))
     expect(await screen.findByRole('alert')).toHaveTextContent('No recovery is claimed')
     expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
@@ -1454,7 +1487,7 @@ it('does not let a background queue focus request steal the confirmation focus',
   render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
   fireEvent.keyDown(await screen.findByTestId('dlq-row-a'), { key: 'Enter', ctrlKey: true })
   act(() => requestRecoveryQueueFocus('b'))
-  expect(screen.getByTestId('dlq-close-cancel')).toHaveFocus()
+  expect(screen.getByTestId('dlq-close-reason')).toHaveFocus()
   expect(screen.getByRole('alertdialog')).toHaveTextContent('Failure: a')
 })
 
@@ -1465,4 +1498,262 @@ it('labels closed DLQ rows as accepted loss rather than recovered work', async (
   render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
   fireEvent.change(screen.getByLabelText('Failure status'), { target: { value: 'all' } })
   expect(await screen.findByRole('row', { name: 'node-a — Accepted loss' })).toBeInTheDocument()
+})
+
+describe('<DeadLettersPanel /> — list and detail', () => {
+  const dns = { message: 'Get "https://a.invalid/": dial tcp: lookup a.invalid: no such host' }
+  const secret = { message: 'Missing secret: BILLING_TOKEN' }
+  const DNS_SIGNATURE = 'DNS lookup failed on http node'
+  const SECRET_SIGNATURE = 'Missing secret: BILLING_TOKEN'
+  const rows = [
+    mockDeadLetter('a', { errorJson: dns, nodeType: 'http', workflowName: 'Ingest' }),
+    mockDeadLetter('b', { errorJson: secret, nodeType: 'http', workflowName: 'Billing' }),
+    mockDeadLetter('c', { errorJson: dns, nodeType: 'http', workflowName: 'Ingest' }),
+  ]
+  const rollup = {
+    signature: DNS_SIGNATURE, category: 'network_timeout', frequency: 7,
+    affectedWorkflows: [{ workflowId: 'w1', workflowName: 'Ingest', count: 5 }, { workflowId: 'w2', workflowName: 'Feed', count: 2 }],
+    firstSeen: '2026-05-20T12:00:00Z', lastSeen: '2026-05-25T12:00:00Z', suggestedOwner: 'workflow_author',
+    samples: [{ source: 'dead_letter', id: 'a', runId: 'run-a' }], recurredAfterRecovery: false,
+  }
+
+  function mockQueue(members: Record<string, string[]> = {}, queueRows = rows) {
+    const base = dlqMock(queueRows)
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/dlq/clusters') return { clusters: [rollup], totalSamples: 7, windowDays: 30 }
+      if (path.startsWith('/dlq/cluster-members')) {
+        const ids = members[new URL(path, 'http://x').searchParams.get('signature') ?? ''] ?? []
+        return { deadLetterIds: ids, total: ids.length, capped: false }
+      }
+      if (path.startsWith('/dlq/entries/')) return mockDeadLetter(path.split('/').at(-1)!)
+      if (path === '/recovery/campaigns/preview') return { canCreate: true, clusterSignature: DNS_SIGNATURE, eligible: [], rejected: [] }
+      return base(path, options)
+    })
+  }
+
+  const mount = (props: Partial<Parameters<typeof DeadLettersPanel>[0]> = {}) =>
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} {...props} />)
+
+  const campaignIds = () => {
+    const call = vi.mocked(api).mock.calls.find(([path]) => path === '/recovery/campaigns/preview')
+    return JSON.parse(String(call?.[1]?.body)).deadLetterIds
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    sessionStorage.clear()
+    vi.mocked(api).mockClear()
+    useWorkflowStore.setState({ ...initialState, toasts: [] }, true)
+  })
+
+  it('groups the queue by failure cluster by default, with the rollup totals on the header', async () => {
+    mockQueue()
+    mount()
+    const header = await screen.findByTestId(`dlq-cluster-${DNS_SIGNATURE}`)
+    expect(header).toHaveTextContent(DNS_SIGNATURE)
+    expect(header).toHaveTextContent('Network')
+    await waitFor(() => expect(header).toHaveTextContent('7 occurrences'))
+    expect(header).toHaveTextContent('2 workflows')
+    expect(screen.getByTestId('dlq-view-clusters')).toHaveAttribute('aria-pressed', 'true')
+
+    const grid = screen.getByRole('grid')
+    expect(grid).toHaveAttribute('aria-rowcount', '5')
+    expect([...grid.children].map(row => row.getAttribute('data-testid'))).toEqual([
+      `dlq-cluster-${DNS_SIGNATURE}`, 'dlq-row-a', 'dlq-row-c', `dlq-cluster-${SECRET_SIGNATURE}`, 'dlq-row-b',
+    ])
+    expect(screen.getByTestId('dlq-row-a')).toHaveAttribute('aria-rowindex', '2')
+  })
+
+  it('still groups from the loaded rows when the rollup read fails', async () => {
+    const base = dlqMock(rows)
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/dlq/clusters') throw new Error('rollup down')
+      return base(path, options)
+    })
+    mount()
+    const header = await screen.findByTestId(`dlq-cluster-${DNS_SIGNATURE}`)
+    expect(header).toHaveTextContent('2 occurrences')
+    expect(header).toHaveTextContent('1 workflow')
+    expect(screen.getByTestId('dlq-row-c')).toBeInTheDocument()
+  })
+
+  it('walks J/K through the grouped order, not the page order', async () => {
+    mockQueue()
+    mount()
+    const first = await screen.findByTestId('dlq-row-a')
+    expect(first).toHaveAttribute('aria-selected', 'true')
+    first.focus()
+    for (const id of ['c', 'b']) {
+      fireEvent.keyDown(document.activeElement!, { key: 'j' })
+      await waitFor(() => expect(screen.getByTestId(`dlq-row-${id}`)).toHaveFocus())
+      expect(screen.getByTestId(`dlq-row-${id}`)).toHaveAttribute('aria-selected', 'true')
+    }
+    fireEvent.keyDown(document.activeElement!, { key: 'k' })
+    await waitFor(() => expect(screen.getByTestId('dlq-row-c')).toHaveFocus())
+  })
+
+  it('moves triage focus to the visual neighbor after an action removes a grouped row', async () => {
+    let current = rows
+    const base = () => dlqMock(current)
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path.startsWith('/dlq/entries/')) return mockDeadLetter(path.split('/').at(-1)!)
+      return base()(path, options)
+    })
+    const onReplay = vi.fn(async () => {
+      current = rows.filter(row => row.id !== 'a')
+      act(() => invalidateTags([PLATFORM_TAG]))
+      return true
+    })
+    mount({ onReplay })
+    const row = await screen.findByTestId('dlq-row-a')
+    row.focus()
+    await act(async () => { fireEvent.keyDown(row, { key: 'r' }) })
+    // The next row by position in the page is `b`; the next one on screen is `c`.
+    await waitFor(() => expect(screen.getByTestId('dlq-row-c')).toHaveFocus())
+  })
+
+  it('keeps the All items view flat, persists the choice and skips the rollup read', async () => {
+    mockQueue()
+    const { unmount } = mount()
+    await screen.findByTestId(`dlq-cluster-${DNS_SIGNATURE}`)
+    fireEvent.click(screen.getByTestId('dlq-view-list'))
+    await waitFor(() => expect(screen.queryByTestId(`dlq-cluster-${DNS_SIGNATURE}`)).toBeNull())
+    expect([...screen.getByRole('grid').children].map(row => row.getAttribute('data-testid')))
+      .toEqual(['dlq-row-a', 'dlq-row-b', 'dlq-row-c'])
+    unmount()
+
+    vi.mocked(api).mockClear()
+    mount()
+    await screen.findByTestId('dlq-row-a')
+    expect(screen.getByTestId('dlq-view-list')).toHaveAttribute('aria-pressed', 'true')
+    expect(vi.mocked(api).mock.calls.map(([path]) => path)).not.toContain('/dlq/clusters')
+  })
+
+  it('Replay cluster previews a campaign over the server members, not only the loaded rows', async () => {
+    mockQueue({ [DNS_SIGNATURE]: ['a', 'c', 'off-page'] })
+    mount()
+    fireEvent.click(await screen.findByTestId(`dlq-cluster-replay-${DNS_SIGNATURE}`))
+    expect(await screen.findByTestId('replay-campaign-dialog')).toBeInTheDocument()
+    await waitFor(() => expect(campaignIds()).toEqual(['a', 'c', 'off-page']))
+    expect(vi.mocked(api).mock.calls.map(([path]) => path))
+      .toContain(`/dlq/cluster-members?signature=${encodeURIComponent(DNS_SIGNATURE)}`)
+  })
+
+  it('Replay cluster falls back to the loaded open rows for a signature outside the rollup window', async () => {
+    mockQueue()
+    mount()
+    fireEvent.click(await screen.findByTestId(`dlq-cluster-replay-${DNS_SIGNATURE}`))
+    await screen.findByTestId('replay-campaign-dialog')
+    await waitFor(() => expect(campaignIds()).toEqual(['a', 'c']))
+  })
+
+  it('Investigate opens cluster recovery over the members, or one failure when it is alone', async () => {
+    mockQueue({ [DNS_SIGNATURE]: ['a', 'c'], [SECRET_SIGNATURE]: ['b'] })
+    mount()
+    fireEvent.click(await screen.findByTestId(`dlq-cluster-investigate-${DNS_SIGNATURE}`))
+    const dialog = await screen.findByTestId('recovery-dialog')
+    expect(JSON.parse(dialog.textContent!)).toEqual({ id: 'a', clusterMembers: ['a', 'c'], clusterSignature: DNS_SIGNATURE })
+    fireEvent.click(dialog)
+    await waitFor(() => expect(screen.queryByTestId('recovery-dialog')).toBeNull())
+
+    fireEvent.click(screen.getByTestId(`dlq-cluster-investigate-${SECRET_SIGNATURE}`))
+    expect(JSON.parse((await screen.findByTestId('recovery-dialog')).textContent!)).toEqual({ id: 'b' })
+  })
+
+  it('Investigate still opens the failure when the signature is outside the rollup window', async () => {
+    mockQueue()
+    mount()
+    fireEvent.click(await screen.findByTestId(`dlq-cluster-investigate-${DNS_SIGNATURE}`))
+    expect(JSON.parse((await screen.findByTestId('recovery-dialog')).textContent!)).toEqual({ id: 'a' })
+  })
+
+  it('reports a failed member read and releases the cluster actions', async () => {
+    mockQueue()
+    const base = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path.startsWith('/dlq/cluster-members')) throw new Error('members down')
+      return base(path, options)
+    })
+    mount()
+    const replay = await screen.findByTestId(`dlq-cluster-replay-${DNS_SIGNATURE}`)
+    fireEvent.click(replay)
+    await waitFor(() => expect(useWorkflowStore.getState().toasts.map(toast => toast.message).join()).toContain('members down'))
+    expect(replay).toBeEnabled()
+    expect(screen.queryByTestId('replay-campaign-dialog')).toBeNull()
+  })
+
+  it('drops a cluster load that finishes after the organization changed', async () => {
+    mockQueue({ [DNS_SIGNATURE]: ['a', 'c'] })
+    const base = vi.mocked(api).getMockImplementation()!
+    let release!: () => void
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path.startsWith('/dlq/cluster-members')) await new Promise<void>(resolve => { release = resolve })
+      return base(path, options)
+    })
+    mount()
+    const replay = await screen.findByTestId(`dlq-cluster-replay-${DNS_SIGNATURE}`)
+    fireEvent.click(replay)
+    await waitFor(() => expect(replay).toBeDisabled())
+    act(() => useWorkflowStore.setState({ orgId: 'other-org' }))
+    await act(async () => { release() })
+    await waitFor(() => expect(replay).toBeEnabled())
+    expect(screen.queryByTestId('replay-campaign-dialog')).toBeNull()
+  })
+
+  it('gates the cluster actions by permission, open rows and the campaign minimum', async () => {
+    const closed = mockDeadLetter('closed', { errorJson: { message: 'Missing secret: OLD' }, nodeType: 'http', status: 'resolved' })
+    mockQueue({}, [...rows, closed])
+    const { unmount } = mount()
+    await screen.findByTestId(`dlq-cluster-${DNS_SIGNATURE}`)
+    expect(screen.getByTestId(`dlq-cluster-replay-${DNS_SIGNATURE}`)).toBeEnabled()
+    expect(screen.getByTestId(`dlq-cluster-replay-${SECRET_SIGNATURE}`)).toBeDisabled()
+    expect(screen.getByTestId(`dlq-cluster-investigate-${SECRET_SIGNATURE}`)).toBeEnabled()
+    unmount()
+
+    localStorage.setItem('janusly:recoveryQueueFilters', JSON.stringify({ status: 'all' }))
+    const all = mount()
+    expect(await screen.findByTestId('dlq-cluster-investigate-Missing secret: OLD')).toBeDisabled()
+    all.unmount()
+
+    mount({ canReplay: false, canUseRecovery: false })
+    await screen.findByTestId(`dlq-cluster-${DNS_SIGNATURE}`)
+    expect(screen.queryByTestId(`dlq-cluster-replay-${DNS_SIGNATURE}`)).toBeNull()
+    expect(screen.queryByTestId(`dlq-cluster-investigate-${DNS_SIGNATURE}`)).toBeNull()
+  })
+
+  it('lets the Suggest fix dialog offer Replay Lab only when the operator may start runs', async () => {
+    mockQueue({ [DNS_SIGNATURE]: ['a', 'c'], [SECRET_SIGNATURE]: ['b'] })
+    const first = mount({ canStartRuns: false })
+    fireEvent.click(await screen.findByTestId(`dlq-cluster-investigate-${SECRET_SIGNATURE}`))
+    expect(await screen.findByTestId('recovery-dialog')).toHaveAttribute('data-lab', 'false')
+    first.unmount()
+
+    mount()
+    fireEvent.click(await screen.findByTestId(`dlq-cluster-investigate-${SECRET_SIGNATURE}`))
+    expect(await screen.findByTestId('recovery-dialog')).toHaveAttribute('data-lab', 'true')
+  })
+
+  it('groups every failure action in the bar and gives the queue the width while selecting', async () => {
+    mockQueue()
+    mount()
+    await screen.findByTestId('dlq-row-a')
+    expect(screen.getByTestId('dlq-action-bar')).toBeInTheDocument()
+    expect(screen.getByTestId('dlq-detail-context')).toHaveTextContent(`Ingest · ${new Date('2026-05-25T12:00:00Z').toLocaleString('en')}`)
+    const recover = screen.getByTestId('dlq-actions-recover')
+    expect(recover).toHaveTextContent('Suggest fix')
+    expect(recover).toHaveTextContent('Retry')
+    expect(recover).toContainElement(screen.getByTestId('dlq-replay-in-lab'))
+    const evidence = screen.getByTestId('dlq-actions-evidence')
+    expect(evidence).toContainElement(screen.getByTestId('dlq-copy-error'))
+    expect(evidence).toContainElement(screen.getByTestId('dlq-export-run-explain'))
+    expect(screen.getByTestId('dlq-actions-close')).toHaveTextContent('Close without recovery')
+
+    const panes = screen.getByTestId('dlq-panes')
+    expect(panes).toHaveAttribute('data-detail', 'true')
+    expect(screen.getByTestId('dlq-queue-pane')).toContainElement(screen.getByRole('grid'))
+    expect(screen.getByTestId('dlq-detail-pane')).toContainElement(screen.getByTestId('dlq-action-bar'))
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    expect(panes).not.toHaveAttribute('data-detail')
+    expect(screen.queryByTestId('dlq-detail-pane')).toBeNull()
+  })
 })

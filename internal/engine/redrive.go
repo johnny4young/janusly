@@ -26,6 +26,29 @@ var ErrDeadLetterNotFound = errors.New("dead letter not found")
 // or a node no longer in the failed state; the API maps it to 409.
 var ErrRedriveConflict = errors.New("dead letter replay already claimed")
 
+type rerunExistsError struct{}
+
+func (rerunExistsError) Error() string {
+	return "this step already ran in a related rerun; open the latest run instead of replaying it"
+}
+
+func (rerunExistsError) Is(target error) bool { return target == ErrRedriveConflict }
+
+// ErrRedriveRerunExists is a conflict: replaying would repeat a write the rerun
+// already attempted, and no provider idempotency key would catch it.
+var ErrRedriveRerunExists error = rerunExistsError{}
+
+func refuseRedriveAfterRerun(ctx context.Context, q *store.Queries, orgID, runID, nodeID string) error {
+	rerun, err := q.RunNodeSupersededByRerun(ctx, store.RunNodeSupersededByRerunParams{OrgID: orgID, RunID: runID, NodeID: nodeID})
+	if err != nil {
+		return fmt.Errorf("read rerun children: %w", err)
+	}
+	if rerun {
+		return ErrRedriveRerunExists
+	}
+	return nil
+}
+
 // RedriveOptions carries the optional extras a redrive can stamp on the
 // revival: a VERIFIED playbook claim, an applied fix (replaces the run's
 // workflow snapshot so the revived node executes the patch), and a
@@ -79,6 +102,9 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	// revival can't interleave with a concurrent scan of the same run.
 	if err := q.AcquireRunCompletionLock(ctx, deadLetter.RunID); err != nil {
 		return fmt.Errorf("acquire completion lock: %w", err)
+	}
+	if err := refuseRedriveAfterRerun(ctx, q, orgID, deadLetter.RunID, deadLetter.NodeID); err != nil {
+		return err
 	}
 	claimed, err := q.ClaimDeadLetterReplay(ctx, store.ClaimDeadLetterReplayParams{
 		ID: deadLetterID, OrgID: orgID,
@@ -211,6 +237,9 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID string
 	_ = run
 	if err := q.AcquireRunCompletionLock(ctx, runID); err != nil {
 		return fmt.Errorf("acquire completion lock: %w", err)
+	}
+	if err := refuseRedriveAfterRerun(ctx, q, orgID, runID, nodeID); err != nil {
+		return err
 	}
 	attempt, err := q.RedriveFailedRunNode(ctx, store.RedriveFailedRunNodeParams{
 		RunID: runID, NodeID: nodeID,
