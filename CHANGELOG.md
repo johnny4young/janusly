@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Login has Forgot password?, which emails a reset link that ends at the
+  set-password step. The answer is the same whether or not the email has an
+  account, including when the auth server limits how often it sends.
 - Permission grants is one matrix with permissions in rows and roles in
   columns, a filter, and one Save for every edited role. Cells that differ from
   the built-in default are tinted. If only some roles save, the panel says which
