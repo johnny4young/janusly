@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { CheckCircle2, GitBranch, MessageSquareText, Settings2, ShieldCheck, Sparkles, Wrench } from 'lucide-react'
 
 import { useT } from '../i18n'
@@ -14,6 +14,8 @@ import type {
   WorkflowGraphEdge,
   WorkflowGraphNode,
 } from '../types'
+import { useAuthoringScopeRequest, type AuthoringScope } from './authoring-focus-bus'
+import { buildAuthoringProblems } from './authoring-problems'
 import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
 import { InspectorPanel } from './InspectorPanel'
 import { PanelChrome } from './panel-primitives'
@@ -43,8 +45,6 @@ export type AuthoringPanelModel = {
   onInsertSnippet: () => void
 }
 
-type AuthoringScope = 'step' | 'workflow' | 'problems'
-
 export function AuthoringPanel({
   model,
   canWrite,
@@ -58,14 +58,22 @@ export function AuthoringPanel({
 }) {
   const { t } = useT()
   const hasSelection = Boolean(model.selectedNode || model.selectedEdge)
-  const problemCount = model.validationIssues.length
-    + model.aiReviewIssues.length
-    + (model.readinessResult?.issues.length ?? 0)
+  const problemCount = useMemo(() => buildAuthoringProblems({
+    validationIssues: model.validationIssues,
+    readiness: model.readinessResult,
+    aiReviewIssues: model.aiReviewIssues,
+    workflowEdges: model.workflowEdges,
+  }).length, [model.aiReviewIssues, model.readinessResult, model.validationIssues, model.workflowEdges])
   const [scope, setScope] = useState<AuthoringScope>(hasSelection ? 'step' : 'workflow')
 
-  useEffect(() => {
+  // Reset on a selection change only: a mount must not undo a jump's requested scope.
+  const selectionKey = `${model.selectedNode?.id ?? ''}|${model.selectedEdge?.id ?? ''}`
+  const [lastSelectionKey, setLastSelectionKey] = useState(selectionKey)
+  if (selectionKey !== lastSelectionKey) {
+    setLastSelectionKey(selectionKey)
     setScope(hasSelection ? 'step' : 'workflow')
-  }, [hasSelection, model.selectedEdge?.id, model.selectedNode?.id])
+  }
+  useAuthoringScopeRequest(setScope)
 
   const actions: readonly {
     action: AiAuthoringAction
@@ -139,7 +147,6 @@ export function AuthoringPanel({
           aiReviewIssues={model.aiReviewIssues}
           workflowEdges={model.workflowEdges}
           onValidate={model.onValidateWorkflow}
-          onOpenProblem={() => setScope('step')}
         />
       )}
 

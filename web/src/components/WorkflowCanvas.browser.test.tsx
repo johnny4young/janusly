@@ -582,4 +582,74 @@ describe('WorkflowCanvas (browser mode)', () => {
       window.localStorage.removeItem(STORAGE_KEY)
     }
   })
+
+  describe('authoring problems', () => {
+    const readiness = {
+      status: 'warn' as const,
+      issues: [
+        { code: 'workflow_missing_outputs', severity: 'warn' as const, message: 'No outputs' },
+        { code: 'workflow_missing_rollback_version', severity: 'warn' as const, message: 'One version' },
+        { code: 'credential_missing', severity: 'warn' as const, message: 'Soft', nodeId: 'beta' },
+        { code: 'raw_secret_in_config', severity: 'fail' as const, message: 'Secret', nodeId: 'beta' },
+      ],
+    }
+
+    it('shows the count on the Flow map, unplaced problems as a band and step problems as a dot', async () => {
+      const { container, findByTestId, getByTestId } = mountCanvas({ readiness })
+      expect((await findByTestId('canvas-problems-chip')).textContent).toBe('Problems 4')
+      const band = getByTestId('canvas-problems-band')
+      expect(band.querySelectorAll('button')).toHaveLength(2)
+      const dots = await waitFor(() => {
+        const found = container.querySelectorAll<HTMLElement>('[data-testid="workflow-node-problem"]')
+        expect(found).toHaveLength(1)
+        return found
+      })
+      expect(dots[0].closest('.react-flow__node')?.getAttribute('data-id')).toBe('beta')
+      expect(dots[0].dataset.severity).toBe('fail')
+      expect(dots[0].getBoundingClientRect().width).toBeGreaterThanOrEqual(24)
+    })
+
+    it('never marks the band with a one-sided strip', async () => {
+      const { findByTestId } = mountCanvas({ readiness })
+      const style = getComputedStyle(await findByTestId('canvas-problems-band'))
+      expect(style.borderLeftWidth).toBe(style.borderRightWidth)
+      expect(style.borderLeftColor).toBe(style.borderRightColor)
+    })
+
+    it('jumps from the dot to the step without firing the node click', async () => {
+      const { container, props } = mountCanvas({ readiness })
+      const dot = await waitFor(() => {
+        const found = container.querySelector<HTMLElement>('[data-testid="workflow-node-problem"]')
+        expect(found).toBeTruthy()
+        return found!
+      })
+      dot.click()
+      expect(useWorkflowStore.getState().selectedNodeId).toBe('beta')
+      expect(useWorkflowStore.getState().activeTab).toBe('inspector')
+      expect(props.onNodeClick).not.toHaveBeenCalled()
+    })
+
+    it('stays off a run snapshot and a clean workflow', async () => {
+      const observed = mountCanvas({ mode: 'observe', readiness })
+      await observed.findByText('Alpha step')
+      expect(observed.queryByTestId('canvas-problems-chip')).toBeNull()
+      expect(observed.queryByTestId('canvas-problems-band')).toBeNull()
+      expect(observed.queryByTestId('workflow-node-problem')).toBeNull()
+      observed.unmount()
+
+      const clean = mountCanvas({ readiness: { status: 'pass', issues: [] } })
+      await clean.findByText('Alpha step')
+      expect(clean.queryByTestId('canvas-problems-chip')).toBeNull()
+      expect(clean.queryByTestId('canvas-problems-band')).toBeNull()
+    })
+
+    it('lays the chrome out in a row that cannot overlap', async () => {
+      const { container, findByTestId } = mountCanvas({ readiness, onAddNode: vi.fn() })
+      const band = (await findByTestId('canvas-problems-band')).getBoundingClientRect()
+      const toolbar = container.querySelector('.canvas-toolbar')!.getBoundingClientRect()
+      const picker = container.querySelector('.canvas-step-picker')!.getBoundingClientRect()
+      expect(picker.left).toBeGreaterThanOrEqual(toolbar.right)
+      expect(band.left).toBeGreaterThanOrEqual(picker.right)
+    })
+  })
 })

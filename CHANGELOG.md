@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Build shows a workflow's problems on the canvas. The Flow map card has a
+  Problems chip with the count, workflow-level problems appear in a band above
+  the steps, and a step with a problem has a dot on its corner. Each one opens
+  what needs fixing: the step, the path, the Outputs section or Versions.
+  Outputs and Versions problems also open from the Problems tab, whose count now
+  lists a problem reported by two checks once. Add step no longer overlaps the
+  Flow map card in Spanish.
 - Retrying on Network errors now covers connection refused, connection reset and
   DNS failures, and retrying on Timeouts covers deadline exceeded. A policy that
   ignores `network` now stops retries for those failures too. A write-side MCP

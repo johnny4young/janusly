@@ -1,10 +1,17 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useWorkflowStore } from '../store'
+import { useAuthoringScopeRequest } from './authoring-focus-bus'
 import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
 import { consumeResilienceFocus } from './resilience-focus-bus'
 
 const initialState = useWorkflowStore.getState()
+
+function requestedScope() {
+  const onScope = vi.fn()
+  renderHook(() => useAuthoringScopeRequest(onScope)).unmount()
+  return onScope.mock.calls.at(-1)?.[0]
+}
 
 beforeEach(() => {
   sessionStorage.clear()
@@ -18,7 +25,6 @@ beforeEach(() => {
 
 describe('<AuthoringProblemsPanel />', () => {
   it('navigates node and edge findings with keyboard-accessible buttons', () => {
-    const onOpenProblem = vi.fn()
     const { rerender } = render(
       <AuthoringProblemsPanel
         validationIssues={[{ code: 'condition_invalid_expression', message: 'Bad', nodeId: 'gate' }]}
@@ -26,12 +32,11 @@ describe('<AuthoringProblemsPanel />', () => {
         aiReviewIssues={[]}
         workflowEdges={[]}
         onValidate={vi.fn(async () => false)}
-        onOpenProblem={onOpenProblem}
       />,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Open problem on step gate' }))
     expect(useWorkflowStore.getState().selectedNodeId).toBe('gate')
-    expect(onOpenProblem).toHaveBeenCalledOnce()
+    expect(requestedScope()).toBe('step')
 
     rerender(
       <AuthoringProblemsPanel
@@ -40,12 +45,11 @@ describe('<AuthoringProblemsPanel />', () => {
         aiReviewIssues={[]}
         workflowEdges={[{ id: 'path-a', source: 'first', target: 'second', data: {} }]}
         onValidate={vi.fn(async () => false)}
-        onOpenProblem={onOpenProblem}
       />,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Open problem on path path-a' }))
     expect(useWorkflowStore.getState().selectedEdgeId).toBe('path-a')
-    expect(onOpenProblem).toHaveBeenCalledTimes(2)
+    expect(requestedScope()).toBe('step')
   })
 
   it('reuses the resilience fieldset handoff for readiness findings', () => {
@@ -63,6 +67,27 @@ describe('<AuthoringProblemsPanel />', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: 'Open problem on step fetch' }))
     expect(consumeResilienceFocus('fetch')).toBe(true)
+  })
+
+  it('links a workflow-level finding only when it has an element to open', () => {
+    render(
+      <AuthoringProblemsPanel
+        validationIssues={[]}
+        readiness={{
+          status: 'warn',
+          issues: [
+            { code: 'workflow_missing_outputs', severity: 'warn', message: 'Outputs' },
+            { code: 'workflow_missing_evals', severity: 'warn', message: 'Evals' },
+          ],
+        }}
+        aiReviewIssues={[]}
+        workflowEdges={[]}
+        onValidate={vi.fn(async () => false)}
+      />,
+    )
+    expect(screen.queryByTestId('authoring-problem-workflow_missing_evals')).toBeNull()
+    fireEvent.click(screen.getByTestId('authoring-problem-workflow_missing_outputs'))
+    expect(requestedScope()).toBe('workflow')
   })
 
   it('runs structural validation and renders the all-clear state', async () => {

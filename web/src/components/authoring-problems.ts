@@ -1,11 +1,12 @@
 /**
- * Pure projection for the Inspector Problems surface.
+ * Projection shared by the Problems scope and the canvas.
  *
  * Validation, deterministic readiness, and AI review can report the same
  * stable code/location. This merger collapses those duplicates, preserves all
  * provenances, and sorts by worst severity without persisting ephemeral rows.
  */
 
+import { tAiReviewIssue, tReadinessIssue, tValidationIssue } from '../i18n'
 import type { AiReviewIssue, ReadinessResult, ValidationIssue, WorkflowGraphEdge } from '../types'
 
 export type AuthoringProblemSource = 'validation' | 'readiness' | 'aiReview'
@@ -119,4 +120,19 @@ export function buildAuthoringProblems({
     const locationB = b.nodeId ?? b.edgeId ?? ''
     return locationA.localeCompare(locationB) || a.code.localeCompare(b.code)
   })
+}
+
+export function localizeAuthoringProblem(problem: AuthoringProblem): string {
+  const issue = {
+    code: problem.code,
+    severity: problem.severity,
+    message: problem.message,
+    nodeId: problem.nodeId,
+    edgeId: problem.edgeId,
+    rationale: problem.rationale,
+    suggestion: problem.suggestion,
+  }
+  if (problem.primarySource === 'validation') return tValidationIssue(issue)
+  if (problem.primarySource === 'readiness') return tReadinessIssue(issue)
+  return tAiReviewIssue(issue)
 }

@@ -1,5 +1,7 @@
 /** Consume-once handoff from a Problems row to the selected Inspector entity. */
 
+import { useEffect, useRef, type RefObject } from 'react'
+
 const STORAGE_KEY = 'janusly:authoring:entity-focus'
 export const AUTHORING_FOCUS_EVENT = 'janusly:authoring:entity-focus'
 
@@ -37,4 +39,53 @@ export function requestAuthoringFocus(request: AuthoringFocusRequest): void {
     // The live event still covers an already-mounted Inspector.
   }
   window.dispatchEvent(new CustomEvent(AUTHORING_FOCUS_EVENT, { detail: normalized }))
+}
+
+export type AuthoringScope = 'step' | 'workflow' | 'problems'
+export type AuthoringWorkflowTarget = 'outputs' | 'versions'
+
+const AUTHORING_SCOPE_EVENT = 'janusly:authoring:scope'
+let pendingScope: AuthoringScope | null = null
+let pendingTarget: AuthoringWorkflowTarget | null = null
+
+/** A jump can precede the mount of the lazy panel or its target, so both are held until read. */
+export function requestAuthoringScope(scope: AuthoringScope, target: AuthoringWorkflowTarget | null = null): void {
+  pendingScope = scope
+  pendingTarget = target
+  window.dispatchEvent(new Event(AUTHORING_SCOPE_EVENT))
+}
+
+function useAuthoringJump(read: () => void): void {
+  const latest = useRef(read)
+  latest.current = read
+  useEffect(() => {
+    const apply = () => latest.current()
+    apply()
+    window.addEventListener(AUTHORING_SCOPE_EVENT, apply)
+    return () => window.removeEventListener(AUTHORING_SCOPE_EVENT, apply)
+  }, [])
+}
+
+export function useAuthoringScopeRequest(onScope: (scope: AuthoringScope) => void): void {
+  useAuthoringJump(() => {
+    const scope = pendingScope
+    pendingScope = null
+    if (scope) onScope(scope)
+  })
+}
+
+/** Focus (and so scroll to) the returned element when a jump names this target. */
+export function useAuthoringTargetFocus<T extends HTMLElement>(
+  target: AuthoringWorkflowTarget,
+  onTarget?: () => void,
+): RefObject<T | null> {
+  const ref = useRef<T | null>(null)
+  useAuthoringJump(() => {
+    if (pendingTarget !== target) return
+    pendingTarget = null
+    onTarget?.()
+    ref.current?.focus({ preventScroll: true })
+    ref.current?.scrollIntoView?.({ block: 'start' })
+  })
+  return ref
 }

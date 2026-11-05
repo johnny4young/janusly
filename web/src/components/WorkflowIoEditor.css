@@ -69,3 +69,9 @@
   .we-workflow-io__row-main--output > label:first-child,
   .we-workflow-io__template { flex-basis: calc(100% - 38px); }
 }
+
+.we-workflow-io__section:focus {
+  border-radius: 8px;
+  outline: 2px solid var(--we-primary-ring);
+  outline-offset: 4px;
+}

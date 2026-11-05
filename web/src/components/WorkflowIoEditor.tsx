@@ -11,6 +11,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import type { WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
+import { useAuthoringTargetFocus } from './authoring-focus-bus'
 import { SelectControl, TextInput } from '@/components/ui/Form'
 import './WorkflowIoEditor.css'
 import { Button } from './ui/Button'
@@ -377,6 +378,7 @@ export function WorkflowIoEditor({
   onChangeTemplatePolicy,
 }: WorkflowIoEditorProps) {
   const { t } = useT()
+  const outputsRef = useAuthoringTargetFocus<HTMLDivElement>('outputs')
   const outputEntries = Object.entries(outputs ?? {})
 
   const addOutput = () => {
@@ -434,7 +436,7 @@ export function WorkflowIoEditor({
         onChange={onChangeInputs}
       />
 
-      <div className="we-workflow-io__section" data-testid="workflow-outputs-editor">
+      <div ref={outputsRef} tabIndex={-1} className="we-workflow-io__section" data-testid="workflow-outputs-editor">
         <div className="we-workflow-io__heading">
           <div>
             <strong>{t('rightPanel.inspector.outputsLabel')}</strong>

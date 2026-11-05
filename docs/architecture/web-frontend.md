@@ -348,6 +348,15 @@ snapshot and stays pending until it settles; a prefill does not cancel it or
 start another operation. Identity and unrelated canvas changes discard pending
 focus alongside the old authoring state.
 
+Authoring problems have one source, `buildAuthoringProblems`, and one route to
+the element that resolves them, `openAuthoringProblem`. The canvas projects them
+without persisting anything: a chip on the Flow map opens the Problems scope, a
+step's worst problem sets its dot, and the rest fill a band capped at two entries
+with the overflow left to the Problems scope. A problem without a step or path
+opens its Workflow scope target when its code has one (Outputs, Versions) and the
+Problems scope otherwise. The canvas can precede the lazy panel, so
+`requestAuthoringScope` holds the scope and target until they mount and read them.
+
 The Home hero is a named region inside workspace main, not a second page banner.
 The authoring canvas is an explicitly named programmatic focus target, JSON
 feedback uses status/alert semantics, and decorative edge badges do not duplicate

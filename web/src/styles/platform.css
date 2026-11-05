@@ -233,16 +233,13 @@
     white-space: normal;
   }
 
-  .canvas-toolbar {
-    left: 10px;
-    min-width: 160px;
-    padding: 8px 10px;
-    top: 10px;
+  .canvas-chrome {
+    inset: 10px 10px auto;
   }
 
-  .canvas-step-picker {
-    left: 10px;
-    top: 62px;
+  .canvas-toolbar {
+    min-width: 160px;
+    padding: 8px 10px;
   }
 
   .canvas-step-picker__menu {

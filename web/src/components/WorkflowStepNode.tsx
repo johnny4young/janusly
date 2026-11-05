@@ -12,6 +12,8 @@ import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import { formatStatusLabel, getNodeConfigSummary, getNodeHelper, getNodeLabel } from '../constants'
 import { useT } from '../i18n'
+import { localizeAuthoringProblem } from './authoring-problems'
+import { openAuthoringProblem } from './open-authoring-problem'
 import { Button } from './ui/Button'
 import type { WorkflowGraphNode } from '../types'
 
@@ -52,10 +54,25 @@ export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode
   const helper = data.helper || getNodeHelper(type)
   const summary = getNodeConfigSummary(type, data.config ?? {})
   const tone = data.hasValidationError ? 'error' : status
+  const problem = data.problem
 
   return (
     <div className="workflow-node" data-status={tone} data-selected={selected ? 'true' : 'false'}>
       <Handle className="workflow-handle workflow-handle-target" type="target" position={Position.Top} />
+      {problem && (
+        <Button
+          variant="ghost"
+          className="workflow-node-problem nodrag nopan nokey"
+          data-severity={problem.severity}
+          data-testid="workflow-node-problem"
+          title={localizeAuthoringProblem(problem)}
+          aria-label={t('problems.openNode', { id: title })}
+          onClick={(event) => {
+            event.stopPropagation()
+            openAuthoringProblem(problem)
+          }}
+        />
+      )}
       <div className="workflow-node-head">
         <span className="workflow-node-icon">{nodeIcons[type] ?? <SquarePlus size={15} />}</span>
         <span className="workflow-node-title">{title}</span>
