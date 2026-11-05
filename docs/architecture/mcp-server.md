@@ -31,8 +31,9 @@ does not maintain another task store.
 
 ## Catalog
 
-The stable catalog contains 15 tools:
+The stable catalog contains 17 tools:
 
+- authoring: `catalog.describe`, `workflows.validate`;
 - workflow: `workflows.list`, `workflows.assure`, `workflows.propose`,
   `workflows.save`;
 - run: `runs.list`, `runs.status`, `runs.inspect`, `runs.start`;
@@ -55,8 +56,32 @@ the composite `recovery.cases.diagnose` tool for candidate creation, DLQ
 inspection maps to `dlq.list`, and human-only approval actions are omitted.
 `workflows.propose` compiles a bounded Intent Brief and binds either a
 caller draft or the provider-free template to the exact tenant capability
-catalog. Its result contains node id/type summaries and assurance evidence,
-not the complete DAG or node configuration.
+catalog. Its result contains node id/type summaries and assurance evidence.
+With `includeDocument: true` it also returns the bound draft, scrubbed of
+secret-shaped literals, so an agent can validate and save it. The draft is the
+caller's own document or a template filled with capability names the catalog
+already exposes; it is never a saved workflow.
+
+`catalog.describe` lets an agent author without repository docs. The index and
+the `nodes`, `tools`, `triggers` and `subworkflows` sections require
+`workflows.read`; `nodes` gives the document shape and a validated example per
+executable step type, and `tools` lists names unless `tool` selects one entry
+with its input fields. The `credentials` section requires `credentials.read`
+and returns credential names, kinds and status plus exposed external MCP tools,
+never secret material.
+
+`workflows.validate` (`workflows.read`) runs the same structural gate as
+`workflows.save`, plus readiness, and saves nothing. Tenant bindings, whose
+alternatives name credentials, are added only when the ceiling also holds
+`credentials.read`. Every
+issue carries a message and a suggestion. `workflows.save` and `runs.start`
+return the same JSON report as their `isError` text when they reject a
+document, so one call shows every problem.
+
+`runs.start` accepts either a document or a `workflowId`. A `workflowId` runs
+the active workflow's latest immutable version, bound exactly as if that
+document had been sent. `idempotencyKey` shares the HTTP start's per-tenant key
+space: a retry with the same key returns the first run with `replayed: true`.
 
 `workflows.save` calls the same canonical atomic engine append as HTTP. It does
 not allocate `MAX(version)+1` independently, persist raw caller JSON, or skip

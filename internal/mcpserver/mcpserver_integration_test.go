@@ -1166,3 +1166,106 @@ func poolForTest(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 	return pool
 }
+
+func TestAgentAuthorsAndStartsWithoutExternalDocs(t *testing.T) {
+	session, org := newMCPSessionWithPermissions(t, map[string]bool{
+		"workflows.read": true, "workflows.write": true, "runs.read": true, "runs.start": true,
+		"ai.write": true,
+	})
+
+	index, view := callTool(t, session, "catalog.describe", map[string]any{})
+	if index.IsError || view["catalogVersion"] == "" || len(view["nodeTypes"].([]any)) != len(nodeGuides) {
+		t.Fatalf("catalog index: %+v", view)
+	}
+	_, nodes := callTool(t, session, "catalog.describe", map[string]any{"section": "nodes"})
+	if nodes["documentShape"] == nil || len(nodes["nodeTypes"].([]any)) != len(nodeGuides) {
+		t.Fatalf("node guide: %+v", nodes)
+	}
+	_, tools := callTool(t, session, "catalog.describe", map[string]any{"section": "tools"})
+	if summary := tools["tools"].([]any)[0].(map[string]any); summary["inputFields"] != nil {
+		t.Fatalf("tool index must stay compact: %+v", summary)
+	}
+	_, one := callTool(t, session, "catalog.describe", map[string]any{"section": "tools", "tool": "text.uppercase"})
+	if tool, _ := one["tool"].(map[string]any); tool["name"] != "text.uppercase" || tool["inputFields"] == nil {
+		t.Fatalf("single tool detail: %+v", one)
+	}
+	if denied, _ := callTool(t, session, "catalog.describe", map[string]any{"section": "credentials"}); !denied.IsError {
+		t.Fatal("credential names require credentials.read")
+	}
+
+	broken := map[string]any{"id": "wf-authored-" + org, "nodes": []any{
+		map[string]any{"id": "fetch", "type": "http", "config": map[string]any{}},
+		map[string]any{"id": "shape", "type": "transform", "config": map[string]any{}},
+	}, "edges": []any{map[string]any{"from": "fetch", "to": "missing"}}}
+	checked, report := callTool(t, session, "workflows.validate", map[string]any{"workflow": broken})
+	if checked.IsError || report["valid"] != false || len(report["issues"].([]any)) < 3 {
+		t.Fatalf("dry run must list every issue at once: %+v", report)
+	}
+	if report["bindings"] != nil || report["bindingsWithheld"] == nil {
+		t.Fatalf("bindings name credentials and need credentials.read: %+v", report)
+	}
+	for _, raw := range report["issues"].([]any) {
+		if issue := raw.(map[string]any); issue["suggestion"] == "" || issue["message"] == "" {
+			t.Fatalf("issue lacks guidance: %+v", issue)
+		}
+	}
+	rejected, rejection := callTool(t, session, "workflows.save", map[string]any{"workflow": broken})
+	if !rejected.IsError || rejection["error"] != "workflow validation failed" || len(rejection["issues"].([]any)) < 3 {
+		t.Fatalf("save rejection must carry the full report: %+v", rejection)
+	}
+
+	draft := map[string]any{"id": "wf-draft-" + org, "name": "Draft", "nodes": []any{
+		map[string]any{"id": "shape", "type": "transform", "config": map[string]any{
+			"mapping": map[string]any{"note": "sk-abcdefghijklmnopqrstuv"}}},
+	}, "edges": []any{}}
+	proposeArgs := map[string]any{"prompt": "Shape the order note", "workflow": draft, "includeDocument": true}
+	proposed, proposal := callTool(t, session, "workflows.propose", proposeArgs)
+	document, _ := proposal["document"].(map[string]any)
+	if proposed.IsError || document == nil || document["id"] != draft["id"] {
+		t.Fatalf("propose must return the draft on request: %+v", proposal)
+	}
+	if raw, _ := json.Marshal(document); strings.Contains(string(raw), "sk-abcdefghijklmnopqrstuv") {
+		t.Fatalf("returned draft kept a secret-shaped literal: %s", raw)
+	}
+	delete(proposeArgs, "includeDocument")
+	if _, compact := callTool(t, session, "workflows.propose", proposeArgs); compact["document"] != nil {
+		t.Fatal("the draft document is opt-in")
+	}
+
+	fixed := map[string]any{"id": "wf-authored-" + org, "name": "Authored", "nodes": []any{
+		map[string]any{"id": "shape", "type": "transform", "config": map[string]any{"mapping": map[string]any{"name": "{{context.input.name}}"}}},
+	}, "edges": []any{}}
+	if _, report := callTool(t, session, "workflows.validate", map[string]any{"workflow": fixed}); report["valid"] != true {
+		t.Fatalf("fixed draft should validate: %+v", report)
+	}
+	saved, savedView := callTool(t, session, "workflows.save", map[string]any{"workflow": fixed})
+	if saved.IsError {
+		t.Fatalf("save: %+v", saved.Content)
+	}
+
+	start := map[string]any{"workflowId": fixed["id"], "input": map[string]any{"name": "ada"}, "idempotencyKey": "retry-1"}
+	first, firstView := callTool(t, session, "runs.start", start)
+	second, secondView := callTool(t, session, "runs.start", start)
+	if first.IsError || second.IsError || firstView["runId"] != secondView["runId"] || secondView["replayed"] != true {
+		t.Fatalf("idempotent start by id: first=%+v second=%+v", firstView, secondView)
+	}
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var versionID string
+	if err := pool.QueryRow(context.Background(), `SELECT workflow_version_id FROM runs WHERE id = $1 AND org_id = $2`,
+		firstView["runId"], org).Scan(&versionID); err != nil || versionID != savedView["versionId"] {
+		t.Fatalf("start by id must bind the latest version: %q vs %v (%v)", versionID, savedView["versionId"], err)
+	}
+	for _, args := range []map[string]any{
+		{},
+		{"workflowId": fixed["id"], "workflow": fixed},
+		{"workflowId": "wf-unknown-" + org},
+	} {
+		if result, _ := callTool(t, session, "runs.start", args); !result.IsError {
+			t.Fatalf("start must reject %+v", args)
+		}
+	}
+}

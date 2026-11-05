@@ -91,7 +91,7 @@ func TestMCPToolCatalogHasTruthfulAnnotationsAndNoApprovalTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tools) != 15 {
+	if len(listed.Tools) != 17 {
 		t.Fatalf("tool catalog drifted: got %d", len(listed.Tools))
 	}
 	byName := map[string]*mcp.Tool{}
@@ -104,7 +104,7 @@ func TestMCPToolCatalogHasTruthfulAnnotationsAndNoApprovalTool(t *testing.T) {
 	if byName["recovery.cases.approve"] != nil {
 		t.Fatal("MCP must never expose human approval")
 	}
-	for _, name := range []string{"operations.brief", "workflows.propose", "recovery.cases.inspect"} {
+	for _, name := range []string{"operations.brief", "workflows.propose", "recovery.cases.inspect", "catalog.describe", "workflows.validate"} {
 		if tool := byName[name]; tool == nil || !tool.Annotations.ReadOnlyHint {
 			t.Fatalf("read tool annotation drifted: %s %+v", name, tool)
 		}
