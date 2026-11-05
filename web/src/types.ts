@@ -112,7 +112,7 @@ export type Credential = {
 }
 
 /** One required credential a solution pack declares (name + kind + purpose; never a secret value). */
-type PackRequiredCredential = { name: string; kind: string; purpose: string }
+export type PackRequiredCredential = { name: string; kind: string; purpose: string }
 /** One required org-config key a solution pack declares. */
 type PackRequiredOrgConfig = { key: string; purpose: string }
 export type SolutionPackFailureMode =

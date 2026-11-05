@@ -22,6 +22,7 @@ import { getResolvedLocale, useT } from '../i18n'
 import type { Credential } from '../types'
 import type { WorkflowLabels } from './AffectedWorkflowList'
 import type { CreateCredential } from './CredentialCreateDialog'
+import { loadConnectionDialogs } from './panel-loaders'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { Button } from './ui/Button'
 import { SelectControl, TextInput } from './ui/Form'
@@ -32,9 +33,9 @@ const CONNECTION_TAGS = [PLATFORM_TAG, 'credentials'] as const
 
 const CONNECTION_ROW_HEIGHT = 48
 
-const CredentialCreateDialog = lazy(() => import('./connection-dialogs').then((m) => ({ default: m.CredentialCreateDialog })))
-const CredentialRevokeDialog = lazy(() => import('./connection-dialogs').then((m) => ({ default: m.CredentialRevokeDialog })))
-const CredentialRotateModal = lazy(() => import('./connection-dialogs').then((m) => ({ default: m.CredentialRotateModal })))
+const CredentialCreateDialog = lazy(() => loadConnectionDialogs().then((m) => ({ default: m.CredentialCreateDialog })))
+const CredentialRevokeDialog = lazy(() => loadConnectionDialogs().then((m) => ({ default: m.CredentialRevokeDialog })))
+const CredentialRotateModal = lazy(() => loadConnectionDialogs().then((m) => ({ default: m.CredentialRotateModal })))
 
 type ConnectionDialog = { kind: 'create' } | { kind: 'rotate' | 'revoke'; name: string }
 

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -61,6 +61,9 @@ beforeEach(() => {
 })
 
 describe('<ConnectionsPanel />', () => {
+  // The cold dialog chunk can outlast a query's timeout on a loaded machine.
+  beforeAll(() => import('./connection-dialogs'))
+
   it('opens on searchable inventory with type, owner, expiry, and health', async () => {
     render(
       <ConnectionsPanel

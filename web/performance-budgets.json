@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 609.9,
+  "artifactGzipKiB": 611.3,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 565.2
+    "maxGzipKiB": 566.5
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,7 +85,7 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 82.98,
+    "app-workspace.js": 83.09,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
@@ -98,7 +98,7 @@
     "BudgetSettingsPanel.js": 3.58,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 40.64,
+    "catalog-en.js": 40.67,
     "catalog-es.js": 45.56,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
@@ -162,7 +162,7 @@
     "SlackInteractionsPanel.js": 2.56,
     "SnippetInsertMenu.js": 3.92,
     "SolutionPacksPanel.css": 0.43,
-    "SolutionPacksPanel.js": 1.85,
+    "SolutionPacksPanel.js": 2.55,
     "supabase-runtime.js": 21.13,
     "ToolInputFields.js": 1.51,
     "UpstreamHealthPanel.js": 2.39,

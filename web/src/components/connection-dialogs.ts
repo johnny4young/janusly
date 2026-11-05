@@ -2,3 +2,4 @@
 export { CredentialCreateDialog } from './CredentialCreateDialog'
 export { CredentialRevokeDialog } from './CredentialRevokeDialog'
 export { CredentialRotateModal } from './CredentialRotateModal'
+export { PackConnectDialog } from './PackConnectDialog'

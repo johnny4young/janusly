@@ -7,6 +7,15 @@
   in the first step. A disabled Run comparison names the missing step and field,
   and selecting that message takes you there. Roles that can only read are told
   so and no longer see the dataset form.
+- Solution packs show a Before installing checklist with each required credential,
+  its state and how many are ready. Connect opens the new connection dialog with
+  the name and kind filled in, and the row turns ready without leaving the page.
+  A credential that has expired, has no secret set on the server or is held under
+  another kind says so and offers Review, which opens Connections. Install becomes
+  the primary action once every credential is ready, and it still installs a draft
+  before then.
+- Failed actions that go through the platform's shared error toast now show the
+  message in your language when one exists, instead of the server's English.
 - The AI budget in Settings now meters this month's spend against the limit,
   with the warning threshold marked on the bar. An Off / Limit switch replaces
   entering 0 to turn the budget off. A limit must be at least $0.01 and a warning
