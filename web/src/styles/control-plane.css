@@ -1109,7 +1109,6 @@
 [data-density="compact"] .user-menu__workspace { padding: 8px; }
 [data-density="compact"] .user-menu__id { padding: 10px 12px; }
 
-[data-density="compact"] .recovery-center-composer { padding: 10px 12px; gap: 8px; }
 [data-density="compact"] .top-bar { padding-inline: 12px; }
 
 /* ==========================================================================
@@ -1842,22 +1841,6 @@
    the operator explicitly starts a controlled drill.
    ========================================================================== */
 
-/* Recovery-first chip variant — used for the lead composer chip
-   ("Suggest a fix") so the recovery action is visually weighted
-   above the diagnostic + diff + spend chips. */
-.recovery-center-composer__chip--primary {
-  border-color: color-mix(in srgb, var(--we-primary) 32%, transparent);
-  background: color-mix(in srgb, var(--we-primary) 6%, var(--we-surface) 94%);
-  color: var(--we-primary);
-}
-
-.recovery-center-composer__chip--primary:hover {
-  background: var(--we-primary-soft);
-  border-color: var(--we-primary);
-}
-
-.recovery-center-composer__chip--primary svg { color: var(--we-primary); }
-
 .auth-card {
   width: min(380px, 100%);
   border: 1px solid var(--we-line);
@@ -1875,6 +1858,7 @@
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .auth-submit { margin-top: 6px; width: 100%; }

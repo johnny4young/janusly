@@ -504,7 +504,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
     expect(await screen.findByText(/Metrics unavailable/i)).toBeInTheDocument()
     expect(screen.getByTestId('home-today')).toBeInTheDocument()
-    expect(screen.getByTestId('recovery-center-composer')).toBeInTheDocument()
+    expect(screen.getByTestId('home-operator-field')).toBeInTheDocument()
     expect(screen.queryByTestId('home-contributor-success')).toBeNull()
   })
 
@@ -888,7 +888,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     expect(await screen.findByTestId('recovery-center-action-recover_cluster')).toBeInTheDocument()
     expect(screen.getByTestId('recovery-center-action-recover_cluster')).toHaveTextContent('Open recovery queue')
     expect(screen.getByTestId('home-today')).toBeInTheDocument()
-    expect(screen.getByTestId('recovery-center-composer')).toBeInTheDocument()
+    expect(screen.getByTestId('home-operator-field')).toBeInTheDocument()
     for (const trend of [
       'recovery-center-metric-verified-recovery', 'recovery-center-metric-sla', 'recovery-heatmap',
       'recovery-center-tile-clusters', 'recovery-center-tile-calibration', 'recovery-validation-section',

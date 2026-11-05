@@ -11,6 +11,14 @@
   items. Each cluster shows its signature, category, occurrences and affected
   workflows, plus Investigate, which opens the fix for every open failure in the
   cluster, and Replay cluster, which starts a paced campaign after its preview.
+||||||| 515e0376
+- Home's Operator prompt is now one compact field at the bottom of What needs
+  you, and answers open in a side panel instead of pushing Home down. The panel
+  links the run the answer is based on and opens its recovery case in one click.
+  Without an AI provider it says so and shows the root cause, failed step, error
+  and next action, with the full report one click away. A question typed on Home
+  with no draft loaded now answers about the most recent open failure instead of
+  sending you to AI Studio. The five suggested questions moved to the panel.
 - Build shows a workflow's problems on the canvas. The Flow map card has a
   Problems chip with the count, workflow-level problems appear in a band above
   the steps, and a step with a problem has a dot on its corner. Each one opens

@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Login } from './Login'
+import { captureAuthCallback } from '../auth-callback'
 import { initI18n } from '../i18n'
 
 describe('<Login /> + LocaleSwitcher (browser smoke)', () => {
@@ -22,6 +23,21 @@ describe('<Login /> + LocaleSwitcher (browser smoke)', () => {
     expect(screen.getByText('Email')).toBeInTheDocument()
     expect(screen.getByText('Password')).toBeInTheDocument()
     expect(screen.getByText('Continue with SSO')).toBeInTheDocument()
+  })
+
+  it('reports a failed sign-in link once, without reflecting the link text', async () => {
+    window.history.replaceState(null, '', '/#error=access_denied&error_description=Call+this+number')
+    captureAuthCallback()
+    const message = 'This sign-in link is invalid or has expired. Request a new one.'
+
+    const { unmount } = render(<Login onAuthenticated={() => undefined} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent(message)
+    expect(screen.queryByText(/Call this number/)).toBeNull()
+    unmount()
+
+    render(<Login onAuthenticated={() => undefined} />)
+    await screen.findByRole('heading', { level: 1, name: 'Welcome back' })
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('uses the accessible primary text token in dark mode', async () => {
