@@ -5,7 +5,11 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -37,8 +41,24 @@ type preparedRerun struct {
 }
 
 func rerunRejected(rejection *engine.RerunRejection) opResult {
-	return opError(http.StatusUnprocessableEntity, rejection.Code, rejection.Message,
-		map[string]any{"nodeId": rejection.NodeID})
+	status := http.StatusUnprocessableEntity
+	if rejection.Code == "rerun_source_open" {
+		status = http.StatusConflict
+	}
+	return opError(status, rejection.Code, rejection.Message, map[string]any{"nodeId": rejection.NodeID})
+}
+
+// rerunIdempotencyKey binds the client's key to this request, so a resubmit after
+// a lost response replays the same rerun but an edited one starts its own.
+func rerunIdempotencyKey(key string, body rerunRequest) string {
+	if key == "" {
+		return ""
+	}
+	sum := sha256.New()
+	for _, part := range [][]byte{[]byte(key), []byte(body.SourceRunID), []byte(body.NodeID), body.InputOverride} {
+		fmt.Fprintf(sum, "%d:%s", len(part), part)
+	}
+	return "rerun:" + hex.EncodeToString(sum.Sum(nil))
 }
 
 func (s *V1Server) prepareRerun(r *http.Request, rc v1Request, body rerunRequest) (preparedRerun, *opResult) {
@@ -61,6 +81,14 @@ func (s *V1Server) prepareRerun(r *http.Request, rc v1Request, body rerunRequest
 	run, rejection := s.labSource(r, rc, body.SourceRunID, "not_found")
 	if rejection != nil {
 		return preparedRerun{}, rejection
+	}
+	link, err := store.New(s.pool).GetRunParentLink(r.Context(), run.ID)
+	if err != nil {
+		return fail(opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+	}
+	// The child's writes rest on its parent's approvals and input.
+	if link.ParentRunID.Valid && (link.ParentLinkKind.String == "subworkflow" || (!link.ParentLinkKind.Valid && !link.ReplayMode.Valid)) {
+		return fail(opError(http.StatusUnprocessableEntity, "rerun_subworkflow_child", "Rerun this from its parent run", nil))
 	}
 	switch run.Status {
 	case "succeeded", "failed", "cancelled", "timed_out":
@@ -157,8 +185,11 @@ func (s *V1Server) rerunStartCore(r *http.Request, rc v1Request) opResult {
 	started, err := (runstart.Service{Engine: s.engine, Pool: s.pool, NewID: s.newID}).Start(r.Context(), runstart.Request{
 		OrgID: rc.orgID, CreatedBy: rc.userID, Workflow: prepared.workflow,
 		RequestedVersionID: s.rerunVersion(r.Context(), rc.orgID, prepared),
-		Input:              prepared.input, IdempotencyKey: idempotencyKey, Rerun: prepared.plan.Seed,
+		Input:              prepared.input, IdempotencyKey: rerunIdempotencyKey(idempotencyKey, body), Rerun: prepared.plan.Seed,
 	})
+	if errors.Is(err, engine.ErrRerunSourceOpen) {
+		return opError(http.StatusConflict, "rerun_source_open", "The source run has not finished", nil)
+	}
 	if err != nil {
 		return runStartFailure(err)
 	}

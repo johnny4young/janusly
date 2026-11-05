@@ -111,30 +111,45 @@ ordinary readiness pass; cancellation marks its own nodes cancelled.
 `POST /runs/rerun` starts a new production run from one step of a finished run,
 linked to it by `parent_link_kind = 'rerun'`, which is trace-only like a replay.
 Only that step is queued, so only it and its downstream closure can execute.
-Earlier steps and other branches that succeeded are cloned with zero attempts,
-and anything else outside that closure is skipped. An earlier step that did not
-succeed, or an output the size bound truncated, refuses the rerun.
+The selected step must have succeeded, failed or been cancelled, and no source
+step may still be running or waiting on a child run. A subworkflow child cannot
+be rerun, because its writes rest on its parent's approvals and input.
+
+Readiness accepts a skipped predecessor, so every step upstream of the closure
+must have succeeded with a saved output and is cloned with zero attempts. A branch
+the source did not take stays skipped. Anything else upstream refuses the rerun.
+A step with no path into the closure is cloned if it succeeded, otherwise skipped.
 
 `POST /runs/rerun/preview` returns the step's config with sensitive keys masked
 and the reused, rerun, not-run and side-effect steps. Side effects are classified
 from the document that will run, with static tool capability metadata, treating a
 subworkflow or unknown tool as effectful, and the start must acknowledge them, so
-an edit that adds a write returns 409 with the new list.
+an edit that adds a write returns 409 with the new list. Only agents check
+approval at dispatch, so a side effect with any approval upstream that is not in
+the closure refuses the rerun until it starts at that approval.
 
 `inputOverride` replaces the step's authored config in a copy of the run's
 snapshot. Rendered per-node input is not persisted, because it can hold resolved
 secrets, so operators edit references rather than values. A masked value keeps
-the authored one, a literal under a sensitive key is refused, and an override
-cannot enable `allowWriteTools`. The copy then passes `runstart`, the same
-admission as any start: validation, readiness, circuit breaker, saved-only policy
-and idempotency, with no rollout reassignment. An edited document is unbound from
-its version, so saved-only tenants refuse it.
+the authored one, unless it sits in an array whose length or element changed,
+because masks restore by position. Sensitive keys accept only references, with an
+optional `Bearer`, `Basic` or `Token` scheme, and values that are not text. An
+override cannot enable `allowWriteTools`. The copy then passes `runstart`, the
+same admission as any start, with no rollout reassignment. An edited document is
+unbound from its version, so saved-only tenants refuse it. An `Idempotency-Key`
+is bound to the source, step and override, so an edited resubmit starts its own
+run. Validation runs cannot be rerun, which keeps a sandbox from becoming
+production. The audit row records whether the input was edited, never its values.
 
-Executor gates are unchanged. Dispatch reads approval from the graph, so a reused
-approval would authorize new writes: a rerun with side effects behind one is
-refused until it starts at that approval. Validation runs cannot be rerun, which
-keeps a sandbox from becoming production. The audit row records whether the input
-was edited, never its values.
+Once a rerun has run a step again, every redrive and replay of that step in the
+source run returns a conflict, because no provider idempotency key would stop the
+write repeating. Its dead letter stays open until an operator closes it. A rerun
+start and a redrive serialize on the source's completion lock, so one always sees
+the other. A rerun that only cloned a step leaves that step replayable.
+
+The circuit breaker does not distinguish reruns. An unedited rerun keeps its
+version and counts in the failure streak, and a successful one resets it. An edited
+rerun is unbound, so it never counts, but its failure still evaluates the streak.
 
 Wake-ups carry a count: `janusly_wake` notifications and the wake sweeper
 say how many nodes just became claimable, and that many workers wake,

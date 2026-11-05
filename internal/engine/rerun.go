@@ -5,7 +5,10 @@
 package engine
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -18,6 +21,12 @@ import (
 
 // RerunLinkKind marks trace-only lineage: a rerun never joins its source run.
 const RerunLinkKind = "rerun"
+
+// rerunSkipReason marks a step a rerun skipped, unlike a branch not taken.
+var rerunSkipReason = []byte("outside_rerun")
+
+// ErrRerunSourceOpen reports a source run revived after the rerun was planned.
+var ErrRerunSourceOpen = errors.New("the source run has not finished")
 
 // NodeSeed is a node row's starting state in a rerun.
 type NodeSeed struct {
@@ -74,57 +83,78 @@ func rerunHasEffect(node domain.Node) bool {
 
 // PlanRerun decides each node's role. Only the selected step and its downstream
 // closure can execute: everything else is cloned or skipped, so an earlier write
-// has no queued row through which to run again.
+// has no queued row through which to run again. Readiness accepts a skipped
+// predecessor, so nothing a closure node depends on may be skipped in its place.
 func PlanRerun(sourceRunID string, wf *domain.Workflow, rows []store.ListRunNodesByRunForOrgRow, nodeID string) (RerunPlan, *RerunRejection) {
 	source := make(map[string]store.ListRunNodesByRunForOrgRow, len(rows))
 	for _, row := range rows {
 		source[row.NodeID] = row
+		if row.Status == "running" || waitsOnChildRun(row.StateJson) {
+			return RerunPlan{}, &RerunRejection{Code: "rerun_source_open", Message: "A step of the source run is still executing", NodeID: row.NodeID}
+		}
 	}
 	if !slices.ContainsFunc(wf.Nodes, func(node domain.Node) bool { return node.ID == nodeID }) {
 		return RerunPlan{}, &RerunRejection{Code: "fork_node_not_found", Message: "Step is not part of this run", NodeID: nodeID}
 	}
-	if source[nodeID].Status == "skipped" {
-		return RerunPlan{}, &RerunRejection{Code: "predecessor_not_succeeded", Message: "This step did not run in the source run", NodeID: nodeID}
+	switch source[nodeID].Status {
+	case "succeeded", "failed", "cancelled":
+	default:
+		return RerunPlan{}, &RerunRejection{Code: "predecessor_not_succeeded", Message: "This step did not finish in the source run", NodeID: nodeID}
 	}
-	ancestors := collectRelatives(wf, nodeID, true)
-	downstream := collectRelatives(wf, nodeID, false)
+	closure := collectRelatives(wf, nodeID, false)
+	closure[nodeID] = true
+	needed := map[string]bool{}
+	for member := range closure {
+		maps.Copy(needed, collectRelatives(wf, member, true))
+	}
 	plan := RerunPlan{
 		Reused: []string{}, Rerun: []string{}, NotRun: []string{}, SideEffects: []RerunEffect{},
 		Seed: &RerunSeed{SourceRunID: sourceRunID, NodeID: nodeID, Nodes: make(map[string]NodeSeed, len(wf.Nodes))},
 	}
-	approval := ""
 	for _, node := range wf.Nodes {
 		row := source[node.ID]
 		switch {
-		case node.ID == nodeID || downstream[node.ID]:
+		case closure[node.ID]:
 			plan.Rerun = append(plan.Rerun, node.ID)
 			if rerunHasEffect(node) {
 				plan.SideEffects = append(plan.SideEffects, RerunEffect{NodeID: node.ID, Type: node.Type})
 			}
-			continue
-		case row.Status == "succeeded" || (row.Status == "skipped" && ancestors[node.ID]):
-			if row.Status == "succeeded" && !hasSavedOutput(row.StateJson) {
-				return RerunPlan{}, &RerunRejection{Code: "predecessor_not_succeeded", Message: "A saved output cannot be reused", NodeID: node.ID}
-			}
+		case row.Status == "succeeded" && hasSavedOutput(row.StateJson):
 			plan.Seed.Nodes[node.ID] = NodeSeed{Status: row.Status, State: row.StateJson}
 			plan.Reused = append(plan.Reused, node.ID)
-			if ancestors[node.ID] && node.Type == "approval" {
-				approval = node.ID
-			}
-			continue
-		case ancestors[node.ID]:
-			return RerunPlan{}, &RerunRejection{Code: "predecessor_not_succeeded", Message: "An earlier step did not succeed in the source run", NodeID: node.ID}
+		case needed[node.ID] && (row.Status != "skipped" || bytes.Contains(row.StateJson, rerunSkipReason)):
+			return RerunPlan{}, &RerunRejection{Code: "predecessor_not_succeeded", Message: "A step this rerun depends on did not succeed in the source run", NodeID: node.ID}
+		case needed[node.ID]:
+			// A branch the source run did not take stays not taken.
+			plan.Seed.Nodes[node.ID] = NodeSeed{Status: row.Status, State: row.StateJson}
+			plan.NotRun = append(plan.NotRun, node.ID)
+		default:
+			state, _ := json.Marshal(map[string]any{"skipped": map[string]any{"reason": string(rerunSkipReason), "rerunNodeId": nodeID}})
+			plan.Seed.Nodes[node.ID] = NodeSeed{Status: "skipped", State: state}
+			plan.NotRun = append(plan.NotRun, node.ID)
 		}
-		state, _ := json.Marshal(map[string]any{"skipped": map[string]any{"reason": "outside_rerun", "rerunNodeId": nodeID}})
-		plan.Seed.Nodes[node.ID] = NodeSeed{Status: "skipped", State: state}
-		plan.NotRun = append(plan.NotRun, node.ID)
 	}
-	// An approval covers one execution: dispatch reads approval from the graph,
-	// so a cloned one would otherwise authorize these writes a second time.
-	if approval != "" && len(plan.SideEffects) > 0 {
-		return RerunPlan{}, &RerunRejection{Code: "rerun_needs_approval", Message: "Rerun from the approval step so it is approved again", NodeID: approval}
+	// An approval covers one execution, and only agents check it at dispatch, so
+	// each write needs every approval upstream of it to run again in this rerun.
+	for _, effect := range plan.SideEffects {
+		upstream := collectRelatives(wf, effect.NodeID, true)
+		for _, node := range wf.Nodes {
+			if node.Type == "approval" && upstream[node.ID] && !closure[node.ID] {
+				return RerunPlan{}, &RerunRejection{Code: "rerun_needs_approval", Message: "Rerun from the approval step so it is approved again", NodeID: node.ID}
+			}
+		}
 	}
 	return plan, nil
+}
+
+// waitsOnChildRun reports a parked subworkflow whose child may still be writing.
+func waitsOnChildRun(state json.RawMessage) bool {
+	var fields struct {
+		Waiting struct {
+			Kind string `json:"kind"`
+		} `json:"waiting"`
+	}
+	return json.Unmarshal(state, &fields) == nil && fields.Waiting.Kind == "subworkflow"
 }
 
 // hasSavedOutput refuses a state whose output the size bound truncated away.
@@ -183,11 +213,10 @@ func mergeRerunOverride(override, original any) (any, string) {
 		for key, item := range value {
 			if grammar.IsSensitiveKey(key) {
 				prior, present := source[key]
-				text, isText := item.(string)
 				switch {
-				case isText && text == grammar.RedactedPlaceholder && present:
+				case item == grammar.RedactedPlaceholder && present:
 					out[key] = prior
-				case item == nil || (isText && (strings.TrimSpace(text) == "" || domain.IsSecretReference(text))):
+				case holdsNoLiteral(item):
 					out[key] = item
 				default:
 					return nil, key
@@ -213,10 +242,56 @@ func mergeRerunOverride(override, original any) (any, string) {
 			if bad != "" {
 				return nil, bad
 			}
+			// Masks restore by position, so a moved or edited element could carry
+			// one target's credential to another.
+			if key := maskedKey(item); key != "" && (len(value) != len(source) || !reflect.DeepEqual(merged, prior)) {
+				return nil, key
+			}
 			out[index] = merged
 		}
 		return out, ""
 	default:
 		return override, ""
 	}
+}
+
+// holdsNoLiteral accepts secret references with a known auth scheme, and values
+// that are not text, such as a tokenLimit.
+func holdsNoLiteral(value any) bool {
+	switch item := value.(type) {
+	case string:
+		stripped := domain.StripSecretReferences(item)
+		rest := strings.ToLower(strings.TrimSpace(stripped))
+		return rest == "" || (stripped != item && slices.Contains([]string{"bearer", "basic", "token"}, rest))
+	case map[string]any:
+		for _, child := range item {
+			if !holdsNoLiteral(child) {
+				return false
+			}
+		}
+	case []any:
+		return !slices.ContainsFunc(item, func(child any) bool { return !holdsNoLiteral(child) })
+	}
+	return true
+}
+
+func maskedKey(value any) string {
+	switch item := value.(type) {
+	case map[string]any:
+		for key, child := range item {
+			if child == grammar.RedactedPlaceholder && grammar.IsSensitiveKey(key) {
+				return key
+			}
+			if found := maskedKey(child); found != "" {
+				return found
+			}
+		}
+	case []any:
+		for _, child := range item {
+			if found := maskedKey(child); found != "" {
+				return found
+			}
+		}
+	}
+	return ""
 }

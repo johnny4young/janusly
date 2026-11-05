@@ -79,10 +79,14 @@ func TestPlanRerunRefusals(t *testing.T) {
 		nodeID   string
 		code     string
 	}{
-		"unknown step":           {map[string]string{"start": "succeeded"}, "ghost", "fork_node_not_found"},
-		"skipped step":           {map[string]string{"start": "succeeded", "write": "skipped"}, "write", "predecessor_not_succeeded"},
-		"failed earlier step":    {map[string]string{"start": "succeeded", "write": "failed"}, "read", "predecessor_not_succeeded"},
-		"unreached earlier step": {map[string]string{"start": "succeeded"}, "read", "predecessor_not_succeeded"},
+		"unknown step": {map[string]string{"start": "succeeded"}, "ghost", "fork_node_not_found"},
+		"skipped step": {map[string]string{"start": "succeeded", "side": "succeeded", "write": "skipped"}, "write", "predecessor_not_succeeded"},
+		"pending step, whose edge condition was never evaluated": {map[string]string{"start": "succeeded", "side": "succeeded", "write": "pending"}, "write", "predecessor_not_succeeded"},
+		"waiting step":                {map[string]string{"start": "succeeded", "side": "succeeded", "write": "waiting"}, "write", "predecessor_not_succeeded"},
+		"failed earlier step":         {map[string]string{"start": "succeeded", "write": "failed", "read": "cancelled"}, "read", "predecessor_not_succeeded"},
+		"unreached earlier step":      {map[string]string{"start": "succeeded", "read": "cancelled"}, "read", "predecessor_not_succeeded"},
+		"selected step still running": {map[string]string{"start": "succeeded", "write": "running"}, "write", "rerun_source_open"},
+		"another step still running":  {map[string]string{"start": "succeeded", "write": "succeeded", "side": "running"}, "write", "rerun_source_open"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -99,6 +103,7 @@ func TestPlanRerunRefusesATruncatedOutput(t *testing.T) {
 	wf := rerunDoc(t, `{"dslVersion":"1.0","nodes":[{"id":"a","type":"noop"},{"id":"b","type":"noop"}],"edges":[{"from":"a","to":"b"}]}`)
 	_, rejected := PlanRerun("src", wf, []store.ListRunNodesByRunForOrgRow{
 		{NodeID: "a", Status: "succeeded", StateJson: json.RawMessage(`{"__truncated":true}`)},
+		{NodeID: "b", Status: "failed", StateJson: json.RawMessage(`{}`)},
 	}, "b")
 	if rejected == nil || rejected.NodeID != "a" {
 		t.Fatalf("truncated output must not be reused: %+v", rejected)
@@ -121,6 +126,79 @@ func TestPlanRerunDoesNotReuseAnApprovalForWrites(t *testing.T) {
 	plan, rejected := PlanRerun("src", wf, rerunRows(statuses), "gate")
 	if rejected != nil || plan.Seed.NodeID != "gate" {
 		t.Fatalf("rerunning the approval itself asks a human again: %+v %+v", plan, rejected)
+	}
+}
+
+// A gate beside the selected step guards the write through the join, even though
+// it is neither upstream of the selected step nor in its closure.
+func TestPlanRerunRefusesAWriteBehindASiblingApproval(t *testing.T) {
+	wf := rerunDoc(t, `{"dslVersion":"1.0","nodes":[
+		{"id":"fork","type":"noop"},{"id":"enrich","type":"noop"},{"id":"gate","type":"approval"},
+		{"id":"charge","type":"http","config":{"url":"https://a.example","method":"POST"}}
+	],"edges":[{"from":"fork","to":"enrich"},{"from":"fork","to":"gate"},{"from":"enrich","to":"charge"},{"from":"gate","to":"charge"}]}`)
+	for _, status := range []string{"succeeded", "cancelled", "failed", "waiting", "pending"} {
+		t.Run(status, func(t *testing.T) {
+			_, rejected := PlanRerun("src", wf, rerunRows(map[string]string{
+				"fork": "succeeded", "enrich": "succeeded", "gate": status, "charge": "failed",
+			}), "enrich")
+			if rejected == nil || rejected.NodeID != "gate" {
+				t.Fatalf("the write must not fire without its gate: %+v", rejected)
+			}
+		})
+	}
+	if plan, rejected := PlanRerun("src", wf, rerunRows(map[string]string{
+		"fork": "succeeded", "enrich": "succeeded", "gate": "succeeded", "charge": "failed",
+	}), "gate"); rejected != nil || !slices.Contains(plan.Rerun, "charge") {
+		t.Fatalf("rerunning the gate itself asks a human again: %+v %+v", plan, rejected)
+	}
+}
+
+// Readiness accepts a skipped predecessor, so a failed one must not be skipped
+// into place: the join would run on an output that does not exist.
+func TestPlanRerunRefusesAJoinWithoutItsPredecessor(t *testing.T) {
+	wf := rerunDoc(t, `{"dslVersion":"1.0","nodes":[
+		{"id":"a","type":"noop"},{"id":"b","type":"noop"},{"id":"c","type":"noop"},{"id":"far","type":"noop"},
+		{"id":"d","type":"http","config":{"url":"https://a.example","method":"POST"}}
+	],"edges":[{"from":"a","to":"b"},{"from":"a","to":"c"},{"from":"b","to":"d"},{"from":"c","to":"d"},{"from":"a","to":"far"}]}`)
+	for _, status := range []string{"failed", "pending", "cancelled", "waiting"} {
+		_, rejected := PlanRerun("src", wf, rerunRows(map[string]string{"a": "succeeded", "b": status, "c": "failed", "d": "pending", "far": "succeeded"}), "c")
+		if rejected == nil || rejected.Code != "predecessor_not_succeeded" || rejected.NodeID != "b" {
+			t.Fatalf("%s predecessor: %+v", status, rejected)
+		}
+	}
+
+	// A step with no way into the closure can stay behind.
+	plan, rejected := PlanRerun("src", wf, rerunRows(map[string]string{"a": "succeeded", "b": "succeeded", "c": "failed", "d": "pending", "far": "failed"}), "c")
+	if rejected != nil || !slices.Equal(plan.NotRun, []string{"far"}) || plan.Seed.Nodes["far"].Status != "skipped" {
+		t.Fatalf("unrelated failure: %+v %+v", plan, rejected)
+	}
+
+	// A branch the source did not take stays not taken, so a merge can rerun.
+	plan, rejected = PlanRerun("src", wf, rerunRows(map[string]string{"a": "succeeded", "b": "skipped", "c": "failed", "d": "pending", "far": "succeeded"}), "c")
+	if rejected != nil || !slices.Contains(plan.NotRun, "b") || plan.Seed.Nodes["b"].Status != "skipped" {
+		t.Fatalf("branch not taken: %+v %+v", plan, rejected)
+	}
+
+	// A skip left by an earlier rerun says nothing about that branch.
+	rows := rerunRows(map[string]string{"a": "succeeded", "c": "failed", "d": "pending", "far": "succeeded"})
+	rows = append(rows, store.ListRunNodesByRunForOrgRow{NodeID: "b", Status: "skipped", StateJson: json.RawMessage(`{"skipped":{"reason":"outside_rerun"}}`)})
+	if _, rejected := PlanRerun("src", wf, rows, "c"); rejected == nil || rejected.NodeID != "b" {
+		t.Fatalf("a rerun's own skip must not count as taken: %+v", rejected)
+	}
+}
+
+func TestPlanRerunRefusesASubworkflowStillWaitingOnItsChild(t *testing.T) {
+	wf := rerunDoc(t, `{"dslVersion":"1.0","nodes":[{"id":"a","type":"noop"},{"id":"child","type":"noop"}],"edges":[]}`)
+	rows := []store.ListRunNodesByRunForOrgRow{
+		{NodeID: "a", Status: "failed", StateJson: json.RawMessage(`{}`)},
+		{NodeID: "child", Status: "waiting", StateJson: json.RawMessage(`{"waiting":{"kind":"subworkflow","childRunId":"c1"}}`)},
+	}
+	if _, rejected := PlanRerun("src", wf, rows, "a"); rejected == nil || rejected.Code != "rerun_source_open" {
+		t.Fatalf("a live child can still write: %+v", rejected)
+	}
+	rows[1].StateJson = json.RawMessage(`{"waiting":{"kind":"approval"}}`)
+	if _, rejected := PlanRerun("src", wf, rows, "a"); rejected != nil {
+		t.Fatalf("a parked approval executes nothing: %+v", rejected)
 	}
 }
 
@@ -188,11 +266,66 @@ func TestApplyRerunOverride(t *testing.T) {
 		}
 	}
 
+	for name, value := range map[string]any{
+		"reference":        "{{secret.KEY}}",
+		"scheme":           "Bearer {{secret.KEY}}",
+		"lowercase scheme": "bearer {{env.KEY}}",
+		"blank":            "",
+		"null":             nil,
+		"not text":         float64(500),
+	} {
+		if _, rejected := ApplyRerunOverride(wf, "call", map[string]any{"url": "https://x", "token": value}); rejected != nil {
+			t.Errorf("%s must be accepted: %+v", name, rejected)
+		}
+	}
+	for name, value := range map[string]any{
+		"literal beside a reference": "sk-live-abc123 {{secret.KEY}}",
+		"scheme with no reference":   "Bearer",
+		"scheme and a literal":       "Bearer sk-live-abc123",
+		"literal in a list":          []any{"pasted"},
+	} {
+		if _, rejected := ApplyRerunOverride(wf, "call", map[string]any{"url": "https://x", "token": value}); rejected == nil || rejected.Code != "rerun_raw_secret" {
+			t.Errorf("%s must be refused: %+v", name, rejected)
+		}
+	}
+	if patched, rejected := ApplyRerunOverride(wf, "call", map[string]any{"url": "https://x", "tokenLimit": float64(500)}); rejected != nil || patched.Nodes[0].Config["tokenLimit"] != float64(500) {
+		t.Errorf("a number under a token-shaped key is not a credential: %+v", rejected)
+	}
+
 	agent := rerunDoc(t, `{"dslVersion":"1.0","nodes":[{"id":"a","type":"agent","config":{"goal":"x"}}],"edges":[]}`)
 	if _, rejected := ApplyRerunOverride(agent, "a", map[string]any{"goal": "x", "allowWriteTools": true}); rejected == nil {
 		t.Fatal("an override must not opt an agent into writes")
 	}
 	if _, rejected := ApplyRerunOverride(wf, "ghost", map[string]any{}); rejected == nil {
 		t.Fatal("an unknown step must be refused")
+	}
+}
+
+// A mask restores by position, so it must not survive a change to where it sits.
+func TestApplyRerunOverrideRefusesAMovedMask(t *testing.T) {
+	wf := rerunDoc(t, `{"dslVersion":"1.0","nodes":[{"id":"call","type":"tool","config":{"tool":"x","targets":[
+		{"url":"https://a.example","apiKey":"credential-a"},
+		{"url":"https://b.example","apiKey":"credential-b"}
+	]}}],"edges":[]}`)
+	target := func(url string) map[string]any { return map[string]any{"url": url, "apiKey": "[redacted]"} }
+	override := func(items ...any) map[string]any { return map[string]any{"tool": "x", "targets": items} }
+
+	if same, rejected := ApplyRerunOverride(wf, "call", override(target("https://a.example"), target("https://b.example"))); rejected != nil || same != wf {
+		t.Fatalf("an unchanged list must round trip: %+v", rejected)
+	}
+	for name, items := range map[string][]any{
+		"reordered":  {target("https://b.example"), target("https://a.example")},
+		"removed":    {target("https://b.example")},
+		"appended":   {target("https://a.example"), target("https://b.example"), target("https://c.example")},
+		"retargeted": {target("https://evil.example"), target("https://b.example")},
+	} {
+		if _, rejected := ApplyRerunOverride(wf, "call", override(items...)); rejected == nil || rejected.Code != "rerun_raw_secret" {
+			t.Errorf("%s: %+v", name, rejected)
+		}
+	}
+	// An edit that drops the mask for a named secret has nothing to misdirect.
+	edited := override(map[string]any{"url": "https://evil.example", "apiKey": "{{secret.NEW}}"}, target("https://b.example"))
+	if _, rejected := ApplyRerunOverride(wf, "call", edited); rejected != nil {
+		t.Errorf("a reference needs no restore: %+v", rejected)
 	}
 }

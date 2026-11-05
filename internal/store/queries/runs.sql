@@ -6,6 +6,15 @@ INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_b
   workflow_id, trigger_kind)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);
 
+-- name: RunNodeHasRerun :one
+-- A rerun cloning this step never executed it; any other row in the child did or will.
+SELECT EXISTS (
+  SELECT 1 FROM runs c JOIN run_nodes n ON n.run_id = c.id
+  WHERE c.org_id = sqlc.arg(org_id) AND c.parent_run_id = sqlc.arg(run_id)::text
+    AND c.parent_link_kind = 'rerun' AND n.node_id = sqlc.arg(node_id)
+    AND (n.attempts > 0 OR n.status IN ('pending', 'queued', 'running', 'waiting'))
+);
+
 -- Recovery drills reproduce a server-authored historical claim and therefore
 -- need an explicit creation clock. Ordinary run starts must keep using
 -- InsertRun so callers cannot backdate production traffic.

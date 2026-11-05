@@ -457,6 +457,8 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 		return ok(map[string]any{"redriven": true, "deadLetterId": deadLetterID})
 	case errors.Is(err, engine.ErrDeadLetterNotFound):
 		return expected("dead letter not found")
+	case errors.Is(err, engine.ErrRedriveRerunExists):
+		return expected(err.Error())
 	case errors.Is(err, engine.ErrRedriveConflict):
 		return expected("dead letter replay already claimed")
 	default:

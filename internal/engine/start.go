@@ -240,6 +240,23 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(e.wrapTx(tx))
 
+	if in.Rerun != nil {
+		// Redrive takes this lock before it looks for a rerun, so one of the two
+		// always sees the other and a failed write cannot run from both.
+		if err := q.AcquireRunCompletionLock(ctx, in.Rerun.SourceRunID); err != nil {
+			return "", fmt.Errorf("lock rerun source: %w", err)
+		}
+		source, err := q.GetRunHeader(ctx, in.Rerun.SourceRunID)
+		if err != nil {
+			return "", fmt.Errorf("read rerun source: %w", err)
+		}
+		switch source.Status {
+		case "succeeded", "failed", "cancelled", "timed_out":
+		default:
+			return "", ErrRerunSourceOpen
+		}
+	}
+
 	traceID := in.TraceID
 	if traceID == "" {
 		traceID = uuid.NewString()

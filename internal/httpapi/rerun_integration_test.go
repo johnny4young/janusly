@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -481,5 +482,201 @@ func TestRerunIgnoresActiveRollouts(t *testing.T) {
 		if variant != "" || version != v1 {
 			t.Fatalf("rerun must stay on the source version: variant=%q version=%s want %v", variant, version, v1)
 		}
+	}
+}
+
+func (h *apiHarness) rerunSent(key string, body map[string]any) apiResponse {
+	h.t.Helper()
+	raw, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", h.server.URL+"/runs/rerun", bytes.NewReader(raw))
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-org-id", h.org)
+	req.Header.Set("x-user-id", "api-tester")
+	req.Header.Set("Idempotency-Key", key)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatalf("send: %v", err)
+	}
+	defer res.Body.Close()
+	var parsed map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&parsed)
+	return apiResponse{status: res.StatusCode, body: parsed}
+}
+
+// A resubmit after a lost response replays its rerun; an edited one must not
+// silently come back as the earlier run without the edit.
+func TestRerunIdempotencyKeyIsBoundToTheRequest(t *testing.T) {
+	h := newAPIHarness(t)
+	target := newRerunTarget(t)
+	sourceRunID := h.failedRerunSource(target.URL, fmt.Sprintf("wf-rerun-%d", time.Now().UnixNano()))
+	retry := map[string]any{"maxAttempts": 1}
+	request := func(path string) map[string]any {
+		return map[string]any{
+			"sourceRunId": sourceRunID, "nodeId": "fetch", "acknowledgedSideEffects": []string{"notify"},
+			"inputOverride": map[string]any{"url": target.URL + path, "method": "GET", "retry": retry},
+		}
+	}
+	first := h.rerunSent("same-key", request("/one"))
+	again := h.rerunSent("same-key", request("/one"))
+	edited := h.rerunSent("same-key", request("/two"))
+	if first.status != 200 || again.status != 200 || edited.status != 200 {
+		t.Fatalf("responses: %+v %+v %+v", first, again, edited)
+	}
+	if first.body["runId"] != again.body["runId"] {
+		t.Fatalf("the same request must replay: %v %v", first.body["runId"], again.body["runId"])
+	}
+	if first.body["runId"] == edited.body["runId"] {
+		t.Fatal("an edited request must start its own rerun")
+	}
+}
+
+// A subworkflow child's writes rest on its parent's approvals and input.
+func TestRerunRefusesASubworkflowChild(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	target := newRerunTarget(t)
+	sourceRunID := h.failedRerunSource(target.URL, fmt.Sprintf("wf-rerun-%d", time.Now().UnixNano()))
+	request := map[string]any{"sourceRunId": sourceRunID, "nodeId": "fetch", "acknowledgedSideEffects": []string{"notify"}}
+
+	for name, kind := range map[string]any{"subworkflow": "subworkflow", "legacy NULL kind": nil} {
+		if _, err := pool.Exec(t.Context(), `UPDATE runs SET parent_run_id='parent', parent_node_id='call', parent_link_kind=$2 WHERE id=$1`, sourceRunID, kind); err != nil {
+			t.Fatalf("link: %v", err)
+		}
+		for _, path := range []string{"/runs/rerun/preview", "/runs/rerun"} {
+			if res := h.call("POST", path, request, ""); res.status != 422 || res.body["code"] != "rerun_subworkflow_child" {
+				t.Fatalf("%s %s: %d %+v", name, path, res.status, res.body)
+			}
+		}
+	}
+	// A rerun of a rerun has no parent writes to rest on.
+	if _, err := pool.Exec(t.Context(), `UPDATE runs SET parent_link_kind='rerun' WHERE id=$1`, sourceRunID); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if res := h.call("POST", "/runs/rerun/preview", request, ""); res.status != 200 {
+		t.Fatalf("rerun of a rerun: %d %+v", res.status, res.body)
+	}
+}
+
+// Once a rerun has run a failed write again, every replay path must refuse it:
+// no provider idempotency key would stop the write repeating.
+func TestDeadLetterReplayRefusedAfterARerun(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	target := newRerunTarget(t)
+	retry := map[string]any{"maxAttempts": 1}
+	sourceRunID := h.failedRerunSource(target.URL, fmt.Sprintf("wf-rerun-%d", time.Now().UnixNano()))
+	var deadLetterID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id=$1 AND node_id='fetch'`, sourceRunID).Scan(&deadLetterID); err != nil {
+		t.Fatalf("dead letter: %v", err)
+	}
+	started := h.call("POST", "/runs/rerun", map[string]any{
+		"sourceRunId": sourceRunID, "nodeId": "fetch", "acknowledgedSideEffects": []string{"notify"},
+		"inputOverride": map[string]any{"url": target.URL + "/fixed", "method": "GET", "retry": retry},
+	}, "")
+	if started.status != 200 {
+		t.Fatalf("rerun: %d %+v", started.status, started.body)
+	}
+	h.waitRun(started.body["runId"].(string), "succeeded")
+	writes := target.writes.Load()
+
+	for _, tc := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/v1/dlq/redrive", map[string]any{"deadLetterId": deadLetterID}},
+		{"/v1/dlq/replay", map[string]any{"deadLetterId": deadLetterID}},
+		{"/v1/dlq/replay", map[string]any{"runId": sourceRunID, "nodeId": "fetch"}},
+		{"/runs/redrive", map[string]any{"runId": sourceRunID, "nodeId": "fetch"}},
+	} {
+		res := h.call("POST", tc.path, tc.body, "")
+		if res.status != 409 || !strings.Contains(fmt.Sprint(res.body), "rerun") {
+			t.Errorf("%s %v: %d %+v", tc.path, tc.body, res.status, res.body)
+		}
+	}
+	bulk := h.call("POST", "/dlq/bulk-replay", map[string]any{"deadLetterIds": []string{deadLetterID}}, "")
+	if bulk.body["replayed"] != float64(0) || !strings.Contains(fmt.Sprint(bulk.body["errors"]), "rerun") {
+		t.Errorf("bulk replay: %d %+v", bulk.status, bulk.body)
+	}
+
+	// The campaign pump settles the item as failed and never replays it.
+	campaignID := "camp-" + deadLetterID
+	if _, err := pool.Exec(ctx, `INSERT INTO replay_campaigns
+		(id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, created_by, next_dispatch_at, started_at)
+		VALUES ($1, $2, 'rerun', 'sig', '{}', 0, 'running', 1, 'test', now(), now())`, campaignID, h.org); err != nil {
+		t.Fatalf("campaign: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO replay_campaign_items (id, org_id, campaign_id, dead_letter_id, position)
+		VALUES ($1, $2, $3, $4, 0)`, campaignID+"-item", h.org, campaignID, deadLetterID); err != nil {
+		t.Fatalf("campaign item: %v", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var itemStatus, itemError string
+		_ = pool.QueryRow(ctx, `SELECT status, COALESCE(error,'') FROM replay_campaign_items WHERE id=$1`, campaignID+"-item").Scan(&itemStatus, &itemError)
+		if itemStatus == "failed" && strings.Contains(itemError, "rerun") {
+			break
+		}
+		if itemStatus == "replayed" || time.Now().After(deadline) {
+			t.Fatalf("campaign item: %s %q", itemStatus, itemError)
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+
+	// The refusal leaves the dead letter claimable and the source run untouched.
+	var status, claimed string
+	if err := pool.QueryRow(ctx, `SELECT status, COALESCE(replay_claimed_at::text,'') FROM dead_letters WHERE id=$1`, deadLetterID).Scan(&status, &claimed); err != nil {
+		t.Fatalf("read dead letter: %v", err)
+	}
+	if status != "open" || claimed != "" {
+		t.Errorf("a refusal must not burn the claim: %s %q", status, claimed)
+	}
+	h.waitRun(sourceRunID, "failed")
+	time.Sleep(200 * time.Millisecond)
+	if target.writes.Load() != writes {
+		t.Fatalf("no replay may write again: %d -> %d", writes, target.writes.Load())
+	}
+}
+
+// A rerun that only cloned a step never ran it, so that step can still be replayed.
+func TestDeadLetterReplayAllowedForAStepTheRerunDidNotRun(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	target := newRerunTarget(t)
+	retry := map[string]any{"maxAttempts": 1}
+	workflow := map[string]any{
+		"id": fmt.Sprintf("wf-rerun-other-%d", time.Now().UnixNano()), "name": "Other", "dslVersion": "1.0",
+		"nodes": []any{
+			map[string]any{"id": "root", "type": "noop", "config": map[string]any{}},
+			map[string]any{"id": "good", "type": "http", "config": map[string]any{"url": target.URL + "/good", "method": "GET", "retry": retry}},
+			map[string]any{"id": "bad", "type": "http", "config": map[string]any{"url": target.URL + "/broken", "method": "GET", "retry": retry}},
+		},
+		"edges": []any{map[string]any{"from": "root", "to": "good"}, map[string]any{"from": "root", "to": "bad"}},
+	}
+	sourceRunID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, ""))
+	h.waitRun(sourceRunID, "failed")
+	// The failure can overtake the sibling, so settle it instead of racing it.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var running int
+		_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM run_nodes WHERE run_id=$1 AND status='running'`, sourceRunID).Scan(&running)
+		if running == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("source steps never settled")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE run_nodes SET status='succeeded', state_json='{"output":{}}' WHERE run_id=$1 AND node_id='good'`, sourceRunID); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	started := h.call("POST", "/runs/rerun", map[string]any{"sourceRunId": sourceRunID, "nodeId": "good"}, "")
+	if started.status != 200 {
+		t.Fatalf("rerun: %d %+v", started.status, started.body)
+	}
+	h.waitRun(started.body["runId"].(string), "succeeded")
+	if res := h.call("POST", "/v1/dlq/replay", map[string]any{"runId": sourceRunID, "nodeId": "bad"}, ""); res.status != 200 {
+		t.Fatalf("a step outside the rerun stays replayable: %d %+v", res.status, res.body)
 	}
 }

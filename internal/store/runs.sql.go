@@ -2509,6 +2509,29 @@ func (q *Queries) ReviveFailedRun(ctx context.Context, id string) (int64, error)
 	return result.RowsAffected(), nil
 }
 
+const runNodeHasRerun = `-- name: RunNodeHasRerun :one
+SELECT EXISTS (
+  SELECT 1 FROM runs c JOIN run_nodes n ON n.run_id = c.id
+  WHERE c.org_id = $1 AND c.parent_run_id = $2::text
+    AND c.parent_link_kind = 'rerun' AND n.node_id = $3
+    AND (n.attempts > 0 OR n.status IN ('pending', 'queued', 'running', 'waiting'))
+)
+`
+
+type RunNodeHasRerunParams struct {
+	OrgID  string
+	RunID  string
+	NodeID string
+}
+
+// A rerun cloning this step never executed it; any other row in the child did or will.
+func (q *Queries) RunNodeHasRerun(ctx context.Context, arg RunNodeHasRerunParams) (bool, error) {
+	row := q.db.QueryRow(ctx, runNodeHasRerun, arg.OrgID, arg.RunID, arg.NodeID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const selectExpiredRunEventsBatch = `-- name: SelectExpiredRunEventsBatch :many
 SELECT re.id, re.run_id, re.node_id, re.type, re.payload, re.created_at
 FROM run_events re

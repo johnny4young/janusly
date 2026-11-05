@@ -17,7 +17,8 @@ impact attribution, and feedback.
 - Validation replay suppresses external write effects.
 - Rerun from a step (`run-model.md`) is a new linked production run, unlike a
   redrive, which revives the failed node in place. It claims no dead letter and
-  credits no recovery impact.
+  credits no recovery impact, and a step it has run again can no longer be
+  redriven or replayed.
 - Circuit breaking pauses every run entry point and requires explicit resume.
 - Buffered event triggers resume oldest-first; missed schedule ticks are not
   synthesized.
