@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Permission grants is one matrix with permissions in rows and roles in
+  columns, a filter, and one Save for every edited role. Cells that differ from
+  the built-in default are tinted. If only some roles save, the panel says which
+  failed and keeps their edits to retry. Switching workspace during a save stops
+  it, so grants never land in the other workspace, and the panel reports which
+  roles saved.
+- A custom role named `constructor` or `__proto__` no longer crashes the
+  permissions panel.
+- Revert to defaults now appears on built-in roles that have saved changes.
 - Rerun a run from any step that ran, from the Timeline tab. Earlier steps reuse
   their saved outputs, so nothing before the step repeats. The step's input is
   edited beside the original, the steps with side effects are listed before you

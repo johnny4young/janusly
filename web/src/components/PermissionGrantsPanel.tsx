@@ -1,12 +1,12 @@
 /**
  * Permission grants admin panel — mounted inside `OperationsPage`.
  *
- * Renders the closed permission catalog as a checkbox grid grouped by
- * category, with one card per role (built-ins first, custom roles
- * after). Admins can:
+ * Renders the closed permission catalog as one matrix: permissions grouped by
+ * category in rows, roles in columns (built-ins first, custom roles after).
+ * Admins can:
  *
  *   - Override a built-in role's permission set (or revert to
- *     catalog defaults).
+ *     catalog defaults). One Save posts each edited role separately.
  *   - Create a custom role (`compliance`, `ops-readonly`, …) with
  *     `inheritsFrom` rank inheritance + an explicit permission set.
  *   - Edit / delete custom roles (built-ins can't be deleted).
@@ -21,14 +21,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AlertCircle, KeyRound, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 
 import { api } from "../api";
+import { getActiveOrg } from "../auth";
 import { useWorkflowStore } from "../store";
 import { tApiError, useT } from "../i18n";
 import { useConfirm } from "./ConfirmDialog";
 import { Button } from "./ui/Button";
-import { FormActions, FormField, FormGrid } from "./ui/Form";
+import { FormActions, FormField, FormGrid, TextInput } from "./ui/Form";
 import { StatusSummary } from "./ui/StatusSummary";
 import './PermissionGrantsPanel.css'
 import { PLATFORM_TAG, useInvalidationNonce, type ResourceTag } from '../lib/query-cache'
+import { useAliveRef } from '../hooks/useAliveRef'
 
 const PERMISSION_TAGS = [PLATFORM_TAG, 'roles'] as const
 
@@ -44,13 +46,15 @@ type CatalogEntry = {
 };
 
 type RoleEntry = {
+  id?: string;
   name: string;
   isBuiltin: boolean;
   inheritsFrom: Role;
   description: string | null;
   grantedPermissions: string[] | null;
-  isOverride?: boolean;
 };
+
+type SaveFailure = { role: string; message: string; attempted: Set<string> };
 
 const ROLE_ORDER: Role[] = ["viewer", "editor", "admin"];
 
@@ -58,8 +62,18 @@ const ROLE_ORDER: Role[] = ["viewer", "editor", "admin"];
  *  the server-side validation so the operator sees the rule before submitting. */
 const ROLE_NAME_RE = /^[a-z0-9_-]{1,32}$/;
 
-export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean } = {}) {
+function sameKeys(a: Set<string>, b: Set<string>) {
+  return a.size === b.size && [...a].every((key) => b.has(key));
+}
+
+export function PermissionGrantsPanel({ canWrite }: { canWrite?: boolean } = {}) {
+  const organizationId = useWorkflowStore((s) => s.identityContext?.currentOrganizationId ?? "");
+  return <OrganizationPermissions key={organizationId} canWrite={canWrite} />;
+}
+
+function OrganizationPermissions({ canWrite = true }: { canWrite?: boolean }) {
   const { t } = useT();
+  const aliveRef = useAliveRef();
   const confirmDialog = useConfirm();
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion);
   const addToast = useWorkflowStore((s) => s.addToast);
@@ -76,10 +90,14 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
   const [newRoleDescription, setNewRoleDescription] = useState("");
   const [newRolePermissions, setNewRolePermissions] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
-  // Per-role dirty checkbox state for editing
-  const [editing, setEditing] = useState<Record<string, Set<string>>>({});
-  const [savingRole, setSavingRole] = useState<string | null>(null);
+  // Unsaved grants per role, keyed by a Map because role names are user-defined
+  // and may collide with Object.prototype. A role without a draft shows the server state.
+  const [drafts, setDrafts] = useState<ReadonlyMap<string, Set<string>>>(new Map());
+  const [saving, setSaving] = useState(false);
+  const [saveReport, setSaveReport] = useState<{ total: number; failures: SaveFailure[] } | null>(null);
+  const [filter, setFilter] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -89,35 +107,13 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
       .then(([catalogResp, rolesResp]) => {
         if (cancelled) return;
         const c = (catalogResp as { catalog?: CatalogEntry[]; mandatoryAdminPermissions?: string[] }) ?? {};
-        const catalogEntries = c.catalog ?? [];
-        setCatalog(catalogEntries);
+        setCatalog(c.catalog ?? []);
         setMandatoryAdmin(c.mandatoryAdminPermissions ?? []);
         const r = (rolesResp as { roles?: RoleEntry[] }) ?? {};
         setRoles(r.roles ?? []);
-        // Only seed `editing` for roles we haven't touched yet — refetches
-        // from a invalidationNonce bump must NOT clobber an admin's in-progress
-        // edits on roles they haven't saved yet. New roles that appeared in
-        // the server response (e.g. someone else created a custom role)
-        // still get their default initial state.
-        setEditing((prev) => {
-          const next: Record<string, Set<string>> = { ...prev };
-          for (const role of r.roles ?? []) {
-            if (!(role.name in next)) {
-              const granted = Array.isArray(role.grantedPermissions)
-                ? role.grantedPermissions
-                : role.isBuiltin
-                  ? catalogEntries
-                    .filter((entry) => entry.defaultRoles.includes(role.name as Role))
-                    .map((entry) => entry.key)
-                  : [];
-              next[role.name] = new Set(granted);
-            }
-          }
-          return next;
-        });
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : (t("permissions.errorLoad")));
+        if (!cancelled) setError(tApiError(err) || t("permissions.errorLoad"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -137,30 +133,97 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
     return Array.from(out.entries());
   }, [catalog]);
 
-  function toggleEditing(roleName: string, key: string) {
-    setEditing((prev) => {
-      const set = new Set(prev[roleName] ?? []);
+  const visibleGroups = useMemo(() => {
+    const query = filter.trim().toLowerCase();
+    if (!query) return grouped;
+    return grouped
+      .map(([category, entries]): [string, CatalogEntry[]] => [
+        category,
+        entries.filter((entry) =>
+          [entry.key, category, entry.description].some((text) => text.toLowerCase().includes(query))),
+      ])
+      .filter(([, entries]) => entries.length > 0);
+  }, [grouped, filter]);
+
+  const savedGrants = useMemo(() => {
+    const out = new Map<string, Set<string>>();
+    for (const role of roles) {
+      const granted = Array.isArray(role.grantedPermissions)
+        ? role.grantedPermissions
+        : role.isBuiltin
+          ? catalog.filter((entry) => entry.defaultRoles.includes(role.name as Role)).map((entry) => entry.key)
+          : [];
+      out.set(role.name, new Set(granted));
+    }
+    return out;
+  }, [roles, catalog]);
+
+  // A draft equal to the server state is no edit: keeping it would overwrite a later server change.
+  useEffect(() => {
+    setDrafts((prev) => {
+      const next = new Map([...prev].filter(([name, draft]) => {
+        const saved = savedGrants.get(name);
+        return saved && !sameKeys(draft, saved);
+      }));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [savedGrants]);
+
+  function toggleGrant(roleName: string, key: string) {
+    setDrafts((prev) => {
+      const saved = savedGrants.get(roleName) ?? new Set<string>();
+      const set = new Set(prev.get(roleName) ?? saved);
       if (set.has(key)) set.delete(key);
       else set.add(key);
-      return { ...prev, [roleName]: set };
+      const next = new Map(prev);
+      if (sameKeys(set, saved)) next.delete(roleName);
+      else next.set(roleName, set);
+      return next;
     });
   }
 
-  async function saveRole(role: RoleEntry) {
-    const granted = Array.from(editing[role.name] ?? new Set<string>()).sort();
-    setSavingRole(role.name);
-    try {
-      await api(`/org/roles/${encodeURIComponent(role.name)}`, {
-        method: "POST",
-        body: JSON.stringify({ grantedPermissions: granted }),
-      });
-      addToast(t("permissions.toastUpdated", { role: role.name }), "success");
-      bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
-    } catch (err) {
-      addToast(tApiError(err) || (t("permissions.errorSave")), "error");
-    } finally {
-      setSavingRole(null);
+  function dropDrafts(roleNames: readonly string[]) {
+    setDrafts((prev) => new Map([...prev].filter(([name]) => !roleNames.includes(name))));
+  }
+
+  // The API saves one role per request, so roles can succeed and fail independently.
+  async function saveChanges(edited: readonly RoleEntry[]) {
+    // api() reads the active org per request, so a later POST would land in the newly active workspace.
+    const org = getActiveOrg();
+    const leftView = () => !aliveRef.current || getActiveOrg() !== org;
+    setSaving(true);
+    setSaveReport(null);
+    const failures: SaveFailure[] = [];
+    const saved = new Map<string, Partial<RoleEntry>>();
+    for (const role of edited) {
+      if (leftView()) break;
+      const attempted = drafts.get(role.name);
+      if (!attempted) continue;
+      const granted = Array.from(attempted).sort();
+      try {
+        const response = (await api(`/org/roles/${encodeURIComponent(role.name)}`, {
+          method: "POST",
+          body: JSON.stringify({ grantedPermissions: granted }),
+        })) as Partial<RoleEntry> | null;
+        saved.set(role.name, { ...response, grantedPermissions: response?.grantedPermissions ?? granted });
+      } catch (err) {
+        failures.push({ role: role.name, message: tApiError(err) || t("permissions.errorSave"), attempted });
+      }
     }
+    if (saved.size > 0) {
+      setRoles((prev) => prev.map((role) => ({ ...role, ...saved.get(role.name) })));
+      dropDrafts([...saved.keys()]);
+      bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
+    }
+    const unconfirmed = edited.filter((role) => !saved.has(role.name)).map((role) => role.name);
+    if (unconfirmed.length > 0 && leftView()) {
+      addToast(t("permissions.saveStopped", {
+        saved: [...saved.keys()].join(", ") || "—",
+        unconfirmed: unconfirmed.join(", "),
+      }), "error");
+    } else if (failures.length > 0) setSaveReport({ total: edited.length, failures });
+    else addToast(t("permissions.toastUpdated", { role: [...saved.keys()].join(", ") }), "success");
+    setSaving(false);
   }
 
   async function revertBuiltin(role: RoleEntry) {
@@ -168,6 +231,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
     try {
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
       addToast(t("permissions.toastReverted", { role: role.name }), "success");
+      dropDrafts([role.name]);
       bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
       addToast(tApiError(err) || (t("permissions.errorRevert")), "error");
@@ -179,6 +243,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
     try {
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
       addToast(t("permissions.toastDeleted", { role: role.name }), "success");
+      dropDrafts([role.name]);
       bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
       addToast(tApiError(err) || (t("permissions.errorDelete")), "error");
@@ -197,12 +262,9 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
   async function createRole(event: React.FormEvent) {
     event.preventDefault();
     const name = newRoleName.trim().toLowerCase();
-    if (!ROLE_NAME_RE.test(name)) {
-      setError(t("permissions.errorName"));
-      return;
-    }
+    if (!ROLE_NAME_RE.test(name)) return;
     setCreating(true);
-    setError(null);
+    setCreateError(null);
     try {
       await api("/org/roles", {
         method: "POST",
@@ -220,13 +282,13 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
       setNewRoleInherits("viewer");
       bumpPlatformVersion(PERMISSION_MUTATION_TAGS);
     } catch (err) {
-      setError(err instanceof Error ? err.message : (t("permissions.errorCreate")));
+      setCreateError(tApiError(err) || t("permissions.errorCreate"));
     } finally {
       setCreating(false);
     }
   }
 
-  if (loading) {
+  if (loading && roles.length === 0) {
     return (
       <section className="we-budget-settings" aria-labelledby="permissions-heading">
         <header className="we-budget-settings__header">
@@ -240,6 +302,18 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
 
   const builtins = ROLE_ORDER.map((r) => roles.find((row) => row.name === r)).filter((r): r is RoleEntry => r !== undefined);
   const customs = roles.filter((r) => !r.isBuiltin);
+  const columns = [...builtins, ...customs];
+  const savedOf = (role: RoleEntry) => savedGrants.get(role.name) ?? new Set<string>();
+  const grantsOf = (role: RoleEntry) => drafts.get(role.name) ?? savedOf(role);
+  const editedRoles = columns.filter((role) => drafts.has(role.name));
+  // A failure stays on screen only while that exact attempt is still the role's draft.
+  const liveFailures = saveReport?.failures.filter((failure) => drafts.get(failure.role) === failure.attempted) ?? [];
+  const differsFromDefault = (role: RoleEntry, entry: CatalogEntry) =>
+    role.isBuiltin && grantsOf(role).has(entry.key) !== entry.defaultRoles.includes(role.name as Role);
+  const changesFromDefault = columns.reduce(
+    (sum, role) => sum + catalog.filter((entry) => differsFromDefault(role, entry)).length,
+    0,
+  );
 
   // Live validation for the new-role name: flag a non-empty value that breaks
   // the format so the operator sees it before submitting, and gate the submit.
@@ -249,111 +323,172 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
 
   return (
     <section className="we-budget-settings" aria-labelledby="permissions-heading" data-testid="permission-grants-panel">
-      <header className="we-budget-settings__header">
-        <KeyRound size={18} aria-hidden="true" />
-        <h3 id="permissions-heading">{t("permissions.heading")}</h3>
-      </header>
+      <div className="we-permissions-bar">
+        <div>
+          <header className="we-budget-settings__header">
+            <KeyRound size={18} aria-hidden="true" />
+            <h3 id="permissions-heading">{t("permissions.heading")}</h3>
+          </header>
+          {columns.length > 0 && (
+            <p className="we-permissions-bar__status" aria-live="polite" data-testid="permissions-status">
+              {t("permissions.changesFromDefault", { count: changesFromDefault })}
+              {editedRoles.length > 0 && (
+                <strong> · {t("permissions.unsaved", { roles: editedRoles.map((role) => role.name).join(", ") })}</strong>
+              )}
+            </p>
+          )}
+        </div>
+        {columns.length > 0 && (
+          <div className="we-permissions-bar__controls">
+            <TextInput
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={t("permissions.filter")}
+              aria-label={t("permissions.filter")}
+              data-testid="permissions-filter"
+            />
+            {canWrite && (
+              <>
+                <Button
+                  onClick={() => setDrafts(new Map())}
+                  disabled={editedRoles.length === 0 || saving}
+                  data-testid="permissions-discard"
+                >
+                  {t("permissions.discard")}
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => saveChanges(editedRoles)}
+                  disabled={editedRoles.length === 0}
+                  loading={saving}
+                  loadingLabel={t("permissions.saveAll")}
+                  leadingIcon={<Save size={14} />}
+                  data-testid="permissions-save"
+                >
+                  {t("permissions.saveAll")}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {error && (
         <StatusSummary role="alert" tone="danger" icon={<AlertCircle size={16} />} title={error} />
       )}
 
-      {[...builtins, ...customs].map((role) => {
-        const isAdminBuiltin = role.isBuiltin && role.name === "admin";
-        const grantedCount = editing[role.name]?.size ?? 0;
-        return (
-          <article
-            key={role.name}
-            className="we-permissions-role-card"
-            data-testid={`permissions-role-${role.name}`}
-          >
-            <header>
-              <h4>
-                <code>{role.name}</code>
-                {role.isBuiltin ? <span> {t("permissions.builtin")}</span> : <span> {t("permissions.custom", { base: role.inheritsFrom })}</span>}
-                {role.isOverride && <span className="we-pill" data-tone="info"> {t("permissions.override")}</span>}
-              </h4>
-              {role.description && <p>{role.description}</p>}
-            </header>
-            <div className="we-permissions-role-summary">
-              <span className="mode-pill mode-pill-neutral">
-                {t("permissions.summary", { granted: grantedCount, total: catalog.length })}
-              </span>
-              <span>
-                {role.isBuiltin
-                  ? t("permissions.summaryBuiltin")
-                  : t("permissions.summaryCustom", { base: role.inheritsFrom })}
-              </span>
-            </div>
-            <div className="we-permissions-grid">
-              {grouped.map(([category, entries]) => (
-                <div key={category} className="we-permissions-grid__category">
-                  <strong>{category}</strong>
-                  {entries.map((entry) => {
-                    const isMandatory = isAdminBuiltin && mandatoryAdmin.includes(entry.key);
-                    const checked = editing[role.name]?.has(entry.key) ?? false;
-                    return (
-                      <label key={entry.key} className="we-permissions-grid__entry">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={!canWrite || isMandatory}
-                          onChange={() => toggleEditing(role.name, entry.key)}
-                          aria-label={t("permissions.entryAria", { role: role.name, key: entry.key })}
-                        />
-                        <span title={entry.description}>{entry.key}</span>
-                        {isMandatory && <span className="we-pill" data-tone="warning">{t("permissions.required")}</span>}
-                      </label>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-            <footer>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => saveRole(role)}
-                disabled={!canWrite || savingRole === role.name}
-                loading={savingRole === role.name}
-                loadingLabel={t("common.save")}
-                leadingIcon={<Save size={14} />}
-              >
-                {t("common.save")}
-              </Button>
-              {role.isBuiltin && role.isOverride && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => revertBuiltin(role)}
-                  disabled={!canWrite}
-                  leadingIcon={<RotateCcw size={14} />}
-                >
-                  {t("permissions.revert")}
-                </Button>
-              )}
-              {!role.isBuiltin && (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={() => deleteCustom(role)}
-                  disabled={!canWrite}
-                  aria-label={t("permissions.deleteAria", { role: role.name })}
-                  leadingIcon={<Trash2 size={14} />}
-                >
-                  {t("common.delete")}
-                </Button>
-              )}
-            </footer>
-          </article>
-        );
-      })}
+      {saveReport && liveFailures.length > 0 && (
+        <StatusSummary
+          role="alert"
+          tone="danger"
+          icon={<AlertCircle size={16} />}
+          title={t("permissions.savePartial", {
+            saved: saveReport.total - saveReport.failures.length,
+            total: saveReport.total,
+          })}
+          description={liveFailures.map((failure) => (
+            <div key={failure.role}><code>{failure.role}</code>: {failure.message}</div>
+          ))}
+        />
+      )}
 
-      {canWrite && <article className="we-permissions-role-card we-permissions-role-card--new">
-        <header>
-          <h4>{t("permissions.add.heading")}</h4>
-          <p>{t("permissions.add.intro")}</p>
-        </header>
+      {columns.length > 0 && (
+        <div className="we-permissions-matrix-scroll">
+          <table className="we-permissions-matrix" aria-labelledby="permissions-heading" data-testid="permissions-matrix">
+            <thead>
+              <tr>
+                <th scope="col">{t("permissions.group")}</th>
+                <th scope="col" className="we-permissions-matrix__key">{t("permissions.permission")}</th>
+                {columns.map((role) => (
+                  <th key={role.name} scope="col" data-testid={`permissions-role-${role.name}`}>
+                    <div className="we-permissions-matrix__role">
+                      <code>{role.name}</code>
+                      {!role.isBuiltin && <span>{t("permissions.custom", { base: role.inheritsFrom })}</span>}
+                      {role.isBuiltin && role.id && <span className="we-pill" data-tone="info">{t("permissions.override")}</span>}
+                      <span>{t("permissions.summary", { granted: grantsOf(role).size, total: catalog.length })}</span>
+                      {role.description && <span className="we-permissions-matrix__description" title={role.description}>{role.description}</span>}
+                      {canWrite && role.isBuiltin && role.id && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => revertBuiltin(role)}
+                          disabled={saving}
+                          aria-label={t("permissions.revertAria", { role: role.name })}
+                          title={t("permissions.revertAria", { role: role.name })}
+                          leadingIcon={<RotateCcw size={14} />}
+                          data-testid={`permissions-revert-${role.name}`}
+                        />
+                      )}
+                      {canWrite && !role.isBuiltin && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => deleteCustom(role)}
+                          disabled={saving}
+                          aria-label={t("permissions.deleteAria", { role: role.name })}
+                          title={t("permissions.deleteAria", { role: role.name })}
+                          leadingIcon={<Trash2 size={14} />}
+                          data-testid={`permissions-delete-${role.name}`}
+                        />
+                      )}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            {visibleGroups.map(([category, entries]) => (
+              <tbody key={category}>
+                {entries.map((entry, index) => (
+                  <tr key={entry.key}>
+                    {index === 0 && (
+                      <th scope="rowgroup" rowSpan={entries.length} className="we-permissions-matrix__group">{category}</th>
+                    )}
+                    <th scope="row" className="we-permissions-matrix__key" title={entry.description}>{entry.key}</th>
+                    {columns.map((role) => {
+                      const isMandatory = role.isBuiltin && role.name === "admin" && mandatoryAdmin.includes(entry.key);
+                      const checked = grantsOf(role).has(entry.key);
+                      const changed = differsFromDefault(role, entry);
+                      const unsaved = checked !== savedOf(role).has(entry.key);
+                      return (
+                        <td
+                          key={role.name}
+                          data-changed={changed || undefined}
+                          data-unsaved={unsaved || undefined}
+                        >
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={!canWrite || isMandatory || saving}
+                              onChange={() => toggleGrant(role.name, entry.key)}
+                              aria-label={t("permissions.entryAria", { role: role.name, key: entry.key })}
+                              aria-description={[changed && t("permissions.changedNote"), unsaved && t("permissions.unsavedNote")].filter(Boolean).join(". ") || undefined}
+                              data-testid={`permissions-toggle-${role.name}-${entry.key}`}
+                            />
+                            {isMandatory && <span className="we-pill" data-tone="warning">{t("permissions.required")}</span>}
+                          </label>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            ))}
+            {visibleGroups.length === 0 && (
+              <tbody>
+                <tr>
+                  <td colSpan={columns.length + 2} data-testid="permissions-no-match">{t("permissions.noMatch")}</td>
+                </tr>
+              </tbody>
+            )}
+          </table>
+        </div>
+      )}
+
+      {canWrite && columns.length > 0 && <details className="we-permissions-role-card">
+        <summary data-testid="permissions-add-role"><h4>{t("permissions.add.heading")}</h4></summary>
+        <p>{t("permissions.add.intro")}</p>
         <form className="ui-form-layout" onSubmit={createRole} noValidate>
           <FormGrid>
             <FormField
@@ -423,6 +558,9 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
               </div>
             ))}
           </div>
+          {createError && (
+            <StatusSummary role="alert" tone="danger" icon={<AlertCircle size={16} />} title={createError} />
+          )}
           <FormActions>
             <Button
               type="submit"
@@ -436,7 +574,7 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
             </Button>
           </FormActions>
         </form>
-      </article>}
+      </details>}
     </section>
   );
 }
