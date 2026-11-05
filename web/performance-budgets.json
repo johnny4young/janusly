@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 606.3,
+  "artifactGzipKiB": 607.9,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 562.1
+    "maxGzipKiB": 563.2
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -142,7 +142,7 @@
     "RecoveryDialog.css": 2.32,
     "RecoveryDialog.js": 11.82,
     "ReplayCampaignsCard.css": 0.57,
-    "ReplayCampaignsCard.js": 1.6,
+    "ReplayCampaignsCard.js": 2.5,
     "RollbackConfirmDialog.js": 1.43,
     "rolldown-runtime.js": 0.41,
     "RunExplainChat.css": 0.74,

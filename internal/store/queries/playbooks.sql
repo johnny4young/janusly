@@ -5,6 +5,16 @@ SELECT id, run_id, node_id, status, error_json, node_json
 FROM dead_letters
 WHERE org_id = $1 AND id = ANY(sqlc.arg(ids)::text[]);
 
+-- name: ListReplayCampaignWorkflowSnapshots :many
+-- One row per distinct workflow document, so a cohort from one workflow parses once.
+SELECT array_agg(id ORDER BY id)::text[] AS run_ids, (input_json -> 'workflow')::jsonb AS workflow
+FROM runs
+WHERE org_id = sqlc.arg(org_id) AND id = ANY(sqlc.arg(run_ids)::text[])
+  AND input_json -> 'workflow' IS NOT NULL
+GROUP BY input_json -> 'workflow'
+ORDER BY min(id)
+LIMIT sqlc.arg(max_snapshots);
+
 -- name: InsertReplayCampaign :exec
 INSERT INTO replay_campaigns (id, org_id, name, cluster_signature, filter_json,
                               pacing_ms, total_count, created_by)

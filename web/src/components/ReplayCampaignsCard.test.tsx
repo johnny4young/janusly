@@ -44,7 +44,7 @@ describe('<ReplayCampaignsCard />', () => {
     await screen.findByTestId('recovery-jobs-empty')
   })
 
-  it('renders bounded progress, outcome counters and who started the job', async () => {
+  it('renders bounded progress and counters, and no opaque user id', async () => {
     vi.mocked(api).mockResolvedValueOnce({ campaigns: [runningCampaign] })
 
     render(<ReplayCampaignsCard />)
@@ -53,7 +53,9 @@ describe('<ReplayCampaignsCard />', () => {
     expect(row).toHaveTextContent('Payments recovery')
     expect(row).toHaveTextContent('Cluster · 4 items')
     expect(row).toHaveTextContent('2 of 4 settled')
-    expect(row).toHaveTextContent('dev-user')
+    expect(row).not.toHaveTextContent('dev-user')
+    expect(screen.queryByRole('columnheader', { name: 'Started by' })).not.toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Replays started' })).toBeInTheDocument()
     expect(screen.getByRole('progressbar', { name: 'Progress for Payments recovery' })).toHaveAttribute('aria-valuenow', '2')
     expect(api).toHaveBeenCalledWith('/recovery/campaigns?limit=50')
   })
@@ -120,8 +122,9 @@ describe('<ReplayCampaignsCard />', () => {
       .mockResolvedValueOnce({ campaigns: [{ ...runningCampaign, status: 'completed' }] })
       .mockResolvedValueOnce({
         items: [
-          { id: 'item-1', deadLetterId: 'dead-letter-1', runId: 'run-12345678', nodeId: 'fetch', status: 'replayed', error: null },
-          { id: 'item-2', deadLetterId: 'dead-letter-2', runId: null, nodeId: null, status: 'failed', error: 'Redrive conflict' },
+          { id: 'item-1', deadLetterId: 'dead-letter-1', runId: 'run-12345678', nodeId: 'fetch', status: 'replayed', errorCode: null },
+          { id: 'item-2', deadLetterId: 'dead-letter-2', runId: null, nodeId: null, status: 'failed', errorCode: 'rerun_exists' },
+          { id: 'item-3', deadLetterId: 'dead-letter-3', runId: null, nodeId: null, status: 'failed', errorCode: 'something_new', error: 'claim replay: conn closed' },
         ],
       })
 
@@ -134,8 +137,10 @@ describe('<ReplayCampaignsCard />', () => {
     expect(api).toHaveBeenCalledWith('/recovery/campaigns/campaign-1')
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(runs).toHaveTextContent('fetch')
-    expect(runs).toHaveTextContent('Replayed')
-    expect(runs).toHaveTextContent('Redrive conflict')
+    expect(runs).toHaveTextContent('Replay started')
+    expect(runs).toHaveTextContent('Already ran in a rerun. Open the latest run.')
+    expect(runs).toHaveTextContent('The replay could not start')
+    expect(runs).not.toHaveTextContent('claim replay')
     // A pruned dead letter has no run to open; its id is listed without a link.
     expect(runs).toHaveTextContent('dead-let')
     expect(screen.queryByTestId('recovery-job-run-item-2')).not.toBeInTheDocument()
@@ -165,15 +170,15 @@ describe('<ReplayCampaignsCard />', () => {
     expect(screen.getByTestId('replay-campaign-campaign-1')).toBeInTheDocument()
     unmount()
 
-    // A failed poll keeps watching.
+    // A failed poll keeps watching, later.
     vi.mocked(api).mockRejectedValueOnce(new Error('offline'))
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
     expect(addToast).not.toHaveBeenCalled()
 
     vi.mocked(api).mockResolvedValue({ campaigns: [finished] })
-    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000) })
     expect(addToast).toHaveBeenCalledTimes(1)
-    expect(addToast).toHaveBeenCalledWith('Payments recovery finished: 3 replayed, 1 failed', 'error')
+    expect(addToast).toHaveBeenCalledWith('Payments recovery finished. Replays started: 3. Could not start: 1.', 'error')
     expect(bumpPlatformVersion).toHaveBeenCalledWith(['campaigns', 'recovery', 'dlq'])
 
     const callsAfterEnd = vi.mocked(api).mock.calls.length
@@ -214,6 +219,149 @@ describe('<ReplayCampaignsCard />', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
     expect(screen.getByTestId('replay-campaign-campaign-2')).toHaveTextContent('3 of 4 settled')
     expect(addToast).not.toHaveBeenCalled()
+  })
+
+  it('says replays started, in a neutral tone, when no replay failed to start', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api).mockResolvedValueOnce({ campaigns: [runningCampaign] })
+    render(<ReplayCampaignsCard />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    vi.mocked(api).mockResolvedValue({ campaigns: [{ ...runningCampaign, status: 'completed', replayedCount: 4, failedCount: 0 }] })
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+
+    expect(addToast).toHaveBeenCalledWith('Payments recovery finished. Replays started: 4. Could not start: 0.', 'info')
+    const row = screen.getByTestId('replay-campaign-campaign-1')
+    expect(row).toHaveTextContent('Finished')
+    expect(row.querySelector('.we-pill')).toHaveAttribute('data-tone', 'neutral')
+  })
+
+  it('does not poll again while a poll is in flight', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api).mockResolvedValueOnce({ campaigns: [runningCampaign] })
+    render(<ReplayCampaignsCard />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    let resolvePoll: (value: unknown) => void = () => undefined
+    vi.mocked(api).mockReturnValueOnce(new Promise((resolve) => { resolvePoll = resolve }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000) })
+    expect(api).toHaveBeenCalledTimes(2)
+
+    vi.mocked(api).mockResolvedValue({ campaigns: [runningCampaign] })
+    await act(async () => { resolvePoll({ campaigns: [runningCampaign] }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    expect(api).toHaveBeenCalledTimes(3)
+  })
+
+  it('ignores an older response that arrives after a newer one', async () => {
+    vi.useFakeTimers()
+    const finished = { ...runningCampaign, status: 'completed', replayedCount: 3, failedCount: 1 }
+    vi.mocked(api).mockResolvedValueOnce({ campaigns: [runningCampaign] })
+    render(<ReplayCampaignsCard />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    let resolveOlder: (value: unknown) => void = () => undefined
+    vi.mocked(api).mockReturnValueOnce(new Promise((resolve) => { resolveOlder = resolve }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    vi.mocked(api).mockResolvedValueOnce({ campaigns: [finished] })
+    fireEvent.click(screen.getByTestId('recovery-jobs-refresh'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(addToast).toHaveBeenCalledTimes(1)
+
+    await act(async () => { resolveOlder({ campaigns: [runningCampaign] }) })
+    expect(screen.getByTestId('replay-campaign-campaign-1')).toHaveTextContent('Finished')
+
+    const calls = vi.mocked(api).mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000) })
+    expect(vi.mocked(api).mock.calls.length).toBe(calls)
+    expect(addToast).toHaveBeenCalledTimes(1)
+  })
+
+  it('announces an abort once when a stale running response lands around it', async () => {
+    vi.useFakeTimers()
+    const cancelled = { ...runningCampaign, status: 'cancelled', cancelledCount: 2 }
+    vi.mocked(api).mockResolvedValueOnce({ campaigns: [runningCampaign] })
+    render(<ReplayCampaignsCard />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    fireEvent.click(screen.getByTestId('replay-campaign-cancel-campaign-1'))
+
+    // A poll leaves before the abort commits and lands before the refresh after it.
+    let resolvePoll: (value: unknown) => void = () => undefined
+    vi.mocked(api).mockReturnValueOnce(new Promise((resolve) => { resolvePoll = resolve }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    let resolveRefresh: (value: unknown) => void = () => undefined
+    vi.mocked(api)
+      .mockResolvedValueOnce({ campaign: cancelled })
+      .mockReturnValueOnce(new Promise((resolve) => { resolveRefresh = resolve }))
+    fireEvent.click(screen.getByTestId('replay-campaign-cancel-confirm-campaign-1'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    await act(async () => { resolvePoll({ campaigns: [runningCampaign] }) })
+    await act(async () => { resolveRefresh({ campaigns: [cancelled] }) })
+
+    expect(addToast).toHaveBeenCalledTimes(1)
+    expect(addToast).toHaveBeenCalledWith('Payments recovery cancelled', 'success')
+    expect(screen.getByTestId('replay-campaign-campaign-1')).toHaveTextContent('Cancelled')
+  })
+
+  it.each([401, 403])('stops polling on %i and says the list is out of date', async (statusCode) => {
+    vi.useFakeTimers()
+    vi.mocked(api).mockResolvedValueOnce({ campaigns: [runningCampaign] })
+    render(<ReplayCampaignsCard />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    vi.mocked(api).mockRejectedValue(Object.assign(new Error('denied'), { statusCode }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    expect(api).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId('recovery-jobs-failed')).toHaveTextContent('Could not load recovery jobs')
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(api).toHaveBeenCalledTimes(2)
+
+    vi.mocked(api).mockResolvedValue({ campaigns: [{ ...runningCampaign, status: 'completed' }] })
+    fireEvent.click(screen.getByTestId('recovery-jobs-refresh'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.queryByTestId('recovery-jobs-failed')).not.toBeInTheDocument()
+  })
+
+  it('backs off on repeated failures and resumes after a success', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api).mockResolvedValueOnce({ campaigns: [runningCampaign] })
+    render(<ReplayCampaignsCard />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    vi.mocked(api).mockRejectedValue(new Error('offline'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    // Polls at 3 s, 9 s, 21 s and 45 s, after the first read.
+    expect(api).toHaveBeenCalledTimes(5)
+
+    vi.mocked(api).mockResolvedValue({ campaigns: [runningCampaign] })
+    await act(async () => { await vi.advanceTimersByTimeAsync(33_000) })
+    expect(api).toHaveBeenCalledTimes(6)
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    expect(api).toHaveBeenCalledTimes(7)
+  })
+
+  it('says when the list reached its limit', async () => {
+    const jobs = Array.from({ length: 50 }, (_, index) => ({ ...runningCampaign, id: `job-${index}`, status: 'completed' }))
+    vi.mocked(api).mockResolvedValueOnce({ campaigns: jobs })
+    const { unmount } = render(<ReplayCampaignsCard />)
+    expect(await screen.findByTestId('recovery-jobs-limit')).toHaveTextContent('Showing the latest 50 jobs')
+    unmount()
+
+    vi.mocked(api).mockResolvedValueOnce({ campaigns: jobs.slice(1) })
+    render(<ReplayCampaignsCard />)
+    await screen.findByTestId('replay-campaign-job-1')
+    expect(screen.queryByTestId('recovery-jobs-limit')).not.toBeInTheDocument()
+  })
+
+  it('reports a failed list instead of claiming there are no jobs', async () => {
+    vi.mocked(api).mockRejectedValueOnce(new Error('boom'))
+
+    render(<ReplayCampaignsCard />)
+
+    expect(await screen.findByTestId('recovery-jobs-failed')).toBeInTheDocument()
+    expect(screen.queryByTestId('recovery-jobs-empty')).not.toBeInTheDocument()
   })
 
   it('does not announce a job that was never seen running', async () => {

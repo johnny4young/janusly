@@ -239,8 +239,8 @@ describe('<DeadLettersPanel />', () => {
           canCreate: true,
           clusterSignature: 'sig',
           eligible: [
-            { deadLetterId: 'a', runId: 'run-a', nodeId: 'fetch', sideEffect: false },
-            { deadLetterId: 'b', runId: 'run-b', nodeId: 'fetch', sideEffect: false },
+            { deadLetterId: 'a', runId: 'run-a', nodeId: 'fetch', effects: [], effectsKnown: true },
+            { deadLetterId: 'b', runId: 'run-b', nodeId: 'fetch', effects: [], effectsKnown: true },
           ],
           rejected: [],
         }

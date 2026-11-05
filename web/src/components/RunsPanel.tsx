@@ -105,6 +105,7 @@ export type RunsPanelProps = {
   canStartRuns?: boolean
   canCancelRuns?: boolean
   canReplayDeadLetters?: boolean
+  canReadRuns?: boolean
   canResolveDeadLetters?: boolean
   canUseRecovery?: boolean
   canReadAutoHealing?: boolean
@@ -162,6 +163,7 @@ export function RunsPanel({
   canStartRuns = true,
   canCancelRuns = true,
   canReplayDeadLetters = true,
+  canReadRuns = true,
   canResolveDeadLetters = true,
   canUseRecovery = true,
   canReadAutoHealing = true,
@@ -666,7 +668,7 @@ export function RunsPanel({
         canUseRecovery={canUseRecovery}
         canReadAutoHealing={canReadAutoHealing}
         canDecideAutoHealing={canDecideAutoHealing}
-        onOpenRun={onOpenRun}
+        onOpenRun={canReadRuns ? onOpenRun : undefined}
       />}
 
       {!recoveryMode && !activityDetail && <RunHistoryList

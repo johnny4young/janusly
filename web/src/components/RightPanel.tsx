@@ -223,6 +223,7 @@ function RightPanelRouter(props: RightPanelProps) {
     onReplayDeadLetter: execution.onReplayDeadLetter,
     onResolveDeadLetter: execution.onResolveDeadLetter,
     canStartRuns: can('runs.start'),
+    canReadRuns: can('runs.read'),
     canCancelRuns: can('runs.cancel'),
     canReplayDeadLetters: can('dlq.replay'),
     canResolveDeadLetters: can('recovery.write'),

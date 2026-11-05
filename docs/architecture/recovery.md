@@ -15,10 +15,20 @@ impact attribution, and feedback.
   Savepoint recovery failures abort completion rather than claiming success.
 - Replay claims are compare-and-set and bound to the exact failed task.
 - Validation replay suppresses external write effects.
-- A replay campaign preview marks each eligible step with `sideEffect`, from the
-  same classifier readiness uses (write-side tools, non-read HTTP methods, MCP
-  tools and write-enabled agents), so an operator sees repeated writes before
-  starting. Campaign detail links each item to its run and step.
+- A replay campaign preview lists, per eligible entry, the steps that may change
+  external state when the failed step runs again: that step and everything
+  downstream of it in the run's snapshot, including branches the run may not
+  take. It is the classifier rerun from a step uses, so the two previews cannot
+  disagree: write-side tools, tools the registry does not know, non-read HTTP
+  methods, MCP tools, subworkflows and write-enabled agents. It reads what a step
+  can do, not what it will do. Without a readable snapshot, or past the bound on
+  distinct workflows parsed in one preview, `effectsKnown` is false and
+  `sideEffect` true, never a silent zero. Entries the rerun lineage will refuse
+  stay in the cohort, marked `supersededByRerun`, and settle as failed.
+- A replayed campaign item means its redrive committed, before the node runs.
+  Nothing tracks whether the run then recovered, so the job's copy says replays
+  started and each run's outcome lives in Activity. Item errors reach the client
+  as a stable `errorCode`; the raw text stays in the database and the audit trail.
 - Rerun from a step (`run-model.md`) is a new linked production run, unlike a
   redrive, which revives the failed node in place. It claims no dead letter and
   credits no recovery impact, and a step it has run again can no longer be

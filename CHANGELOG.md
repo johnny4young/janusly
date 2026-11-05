@@ -4,11 +4,13 @@
 
 - Recover has a Recovery jobs view beside the queue. Name a paced replay after
   the incident; before it starts you see how many failures and runs it touches,
-  which steps may change external systems and the estimated time. Each job shows
-  live progress, its replayed, failed and cancelled counts and who started it,
-  with Abort while it runs and View runs to open any run it touched. Janusly
-  shows a notice when a job you have seen running ends, even after you leave
-  Recover. These jobs moved here from Automation and patterns.
+  the failed steps and later steps that may change external systems, and the
+  estimated time. Each job shows live progress and how many replays started,
+  could not start or were cancelled, with Abort while it runs and View runs to
+  open any run it touched. A started replay is not yet a recovered run, so check
+  the runs for their outcome. Janusly shows a notice when a job you have seen
+  running ends, even after you leave Recover. These jobs moved here from
+  Automation and patterns.
 - Rerun a run from any step that ran, from the Timeline tab. Earlier steps reuse
   their saved outputs, so nothing before the step repeats. The step's input is
   edited beside the original, the steps with side effects are listed before you

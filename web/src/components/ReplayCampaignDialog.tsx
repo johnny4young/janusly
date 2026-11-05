@@ -19,7 +19,14 @@ import { FieldLabel, SelectControl, TextInput } from '@/components/ui/Form'
 type CampaignPreview = {
   canCreate: boolean
   clusterSignature: string | null
-  eligible: Array<{ deadLetterId: string; runId: string; nodeId: string; sideEffect?: boolean }>
+  eligible: Array<{
+    deadLetterId: string
+    runId: string
+    nodeId: string
+    effects?: Array<{ nodeId: string }>
+    effectsKnown?: boolean
+    supersededByRerun?: boolean
+  }>
   rejected: Array<{ deadLetterId: string; reason: string }>
 }
 
@@ -60,12 +67,16 @@ function formatEstimate(totalMs: number): string {
   return `~${new Intl.NumberFormat(getResolvedLocale(), { style: 'unit', unit, unitDisplay: 'short' }).format(value)}`
 }
 
-function sideEffectSteps(preview: CampaignPreview | null): Array<[string, number]> {
+function previewEffects(preview: CampaignPreview | null) {
   const steps = new Map<string, number>()
+  let unknown = 0
+  let refused = 0
   for (const entry of preview?.eligible ?? []) {
-    if (entry.sideEffect) steps.set(entry.nodeId, (steps.get(entry.nodeId) ?? 0) + 1)
+    for (const { nodeId } of entry.effects ?? []) steps.set(nodeId, (steps.get(nodeId) ?? 0) + 1)
+    if (entry.effectsKnown !== true) unknown += 1
+    if (entry.supersededByRerun) refused += 1
   }
-  return [...steps]
+  return { steps: [...steps], unknown, refused }
 }
 
 export function ReplayCampaignDialog({
@@ -143,7 +154,8 @@ export function ReplayCampaignDialog({
   }
 
   const eligibleCount = preview?.eligible.length ?? 0
-  const writingSteps = sideEffectSteps(preview)
+  const { steps: writingSteps, unknown, refused } = previewEffects(preview)
+  const unknownSuffix = writingSteps.length > 0 ? `${writingSteps.length}+` : '?'
 
   return (
     <div className="run-input-backdrop" onClick={close}>
@@ -204,7 +216,7 @@ export function ReplayCampaignDialog({
                 {([
                   ['failures', eligibleCount],
                   ['runs', new Set(preview?.eligible.map((entry) => entry.runId)).size],
-                  ['sideEffectSteps', writingSteps.length],
+                  ['sideEffectSteps', unknown > 0 ? unknownSuffix : writingSteps.length],
                   ['estimate', formatEstimate(eligibleCount * pacingMs)],
                 ] as const).map(([key, value]) => (
                   <div key={key}>
@@ -214,7 +226,7 @@ export function ReplayCampaignDialog({
                 ))}
               </dl>
             )}
-            {writingSteps.length > 0 && (
+            {writingSteps.length + unknown + refused > 0 && (
               <ul className="we-campaign-preview__rejections" data-testid="replay-campaign-side-effects">
                 {writingSteps.map(([nodeId, count]) => (
                   <li key={nodeId}>
@@ -222,6 +234,12 @@ export function ReplayCampaignDialog({
                     <span>{t('replayCampaign.dialog.sideEffect', { count })}</span>
                   </li>
                 ))}
+                {unknown > 0 && (
+                  <li data-testid="replay-campaign-effects-unknown">{t('replayCampaign.dialog.effectsUnknown', { count: unknown })}</li>
+                )}
+                {refused > 0 && (
+                  <li data-testid="replay-campaign-refused">{t('replayCampaign.dialog.refused', { count: refused })}</li>
+                )}
               </ul>
             )}
             {preview && preview.rejected.length > 0 && (

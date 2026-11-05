@@ -16,8 +16,8 @@ vi.mock('./AuthoringPanel', () => ({
   AuthoringPanel: () => <div data-testid="authoring-panel" />,
 }))
 vi.mock('./RunsPanel', () => ({
-  RunsPanel: ({ mode }: { mode?: string }) => (
-    <div data-testid="runs-panel-mode">{mode ?? 'runs'}</div>
+  RunsPanel: ({ mode, canReadRuns }: { mode?: string; canReadRuns?: boolean }) => (
+    <div data-testid="runs-panel-mode" data-can-read-runs={String(canReadRuns)}>{mode ?? 'runs'}</div>
   ),
 }))
 
@@ -142,6 +142,12 @@ describe('<RightPanel /> recovery task space', () => {
       .toHaveAttribute('aria-current', 'page')
     expect(within(sectionNav).getByRole('button', { name: 'Runs' }))
       .not.toHaveAttribute('aria-current')
+  })
+
+  it('passes the runs.read permission to Recover', async () => {
+    render(<RightPanel {...props({ tab: 'recover', permissions: ['dlq.read', 'recovery.read'] })} />)
+
+    expect(await screen.findByTestId('runs-panel-mode')).toHaveAttribute('data-can-read-runs', 'false')
   })
 
   it('mounts Reports with each widget gate and counts only open failures on Recover', async () => {

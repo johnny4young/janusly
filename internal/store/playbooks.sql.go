@@ -464,6 +464,48 @@ func (q *Queries) ListReplayCampaignItems(ctx context.Context, arg ListReplayCam
 	return items, nil
 }
 
+const listReplayCampaignWorkflowSnapshots = `-- name: ListReplayCampaignWorkflowSnapshots :many
+SELECT array_agg(id ORDER BY id)::text[] AS run_ids, (input_json -> 'workflow')::jsonb AS workflow
+FROM runs
+WHERE org_id = $1 AND id = ANY($2::text[])
+  AND input_json -> 'workflow' IS NOT NULL
+GROUP BY input_json -> 'workflow'
+ORDER BY min(id)
+LIMIT $3
+`
+
+type ListReplayCampaignWorkflowSnapshotsParams struct {
+	OrgID        string
+	RunIds       []string
+	MaxSnapshots int32
+}
+
+type ListReplayCampaignWorkflowSnapshotsRow struct {
+	RunIds   []string
+	Workflow json.RawMessage
+}
+
+// One row per distinct workflow document, so a cohort from one workflow parses once.
+func (q *Queries) ListReplayCampaignWorkflowSnapshots(ctx context.Context, arg ListReplayCampaignWorkflowSnapshotsParams) ([]ListReplayCampaignWorkflowSnapshotsRow, error) {
+	rows, err := q.db.Query(ctx, listReplayCampaignWorkflowSnapshots, arg.OrgID, arg.RunIds, arg.MaxSnapshots)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReplayCampaignWorkflowSnapshotsRow
+	for rows.Next() {
+		var i ListReplayCampaignWorkflowSnapshotsRow
+		if err := rows.Scan(&i.RunIds, &i.Workflow); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReplayCampaigns = `-- name: ListReplayCampaigns :many
 SELECT id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at FROM replay_campaigns
 WHERE org_id = $1

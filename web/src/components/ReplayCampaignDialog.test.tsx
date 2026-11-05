@@ -16,8 +16,8 @@ describe('<ReplayCampaignDialog />', () => {
         canCreate: true,
         clusterSignature: 'sig-http-502',
         eligible: [
-          { deadLetterId: 'dlq-1', runId: 'run-1', nodeId: 'fetch' },
-          { deadLetterId: 'dlq-2', runId: 'run-2', nodeId: 'fetch' },
+          { deadLetterId: 'dlq-1', runId: 'run-1', nodeId: 'fetch', effects: [], effectsKnown: true },
+          { deadLetterId: 'dlq-2', runId: 'run-2', nodeId: 'fetch', effects: [], effectsKnown: true },
         ],
         rejected: [],
       })
@@ -75,9 +75,9 @@ describe('<ReplayCampaignDialog />', () => {
       canCreate: true,
       clusterSignature: 'sig',
       eligible: [
-        { deadLetterId: 'dlq-1', runId: 'run-1', nodeId: 'charge', sideEffect: true },
-        { deadLetterId: 'dlq-2', runId: 'run-2', nodeId: 'charge', sideEffect: true },
-        { deadLetterId: 'dlq-3', runId: 'run-2', nodeId: 'fetch', sideEffect: false },
+        { deadLetterId: 'dlq-1', runId: 'run-1', nodeId: 'fetch', effects: [{ nodeId: 'charge', type: 'http' }], effectsKnown: true },
+        { deadLetterId: 'dlq-2', runId: 'run-2', nodeId: 'fetch', effects: [{ nodeId: 'charge', type: 'http' }], effectsKnown: true },
+        { deadLetterId: 'dlq-3', runId: 'run-2', nodeId: 'lookup', effects: [], effectsKnown: true },
       ],
       rejected: [],
     })
@@ -92,9 +92,59 @@ describe('<ReplayCampaignDialog />', () => {
     expect(steps).toHaveTextContent('charge')
     expect(steps).toHaveTextContent('2× · may change external systems')
     expect(steps).not.toHaveTextContent('fetch')
+    expect(steps).not.toHaveTextContent('lookup')
 
     fireEvent.change(screen.getByTestId('replay-campaign-pace'), { target: { value: '60000' } })
     expect(screen.getByTestId('replay-campaign-stat-estimate')).toHaveTextContent('~3 min')
+  })
+
+  it('never reads as zero when a run\'s workflow is unavailable', async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      canCreate: true,
+      clusterSignature: 'sig',
+      eligible: [
+        { deadLetterId: 'dlq-1', runId: 'run-1', nodeId: 'fetch', effects: [], effectsKnown: false },
+        { deadLetterId: 'dlq-2', runId: 'run-2', nodeId: 'fetch' },
+      ],
+      rejected: [],
+    })
+    render(<ReplayCampaignDialog deadLetterIds={['dlq-1', 'dlq-2']} onClose={vi.fn()} onCreated={vi.fn()} />)
+
+    await screen.findByText('2 of 2 eligible')
+    expect(screen.getByTestId('replay-campaign-stat-sideEffectSteps')).toHaveTextContent('?')
+    expect(screen.getByTestId('replay-campaign-effects-unknown')).toHaveTextContent('2× · workflow unavailable')
+  })
+
+  it('counts known steps as a minimum when other runs are unknown', async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      canCreate: true,
+      clusterSignature: 'sig',
+      eligible: [
+        { deadLetterId: 'dlq-1', runId: 'run-1', nodeId: 'fetch', effects: [{ nodeId: 'charge', type: 'http' }], effectsKnown: true },
+        { deadLetterId: 'dlq-2', runId: 'run-2', nodeId: 'fetch', effects: [], effectsKnown: false },
+      ],
+      rejected: [],
+    })
+    render(<ReplayCampaignDialog deadLetterIds={['dlq-1', 'dlq-2']} onClose={vi.fn()} onCreated={vi.fn()} />)
+
+    await screen.findByText('2 of 2 eligible')
+    expect(screen.getByTestId('replay-campaign-stat-sideEffectSteps')).toHaveTextContent('1+')
+  })
+
+  it('warns about failures the rerun lineage will refuse', async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      canCreate: true,
+      clusterSignature: 'sig',
+      eligible: [
+        { deadLetterId: 'dlq-1', runId: 'run-1', nodeId: 'fetch', effects: [], effectsKnown: true, supersededByRerun: true },
+        { deadLetterId: 'dlq-2', runId: 'run-2', nodeId: 'fetch', effects: [], effectsKnown: true },
+      ],
+      rejected: [],
+    })
+    render(<ReplayCampaignDialog deadLetterIds={['dlq-1', 'dlq-2']} onClose={vi.fn()} onCreated={vi.fn()} />)
+
+    expect(await screen.findByTestId('replay-campaign-refused')).toHaveTextContent('1× · already ran in a rerun, will be refused')
+    expect(screen.getByTestId('replay-campaign-stat-sideEffectSteps')).toHaveTextContent('0')
   })
 
   it('closes on Escape once the preview is settled', async () => {
@@ -103,8 +153,8 @@ describe('<ReplayCampaignDialog />', () => {
       canCreate: true,
       clusterSignature: 'sig',
       eligible: [
-        { deadLetterId: 'dlq-1', runId: 'run-1', nodeId: 'fetch' },
-        { deadLetterId: 'dlq-2', runId: 'run-2', nodeId: 'fetch' },
+        { deadLetterId: 'dlq-1', runId: 'run-1', nodeId: 'fetch', effects: [], effectsKnown: true },
+        { deadLetterId: 'dlq-2', runId: 'run-2', nodeId: 'fetch', effects: [], effectsKnown: true },
       ],
       rejected: [],
     })

@@ -15,9 +15,11 @@ import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { Button } from './ui/Button'
 
 const REPLAY_CAMPAIGN_TAGS = [PLATFORM_TAG, 'campaigns', 'recovery', 'dlq'] as const
-const JOB_LIST_PATH = '/recovery/campaigns?limit=50'
+const JOB_LIST_LIMIT = 50
+const JOB_LIST_PATH = `/recovery/campaigns?limit=${JOB_LIST_LIMIT}`
 const JOB_POLL_MS = 3_000
-const JOB_COLUMNS = ['replayed', 'failed', 'cancelled', 'startedBy'] as const
+const JOB_POLL_MAX_MS = 60_000
+const JOB_COLUMNS = ['replayed', 'failed', 'cancelled'] as const
 
 type ReplayCampaign = {
   id: string
@@ -28,7 +30,6 @@ type ReplayCampaign = {
   replayedCount: number
   failedCount: number
   cancelledCount: number
-  createdBy: string
   createdAt: string
 }
 
@@ -38,7 +39,7 @@ type JobItem = {
   runId: string | null
   nodeId: string | null
   status: string
-  error: string | null
+  errorCode: string | null
 }
 
 function isCount(value: unknown, min = 0, max = Infinity): value is number {
@@ -60,7 +61,6 @@ function campaignList(value: unknown): ReplayCampaign[] {
       && isCount(candidate.failedCount)
       && isCount(candidate.cancelledCount)
       && candidate.replayedCount + candidate.failedCount + candidate.cancelledCount <= candidate.totalCount
-      && typeof candidate.createdBy === 'string'
       && typeof candidate.createdAt === 'string'
       && Number.isFinite(Date.parse(candidate.createdAt))
       && (candidate.status === 'running' || candidate.status === 'completed' || candidate.status === 'cancelled')
@@ -81,8 +81,15 @@ function jobItems(value: unknown): JobItem[] {
 // Module state outlives this lazy view, so a job still announces its end after
 // the operator leaves Recover. One timer serves the view and the announcements.
 const watchedJobs = new Set<string>()
+// Ended or aborted here, so a response that was already on its way cannot revive it.
+const settledJobs = new Set<string>()
 let jobTimer: number | undefined
-let showJobs: ((jobs: ReplayCampaign[]) => void) | undefined
+let pollBusy = false
+let pollFailures = 0
+let pollResumeAt = 0
+let lastRead = 0
+let lastApplied = 0
+let showJobs: ((jobs: ReplayCampaign[] | null) => void) | undefined
 let announceJob: ((job: ReplayCampaign) => void) | undefined
 
 function stopJobTimer() {
@@ -90,30 +97,65 @@ function stopJobTimer() {
   jobTimer = undefined
 }
 
+function dropWatch() {
+  watchedJobs.clear()
+  settledJobs.clear()
+  pollBusy = false
+  pollFailures = 0
+  pollResumeAt = 0
+  stopJobTimer()
+}
+
+function pollJobs() {
+  if (pollBusy || Date.now() < pollResumeAt) return
+  pollBusy = true
+  readJobs().then(() => {
+    pollFailures = 0
+    pollResumeAt = 0
+  }, (error: unknown) => {
+    const status = (error as { statusCode?: number } | null)?.statusCode
+    // Retrying cannot restore access; Refresh reads again.
+    if (status === 401 || status === 403) {
+      dropWatch()
+      showJobs?.(null)
+      return
+    }
+    pollFailures += 1
+    pollResumeAt = Date.now() + Math.min(JOB_POLL_MS * 2 ** pollFailures, JOB_POLL_MAX_MS)
+  }).finally(() => { pollBusy = false })
+}
+
 function trackJobs(jobs: ReplayCampaign[]) {
   const listed = new Set(jobs.map((job) => job.id))
-  for (const id of watchedJobs) if (!listed.has(id)) watchedJobs.delete(id)
+  for (const ids of [watchedJobs, settledJobs]) {
+    for (const id of ids) if (!listed.has(id)) ids.delete(id)
+  }
   for (const job of jobs) {
-    if (job.status === 'running') watchedJobs.add(job.id)
-    else if (watchedJobs.delete(job.id)) announceJob?.(job)
+    if (job.status === 'running') {
+      if (!settledJobs.has(job.id)) watchedJobs.add(job.id)
+    } else {
+      settledJobs.add(job.id)
+      if (watchedJobs.delete(job.id)) announceJob?.(job)
+    }
   }
   if (watchedJobs.size === 0) stopJobTimer()
   else if (jobTimer === undefined) {
     const { signal } = currentApiRequestLifecycle()
     jobTimer = window.setInterval(() => {
       if (signal.aborted) {
-        watchedJobs.clear()
-        stopJobTimer()
+        dropWatch()
         if (!showJobs) return
       }
-      // A failed poll keeps the watch; the next tick retries.
-      void readJobs().catch(() => undefined)
+      pollJobs()
     }, JOB_POLL_MS)
   }
 }
 
 async function readJobs() {
+  const read = ++lastRead
   const jobs = campaignList(await api(JOB_LIST_PATH))
+  if (read < lastApplied) return
+  lastApplied = read
   showJobs?.(jobs)
   trackJobs(jobs)
 }
@@ -155,10 +197,14 @@ function JobRuns({ jobId, settled, onOpenRun }: {
             </Button>
           ) : <code>{(item.runId ?? item.deadLetterId).slice(0, 8)}</code>}
           <span>{item.nodeId}</span>
-          <span className="we-pill" data-tone={item.status === 'failed' ? 'danger' : item.status === 'replayed' ? 'success' : 'neutral'}>
+          <span className="we-pill" data-tone={item.status === 'failed' ? 'danger' : 'neutral'}>
             {t(`replayCampaign.item.${item.status}`, { defaultValue: item.status })}
           </span>
-          {item.error && <small>{item.error}</small>}
+          {item.errorCode && (
+            <small>
+              {t(`replayCampaign.itemError.${item.errorCode}`, { defaultValue: t('replayCampaign.itemError.replay_failed') })}
+            </small>
+          )}
         </li>
       ))}
     </ul>
@@ -176,6 +222,7 @@ export function ReplayCampaignsCard({ canCancel = true, onNew, onOpenRun }: {
   const addToast = useWorkflowStore((state) => state.addToast)
   const [campaigns, setCampaigns] = useState<ReplayCampaign[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [listFailed, setListFailed] = useState(false)
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [openRunsId, setOpenRunsId] = useState<string | null>(null)
@@ -185,19 +232,23 @@ export function ReplayCampaignsCard({ canCancel = true, onNew, onOpenRun }: {
       await readJobs()
     } catch {
       // Job progress is supplementary; the recovery queue remains usable.
+      setListFailed(true)
     } finally {
       setLoaded(true)
     }
   }, [])
 
   useEffect(() => {
-    showJobs = setCampaigns
+    showJobs = (jobs) => {
+      setListFailed(jobs === null)
+      if (jobs) setCampaigns(jobs)
+    }
     announceJob = (job) => {
       addToast(
         job.status === 'cancelled'
           ? t('replayCampaign.cancelled', { name: job.name })
           : t('replayCampaign.finished', { name: job.name, replayed: job.replayedCount, failed: job.failedCount }),
-        job.failedCount > 0 ? 'error' : 'success',
+        job.failedCount > 0 ? 'error' : 'info',
       )
       bumpPlatformVersion(['campaigns', 'recovery', 'dlq'])
     }
@@ -211,6 +262,7 @@ export function ReplayCampaignsCard({ canCancel = true, onNew, onOpenRun }: {
     try {
       await api(`/recovery/campaigns/${encodeURIComponent(campaign.id)}/cancel`, { method: 'POST' })
       watchedJobs.delete(campaign.id)
+      settledJobs.add(campaign.id)
       addToast(t('replayCampaign.cancelled', { name: campaign.name }), 'success')
       setConfirmCancelId(null)
       bumpPlatformVersion()
@@ -243,7 +295,8 @@ export function ReplayCampaignsCard({ canCancel = true, onNew, onOpenRun }: {
         </div>
       </div>
       {!loaded && <p className="helper-text">{t('common.loading')}</p>}
-      {loaded && campaigns.length === 0 && (
+      {listFailed && <p className="helper-text" role="alert" data-testid="recovery-jobs-failed">{t('replayCampaign.listFailed')}</p>}
+      {loaded && !listFailed && campaigns.length === 0 && (
         <p className="helper-text" data-testid="recovery-jobs-empty">{t('replayCampaign.empty')}</p>
       )}
       {campaigns.length > 0 && (
@@ -260,7 +313,7 @@ export function ReplayCampaignsCard({ canCancel = true, onNew, onOpenRun }: {
             {campaigns.map((campaign) => {
               const settled = campaign.replayedCount + campaign.failedCount + campaign.cancelledCount
               const percentage = Math.min(100, Math.round((settled / campaign.totalCount) * 100))
-              const tone = campaign.status === 'completed' ? 'success' : campaign.status === 'cancelled' ? 'neutral' : 'info'
+              const tone = campaign.status === 'running' ? 'info' : 'neutral'
               const confirming = canCancel && campaign.status === 'running' && confirmCancelId === campaign.id
               return (
                 <Fragment key={campaign.id}>
@@ -287,7 +340,7 @@ export function ReplayCampaignsCard({ canCancel = true, onNew, onOpenRun }: {
                         <span style={{ width: `${percentage}%` }} />
                       </div>
                     </td>
-                    {[campaign.replayedCount, campaign.failedCount, campaign.cancelledCount, campaign.createdBy].map((value, index) => (
+                    {[campaign.replayedCount, campaign.failedCount, campaign.cancelledCount].map((value, index) => (
                       <td key={JOB_COLUMNS[index]} data-label={t(`replayCampaign.col.${JOB_COLUMNS[index]}`)}>{value}</td>
                     ))}
                     <td>
@@ -314,7 +367,7 @@ export function ReplayCampaignsCard({ canCancel = true, onNew, onOpenRun }: {
                   </tr>
                   {(confirming || openRunsId === campaign.id) && (
                     <tr className="we-recovery-jobs__detail">
-                      <td colSpan={7}>
+                      <td colSpan={6}>
                         {confirming && <div className="we-replay-campaign__actions">
                           <span className="helper-text">{t('replayCampaign.cancelConfirm')}</span>
                           <Button
@@ -339,6 +392,9 @@ export function ReplayCampaignsCard({ canCancel = true, onNew, onOpenRun }: {
             })}
           </tbody>
         </table>
+      )}
+      {campaigns.length >= JOB_LIST_LIMIT && (
+        <p className="helper-text" data-testid="recovery-jobs-limit">{t('replayCampaign.limit', { count: JOB_LIST_LIMIT })}</p>
       )}
     </section>
   )
