@@ -264,6 +264,9 @@ func (e *Engine) processApprovalTimeout(
 		applied = true
 		return nil
 	})
+	if applied && err == nil {
+		e.DeliverParentNotifications(ctx, runID)
+	}
 	return applied, err
 }
 
@@ -296,7 +299,7 @@ var (
 // cannot double-write output or double-enqueue downstream work.
 func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, input map[string]any, token string) error {
 	finishedAt := e.eventNow()
-	return e.inCompletionTx(ctx, runID, func(q *store.Queries, events *runEventBuffer) error {
+	err := e.inCompletionTx(ctx, runID, func(q *store.Queries, events *runEventBuffer) error {
 		run, err := q.GetRunExecution(ctx, runID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -362,6 +365,13 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 		_, err = e.scheduleDownstream(ctx, q, events, ClaimedNode{RunID: runID, NodeID: nodeID}, finishedAt)
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	// The resumed node may have been the child's last: hand off to a waiting
+	// parent now instead of on the reconciler's next sweep.
+	e.DeliverParentNotifications(ctx, runID)
+	return nil
 }
 
 // Waiting-sweep bounds: one poll tick keeps draining fair batches until the
@@ -497,6 +507,9 @@ func (e *Engine) failInvalidSnapshotTimer(ctx context.Context, runID, nodeID str
 		applied = true
 		return nil
 	})
+	if applied && err == nil {
+		e.DeliverParentNotifications(ctx, runID)
+	}
 	return applied, err
 }
 
