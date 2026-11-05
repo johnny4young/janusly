@@ -29,8 +29,11 @@
 - Reports has an Estimated AI cost section for the selected window: the most
   expensive steps and the cost by model, with uncached, cached and output tokens.
   A step opens its run and a model lists its steps. With no usage it says why;
-  failed or simulated calls show no cost instead of $0. Settings > Usage links to
-  it and labels its dollars as estimated.
+  failed or simulated calls show no cost instead of $0, and simulated calls add no
+  tokens. Totals cover the whole window; when a busy window has more calls than the
+  steps list reads, the section says how far back the steps reach. Settings > Usage
+  links to it, labels its dollars as estimated, and no longer shows "no usage" while
+  its read is loading or after it failed.
 - Permission grants is one matrix with permissions in rows and roles in
   columns, a filter, and one Save for every edited role. Cells that differ from
   the built-in default are tinted. If only some roles save, the panel says which

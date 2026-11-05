@@ -1086,7 +1086,9 @@ export type UsageCosts = {
     "unknownCostCalls": number
     "workflowName": string
   })[]
+  "stepsCoveredSince": string | null
   "stepsTotal": number
+  "stepsTruncated": boolean
   "totals": {
     "cacheCreationInputTokens": number
     "cachedInputTokens": number
@@ -1097,7 +1099,6 @@ export type UsageCosts = {
     "uncachedInputTokens": number
     "unknownCostCalls": number
   }
-  "truncated": boolean
   "windowDays": number
   "withoutRun": {
     "cacheCreationInputTokens": number

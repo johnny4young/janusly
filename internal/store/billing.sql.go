@@ -58,19 +58,11 @@ func (q *Queries) GetWorkflowBudget(ctx context.Context, arg GetWorkflowBudgetPa
 	return i, err
 }
 
-const listUsageCostGroups = `-- name: ListUsageCostGroups :many
-WITH slice AS (
-  SELECT run_id, metadata FROM usage_events
-  WHERE org_id = $1 AND metric = 'llm.completion'
-    AND created_at >= $2::timestamptz
-  ORDER BY created_at DESC NULLS LAST
-  LIMIT $3
-)
+const listUsageCostModels = `-- name: ListUsageCostModels :many
 SELECT
-  coalesce(run_id, '')::text AS run_id,
-  (CASE WHEN jsonb_typeof(metadata->'nodeId') = 'string' THEN metadata->>'nodeId' ELSE '' END)::text AS node_id,
   (CASE WHEN jsonb_typeof(metadata->'provider') = 'string' THEN metadata->>'provider' ELSE 'unknown' END)::text AS provider,
   (CASE WHEN jsonb_typeof(metadata->'model') = 'string' THEN metadata->>'model' ELSE 'unknown' END)::text AS model,
+  (run_id IS NULL OR run_id = '')::boolean AS without_run,
   count(*)::bigint AS calls,
   count(*) FILTER (WHERE metadata->'providerSimulated' = 'true'::jsonb)::bigint AS simulated_calls,
   count(*) FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number'
@@ -78,30 +70,30 @@ SELECT
   coalesce(sum(greatest((metadata->>'costUsd')::double precision, 0))
     FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number'
       AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb), 0)::double precision AS cost_usd,
-  sum(CASE WHEN jsonb_typeof(metadata->'inputTokens') = 'number'
+  sum(CASE WHEN jsonb_typeof(metadata->'inputTokens') = 'number' AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb
     THEN greatest((metadata->>'inputTokens')::double precision, 0) ELSE 0 END)::double precision AS input_tokens,
-  sum(CASE WHEN jsonb_typeof(metadata->'cachedInputTokens') = 'number'
+  sum(CASE WHEN jsonb_typeof(metadata->'cachedInputTokens') = 'number' AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb
     THEN greatest((metadata->>'cachedInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cached_input_tokens,
-  sum(CASE WHEN jsonb_typeof(metadata->'cacheCreationInputTokens') = 'number'
+  sum(CASE WHEN jsonb_typeof(metadata->'cacheCreationInputTokens') = 'number' AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb
     THEN greatest((metadata->>'cacheCreationInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cache_creation_input_tokens,
-  sum(CASE WHEN jsonb_typeof(metadata->'outputTokens') = 'number'
+  sum(CASE WHEN jsonb_typeof(metadata->'outputTokens') = 'number' AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb
     THEN greatest((metadata->>'outputTokens')::double precision, 0) ELSE 0 END)::double precision AS output_tokens
-FROM slice
-GROUP BY 1, 2, 3, 4
-ORDER BY 1, 2, 3, 4
+FROM usage_events
+WHERE org_id = $1 AND metric = 'llm.completion'
+  AND created_at >= $2::timestamptz
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3
 `
 
-type ListUsageCostGroupsParams struct {
-	OrgID  string
-	Since  time.Time
-	RowCap int32
+type ListUsageCostModelsParams struct {
+	OrgID string
+	Since time.Time
 }
 
-type ListUsageCostGroupsRow struct {
-	RunID                    string
-	NodeID                   string
+type ListUsageCostModelsRow struct {
 	Provider                 string
 	Model                    string
+	WithoutRun               bool
 	Calls                    int64
 	SimulatedCalls           int64
 	PricedCalls              int64
@@ -112,22 +104,21 @@ type ListUsageCostGroupsRow struct {
 	OutputTokens             float64
 }
 
-// The newest bounded LLM slice of a window, grouped per run, node and model.
-// Only counters and identifiers leave the slice: never prompts or aiError.
-func (q *Queries) ListUsageCostGroups(ctx context.Context, arg ListUsageCostGroupsParams) ([]ListUsageCostGroupsRow, error) {
-	rows, err := q.db.Query(ctx, listUsageCostGroups, arg.OrgID, arg.Since, arg.RowCap)
+// Exact totals of a window per model, split by whether the call ran inside a run.
+// Simulated calls count as calls but add no cost and no tokens.
+func (q *Queries) ListUsageCostModels(ctx context.Context, arg ListUsageCostModelsParams) ([]ListUsageCostModelsRow, error) {
+	rows, err := q.db.Query(ctx, listUsageCostModels, arg.OrgID, arg.Since)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListUsageCostGroupsRow
+	var items []ListUsageCostModelsRow
 	for rows.Next() {
-		var i ListUsageCostGroupsRow
+		var i ListUsageCostModelsRow
 		if err := rows.Scan(
-			&i.RunID,
-			&i.NodeID,
 			&i.Provider,
 			&i.Model,
+			&i.WithoutRun,
 			&i.Calls,
 			&i.SimulatedCalls,
 			&i.PricedCalls,
@@ -174,6 +165,106 @@ func (q *Queries) ListUsageCostRuns(ctx context.Context, arg ListUsageCostRunsPa
 	for rows.Next() {
 		var i ListUsageCostRunsRow
 		if err := rows.Scan(&i.ID, &i.WorkflowName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsageCostSteps = `-- name: ListUsageCostSteps :many
+WITH slice AS (
+  SELECT run_id, metadata, created_at FROM usage_events
+  WHERE org_id = $1 AND metric = 'llm.completion'
+    AND created_at >= $2::timestamptz
+    AND run_id <> ''
+    AND ($3::text IS NULL OR (CASE WHEN jsonb_typeof(metadata->'model') = 'string' THEN metadata->>'model' ELSE 'unknown' END)::text = $3::text)
+  ORDER BY created_at DESC NULLS LAST
+  LIMIT $4
+)
+SELECT
+  run_id::text AS run_id,
+  (CASE WHEN jsonb_typeof(metadata->'nodeId') = 'string' THEN metadata->>'nodeId' ELSE '' END)::text AS node_id,
+  (CASE WHEN jsonb_typeof(metadata->'provider') = 'string' THEN metadata->>'provider' ELSE 'unknown' END)::text AS provider,
+  (CASE WHEN jsonb_typeof(metadata->'model') = 'string' THEN metadata->>'model' ELSE 'unknown' END)::text AS model,
+  min(created_at)::timestamptz AS oldest_at,
+  count(*)::bigint AS calls,
+  count(*) FILTER (WHERE metadata->'providerSimulated' = 'true'::jsonb)::bigint AS simulated_calls,
+  count(*) FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number'
+    AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb)::bigint AS priced_calls,
+  coalesce(sum(greatest((metadata->>'costUsd')::double precision, 0))
+    FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number'
+      AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb), 0)::double precision AS cost_usd,
+  sum(CASE WHEN jsonb_typeof(metadata->'inputTokens') = 'number' AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb
+    THEN greatest((metadata->>'inputTokens')::double precision, 0) ELSE 0 END)::double precision AS input_tokens,
+  sum(CASE WHEN jsonb_typeof(metadata->'cachedInputTokens') = 'number' AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb
+    THEN greatest((metadata->>'cachedInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cached_input_tokens,
+  sum(CASE WHEN jsonb_typeof(metadata->'cacheCreationInputTokens') = 'number' AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb
+    THEN greatest((metadata->>'cacheCreationInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cache_creation_input_tokens,
+  sum(CASE WHEN jsonb_typeof(metadata->'outputTokens') = 'number' AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb
+    THEN greatest((metadata->>'outputTokens')::double precision, 0) ELSE 0 END)::double precision AS output_tokens
+FROM slice
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 2, 3, 4
+`
+
+type ListUsageCostStepsParams struct {
+	OrgID  string
+	Since  time.Time
+	Model  pgtype.Text
+	RowCap int32
+}
+
+type ListUsageCostStepsRow struct {
+	RunID                    string
+	NodeID                   string
+	Provider                 string
+	Model                    string
+	OldestAt                 time.Time
+	Calls                    int64
+	SimulatedCalls           int64
+	PricedCalls              int64
+	CostUsd                  float64
+	InputTokens              float64
+	CachedInputTokens        float64
+	CacheCreationInputTokens float64
+	OutputTokens             float64
+}
+
+// The newest bounded slice of in-run calls, grouped per run, node and model.
+// Only counters and identifiers leave the slice: never prompts or aiError.
+func (q *Queries) ListUsageCostSteps(ctx context.Context, arg ListUsageCostStepsParams) ([]ListUsageCostStepsRow, error) {
+	rows, err := q.db.Query(ctx, listUsageCostSteps,
+		arg.OrgID,
+		arg.Since,
+		arg.Model,
+		arg.RowCap,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsageCostStepsRow
+	for rows.Next() {
+		var i ListUsageCostStepsRow
+		if err := rows.Scan(
+			&i.RunID,
+			&i.NodeID,
+			&i.Provider,
+			&i.Model,
+			&i.OldestAt,
+			&i.Calls,
+			&i.SimulatedCalls,
+			&i.PricedCalls,
+			&i.CostUsd,
+			&i.InputTokens,
+			&i.CachedInputTokens,
+			&i.CacheCreationInputTokens,
+			&i.OutputTokens,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

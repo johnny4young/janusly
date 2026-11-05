@@ -222,7 +222,8 @@ func usageCostRow(extra map[string]any) Schema {
 
 var usageCosts = closedObj(map[string]any{
 	"windowDays": intT(), "retentionDays": countT(), "aiConfigured": boolT(),
-	"truncated": boolT(), "rowCap": countT(), "stepsTotal": countT(), "modelsTotal": countT(),
+	"stepsTruncated": boolT(), "stepsCoveredSince": nullableString(), "rowCap": countT(),
+	"stepsTotal": countT(), "modelsTotal": countT(),
 	"totals":     usageCostRow(nil),
 	"withoutRun": usageCostRow(nil),
 	"steps": arr(usageCostRow(map[string]any{
@@ -230,7 +231,7 @@ var usageCosts = closedObj(map[string]any{
 		"nodeId": nullableString(), "provider": str(), "model": str(),
 	})),
 	"models": arr(usageCostRow(map[string]any{"provider": str(), "model": str()})),
-}, "windowDays", "retentionDays", "aiConfigured", "truncated", "rowCap", "stepsTotal", "modelsTotal",
+}, "windowDays", "retentionDays", "aiConfigured", "stepsTruncated", "stepsCoveredSince", "rowCap", "stepsTotal", "modelsTotal",
 	"totals", "withoutRun", "steps", "models")
 
 var validationBreakdown = closedObj(map[string]any{

@@ -88,7 +88,7 @@ function usageCosts(path: string) {
   const model = new URL(path, 'http://x').searchParams.get('model')
   const steps = model ? [costStep('run-of-model', model)] : [costStep('run-of-all', 'haiku')]
   return {
-    windowDays: windowOf(path), retentionDays: 90, aiConfigured: true, truncated: false, rowCap: 10000,
+    windowDays: windowOf(path), retentionDays: 90, aiConfigured: true, stepsTruncated: false, stepsCoveredSince: null, rowCap: 10000,
     stepsTotal: 1, modelsTotal: 1, totals: costTally, withoutRun: { ...costTally, calls: 0, costUsd: null }, steps,
     models: [{ ...costTally, provider: 'Anthropic', model: 'haiku' }],
   }
@@ -108,9 +108,12 @@ function respond(path: string): unknown {
 }
 
 const called = (prefix: string) => vi.mocked(api).mock.calls.map(([path]) => path).filter((path) => path.startsWith(prefix))
-const renderPanel = (props: Partial<Parameters<typeof ReportsPanel>[0]> = {}) => {
+const renderPanel = ({ canReadDeadLetters = true, canReadReports = true, canReadRuns = false, onOpenRun = vi.fn() } = {}) => {
   const onOpenTab = vi.fn()
-  render(<ReportsPanel canReadDeadLetters canReadReports canReadRuns={false} onOpenTab={onOpenTab} onOpenRun={vi.fn()} {...props} />)
+  const permissions = [
+    ...(canReadDeadLetters ? ['dlq.read'] : []), ...(canReadReports ? ['reports.read'] : []), ...(canReadRuns ? ['runs.read'] : []),
+  ]
+  render(<ReportsPanel permissions={permissions} onOpenTab={onOpenTab} onOpenRun={onOpenRun} />)
   return onOpenTab
 }
 
@@ -344,6 +347,12 @@ describe('ReportsPanel', () => {
     await screen.findByTestId('recovery-center-tile-clusters')
     expect(called('/v1/usage/costs')).toEqual([])
     expect(screen.queryByTestId('cost-drill')).toBeNull()
+  })
+
+  it('reads every report when the panel gets no permission list', async () => {
+    render(<ReportsPanel onOpenTab={vi.fn()} onOpenRun={vi.fn()} />)
+    expect(await screen.findByTestId('cost-drill')).toBeInTheDocument()
+    expect(screen.getByTestId('reports-window-30')).toBeInTheDocument()
   })
 
   it('reads the steps of a model without losing the totals, and resets it with the window', async () => {

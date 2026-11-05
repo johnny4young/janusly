@@ -262,9 +262,7 @@ function RightPanelRouter(props: RightPanelProps) {
   if (props.tab === 'reports') return (
     <PanelChrome title={t('workspace.section.reports.label')} description={t('workspace.section.reports.helper')}>
       <ReportsPanel
-        canReadDeadLetters={can('dlq.read')}
-        canReadReports={can('reports.read')}
-        canReadRuns={can('runs.read')}
+        permissions={props.permissions}
         onOpenTab={navigation.onOpenTab}
         onOpenRun={onOpenRun}
       />

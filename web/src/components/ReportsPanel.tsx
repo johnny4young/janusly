@@ -97,19 +97,20 @@ function useReportRead<T>(
 }
 
 export function ReportsPanel({
-  canReadDeadLetters,
-  canReadReports,
-  canReadRuns,
+  permissions,
   onOpenTab,
   onOpenRun,
 }: {
-  canReadDeadLetters: boolean
-  canReadReports: boolean
-  canReadRuns: boolean
+  /** Absent means every permission, as in the rest of the right panel. */
+  permissions?: readonly string[]
   onOpenTab: (tab: ActiveTab) => void
   onOpenRun: (runId: string) => void
 }) {
   const { t } = useT()
+  const can = (permission: string) => !permissions || permissions.includes(permission)
+  const canReadDeadLetters = can('dlq.read')
+  const canReadReports = can('reports.read')
+  const canReadRuns = can('runs.read')
   const orgId = useWorkflowStore((state) => state.orgId) ?? 'default'
   const invalidation = useInvalidationNonce(REPORT_TAGS)
   const [retries, setRetries] = useState(0)

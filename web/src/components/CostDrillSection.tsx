@@ -90,7 +90,6 @@ export function CostDrillSection({
     totals.unknownCostCalls > 0 && t('activity.reports.cost.note.unknown', { count: totals.unknownCostCalls }),
     totals.simulatedCalls > 0 && t('activity.reports.cost.note.simulated', { count: totals.simulatedCalls }),
     withoutRun.calls > 0 && t('activity.reports.cost.note.withoutRun', { count: withoutRun.calls }),
-    costs.truncated && t('activity.reports.cost.note.truncated', { rows: count(costs.rowCap) }),
     costs.retentionDays > 0 && costs.retentionDays < windowDays && t('activity.reports.cost.note.retention', { days: costs.retentionDays }),
   ].filter((note) => typeof note === 'string')
 
@@ -165,6 +164,14 @@ export function CostDrillSection({
             </tbody>
           </table>
         </div>
+      )}
+      {stepsRead?.stepsCoveredSince && (
+        <p className="helper-text" data-testid="cost-drill-steps-coverage">
+          {t('activity.reports.cost.steps.coverage', {
+            rows: count(stepsRead.rowCap),
+            since: new Date(stepsRead.stepsCoveredSince).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }),
+          })}
+        </p>
       )}
       {stepsRead && stepsRead.stepsTotal > stepsRead.steps.length && (
         <p className="helper-text" data-testid="cost-drill-steps-top">

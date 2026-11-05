@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/johnny4young/janusly/internal/aiconfig"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
@@ -35,16 +37,22 @@ type usageCostTally struct {
 	SimulatedCalls           int64    `json:"simulatedCalls"`
 }
 
-func (t *usageCostTally) add(row store.ListUsageCostGroupsRow) {
-	t.Calls += row.Calls
-	t.UncachedInputTokens += int64(row.InputTokens)
-	t.CachedInputTokens += int64(row.CachedInputTokens)
-	t.CacheCreationInputTokens += int64(row.CacheCreationInputTokens)
-	t.OutputTokens += int64(row.OutputTokens)
-	t.UnknownCostCalls += row.Calls - row.PricedCalls - row.SimulatedCalls
-	t.SimulatedCalls += row.SimulatedCalls
-	if row.PricedCalls > 0 {
-		cost := row.CostUsd
+// usageCostCounts is the tally shared by the exact model rollup and the step slice.
+type usageCostCounts struct {
+	calls, simulated, priced                   int64
+	cost, input, cached, cacheCreation, output float64
+}
+
+func (t *usageCostTally) add(row usageCostCounts) {
+	t.Calls += row.calls
+	t.UncachedInputTokens += int64(row.input)
+	t.CachedInputTokens += int64(row.cached)
+	t.CacheCreationInputTokens += int64(row.cacheCreation)
+	t.OutputTokens += int64(row.output)
+	t.UnknownCostCalls += row.calls - row.priced - row.simulated
+	t.SimulatedCalls += row.simulated
+	if row.priced > 0 {
+		cost := row.cost
 		if t.CostUsd != nil {
 			cost += *t.CostUsd
 		}
@@ -94,9 +102,15 @@ func (s *V1Server) usageCostsCore(r *http.Request, rc v1Request) opResult {
 	windowDays := boundedQueryInt(r, "windowDays", 30, 1, 90)
 	limit := boundedQueryInt(r, "limit", usageCostDefaultSteps, 1, usageCostMaxSteps)
 	modelFilter := r.URL.Query().Get("model")
+	since := time.Now().UTC().AddDate(0, 0, -windowDays)
 	q := store.New(s.pool)
-	groups, err := q.ListUsageCostGroups(ctx, store.ListUsageCostGroupsParams{
-		OrgID: rc.orgID, Since: time.Now().UTC().AddDate(0, 0, -windowDays), RowCap: usageCostRowCap,
+	modelRows, err := q.ListUsageCostModels(ctx, store.ListUsageCostModelsParams{OrgID: rc.orgID, Since: since})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	stepRows, err := q.ListUsageCostSteps(ctx, store.ListUsageCostStepsParams{
+		OrgID: rc.orgID, Since: since, RowCap: usageCostRowCap,
+		Model: pgtype.Text{String: modelFilter, Valid: modelFilter != ""},
 	})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
@@ -105,9 +119,13 @@ func (s *V1Server) usageCostsCore(r *http.Request, rc v1Request) opResult {
 	var totals, withoutRun usageCostTally
 	modelsByKey := map[[2]string]*usageCostModel{}
 	models := []*usageCostModel{}
-	steps := []usageCostStep{}
-	for _, row := range groups {
-		totals.add(row)
+	for _, row := range modelRows {
+		counts := usageCostCounts{row.Calls, row.SimulatedCalls, row.PricedCalls,
+			row.CostUsd, row.InputTokens, row.CachedInputTokens, row.CacheCreationInputTokens, row.OutputTokens}
+		totals.add(counts)
+		if row.WithoutRun {
+			withoutRun.add(counts)
+		}
 		key := [2]string{row.Provider, row.Model}
 		model := modelsByKey[key]
 		if model == nil {
@@ -115,20 +133,29 @@ func (s *V1Server) usageCostsCore(r *http.Request, rc v1Request) opResult {
 			modelsByKey[key] = model
 			models = append(models, model)
 		}
-		model.add(row)
-		if row.RunID == "" {
-			withoutRun.add(row)
-			continue
-		}
-		if modelFilter != "" && row.Model != modelFilter {
-			continue
+		model.add(counts)
+	}
+
+	var sliceCalls int64
+	var coveredSince *time.Time
+	steps := make([]usageCostStep, 0, len(stepRows))
+	for _, row := range stepRows {
+		sliceCalls += row.Calls
+		if coveredSince == nil || row.OldestAt.Before(*coveredSince) {
+			coveredSince = &row.OldestAt
 		}
 		step := usageCostStep{RunID: row.RunID, Provider: displayProvider(row.Provider), Model: row.Model}
 		if row.NodeID != "" {
 			step.NodeID = &row.NodeID
 		}
-		step.add(row)
+		step.add(usageCostCounts{row.Calls, row.SimulatedCalls, row.PricedCalls,
+			row.CostUsd, row.InputTokens, row.CachedInputTokens, row.CacheCreationInputTokens, row.OutputTokens})
 		steps = append(steps, step)
+	}
+	// Totals and models are exact; only the steps list can stop short of the window.
+	stepsTruncated := sliceCalls >= usageCostRowCap
+	if !stepsTruncated {
+		coveredSince = nil
 	}
 
 	// Stable over the query's grouped order, so equal costs never reshuffle.
@@ -161,8 +188,8 @@ func (s *V1Server) usageCostsCore(r *http.Request, rc v1Request) opResult {
 	client, _ := aiconfig.Resolve(ctx, s.pool, rc.orgID)
 	return opOK(map[string]any{
 		"windowDays": windowDays, "retentionDays": int(orgconfig.LoadNumber(ctx, s.pool, rc.orgID, "retention.usageEventsDays")),
-		"aiConfigured": client.Configured(),
-		"truncated":    totals.Calls >= usageCostRowCap, "rowCap": usageCostRowCap,
+		"aiConfigured":   client.Configured(),
+		"stepsTruncated": stepsTruncated, "stepsCoveredSince": timeOrNull(coveredSince), "rowCap": usageCostRowCap,
 		"stepsTotal": stepsTotal, "modelsTotal": modelsTotal,
 		"totals": totals, "withoutRun": withoutRun, "steps": steps, "models": models,
 	})

@@ -1,8 +1,9 @@
 import { fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api } from '../api'
+import { api, ApiError } from '../api'
 import { changeAppLanguage } from '../i18n'
+import { MalformedResponseError } from '../lib/malformed-response'
 import { useWorkflowStore } from '../store'
 import { OperationsPage } from './OperationsPage'
 import { requestOperationsSection, useRouteOpsSection } from './operations-section-bus'
@@ -214,6 +215,40 @@ describe('<OperationsPage />', () => {
 
     await changeAppLanguage('es')
     expect(costTable).toHaveAccessibleName('Tabla de desglose de costo')
+  })
+
+  it.each([
+    ['loading', () => new Promise(() => undefined), 'settings-usage-loading', 'Loading…'],
+    ['forbidden', () => Promise.reject(new ApiError('Forbidden', { statusCode: 403 })), 'settings-usage-unavailable', "Couldn't load usage totals."],
+    ['malformed', () => Promise.reject(new MalformedResponseError()), 'settings-usage-unavailable', "Couldn't load usage totals."],
+  ])('never shows a %s usage read as no usage, and keeps the link to the steps', async (_state, read, testId, copy) => {
+    await changeAppLanguage('en')
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/recovery/metrics')) return read()
+      if (path === '/system/queue') return clearQueue
+      return null
+    })
+    render(<OperationsPage permissions={['recovery.read', 'runs.read']} />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-usage'))
+    expect(await screen.findByTestId(testId)).toHaveTextContent(copy)
+    expect(screen.queryByText('No AI usage in the last 30 days')).toBeNull()
+    expect(screen.getByTestId('settings-usage-open-cost-steps')).toBeInTheDocument()
+  })
+
+  it('states an empty window with AI-only copy and keeps the link to the steps', async () => {
+    stubApiByPath({
+      '/recovery/metrics': { ...healthyMetrics, costThisWindow: { ...healthyMetrics.costThisWindow, providers: [] } },
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+    render(<OperationsPage permissions={['recovery.read', 'runs.read']} />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-usage'))
+    expect(await screen.findByText('No AI usage in the last 30 days')).toBeInTheDocument()
+    expect(screen.getByText(/Only AI calls are priced/)).toBeInTheDocument()
+    expect(screen.getByTestId('settings-usage-open-cost-steps')).toBeInTheDocument()
+    expect(screen.queryByTestId('settings-usage-unavailable')).toBeNull()
+    await changeAppLanguage('es')
+    expect(await screen.findByText('Sin uso de IA en los últimos 30 días')).toBeInTheDocument()
+    await changeAppLanguage('en')
   })
 
   it('offers the cost steps only to an operator who can open Reports and its runs', async () => {

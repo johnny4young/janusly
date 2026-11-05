@@ -38,7 +38,9 @@ export function isUsageCosts(value: unknown): value is Api.UsageCosts {
       unknownCostCalls: isInteger,
       workflowName: isString,
     })),
+    stepsCoveredSince: nullable(isString),
     stepsTotal: isInteger,
+    stepsTruncated: isBoolean,
     totals: shape({
       cacheCreationInputTokens: isInteger,
       cachedInputTokens: isInteger,
@@ -49,7 +51,6 @@ export function isUsageCosts(value: unknown): value is Api.UsageCosts {
       uncachedInputTokens: isInteger,
       unknownCostCalls: isInteger,
     }),
-    truncated: isBoolean,
     windowDays: isInteger,
     withoutRun: shape({
       cacheCreationInputTokens: isInteger,

@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 613.4,
+  "artifactGzipKiB": 616.6,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 568.5
+    "maxGzipKiB": 571.3
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -99,7 +99,7 @@
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
     "catalog-en.js": 44.85,
-    "catalog-es.js": 45.56,
+    "catalog-es.js": 45.85,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
@@ -124,7 +124,7 @@
     "MultiAgentTimeline.css": 1.06,
     "MultiAgentTimeline.js": 1.78,
     "OperationsPage.css": 1.36,
-    "OperationsPage.js": 5.76,
+    "OperationsPage.js": 5.84,
     "PermissionGrantsPanel.css": 0.96,
     "PermissionGrantsPanel.js": 3.51,
     "PlaybookMatchCard.js": 0.95,

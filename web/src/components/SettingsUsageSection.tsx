@@ -10,25 +10,48 @@ import './SettingsUsageSection.css'
 export type { CacheEfficiency, CostProviderRow }
 
 export function SettingsUsageSection({
-  providers,
-  cache,
+  cost,
+  windowDays,
   onOpenCostSteps,
 }: {
-  providers: CostProviderRow[]
-  cache: CacheEfficiency
+  /** `undefined` while the read is pending, `null` once it failed. */
+  cost: { providers: CostProviderRow[]; cache: CacheEfficiency } | null | undefined
+  windowDays: number
   /** Absent when the operator cannot open Reports and its runs. */
   onOpenCostSteps?: () => void
 }) {
   const { t } = useT()
   const locale = getResolvedLocale()
+  const head = (
+    <div className="split-row">
+      <div className="section-kicker">{t('operations.cost.heading')}</div>
+      {onOpenCostSteps && (
+        <Button size="sm" data-testid="settings-usage-open-cost-steps" onClick={onOpenCostSteps}>
+          {t('operations.cost.openSteps')}
+        </Button>
+      )}
+    </div>
+  )
 
+  if (!cost) {
+    return (
+      <section className="we-card we-settings-usage">
+        {head}
+        {cost === undefined
+          ? <p className="helper-text" role="status" data-testid="settings-usage-loading">{t('common.loading')}</p>
+          : <p className="helper-text" role="alert" data-testid="settings-usage-unavailable">{t('operations.cost.unavailable')}</p>}
+      </section>
+    )
+  }
+  const { providers, cache } = cost
   if (providers.length === 0) {
     return (
       <section className="we-card we-settings-usage">
+        {head}
         <EmptyView
           icon={<ChartNoAxesCombined size={22} />}
-          title={t('rightPanel.usage.emptyKicker')}
-          body={t('rightPanel.usage.empty')}
+          title={t('operations.cost.empty.title', { days: windowDays })}
+          body={t('operations.cost.empty.body')}
         />
       </section>
     )
@@ -36,14 +59,7 @@ export function SettingsUsageSection({
 
   return (
     <section className="we-card we-settings-usage">
-      <div className="split-row">
-        <div className="section-kicker">{t('operations.cost.heading')}</div>
-        {onOpenCostSteps && (
-          <Button size="sm" data-testid="settings-usage-open-cost-steps" onClick={onOpenCostSteps}>
-            {t('operations.cost.openSteps')}
-          </Button>
-        )}
-      </div>
+      {head}
       <dl className="we-ops-cache-summary" aria-label={t('operations.cost.cache.summaryLabel')}>
         <div>
           <dt>{t('operations.cost.cache.readShare')}</dt>

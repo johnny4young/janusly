@@ -4827,9 +4827,18 @@
             },
             "type": "array"
           },
+          "stepsCoveredSince": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "stepsTotal": {
             "minimum": 0,
             "type": "integer"
+          },
+          "stepsTruncated": {
+            "type": "boolean"
           },
           "totals": {
             "additionalProperties": false,
@@ -4880,9 +4889,6 @@
               "unknownCostCalls"
             ],
             "type": "object"
-          },
-          "truncated": {
-            "type": "boolean"
           },
           "windowDays": {
             "type": "integer"
@@ -4942,7 +4948,8 @@
           "windowDays",
           "retentionDays",
           "aiConfigured",
-          "truncated",
+          "stepsTruncated",
+          "stepsCoveredSince",
           "rowCap",
           "stepsTotal",
           "modelsTotal",

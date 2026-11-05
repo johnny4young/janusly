@@ -276,13 +276,15 @@ Recover through `#/recover/day/<YYYY-MM-DD>`.
 
 Estimated AI cost in Reports reads `GET /v1/usage/costs` behind `runs.read`, the
 permission of `/run/usage`, and hides without it; an operator without `dlq.read`
-has no window control, so it stays at 30 days. The server tallies the newest 10,000
-LLM usage rows of the window through `usage_events_org_metric_created_idx`, and the
-section says when that cap applied. Stored `inputTokens` exclude cache reads and
-cache writes, so they are the uncached count. A call with no recorded cost, such as
-a failed attempt, and a simulated call keep a null cost and leave the estimate; a
-step whose run is gone shows no link. Selecting a model re-reads only its steps, and
-Settings > Usage links here.
+has no window control, so it stays at 30 days. Totals and cost by model aggregate the
+whole window in SQL through `usage_events_org_metric_created_idx`, so they match
+Settings > Usage. Only the steps list reads the newest 10,000 in-run calls, and when
+that cap applies it states the oldest time it reaches. Stored `inputTokens` exclude
+cache reads and cache writes, so they are the uncached count. A call with no
+recorded cost, such as a failed attempt, keeps a null cost; a simulated call adds no
+cost and no tokens. A step whose run is gone shows no link. Selecting a model
+re-reads only its steps. Settings > Usage links here in every state, and shows
+loading and a failed read apart from an empty window.
 
 Opening a run shows one run sheet (`RunWorkspace`). `RunsPanel` owns the header
 (identity, actions, data row) and its dialogs, so they stay available on every
