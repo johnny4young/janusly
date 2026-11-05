@@ -37,7 +37,8 @@ field, are called without it.
 - `POST /ai/explain-run`
 
 The React AI Studio consumes these routes and clearly labels provider-backed
-and fallback results.
+and fallback results. The Home Operator panel consumes the two explain routes
+with the same labels, and cites a run only from the `report` the response returns.
 
 ## Registered authoring examples
 

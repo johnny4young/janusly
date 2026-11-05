@@ -5,7 +5,7 @@ import { RecoveryLabEntry } from './recovery-center/RecoveryCenterEmptyState'
 import { HomeActionWorkspace } from './recovery-center/HomeActionWorkspace'
 import { HomeBudgetBanner } from './recovery-center/HomeBudgetBanner'
 import { HomeTodayStrip } from './recovery-center/HomeTodayStrip'
-import { RecoveryCenterComposer } from './recovery-center/RecoveryCenterComposer'
+import { HomeOperatorField } from './recovery-center/HomeOperatorField'
 import { downtimeSeverity } from './recovery-center/recovery-center-model'
 import { useT } from '../i18n'
 import type { RecoveryCenterController } from './RecoveryCenterPanel'
@@ -21,6 +21,14 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
     openDeadLetters, openFailureCount, operatorBriefStatus, operatorBriefWarnings, operatorWins,
     recommendedActions, recoveryClearEligible, runsToday, showOnboarding, streak,
   } = model
+  const operator = (
+    <HomeOperatorField
+      openFailures={openDeadLetters}
+      onOpenTab={onOpenTab}
+      onOpenRun={onOpenRun}
+      onOpenRecoveryQueue={onOpenRecoveryQueue}
+    />
+  )
 
   return (
     <div className="we-recovery-center-panel we-recovery-center-panel--operator">
@@ -57,6 +65,7 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
             onDismiss={dismissIntro}
           />
           <OnboardingBanner onOpenTab={onOpenTab} />
+          {operator}
         </>
       ) : <HomeActionWorkspace
         actions={recommendedActions}
@@ -65,12 +74,11 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         status={operatorBriefStatus}
         warnings={operatorBriefWarnings}
         setup={<OnboardingBanner onOpenTab={onOpenTab} />}
+        operator={operator}
         onSelectAction={handleRecommendedAction}
         onOpenRun={onOpenRun}
         onOpenActivity={onOpenActivity}
       />}
-
-      <RecoveryCenterComposer onOpenTab={onOpenTab} recentDlqRunId={openDeadLetters[0]?.runId} />
 
       <HomeTodayStrip
         runsToday={runsToday}

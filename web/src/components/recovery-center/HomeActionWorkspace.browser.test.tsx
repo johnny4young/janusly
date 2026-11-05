@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { HomeActionWorkspace } from './HomeActionWorkspace'
+import { HomeOperatorField } from './HomeOperatorField'
 import type { RecommendedAction } from './recovery-center-model'
 
 const actions: RecommendedAction[] = [
@@ -126,5 +127,33 @@ describe('<HomeActionWorkspace /> (browser smoke)', () => {
     )
 
     expect(screen.getByTestId('home-priority-inbox')).toContainElement(screen.getByTestId('setup-step'))
+  })
+
+  it('keeps the operator field under the inbox rows at phone width', () => {
+    render(
+      <div style={{ width: 343 }}>
+        <HomeActionWorkspace
+          actions={actions}
+          activeRuns={[]}
+          activeRunCount={0}
+          status="available"
+          warnings={[]}
+          operator={<HomeOperatorField openFailures={[]} onOpenTab={() => {}} onOpenRun={() => {}} onOpenRecoveryQueue={() => {}} />}
+          onSelectAction={() => {}}
+          onOpenRun={() => {}}
+          onOpenActivity={() => {}}
+        />
+      </div>,
+    )
+
+    const inbox = screen.getByTestId('home-priority-inbox')
+    const field = screen.getByTestId('home-operator-field')
+    expect(inbox).toContainElement(field)
+    expect(field.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      screen.getByTestId('recovery-center-action-review_semantic_cases').getBoundingClientRect().bottom,
+    )
+    expect(inbox.scrollWidth).toBeLessThanOrEqual(inbox.clientWidth + 1)
+    expect(screen.getByTestId('home-operator-ask').getBoundingClientRect().right)
+      .toBeLessThanOrEqual(field.getBoundingClientRect().right)
   })
 })

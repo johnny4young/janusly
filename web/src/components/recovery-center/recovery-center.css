@@ -1,4 +1,4 @@
-/* Styles for RecoveryCenterTiles.tsx, RecoveryHeatmap.tsx, RecoveryCenterEmptyState.tsx, RecoveryCenterComposer.tsx: shipped with the lazy chunk that renders them (moved from platform.css, control-plane.css, workflow.css). */
+/* Styles for RecoveryCenterTiles.tsx, RecoveryHeatmap.tsx, RecoveryCenterEmptyState.tsx, HomeOperatorField.tsx: shipped with the lazy chunk that renders them (moved from platform.css, control-plane.css, workflow.css). */
 
 .we-recovery-center-tile {
   display: flex;
@@ -480,181 +480,42 @@ button.we-recovery-heatmap__cell:focus-visible {
   }
 }
 
-/* ==========================================================================
-   Home composer + tile severity (Recovery Center reskin)
-   The home tab adds a chat-style composer above the existing hero. Tiles
-   gain a 3px left-color border per severity (cobalt / warning / danger /
-   success / cyan / neutral) — mirrors `preview/25-operations.html`.
-   ========================================================================== */
-.recovery-center-composer {
-  position: relative;
-  border: 1px solid var(--we-line);
-  border-radius: 12px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--we-primary) 6%, var(--we-surface) 94%) 0%, color-mix(in srgb, var(--we-accent) 5%, var(--we-surface) 95%) 100%);
-  padding: 14px 16px;
-  display: grid;
-  gap: 10px;
-  box-shadow: 0 1px 2px var(--we-shadow-ink-04);
-}
-
-.recovery-center-composer__head {
+.we-home-operator {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-bottom: 2px;
-}
-
-.recovery-center-composer__avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--we-primary), var(--we-accent));
-  color: var(--we-brand-glyph);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  box-shadow: 0 6px 14px -6px var(--we-primary-shadow);
-}
-
-.recovery-center-composer__input {
-  display: grid;
-  grid-template-columns: 18px 1fr auto;
-  gap: 10px;
-  align-items: center;
+  padding: 4px 6px 4px 12px;
   border: 1px solid var(--we-line-strong);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--we-surface);
-  padding: 10px 12px;
 }
 
-.recovery-center-composer__input:focus-within {
+.we-home-priority .we-home-operator { margin-top: 14px; }
+
+.we-home-operator:focus-within {
   border-color: var(--we-primary);
   box-shadow: 0 0 0 3px var(--we-primary-ring);
 }
 
-.recovery-center-composer__input svg { color: var(--we-ink-soft); }
-
-.recovery-center-composer__input input {
-  width: 100%;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  font-size: 14px;
-  color: var(--we-ink);
-}
-
-.recovery-center-composer__input input::placeholder { color: var(--we-muted); }
-
-.recovery-center-composer__send {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 0;
-  background: linear-gradient(135deg, var(--we-primary), var(--we-primary-strong));
-  color: var(--we-brand-glyph);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 6px 14px -6px var(--we-primary-shadow);
-}
-
-.recovery-center-composer__send:hover { filter: brightness(1.05); }
-
-.recovery-center-composer__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.recovery-center-composer__chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: var(--we-radius-pill);
-  border: 1px solid var(--we-line);
-  background: var(--we-surface);
-  color: var(--we-ink-soft);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.recovery-center-composer__chip:hover {
-  border-color: var(--we-primary);
+.we-home-operator > svg {
+  flex-shrink: 0;
   color: var(--we-primary);
 }
 
-.recovery-center-composer__chip svg { color: var(--we-primary); }
-
-/* Composer inline answer card — surfaces /ai/explain-workflow output. */
-.recovery-center-composer__answer {
-  position: relative;
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--we-line);
-  background: var(--we-surface);
-  display: grid;
-  gap: 8px;
-}
-
-.recovery-center-composer__answer--ai {
-  border-color: color-mix(in srgb, var(--we-accent) 24%, transparent);
-  background: color-mix(in srgb, var(--we-accent) 5%, var(--we-surface) 95%);
-}
-
-.recovery-center-composer__answer--fallback {
-  border-color: var(--we-warning-border-30);
-  background: color-mix(in srgb, var(--we-warning) 4%, var(--we-surface) 96%);
-}
-
-.recovery-center-composer__answer p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
+.we-home-operator input {
+  flex: 1 1 200px;
+  min-width: 0;
+  min-height: 30px;
+  border: 0;
+  outline: 0;
+  background: transparent;
   color: var(--we-ink);
-  white-space: pre-wrap;
+  font-size: 13px;
+  text-overflow: ellipsis;
 }
 
-.recovery-center-composer__answer-pill {
-  display: inline-flex;
-  align-self: flex-start;
-  align-items: center;
-  padding: 2px 7px;
-  border-radius: var(--we-radius-pill);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.recovery-center-composer__answer-pill--ai {
-  background: var(--we-accent-soft);
-  color: var(--we-accent-text);
-  border: 1px solid color-mix(in srgb, var(--we-accent) 30%, transparent);
-}
-
-.recovery-center-composer__answer-pill--fallback {
-  background: var(--we-warning-soft);
-  color: var(--we-warning-text);
-  border: 1px solid var(--we-warning-border-30);
-}
-
-.recovery-center-composer__answer-error {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--we-warning-text);
-}
-
-.recovery-center-composer__answer-acts {
-  display: inline-flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
+.we-home-operator input::placeholder { color: var(--we-muted); }
 
 /* Tile severity left-border — applies to every `[data-severity]` tile inside
    `.we-recovery-center-tile`. Mirrors preview/25-operations.html cards. */

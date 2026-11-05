@@ -271,6 +271,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(homeMeasurement.resources.some((path) => /catalog-en-.*\.js$/.test(path))).toBe(true)
   expect(homeMeasurement.resources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(false)
   expect(homeMeasurement.resources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
+  expect(homeMeasurement.resources.some((path) => /HomeOperatorPanel-.*\.(js|css)$/.test(path))).toBe(false)
   await captureElement(home, 'web-en-performance-home')
 
   const workflowsDestination = page.getByRole('button', { name: /^Workflows\b/ })

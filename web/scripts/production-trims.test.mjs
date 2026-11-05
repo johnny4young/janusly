@@ -71,10 +71,17 @@ const authJson = (body, status = 200) => new Response(JSON.stringify(body), {
   headers: { 'content-type': 'application/json' },
 })
 const URL_SESSION = 'access_token=from-url&refresh_token=r&expires_in=3600&token_type=bearer&expires_at=9999999999'
+const callbackToken = (exp) => [{ alg: 'HS256' }, { sub: 'user-1', exp }, 'sig']
+  .map((part) => Buffer.from(JSON.stringify(part)).toString('base64url')).join('.')
+const LIVE_CALLBACK = callbackToken(9999999999)
 const AUTH_SCENARIOS = {
   'password session lifecycle': {},
-  'implicit-grant session in the URL': { url: `https://app.example.test/#${URL_SESSION}` },
-  'recovery session in the URL': { url: `https://app.example.test/#${URL_SESSION}&type=recovery` },
+  'session in the URL': { url: `https://app.example.test/#${URL_SESSION}` },
+  'approved callback': { callback: LIVE_CALLBACK },
+  'approved expired callback': { callback: callbackToken(1) },
+  'callback the server rejects': { callback: LIVE_CALLBACK, user: () => authJson({ msg: 'bad jwt' }, 401) },
+  'callback whose session ended': { callback: LIVE_CALLBACK, user: () => authJson({ error_code: 'session_not_found', msg: 'gone' }, 403) },
+  'malformed callback': { callback: 'not-a-jwt' },
   'error in the URL': { url: 'https://app.example.test/#error=access_denied&error_code=otp_expired&error_description=expired' },
   'code under the implicit flow': { url: 'https://app.example.test/?code=abc' },
   'hash route': { url: 'https://app.example.test/#/home' },
@@ -111,7 +118,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
     storageKey,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,
     flowType: 'implicit',
     fetch: async (url, init = {}) => {
       const { pathname, search } = new URL(url)
@@ -120,7 +127,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
       if (search.includes('grant_type=password')) return scenario.password?.() ?? authJson(authSession('password'))
       if (search.includes('grant_type=refresh_token')) return scenario.refresh?.() ?? authJson(authSession('refreshed'))
       if (pathname.endsWith('/logout')) return scenario.logout?.() ?? new Response(null, { status: 204 })
-      if (pathname.endsWith('/user')) return authJson(AUTH_USER)
+      if (pathname.endsWith('/user')) return scenario.user?.() ?? authJson(AUTH_USER)
       return authJson({ msg: 'unexpected' }, 500)
     },
   })
@@ -128,6 +135,9 @@ async function exerciseAuth(GoTrueClient, scenario) {
     events.push([event, session?.access_token ?? null])
   })
   const fromUrl = comparable(await client.getSession())
+  const adopted = scenario.callback
+    ? comparable(await client.setSession({ access_token: scenario.callback, refresh_token: 'r' }))
+    : null
   document.dispatchEvent(new window.Event('visibilitychange'))
   const signUp = comparable(await client.signUp({ email: 'a@example.test', password: 'pw-12345' }))
   const signIn = comparable(await client.signInWithPassword({ email: 'a@example.test', password: 'pw-12345' }))
@@ -140,6 +150,7 @@ async function exerciseAuth(GoTrueClient, scenario) {
   listener.subscription.unsubscribe()
   const result = {
     fromUrl,
+    adopted,
     signUp,
     signIn,
     afterExpiry,
@@ -166,10 +177,9 @@ test('the auth facade type and the pruning roots list the same methods', () => {
 test('auth pruning keeps session code and removes unused surfaces', () => {
   const code = readFileSync(join(AUTH_MODULE_DIR, 'GoTrueClient.js'), 'utf8')
   const { kept, removed } = pruneAuthClass(code, 'GoTrueClient')
-  assert.ok(kept.includes('_getSessionFromURL'))
+  assert.ok(kept.includes('setSession'))
   assert.ok(kept.includes('_refreshAccessToken'))
   assert.ok(removed.includes('signInWithOAuth'))
-  assert.ok(removed.includes('setSession'))
   const admin = readFileSync(join(AUTH_MODULE_DIR, 'GoTrueAdminApi.js'), 'utf8')
   assert.deepEqual(pruneAuthClass(admin, 'GoTrueAdminApi').kept, ['constructor', 'signOut'])
 })
@@ -178,6 +188,7 @@ const syntheticClient = (member) => `class GoTrueClient {
   ${member}
   constructor() {}
   onAuthStateChange() {}
+  setSession() {}
   signInWithPassword() {}
   signOut() {}
   signUp() {}
@@ -236,9 +247,11 @@ for (const channel of [true, false]) {
   }
 }
 
-test('pruned auth client signs in and adopts a session from the URL', () => withChannel(true, async () => {
-  const fromUrl = await exerciseAuth(trimmed.GoTrueClient, AUTH_SCENARIOS['implicit-grant session in the URL'])
-  assert.equal(fromUrl.fromUrl.data.session.access_token, 'from-url')
+test('pruned auth client signs in, adopts an approved callback and ignores the URL', () => withChannel(true, async () => {
+  const inUrl = await exerciseAuth(trimmed.GoTrueClient, AUTH_SCENARIOS['session in the URL'])
+  assert.equal(inUrl.fromUrl.data.session, null)
+  const approved = await exerciseAuth(trimmed.GoTrueClient, AUTH_SCENARIOS['approved callback'])
+  assert.equal(approved.adopted.data.session.access_token, LIVE_CALLBACK)
   const lifecycle = await exerciseAuth(trimmed.GoTrueClient, AUTH_SCENARIOS['password session lifecycle'])
   assert.equal(lifecycle.signIn.data.session.access_token, 'password')
   assert.equal(lifecycle.afterExpiry.data.session.access_token, 'refreshed')
