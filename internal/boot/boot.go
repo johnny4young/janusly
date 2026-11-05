@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strconv"
@@ -72,7 +73,17 @@ func (role PoolRole) StatementTimeout() time.Duration {
 // any log collector (or a human with jq) consumes it without configuration.
 // JANUSLY_LOG_LEVEL (debug, info, warn, error; default info) sets the floor.
 func NewLogger() *slog.Logger {
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevelFromEnv(os.Getenv("JANUSLY_LOG_LEVEL"))}))
+	return newLogger(os.Stdout)
+}
+
+// NewStderrLogger is NewLogger for processes whose stdout is a protocol
+// stream, such as the MCP stdio server.
+func NewStderrLogger() *slog.Logger {
+	return newLogger(os.Stderr)
+}
+
+func newLogger(out io.Writer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(out, &slog.HandlerOptions{Level: logLevelFromEnv(os.Getenv("JANUSLY_LOG_LEVEL"))}))
 }
 
 // logLevelFromEnv maps the configured name to a level; anything unknown or
