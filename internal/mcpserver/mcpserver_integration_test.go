@@ -1069,7 +1069,7 @@ func TestMcpWorkflowAssuranceProjection(t *testing.T) {
 // The inspect list tools paginate by keyset: page one carries nextCursor,
 // page two picks up exactly where it left off, filters narrow runs.
 func TestMcpListToolsPaginate(t *testing.T) {
-	session, _ := newMCPSession(t)
+	session, org := newMCPSession(t)
 
 	for i := range 3 {
 		doc := map[string]any{
@@ -1110,6 +1110,42 @@ func TestMcpListToolsPaginate(t *testing.T) {
 	_, filtered := callTool(t, session, "runs.list", map[string]any{"workflowId": wfID})
 	if len(filtered["runs"].([]any)) != 1 || filtered["hasMore"] != false {
 		t.Fatalf("filtered runs: %+v", filtered)
+	}
+
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	for i := range 3 {
+		if _, err := pool.Exec(context.Background(), `
+			INSERT INTO dead_letters (id, org_id, run_id, node_id, workflow_json, node_json, error_json, created_at)
+			VALUES ($1, $2, $3, 'a', '{}', '{"type":"noop"}', '{"message":"boom"}', now() - make_interval(mins => $4))`,
+			fmt.Sprintf("%s-dl-%d", org, i), org, fmt.Sprintf("%s-run-%d", org, i), i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, dlq1 := callTool(t, session, "dlq.list", map[string]any{"limit": 2})
+	_, dlq2 := callTool(t, session, "dlq.list", map[string]any{"limit": 2, "cursor": dlq1["nextCursor"]})
+	letters1, _ := dlq1["deadLetters"].([]any)
+	letters2, _ := dlq2["deadLetters"].([]any)
+	if len(letters1) != 2 || dlq1["hasMore"] != true || len(letters2) != 1 || dlq2["hasMore"] != false ||
+		letters2[0].(map[string]any)["id"] != org+"-dl-2" {
+		t.Fatalf("dead letters must page by keyset: %+v then %+v", dlq1, dlq2)
+	}
+
+	for _, tool := range []string{"workflows.list", "runs.list", "dlq.list"} {
+		for _, args := range []map[string]any{
+			{"cursor": "not-a-cursor"},
+			{"cursor": "2026-01-02T03:04:05Z|"},
+			{"limit": 500},
+			{"limit": -1},
+		} {
+			result, _ := callTool(t, session, tool, args)
+			if !result.IsError {
+				t.Fatalf("%s must reject %+v instead of serving page one", tool, args)
+			}
+		}
 	}
 }
 

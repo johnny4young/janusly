@@ -138,14 +138,11 @@ func NewServer(deps Deps) *mcp.Server {
 		return deps.assureWorkflow(ctx, args.WorkflowID)
 	})
 
-	type dlqListArgs struct {
-		Limit int `json:"limit,omitempty" jsonschema:"maximum rows to return (default 20, max 100)"`
-	}
 	mcp.AddTool(server, readTool(
 		"dlq.list", "List dead letters",
-		"List bounded dead-letter summaries for the organization, newest first.",
-	), func(ctx context.Context, req *mcp.CallToolRequest, args dlqListArgs) (*mcp.CallToolResult, any, error) {
-		return deps.dlqList(ctx, args.Limit)
+		"List bounded dead-letter summaries for the organization newest first, keyset-paginated.",
+	), func(ctx context.Context, req *mcp.CallToolRequest, args pageArgs) (*mcp.CallToolResult, any, error) {
+		return deps.dlqList(ctx, args.Limit, args.Cursor)
 	})
 
 	type redriveArgs struct {
@@ -458,21 +455,29 @@ func (d Deps) runInspect(ctx context.Context, runID string) (*mcp.CallToolResult
 	})
 }
 
-func (d Deps) dlqList(ctx context.Context, limit int) (*mcp.CallToolResult, any, error) {
+func (d Deps) dlqList(ctx context.Context, limit int, cursor string) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "dlq.list", "dlq.read", false); !allowed {
 		return expected(message)
 	}
-	if limit <= 0 {
-		limit = 20
+	if !validOptionalMCPCursor(cursor) {
+		return expected("dead-letter list cursor exceeds 1024 characters")
 	}
-	if limit > 100 {
-		limit = 100
+	page, problem := pageBounds(limit, cursor)
+	if problem != "" {
+		return expected(problem)
 	}
-	rows, err := store.New(d.Pool).ListDeadLetterSummaries(ctx, store.ListDeadLetterSummariesParams{
-		OrgID: d.OrgID, PageLimit: int32(limit),
-	})
+	params := store.ListDeadLetterSummariesParams{OrgID: d.OrgID, PageLimit: page.limit + 1}
+	if cursor != "" {
+		params.BeforeCreatedAt = &page.before
+		params.BeforeID = pgtype.Text{String: page.beforeID, Valid: true}
+	}
+	rows, err := store.New(d.Pool).ListDeadLetterSummaries(ctx, params)
 	if err != nil {
 		return nil, nil, err
+	}
+	hasMore := len(rows) > int(page.limit)
+	if hasMore {
+		rows = rows[:page.limit]
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -482,7 +487,12 @@ func (d Deps) dlqList(ctx context.Context, limit int) (*mcp.CallToolResult, any,
 			"error": safeErrorProjection(row.ErrorJson),
 		})
 	}
-	return ok(map[string]any{"deadLetters": items})
+	payload := map[string]any{"deadLetters": items, "hasMore": hasMore}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		payload["nextCursor"] = createdAtISO(last.CreatedAt) + "|" + last.ID
+	}
+	return ok(payload)
 }
 
 func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolResult, any, error) {
@@ -514,24 +524,34 @@ func farFuture() time.Time {
 	return time.Now().Add(24 * time.Hour)
 }
 
-// pageBounds normalizes the shared limit contract (default 20, max 100)
-// and decodes the `<iso>|<id>` keyset cursor; a malformed cursor means
-// page one, never an error — same posture as the HTTP list surfaces.
-func pageBounds(limit int, cursor string) (int32, time.Time, string) {
-	if limit <= 0 {
+type pageWindow struct {
+	limit    int32
+	before   time.Time
+	beforeID string
+}
+
+// pageBounds applies the shared limit contract (default 20, at most 100) and
+// decodes the `<iso>|<id>` keyset cursor. Unlike the HTTP lists, which fall
+// back to page one, MCP rejects a bad cursor or limit: an agent that keeps
+// receiving page one never learns its loop is broken.
+func pageBounds(limit int, cursor string) (pageWindow, string) {
+	if limit < 0 || limit > 100 {
+		return pageWindow{}, "limit must be between 1 and 100; omit it for 20"
+	}
+	if limit == 0 {
 		limit = 20
 	}
-	if limit > 100 {
-		limit = 100
+	page := pageWindow{limit: int32(limit), before: farFuture(), beforeID: "￿"}
+	if cursor == "" {
+		return page, ""
 	}
-	before := farFuture()
-	beforeID := "￿"
-	if at, id, found := strings.Cut(cursor, "|"); found {
-		if parsed, err := time.Parse(time.RFC3339Nano, at); err == nil {
-			before, beforeID = parsed, id
-		}
+	at, id, found := strings.Cut(cursor, "|")
+	parsed, err := time.Parse(time.RFC3339Nano, at)
+	if !found || err != nil || id == "" {
+		return pageWindow{}, "cursor is malformed; pass nextCursor from the previous page unchanged"
 	}
-	return int32(limit), before, beforeID
+	page.before, page.beforeID = parsed, id
+	return page, ""
 }
 
 func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, status string) (*mcp.CallToolResult, any, error) {
@@ -544,9 +564,13 @@ func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, statu
 	if status != "" && status != "running" && status != "succeeded" && status != "failed" && status != "cancelled" {
 		return expected("run status must be running, succeeded, failed, or cancelled")
 	}
-	pageLimit, before, beforeID := pageBounds(limit, cursor)
+	page, problem := pageBounds(limit, cursor)
+	if problem != "" {
+		return expected(problem)
+	}
+	pageLimit := page.limit
 	rows, err := store.New(d.Pool).ListRunSummaries(ctx, store.ListRunSummariesParams{
-		OrgID: d.OrgID, BeforeCreatedAt: before, BeforeID: beforeID,
+		OrgID: d.OrgID, BeforeCreatedAt: page.before, BeforeID: page.beforeID,
 		FilterWorkflowID: pgtype.Text{String: workflowID, Valid: workflowID != ""},
 		FilterStatus:     pgtype.Text{String: status, Valid: status != ""},
 		PageLimit:        pageLimit + 1,
@@ -583,9 +607,13 @@ func (d Deps) workflowsList(ctx context.Context, limit int, cursor string) (*mcp
 	if !validOptionalMCPCursor(cursor) {
 		return expected("workflow list cursor exceeds 1024 characters")
 	}
-	pageLimit, before, beforeID := pageBounds(limit, cursor)
+	page, problem := pageBounds(limit, cursor)
+	if problem != "" {
+		return expected(problem)
+	}
+	pageLimit := page.limit
 	rows, err := store.New(d.Pool).ListWorkflowRows(ctx, store.ListWorkflowRowsParams{
-		OrgID: d.OrgID, BeforeCreatedAt: before, BeforeID: beforeID,
+		OrgID: d.OrgID, BeforeCreatedAt: page.before, BeforeID: page.beforeID,
 		PageLimit: pageLimit + 1,
 	})
 	if err != nil {

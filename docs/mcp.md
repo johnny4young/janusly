@@ -28,8 +28,9 @@ controls, or write suppression.
 ## Server posture
 
 The server publishes a deterministic catalog of inspect, AI, and write tools.
-Descriptors include input validation, stable structured results, truthful
-read-only/destructive annotations, and static write capability. Every call is
+Descriptors include input validation, an output schema for the top level of
+each structured result, truthful read-only/destructive annotations, and static
+write capability. Every call is
 permission-checked, rate-limited and audited. `JANUSLY_MCP_PERMISSIONS` is the
 explicit stdio service-account ceiling; when omitted it grants only
 `workflows.read`, `runs.read`, `dlq.read`, and `recovery.read`. Write dispatch

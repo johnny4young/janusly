@@ -28,6 +28,12 @@ The permission ceiling is validated before database access or background workers
 start. An unknown entry rejects the entire ceiling with a key-only error; invalid
 input is never echoed to logs. Omitted permissions retain the read-only default.
 
+The list tools (`workflows.list`, `runs.list`, `dlq.list`) page by keyset:
+`limit` defaults to 20 and must be at most 100, and `cursor` must be a
+`nextCursor` returned by the previous page. Unlike the HTTP lists, which fall
+back to the first page, MCP rejects a malformed cursor or an out-of-range
+limit so an agent cannot loop on page one.
+
 Consent never grants a permission missing from the service-account ceiling.
 Long-running operations return durable run IDs that clients poll; the server
 does not maintain another task store.
