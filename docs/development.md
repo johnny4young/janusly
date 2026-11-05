@@ -241,7 +241,7 @@ bytes no minifier removes; the caps were raised once for that in 2026-09 and
 are not raised for features. The bundle holds no duplicated first-party modules
 and the i18n catalogs are prefix-compressed, so dead bytes live in vendor code and
 interop. Production-only plugins remove them: named React bindings instead of
-CommonJS interop (`react-esm-facade-plugin.mjs`), `d3-color` and Lucide's React
+CommonJS interop (`react-esm-facade-plugin.mjs`), `d3-color`, unused `d3-transition` methods and Lucide's React
 keys (`trim-vendor-plugin.mjs`), unused GoTrueClient methods
 (`prune-auth-client-plugin.mjs`), and always-true `color-mix` guards
 (`css-floor-plugin.mjs`). `scripts/production-trims.test.mjs` exercises them
