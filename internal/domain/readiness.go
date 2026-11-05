@@ -164,13 +164,14 @@ func checkToolResultPolicy(node Node, opts ReadinessOptions, issues *[]Readiness
 	if !isWriteSideTool(opts, toolName, toolInput) {
 		return
 	}
-	if policy, _ := node.Config["resultPolicy"].(string); policy == "require_ok" {
+	// Write-side tools default to require_ok; only an explicit opt-out hides a failure.
+	if policy, _ := node.Config["resultPolicy"].(string); policy != ResultPolicyEnvelope {
 		return
 	}
 	*issues = append(*issues, ReadinessIssue{
 		Code: "tool_result_policy_missing", Severity: "fail", NodeID: node.ID,
-		Message:    fmt.Sprintf("Write-side tool node %q can return a failed result envelope without failing the run.", node.ID),
-		Suggestion: "Set `config.resultPolicy` to `require_ok` so failed provider envelopes enter DLQ and recovery without unsafe blind retries.",
+		Message:    fmt.Sprintf("Write-side tool node %q sets resultPolicy envelope, so a failed result envelope does not fail the run.", node.ID),
+		Suggestion: "Remove `config.resultPolicy` or set it to `require_ok` so failed provider envelopes enter DLQ and recovery without unsafe blind retries.",
 	})
 }
 

@@ -101,9 +101,10 @@ func (s *V1Server) recoveryMetricsValue(ctx context.Context, orgID string, windo
 	sort.SliceStable(costByProvider, func(i, j int) bool {
 		return costByProvider[i]["usd"].(float64) > costByProvider[j]["usd"].(float64)
 	})
+	// Provider counters are disjoint, so cached reads are a share of all input.
 	var cacheShare any
-	if inputTokens > 0 {
-		cacheShare = math.Min(100, cachedTokens/inputTokens*100)
+	if allInput := inputTokens + cachedTokens + creationTokens; allInput > 0 {
+		cacheShare = cachedTokens / allInput * 100
 	}
 	costMetric := recoveryMetric(costTotal, fmt.Sprintf("$%.2f", costTotal), "neutral",
 		fmt.Sprintf("Across %d providers over the last %d days.", len(costByProvider), windowDays),
