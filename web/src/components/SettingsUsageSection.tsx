@@ -2,6 +2,7 @@ import { ChartNoAxesCombined } from 'lucide-react'
 
 import { getResolvedLocale, useT } from '../i18n'
 import { EmptyView } from './panel-primitives'
+import { Button } from './ui/Button'
 
 import type { CacheEfficiency, CostProviderRow } from '../lib/recovery-metrics-model'
 import './SettingsUsageSection.css'
@@ -11,9 +12,12 @@ export type { CacheEfficiency, CostProviderRow }
 export function SettingsUsageSection({
   providers,
   cache,
+  onOpenCostSteps,
 }: {
   providers: CostProviderRow[]
   cache: CacheEfficiency
+  /** Absent when the operator cannot open Reports and its runs. */
+  onOpenCostSteps?: () => void
 }) {
   const { t } = useT()
   const locale = getResolvedLocale()
@@ -32,7 +36,14 @@ export function SettingsUsageSection({
 
   return (
     <section className="we-card we-settings-usage">
-      <div className="section-kicker">{t('operations.cost.heading')}</div>
+      <div className="split-row">
+        <div className="section-kicker">{t('operations.cost.heading')}</div>
+        {onOpenCostSteps && (
+          <Button size="sm" data-testid="settings-usage-open-cost-steps" onClick={onOpenCostSteps}>
+            {t('operations.cost.openSteps')}
+          </Button>
+        )}
+      </div>
       <dl className="we-ops-cache-summary" aria-label={t('operations.cost.cache.summaryLabel')}>
         <div>
           <dt>{t('operations.cost.cache.readShare')}</dt>

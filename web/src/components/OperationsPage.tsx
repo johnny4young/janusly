@@ -367,6 +367,9 @@ export function OperationsPage({
                   creationTokens: 0,
                   readSharePercent: null,
                 }}
+                onOpenCostSteps={hasPermission(permissions, 'recovery.read') && hasPermission(permissions, 'runs.read')
+                  ? () => onOpenTab('reports')
+                  : undefined}
               />
             )}
             {effectiveSection === 'infrastructure' && (

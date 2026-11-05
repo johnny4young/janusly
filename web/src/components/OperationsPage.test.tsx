@@ -190,7 +190,8 @@ describe('<OperationsPage />', () => {
       '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
     })
 
-    render(<OperationsPage />)
+    const onOpenTab = vi.fn()
+    render(<OperationsPage onOpenTab={onOpenTab} />)
     await screen.findByTestId('settings-index-usage')
     fireEvent.click(screen.getByTestId('operations-rail-tab-usage'))
 
@@ -208,8 +209,36 @@ describe('<OperationsPage />', () => {
     expect(aggregateRow).not.toBeNull()
     expect(within(aggregateRow as HTMLElement).getByText('—')).toBeInTheDocument()
 
+    fireEvent.click(screen.getByTestId('settings-usage-open-cost-steps'))
+    expect(onOpenTab).toHaveBeenCalledWith('reports')
+
     await changeAppLanguage('es')
     expect(costTable).toHaveAccessibleName('Tabla de desglose de costo')
+  })
+
+  it('offers the cost steps only to an operator who can open Reports and its runs', async () => {
+    stubApiByPath({
+      '/recovery/metrics': {
+        ...healthyMetrics,
+        costThisWindow: {
+          ...healthyMetrics.costThisWindow,
+          providers: [{
+            provider: 'Anthropic', model: 'haiku', usd: 1, tokens: 1, inputTokens: 1,
+            cachedInputTokens: 0, cacheCreationInputTokens: 0, calls: 1,
+          }],
+        },
+      },
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+    const { unmount } = render(<OperationsPage permissions={['recovery.read']} />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-usage'))
+    await screen.findByTestId('settings-usage-cost-table')
+    expect(screen.queryByTestId('settings-usage-open-cost-steps')).toBeNull()
+    unmount()
+
+    render(<OperationsPage permissions={['recovery.read', 'runs.read']} />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-usage'))
+    expect(await screen.findByTestId('settings-usage-open-cost-steps')).toBeInTheDocument()
   })
 
   it('mounts only the active sub-tab cards when the operator clicks Reliability', async () => {

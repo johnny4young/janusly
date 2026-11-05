@@ -4668,6 +4668,291 @@
           }
         ]
       },
+      "UsageCosts": {
+        "additionalProperties": false,
+        "properties": {
+          "aiConfigured": {
+            "type": "boolean"
+          },
+          "models": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cacheCreationInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cachedInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "calls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "costUsd": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "outputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "simulatedCalls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "uncachedInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "unknownCostCalls": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "cacheCreationInputTokens",
+                "cachedInputTokens",
+                "calls",
+                "costUsd",
+                "model",
+                "outputTokens",
+                "provider",
+                "simulatedCalls",
+                "uncachedInputTokens",
+                "unknownCostCalls"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "modelsTotal": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retentionDays": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rowCap": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "steps": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cacheCreationInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cachedInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "calls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "costUsd": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "nodeId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "outputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "runAvailable": {
+                  "type": "boolean"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "simulatedCalls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "uncachedInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "unknownCostCalls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "workflowName": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cacheCreationInputTokens",
+                "cachedInputTokens",
+                "calls",
+                "costUsd",
+                "model",
+                "nodeId",
+                "outputTokens",
+                "provider",
+                "runAvailable",
+                "runId",
+                "simulatedCalls",
+                "uncachedInputTokens",
+                "unknownCostCalls",
+                "workflowName"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "stepsTotal": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "totals": {
+            "additionalProperties": false,
+            "properties": {
+              "cacheCreationInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "cachedInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "calls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "costUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "outputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "simulatedCalls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "uncachedInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "unknownCostCalls": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "cacheCreationInputTokens",
+              "cachedInputTokens",
+              "calls",
+              "costUsd",
+              "outputTokens",
+              "simulatedCalls",
+              "uncachedInputTokens",
+              "unknownCostCalls"
+            ],
+            "type": "object"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "windowDays": {
+            "type": "integer"
+          },
+          "withoutRun": {
+            "additionalProperties": false,
+            "properties": {
+              "cacheCreationInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "cachedInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "calls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "costUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "outputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "simulatedCalls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "uncachedInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "unknownCostCalls": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "cacheCreationInputTokens",
+              "cachedInputTokens",
+              "calls",
+              "costUsd",
+              "outputTokens",
+              "simulatedCalls",
+              "uncachedInputTokens",
+              "unknownCostCalls"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "windowDays",
+          "retentionDays",
+          "aiConfigured",
+          "truncated",
+          "rowCap",
+          "stepsTotal",
+          "modelsTotal",
+          "totals",
+          "withoutRun",
+          "steps",
+          "models"
+        ],
+        "type": "object"
+      },
       "V1Envelope": {
         "description": "The v1 success envelope: apiVersion + requestId (echoed as X-Request-Id) around the data payload.",
         "properties": {
@@ -8652,6 +8937,46 @@
           }
         },
         "summary": "Ingest a normalized MCP resource event"
+      }
+    },
+    "/usage/costs": {
+      "get": {
+        "operationId": "get_v1_usage_costs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/UsageCosts"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Estimated AI cost of a bounded window: most expensive steps and cost by model"
       }
     },
     "/validate": {

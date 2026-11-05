@@ -262,7 +262,9 @@ function RightPanelRouter(props: RightPanelProps) {
       <ReportsPanel
         canReadDeadLetters={can('dlq.read')}
         canReadReports={can('reports.read')}
+        canReadRuns={can('runs.read')}
         onOpenTab={navigation.onOpenTab}
+        onOpenRun={execution.onOpenRun}
       />
     </PanelChrome>
   )

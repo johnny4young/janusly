@@ -274,6 +274,16 @@ with no window control and no exports. Model calibration and AI spend
 are not windowed: their endpoints have no window parameter. A heatmap day opens
 Recover through `#/recover/day/<YYYY-MM-DD>`.
 
+Estimated AI cost in Reports reads `GET /v1/usage/costs` behind `runs.read`, the
+permission of `/run/usage`, and hides without it; an operator without `dlq.read`
+has no window control, so it stays at 30 days. The server tallies the newest 10,000
+LLM usage rows of the window through `usage_events_org_metric_created_idx`, and the
+section says when that cap applied. Stored `inputTokens` exclude cache reads and
+cache writes, so they are the uncached count. A call with no recorded cost, such as
+a failed attempt, and a simulated call keep a null cost and leave the estimate; a
+step whose run is gone shows no link. Selecting a model re-reads only its steps, and
+Settings > Usage links here.
+
 Opening a run shows one run sheet (`RunWorkspace`). `RunsPanel` owns the header
 (identity, actions, data row) and its dialogs, so they stay available on every
 tab; `RunWorkspace` owns the tabs Overview, Timeline, Events, Agents and Ask and

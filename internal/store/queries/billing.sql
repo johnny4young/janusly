@@ -8,6 +8,46 @@ FROM usage_events
 WHERE org_id = $1 AND created_at >= sqlc.arg(since)::timestamptz
 LIMIT 10000;
 
+-- The newest bounded LLM slice of a window, grouped per run, node and model.
+-- Only counters and identifiers leave the slice: never prompts or aiError.
+-- name: ListUsageCostGroups :many
+WITH slice AS (
+  SELECT run_id, metadata FROM usage_events
+  WHERE org_id = $1 AND metric = 'llm.completion'
+    AND created_at >= sqlc.arg(since)::timestamptz
+  ORDER BY created_at DESC NULLS LAST
+  LIMIT sqlc.arg(row_cap)
+)
+SELECT
+  coalesce(run_id, '')::text AS run_id,
+  (CASE WHEN jsonb_typeof(metadata->'nodeId') = 'string' THEN metadata->>'nodeId' ELSE '' END)::text AS node_id,
+  (CASE WHEN jsonb_typeof(metadata->'provider') = 'string' THEN metadata->>'provider' ELSE 'unknown' END)::text AS provider,
+  (CASE WHEN jsonb_typeof(metadata->'model') = 'string' THEN metadata->>'model' ELSE 'unknown' END)::text AS model,
+  count(*)::bigint AS calls,
+  count(*) FILTER (WHERE metadata->'providerSimulated' = 'true'::jsonb)::bigint AS simulated_calls,
+  count(*) FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number'
+    AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb)::bigint AS priced_calls,
+  coalesce(sum(greatest((metadata->>'costUsd')::double precision, 0))
+    FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number'
+      AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb), 0)::double precision AS cost_usd,
+  sum(CASE WHEN jsonb_typeof(metadata->'inputTokens') = 'number'
+    THEN greatest((metadata->>'inputTokens')::double precision, 0) ELSE 0 END)::double precision AS input_tokens,
+  sum(CASE WHEN jsonb_typeof(metadata->'cachedInputTokens') = 'number'
+    THEN greatest((metadata->>'cachedInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cached_input_tokens,
+  sum(CASE WHEN jsonb_typeof(metadata->'cacheCreationInputTokens') = 'number'
+    THEN greatest((metadata->>'cacheCreationInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cache_creation_input_tokens,
+  sum(CASE WHEN jsonb_typeof(metadata->'outputTokens') = 'number'
+    THEN greatest((metadata->>'outputTokens')::double precision, 0) ELSE 0 END)::double precision AS output_tokens
+FROM slice
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 2, 3, 4;
+
+-- name: ListUsageCostRuns :many
+SELECT r.id, coalesce(w.name, r.input_json->'workflow'->>'name', '')::text AS workflow_name
+FROM runs r
+LEFT JOIN workflows w ON w.id = r.workflow_id AND w.org_id = r.org_id
+WHERE r.org_id = $1 AND r.id = ANY(sqlc.arg(run_ids)::text[]);
+
 -- name: GetWorkflowBudget :one
 SELECT id, org_id, workflow_id, monthly_usd, warn_percent, policy,
        updated_by, created_at, updated_at
