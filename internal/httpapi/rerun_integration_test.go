@@ -7,9 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1023,5 +1026,79 @@ func TestRerunRefusesASourceWithALiveSubworkflowChild(t *testing.T) {
 	}
 	if _, err := pool.Exec(t.Context(), `DELETE FROM runs WHERE id=$1`, child); err != nil {
 		t.Fatalf("cleanup: %v", err)
+	}
+}
+
+// A reviewer's form submission covers the write it was given for: a rerun cannot
+// fire that write again, nor send different content on the strength of it.
+func TestRerunDoesNotReuseAHumanFormForAWrite(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	var mu sync.Mutex
+	var sent []string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		sent = append(sent, r.URL.Path+" "+string(body))
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(target.Close)
+	sends := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(sent)
+	}
+
+	retry := map[string]any{"maxAttempts": 1}
+	workflow := map[string]any{
+		"id": fmt.Sprintf("wf-rerun-form-%d", time.Now().UnixNano()), "name": "Reviewed send", "dslVersion": "1.0",
+		"nodes": []any{
+			map[string]any{"id": "review", "type": "human_form", "config": map[string]any{
+				"title": "Review the reply before sending",
+				"schema": map[string]any{"type": "object", "required": []any{"finalBody"},
+					"properties": map[string]any{"finalBody": map[string]any{"type": "string"}}},
+			}},
+			map[string]any{"id": "send", "type": "http", "config": map[string]any{
+				"url": target.URL + "/send", "method": "POST", "retry": retry,
+				"body": map[string]any{"text": "{{context.review.output.finalBody}}"},
+			}},
+		},
+		"edges": []any{map[string]any{"from": "review", "to": "send"}},
+	}
+	sourceRunID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, ""))
+	token := waitFormToken(t, pool, ctx, sourceRunID, "review")
+	if res := h.call("POST", "/resume", map[string]any{
+		"runId": sourceRunID, "nodeId": "review", "resumeToken": token, "input": map[string]any{"finalBody": "reviewed text"},
+	}, ""); res.status != 200 {
+		t.Fatalf("resume: %d %+v", res.status, res.body)
+	}
+	h.waitRun(sourceRunID, "succeeded")
+	if got := sends(); len(got) != 1 || !strings.Contains(got[0], "reviewed text") {
+		t.Fatalf("source run must send the reviewed text once: %q", got)
+	}
+
+	started := h.call("POST", "/runs/rerun", map[string]any{
+		"sourceRunId": sourceRunID, "nodeId": "send", "acknowledgedSideEffects": []string{"send"},
+		"inputOverride": map[string]any{
+			"url": target.URL + "/send", "method": "POST", "retry": retry,
+			"body": map[string]any{"text": "text nobody reviewed"},
+		},
+	}, "")
+	if started.status == 200 {
+		rerunID := started.body["runId"].(string)
+		h.waitRun(rerunID, "succeeded")
+		var attempts int
+		_ = pool.QueryRow(ctx, `SELECT coalesce(attempts,0) FROM run_nodes WHERE run_id=$1 AND node_id='review'`, rerunID).Scan(&attempts)
+		t.Fatalf("write fired on a reused form: form attempts=%d, target received %q", attempts, sends())
+	}
+	params, _ := started.body["params"].(map[string]any)
+	if started.body["code"] != "rerun_needs_approval" || params["nodeId"] != "review" {
+		t.Fatalf("refusal: %d %+v", started.status, started.body)
+	}
+	if got := sends(); len(got) != 1 {
+		t.Fatalf("a refused rerun must not send: %q", got)
 	}
 }

@@ -288,7 +288,7 @@ func (b *proposalBinder) reportUndeclaredEffects(brief IntentBrief) {
 func (b *proposalBinder) bindIntentApprovals(brief IntentBrief) {
 	if len(brief.Approvals) > 0 {
 		b.require("intent_approval", "brief.approvals", strings.Join(brief.Approvals, ","), []string{"approval", "human_form"}, func(f nodeFact) bool {
-			return f.Type == "approval" || f.Type == "human_form"
+			return domain.ConsumesHumanDecision(f.Type)
 		})
 	}
 }

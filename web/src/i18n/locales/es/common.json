@@ -82,7 +82,7 @@
   "apiErrors.fork_node_not_found": "El nodo objetivo no existe en este workflow",
   "apiErrors.predecessor_not_succeeded": "Uno o más pasos anteriores no terminaron bien en la ejecución de origen",
   "apiErrors.override_too_large": "El reemplazo supera el límite de 64 KiB",
-  "apiErrors.rerun_needs_approval": "Repite desde {{nodeId}}: una aprobación cubre una ejecución",
+  "apiErrors.rerun_needs_approval": "Repite desde {{nodeId}} para decidir de nuevo",
   "apiErrors.rerun_raw_secret": "Las credenciales requieren una referencia a un secreto",
   "apiErrors.no_workflow_snapshot": "La ejecución origen no tiene un snapshot del workflow disponible",
   "apiErrors.invalid_snapshot": "El snapshot del workflow de la ejecución origen no es válido",
