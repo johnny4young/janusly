@@ -14,7 +14,6 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { flushSync } from 'react-dom'
 import { ArrowRight, ChartNoAxesCombined, CheckCircle2, CircleAlert, FlaskConical, Play, Plus, RefreshCw } from 'lucide-react'
 
 import { api } from '../api'
@@ -47,6 +46,7 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
   const [datasets, setDatasets] = useState<EvalDataset[]>([])
   const [datasetsFailed, setDatasetsFailed] = useState(false)
   const [step, setStep] = useState<SetupStep>('dataset')
+  const [pendingFocus, setPendingFocus] = useState<{ field: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [maxProviderCalls, setMaxProviderCalls] = useState(DEFAULT_MAX_PROVIDER_CALLS)
@@ -57,6 +57,11 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
   const [datasetRetentionDays, setDatasetRetentionDays] = useState('')
   const [creatingDataset, setCreatingDataset] = useState(false)
   const [running, setRunning] = useState(false)
+
+  // The target field only mounts once the step change commits.
+  useEffect(() => {
+    if (pendingFocus) document.getElementById(pendingFocus.field)?.focus()
+  }, [pendingFocus])
 
   useEffect(() => {
     let cancelled = false
@@ -160,10 +165,9 @@ export function ExperimentsPanel({ canWrite = true }: { canWrite?: boolean } = {
     }
   }
 
-  // Step changes unmount the previous fields, so focus must move in the same tick.
   function goToField(target: SetupStep, field: string): void {
-    flushSync(() => setStep(target))
-    document.getElementById(field)?.focus()
+    setStep(target)
+    setPendingFocus({ field })
   }
 
   const selectedDataset = datasets.find((dataset) => dataset.id === runForm.evalDatasetId) ?? null
