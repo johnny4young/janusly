@@ -158,9 +158,18 @@ export function DeadLetterQueueView({
   const showDetail = !selectionMode && (selected !== null || requestedNotFound)
   const detailPaneRef = useRef<HTMLDivElement | null>(null)
   const selectedId = selected?.id
+  const openRecoveryItemId = openRecoveryItem?.id
   useEffect(() => {
     if (detailPaneRef.current) detailPaneRef.current.scrollTop = 0
-  }, [selectedId])
+  }, [selectedId, openRecoveryItemId])
+  const recoveryItemDrawer = openRecoveryItem && (
+    <Suspense fallback={null}>
+      <RecoveryItemDrawer
+        item={openRecoveryItem}
+        onClose={() => actions.openRecoveryItem(null)}
+      />
+    </Suspense>
+  )
 
   return (
       <section
@@ -595,19 +604,13 @@ export function DeadLetterQueueView({
           )}
           </>
         )}
-        {openRecoveryItem && (
-          <Suspense fallback={null}>
-            <RecoveryItemDrawer
-              item={openRecoveryItem}
-              onClose={() => actions.openRecoveryItem(null)}
-            />
-          </Suspense>
-        )}
+        {!showDetail && recoveryItemDrawer}
       </div>
       </div>
 
       {showDetail && (
       <div ref={detailPaneRef} className="we-dlq-detail-pane" data-testid="dlq-detail-pane">
+      {recoveryItemDrawer}
       <DeadLetterDetail
         selection={{
           requestedNotFound,

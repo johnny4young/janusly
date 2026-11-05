@@ -270,7 +270,8 @@ Recover through `#/recover/day/<YYYY-MM-DD>`.
 Recover keeps its filters above two panes once the queue section is at least
 760 px wide: the queue on the left and the selected failure on the right, each
 scrolling inside a height tied to the viewport. Narrower sections stack them, and
-selecting rows gives the queue the full width. The default By cluster view groups
+selecting rows gives the queue the full width. A row's recovery item drawer opens
+in the detail pane. The default By cluster view groups
 the loaded rows client-side with `normalizeErrorSignature`, the normalizer the
 server clusters with, so every filter, sort and page keeps applying.
 `/dlq/clusters` only adds the totals on each header: a signature outside its

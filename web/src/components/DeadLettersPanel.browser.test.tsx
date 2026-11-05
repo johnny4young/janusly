@@ -127,6 +127,45 @@ describe('Recovery queue layout and focus in Chromium', () => {
     } finally { await page.viewport(1024, 768) }
   })
 
+  it('opens the recovery item drawer in the detail pane, leaving the queue and Load more usable', async () => {
+    initI18n('en')
+    await page.viewport(1280, 800)
+    const recovery: DeadLetter['recovery'] = {
+      id: 'item', owner: null, severity: 'p2', status: 'open', slaTargetAt: '2026-09-02T12:00:00Z', resolutionReason: null,
+      comments: [], workflowId: null, occurrenceCount: 2, lastOccurredAt: '2026-09-01T12:00:00Z',
+    }
+    queueRows = Array.from({ length: 6 }, (_, index) => ({ ...rows[0]!, id: `r${index}`, runId: `run-${index}`, recovery }))
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === '/dlq/counts') return { total: 6, open: 6, replayed: 0, resolved: 0 }
+      if (path.startsWith('/dlq/queue')) return { items: queueRows, nextCursor: 'next', hasMore: true }
+      if (path.startsWith('/dlq/entries/')) return { ...rows[0]!, id: path.split('/').at(-1)! }
+      if (path === '/dlq/clusters') return { clusters: [], totalSamples: 0, windowDays: 30 }
+      return []
+    })
+    mountQueue()
+    try {
+      const list = await screen.findByTestId('dlq-virtual-list')
+      const left = screen.getByTestId('dlq-queue-pane')
+      const leftBox = left.getBoundingClientRect()
+      const listHeight = list.clientHeight
+      expect(listHeight).toBeGreaterThan(200)
+      expect(screen.getByTestId('dlq-load-more').getBoundingClientRect().bottom).toBeLessThanOrEqual(leftBox.bottom + 1)
+
+      const right = screen.getByTestId('dlq-detail-pane')
+      right.scrollTop = right.scrollHeight
+      await userEvent.click(screen.getAllByTestId('recovery-item-badge')[1]!)
+      const drawer = await waitFor(() => {
+        const element = document.querySelector('.we-recovery-item-drawer')
+        expect(element).not.toBeNull()
+        return element!
+      })
+      expect(right).toContainElement(drawer as HTMLElement)
+      expect(left.getBoundingClientRect().height).toBe(leftBox.height)
+      expect(list.clientHeight).toBe(listHeight)
+      await waitFor(() => expect(drawer.getBoundingClientRect().top).toBeGreaterThanOrEqual(right.getBoundingClientRect().top))
+    } finally { await page.viewport(1024, 768) }
+  })
+
   it('keeps keyboard focus, selected failure and bulk selection across background refresh', async () => {
     mountQueue()
     const row = await screen.findByTestId('dlq-row-shipment')

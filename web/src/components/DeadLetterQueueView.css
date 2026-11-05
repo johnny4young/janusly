@@ -171,6 +171,8 @@
 
   .we-dlq-detail-pane .detail-box { border-top: 0; padding: 0 12px 12px; }
 
+  .we-dlq-detail-pane > .we-recovery-item-drawer { margin: 12px; }
+
   .we-dlq-detail__head {
     background: var(--we-surface);
     padding-block: 12px 10px;
