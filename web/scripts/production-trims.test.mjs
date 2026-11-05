@@ -20,6 +20,7 @@ const ENTRY = join(outDir, 'entry.mjs')
 writeFileSync(ENTRY, `
 export { GoTrueClient } from '@supabase/auth-js'
 export { XYPanZoom } from ${JSON.stringify(XYFLOW_SYSTEM)}
+export { select } from ${JSON.stringify(join(XYFLOW_SYSTEM, '../../d3-selection'))}
 export { Bot } from 'lucide-react'
 `)
 
@@ -267,9 +268,9 @@ test('pruned auth client signs in, adopts an approved callback and ignores the U
   assert.ok(lifecycle.calls.some((call) => call.includes('/logout')))
 }))
 
-test('stubbed d3-color still runs animated and linear React Flow zoom transitions', async () => {
+test('trimmed d3 still runs animated and linear React Flow zoom transitions', async () => {
   const dom = installBrowser('https://app.example.test/')
-  const { XYPanZoom } = trimmed
+  const { XYPanZoom, select } = trimmed
   const domNode = document.getElementById('pane')
   const panZoom = XYPanZoom({
     domNode,
@@ -288,6 +289,7 @@ test('stubbed d3-color still runs animated and linear React Flow zoom transition
     await panZoom.setViewport(target, { duration: 30, interpolate })
     assert.deepEqual(panZoom.getViewport(), target)
   }
+  assert.throws(() => select(domNode).transition().attr('x', 1), /Unsupported d3 transition method/)
   panZoom.destroy()
   dom.window.close()
 })
