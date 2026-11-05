@@ -71,7 +71,7 @@ for (const locale of ['en', 'es'] as const) {
     await capture(page, `real-recovery-lab-semantic-run-${locale}`)
 
     await recoveredRow.locator('button.list-card-row').click()
-    await page.getByTestId('run-workspace-tab-timeline').click()
+    await page.getByTestId('run-workspace-tab-events').click()
     await page.getByTestId('run-event-filter').fill('recovery.semantic')
     const semanticViolation = page.getByRole('listitem', { name: /recovery\.semantic_violation/i })
     const semanticResolution = page.getByRole('listitem', { name: /recovery\.semantic_resolved/i })
@@ -95,7 +95,7 @@ for (const locale of ['en', 'es'] as const) {
     await validationRow.locator('button.list-card-row').click()
     await expect(page.getByTestId('active-run-validation-evidence'))
       .toHaveText(evidenceLabel)
-    await page.getByTestId('run-workspace-tab-timeline').click()
+    await page.getByTestId('run-workspace-tab-events').click()
     await page.getByTestId('run-event-filter').fill('provider_simulation_receipt')
     const receiptRow = page.getByRole('listitem').filter({ hasText: receiptLabel })
     await expect(receiptRow).toContainText('provider_simulation_receipt')

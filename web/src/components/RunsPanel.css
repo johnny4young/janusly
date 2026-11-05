@@ -8,17 +8,16 @@
 .we-run-overview {
   display: grid;
   gap: 12px;
-  background: linear-gradient(145deg, var(--we-surface) 0%, var(--we-primary-soft) 180%);
 }
 
 .we-run-overview__header { align-items: flex-start; }
 
-.we-run-overview__title,
-.we-run-overview__actions {
+.we-run-overview__actions,
+.we-run-overview__status {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .we-run-overview__trace dd {
@@ -27,11 +26,9 @@
   gap: 5px;
 }
 
-.we-run-overview__status-copy { margin: 0; }
-
-.we-run-overview__payload {
-  border-top: 1px solid var(--we-line);
-  padding-top: 9px;
+.we-run-overview__payloads {
+  display: grid;
+  gap: 9px;
 }
 
 .we-run-overview__payload summary {

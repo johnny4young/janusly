@@ -1,0 +1,116 @@
+/* Styles for RunStepTimeline.tsx: shipped with the lazy chunk that renders it. */
+
+.we-run-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.we-run-steps ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-run-steps__axis {
+  color: var(--we-muted);
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  justify-content: space-between;
+  margin-left: calc(38% + 12px);
+  margin-right: 60px;
+}
+
+.we-run-step {
+  align-items: center;
+  border-top: 1px solid var(--we-line);
+  display: grid;
+  gap: 6px 12px;
+  grid-template-columns: minmax(0, 38%) minmax(0, 1fr) 48px;
+  padding: 9px 0;
+}
+
+.we-run-step__head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.we-run-step__head code {
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.we-run-step__track {
+  background: var(--we-surface-muted);
+  border-radius: 4px;
+  height: 14px;
+  position: relative;
+}
+
+.we-run-step__bar {
+  background: var(--we-info-soft);
+  border: 1px solid var(--we-info-border-30);
+  border-radius: 4px;
+  bottom: 0;
+  min-width: 3px;
+  position: absolute;
+  top: 0;
+}
+
+.we-run-step__bar[data-outcome="succeeded"] {
+  background: var(--we-success-soft);
+  border-color: var(--we-success-border-40);
+}
+
+.we-run-step__bar[data-outcome="retried"],
+.we-run-step__bar[data-outcome="waiting"] {
+  background: var(--we-warning-soft);
+  border-color: var(--we-warning-border-35);
+}
+
+.we-run-step__bar[data-outcome="failed"] {
+  background: var(--we-danger-soft);
+  border-color: var(--we-danger-border-40);
+}
+
+.we-run-step__duration {
+  color: var(--we-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: right;
+}
+
+.we-run-step__attempts {
+  color: var(--we-ink-soft);
+  display: grid;
+  font-size: 11px;
+  gap: 4px;
+  grid-column: 1 / -1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-run-step__attempts p {
+  color: var(--we-danger-text);
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 480px) {
+  .we-run-steps__axis {
+    margin-left: 0;
+  }
+
+  .we-run-step {
+    grid-template-columns: minmax(0, 1fr) 48px;
+  }
+
+  .we-run-step__head {
+    grid-column: 1 / -1;
+  }
+}

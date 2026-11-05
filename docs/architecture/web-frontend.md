@@ -267,6 +267,14 @@ with no window control and no exports. Model calibration and AI spend
 are not windowed: their endpoints have no window parameter. A heatmap day opens
 Recover through `#/recover/day/<YYYY-MM-DD>`.
 
+Opening a run shows one run sheet (`RunWorkspace`). `RunsPanel` owns the header
+(identity, actions, data row) and its dialogs, so they stay available on every
+tab; `RunWorkspace` owns the tabs Overview, Timeline, Events, Agents and Ask and
+lays both out through `renderSheet`. Timeline (`RunStepTimeline`, a lazy chunk)
+projects the loaded events and `run_nodes` rows with `projectRunSteps`: attempts
+grouped by step on one scale, with the row as the authority for the attempt in
+progress. No tab adds a fetch, and changing the run returns to Overview.
+
 The eager shell owns the core locale catalog. Non-home main and authoring-panel
 slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
 behind an accessible, height-preserving skeleton while the sidebar, top bar and

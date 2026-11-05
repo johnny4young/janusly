@@ -15,7 +15,7 @@ vi.mock('./UsageSummaryCard', () => ({ UsageSummaryCard: () => null }))
 vi.mock('./RunStreamChip', () => ({ RunStreamChip: () => <span>Live</span> }))
 vi.mock('./ReplayLabDialog', () => ({ ReplayLabDialog: () => null }))
 vi.mock('./ReplayLabForkDialog', () => ({ ReplayLabForkDialog: () => null }))
-vi.mock('./ReportDeliveryDialog', () => ({ ReportDeliveryDialog: () => null }))
+vi.mock('./ReportDeliveryDialog', () => ({ ReportDeliveryDialog: () => <div role="dialog" aria-label="Send run report" /> }))
 vi.mock('./HumanFormDialog', () => ({ HumanFormDialog: () => null }))
 vi.mock('../hooks/useVirtualList', () => ({
   useVirtualList: ({ items }: { items: unknown[] }) => ({
@@ -183,12 +183,51 @@ describe('<RunsPanel /> observability', () => {
     expect(screen.getByTestId('run-overview')).toHaveTextContent('5s')
     expect(screen.getByRole('button', { name: 'Copy trace ID' })).toBeInTheDocument()
     expect(screen.getByTestId('run-trigger-input')).toHaveTextContent('inv-42')
-    fireEvent.click(screen.getByRole('button', { name: 'View timeline' }))
-    expect(useWorkflowStore.getState().activeTab).toBe('reasoning')
   })
 
-  it('delegates timeline navigation when hosted by the Runs workspace', () => {
-    const onViewTimeline = vi.fn()
+  it('keeps the data row and every run action in the sheet header', () => {
+    const onClose = vi.fn()
+    const dropped = vi.fn()
+    render(
+      <RunsPanel
+        {...handlers}
+        activeRunId="run-1234567890"
+        workflows={[]}
+        runs={[{
+          id: 'run-1234567890',
+          status: 'succeeded',
+          workflowVersionId: 'version-abcdef1234',
+          traceId: 'trace-abcdef1234',
+          createdAt: '2026-07-12T10:00:00.000Z',
+          outputJson: { total: 42 },
+        }]}
+        runNodes={[]}
+        usage={{}}
+        onClose={onClose}
+        renderSheet={({ header, overview }) => {
+          dropped(overview)
+          return header
+        }}
+      />,
+    )
+
+    const header = screen.getByTestId('run-overview')
+    for (const fact of ['Status', 'Duration', 'Started', 'Version reference', 'Trace ID', 'Run ID']) {
+      expect(header).toHaveTextContent(fact)
+    }
+    expect(screen.getByTestId('run-sheet-status')).toHaveTextContent('Done')
+    expect(screen.getByTestId('active-run-replay-in-lab')).toBeInTheDocument()
+    expect(screen.getByTestId('run-sheet-export')).toHaveAccessibleName(/run-1234567890/)
+    expect(screen.getByTestId('run-sheet-send')).toHaveAccessibleName(/run-1234567890/)
+    fireEvent.click(screen.getByTestId('run-sheet-close'))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    // Outputs belong to the overview slot, and a finished run offers no cancel.
+    expect(header).not.toHaveTextContent('Workflow output')
+    expect(screen.queryByRole('button', { name: 'Cancel run' })).not.toBeInTheDocument()
+    expect(dropped).toHaveBeenCalled()
+  })
+
+  it('opens the sheet dialogs from the header while another tab replaces the overview', () => {
     render(
       <RunsPanel
         {...handlers}
@@ -197,14 +236,30 @@ describe('<RunsPanel /> observability', () => {
         runs={[{ id: 'run-1', status: 'succeeded' }]}
         runNodes={[]}
         usage={{}}
-        onViewTimeline={onViewTimeline}
+        renderSheet={({ header }) => header}
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'View timeline' }))
+    fireEvent.click(screen.getByTestId('run-sheet-send'))
 
-    expect(onViewTimeline).toHaveBeenCalledTimes(1)
-    expect(useWorkflowStore.getState().activeTab).toBe('runs')
+    expect(screen.getByRole('dialog', { name: 'Send run report' })).toBeInTheDocument()
+  })
+
+  it('offers cancel only while the run can still stop', () => {
+    render(
+      <RunsPanel
+        {...handlers}
+        activeRunId="run-1"
+        workflows={[]}
+        runs={[{ id: 'run-1', status: 'running' }]}
+        runNodes={[]}
+        usage={{}}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel run' }))
+
+    expect(handlers.onCancelActiveRun).toHaveBeenCalledTimes(1)
   })
 
   it('labels approval and timer waits with actionable copy and timing', () => {

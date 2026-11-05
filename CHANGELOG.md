@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Run detail is one sheet. Its header shows the workflow, the actions and a data
+  row with status, duration, start, version, trace and run ID, and it stays in
+  place across the tabs Overview, Timeline, Events, Agents and Ask. Timeline now
+  groups this run's attempts by step on one time scale and marks retries; the
+  event list moved to Events, and the conversation with Janusly to Ask, where it
+  survives a look at another tab. View timeline is gone in favor of the tabs,
+  Cancel run only appears while a run can still stop, and a Close button returns
+  to the activity feed.
 - Build shows a workflow's problems on the canvas. The Flow map card has a
   Problems chip with the count, workflow-level problems appear in a band above
   the steps, and a step with a problem has a dot on its corner. Each one opens
