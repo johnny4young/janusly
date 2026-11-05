@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 607.8,
+  "artifactGzipKiB": 609.9,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 563.3
+    "maxGzipKiB": 565.2
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -95,7 +95,7 @@
     "AuthPolicySettingsPanel.js": 1.73,
     "AutoHealingPendingCard.css": 0.81,
     "AutoHealingPendingCard.js": 2.34,
-    "BudgetSettingsPanel.js": 2.29,
+    "BudgetSettingsPanel.js": 3.58,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
     "catalog-en.js": 40.64,
