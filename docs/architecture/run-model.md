@@ -128,8 +128,13 @@ an edit that adds a write returns 409 with the new list. Only agents check
 approval at dispatch, so a side effect with an approval or human form upstream
 that is not in the closure refuses the rerun until it starts at that step: one
 person's answer covers one execution, and an override could change what they
-reviewed. A webhook, timer or subworkflow upstream stays reusable. A webhook is
-usually the run's trigger, whose payload nobody would send again.
+reviewed. A reused subworkflow upstream of a side effect refuses the same way
+when its child run, or any run below it, has an approval or human form that was
+not skipped. The child is found through the step's saved `childRunId`, which a
+rerun clones, and a child that cannot be identified or read, or a tree past 100
+child runs, counts as decided. A webhook, timer or subworkflow without such a
+step stays reusable. A webhook is usually the run's trigger, whose payload nobody
+would send again.
 
 `inputOverride` replaces the step's authored config in a copy of the run's
 snapshot. Rendered per-node input is not persisted, because it can hold resolved
