@@ -20,7 +20,13 @@ impact attribution, and feedback.
   synthesized.
 - Recovery impact is credited only after generation-bound terminal success.
 - AI patches are suggestions. Deterministic evidence, permissions, and
-  operator action retain authority.
+  operator action retain authority. The Suggest fix dialog reads AI availability
+  from the bootstrap `GET /ai/health`, with no request of its own. Without a key
+  it leads with Replay in Lab when the operator has `runs.start`, stacked over
+  the dialog so closing it returns there, and the deterministic fallback envelope stays reachable as Review evidence. An
+  unreadable status claims no connection and keeps the suggestion action. Its
+  stage rail covers only the steps the dialog has, Patch, Validate and Apply, and
+  Validate reads done only after a sandbox pass; errors show no rail.
 - Playbooks require exact workflow/signature matching and fresh validation.
 - Failure signatures normalize identically in `internal/signature` and
   `web/src/lib/error-signature.ts`. The failure detail derives its summary, cause

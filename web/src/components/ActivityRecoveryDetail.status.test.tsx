@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { readDeadLetterDetail } from '../lib/dead-letter-contract'
 import type { DeadLetter } from './dead-letter-types'
@@ -108,4 +108,26 @@ it.each(['failure', 'organization'])('discards pending consent when the %s chang
   else rerender(<ActivityRecoveryDetail deadLetter={{ ...summary, id: 'dlq-next' }} {...handlers} onResolve={onResolve} />)
   await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
   expect(onResolve).not.toHaveBeenCalled()
+})
+
+describe('Suggest fix without an AI key', () => {
+  const openDialog = async (canStartRuns: boolean) => {
+    useWorkflowStore.setState({ aiHealth: { enabled: false, model: 'm', timeoutMs: 1, maxRetries: 0 } })
+    vi.mocked(readDeadLetterDetail).mockResolvedValue(detail('open', 'boom'))
+    render(<ActivityRecoveryDetail deadLetter={summary} {...handlers} canUseRecovery canStartRuns={canStartRuns} />)
+    await screen.findByText(/boom/)
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest fix' }))
+    await screen.findByTestId('recovery-availability')
+  }
+
+  it('offers Replay in Lab to an operator who may start runs', async () => {
+    await openDialog(true)
+    expect(screen.getByTestId('recovery-replay-in-lab')).toBeInTheDocument()
+  })
+
+  it('keeps Replay Lab out of the dialog for an operator who may not start runs', async () => {
+    await openDialog(false)
+    expect(screen.queryByTestId('recovery-replay-in-lab')).not.toBeInTheDocument()
+    expect(screen.getByTestId('recovery-review-evidence')).toBeInTheDocument()
+  })
 })

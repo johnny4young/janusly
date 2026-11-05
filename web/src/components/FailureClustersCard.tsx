@@ -70,7 +70,7 @@ function severityForCategory(category: ClusterCategory): 'pass' | 'warn' | 'fail
   return 'warn'
 }
 
-export function FailureClustersCard({ canRecover = true }: { canRecover?: boolean }) {
+export function FailureClustersCard({ canRecover = true, canStartRuns = false }: { canRecover?: boolean; canStartRuns?: boolean }) {
   const { t } = useT()
   const platformVersion = useInvalidationNonce(FAILURE_CLUSTER_TAGS)
   const [data, setData] = useState<ClusterData | null>(null)
@@ -145,6 +145,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
         clusterMembersCapped={recovery.capped}
         clusterMembersTotal={recovery.total}
         onClose={() => setRecovery(null)}
+        canReplayInLab={canStartRuns}
       />
     </Suspense>
   ) : null

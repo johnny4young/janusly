@@ -782,6 +782,7 @@ export function DeadLettersPanel({
       )}
       <RecoveryAutomationDisclosure
         canRecover={canUseRecovery}
+        canStartRuns={canStartRuns}
         canCancelCampaign={canReplay}
         canReadAutoHealing={canReadAutoHealing}
         canDecideAutoHealing={canDecideAutoHealing}
@@ -796,6 +797,7 @@ export function DeadLettersPanel({
             clusterMembersCapped={recovery.cluster?.capped}
             clusterMembersTotal={recovery.cluster?.total}
             onClose={() => setRecovery(null)}
+            canReplayInLab={canStartRuns}
           />
         </Suspense>
       )}

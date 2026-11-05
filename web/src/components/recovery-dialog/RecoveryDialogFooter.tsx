@@ -1,4 +1,4 @@
-import { Play, RefreshCcw, Sparkles } from 'lucide-react'
+import { FlaskConical, Play, RefreshCcw, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useT } from '../../i18n'
 import type { RecoveryDialogModel } from './useRecoveryDialogController'
@@ -6,7 +6,9 @@ import type { RecoveryDialogModel } from './useRecoveryDialogController'
 /** Shared action row; the dialog owns focus across asynchronous step changes. */
 export function RecoveryDialogFooter({ model }: { model: RecoveryDialogModel }) {
   const { t } = useT()
-  const { step, onClose, primaryRef, isClusterMode, clusterMemberCount, canApplyPatch, busy } = model
+  const { step, onClose, canReplayInLab, primaryRef, isClusterMode, clusterMemberCount, canApplyPatch, busy } = model
+  const noAi = step.kind === 'idle' && model.aiStatus === 'off'
+  const evidenceLabel = t('recoveryDialog.footer.reviewEvidence')
   const patchDecision = step.kind === 'review' || step.kind === 'validated'
   const canCancel = patchDecision || step.kind === 'validation-failed'
   let action: (() => void) | undefined
@@ -14,9 +16,18 @@ export function RecoveryDialogFooter({ model }: { model: RecoveryDialogModel }) 
   let Icon: typeof Play | undefined
   switch (step.kind) {
     case 'idle':
-      action = model.generateSuggestion
-      label = t('recoveryDialog.footer.generate')
-      Icon = Sparkles
+      if (!noAi) {
+        action = model.generateSuggestion
+        label = t('recoveryDialog.footer.generate')
+        Icon = Sparkles
+      } else if (canReplayInLab) {
+        action = () => model.setLabOpen(true)
+        label = t('dlq.action.replayInLab')
+        Icon = FlaskConical
+      } else {
+        action = model.generateSuggestion
+        label = evidenceLabel
+      }
       break
     case 'review':
       action = model.validateSuggestion
@@ -48,8 +59,13 @@ export function RecoveryDialogFooter({ model }: { model: RecoveryDialogModel }) 
           {t(step.kind === 'error' ? 'common.close' : 'common.cancel')}
         </Button>
       )}
+      {noAi && canReplayInLab && (
+        <Button variant="secondary" onClick={model.generateSuggestion} disabled={model.playbookBusy !== null} data-testid="recovery-review-evidence">
+          {evidenceLabel}
+        </Button>
+      )}
       {action && (
-        <Button variant="primary" ref={primaryRef} onClick={action} leadingIcon={Icon && <Icon size={14} aria-hidden="true" />}
+        <Button variant="primary" ref={primaryRef} data-testid={noAi ? (canReplayInLab ? 'recovery-replay-in-lab' : 'recovery-review-evidence') : undefined} onClick={action} leadingIcon={Icon && <Icon size={14} aria-hidden="true" />}
           disabled={(patchDecision && !canApplyPatch) || (step.kind === 'idle' && model.playbookBusy !== null)}
           title={step.kind === 'review' && !canApplyPatch ? t('recoveryDialog.footer.applyDisabledReason') : undefined}>
           {label}

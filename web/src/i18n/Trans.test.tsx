@@ -24,15 +24,16 @@ describe('Trans', () => {
     render(
       <p>
         <Trans
-          i18nKey="recoveryDialog.idle.clickGenerate"
-          components={{ strong: <strong /> }}
+          i18nKey="recoveryDialog.validationFailed.body"
+          values={{ runIdShort: 'abc' }}
+          components={{ strong: <strong />, code: <code /> }}
         />
       </p>,
     )
-    expect(screen.getByText('Generate suggestion', { selector: 'strong' })).toBeVisible()
+    expect(screen.getByText('Iterate', { selector: 'strong' })).toBeVisible()
 
     await changeAppLanguage('es')
-    expect(screen.getByText('Generar sugerencia', { selector: 'strong' })).toBeVisible()
+    expect(screen.getByText('Itera', { selector: 'strong' })).toBeVisible()
   })
 
   it('preserves malformed rich text as inert text without dropping content', async () => {

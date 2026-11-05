@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Suggest fix now opens with the failed step, the attempts and whether AI is
+  connected. Without an API key it says so and leads with Replay in Lab; Review
+  evidence still shows the deterministic evidence, with no patch. Once a
+  suggestion is under way, the dialog shows Patch, Validate and Apply, and marks
+  Validate done only after a sandbox run passes.
 - Run detail is one sheet. Its header shows the workflow, the actions and a data
   row with status, duration, start, version, trace and run ID, and it stays in
   place across the tabs Overview, Timeline, Events, Agents and Ask. Timeline now

@@ -599,12 +599,13 @@ test('first kilometer against Go: Home cluster CTA lands on an actionable recove
   await expect(page.getByTestId('activity-recovery-detail')).toBeVisible()
 
   await page.getByRole('button', { name: 'Suggest fix', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Generate suggestion' })).toBeVisible()
-  await page.getByRole('button', { name: 'Generate suggestion' }).click()
-
-  // The container has no provider key on purpose: the dialog must stay
-  // honest — a passport verdict and a blocked candidate, never an
+  // The container has no provider key on purpose: the dialog must say so up
+  // front, lead with Replay in Lab, and stay honest after that — a passport
+  // verdict and a blocked candidate, never an
   // invented patch and never a fabricated occurrence count.
+  await expect(page.getByTestId('recovery-availability')).toHaveAttribute('data-ai', 'off')
+  await expect(page.getByTestId('recovery-replay-in-lab')).toBeVisible()
+  await page.getByTestId('recovery-review-evidence').click()
   const passport = page.getByTestId('recovery-confidence-passport')
   await expect(passport).toBeVisible()
   await expect(passport).toHaveAttribute('data-verdict', 'unsafe')
