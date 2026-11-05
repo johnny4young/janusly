@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -396,6 +398,133 @@ func TestPlanRerunGatesAWriteBehindAHumanStep(t *testing.T) {
 			}
 			if plan, rejected := PlanRerun("src", wf, rerunRows(statuses), "gate"); rejected != nil || plan.Seed.NodeID != "gate" {
 				t.Fatalf("rerunning the step itself runs it again: %+v %+v", plan, rejected)
+			}
+		})
+	}
+}
+
+func subworkflowState(childRunID string) json.RawMessage {
+	return json.RawMessage(`{"output":{},"subworkflow":{"childRunId":"` + childRunID + `"}}`)
+}
+
+func TestPlanRerunListsReusedSubworkflowsBeforeAWrite(t *testing.T) {
+	wf := rerunDoc(t, `{"dslVersion":"1.0","nodes":[
+		{"id":"call","type":"subworkflow","config":{"workflowId":"child"}},
+		{"id":"shape","type":"noop"},
+		{"id":"send","type":"http","config":{"url":"https://a.example","method":"POST"}},
+		{"id":"peek","type":"http","config":{"url":"https://a.example","method":"GET"}}
+	],"edges":[{"from":"call","to":"shape"},{"from":"shape","to":"send"},{"from":"call","to":"peek"}]}`)
+	rows := func(callStatus string) []store.ListRunNodesByRunForOrgRow {
+		rows := rerunRows(map[string]string{"shape": "succeeded", "send": "succeeded", "peek": "succeeded"})
+		return append(rows, store.ListRunNodesByRunForOrgRow{NodeID: "call", Status: callStatus, StateJson: subworkflowState("c1")})
+	}
+	for name, tc := range map[string]struct {
+		callStatus, nodeID string
+		want               []string
+	}{
+		"write after the reused child":      {"succeeded", "shape", []string{"call"}},
+		"read after the reused child":       {"succeeded", "peek", nil},
+		"child runs again":                  {"succeeded", "call", nil},
+		"subworkflow on a branch not taken": {"skipped", "shape", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			plan, rejected := PlanRerun("src", wf, rows(tc.callStatus), tc.nodeID)
+			if rejected != nil || !slices.Equal(plan.ReusedSubworkflows, tc.want) {
+				t.Fatalf("got %v %+v, want %v", plan.ReusedSubworkflows, rejected, tc.want)
+			}
+		})
+	}
+}
+
+func TestRerunChildDecision(t *testing.T) {
+	type child struct {
+		doc  string
+		rows []store.ListRunNodesByRunForOrgRow
+	}
+	step := func(nodeID, status string, state json.RawMessage) store.ListRunNodesByRunForOrgRow {
+		return store.ListRunNodesByRunForOrgRow{NodeID: nodeID, Status: status, StateJson: state}
+	}
+	gate := func(nodeType, status string) child {
+		return child{
+			doc:  `{"dslVersion":"1.0","nodes":[{"id":"a","type":"noop"},{"id":"gate","type":"` + nodeType + `"}],"edges":[{"from":"a","to":"gate"}]}`,
+			rows: []store.ListRunNodesByRunForOrgRow{step("a", "succeeded", nil), step("gate", status, nil)},
+		}
+	}
+	nest := func(status string, state json.RawMessage) child {
+		return child{
+			doc:  `{"dslVersion":"1.0","nodes":[{"id":"nest","type":"subworkflow","config":{"workflowId":"inner"}}],"edges":[]}`,
+			rows: []store.ListRunNodesByRunForOrgRow{step("nest", status, state)},
+		}
+	}
+	runs := map[string]child{
+		"plain":           gate("noop", "succeeded"),
+		"approval":        gate("approval", "succeeded"),
+		"form":            gate("human_form", "succeeded"),
+		"skipped":         gate("approval", "skipped"),
+		"outer-approval":  nest("succeeded", subworkflowState("approval")),
+		"outer-plain":     nest("succeeded", subworkflowState("plain")),
+		"outer-skipped":   nest("skipped", nil),
+		"outer-no-id":     nest("succeeded", json.RawMessage(`{"output":{}}`)),
+		"outer-self":      nest("succeeded", subworkflowState("outer-self")),
+		"outer-missing":   nest("succeeded", subworkflowState("gone")),
+		"outer-read-fail": nest("succeeded", subworkflowState("broken")),
+	}
+	read := func(_ context.Context, runID string) (*domain.Workflow, []store.ListRunNodesByRunForOrgRow, error) {
+		switch {
+		case runID == "gone":
+			return nil, nil, ErrRerunChildMissing
+		case runID == "broken":
+			return nil, nil, errors.New("connection reset")
+		case strings.HasPrefix(runID, "deep-"):
+			next := nest("succeeded", subworkflowState(runID+"x"))
+			return rerunDoc(t, next.doc), next.rows, nil
+		}
+		run := runs[runID]
+		return rerunDoc(t, run.doc), run.rows, nil
+	}
+	for name, tc := range map[string]struct {
+		childRunID string
+		refused    bool
+		failed     bool
+	}{
+		"child without a human step":        {childRunID: "plain"},
+		"child with an approval":            {childRunID: "approval", refused: true},
+		"child with a human form":           {childRunID: "form", refused: true},
+		"human step on a branch not taken":  {childRunID: "skipped"},
+		"approval in a nested child":        {childRunID: "outer-approval", refused: true},
+		"nested child without a human step": {childRunID: "outer-plain"},
+		"nested subworkflow not taken":      {childRunID: "outer-skipped"},
+		"nested step without a child id":    {childRunID: "outer-no-id", refused: true},
+		"child run reached twice":           {childRunID: "outer-self", refused: true},
+		"nested child run is gone":          {childRunID: "outer-missing", refused: true},
+		"chain past the read bound":         {childRunID: "deep-", refused: true},
+		"no child id":                       {childRunID: "", refused: true},
+		"read error":                        {childRunID: "outer-read-fail", failed: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := json.RawMessage(`{"output":{}}`)
+			if tc.childRunID != "" {
+				state = subworkflowState(tc.childRunID)
+			}
+			plan := RerunPlan{
+				ReusedSubworkflows: []string{"call"},
+				Seed:               &RerunSeed{Nodes: map[string]NodeSeed{"call": {Status: "succeeded", State: state}}},
+			}
+			rejected, err := RerunChildDecision(t.Context(), plan, read)
+			if tc.failed {
+				if err == nil || rejected != nil {
+					t.Fatalf("a read error must fail the request: %+v %v", rejected, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if !tc.refused && rejected != nil {
+				t.Fatalf("nothing to decide again: %+v", rejected)
+			}
+			if tc.refused && (rejected == nil || rejected.Code != "rerun_needs_approval" || rejected.NodeID != "call") {
+				t.Fatalf("refusal: %+v", rejected)
 			}
 		})
 	}

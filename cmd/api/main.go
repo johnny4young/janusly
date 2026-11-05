@@ -131,7 +131,7 @@ func run() error {
 	// `janusly readyz` probes the serving process on the configured port so
 	// the distroless image (no shell, no curl) can run its own healthcheck.
 	if len(os.Args) > 1 && os.Args[1] == "readyz" {
-		return probeReadiness(cfg.Port)
+		return probeReadiness(cfg.HTTPHost, cfg.Port)
 	}
 	if err := requireBuildProvenance(cfg.Production, identity); err != nil {
 		return err
@@ -311,7 +311,7 @@ func run() error {
 			logger.Error("V1 server shutdown incomplete", "reason", "feedback_memory_drain")
 		}
 	}()
-	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), publicAPI)
+	api := newHTTPServer(net.JoinHostPort(cfg.HTTPHost, strconv.Itoa(cfg.Port)), publicAPI)
 	internal := newHTTPServer(
 		net.JoinHostPort(cfg.InternalHost, strconv.Itoa(cfg.InternalPort)),
 		httpapi.NewInternalHandler(identity),
@@ -369,10 +369,16 @@ func resourceInstanceID() string {
 
 const readinessProbeTimeout = 3 * time.Second
 
-func probeReadiness(port int) error {
+func probeReadiness(host string, port int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), readinessProbeTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/readyz", port), nil)
+	// An IPv6-only loopback listener does not answer on 127.0.0.1.
+	target := "127.0.0.1"
+	if host == "::1" {
+		target = host
+	}
+	url := "http://" + net.JoinHostPort(target, strconv.Itoa(port)) + "/readyz"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
