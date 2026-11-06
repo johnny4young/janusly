@@ -111,6 +111,7 @@ describe('Recovery queue layout and focus in Chromium', () => {
     await waitFor(() => expect(screen.getByRole('radio', { name: 'Todos 12' })).toBeInTheDocument())
     const toolbar = screen.getByTestId('dlq-toolbar')
     expect(getComputedStyle(toolbar).fontFamily).toMatch(/^"Inter Tight"/)
+    console.log('TOOLBAR_WIDTHS', ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort'].map(id => document.getElementById(id)!.getBoundingClientRect().width.toFixed(1)).join(' '))
     expect(rowSpread()).toBeLessThanOrEqual(1)
     expect(toolbar.getBoundingClientRect().height).toBeLessThanOrEqual(40)
     expect(screen.getByTestId('dlq-search').getBoundingClientRect().width).toBeGreaterThanOrEqual(96)

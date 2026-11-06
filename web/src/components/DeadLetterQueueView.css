@@ -105,9 +105,15 @@
   font-size: 12px;
 }
 
+/* A drawn chevron replaces the native arrow, whose width differs by platform. */
 .we-dlq-filters select.ui-control {
   width: auto;
-  padding-inline: 8px 4px;
+  appearance: none;
+  padding-inline: 8px 20px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 12px center, right 8px center;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
   field-sizing: content;
 }
 
