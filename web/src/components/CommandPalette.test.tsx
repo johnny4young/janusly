@@ -1,7 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { changeAppLanguage } from '../i18n'
+import { readRunSummaryPage } from '../lib/list-contract'
 import { CommandPalette, type CommandPaletteProps } from './CommandPalette'
+
+vi.mock('../lib/list-contract', () => ({ readRunSummaryPage: vi.fn() }))
 
 function props(overrides: Partial<CommandPaletteProps> = {}): CommandPaletteProps {
   return {
@@ -133,5 +137,214 @@ describe('<CommandPalette /> effective permissions', () => {
     expect(screen.getByText('Go to Settings')).toBeInTheDocument()
     expect(screen.getByText('Go to Recover')).toBeInTheDocument()
     expect(screen.getByText('Go to Connections')).toBeInTheDocument()
+  })
+})
+
+describe('<CommandPalette /> run filters', () => {
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString()
+  const flaky = { id: 'demo-flaky-ingest', name: 'Demo · flaky ingest' }
+  const row = (id: string, createdAt: string) => ({ id, workflowId: flaky.id, workflowName: flaky.name, status: 'failed', createdAt, cursor: `${createdAt.replace('Z', '123Z')}|${id}` })
+  const recent = row('run-recent-0001', hoursAgo(1))
+  const old = row('run-old-000002', hoursAgo(24 * 5))
+
+  function runProps(overrides: Partial<CommandPaletteProps> = {}) {
+    return props({
+      workflows: [flaky],
+      onOpenRun: vi.fn(),
+      onOpenRecovery: vi.fn(),
+      recoveryTargets: [{ id: 'dlq-1', runId: recent.id }],
+      permissions: ['runs.read', 'dlq.read', 'dlq.replay'],
+      ...overrides,
+    })
+  }
+
+  it('turns a sentence into editable chips and lists only runs inside the window', async () => {
+    vi.mocked(readRunSummaryPage).mockResolvedValue([recent, old])
+    const onOpenRun = vi.fn()
+    const onClose = vi.fn()
+    render(<CommandPalette {...runProps({ onOpenRun, onClose })} />)
+    const input = screen.getByRole('combobox')
+
+    fireEvent.change(input, { target: { value: 'failed runs of demo-flaky-ingest since yesterday maybe' } })
+
+    expect(screen.getByTestId('palette-chip-status')).toBeInTheDocument()
+    expect(screen.getByTestId('palette-chip-workflow')).toBeInTheDocument()
+    expect(screen.getByTestId('palette-chip-time')).toBeInTheDocument()
+    expect(screen.getByTestId('palette-unparsed')).toHaveTextContent('Not understood: maybe')
+    expect(await screen.findByTestId(`palette-run-${recent.id}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`palette-run-${old.id}`)).not.toBeInTheDocument()
+    expect(vi.mocked(readRunSummaryPage)).toHaveBeenCalledWith(
+      '/runs?limit=25&status=failed&workflowId=demo-flaky-ingest',
+      expect.any(AbortSignal),
+    )
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onOpenRun).toHaveBeenCalledWith(recent.id)
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('edits and removes chips by rewriting the query', async () => {
+    vi.mocked(readRunSummaryPage).mockResolvedValue([])
+    render(<CommandPalette {...runProps()} />)
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'failed runs of demo-flaky-ingest' } })
+
+    fireEvent.change(screen.getByTestId('palette-chip-select-status'), { target: { value: 'succeeded' } })
+    expect(input).toHaveValue('succeeded runs of demo-flaky-ingest')
+
+    fireEvent.click(screen.getByTestId('palette-chip-remove-workflow'))
+    expect(input).toHaveValue('succeeded runs of')
+    expect(input).toHaveFocus()
+    expect(screen.queryByTestId('palette-chip-workflow')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('palette-runs-state')).toHaveTextContent('No runs match these filters.'))
+  })
+
+  it('writes a workflow by id when its name would read as another workflow', () => {
+    vi.mocked(readRunSummaryPage).mockResolvedValue([])
+    render(<CommandPalette {...runProps({ workflows: [{ id: 'demo-order', name: 'Order A' }, { id: 'wf-9', name: 'Demo order' }] })} />)
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'failed runs of order a' } })
+
+    fireEvent.change(screen.getByTestId('palette-chip-select-workflow'), { target: { value: 'wf-9' } })
+    expect(input).toHaveValue('failed runs of wf-9')
+    expect(screen.getByTestId('palette-chip-select-workflow')).toHaveDisplayValue('Demo order')
+  })
+
+  it('hands replay to the recovery queue without writing, and only with the replay grant', async () => {
+    vi.mocked(readRunSummaryPage).mockResolvedValue([recent])
+    const onOpenRecovery = vi.fn()
+    const { unmount } = render(<CommandPalette {...runProps({ onOpenRecovery })} />)
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'failed runs' } })
+
+    const replay = await screen.findByTestId(`palette-replay-${recent.id}`)
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(input).toHaveAttribute('aria-activedescendant', replay.id)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onOpenRecovery).toHaveBeenCalledWith('dlq-1')
+    unmount()
+
+    render(<CommandPalette {...runProps({ permissions: ['runs.read', 'dlq.read'] })} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed runs' } })
+    expect(await screen.findByTestId(`palette-run-${recent.id}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`palette-replay-${recent.id}`)).not.toBeInTheDocument()
+  })
+
+  it('pages older runs with the keyset cursor', async () => {
+    const page = Array.from({ length: 25 }, (_, index) => row(`run-${String(index).padStart(3, '0')}`, hoursAgo(index + 1)))
+    vi.mocked(readRunSummaryPage).mockResolvedValueOnce(page).mockResolvedValueOnce([old]).mockResolvedValue(page)
+    render(<CommandPalette {...runProps({ recoveryTargets: [] })} />)
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'failed runs' } })
+
+    fireEvent.mouseDown(await screen.findByTestId('palette-runs-more'))
+
+    expect(await screen.findByTestId(`palette-run-${old.id}`)).toBeInTheDocument()
+    const last = page[24]
+    expect(vi.mocked(readRunSummaryPage)).toHaveBeenLastCalledWith(
+      `/runs?limit=25&status=failed&before=${encodeURIComponent(last.cursor)}`,
+      expect.any(AbortSignal),
+    )
+
+    // A changed query starts again from the newest page.
+    fireEvent.change(input, { target: { value: 'failed runs today' } })
+    fireEvent.change(input, { target: { value: 'failed runs' } })
+    await waitFor(() => expect(screen.queryByTestId(`palette-run-${old.id}`)).not.toBeInTheDocument())
+    expect(await screen.findByTestId('palette-run-run-000')).toBeInTheDocument()
+    expect(vi.mocked(readRunSummaryPage)).toHaveBeenLastCalledWith('/runs?limit=25&status=failed', expect.any(AbortSignal))
+  })
+
+  it('keeps workflows and commands while the query is the start of a name', () => {
+    vi.mocked(readRunSummaryPage).mockClear()
+    render(<CommandPalette {...runProps({
+      workflows: [flaky, { id: 'wf-fp', name: 'Failed payment recovery' }],
+      permissions: ['runs.read', 'workflows.read'],
+    })} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed pay' } })
+    expect(screen.getByRole('option', { name: /Failed payment recovery/ })).toBeInTheDocument()
+    expect(screen.queryByTestId('palette-run-filters')).not.toBeInTheDocument()
+    expect(readRunSummaryPage).not.toHaveBeenCalled()
+  })
+
+  it('seeks a bounded window to its end and says when it is empty', async () => {
+    vi.mocked(readRunSummaryPage).mockClear().mockResolvedValue([])
+    render(<CommandPalette {...runProps()} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed runs yesterday' } })
+    const today = new Date()
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString()
+    await waitFor(() => expect(readRunSummaryPage).toHaveBeenCalledWith(
+      `/runs?limit=25&status=failed&before=${encodeURIComponent(`${end}|\uffff`)}`,
+      expect.any(AbortSignal),
+    ))
+    await waitFor(() => expect(screen.getByTestId('palette-runs-state')).toHaveTextContent('No runs match these filters.'))
+    expect(screen.queryByTestId('palette-runs-more')).not.toBeInTheDocument()
+  })
+
+  it('keeps the active option inside the results while they load', async () => {
+    let resolve: (rows: typeof recent[]) => void = () => undefined
+    vi.mocked(readRunSummaryPage).mockReturnValue(new Promise(done => { resolve = done }))
+    render(<CommandPalette {...runProps({ recoveryTargets: [] })} />)
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'failed runs' } })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(input).not.toHaveAttribute('aria-activedescendant')
+
+    await act(async () => { resolve([recent]) })
+    expect(input).toHaveAttribute('aria-activedescendant', (await screen.findByTestId(`palette-run-${recent.id}`)).id)
+  })
+
+  it('keeps the time options in one order as the value changes', () => {
+    vi.mocked(readRunSummaryPage).mockResolvedValue([])
+    render(<CommandPalette {...runProps()} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed runs today' } })
+    const labels = () => [...(screen.getByTestId('palette-chip-select-time') as HTMLSelectElement).options].map(option => option.text)
+    const before = labels()
+    expect(before.slice(1)).toEqual(['Yesterday', 'Since yesterday', 'Last 7 days'])
+
+    fireEvent.change(screen.getByTestId('palette-chip-select-time'), { target: { value: 'yesterday' } })
+    const after = labels()
+    expect(after).toHaveLength(4)
+    expect([after[0], ...after.slice(2)]).toEqual(['Today', 'Since yesterday', 'Last 7 days'])
+    expect((screen.getByTestId('palette-chip-select-time') as HTMLSelectElement).selectedIndex).toBe(1)
+  })
+
+  it('keeps loaded runs when an older page fails and retries that page', async () => {
+    const page = Array.from({ length: 25 }, (_, index) => row(`run-${String(index).padStart(3, '0')}`, hoursAgo(index + 1)))
+    vi.mocked(readRunSummaryPage).mockReset().mockResolvedValueOnce(page).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([old])
+    render(<CommandPalette {...runProps({ recoveryTargets: [] })} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed runs' } })
+
+    fireEvent.mouseDown(await screen.findByTestId('palette-runs-more'))
+    await waitFor(() => expect(screen.getByTestId('palette-runs-more')).toHaveTextContent('Older runs could not be loaded. Try again'))
+    expect(screen.getByTestId('palette-run-run-000')).toBeInTheDocument()
+
+    fireEvent.mouseDown(screen.getByTestId('palette-runs-more'))
+    expect(await screen.findByTestId(`palette-run-${old.id}`)).toBeInTheDocument()
+    expect(vi.mocked(readRunSummaryPage).mock.calls.slice(1).map(([path]) => path)).toEqual([
+      `/runs?limit=25&status=failed&before=${encodeURIComponent(page[24].cursor)}`,
+      `/runs?limit=25&status=failed&before=${encodeURIComponent(page[24].cursor)}`,
+    ])
+  })
+
+  it('stays a command search without the runs grant', () => {
+    vi.mocked(readRunSummaryPage).mockClear()
+    render(<CommandPalette {...runProps({ permissions: ['workflows.read'] })} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed runs' } })
+    expect(screen.queryByTestId('palette-run-filters')).not.toBeInTheDocument()
+    expect(readRunSummaryPage).not.toHaveBeenCalled()
+  })
+
+  it('parses and labels Spanish queries', async () => {
+    vi.mocked(readRunSummaryPage).mockResolvedValue([recent])
+    try {
+      await act(async () => { await changeAppLanguage('es') })
+      render(<CommandPalette {...runProps()} />)
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'ejecuciones fallidas de demo-flaky-ingest desde ayer' } })
+      expect(screen.getByRole('group', { name: 'Entendido como' })).toBeInTheDocument()
+      expect(screen.getByLabelText('Quitar el filtro Rango de tiempo')).toBeInTheDocument()
+      await waitFor(() => expect(screen.getByTestId(`palette-replay-${recent.id}`)).toHaveTextContent('Reintentar la ejecución run-rece… en Recuperar'))
+    } finally {
+      await act(async () => { await changeAppLanguage('en') })
+    }
   })
 })

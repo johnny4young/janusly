@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 628.5,
+  "artifactGzipKiB": 631.9,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 581.9
+    "maxGzipKiB": 585.3
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -98,9 +98,9 @@
     "BudgetSettingsPanel.js": 3.25,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 42.4,
-    "catalog-es.js": 47.2,
-    "CommandPalette.js": 3,
+    "catalog-en.js": 42.36,
+    "catalog-es.js": 47.18,
+    "CommandPalette.js": 6.07,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
     "ExperimentsPanel.css": 1.05,

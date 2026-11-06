@@ -506,6 +506,10 @@ export default function App() {
   )
   const paletteWorkflows = useMemo(() => savedWorkflows.map(workflow => ({ id: workflow.id, name: workflow.name })), [savedWorkflows])
   const paletteRecipes = useMemo(() => templates.map(template => ({ id: template.id, name: template.name })), [templates])
+  const paletteRecoveryTargets = useMemo(
+    () => deadLetters.filter(item => item.status === 'open' && item.runId).map(item => ({ id: item.id, runId: item.runId })),
+    [deadLetters],
+  )
 
   if (!authReady || (userId !== null && !identityReady)) return (
     <div className="boot-screen" role="status" aria-live="polite">
@@ -683,6 +687,9 @@ export default function App() {
         permissions: tenantPermissions,
         workflows: paletteWorkflows,
         recipes: paletteRecipes,
+        onOpenRun: (id) => { void openRun(id) },
+        recoveryTargets: paletteRecoveryTargets,
+        onOpenRecovery: openRecoveryQueue,
         onOpenWorkflow: (id) => { void openWorkflow(id) },
         onOpenRecipe: (id) => {
           const template = templates.find(candidate => candidate.id === id)
