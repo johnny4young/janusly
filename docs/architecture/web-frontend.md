@@ -419,6 +419,12 @@ pack API, so they are listed but not counted. Install is disabled only by the
 weight and are named under the button but never block it: every pack installs as a draft
 that is wired afterwards, and `packs.install` is granted to editors while
 `credentials.write` is not.
+Experiments setup keeps every field in panel state across its three steps, and
+`getRunBlockers` is the single source for both the disabled Run reason and the
+step completion marks. Only that reason names a missing field; the provider-call
+plan stays visible on every step. Writes need `evals.write` and an admin base
+role, matching the route gate, and text limits count UTF-8 bytes as the API does.
+The panel is keyed by organization, so no setup or selection crosses workspaces.
 
 Contextual authoring prefills never submit work. Replacing an intent invalidates
 pending compilation/proposal results and releases their loading state; late

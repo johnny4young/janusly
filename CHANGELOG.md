@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Experiments now start from the dataset. Run a comparison has three steps,
+  Dataset, Control vs candidate, and Scorer and run, and the dataset form lives
+  in the first step. A disabled Run comparison names the missing step and field,
+  and selecting that message takes you there. Roles that can only read are told
+  so and no longer see the dataset form. Names and references over the API's
+  byte limits are flagged where you type them, and a dataset deleted before a
+  run reloads the list.
 - Login has Forgot password?, which emails a reset link that ends at the
   set-password step. The answer is the same whether or not the email has an
   account, including when the auth server limits how often it sends.

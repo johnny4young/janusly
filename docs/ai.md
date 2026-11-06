@@ -97,5 +97,8 @@ failed outputs than the control. A canceled HTTP request cannot strand a run in
 `running`: terminal persistence uses a separate five-second finalization
 context and records the failure explicitly.
 
+Setup has three steps: Dataset, Control vs candidate, and Scorer and run. A
+disabled Run comparison names the first thing still missing.
+
 See [AI pipeline architecture](architecture/ai-pipeline.md) and
 [memory policy](memory-policy.md).
