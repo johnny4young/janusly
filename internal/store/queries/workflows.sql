@@ -71,8 +71,7 @@ LEFT JOIN LATERAL (
     AND r.replay_mode IS NULL
   ORDER BY r.created_at DESC, r.id DESC LIMIT 1
 ) last_run ON true
--- The same row GetLatestWorkflowRolloutRow hands the engine's assignment.
-LEFT JOIN LATERAL (
+LEFT JOIN LATERAL ( /* the row GetLatestWorkflowRolloutRow hands the engine's assignment */
   SELECT wr.status, wr.traffic_percent, bv.version AS baseline_version, cv.version AS canary_version
   FROM workflow_rollouts wr
   JOIN workflow_versions bv ON bv.org_id = wr.org_id AND bv.id = wr.baseline_version_id
@@ -155,6 +154,12 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
 FROM workflow_versions
 WHERE id = $1 AND org_id = $2 AND workflow_id = $3;
+
+-- name: GetLatestWorkflowVersionRef :one
+SELECT id, version FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY version DESC
+LIMIT 1;
 
 -- name: GetLatestWorkflowVersion :one
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at

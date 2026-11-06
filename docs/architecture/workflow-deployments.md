@@ -22,8 +22,22 @@ the guardrail:
 - subworkflow calls without a pinned version, keyed by the parent run and node.
 
 Reruns, draft tests, validation runs, recovery replays and subworkflows pinned
-to a version keep their exact version. A start whose assignment cannot be read
-fails instead of running the latest version.
+to a version keep their exact version. No start falls back to the latest
+version when its assignment fails:
+
+- a failed read rejects an HTTP, MCP or webhook start and retries a schedule
+  tick, which keeps its claim;
+- an assigned version that cannot run (missing or no longer valid) drops a
+  schedule tick with a `schedule.tick.dropped` audit row naming the rollout and
+  version, and the entry moves to its next cron occurrence;
+- an unpinned subworkflow call fails with an error naming the rollout and the
+  version. Save a new version of the child, which ends the rollout's routing,
+  or promote an active canary whose baseline is the broken version.
+
+A promote or rollback decision does not wait for starts that are already
+resolving their assignment: a start in flight at that moment can still take
+the previous arm. The window is one start's resolution and applies equally to
+HTTP starts and schedule ticks.
 
 ## Promotion
 

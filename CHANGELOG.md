@@ -10,8 +10,12 @@
   list API returns the same production version and rollout for each workflow.
 - Scheduled runs follow a workflow's canary like other starts. An active canary
   gets its share of ticks and its outcomes count toward the guardrail, and after
-  a rollback every tick runs the baseline. A subworkflow call whose canary
-  cannot be read now fails instead of running the latest version.
+  a rollback every tick runs the baseline. A tick whose canary version cannot
+  run is skipped with an audit entry and the schedule continues at its next
+  time. A subworkflow call whose canary cannot be read now fails and names the
+  rollout and version to fix.
+- A scheduled tick retried after a crash or an expired lease keeps its original
+  time, so it never starts a second run.
 - Admins can make a tool require approval in every workflow (Require approval
   for this tool in every workflow, in the tool inspector). Each call of that
   tool pauses right before it runs, and the paused step shows the tool, its

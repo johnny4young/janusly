@@ -120,11 +120,11 @@ func TestScheduleTickReclaimedAfterLeaseExpiryDoesNotDoubleFire(t *testing.T) {
 		t.Fatalf("claim: %v (%d rows)", err, len(claimed))
 	}
 	entry := claimed[0]
-	if !eng.fireScheduleEntry(ctx, entry, now, nil) {
-		t.Fatal("first attempt must fire")
+	if fired, err := eng.fireScheduleEntry(ctx, entry, now, nil); !fired || err != nil {
+		t.Fatalf("first attempt must fire: %v", err)
 	}
-	if eng.fireScheduleEntry(ctx, entry, now, nil) {
-		t.Fatal("the same logical tick must not fire twice")
+	if fired, err := eng.fireScheduleEntry(ctx, entry, now, nil); fired || err != nil {
+		t.Fatalf("the same logical tick must not fire twice: %v", err)
 	}
 	if runs := countOrgRuns(t, ctx, pool, org); runs != 1 {
 		t.Fatalf("want 1 run for a replayed tick, got %d", runs)

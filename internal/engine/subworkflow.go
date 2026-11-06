@@ -144,7 +144,7 @@ func (e *Engine) executeSubworkflowNode(
 		}
 		if assignment != nil {
 			childWorkflow = assignment.Workflow
-			childVersionID = assignment.VersionID
+			childVersionID, childVersion = assignment.VersionID, int(assignment.Version)
 			rolloutID, rolloutVariant = assignment.Rollout.ID, assignment.Variant
 		}
 	}

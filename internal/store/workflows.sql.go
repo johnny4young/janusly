@@ -562,6 +562,30 @@ func (q *Queries) GetLatestWorkflowVersion(ctx context.Context, arg GetLatestWor
 	return i, err
 }
 
+const getLatestWorkflowVersionRef = `-- name: GetLatestWorkflowVersionRef :one
+SELECT id, version FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY version DESC
+LIMIT 1
+`
+
+type GetLatestWorkflowVersionRefParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+type GetLatestWorkflowVersionRefRow struct {
+	ID      string
+	Version int32
+}
+
+func (q *Queries) GetLatestWorkflowVersionRef(ctx context.Context, arg GetLatestWorkflowVersionRefParams) (GetLatestWorkflowVersionRefRow, error) {
+	row := q.db.QueryRow(ctx, getLatestWorkflowVersionRef, arg.OrgID, arg.WorkflowID)
+	var i GetLatestWorkflowVersionRefRow
+	err := row.Scan(&i.ID, &i.Version)
+	return i, err
+}
+
 const getLatestWorkflowVersionReliability = `-- name: GetLatestWorkflowVersionReliability :one
 SELECT version, slo_json, upstream_health_sources
 FROM workflow_versions
@@ -1548,7 +1572,7 @@ func (q *Queries) ListRecentDeadLettersForWorkflowDelta(ctx context.Context, arg
 }
 
 const listScheduleEntriesForWorkflow = `-- name: ListScheduleEntriesForWorkflow :many
-SELECT id, org_id, workflow_id, workflow_version_id, node_id, cron_expression, enabled, last_run_at, last_run_id, created_by, created_at, updated_at, next_fire_at FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2 ORDER BY node_id
+SELECT id, org_id, workflow_id, workflow_version_id, node_id, cron_expression, enabled, last_run_at, last_run_id, created_by, created_at, updated_at, next_fire_at, claimed_due_at FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2 ORDER BY node_id
 `
 
 type ListScheduleEntriesForWorkflowParams struct {
@@ -1579,6 +1603,7 @@ func (q *Queries) ListScheduleEntriesForWorkflow(ctx context.Context, arg ListSc
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.NextFireAt,
+			&i.ClaimedDueAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1776,7 +1801,7 @@ LEFT JOIN LATERAL (
     AND r.replay_mode IS NULL
   ORDER BY r.created_at DESC, r.id DESC LIMIT 1
 ) last_run ON true
-LEFT JOIN LATERAL (
+LEFT JOIN LATERAL ( /* the row GetLatestWorkflowRolloutRow hands the engine's assignment */
   SELECT wr.status, wr.traffic_percent, bv.version AS baseline_version, cv.version AS canary_version
   FROM workflow_rollouts wr
   JOIN workflow_versions bv ON bv.org_id = wr.org_id AND bv.id = wr.baseline_version_id
@@ -1833,7 +1858,6 @@ type ListWorkflowRowsRow struct {
 // run status include production runs linked through saved versions only. The
 // metadata join drives tags/folders and the buffered-trigger count includes
 // both parked events and abandoned backfill claims after the shared 5m lease.
-// The same row GetLatestWorkflowRolloutRow hands the engine's assignment.
 func (q *Queries) ListWorkflowRows(ctx context.Context, arg ListWorkflowRowsParams) ([]ListWorkflowRowsRow, error) {
 	rows, err := q.db.Query(ctx, listWorkflowRows,
 		arg.OrgID,

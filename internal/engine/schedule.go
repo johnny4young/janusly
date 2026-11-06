@@ -105,26 +105,37 @@ func (e *Engine) SweepDueSchedules(ctx context.Context) (fired, dropped int, err
 	// a workflow with many schedule nodes no longer re-reads and re-parses
 	// its snapshot per tick.
 	started := time.Now()
-	versions := map[string]*domain.Workflow{}
+	versions := map[string]parsedVersion{}
+	var failed []error
 	for index, entry := range due {
 		if time.Since(started) > scheduleSweepWallBudget {
 			slog.Warn("schedule sweep hit its wall budget; leased entries fire after the lease",
 				"deferred", len(due)-index, "budget", scheduleSweepWallBudget)
 			break
 		}
-		if e.fireScheduleEntry(ctx, entry, now, versions) {
+		ok, fireErr := e.fireScheduleEntry(ctx, entry, now, versions)
+		switch {
+		case fireErr != nil:
+			failed = append(failed, fireErr)
+		case ok:
 			fired++
-		} else {
+		default:
 			dropped++
 		}
+	}
+	if len(failed) > 0 {
+		// The ticks keep their claim and retry after the lease; the error marks the pass unhealthy.
+		slog.Warn("schedule ticks failed and will retry", "failed", len(failed), "error", failed[0])
+		return fired, dropped, fmt.Errorf("%d schedule ticks failed: %w", len(failed), errors.Join(failed...))
 	}
 	return fired, dropped, nil
 }
 
 // fireScheduleEntry handles one due tick; returns true when a run started.
+// An error is transient: the tick keeps its claim and retries after the lease.
 // versions caches parsed documents across the sweep, keyed by tenant,
 // workflow and version so the scoped read is never bypassed.
-func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueScheduleEntriesRow, now time.Time, versions map[string]*domain.Workflow) bool {
+func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueScheduleEntriesRow, now time.Time, versions map[string]parsedVersion) (bool, error) {
 	q := store.New(e.pool)
 	schedule, err := cron.Parse(entry.CronExpression)
 	if err != nil {
@@ -136,17 +147,34 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 				TargetType: "schedule_entry", TargetID: entry.ID,
 				Metadata: map[string]any{"reason": "invalid_cron", "workflowId": entry.WorkflowID},
 			})
-		return false
+		return false, nil
 	}
 	next, err := schedule.Next(now)
 	if err != nil {
 		_ = q.DisableScheduleEntry(ctx, entry.ID)
-		return false
+		return false, nil
 	}
-	advance := func(runID string) {
-		_ = q.AdvanceScheduleEntry(ctx, store.AdvanceScheduleEntryParams{
+	advance := func(runID string) error {
+		if err := q.AdvanceScheduleEntry(ctx, store.AdvanceScheduleEntryParams{
 			ID: entry.ID, NextFireAt: &next, LastRunAt: &now, LastRunID: runID,
-		})
+		}); err != nil {
+			return fmt.Errorf("advance schedule entry %s: %w", entry.ID, err)
+		}
+		return nil
+	}
+	// The tick's identity is its LOGICAL due time, not this attempt: the
+	// claim keeps the first claim's due time until the entry advances, so a
+	// lease that expires mid-batch, a crash between the run insert and the
+	// advance, or a second replica claiming the same entry resolve to one run.
+	dueAt := now
+	if entry.DueAt != nil {
+		dueAt = entry.DueAt.UTC()
+	}
+	drop := func(target, targetID string, metadata map[string]any) (bool, error) {
+		metadata["nodeId"], metadata["scheduledAt"] = entry.NodeID, dueAt.Format(time.RFC3339)
+		e.audit.Write(ctx, e.pool, &auth.Context{OrgID: entry.OrgID, UserID: "system:scheduler"},
+			"schedule.tick.dropped", audit.Options{TargetType: target, TargetID: targetID, Metadata: metadata})
+		return false, advance("")
 	}
 
 	// Active-parent guard: a stale entry must never re-run a tombstoned or
@@ -156,44 +184,29 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			_ = q.DeleteScheduleEntry(ctx, entry.ID)
+			return false, nil
 		}
-		return false
+		return false, fmt.Errorf("read schedule owner %s: %w", entry.WorkflowID, err)
 	}
 	if owner.OrgID != entry.OrgID || owner.DeletedAt != nil {
 		_ = q.DeleteScheduleEntry(ctx, entry.ID)
-		return false
+		return false, nil
 	}
 	if owner.Status != "" && owner.Status != "active" {
-		e.audit.Write(ctx, e.pool, &auth.Context{OrgID: entry.OrgID, UserID: "system:scheduler"},
-			"schedule.tick.dropped", audit.Options{
-				TargetType: "workflow", TargetID: entry.WorkflowID,
-				Metadata: map[string]any{
-					"reason": owner.Status, "nodeId": entry.NodeID,
-					"scheduledAt": now.Format(time.RFC3339),
-				},
-			})
-		advance("")
-		return false
+		return drop("workflow", entry.WorkflowID, map[string]any{"reason": owner.Status})
 	}
 
-	versionKey := entry.OrgID + "|" + entry.WorkflowID + "|" + entry.WorkflowVersionID
-	wf := versions[versionKey]
+	parsed, err := loadWorkflowVersion(ctx, q, entry.OrgID, entry.WorkflowID, entry.WorkflowVersionID, versions)
+	if errors.Is(err, pgx.ErrNoRows) {
+		_ = q.DeleteScheduleEntry(ctx, entry.ID)
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read schedule version %s: %w", entry.WorkflowVersionID, err)
+	}
+	wf := parsed.workflow
 	if wf == nil {
-		version, err := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
-			ID: entry.WorkflowVersionID, OrgID: entry.OrgID, WorkflowID: entry.WorkflowID,
-		})
-		if err != nil {
-			_ = q.DeleteScheduleEntry(ctx, entry.ID)
-			return false
-		}
-		wf, _ = domain.Parse(version.DagJson)
-		if wf == nil {
-			advance("")
-			return false
-		}
-		if versions != nil {
-			versions[versionKey] = wf
-		}
+		return false, advance("")
 	}
 	nodePresent := false
 	for _, node := range wf.Nodes {
@@ -204,17 +217,9 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 	}
 	if !nodePresent {
 		_ = q.DeleteScheduleEntry(ctx, entry.ID)
-		return false
+		return false, nil
 	}
 
-	// The tick's identity is its LOGICAL due time, not this attempt: a
-	// lease that expires mid-batch, a crash between the run insert and the
-	// advance, or a second replica claiming the same entry must all resolve
-	// to one run. dueAt is the pre-claim next_fire_at.
-	dueAt := now
-	if entry.DueAt != nil {
-		dueAt = entry.DueAt.UTC()
-	}
 	tick := entry.ID + "@" + dueAt.Format(time.RFC3339Nano)
 	start := StartInput{
 		OrgID: entry.OrgID, Workflow: wf, WorkflowVersionID: entry.WorkflowVersionID,
@@ -226,10 +231,17 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		},
 	}
 	// Ticks follow the deployment like every production start, keyed by the
-	// tick so a retry lands on the same arm. An unreadable rollout skips the tick.
-	assignment, err := e.ResolveWorkflowRolloutAssignment(ctx, entry.OrgID, entry.WorkflowID, tick)
+	// tick so a retry lands on the same arm. A version the rollout cannot run
+	// drops the tick loudly; a read failure retries it.
+	assignment, err := e.resolveRolloutAssignment(ctx, entry.OrgID, entry.WorkflowID, tick, versions)
+	var unavailable *RolloutVersionUnavailableError
+	if errors.As(err, &unavailable) {
+		return drop("workflow_rollout", unavailable.RolloutID, map[string]any{
+			"reason": "rollout_version_unavailable", "workflowId": entry.WorkflowID, "versionId": unavailable.VersionID,
+		})
+	}
 	if err != nil {
-		return false
+		return false, fmt.Errorf("resolve schedule rollout for %s: %w", entry.WorkflowID, err)
 	}
 	if assignment != nil {
 		start.Workflow, start.WorkflowVersionID = assignment.Workflow, assignment.VersionID
@@ -240,15 +252,15 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		var replay *ErrStartIdempotencyReplay
 		if errors.As(err, &replay) {
 			// This tick already fired; only the clock advance was lost.
-			advance(replay.RunID)
-			return false
+			return false, advance(replay.RunID)
 		}
-		// The lease already pushed the clock a minute out — the next sweep
-		// retries naturally; nothing to do beyond not advancing last_run.
-		return false
+		var invalid *InputValidationError
+		if errors.As(err, &invalid) {
+			return drop("workflow", entry.WorkflowID, map[string]any{"reason": "input_invalid"})
+		}
+		return false, fmt.Errorf("start scheduled run for %s: %w", entry.WorkflowID, err)
 	}
-	advance(runID)
-	return true
+	return true, advance(runID)
 }
 
 // RunScheduleSweep loops the due-clock sweep until the context ends.

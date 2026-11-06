@@ -22,10 +22,16 @@ shutdown.
 
 ## Concurrency posture
 
-Each scheduled tick is identified by its logical due time and keyed through
-run-start idempotency, so a lease that expires mid-batch, a crash before the
-clock advances, or a second process claiming the same entry all resolve to one
-run. Auto-healing candidates, replay-campaign items, upstream health sources,
+Each scheduled tick is identified by its logical due time. The first claim
+stores that time on the entry (`claimed_due_at`) and every later claim returns
+it until the entry advances, so a lease that expires mid-batch, a crash before
+the clock advances, or a second process claiming the same entry all key
+run-start idempotency and rollout assignment on the same tick and resolve to
+one run. A tick that fails on a read, a start or the clock advance keeps its
+claim, retries after the lease and marks the sweep unhealthy; a tick that can
+never run, such as one whose rollout version is broken or whose input is
+invalid, is dropped with an audit row and the entry moves to its next cron
+occurrence. Auto-healing candidates, replay-campaign items, upstream health sources,
 and alert dispatches are claimed before their work begins rather than after,
 and post-commit effects belong to the transaction that won its compare-and-set.
 
