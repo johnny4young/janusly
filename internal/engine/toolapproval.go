@@ -343,7 +343,7 @@ func (e *Engine) toolApprovalPolicy(ctx context.Context, orgID string) (map[stri
 }
 
 // stepAndUpstream is the step and every step that can lead to it, whose
-// form submitters and redrivers caused this call.
+// redrivers caused this call.
 func stepAndUpstream(ctx context.Context, q *store.Queries, claim ClaimedNode) ([]string, error) {
 	run, err := q.GetRunExecution(ctx, claim.RunID)
 	if err != nil {

@@ -102,9 +102,11 @@ run's completion lock. The request records:
   reference and revision of a named `credential`;
 - the requesters, who are the people who caused this call:
   - the creators of the run and its subworkflow parents;
-  - everyone who submitted a form, resumed with input or redrove this step or a
-    step upstream of it (`run_actors`, recorded per step; in a subworkflow
-    parent, the step that started the child);
+  - everyone who submitted a form or resumed with input anywhere in that
+    lineage, because rendered parameters can read any step's output;
+  - everyone who redrove this step or a step upstream of it (`run_actors`,
+    recorded per step; in a subworkflow parent, the step that started the
+    child);
   - everyone an earlier request for the same step excluded;
   - whoever saved the versions the lineage runs, when no person started it (the
     creator is `system:*` or the run came from a schedule or webhook), so the

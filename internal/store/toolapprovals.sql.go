@@ -212,7 +212,8 @@ started AS (
 SELECT DISTINCT actor::text FROM (
   SELECT created_by AS actor FROM started
   UNION ALL
-  SELECT a.actor FROM run_actors a JOIN lineage l ON a.run_id = l.id AND a.node_id = ANY(l.nodes)
+  SELECT a.actor FROM run_actors a JOIN lineage l ON a.run_id = l.id
+  WHERE a.role = 'resume' OR a.node_id = ANY(l.nodes)
   UNION ALL
   SELECT unnest(t.requester_ids) FROM tool_approval_requests t
   WHERE t.run_id = $1 AND t.node_id = $2
@@ -233,12 +234,12 @@ type ListToolApprovalRequestersParams struct {
 	NodeIds []string
 }
 
-// The people who caused this call. In the run, anyone who submitted a form,
-// resumed or redrove the step or a step upstream of it (node_ids); in each
-// subworkflow parent, the same for the step that started the child. Plus the
-// creators along that lineage, everyone an earlier request for the step
-// excluded, and, when no person started the lineage (a schedule, webhook or
-// system run), whoever saved the versions it runs.
+// The people who caused this call: the creators along the subworkflow
+// lineage; anyone who submitted a form or resumed with input anywhere in it,
+// since rendered parameters can read any step; whoever redrove this step or
+// one upstream (node_ids; in a parent run, the step that started the child);
+// everyone an earlier request for the step excluded; and, when no person
+// started the lineage, whoever saved the versions it runs.
 func (q *Queries) ListToolApprovalRequesters(ctx context.Context, arg ListToolApprovalRequestersParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listToolApprovalRequesters, arg.RunID, arg.NodeID, arg.NodeIds)
 	if err != nil {

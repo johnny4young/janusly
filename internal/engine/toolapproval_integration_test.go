@@ -490,28 +490,39 @@ func TestOlderDocumentsAndRunsStillStartAndRedrive(t *testing.T) {
 	}
 }
 
-// Requesters are scoped to the step: everyone who resumed or redrove it or a
-// step upstream, and everyone an earlier request for it excluded. A step that
-// cannot lead to the call does not count.
-func TestToolApprovalRequestersAreScopedToTheStep(t *testing.T) {
+// A form submitter anywhere in the lineage is barred, since rendered
+// parameters can read any step; a redriver is barred only for this step and
+// the steps upstream of it; earlier requesters carry forward.
+func TestToolApprovalRequesterScope(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
-	form := domain.Node{ID: "form", Type: "noop", Config: map[string]any{}}
-	other := domain.Node{ID: "other", Type: "noop", Config: map[string]any{}}
-	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{form, other, approvalTool(map[string]any{"value": "a"})},
-		[]domain.Edge{{From: "form", To: "call"}})
-	for _, row := range [][3]string{{"form", "resume", "fiona"}, {"call", "redrive", "dave"}, {"call", "redrive", "erin"}, {"other", "resume", "otto"}} {
-		if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, $2, $3, $4)`, runID, row[0], row[1], row[2]); err != nil {
+	parent := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{{ID: "intake", Type: "noop", Config: map[string]any{}}, {ID: "sub", Type: "noop", Config: map[string]any{}}},
+		[]domain.Edge{{From: "intake", To: "sub"}})
+	child, err := eng.StartRun(ctx, StartInput{OrgID: org, ParentRunID: parent, ParentNodeID: "sub", ParentLinkKind: "subworkflow",
+		Workflow: &domain.Workflow{ID: "wf-child", Name: "Child", DSLVersion: "1.0", Edges: []domain.Edge{{From: "form", To: "call"}},
+			Nodes: []domain.Node{{ID: "form", Type: "noop"}, {ID: "other", Type: "noop"}, approvalTool(map[string]any{"value": "a"})}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range [][4]string{
+		{parent, "intake", "resume", "paula"}, // parent-run form upstream of the subworkflow step
+		{parent, "intake", "redrive", "pete"}, // parent redrive of a step that did not start the child
+		{child, "form", "resume", "fiona"},
+		{child, "other", "resume", "otto"},  // not upstream of the call, but its output is readable
+		{child, "other", "redrive", "rita"}, // redrove an unrelated step
+		{child, "call", "redrive", "dave"},
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, $2, $3, $4)`, row[0], row[1], row[2], row[3]); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO tool_approval_requests (id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, status, consumed_at, expires_at)
-		VALUES ($1, $2, $3, 'call', 'text.uppercase', '{}', 'd', '{gina}', 'expired', now(), now())`, runID+"-old", org, runID); err != nil {
+		VALUES ($1, $2, $3, 'call', 'text.uppercase', '{}', 'd', '{gina}', 'expired', now(), now())`, child+"-old", org, child); err != nil {
 		t.Fatal(err)
 	}
 	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{
-		RunID: runID, NodeID: "call", NodeIds: []string{"call", "form"},
+		RunID: child, NodeID: "call", NodeIds: []string{"call", "form"},
 	})
-	if err != nil || strings.Join(requesters, ",") != "alice,dave,erin,fiona,gina" {
+	if err != nil || strings.Join(requesters, ",") != "alice,dave,fiona,gina,otto,paula" {
 		t.Fatalf("requesters %v %v", requesters, err)
 	}
 }
