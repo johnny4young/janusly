@@ -198,6 +198,17 @@ describe('<CommandPalette /> run filters', () => {
     await waitFor(() => expect(screen.getByTestId('palette-runs-state')).toHaveTextContent('No runs match these filters.'))
   })
 
+  it('writes a workflow by id when its name would read as another workflow', () => {
+    vi.mocked(readRunSummaryPage).mockResolvedValue([])
+    render(<CommandPalette {...runProps({ workflows: [{ id: 'demo-order', name: 'Order A' }, { id: 'wf-9', name: 'Demo order' }] })} />)
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'failed runs of order a' } })
+
+    fireEvent.change(screen.getByTestId('palette-chip-select-workflow'), { target: { value: 'wf-9' } })
+    expect(input).toHaveValue('failed runs of wf-9')
+    expect(screen.getByTestId('palette-chip-select-workflow')).toHaveDisplayValue('Demo order')
+  })
+
   it('hands replay to the recovery queue without writing, and only with the replay grant', async () => {
     vi.mocked(readRunSummaryPage).mockResolvedValue([recent])
     const onOpenRecovery = vi.fn()

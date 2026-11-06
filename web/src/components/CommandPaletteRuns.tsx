@@ -96,10 +96,10 @@ export function PaletteRunFilters({ query, parsed, workflows, now, onQueryChange
 }) {
   const { t, i18n } = useT()
   const text = RUN_QUERY_TEXT[i18n.language === 'es' ? 'es' : 'en']
-  // A name shared by two workflows cannot round-trip through its slug, so it is written as the id.
+  // A name slug shared with any other name or id cannot round-trip, so it is written as the id.
   const workflowText = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const workflow of workflows) counts.set(workflowSlug(workflow.name), (counts.get(workflowSlug(workflow.name)) ?? 0) + 1)
+    for (const slug of workflows.flatMap(workflow => [workflowSlug(workflow.id), workflowSlug(workflow.name)])) counts.set(slug, (counts.get(slug) ?? 0) + 1)
     return (workflow: { id: string; name: string }) => counts.get(workflowSlug(workflow.name)) === 1 ? workflowSlug(workflow.name) : workflow.id
   }, [workflows])
 
