@@ -9,8 +9,8 @@ var runSummary = closedObj(map[string]any{
 	"semanticViolationCount": map[string]any{"type": "integer", "minimum": 0}, "outputJson": runJSON,
 	"parentRunId": nullableString(), "parentNodeId": nullableString(), "replayMode": nullableString(), "traceId": nullableString(),
 	"validationEvidenceLevel": validationEvidenceSchema,
-	"createdBy":               nullableString(), "createdAt": nullableString(),
-}, "id", "orgId", "workflowId", "workflowName", "workflowVersionId", "status", "hasWaitingNodes", "outcomeStatus", "semanticViolationCount", "outputJson", "parentRunId", "parentNodeId", "replayMode", "traceId", "validationEvidenceLevel", "createdBy", "createdAt")
+	"createdBy":               nullableString(), "createdAt": nullableString(), "cursor": nullableString(),
+}, "id", "orgId", "workflowId", "workflowName", "workflowVersionId", "status", "hasWaitingNodes", "outcomeStatus", "semanticViolationCount", "outputJson", "parentRunId", "parentNodeId", "replayMode", "traceId", "validationEvidenceLevel", "createdBy", "createdAt", "cursor")
 
 var workflowListItem = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "name": str(), "createdBy": nullableString(), "createdAt": nullableString(),

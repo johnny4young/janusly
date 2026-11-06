@@ -246,7 +246,7 @@ func TestStartStatusRunAndListShapes(t *testing.T) {
 	requireEnvelope(t, list)
 	items := list.body["data"].([]any)
 	requireKeys(t, items[0].(map[string]any),
-		"createdAt", "createdBy", "hasWaitingNodes", "id", "orgId", "outcomeStatus",
+		"createdAt", "createdBy", "cursor", "hasWaitingNodes", "id", "orgId", "outcomeStatus",
 		"outputJson", "parentNodeId", "parentRunId", "replayMode",
 		"semanticViolationCount", "status", "traceId", "validationEvidenceLevel",
 		"workflowId", "workflowName", "workflowVersionId")

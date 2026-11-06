@@ -24,7 +24,7 @@ const saved = {
   openFailureCount: 0, currentVersion: 1, productionVersion: 1, rollout: null,
 }
 const run = {
-  id: 'run-a', orgId: 'org-a', status: 'timed_out', createdAt: null, createdBy: null, hasWaitingNodes: false,
+  id: 'run-a', orgId: 'org-a', status: 'timed_out', createdAt: null, cursor: null, createdBy: null, hasWaitingNodes: false,
   outcomeStatus: null, outputJson: null, parentNodeId: null, parentRunId: null, replayMode: null,
   semanticViolationCount: 0, traceId: null, validationEvidenceLevel: null, workflowId: workflow.id,
   workflowName: null, workflowVersionId: version.id,

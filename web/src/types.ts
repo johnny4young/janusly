@@ -187,6 +187,8 @@ export type RunSummary = {
   semanticViolationCount?: number
   createdBy?: string | null
   createdAt?: string | null
+  /** Full-precision keyset `before` value from the bounded `/runs` list. */
+  cursor?: string | null
   /** Full run-start envelope. Present on `/run` and `/status`; omitted from the bounded `/runs` list. */
   inputJson?: JsonObject | null
   /** Correlation id shared by a subworkflow chain. Null on historical root runs that predate trace assignment. */
