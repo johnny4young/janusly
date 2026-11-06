@@ -312,18 +312,22 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	// or document edit can move a listed call out of the gate.
 	var approvalRequired func(string) bool
 	approvedTool := ""
-	if node.Type == "tool" || node.Type == "loop" || node.Type == "agent" || node.Type == "multi_agent" {
+	if node.Type == "tool" || node.Type == "http" || node.Type == "loop" || node.Type == "agent" || node.Type == "multi_agent" {
 		policy, err := d.engine.toolApprovalPolicy(ctx, claim.OrgID)
 		if err != nil {
 			return nil, err
 		}
 		approvalRequired = func(name string) bool { return policy[name] }
 	}
-	if node.Type == "tool" {
-		name, _ := renderedConfig["tool"].(string)
-		input, _ := renderedConfig["input"].(map[string]any)
-		if input == nil {
-			input = map[string]any{}
+	if node.Type == "tool" || node.Type == "http" {
+		// An http step is the http.request call its rendered config describes.
+		name, input := "http.request", renderedConfig
+		if node.Type == "tool" {
+			name, _ = renderedConfig["tool"].(string)
+			input, _ = renderedConfig["input"].(map[string]any)
+			if input == nil {
+				input = map[string]any{}
+			}
 		}
 		if approvalRequired(name) && (!dryRun || !executors.ToolCallWriteSide(executors.SharedToolRegistry(), name, input)) {
 			waiting, paused, err := d.engine.gateToolApproval(ctx, claim, name, input, rendered.RedactedValues)

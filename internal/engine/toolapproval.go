@@ -117,7 +117,13 @@ func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool s
 	err = e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, _ *runEventBuffer) error {
 		live, err := q.GetLiveToolApproval(ctx, store.GetLiveToolApprovalParams{RunID: claim.RunID, NodeID: claim.NodeID})
 		if errors.Is(err, pgx.ErrNoRows) {
-			requesters, err := q.ListToolApprovalRequesters(ctx, claim.RunID)
+			upstream, err := stepAndUpstream(ctx, q, claim)
+			if err != nil {
+				return err
+			}
+			requesters, err := q.ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{
+				RunID: claim.RunID, NodeID: claim.NodeID, NodeIds: upstream,
+			})
 			if err != nil {
 				return fmt.Errorf("list tool approval requesters: %w", err)
 			}
@@ -334,4 +340,20 @@ func (e *Engine) toolApprovalPolicy(ctx context.Context, orgID string) (map[stri
 		return nil, fmt.Errorf("tool approval policy is not a string")
 	}
 	return orgconfig.ParseToolApprovalPolicy(text)
+}
+
+// stepAndUpstream is the step and every step that can lead to it, whose
+// form submitters and redrivers caused this call.
+func stepAndUpstream(ctx context.Context, q *store.Queries, claim ClaimedNode) ([]string, error) {
+	run, err := q.GetRunExecution(ctx, claim.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("read run for tool approval: %w", err)
+	}
+	wf, _, err := workflowFromRunInput(run.InputJson)
+	if err != nil {
+		return nil, err
+	}
+	nodes := collectRelatives(wf, claim.NodeID, true)
+	nodes[claim.NodeID] = true
+	return slices.Sorted(maps.Keys(nodes)), nil
 }

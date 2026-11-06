@@ -77,14 +77,18 @@ approval topology stay directly inspectable.
 The org setting `tools.approvalRequired` lists tool names whose every call
 waits for a person. It is changed only by `org.config.write` through
 `POST /org/config`, which audits the change. The tool inspector shows the rule,
-and admins can switch it there.
+and admins can switch it there. The setting accepts only names the gate can
+enforce: the built-in tools, including `http.request`. Any other name, such as
+an MCP tool, is refused with `tool_approval_unenforceable`.
 
-The dispatcher reads the policy for `tool`, `loop`, `agent` and `multi_agent`
-steps and fails closed when it is unreadable or malformed. It matches the tool
-name rendered for the call, so the step id, a decoy step, a replayed fix or a
-rerun override cannot move a listed call out of the gate. A listed tool runs
-only as an approved `tool` step: a `for_each` loop or an agent that reaches it
-gets a `TOOL_APPROVAL_REQUIRED` refusal. MCP tool steps are not covered yet.
+The dispatcher reads the policy for `tool`, `http`, `loop`, `agent` and
+`multi_agent` steps and fails closed when it is unreadable or malformed. It
+matches the tool name rendered for the call (an `http` step is
+`http.request`), so the step id, a decoy step, a replayed fix or a rerun
+override cannot move a listed call out of the gate. A listed tool runs only as
+an approved `tool` or `http` step. A `for_each` loop or an agent that reaches
+it, including an agent's `http.request`, gets a `TOOL_APPROVAL_REQUIRED`
+refusal.
 Validation runs and draft tests keep suppressing writes as before, so the gate
 waits only for listed calls that would really run there, which are reads.
 
@@ -96,10 +100,15 @@ run's completion lock. The request records:
   paths of the masked values (at most 64 KB, or the step fails);
 - an HMAC digest of the full rendered call that also covers the id, kind,
   reference and revision of a named `credential`;
-- the requesters, who are the people who caused this execution: the creators
-  of the run and its subworkflow parents, anyone who submitted a form or
-  resumed with input along that lineage (`run_actors`, role `resume`), and the
-  person who most recently redrove this run (role `redrive`);
+- the requesters, who are the people who caused this call:
+  - the creators of the run and its subworkflow parents;
+  - everyone who submitted a form, resumed with input or redrove this step or a
+    step upstream of it (`run_actors`, recorded per step; in a subworkflow
+    parent, the step that started the child);
+  - everyone an earlier request for the same step excluded;
+  - whoever saved the versions the lineage runs, when no person started it (the
+    creator is `system:*` or the run came from a schedule or webhook), so the
+    author of the parameters cannot approve them;
 - how many members can approve: members who can start runs and are not
   requesters. When none can, the card says so.
 

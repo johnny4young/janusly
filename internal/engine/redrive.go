@@ -306,7 +306,7 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID, actor
 // re-runs and retires any undecided or unspent approval for the step.
 func recordRedriveForApprovals(ctx context.Context, q *store.Queries, runID, nodeID, actor string) error {
 	if actor != "" {
-		if err := q.RecordRunActor(ctx, store.RecordRunActorParams{RunID: runID, Role: "redrive", Actor: actor}); err != nil {
+		if err := q.RecordRunActor(ctx, store.RecordRunActorParams{RunID: runID, NodeID: nodeID, Role: "redrive", Actor: actor}); err != nil {
 			return fmt.Errorf("record redriver: %w", err)
 		}
 	}

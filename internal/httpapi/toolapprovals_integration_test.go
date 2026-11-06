@@ -74,6 +74,9 @@ func TestToolApprovalPolicyGatesTheCallWhateverTheDocument(t *testing.T) {
 	if res := h.call("POST", "/org/config", map[string]any{"key": "tools.approvalRequired", "value": "Not A Tool"}, ""); res.status != 400 {
 		t.Fatalf("a malformed policy was stored: %d %+v", res.status, res.body)
 	}
+	if res := h.call("POST", "/org/config", map[string]any{"key": "tools.approvalRequired", "value": "text.uppercase, crm.lookup"}, ""); res.status != 400 || res.body["code"] != "tool_approval_unenforceable" {
+		t.Fatalf("a policy for a tool the gate cannot hold was stored: %d %+v", res.status, res.body)
+	}
 	id := fmt.Sprintf("wf-policy-%d", time.Now().UnixNano())
 	runID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": gateWorkflow(id, uppercaseStep("call", "page"))}, ""))
 	approvalID, digest := h.waitApproval(ctx, pool, runID)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -489,22 +490,97 @@ func TestOlderDocumentsAndRunsStillStartAndRedrive(t *testing.T) {
 	}
 }
 
-// Whoever submits a form upstream caused the call and cannot approve it; the
-// run's creator, the latest redriver and earlier ones follow the same rule.
-func TestToolApprovalRequestersAreThePeopleBehindThisExecution(t *testing.T) {
+// Requesters are scoped to the step: everyone who resumed or redrove it or a
+// step upstream, and everyone an earlier request for it excluded. A step that
+// cannot lead to the call does not count.
+func TestToolApprovalRequestersAreScopedToTheStep(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
-	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
-	for _, row := range [][2]string{{"resume", "fiona"}, {"redrive", "dave"}} {
-		if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, role, actor, acted_at) VALUES ($1, $2, $3, now() - interval '1 hour')`, runID, row[0], row[1]); err != nil {
+	form := domain.Node{ID: "form", Type: "noop", Config: map[string]any{}}
+	other := domain.Node{ID: "other", Type: "noop", Config: map[string]any{}}
+	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{form, other, approvalTool(map[string]any{"value": "a"})},
+		[]domain.Edge{{From: "form", To: "call"}})
+	for _, row := range [][3]string{{"form", "resume", "fiona"}, {"call", "redrive", "dave"}, {"call", "redrive", "erin"}, {"other", "resume", "otto"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, $2, $3, $4)`, runID, row[0], row[1], row[2]); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, role, actor) VALUES ($1, 'redrive', 'erin')`, runID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO tool_approval_requests (id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, status, consumed_at, expires_at)
+		VALUES ($1, $2, $3, 'call', 'text.uppercase', '{}', 'd', '{gina}', 'expired', now(), now())`, runID+"-old", org, runID); err != nil {
 		t.Fatal(err)
 	}
-	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, runID)
-	if err != nil || strings.Join(requesters, ",") != "alice,erin,fiona" {
+	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{
+		RunID: runID, NodeID: "call", NodeIds: []string{"call", "form"},
+	})
+	if err != nil || strings.Join(requesters, ",") != "alice,dave,erin,fiona,gina" {
 		t.Fatalf("requesters %v %v", requesters, err)
+	}
+}
+
+// Rotating redrivers does not open self-approval: each one stays excluded.
+func TestRedriverRotationCannotSelfApprove(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	requireApprovalFor(t, ctx, pool, org, "text.uppercase")
+	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	fail := func() {
+		if _, err := pool.Exec(ctx, `UPDATE run_nodes SET status = 'failed' WHERE run_id = $1`, runID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE runs SET status = 'failed' WHERE id = $1`, runID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim := claimNext(t, ctx, pool, org, runID)
+	if _, _, err := eng.gateToolApproval(ctx, claim, "text.uppercase", map[string]any{"value": "a"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, redriver := range []string{"dave", "erin"} {
+		fail()
+		if err := eng.RedriveRunNode(ctx, org, runID, "call", redriver); err != nil {
+			t.Fatal(err)
+		}
+		claim = claimNext(t, ctx, pool, org, runID)
+	}
+	waiting, paused, err := eng.gateToolApproval(ctx, claim, "text.uppercase", map[string]any{"value": "a"}, nil)
+	if err != nil || !paused {
+		t.Fatalf("gate: %v", err)
+	}
+	if err := eng.MarkNodeWaiting(ctx, claim, waiting); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = eng.DecideToolApproval(ctx, ToolApprovalDecision{OrgID: org, ApprovalID: waiting.Metadata["approvalId"].(string),
+		Actor: "dave", ParamsDigest: waiting.Metadata["paramsDigest"].(string), Status: ToolApprovalApproved})
+	if !errors.Is(err, ErrToolApprovalSelf) {
+		t.Fatalf("an earlier redriver approved after another redrive: %v", err)
+	}
+}
+
+// When no person started the run, whoever saved the version cannot approve
+// the parameters they wrote; in a person's run they still can.
+func TestVersionAuthorIsBarredOnlyFromUnattendedRuns(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	for index, test := range []struct {
+		createdBy, triggeredBy string
+		authorBarred           bool
+	}{{"system:schedule", "schedule", true}, {"alice", "", false}} {
+		input := map[string]any{}
+		if test.triggeredBy != "" {
+			input["triggeredBy"] = test.triggeredBy
+		}
+		runID, err := eng.StartRun(ctx, StartInput{OrgID: org, CreatedBy: test.createdBy, Input: input, Workflow: &domain.Workflow{
+			ID: "wf-authored", Name: "Authored", DSLVersion: "1.0", Nodes: []domain.Node{approvalTool(map[string]any{"value": "a"})}, Edges: []domain.Edge{}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by) VALUES ($1, $2, 'wf-authored', $3, '{}', 'erin')`, runID+"-v", org, index+1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE runs SET workflow_version_id = $2 WHERE id = $1`, runID, runID+"-v"); err != nil {
+			t.Fatal(err)
+		}
+		requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: runID, NodeID: "call", NodeIds: []string{"call"}})
+		if err != nil || slices.Contains(requesters, "erin") != test.authorBarred {
+			t.Fatalf("%s run: requesters %v %v", test.createdBy, requesters, err)
+		}
 	}
 }
 
@@ -545,6 +621,13 @@ func TestTwoMemberOrgCanApprove(t *testing.T) {
 		}
 	}
 	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	// Bob saved the version; in a run Alice started by hand he may still approve.
+	if _, err := pool.Exec(ctx, `INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by) VALUES ($1, $2, 'wf-tool-approval', 1, '{}', 'bob')`, runID+"-v", org); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE runs SET workflow_version_id = $2 WHERE id = $1`, runID, runID+"-v"); err != nil {
+		t.Fatal(err)
+	}
 	claim := claimNext(t, ctx, pool, org, runID)
 	waiting, _, err := eng.gateToolApproval(ctx, claim, "text.uppercase", map[string]any{"value": "a"}, nil)
 	if err != nil {
@@ -572,5 +655,22 @@ func TestMalformedToolApprovalPolicyFailsClosed(t *testing.T) {
 	var output string
 	if err := pool.QueryRow(ctx, `SELECT coalesce(state_json #>> '{output}', '') FROM run_nodes WHERE run_id = $1`, runID).Scan(&output); err != nil || output != "" {
 		t.Fatalf("the call ran under a malformed policy: %q %v", output, err)
+	}
+}
+
+// An http step is the http.request call it describes, so the policy gates it.
+func TestToolApprovalGatesHTTPSteps(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	requireApprovalFor(t, ctx, pool, org, "http.request")
+	runToolApprovalWorkers(t, eng)
+	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{{ID: "call", Type: "http", Config: map[string]any{
+		"url": "https://hooks.example.test/page", "method": "POST", "headers": map[string]any{"authorization": "Bearer live"}}}}, nil)
+	approvalID := waitForApproval(t, ctx, pool, runID)
+	var tool, params string
+	if err := pool.QueryRow(ctx, `SELECT tool, params_json::text FROM tool_approval_requests WHERE id = $1`, approvalID).Scan(&tool, &params); err != nil {
+		t.Fatal(err)
+	}
+	if tool != "http.request" || strings.Contains(params, "Bearer live") || !strings.Contains(params, "hooks.example.test/page") {
+		t.Fatalf("http step request: %s %s", tool, params)
 	}
 }

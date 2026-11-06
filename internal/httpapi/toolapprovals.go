@@ -2,11 +2,15 @@ package httpapi
 
 import (
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/engine"
+	"github.com/johnny4young/janusly/internal/executors"
+	"github.com/johnny4young/janusly/internal/orgconfig"
 )
 
 func init() {
@@ -59,4 +63,20 @@ func (s *V1Server) decideToolApprovalCore(r *http.Request, rc v1Request) opResul
 		})
 	}
 	return opOK(map[string]any{"runId": row.RunID, "decision": body.Decision})
+}
+
+// unenforceableApprovalTool names a listed tool the gate cannot hold, such as
+// an MCP tool, so the policy never promises a gate that does not exist.
+func unenforceableApprovalTool(key string, value any) string {
+	text, _ := value.(string)
+	if key != orgconfig.ToolApprovalPolicyKey {
+		return ""
+	}
+	names, _ := orgconfig.ParseToolApprovalPolicy(text)
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		if !executors.SharedToolRegistry().Has(name) {
+			return name
+		}
+	}
+	return ""
 }

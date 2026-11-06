@@ -3591,14 +3591,15 @@ CREATE TABLE public.tool_approval_requests (
 CREATE UNIQUE INDEX tool_approval_requests_live_idx ON public.tool_approval_requests (run_id, node_id) WHERE consumed_at IS NULL;
 CREATE INDEX tool_approval_requests_run_node_idx ON public.tool_approval_requests (run_id, node_id);
 
--- People who moved a run along: a form submitter or a redriver may not
--- approve the calls that their action caused.
+-- People who moved a step along: a form submitter or a redriver may not
+-- approve the calls that step leads to.
 CREATE TABLE public.run_actors (
     run_id text NOT NULL,
+    node_id text NOT NULL,
     role text NOT NULL,
     actor text NOT NULL,
     acted_at timestamp with time zone DEFAULT now() NOT NULL,
-    PRIMARY KEY (run_id, role, actor),
+    PRIMARY KEY (run_id, node_id, role, actor),
     CONSTRAINT run_actors_role_check CHECK (role IN ('redrive', 'resume'))
 );
 

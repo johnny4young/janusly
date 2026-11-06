@@ -1118,6 +1118,7 @@ CREATE TABLE public.routing_stats (
 
 CREATE TABLE public.run_actors (
     run_id text NOT NULL,
+    node_id text NOT NULL,
     role text NOT NULL,
     actor text NOT NULL,
     acted_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -2149,7 +2150,7 @@ ALTER TABLE ONLY public.routing_stats
 --
 
 ALTER TABLE ONLY public.run_actors
-    ADD CONSTRAINT run_actors_pkey PRIMARY KEY (run_id, role, actor);
+    ADD CONSTRAINT run_actors_pkey PRIMARY KEY (run_id, node_id, role, actor);
 
 
 --

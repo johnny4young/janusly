@@ -28,3 +28,18 @@ func TestListedToolRunsOnlyAsTheApprovedStep(t *testing.T) {
 		t.Fatalf("validation must keep skipping a listed write: %v", got)
 	}
 }
+
+// An agent's http.request goes through the same rule as the registry tools.
+func TestAgentHTTPRequestFollowsTheApprovalPolicy(t *testing.T) {
+	called := false
+	httpExec := func(context.Context, Input) (any, error) { called = true; return map[string]any{}, nil }
+	in := Input{
+		ApprovalRequired:         func(name string) bool { return name == "http.request" },
+		AgentAllowedHTTPRequests: map[string]map[string]any{"https://api.example.test/x": {"url": "https://api.example.test/x", "method": "POST"}},
+	}
+	plan := AgentPlan{Tool: "http.request", Input: map[string]any{"url": "https://api.example.test/x"}}
+	got := executeAgentTool(context.Background(), in, plan, map[string]any{}, NewToolRegistry(), httpExec)
+	if called || got["code"] != "TOOL_APPROVAL_REQUIRED" {
+		t.Fatalf("a listed agent request ran: called=%v %v", called, got)
+	}
+}

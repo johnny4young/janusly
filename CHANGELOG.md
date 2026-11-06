@@ -8,9 +8,10 @@
   exact parameters with secrets masked and where masked values sit, and the
   policy. Approve runs exactly those parameters once; Deny, or no decision
   within 30 minutes, fails the step so it takes its error route. The person who
-  started the run, anyone who submitted a form in it, and whoever last redrove
-  it cannot decide, and the card says when nobody else can. A listed tool cannot
-  run inside a loop or an agent.
+  started the run, anyone who submitted a form or redrove the step, and, for
+  scheduled and webhook runs, whoever saved the workflow cannot decide. The card
+  says when nobody else can. HTTP request steps follow the same rule, and a
+  listed tool cannot run inside a loop or an agent.
 - The experiment comparison lists metrics by row, with either arm as the
   baseline. Each change says Better or Worse according to whether higher or
   lower is better for that metric. Diff only hides metrics that did not change.

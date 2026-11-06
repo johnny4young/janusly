@@ -740,6 +740,7 @@ type Run struct {
 
 type RunActor struct {
 	RunID   string
+	NodeID  string
 	Role    string
 	Actor   string
 	ActedAt time.Time

@@ -15,34 +15,48 @@ INSERT INTO tool_approval_requests
 VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.arg(requester_ids)::text[], sqlc.narg(eligible_approvers), now() + interval '30 minutes')
 RETURNING *;
 
--- The people who caused this execution: the creators of the run and its
--- subworkflow parents, anyone who submitted a form along that lineage, and
--- whoever redrove this run most recently.
+-- The people who caused this call. In the run, anyone who submitted a form,
+-- resumed or redrove the step or a step upstream of it (node_ids); in each
+-- subworkflow parent, the same for the step that started the child. Plus the
+-- creators along that lineage, everyone an earlier request for the step
+-- excluded, and, when no person started the lineage (a schedule, webhook or
+-- system run), whoever saved the versions it runs.
 -- name: ListToolApprovalRequesters :many
-WITH RECURSIVE lineage (id, parent_run_id, follow, depth) AS (
-  SELECT r.id, r.parent_run_id,
-         r.parent_node_id IS NOT NULL AND coalesce(r.parent_link_kind, 'subworkflow') = 'subworkflow', 0
+WITH RECURSIVE lineage (id, parent_run_id, parent_node_id, follow, nodes, depth) AS (
+  SELECT r.id, r.parent_run_id, r.parent_node_id,
+         r.parent_node_id IS NOT NULL AND coalesce(r.parent_link_kind, 'subworkflow') = 'subworkflow',
+         sqlc.arg(node_ids)::text[], 0
   FROM runs r WHERE r.id = sqlc.arg(run_id)
   UNION ALL
-  SELECT p.id, p.parent_run_id,
-         p.parent_node_id IS NOT NULL AND coalesce(p.parent_link_kind, 'subworkflow') = 'subworkflow', l.depth + 1
+  SELECT p.id, p.parent_run_id, p.parent_node_id,
+         p.parent_node_id IS NOT NULL AND coalesce(p.parent_link_kind, 'subworkflow') = 'subworkflow',
+         ARRAY[l.parent_node_id]::text[], l.depth + 1
   FROM runs p JOIN lineage l ON p.id = l.parent_run_id
   WHERE l.follow AND l.depth < 32
+),
+started AS (
+  SELECT r.created_by, r.trigger_kind, r.workflow_version_id FROM runs r JOIN lineage l ON r.id = l.id
 )
 SELECT DISTINCT actor::text FROM (
-  SELECT r.created_by AS actor FROM runs r JOIN lineage l ON r.id = l.id
+  SELECT created_by AS actor FROM started
   UNION ALL
-  SELECT a.actor FROM run_actors a JOIN lineage l ON a.run_id = l.id WHERE a.role = 'resume'
+  SELECT a.actor FROM run_actors a JOIN lineage l ON a.run_id = l.id AND a.node_id = ANY(l.nodes)
   UNION ALL
-  (SELECT a.actor FROM run_actors a WHERE a.run_id = sqlc.arg(run_id) AND a.role = 'redrive'
-   ORDER BY a.acted_at DESC LIMIT 1)
+  SELECT unnest(t.requester_ids) FROM tool_approval_requests t
+  WHERE t.run_id = sqlc.arg(run_id) AND t.node_id = sqlc.arg(node_id)
+  UNION ALL
+  SELECT v.created_by FROM workflow_versions v JOIN started s ON v.id = s.workflow_version_id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM started h
+    WHERE coalesce(h.created_by, '') <> '' AND h.created_by NOT LIKE 'system:%' AND h.trigger_kind IS NULL
+  )
 ) actors
 WHERE actor IS NOT NULL AND actor <> ''
 ORDER BY actor;
 
 -- name: RecordRunActor :exec
-INSERT INTO run_actors (run_id, role, actor) VALUES ($1, $2, $3)
-ON CONFLICT (run_id, role, actor) DO UPDATE SET acted_at = now();
+INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, $2, $3, $4)
+ON CONFLICT (run_id, node_id, role, actor) DO UPDATE SET acted_at = now();
 
 -- A step that fails or is redriven before the gate spends its decision gives
 -- the decision up, so the next execution asks again.
