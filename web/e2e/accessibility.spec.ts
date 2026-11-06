@@ -61,10 +61,20 @@ test('Home and its primary Activity path meet the accessibility floor', async ({
 
   const hero = page.locator('.we-recovery-center-hero')
   await expect(hero).toBeVisible()
+  const labEntry = page.getByTestId('recovery-lab-entry')
+  await expect(labEntry).toBeVisible()
+  await expectNoBlockingAccessibilityViolations(page, 'Home first run')
+  await capture(page.locator('.workspace-main'), 'accessibility-en-home-first-run')
+
+  // An empty workspace opens on Recovery Lab; dismissing it reveals the action workspace.
+  await labEntry.getByRole('button', { name: 'Dismiss the Recovery Lab introduction', exact: true }).click()
+  await expect(labEntry).toBeHidden()
+  const activeWork = page.getByTestId('home-active-work')
+  await expect(activeWork).toBeVisible()
   await expectNoBlockingAccessibilityViolations(page, 'Home')
   await capture(page.locator('.workspace-main'), 'accessibility-en-home')
 
-  await page.getByTestId('home-active-work').getByRole('button', { name: 'Activity' }).click()
+  await activeWork.getByRole('button', { name: 'Activity', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Recent activity' })).toBeVisible()
   await expectNoBlockingAccessibilityViolations(page, 'Activity')
@@ -117,11 +127,47 @@ test('AI-generated workflow result meets the accessibility floor', async ({ page
       },
     ],
     edges: [{ from: 'fetch', to: 'approval' }],
+    outputs: { result: '{{context.approval.output}}' },
+    recovery: {
+      contract: {
+        version: '2',
+        failure: {
+          technical: { terminalNodeFailure: true, stalledNode: true },
+          semantic: {
+            mode: 'deterministic',
+            detectors: [{
+              id: 'api-reachable',
+              sourceNodeId: 'fetch',
+              kind: 'expression',
+              passWhen: 'context.fetch.output.status === 200',
+              action: 'quarantine',
+              message: 'The API result needs review before approval.',
+              autonomyLevel: 2,
+            }],
+            evaluationFixtures: [
+              { id: 'api-ok', sourceNodeId: 'fetch', output: { status: 200 }, expected: 'pass' },
+              { id: 'api-down', sourceNodeId: 'fetch', output: { status: 503 }, expected: 'violation' },
+            ],
+          },
+        },
+        evidence: { required: ['failure_snapshot', 'audit_trail', 'terminal_outcome'] },
+        effects: [],
+        repairs: { allowed: ['retry'] },
+        validation: { minimumEvidenceLevel: 'static' },
+        approval: { productionMutation: 'required', permission: 'recovery.write' },
+        autonomyLevel: 2,
+        verification: { kind: 'generation_bound_terminal_success' },
+        recurrence: { windowDays: 7 },
+      },
+    },
   }, { mode: 'ai' })
   await page.goto('/')
 
   await openWorkflowAiAction(page, 'Workflows')
-  await page.locator('.ai-studio-prompt').fill('Draft an API flow with human approval.')
+  // The local compiler asks for the trigger and external effects of a short prompt.
+  await page.locator('.ai-studio-prompt').fill(
+    'Start manually, read the GitHub API status without modifying external systems, and require human approval.',
+  )
   const proposal = await buildWorkflowProposal(page)
   await expect(proposal.getByTestId('workflow-assurance-summary').locator('.mode-pill-ai')).toHaveCount(3)
   await applyBuiltWorkflowProposal(page)
