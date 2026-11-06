@@ -120,7 +120,6 @@ export type ToolApprovalRequest = {
 }
 
 export type ToolApprovalDecision = {
-  nodeId: string
   approvalId: string
   paramsDigest: string
   decision: 'approve' | 'deny'

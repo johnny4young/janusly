@@ -243,29 +243,16 @@ export function useRunCommands(
     t,
   ])
 
-  const approveNode = useCallback(async (nodeId: string) => {
+  // A tool approval is decided against the exact call it shows; other waits resume.
+  const approveNode = useCallback(async (nodeId: string, toolDecision?: ToolApprovalDecision) => {
     if (!runId) return
     await runPlatformMutation({
-      request: () => api('/resume', {
-        method: 'POST',
-        body: JSON.stringify({ runId, nodeId }),
-      }),
-      failureMessage: t('toasts.resumeFailed'),
-      successToast: { message: t('toasts.stepApproved', { nodeId }), tone: 'success' },
-      onSuccess: async () => {
-        await loadStatus(runId)
-      },
-    })
-  }, [loadStatus, runId, runPlatformMutation, t])
-
-  const decideToolApproval = useCallback(async (decision: ToolApprovalDecision) => {
-    if (!runId) return
-    const { nodeId, ...body } = decision
-    await runPlatformMutation({
-      request: () => api('/runs/tool-approvals/decide', { method: 'POST', body: JSON.stringify(body) }),
-      failureMessage: t('toasts.toolApprovalFailed'),
+      request: () => toolDecision
+        ? api('/runs/tool-approvals/decide', { method: 'POST', body: JSON.stringify(toolDecision) })
+        : api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) }),
+      failureMessage: t(toolDecision ? 'toasts.toolApprovalFailed' : 'toasts.resumeFailed'),
       successToast: {
-        message: t(decision.decision === 'approve' ? 'toasts.toolApprovalApproved' : 'toasts.toolApprovalDenied', { nodeId }),
+        message: t(toolDecision?.decision === 'deny' ? 'toasts.toolApprovalDenied' : 'toasts.stepApproved', { nodeId }),
         tone: 'success',
       },
       onSuccess: async () => {
@@ -402,7 +389,6 @@ export function useRunCommands(
 
   return {
     approveNode,
-    decideToolApproval,
     cancelActiveRun,
     clearActiveRun,
     loadOlderEvents,

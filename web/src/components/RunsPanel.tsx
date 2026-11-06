@@ -95,8 +95,7 @@ export type RunsPanelProps = {
   activeRunId?: string | null
   onOpenRun: (id: string) => void | Promise<void>
   onRefreshPlatform: () => void
-  onApproveNode: (nodeId: string) => void
-  onDecideToolApproval?: (decision: ToolApprovalDecision) => void
+  onApproveNode: (nodeId: string, toolDecision?: ToolApprovalDecision) => void
   onSubmitHumanForm: SubmitHumanFormHandler
   onReplayNode: (nodeId: string) => void
   onRedriveNode: (nodeId: string) => void
@@ -155,7 +154,6 @@ export function RunsPanel({
   onOpenRun,
   onRefreshPlatform,
   onApproveNode,
-  onDecideToolApproval,
   onSubmitHumanForm,
   onReplayNode,
   onRedriveNode,
@@ -559,7 +557,7 @@ export function RunsPanel({
                   </div>
                 )}
                 {toolApproval ? (
-                  canStartRuns && onDecideToolApproval && (
+                  canStartRuns && (
                     <div className="we-run-overview__actions">
                       {(['approve', 'deny'] as const).map(decision => (
                         <Button
@@ -567,8 +565,7 @@ export function RunsPanel({
                           size="sm"
                           variant={decision === 'approve' ? 'primary' : 'danger'}
                           data-testid={`tool-approval-${decision}-${node.nodeId}`}
-                          onClick={() => onDecideToolApproval({
-                            nodeId: node.nodeId,
+                          onClick={() => onApproveNode(node.nodeId, {
                             approvalId: toolApproval.approvalId,
                             paramsDigest: toolApproval.paramsDigest,
                             decision,

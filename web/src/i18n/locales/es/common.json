@@ -606,7 +606,6 @@
   "toasts.credentialAdded": "Credencial {{name}} agregada",
   "toasts.credentialFailed": "No se pudo guardar la credencial",
   "toasts.stepApproved": "Paso {{nodeId}} aprobado",
-  "toasts.toolApprovalApproved": "Aprobaste {{nodeId}}; la herramienta se ejecuta ahora",
   "toasts.toolApprovalDenied": "Rechazaste {{nodeId}}",
   "toasts.toolApprovalFailed": "No se pudo registrar la decisión",
   "toasts.resumeFailed": "Falló la reanudación",

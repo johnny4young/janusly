@@ -606,7 +606,6 @@
   "toasts.credentialAdded": "Credential {{name}} added",
   "toasts.credentialFailed": "Credential failed to save",
   "toasts.stepApproved": "Step {{nodeId}} approved",
-  "toasts.toolApprovalApproved": "Approved {{nodeId}}; the tool runs now",
   "toasts.toolApprovalDenied": "Denied {{nodeId}}",
   "toasts.toolApprovalFailed": "Could not record the decision",
   "toasts.resumeFailed": "Resume failed",

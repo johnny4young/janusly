@@ -343,7 +343,7 @@ describe('<RunsPanel /> observability', () => {
   })
 
   it('shows the exact tool call and records a bound decision', () => {
-    const onDecideToolApproval = vi.fn()
+    const onApproveNode = vi.fn()
     const node: RunNode = {
       nodeId: 'snooze',
       status: 'waiting',
@@ -361,7 +361,7 @@ describe('<RunsPanel /> observability', () => {
       },
     }
     const { rerender } = render(
-      <RunsPanel {...handlers} onDecideToolApproval={onDecideToolApproval} mode="recovery" activeRunId="run-1" workflows={[]}
+      <RunsPanel {...handlers} onApproveNode={onApproveNode} mode="recovery" activeRunId="run-1" workflows={[]}
         runs={[{ id: 'run-1', status: 'running' }]} runNodes={[node]} usage={{}} />,
     )
 
@@ -377,13 +377,13 @@ describe('<RunsPanel /> observability', () => {
 
     fireEvent.click(screen.getByTestId('tool-approval-deny-snooze'))
     fireEvent.click(screen.getByTestId('tool-approval-approve-snooze'))
-    expect(onDecideToolApproval.mock.calls).toEqual([
-      [{ nodeId: 'snooze', approvalId: 'approval-1', paramsDigest: 'digest-1', decision: 'deny' }],
-      [{ nodeId: 'snooze', approvalId: 'approval-1', paramsDigest: 'digest-1', decision: 'approve' }],
+    expect(onApproveNode.mock.calls).toEqual([
+      ['snooze', { approvalId: 'approval-1', paramsDigest: 'digest-1', decision: 'deny' }],
+      ['snooze', { approvalId: 'approval-1', paramsDigest: 'digest-1', decision: 'approve' }],
     ])
 
     rerender(
-      <RunsPanel {...handlers} onDecideToolApproval={onDecideToolApproval} canStartRuns={false} mode="recovery" activeRunId="run-1"
+      <RunsPanel {...handlers} onApproveNode={onApproveNode} canStartRuns={false} mode="recovery" activeRunId="run-1"
         workflows={[]} runs={[{ id: 'run-1', status: 'running' }]} runNodes={[node]} usage={{}} />,
     )
     expect(screen.queryByTestId('tool-approval-approve-snooze')).not.toBeInTheDocument()
