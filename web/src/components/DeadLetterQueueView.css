@@ -107,7 +107,7 @@
 
 .we-dlq-filters select.ui-control {
   width: auto;
-  padding-inline: 8px;
+  padding-inline: 8px 4px;
   field-sizing: content;
 }
 
@@ -120,7 +120,7 @@
 .we-dlq-status label {
   position: relative;
   gap: 4px;
-  padding-inline: 8px;
+  padding-inline: 6px;
   border-radius: var(--we-radius-pill);
 }
 
@@ -143,6 +143,18 @@
 }
 
 .we-dlq-status label:has(:focus-visible) { box-shadow: var(--we-focus-ring); }
+
+/* The owner gives way first, then the severity text, then the occurrence text.
+   The ratios keep each one whole, without a sub-pixel ellipsis, until the one before reaches its minimum. */
+.we-dlq-row .we-recovery-item-badge__owner { flex-shrink: 10000000000; }
+.we-dlq-row .we-recovery-item-badge__severity { flex-shrink: 100000; }
+
+.we-dlq-row :is(.we-recovery-item-badge__severity, .we-recovery-item-badge__occurrences) {
+  display: inline-block;
+  min-width: 4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* The shared .we-virtual-list rule ships with the canvas chunk, absent on a direct Recover load. */
 .we-dlq-virtual-list {

@@ -72,6 +72,8 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
   const severityTone = SEVERITY_TONE[item.severity]
   const slaToneClass = slaTone(item.slaTargetAtIso, item.status)
   const remaining = formatRemaining(item.slaTargetAtIso, item.status)
+  const severityLabel = t(`recoveryItems.severity.${item.severity}`)
+  const occurrences = t('recoveryItems.occurrences.badge', { count: item.occurrenceCount })
 
   // Screen-reader urgency consistency. The SLA color band (red/amber/green) is the
   // whole point of the badge, but color can't be perceived non-visually — and
@@ -89,12 +91,12 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
   const ariaLabel =
     slaDescriptor
       ? t('recoveryItems.badge.openSla', {
-          severity: t(`recoveryItems.severity.${item.severity}`),
+          severity: severityLabel,
           status: t(`recoveryItems.status.${item.status}`),
           sla: slaDescriptor,
         })
       : t('recoveryItems.badge.open', {
-          severity: t(`recoveryItems.severity.${item.severity}`),
+          severity: severityLabel,
           status: t(`recoveryItems.status.${item.status}`),
         })
 
@@ -112,11 +114,12 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
       aria-label={ariaLabel}
     >
       <span
-        className="we-pill"
+        className="we-pill we-recovery-item-badge__severity"
         data-tone={severityTone}
         data-testid="recovery-item-severity"
+        title={severityLabel}
       >
-        {t(`recoveryItems.severity.${item.severity}`)}
+        {severityLabel}
       </span>
       <span
         className="we-pill we-recovery-item-badge__status" data-tone="neutral"
@@ -126,10 +129,11 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
       </span>
       {item.occurrenceCount > 1 && (
         <span
-          className="we-pill" data-tone="warning"
+          className="we-pill we-recovery-item-badge__occurrences" data-tone="warning"
           data-testid="recovery-item-occurrences"
+          title={occurrences}
         >
-          {t('recoveryItems.occurrences.badge', { count: item.occurrenceCount })}
+          {occurrences}
         </span>
       )}
       {item.owner && (

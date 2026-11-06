@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- In Spanish, the Recover queue toolbar fits on one row from a 1280 px window
+  with the detail pane open, for every menu choice. Sort options read "Más
+  recientes", "Más antiguos", "Más graves" and "SLA próximo". On narrow
+  screens a queue row's SLA time is no longer cut off: the severity and
+  occurrence labels shorten with an ellipsis instead and show their full text
+  on hover.
 - The interface ships its Inter Tight typeface instead of depending on what
   each machine has installed, so sans text measures the same on macOS and
   Linux. The font loads from the app itself, is cached for a year and swaps in

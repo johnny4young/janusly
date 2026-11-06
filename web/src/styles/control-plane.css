@@ -1181,8 +1181,8 @@
   white-space: nowrap;
 }
 
-/* The owner gives way first so the SLA after it stays readable. */
-.we-dlq-row .we-recovery-item-badge > :not(.we-recovery-item-badge__owner) { flex-shrink: 0; }
+/* The SLA never shrinks; DeadLetterQueueView.css sets which pills give way first. */
+.we-dlq-row .we-recovery-item-badge > :is(.we-recovery-item-badge__status, .we-recovery-item-badge__sla) { flex-shrink: 0; }
 
 .we-dlq-row .we-list-row__meta {
   flex-wrap: nowrap;
