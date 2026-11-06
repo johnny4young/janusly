@@ -91,6 +91,23 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 	}
 }
 
+func TestHTTPHostDefaultsToEveryInterfaceAndAcceptsOnlyBindLiterals(t *testing.T) {
+	cfg, err := Load(env(map[string]string{}))
+	if err != nil || cfg.HTTPHost != "" {
+		t.Fatalf("default public bind must stay every interface: %q %v", cfg.HTTPHost, err)
+	}
+	for _, host := range []string{"127.0.0.1", "0.0.0.0", "::1", "::"} {
+		if cfg, err := Load(env(map[string]string{"JANUSLY_HTTP_HOST": host})); err != nil || cfg.HTTPHost != host {
+			t.Fatalf("JANUSLY_HTTP_HOST=%s rejected: %v", host, err)
+		}
+	}
+	for _, host := range []string{"localhost", "10.0.0.5", "127.0.0.1:3001"} {
+		if _, err := Load(env(map[string]string{"JANUSLY_HTTP_HOST": host})); err == nil {
+			t.Fatalf("JANUSLY_HTTP_HOST=%q must be rejected", host)
+		}
+	}
+}
+
 // IPv6 loopback and wildcard are first-class: on hosts whose private
 // network is IPv6-only, the IPv4 literals leave metrics unreachable.
 func TestInternalHostAcceptsIPv6Binds(t *testing.T) {

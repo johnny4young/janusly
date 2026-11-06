@@ -54,6 +54,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Like Vite below, the API trusts development auth headers here, so it stays
+# on loopback unless the caller opens it explicitly.
+export JANUSLY_HTTP_HOST="${JANUSLY_HTTP_HOST:-127.0.0.1}"
+
 (cd "$root" && go run ./cmd/api) &
 api_pid=$!
 (cd "$root/web" && $pnpm_command dev --host 127.0.0.1) &

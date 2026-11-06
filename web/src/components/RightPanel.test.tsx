@@ -8,8 +8,8 @@ vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 vi.mock('./ReportsPanel', () => ({
-  ReportsPanel: ({ canReadDeadLetters, canReadReports }: { canReadDeadLetters: boolean; canReadReports: boolean }) => (
-    <div data-testid="reports-gates">{`dlq:${canReadDeadLetters} reports:${canReadReports}`}</div>
+  ReportsPanel: ({ permissions }: { permissions?: readonly string[] }) => (
+    <div data-testid="reports-gates">{permissions?.join(' ')}</div>
   ),
 }))
 vi.mock('./AuthoringPanel', () => ({
@@ -165,7 +165,7 @@ describe('<RightPanel /> recovery task space', () => {
       },
     })} />)
 
-    expect(await screen.findByTestId('reports-gates')).toHaveTextContent('dlq:false reports:true')
+    expect(await screen.findByTestId('reports-gates')).toHaveTextContent('recovery.read reports.read')
     const sectionNav = screen.getByTestId('workspace-section-nav')
     expect(within(sectionNav).getByRole('button', { name: 'Reports' })).toHaveAttribute('aria-current', 'page')
     expect(within(sectionNav).getByTestId('workspace-section-recover-count')).toHaveTextContent('2')

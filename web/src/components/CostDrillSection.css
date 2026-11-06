@@ -1,0 +1,32 @@
+.we-cost-drill {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.we-cost-drill__head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: space-between;
+}
+
+.we-cost-drill__subhead {
+  margin-top: 6px;
+}
+
+.we-cost-drill .we-cost-drill__summary {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  margin: 0;
+}
+
+.we-cost-drill__notes {
+  color: var(--we-text-2);
+  display: grid;
+  font-size: 12px;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
