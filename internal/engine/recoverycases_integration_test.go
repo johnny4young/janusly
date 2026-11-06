@@ -56,6 +56,11 @@ func TestRecoveryCaseTransitions(t *testing.T) {
 		t.Fatalf("one case expected: %d", caseCount)
 	}
 
+	// A frozen clock puts every transition in one millisecond; receipts
+	// must still read back in the order they happened.
+	frozen := time.Now()
+	eng.now = func() time.Time { return frozen }
+
 	evidence := []domain.RecoveryCaseEvidenceRef{{Kind: "run_node", ID: "run-1:calc"}}
 	receipt := func(from, to string) domain.RecoveryCaseTransitionReceipt {
 		return domain.RecoveryCaseTransitionReceipt{
