@@ -192,14 +192,13 @@ type RecoveryQueuePageResponse = {
 }
 
 /** The org-wide DLQ status breakdown returned by `GET /dlq/counts` — the
- *  mini-grid's queue-health summary, independent of the filtered/paginated page. */
+ *  status chips' queue-health summary, independent of the filtered/paginated page. */
 type RecoveryQueueCounts = {
   total: number
   open: number
   replayed: number
   resolved: number
 }
-const EMPTY_COUNTS: RecoveryQueueCounts = { total: 0, open: 0, replayed: 0, resolved: 0 }
 
 /** Build the `/dlq/queue?…` path from the current filter/sort selections plus an
  *  optional keyset `cursor`. Shared by the first-page effect and `loadMore` so
@@ -276,10 +275,11 @@ export type RecoveryQueueFilters = {
   /** True while a {@link loadMore} fetch is in flight (drives the button's
    *  disabled / "loading" state without blanking the already-loaded rows). */
   loadingMore: boolean
-  /** Org-wide DLQ status breakdown for the mini-grid — total / open / replayed /
+  /** Org-wide DLQ status breakdown for the status chips — total / open / replayed /
    *  resolved across the WHOLE queue, NOT the filtered page. Refetched on
-   *  `invalidationNonce` / refresh only, never on a filter or sort change. */
-  counts: RecoveryQueueCounts
+   *  `invalidationNonce` / refresh only, never on a filter or sort change.
+   *  Null until the first fetch succeeds, and after a failed one. */
+  counts: RecoveryQueueCounts | null
 }
 
 /**
@@ -318,7 +318,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   const [cursor, setCursor] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [counts, setCounts] = useState<RecoveryQueueCounts>(EMPTY_COUNTS)
+  const [counts, setCounts] = useState<RecoveryQueueCounts | null>(null)
   const [refreshNonce, setRefreshNonce] = useState(0)
   // Bumped on every first-page fetch; `loadMore` captures it and drops a stale
   // append if a filter/sort/refresh landed mid-fetch (the page-1 reset wins).
@@ -387,9 +387,9 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     return () => { cancelled = true }
   }, [invalidationNonce, refreshNonce, view])
 
-  // Org-wide status counts for the mini-grid. Keyed ONLY on invalidationNonce +
-  // refresh — NOT on the filter/sort, because the mini-grid summarizes the WHOLE
-  // queue, not the filtered page. A failed fetch degrades to zeros.
+  // Org-wide status counts for the status chips. Keyed ONLY on invalidationNonce +
+  // refresh — NOT on the filter/sort, because the chips summarize the WHOLE
+  // queue, not the filtered page. A failed fetch clears them so it never reads as zero.
   useEffect(() => {
     let cancelled = false
     api('/dlq/counts')
@@ -405,7 +405,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
       })
       .catch(() => {
         if (cancelled) return
-        setCounts(EMPTY_COUNTS)
+        setCounts(null)
       })
     return () => {
       cancelled = true

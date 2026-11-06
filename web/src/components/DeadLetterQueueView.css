@@ -94,8 +94,8 @@
 
 .we-dlq-filters { margin-block: 10px; }
 
-/* Search grows into any spare width; a small basis keeps one row with wide fallback fonts. */
-.we-dlq-filters .we-list-search { flex-basis: 9rem; }
+/* Search absorbs width changes, so menu choices and wide fallback fonts keep one row. */
+.we-dlq-filters .we-list-search { flex-basis: 6rem; }
 
 .we-dlq-filters .we-list-search > input { text-overflow: ellipsis; }
 

@@ -479,7 +479,7 @@ describe('<DeadLettersPanel />', () => {
     expect(onRefresh).toHaveBeenCalled()
   })
 
-  it('combines status, owner, severity and search without changing organization totals', async () => {
+  it('combines status, owner, severity and search, hiding organization totals while they narrow the queue', async () => {
     const rows = [
       mockDeadLetter('match', { nodeId: 'invoice-match', recovery: overlay('match', 'p1') }),
       mockDeadLetter('other-severity', { nodeId: 'invoice-low', recovery: overlay('low', 'p4') }),
@@ -494,12 +494,45 @@ describe('<DeadLettersPanel />', () => {
     fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'mine' } })
     fireEvent.change(screen.getByLabelText('Recovery severity'), { target: { value: 'p1' } })
     fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'oldest' } })
-    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'invoice' } })
+    fireEvent.change(screen.getByLabelText('Search node, run id or error'), { target: { value: 'invoice' } })
     await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(1))
     expect(screen.getByTestId('dlq-row-match')).toBeInTheDocument()
     expect(Object.fromEntries(lastDlqParams()!)).toMatchObject({ status: 'open', owner: 'me', severity: 'p1', sort: 'oldest', search: 'invoice' })
     const totals = screen.getByRole('radiogroup', { name: 'Failure status' })
-    expect([...totals.querySelectorAll('strong')].map(value => value.textContent)).toEqual(['5', '4', '0', '1'])
+    expect(totals.querySelectorAll('strong')).toHaveLength(0)
+    expect(within(totals).getByRole('radio', { name: 'Open' })).toBeChecked()
+  })
+
+  it('shows organization totals on the chips only while no other filter narrows the queue', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a', { recovery: overlay('a', 'p1') })]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    const status = screen.getByRole('radiogroup', { name: 'Failure status' })
+    await waitFor(() => expect(within(status).getByRole('radio', { name: 'Open 1' })).toBeChecked())
+    fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'mine' } })
+    await waitFor(() => expect(within(status).getByRole('radio', { name: 'Open' })).toBeChecked())
+    fireEvent.change(screen.getByTestId('dlq-owner'), { target: { value: 'all' } })
+    fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'p2' } })
+    await waitFor(() => expect(within(status).getByRole('radio', { name: 'Open' })).toBeChecked())
+    fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'all' } })
+    await waitFor(() => expect(within(status).getByRole('radio', { name: 'Open 1' })).toBeChecked())
+  })
+
+  it.each([
+    ['still loading', () => new Promise<never>(() => {})],
+    ['failed', () => Promise.reject(new Error('counts unavailable'))],
+  ])('omits chip counts while they are %s instead of showing zero', async (_state, counts) => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return counts()
+      if (path.startsWith('/dlq/queue')) return { items: [mockDeadLetter('a')], nextCursor: null, hasMore: false }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+    await act(async () => { await Promise.resolve() })
+    const status = screen.getByRole('radiogroup', { name: 'Failure status' })
+    expect(status.querySelectorAll('strong')).toHaveLength(0)
+    expect(within(status).getByRole('radio', { name: 'All' })).toBe(screen.getByTestId('dlq-status-all'))
+    expect(within(status).getByRole('radio', { name: 'Closed without recovery' })).toBe(screen.getByTestId('dlq-status-resolved'))
   })
 
   it('shows every failure status as a chip with its organization count', async () => {
@@ -514,9 +547,12 @@ describe('<DeadLettersPanel />', () => {
     await waitFor(() => expect(within(status).getByRole('radio', { name: 'All 120' })).toBe(screen.getByTestId('dlq-status-all')))
     expect(within(status).getByRole('radio', { name: 'Open 100' })).toBe(screen.getByTestId('dlq-status-open'))
     expect(within(status).getByRole('radio', { name: 'Retried 15' })).toBe(screen.getByTestId('dlq-status-replayed'))
-    expect(within(status).getByRole('radio', { name: 'Closed 5' })).toBe(screen.getByTestId('dlq-status-resolved'))
+    expect(within(status).getByRole('radio', { name: 'Closed without recovery 5' })).toBe(screen.getByTestId('dlq-status-resolved'))
+    expect(screen.getByTestId('dlq-status-resolved').closest('label')).toHaveTextContent(/^Closed 5$/)
     expect(screen.getByTestId('dlq-status-open')).toBeChecked()
-    expect(status).toHaveAccessibleDescription(/organization totals.*Closed means closed without recovery/i)
+    expect(status).toHaveAccessibleDescription(/whole organization and show only when no other filter is on/i)
+    expect(screen.getByRole('grid')).not.toHaveAttribute('aria-describedby')
+    expect(screen.getByRole('searchbox', { name: 'Search node, run id or error' })).toBe(screen.getByTestId('dlq-search'))
     expect(screen.getByTestId('dlq-toolbar')).toContainElement(screen.getByTestId('dlq-owner'))
     expect(screen.getByRole('option', { name: 'Owner: Mine' })).toBeInTheDocument()
   })

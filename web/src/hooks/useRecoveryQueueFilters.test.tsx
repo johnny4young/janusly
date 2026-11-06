@@ -109,8 +109,9 @@ function Harness() {
       <span data-testid="loading">{String(f.recoveryFilterLoading)}</span>
       <span data-testid="has-more">{String(f.hasMore)}</span>
       <span data-testid="loading-more">{String(f.loadingMore)}</span>
-      <span data-testid="counts">{`${f.counts.total}/${f.counts.open}/${f.counts.replayed}/${f.counts.resolved}`}</span>
+      <span data-testid="counts">{f.counts ? `${f.counts.total}/${f.counts.open}/${f.counts.replayed}/${f.counts.resolved}` : 'unknown'}</span>
       <button data-testid="load-more" onClick={() => f.loadMore()} />
+      <button data-testid="refresh" onClick={() => f.refresh()} />
       <button data-testid="set-status-all" onClick={() => f.setStatus('all')} />
       <button data-testid="set-status-resolved" onClick={() => f.setStatus('resolved')} />
       <button data-testid="set-owner-mine" onClick={() => f.setOwnerScope('mine')} />
@@ -490,14 +491,20 @@ describe('useRecoveryQueueFilters', () => {
     expect(countsFetchCount()).toBe(countsBefore)
   })
 
-  it('defaults counts to zero when the /dlq/counts fetch fails', async () => {
+  it('leaves counts unknown, not zero, when a /dlq/counts refresh fails', async () => {
+    let fail = false
     vi.mocked(api).mockImplementation(async (path) => {
-      if (String(path).startsWith('/dlq/counts')) throw new Error('boom')
+      if (String(path).startsWith('/dlq/counts')) {
+        if (fail) throw new Error('boom')
+        return { total: 3, open: 3, replayed: 0, resolved: 0 }
+      }
       return page([])
     })
     render(<Harness />)
-    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('open'))
-    expect(screen.getByTestId('counts')).toHaveTextContent('0/0/0/0')
+    await waitFor(() => expect(screen.getByTestId('counts')).toHaveTextContent('3/3/0/0'))
+    fail = true
+    fireEvent.click(screen.getByTestId('refresh'))
+    await waitFor(() => expect(screen.getByTestId('counts')).toHaveTextContent('unknown'))
   })
 
   it('debounces the search box and sends the search= param, resetting to page 1', async () => {

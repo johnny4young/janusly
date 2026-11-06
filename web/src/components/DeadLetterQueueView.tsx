@@ -155,6 +155,10 @@ export function DeadLetterQueueView({
         ? t('apiErrors.search_query_invalid_characters')
         : null
   const searchInvalid = searchState.kind === 'too-long' || searchState.kind === 'invalid-characters'
+  // Org totals match what a chip would list only while no other filter narrows the queue.
+  const statusCounts = ownerScope === 'all' && severityFilter === 'all' && !dayFilter && searchState.kind !== 'valid'
+    ? counts
+    : null
   const showDetail = !selectionMode && (selected !== null || requestedNotFound)
   const detailPaneRef = useRef<HTMLDivElement | null>(null)
   const selectedId = selected?.id
@@ -244,9 +248,10 @@ export function DeadLetterQueueView({
             id="dlq-search"
             type="search"
             aria-label={t('dlq.search.label')}
+            title={t('dlq.search.label')}
             value={searchInput}
             onChange={event => queue.setSearchInput(event.target.value)}
-            placeholder={t('dlq.search.placeholder')}
+            placeholder={t('dlq.search.label')}
             aria-invalid={searchInvalid || undefined}
             aria-describedby={searchHint ? 'dlq-search-hint' : undefined}
             aria-errormessage={searchInvalid ? 'dlq-search-hint' : undefined}
@@ -261,19 +266,23 @@ export function DeadLetterQueueView({
           aria-describedby="dlq-status-help"
           title={t('dlq.statusHelp')}
         >
-          {statuses.map(item => (
-            <label key={item} className="ui-button ui-button--secondary ui-button--sm">
-              <input
-                type="radio"
-                name="dlq-status"
-                value={item}
-                checked={status === item}
-                onChange={() => queue.setStatus(item)}
-                data-testid={`dlq-status-${item}`}
-              />
-              {t(STATUS_FILTER_KEYS[item])} <strong>{counts[item === 'all' ? 'total' : item]}</strong>
-            </label>
-          ))}
+          {statuses.map(item => {
+            const count = statusCounts?.[item === 'all' ? 'total' : item].toLocaleString(getResolvedLocale())
+            return (
+              <label key={item} className="ui-button ui-button--secondary ui-button--sm">
+                <input
+                  type="radio"
+                  name="dlq-status"
+                  value={item}
+                  checked={status === item}
+                  onChange={() => queue.setStatus(item)}
+                  aria-label={[t(STATUS_FILTER_KEYS[item]), item === 'resolved' && t('dlq.filter.resolvedQualifier'), count].filter(Boolean).join(' ')}
+                  data-testid={`dlq-status-${item}`}
+                />
+                {t(STATUS_FILTER_KEYS[item])} {count && <strong>{count}</strong>}
+              </label>
+            )
+          })}
         </div>
         <SelectControl
           id="dlq-owner"
@@ -474,7 +483,6 @@ export function DeadLetterQueueView({
                 style={{ transform: `translateY(${virtual.startOffset}px)` }}
                 role="grid"
                 aria-labelledby="recovery-queue-heading"
-                aria-describedby="dlq-status-help"
                 aria-multiselectable={selectionMode}
                 aria-rowcount={queueItemCount}
               >

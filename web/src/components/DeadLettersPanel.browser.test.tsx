@@ -68,17 +68,50 @@ describe('Recovery queue layout and focus in Chromium', () => {
     } finally { await page.viewport(1024, 768) }
   })
 
-  it('keeps search, status chips and menus on one row in the 852px card beside the sidebar', async () => {
-    initI18n('en')
-    // No web font ships, so check wide fallback metrics: Verdana on macOS, DejaVu Sans on Linux.
+  // No web font ships, so these render with wide fallback metrics: Verdana on macOS, DejaVu Sans on Linux.
+  const toolbarIds = ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']
+  async function mountInCard() {
     document.documentElement.style.setProperty('--font-sans', 'Verdana, "DejaVu Sans", sans-serif')
+    initI18n('en')
+    render(<div style={{ width: 852 }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
+    await screen.findByTestId('dlq-row-invoice')
+    return screen.getByTestId('dlq-toolbar')
+  }
+  const rowSpread = () => {
+    const centers = toolbarIds.map(id => { const box = document.getElementById(id)!.getBoundingClientRect(); return box.top + box.height / 2 })
+    return Math.max(...centers) - Math.min(...centers)
+  }
+
+  it('keeps search, status chips and menus on one row in the 852px card for every menu choice', async () => {
     try {
-      render(<div style={{ width: 852 }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
-      await screen.findByTestId('dlq-row-invoice')
-      const centers = ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']
-        .map(id => { const box = document.getElementById(id)!.getBoundingClientRect(); return box.top + box.height / 2 })
-      expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1)
-      expect(screen.getByTestId('dlq-toolbar').getBoundingClientRect().height).toBeLessThanOrEqual(40)
+      const toolbar = await mountInCard()
+      await waitFor(() => expect(screen.getByRole('radio', { name: 'All 12' })).toBeInTheDocument())
+      expect(rowSpread()).toBeLessThanOrEqual(1)
+      expect(toolbar.getBoundingClientRect().height).toBeLessThanOrEqual(40)
+      const panesTop = screen.getByTestId('dlq-panes').getBoundingClientRect().top
+      // The longest choices; owner and severity also hide the counts.
+      for (const [id, value] of [['dlq-sort', 'sla'], ['dlq-severity-filter', 'p4'], ['dlq-owner', 'mine']] as const) {
+        await userEvent.selectOptions(screen.getByTestId(id), value)
+        expect(rowSpread()).toBeLessThanOrEqual(1)
+        expect(screen.getByTestId('dlq-panes').getBoundingClientRect().top).toBe(panesTop)
+      }
+    } finally { document.documentElement.style.removeProperty('--font-sans') }
+  })
+
+  it('wraps to at most two rows without overflow when counts reach the thousands', async () => {
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === '/dlq/counts') return { total: 9876, open: 8765, replayed: 1234, resolved: 4321 }
+      if (path.startsWith('/dlq/queue')) return { items: queueRows, nextCursor: null, hasMore: false }
+      throw new Error(`Unexpected read: ${path}`)
+    })
+    try {
+      const toolbar = await mountInCard()
+      await waitFor(() => expect(screen.getByRole('radio', { name: 'All 9,876' })).toBeInTheDocument())
+      await userEvent.selectOptions(screen.getByTestId('dlq-sort'), 'sla')
+      const box = toolbar.getBoundingClientRect()
+      expect(box.height).toBeLessThanOrEqual(80)
+      expect(toolbar.scrollWidth).toBeLessThanOrEqual(toolbar.clientWidth)
+      for (const id of toolbarIds) expect(document.getElementById(id)!.getBoundingClientRect().right).toBeLessThanOrEqual(box.right + 1)
     } finally { document.documentElement.style.removeProperty('--font-sans') }
   })
 
