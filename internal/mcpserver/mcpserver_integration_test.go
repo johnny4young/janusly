@@ -1387,3 +1387,51 @@ func TestAgentReadsAndManagesWorkflowLifecycle(t *testing.T) {
 		t.Fatal("unknown runs must not be cancellable")
 	}
 }
+
+// A redrive keeps the run's original version, so after a fix it must say so
+// and point at starting a new run.
+func TestRedriveReportsWhenTheRunKeepsAnOlderVersion(t *testing.T) {
+	session, org := newMCPSession(t)
+	missing := httptest.NewServer(http.NotFoundHandler())
+	defer missing.Close()
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	id := "wf-redrive-version-" + org
+	document := func(name string) map[string]any {
+		return map[string]any{"id": id, "name": name, "nodes": []any{
+			map[string]any{"id": "fetch", "type": "http", "config": map[string]any{"url": missing.URL}},
+		}, "edges": []any{}}
+	}
+	redriveFailed := func(runID string) map[string]any {
+		t.Helper()
+		waitMCPRunStatus(t, pool, runID, "failed")
+		var deadLetterID string
+		if err := pool.QueryRow(context.Background(), `SELECT id FROM dead_letters WHERE org_id = $1 AND run_id = $2`, org, runID).Scan(&deadLetterID); err != nil {
+			t.Fatal(err)
+		}
+		result, view := callTool(t, session, "dlq.redrive", map[string]any{"deadLetterId": deadLetterID})
+		if result.IsError {
+			t.Fatalf("redrive: %+v", result.Content)
+		}
+		return view
+	}
+
+	callTool(t, session, "workflows.save", map[string]any{"workflow": document("first")})
+	_, first := callTool(t, session, "runs.start", map[string]any{"workflowId": id})
+	callTool(t, session, "workflows.save", map[string]any{"workflow": document("second")})
+	stale := redriveFailed(first["runId"].(string))
+	if stale["staleVersion"] != true || stale["runVersion"] != float64(1) || stale["latestVersion"] != float64(2) ||
+		!strings.Contains(fmt.Sprint(stale["hint"]), "runs.start") {
+		t.Fatalf("redrive on an older version must say so: %+v", stale)
+	}
+
+	_, second := callTool(t, session, "runs.start", map[string]any{"workflowId": id})
+	current := redriveFailed(second["runId"].(string))
+	if current["staleVersion"] != false || current["hint"] != nil {
+		t.Fatalf("redrive on the latest version needs no hint: %+v", current)
+	}
+}
