@@ -5,6 +5,7 @@
 .we-experiments {
   display: grid;
   gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .we-experiments__form,
@@ -143,7 +144,7 @@
 
 .we-experiments__table {
   border-collapse: collapse;
-  min-width: 620px;
+  min-width: 480px;
   width: 100%;
 }
 
@@ -184,7 +185,7 @@
 .we-experiments__baseline[data-baseline="true"] {
   background: var(--we-primary-soft);
   border-color: var(--we-primary);
-  color: var(--we-primary);
+  color: var(--we-ink);
 }
 
 .we-experiments__direction {
