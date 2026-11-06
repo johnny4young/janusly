@@ -1,3 +1,4 @@
+import { lazy, Suspense, useRef, useState } from 'react'
 import { OnboardingReplayButton } from './OnboardingReplayButton'
 import { OnboardingBanner } from './OnboardingBanner'
 import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
@@ -6,9 +7,13 @@ import { HomeActionWorkspace } from './recovery-center/HomeActionWorkspace'
 import { HomeBudgetBanner } from './recovery-center/HomeBudgetBanner'
 import { HomeTodayStrip } from './recovery-center/HomeTodayStrip'
 import { HomeOperatorField } from './recovery-center/HomeOperatorField'
-import { downtimeSeverity } from './recovery-center/recovery-center-model'
+import { downtimeSeverity, type RecommendedAction } from './recovery-center/recovery-center-model'
 import { useT } from '../i18n'
 import type { RecoveryCenterController } from './RecoveryCenterPanel'
+
+const HomeInvestigationPanel = lazy(() => import('./recovery-center/HomeInvestigationPanel').then((module) => ({
+  default: module.HomeInvestigationPanel,
+})))
 
 export function RecoveryCenterView({ model }: { model: RecoveryCenterController }) {
   const { t } = useT()
@@ -21,6 +26,16 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
     openDeadLetters, openFailureCount, operatorBriefStatus, operatorBriefWarnings, operatorWins,
     recommendedActions, recoveryClearEligible, runsToday, showOnboarding, streak,
   } = model
+  const [investigating, setInvestigating] = useState<RecommendedAction | null>(null)
+  const investigateTrigger = useRef<HTMLElement | null>(null)
+  const investigate = (action: RecommendedAction) => {
+    investigateTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setInvestigating(action)
+  }
+  const closeInvestigation = () => {
+    setInvestigating(null)
+    investigateTrigger.current?.focus()
+  }
   const operator = (
     <HomeOperatorField
       openFailures={openDeadLetters}
@@ -76,6 +91,7 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         setup={<OnboardingBanner onOpenTab={onOpenTab} />}
         operator={operator}
         onSelectAction={handleRecommendedAction}
+        onInvestigate={investigate}
         onOpenRun={onOpenRun}
         onOpenActivity={onOpenActivity}
       />}
@@ -96,6 +112,19 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
       )}
 
       <OnboardingReplayButton />
+
+      {investigating?.target.runId && (
+        <Suspense fallback={null}>
+          <HomeInvestigationPanel
+            key={investigating.id}
+            runId={investigating.target.runId}
+            title={investigating.title}
+            onClose={closeInvestigation}
+            onOpenRun={onOpenRun}
+            onOpenRecoveryQueue={onOpenRecoveryQueue}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

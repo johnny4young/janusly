@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 622.6,
+  "artifactGzipKiB": 627.1,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 576.7
+    "maxGzipKiB": 580.7
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,7 +85,7 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 83.88,
+    "app-workspace.js": 84.41,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
@@ -98,13 +98,13 @@
     "BudgetSettingsPanel.js": 3.25,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 41.71,
-    "catalog-es.js": 46.44,
+    "catalog-en.js": 42.13,
+    "catalog-es.js": 46.91,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
     "ExperimentsPanel.css": 1.05,
-    "ExperimentsPanel.js": 5.26,
+    "ExperimentsPanel.js": 5.27,
     "ExternalRuntimePanel.css": 0.89,
     "ExternalRuntimePanel.js": 2.54,
     "FailureClustersCard.css": 0.61,
@@ -126,7 +126,7 @@
     "OperationsPage.css": 1.36,
     "OperationsPage.js": 5.86,
     "PermissionGrantsPanel.css": 0.88,
-    "PermissionGrantsPanel.js": 3.19,
+    "PermissionGrantsPanel.js": 3.2,
     "PlaybookMatchCard.js": 0.95,
     "PlaybookPromotionCard.js": 1.25,
     "react-vendor.js": 55.23,

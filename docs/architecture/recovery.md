@@ -45,6 +45,26 @@ impact attribution, and feedback.
   unreadable status claims no connection and keeps the suggestion action. Its
   stage rail covers only the steps the dialog has, Patch, Validate and Apply, and
   Validate reads done only after a sandbox pass; errors show no rail.
+- A run investigation (`GET /v1/runs/{runId}/investigation`, `runs.read`) is
+  deterministic and stores nothing. It evaluates four causes for the run's
+  first failed step, in a fixed order, from rows the organization already has.
+  Network is validated when the error classifies as `network_timeout`, ruled out
+  when it classifies as another known category, and inconclusive when it is
+  missing or unclassified; it cites the failed step and other runs in the same
+  30-day cluster. Credential is validated by a `secret_missing` category, an
+  HTTP 401 or 403 signature, or a named credential that expired before the
+  failure; ruled out when the step's config names no credential and holds no
+  secret template; otherwise inconclusive. Upstream reads the status sources the
+  run's saved version watches: validated when one reports degraded, ruled out
+  when the checked ones are healthy, and inconclusive without `upstream.read`,
+  watched or checked sources, or for failures older than a day, since the status
+  is current. Change compares the run's saved version with the newest earlier
+  successful run of the workflow: validated when the versions differ, ruled out
+  when they match, and inconclusive without such a run. The conclusion is the
+  first validated cause. The single action names the open dead letter and is
+  returned only with the same permissions the Recover queue requires for Suggest
+  fix; it navigates and never executes. No credential value, prompt or tool
+  payload is read into the response.
 - Playbooks require exact workflow/signature matching and fresh validation.
 - Failure signatures normalize identically in `internal/signature` and
   `web/src/lib/error-signature.ts`. The failure detail derives its summary, cause

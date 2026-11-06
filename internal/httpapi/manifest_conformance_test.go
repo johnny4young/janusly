@@ -327,6 +327,7 @@ func manifestConformanceRows() map[string]conformanceRow {
 		"GET /v1/authoring/experiences":           onlyIntegration(),
 		"POST /v1/authoring/experiences/register": onlyIntegration(),
 		"POST /v1/authoring/experiences/revoke":   onlyIntegration(),
+		"GET /v1/runs/{runId}/investigation":      onlyIntegration(),
 		"GET /v1/operations/brief": {integration: true, fixtures: func(t *testing.T) []any {
 			action := func(id string, params map[string]any) operations.Action {
 				return operations.Action{

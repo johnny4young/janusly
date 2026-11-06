@@ -659,3 +659,7 @@ button.we-recovery-heatmap__cell:focus-visible {
   color: var(--we-ink-soft);
   line-height: 1.45;
 }
+
+@media (min-width: 761px) {
+  .we-home-priority__list li[data-investigable] { grid-template-columns: 24px minmax(0, 1fr) auto auto; }
+}

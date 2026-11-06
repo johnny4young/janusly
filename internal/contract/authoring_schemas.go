@@ -1,5 +1,10 @@
 package contract
 
+import (
+	"github.com/johnny4young/janusly/internal/operations"
+	"github.com/johnny4young/janusly/internal/signature"
+)
+
 var briefLanguage = map[string]any{"type": "string", "enum": []any{"en", "es"}}
 
 var workflowIntentBriefInput = closedObj(map[string]any{
@@ -117,6 +122,37 @@ var operatorBrief = closedObj(map[string]any{
 	}, "id", "kind", "priority", "severity", "titleKey", "bodyKey", "ctaKey", "params", "evidence", "target", "allowedActions", "createdAt")),
 	"warnings": arr(str()),
 }, "version", "generatedAt", "actions", "warnings")
+
+var runInvestigation = closedObj(map[string]any{
+	"runId": str(), "nodeId": str(), "workflowName": str(), "signature": str(),
+	"category": strEnum(signature.Categories),
+	"hypotheses": arr(closedObj(map[string]any{
+		"id": strEnum(operations.HypothesisIDs), "verdict": strEnum(operations.HypothesisVerdicts),
+		"reason": strEnum(operations.HypothesisReasons),
+		"params": map[string]any{"oneOf": []any{
+			closedObj(map[string]any{}),
+			closedObj(map[string]any{"signature": str()}, "signature"),
+			closedObj(map[string]any{"signature": str(), "count": countT()}, "signature", "count"),
+			closedObj(map[string]any{"category": strEnum(signature.Categories)}, "category"),
+			closedObj(map[string]any{"credential": str(), "expiredAt": str()}, "credential", "expiredAt"),
+			closedObj(map[string]any{"source": str()}, "source"),
+			closedObj(map[string]any{"sources": str()}, "sources"),
+			closedObj(map[string]any{"version": intT()}, "version"),
+			closedObj(map[string]any{"from": intT(), "to": intT()}, "from", "to"),
+		}},
+		"evidence": arr(closedObj(map[string]any{
+			"kind": strEnum(operations.EvidenceKinds), "runId": str(), "nodeId": str(),
+		}, "kind", "runId")),
+	}, "id", "verdict", "reason", "params", "evidence")),
+	"conclusion": map[string]any{"type": "string", "enum": append([]any{""}, strEnum(operations.HypothesisIDs)["enum"].([]any)...)},
+	"action": map[string]any{"oneOf": []any{
+		map[string]any{"type": "null"},
+		closedObj(map[string]any{
+			"kind": map[string]any{"type": "string", "const": "open_recovery"}, "deadLetterId": str(),
+		}, "kind", "deadLetterId"),
+	}},
+	"generatedAt": str(),
+}, "runId", "nodeId", "workflowName", "signature", "category", "hypotheses", "conclusion", "action", "generatedAt")
 
 var authoringExperienceID = map[string]any{"type": "string", "minLength": 1, "maxLength": 128}
 var authoringExperienceRecord = closedObj(map[string]any{

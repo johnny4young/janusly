@@ -923,6 +923,57 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalledWith('dlq-1')
   })
 
+  it('investigates a failure from What needs you in a side panel and returns focus on close', async () => {
+    mockRecoveryApi(async (path: string) => {
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path.startsWith('/dlq/queue?')) return { items: [] }
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
+      if (path === '/operations/brief') return operatorBrief(
+        briefAction({
+          id: 'resolve_approvals', kind: 'run_approval',
+          target: { kind: 'run_node', id: 'human-approve', runId: 'run-1', destination: 'runs' },
+        }),
+        briefAction({
+          id: 'recover_cluster', kind: 'failure_cluster', priority: 2, severity: 'medium',
+          params: { category: 'network_timeout', count: 2 },
+          target: { kind: 'failure_cluster', id: 'cluster-1', runId: 'run-1', destination: 'recover' },
+        }),
+      )
+      if (path === '/v1/runs/run-1/investigation') return {
+        runId: 'run-1', nodeId: 'fetch', workflowName: '', signature: 'Network timeout on http node', category: 'network_timeout',
+        hypotheses: [{ id: 'network', verdict: 'validated', reason: 'network_unreachable',
+          params: { signature: 'Network timeout on http node', count: 1 }, evidence: [] }],
+        conclusion: 'network', action: null, generatedAt: '2026-11-06T12:00:00Z',
+      }
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return populatedClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+    render(<RecoveryCenterPanel
+      {...baseProps}
+      runs={populatedRuns as never}
+      runNodes={populatedNodes as never}
+      deadLetters={populatedDlq as never}
+    />)
+    const investigate = await screen.findByTestId('recovery-center-action-investigate-recover_cluster')
+    expect(investigate).toHaveAccessibleName('Investigate Recover 2 related failures')
+    expect(screen.queryByTestId('recovery-center-action-investigate-resolve_approvals')).toBeNull()
+
+    investigate.focus()
+    fireEvent.click(investigate)
+    expect(await screen.findByTestId('home-investigation-panel')).toHaveAccessibleName('Recover 2 related failures')
+    expect(await screen.findByTestId('home-investigation-step-network')).toHaveTextContent('Validated')
+    expect(screen.getByText('Why does fetch fail?')).toBeInTheDocument()
+    expect(baseProps.onOpenRecoveryQueue).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId('home-investigation-close'))
+    expect(screen.queryByTestId('home-investigation-panel')).toBeNull()
+    expect(investigate).toHaveFocus()
+  })
+
   it('routes clustered recovery work to the recovery queue', async () => {
     mockRecoveryApi(async (path: string) => {
       if (path === '/dlq/counts') return { open: 0 }

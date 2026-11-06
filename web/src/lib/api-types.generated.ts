@@ -1485,6 +1485,8 @@ export interface ApiRequests {
   "GET /run/usage": undefined
   /** Keyset-paginated run list */
   "GET /runs": undefined
+  /** Rules-based hypotheses for a run's failed step */
+  "GET /runs/{runId}/investigation": undefined
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": undefined
   /** Alias of /v1/run */
@@ -1717,6 +1719,130 @@ export interface ApiResponses {
   "GET /run/usage": RunUsage
   /** Keyset-paginated run list */
   "GET /runs": RunSummary[]
+  /** Rules-based hypotheses for a run's failed step */
+  "GET /runs/{runId}/investigation": {
+    "action": null | {
+      "deadLetterId": string
+      "kind": "open_recovery"
+    }
+    "category": "secret_missing" | "http_error" | "network_timeout" | "ai_provider" | "parse_error" | "tool_input" | "unknown"
+    "conclusion": "" | "network" | "credential" | "upstream" | "change"
+    "generatedAt": string
+    "hypotheses": ({
+      "evidence": ({
+        "kind": "failed_step" | "similar_failure" | "last_success"
+        "nodeId"?: string
+        "runId": string
+      })[]
+      "id": "network" | "credential" | "upstream" | "change"
+      "params": {
+        "signature"?: never
+        "count"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "signature": string
+        "count"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "count": number
+        "signature": string
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "category": "secret_missing" | "http_error" | "network_timeout" | "ai_provider" | "parse_error" | "tool_input" | "unknown"
+        "signature"?: never
+        "count"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "credential": string
+        "expiredAt": string
+        "signature"?: never
+        "count"?: never
+        "category"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "source": string
+        "signature"?: never
+        "count"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "sources": string
+        "signature"?: never
+        "count"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "version": number
+        "signature"?: never
+        "count"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "from": number
+        "to": number
+        "signature"?: never
+        "count"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+      }
+      "reason": "no_error" | "error_unclassified" | "network_dns" | "network_unreachable" | "network_other_category" | "credential_missing" | "credential_rejected" | "credential_expired" | "credential_unused" | "credential_unproven" | "upstream_hidden" | "upstream_unwatched" | "upstream_stale" | "upstream_degraded" | "upstream_healthy" | "upstream_unchecked" | "change_no_baseline" | "change_same_version" | "change_new_version"
+      "verdict": "validated" | "ruled_out" | "inconclusive"
+    })[]
+    "nodeId": string
+    "runId": string
+    "signature": string
+    "workflowName": string
+  }
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": {
     "enabled": boolean
@@ -1910,6 +2036,8 @@ export interface ApiSuccessStatuses {
   "GET /run/usage": 200
   /** Keyset-paginated run list */
   "GET /runs": 200
+  /** Rules-based hypotheses for a run's failed step */
+  "GET /runs/{runId}/investigation": 200
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": 200
   /** Alias of /v1/run */
