@@ -61,6 +61,9 @@ type Request struct {
 	// Rerun seeds a rerun's node rows. It pins the source run's document, so no
 	// rollout may replace it.
 	Rerun *engine.RerunSeed
+	// DraftTest starts a validation run with stand-in step outputs. It keeps
+	// every gate here, takes no rollout and never claims a version.
+	DraftTest *engine.DraftTest
 }
 
 // Result records the exact executable authority committed for the run.
@@ -104,7 +107,7 @@ func (s Service) Start(ctx context.Context, request Request) (Result, error) {
 	wf := request.Workflow
 
 	var rolloutAssignment *engine.RolloutAssignment
-	if wf.ID != "" && request.Rerun == nil {
+	if wf.ID != "" && request.Rerun == nil && request.DraftTest == nil {
 		assignment, err := s.Engine.ResolveWorkflowRolloutAssignment(ctx, request.OrgID, wf.ID, newID())
 		if err != nil {
 			return Result{}, fmt.Errorf("resolve workflow rollout assignment: %w", err)
@@ -185,6 +188,9 @@ func (s Service) Start(ctx context.Context, request Request) (Result, error) {
 		OrgID: request.OrgID, Workflow: wf, Input: request.Input,
 		CreatedBy: request.CreatedBy, IdempotencyKey: request.IdempotencyKey,
 		WorkflowVersionID: binding.VersionID, Rerun: request.Rerun,
+	}
+	if request.DraftTest != nil {
+		startInput.WorkflowVersionID, startInput.ReplayMode, startInput.DraftTest = "", "validation", request.DraftTest
 	}
 	if rolloutAssignment != nil {
 		startInput.WorkflowRolloutID = rolloutAssignment.Rollout.ID

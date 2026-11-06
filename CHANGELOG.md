@@ -10,6 +10,20 @@
   get no verdict when the LLM judge fell back, and score changes under the 5-point
   noise floor get none either. Changes are taken between the values shown, and a
   cost the run did not measure stays Unknown and gets no change.
+- The step Inspector has a Test data section that shows the output of the step
+  and of every step before it from the open run. Pin a step's output or type a
+  mock, then Run this step or Test draft: those steps return the pinned or mocked
+  value instead of running, so earlier AI and tool calls are not repeated. Test
+  runs never change external systems, never publish a version and do not count
+  in reports, recovery or the circuit breaker. The run is marked Test data and
+  the canvas marks pinned and mocked steps. Pins come from production runs only,
+  stay in this browser tab and workspace, and approvals, forms and routers cannot
+  be pinned or mocked.
+- Saved step outputs, run events and model-facing copies now also mask values
+  under API, access, refresh and ID token fields, `X-Auth-Token`, `Set-Cookie`,
+  `Proxy-Authorization`, `credentials`, `passwd` and API secret fields.
+- Sandbox and test runs no longer change the success rates routers learn from,
+  and redriving one of their failures no longer opens a recovery item or alert.
 - Experiments now start from the dataset. Run a comparison has three steps,
   Dataset, Control vs candidate, and Scorer and run, and the dataset form lives
   in the first step. A disabled Run comparison names the missing step and field,

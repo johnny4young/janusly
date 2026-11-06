@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 620.2,
+  "artifactGzipKiB": 621.1,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 574.5
+    "maxGzipKiB": 575.4
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,11 +85,11 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 83.58,
+    "app-workspace.js": 83.84,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
-    "authoring-workspace.css": 0.51,
+    "authoring-workspace.css": 0.63,
     "authoring-workspace.js": 34.55,
     "AuthoringExperienceRegistry.js": 2.04,
     "AuthPolicySettingsPanel.js": 1.73,
@@ -98,8 +98,8 @@
     "BudgetSettingsPanel.js": 3.25,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 41.55,
-    "catalog-es.js": 46.23,
+    "catalog-en.js": 41.56,
+    "catalog-es.js": 46.28,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
@@ -124,7 +124,7 @@
     "MultiAgentTimeline.css": 1.06,
     "MultiAgentTimeline.js": 1.78,
     "OperationsPage.css": 1.36,
-    "OperationsPage.js": 5.85,
+    "OperationsPage.js": 5.86,
     "PermissionGrantsPanel.css": 0.88,
     "PermissionGrantsPanel.js": 3.19,
     "PlaybookMatchCard.js": 0.95,
@@ -142,7 +142,7 @@
     "RecoveryDialog.css": 2.32,
     "RecoveryDialog.js": 11.82,
     "ReplayCampaignsCard.css": 0.57,
-    "ReplayCampaignsCard.js": 2.26,
+    "ReplayCampaignsCard.js": 2.28,
     "RollbackConfirmDialog.js": 1.43,
     "rolldown-runtime.js": 0.41,
     "RunExplainChat.css": 0.74,
