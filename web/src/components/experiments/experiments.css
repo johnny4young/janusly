@@ -182,6 +182,10 @@
   overflow-wrap: anywhere;
 }
 
+.we-experiments__baseline[aria-pressed="true"] {
+  cursor: default;
+}
+
 .we-experiments__baseline[data-baseline="true"] {
   background: var(--we-primary-soft);
   border-color: var(--we-primary);

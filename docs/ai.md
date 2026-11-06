@@ -103,8 +103,11 @@ disabled Run comparison names the first thing still missing.
 The comparison shows the aggregates in each summary, with either arm as the
 baseline. The recommendation always compares candidate with control. Failed
 examples add no cost or latency, so those two metrics get no better or worse
-verdict when the arms finished different counts. A cost with no measured calls
-stays unknown and is never compared. Summaries hold aggregates only, so a
+verdict when the arms finished different counts, and cost gets none when the
+arms measured cost on different call counts. A judge fallback scores by token
+overlap and records no judge latency, so score and latency get no verdict then.
+Score changes under the recommendation's 0.05 floor get no verdict. A cost with
+no measured calls stays unknown and is never compared. Summaries hold aggregates only, so a
 per-example view needs per-example outputs and scores to be persisted first.
 
 See [AI pipeline architecture](architecture/ai-pipeline.md) and

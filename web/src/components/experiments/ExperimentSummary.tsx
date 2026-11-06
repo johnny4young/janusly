@@ -13,7 +13,7 @@ import React, { useState } from 'react'
 import { ArrowDownRight, ArrowUpRight, Clipboard, TriangleAlert } from 'lucide-react'
 
 import { useT } from '../../i18n'
-import { formatCurrency, formatDelta, formatPercent, formatScorePoints, parseSummary, type Experiment, type ExperimentSummary, type SideSummary } from './types'
+import { formatCurrency, formatDelta, formatList, formatPercent, formatScorePoints, MIN_SCORE_DELTA, parseSummary, type Experiment, type ExperimentSummary, type SideSummary } from './types'
 import { Button } from '@/components/ui/Button'
 import { SwitchField } from '@/components/ui/SwitchField'
 import './experiments.css'
@@ -26,22 +26,40 @@ type Metric = {
   label: string
   better: 'higher' | 'lower' | null
   read: (side: SideSummary) => number | null
+  // Display precision: changes are taken between the rounded values each arm shows.
+  digits: number
   format: (value: number) => string
-  // Failed examples add neither cost nor latency, so unequal coverage cannot be called better or worse.
   comparable: boolean
+  // A change smaller than the recommendation's noise floor gets no verdict.
+  belowNoise?: boolean
   flagNonZero?: boolean
 }
 
 function buildMetrics(summary: ExperimentSummary, t: ReturnType<typeof useT>['t']): Metric[] {
   const { control, candidate } = summary
   const count = (value: number) => String(value)
+  // A failed judge scores by token overlap and records no judge latency.
+  const judgeFellBack = summary.recommendationReasonCode === 'scoring_fallback'
+    || (summary.scorerKind === 'llm_judge' && (control.scoringFallbackCount > 0 || candidate.scoringFallbackCount > 0))
+  // Failed examples add neither cost nor latency.
+  const sameCoverage = control.errorCount === candidate.errorCount
   return [
-    { id: 'score', label: t('experiments.table.score'), better: 'higher', read: (side) => side.meanScore * 100, format: formatPercent, comparable: true },
+    {
+      id: 'score',
+      label: t('experiments.table.score'),
+      better: 'higher',
+      read: (side) => side.meanScore * 100,
+      digits: 1,
+      format: formatPercent,
+      comparable: !judgeFellBack,
+      belowNoise: Math.abs(candidate.meanScore - control.meanScore) < MIN_SCORE_DELTA,
+    },
     {
       id: 'cost',
       label: t('experiments.table.cost'),
       better: 'lower',
       read: (side) => side.costKnownCount > 0 ? side.totalCostUsd : null,
+      digits: 4,
       format: formatCurrency,
       comparable: control.costKnownCount === candidate.costKnownCount,
     },
@@ -50,13 +68,19 @@ function buildMetrics(summary: ExperimentSummary, t: ReturnType<typeof useT>['t'
       label: t('experiments.table.latency'),
       better: 'lower',
       read: (side) => side.meanLatencyMs,
-      format: (value) => t('experiments.metric.latency', { value: Math.round(value) }),
-      comparable: control.errorCount === candidate.errorCount,
+      digits: 0,
+      format: (value) => t('experiments.metric.latency', { value }),
+      comparable: sameCoverage && !judgeFellBack,
     },
-    { id: 'errors', label: t('experiments.table.errors'), better: 'lower', read: (side) => side.errorCount, format: count, comparable: true, flagNonZero: true },
-    { id: 'judged', label: t('experiments.table.judged'), better: null, read: (side) => side.judgedByLlmCount, format: count, comparable: true },
-    { id: 'fallbacks', label: t('experiments.table.scoringFallbacks'), better: 'lower', read: (side) => side.scoringFallbackCount, format: count, comparable: true, flagNonZero: true },
+    { id: 'errors', label: t('experiments.table.errors'), better: 'lower', read: (side) => side.errorCount, digits: 0, format: count, comparable: true, flagNonZero: true },
+    { id: 'judged', label: t('experiments.table.judged'), better: null, read: (side) => side.judgedByLlmCount, digits: 0, format: count, comparable: true },
+    { id: 'fallbacks', label: t('experiments.table.scoringFallbacks'), better: 'lower', read: (side) => side.scoringFallbackCount, digits: 0, format: count, comparable: true, flagNonZero: true },
   ]
+}
+
+function roundTo(value: number, digits: number): number {
+  const scale = 10 ** digits
+  return Math.round(value * scale) / scale
 }
 
 function getRecommendationReason(summary: ExperimentSummary, t: ReturnType<typeof useT>['t']): string {
@@ -88,20 +112,26 @@ export function ExperimentSummaryDetail({
   const compared: Arm = baseline === 'control' ? 'candidate' : 'control'
   const unknown = t('common.unknown')
   const metrics = summary ? buildMetrics(summary, t).map((metric) => {
-    const text = (arm: Arm) => {
+    const shown = (arm: Arm) => {
       const value = metric.read(summary[arm])
+      return value === null ? null : roundTo(value, metric.digits)
+    }
+    const text = (arm: Arm) => {
+      const value = shown(arm)
       return value === null ? unknown : metric.format(value)
     }
-    return { ...metric, text, changed: text('control') !== text('candidate') }
+    return { ...metric, shown, text, changed: text('control') !== text('candidate') }
   }) : []
+  const withheld = metrics.filter((metric) => metric.better && !metric.comparable).map((metric) => metric.label)
   const visibleMetrics = diffOnly ? metrics.filter((metric) => metric.changed) : metrics
 
   function renderDelta(metric: typeof metrics[number]): React.ReactNode {
-    const from = metric.read(summary![baseline])
-    const to = metric.read(summary![compared])
-    if (!metric.changed || from === null || to === null) return null
-    const delta = to - from
-    const verdict = !metric.better || !metric.comparable ? null
+    const from = metric.shown(baseline)
+    const to = metric.shown(compared)
+    if (from === null || to === null) return null
+    const delta = roundTo(to - from, metric.digits)
+    if (delta === 0) return null
+    const verdict = !metric.better || !metric.comparable || metric.belowNoise ? null
       : (delta > 0) === (metric.better === 'higher') ? 'better' : 'worse'
     return (
       <span className="we-experiments__delta" data-testid={`experiment-delta-${metric.id}`} data-verdict={verdict ?? 'neutral'}>
@@ -148,9 +178,12 @@ export function ExperimentSummaryDetail({
                         className="we-experiments__baseline"
                         data-testid={`experiment-baseline-${arm}`}
                         data-baseline={baseline === arm}
+                        aria-pressed={baseline === arm}
+                        aria-disabled={baseline === arm || undefined}
                         onClick={() => setBaseline(arm)}
                       >
                         {t(baseline === arm ? 'experiments.compare.baseline' : 'experiments.compare.makeBaseline')}
+                        <span className="we-sr-only">{`: ${t(`experiments.arm.${arm}`)}`}</span>
                       </Button>
                     </th>
                   ))}
@@ -185,14 +218,22 @@ export function ExperimentSummaryDetail({
               </tbody>
             </table>
           </div>
-          {summary.control.errorCount !== summary.candidate.errorCount && (
+          {withheld.length > 0 && (
             <p className="we-experiments__notice" data-testid="experiment-coverage-notice">
               <TriangleAlert size={14} aria-hidden="true" />
-              {t('experiments.compare.coverageNotice', {
-                controlDone: summary.exampleCount - summary.control.errorCount,
-                candidateDone: summary.exampleCount - summary.candidate.errorCount,
-                total: summary.exampleCount,
-              })}
+              <span>
+                {summary.control.errorCount !== summary.candidate.errorCount && `${t('experiments.compare.coverage', {
+                  controlDone: summary.exampleCount - summary.control.errorCount,
+                  candidateDone: summary.exampleCount - summary.candidate.errorCount,
+                  total: summary.exampleCount,
+                })} `}
+                {summary.control.costKnownCount !== summary.candidate.costKnownCount && `${t('experiments.compare.costCoverage', {
+                  control: summary.control.costKnownCount,
+                  candidate: summary.candidate.costKnownCount,
+                })} `}
+                {!metrics[0]!.comparable && `${t('experiments.compare.judgeFallback')} `}
+                {t('experiments.compare.withheld', { metrics: formatList(withheld) })}
+              </span>
             </p>
           )}
           <aside className="we-experiments__recommendation" data-recommendation={summary.recommendation} aria-live="polite">
