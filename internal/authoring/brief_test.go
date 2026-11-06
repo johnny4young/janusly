@@ -2,6 +2,8 @@ package authoring
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -405,5 +407,24 @@ func TestPagerDutyProposalGenerationMergesStructuredBriefConstraints(t *testing.
 	input, _ := load.Config["input"].(map[string]any)
 	if input["requesterEmail"] != "operator@example.com" {
 		t.Fatalf("structured requester email lost: %+v", input)
+	}
+}
+
+// The AI Studio opens with this starter, so it must compile without questions.
+func TestCompileBriefAcceptsShippedPagerDutyStarter(t *testing.T) {
+	for _, locale := range []string{"en", "es"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "i18n", "locales", locale, "common.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var messages map[string]any
+		if err := json.Unmarshal(raw, &messages); err != nil {
+			t.Fatal(err)
+		}
+		starter, _ := messages["aiStudio.starter1"].(string)
+		compiled, err := CompileBrief(CompileBriefRequest{Prompt: starter})
+		if err != nil || !compiled.Complete || len(compiled.ClarifyingQuestions) != 0 {
+			t.Fatalf("%s starter %q is incomplete: %+v %v", locale, starter, compiled.ClarifyingQuestions, err)
+		}
 	}
 }
