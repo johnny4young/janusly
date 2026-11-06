@@ -398,7 +398,7 @@ function ExperimentsPanelForOrganization({ canWrite }: { canWrite: boolean }): R
         )}
       </section>
 
-      {selected && <ExperimentSummaryDetail experiment={selected} onCopyCandidate={() => void copyCandidateReference()} />}
+      {selected && <ExperimentSummaryDetail key={selected.id} experiment={selected} onCopyCandidate={() => void copyCandidateReference()} />}
     </div>
   )
 }
