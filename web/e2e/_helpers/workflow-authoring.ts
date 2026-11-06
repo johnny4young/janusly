@@ -61,6 +61,9 @@ export async function mockWorkflowProposal(
     }
     const nodes = Array.isArray(workflow.nodes) ? workflow.nodes as JsonObject[] : []
     const edges = Array.isArray(workflow.edges) ? workflow.edges : []
+    // Mirror the server: Apply refuses contracts or qualification flags that do not describe the workflow.
+    const outputs = (workflow.outputs as JsonObject | undefined) ?? {}
+    const recoveryContract = (workflow.recovery as JsonObject | undefined)?.contract as JsonObject | undefined
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -76,9 +79,13 @@ export async function mockWorkflowProposal(
         },
         proposal: {
           workflow,
-          intentContract: workflow.outputs ?? {},
-          recoveryContract: (workflow.recovery as JsonObject | undefined)?.contract ?? {},
-          qualification: { intent: true, recovery: true, semantic: true },
+          intentContract: outputs,
+          recoveryContract: recoveryContract ?? null,
+          qualification: {
+            intent: Object.keys(outputs).length > 0,
+            recovery: recoveryContract !== undefined,
+            semantic: recoveryContract?.version === '2',
+          },
           assumptions: options.assumptions ?? [],
           risks: options.risks ?? [],
           readiness: { status: 'pass', issues: [] },

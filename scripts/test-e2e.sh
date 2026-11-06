@@ -31,13 +31,17 @@ specs=(
   e2e/credential-revoke.spec.ts
   e2e/activity-workspace.spec.ts
   e2e/run-observability.spec.ts
+  e2e/ai-efficiency-observability.spec.ts
   e2e/ai-studio-provider.spec.ts
   e2e/api-contract-v1.spec.ts
+  e2e/approachable-ai-step.spec.ts
   e2e/approachable-authoring.spec.ts
   e2e/approachable-branch-rule.spec.ts
   e2e/approachable-human-form.spec.ts
   e2e/approachable-run-inputs.spec.ts
+  e2e/approachable-tool-step.spec.ts
   e2e/auth-policy.spec.ts
+  e2e/authoring-guidance.spec.ts
   e2e/bounded-waiting.spec.ts
   e2e/budget.spec.ts
   e2e/confirm-dialog-focus.spec.ts
@@ -46,6 +50,8 @@ specs=(
   e2e/docs-capability.spec.ts
   e2e/external-runtime-shadow.spec.ts
   e2e/inbound-webhook-trigger.spec.ts
+  e2e/loop-for-each.spec.ts
+  e2e/prompt-drafting.spec.ts
   e2e/recovery-drill-outcomes.spec.ts
   e2e/recovery-exploration.spec.ts
   e2e/recovery-impact.spec.ts
@@ -61,6 +67,7 @@ specs=(
   e2e/technical-recovery-autonomy.spec.ts
   e2e/views.spec.ts
   e2e/workflow.spec.ts
+  e2e/workflow-data-contracts.spec.ts
   e2e/workflow-folders.spec.ts
   e2e/workflow-language.spec.ts
   e2e/workflow-tags.spec.ts

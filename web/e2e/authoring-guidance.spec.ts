@@ -15,7 +15,6 @@ test('Problems and graph context guide an author to a valid branch expression', 
   const browserErrors = captureBrowserErrors(page)
   let reviewRequestCount = 0
   await mockWorkflowProposal(page, {
-    mode: 'fallback',
     id: 'guided-authoring-e2e',
     name: 'Guided authoring',
     inputs: {

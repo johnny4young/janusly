@@ -97,7 +97,7 @@ async function seedPromptAndWorkflow(
   })
   await postJson(request, orgId, `/prompts/${encodeURIComponent(promptName)}/versions`, {
     templateText: 'Classify the invoice for {{var.customer}} and return its risk.',
-    variables: [{ name: 'customer', type: 'string', required: true }],
+    variables: [{ name: 'customer', required: true }],
   })
   await postJson(request, orgId, '/workflows/save', {
     id: workflowId,

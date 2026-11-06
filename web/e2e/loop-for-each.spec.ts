@@ -276,7 +276,7 @@ test('bounded for-each authoring, runtime budgets, and diagnostics work in Engli
       count: 3,
       failedCount: 1,
       failedIndices: [1],
-      failures: [{ index: 1, error: { message: 'json.parse received invalid JSON' } }],
+      failures: [{ index: 1, error: { message: 'Invalid tool input for json.parse: value must contain valid JSON' } }],
     },
   })
   expect(exceeded.snapshot.events.map(event => event.type)).toContain('loop.failure_budget.exceeded')
