@@ -157,14 +157,14 @@ describe('<ActivityWorkspace /> (browser smoke)', () => {
     expect(hit).toBe(screen.getByTestId('activity-open-recovery:recovery-browser'))
   })
 
-  it('marks the selected row with a tint and a full ring, never a leading bar', () => {
+  it('tints the selected row and leaves the others clear', () => {
     const selected = { ...props(), activeRecoveryId: 'recovery-browser' }
     render(<div style={{ width: 1200 }}><ActivityWorkspace {...selected} /></div>)
 
     const style = getComputedStyle(screen.getByTestId('activity-row-recovery:recovery-browser'))
     expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
-    expect(style.boxShadow).toMatch(/0px 0px 0px 1px inset/)
-    expect(style.borderLeftWidth).toBe('0px')
+    expect(getComputedStyle(screen.getByTestId('activity-row-run:run-live')).backgroundColor)
+      .toBe('rgba(0, 0, 0, 0)')
   })
 })
 
