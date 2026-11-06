@@ -367,6 +367,9 @@ export function RunsPanel({
                     testId="active-run-validation-evidence"
                   />
                 )}
+                {Boolean(activeRun?.inputJson?.draftTest) && (
+                  <span className="we-pill" data-tone="primary" data-testid="active-run-test-data">{t('testData.runBadge')}</span>
+                )}
               </dd>
             </div>
             <div>

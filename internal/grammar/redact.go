@@ -89,9 +89,11 @@ func RedactString(s string, redactedValues []string) string {
 // sensitiveKeyPattern is the contract's closed list of secret-shaped object
 // keys (the source contract) — secret*/password*/token*
 // with separator or camel-case continuation, api key, authorization, cookie,
-// x-api-key, client secret, private key.
+// x-api-key, client secret, private key, plus named bearer and session
+// credentials. Plural "tokens" stays readable: usage metadata counts with it.
 var sensitiveKeyPattern = regexp.MustCompile(
-	`^(?i:secret|password|token)((?-i:$|[_-].*|[A-Z].*))$|^(?i)(api[_-]?key|authorization|cookie|x-api-key|client[_-]?secret|private[_-]?key)$`,
+	`^(?i:secret|password|token)((?-i:$|[_-].*|[A-Z].*))$|^(?i)(api[_-]?key|authorization|cookie|x-api-key|client[_-]?secret|private[_-]?key|` +
+		`(api|access|refresh|id)[_-]?token|x-auth-token|set-cookie|proxy-authorization|credentials|passwd|api[_-]?secret)$`,
 )
 
 // IsSensitiveKey reports whether an object key looks like credential

@@ -286,6 +286,10 @@ func (e *Engine) recordRoutingOutcome(
 	ctx context.Context, q *store.Queries, claim ClaimedNode,
 	reward float32, success bool, recordedAt time.Time,
 ) error {
+	// Sandbox and draft test outcomes would steer production routing.
+	if claim.replayMode(ctx, q) != "" {
+		return nil
+	}
 	orgID := claim.OrgID
 	if orgID == "" {
 		run, err := q.GetRunHeader(ctx, claim.RunID)

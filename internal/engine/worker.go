@@ -263,9 +263,14 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 		return
 	}
 
-	executionStart := time.Now()
-	output, execErr := runExecutor(ctx, claim, *node, wf, runInput, execute)
-	metricNodeExecution.WithLabelValues(node.Type).Observe(time.Since(executionStart).Seconds())
+	// A pinned or mocked step completes with its stand-in and never reaches an executor.
+	output, standIn := draftTestOutput(run.ReplayMode.String, run.InputJson, node.ID, node.Type)
+	var execErr error
+	if !standIn {
+		executionStart := time.Now()
+		output, execErr = runExecutor(ctx, claim, *node, wf, runInput, execute)
+		metricNodeExecution.WithLabelValues(node.Type).Observe(time.Since(executionStart).Seconds())
+	}
 	if execErr != nil {
 		if err := e.persistOutcome(ctx, logger, "retry", claim, func() error {
 			return e.RetryOrFail(ctx, claim, *node, execErr)

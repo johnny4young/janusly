@@ -297,6 +297,13 @@ Timeline offers Rerun from this step on finished production runs. `RunWorkspace`
 injects `RerunStepDialog`, which ships with the `RunsPanel` chunk, so the lazy
 timeline does not preload what the panel needs; see `run-model.md`.
 
+The Inspector's Test data section (`NodeTestData`, in the authoring chunk) lists
+the output of the selected step and of every step it reads from, taken from the
+open run when it belongs to the workflow. Pins and mocks live in `lib/test-data`,
+an in-memory store keyed by workflow, never in the workflow document, so a save
+or publish cannot carry them and a reload drops them. Run this step and Test draft
+send them to `POST /runs/draft-test`; the canvas marks pinned and mocked steps.
+
 Recover keeps its filters above two panes once the queue section is at least
 760 px wide: the queue on the left and the selected failure on the right, each
 scrolling inside a height tied to the viewport. Narrower sections stack them, and
