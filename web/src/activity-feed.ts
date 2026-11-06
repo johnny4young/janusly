@@ -130,6 +130,44 @@ export function filterActivityFeed(
   return feed.filter(item => item.category === filter)
 }
 
+export type ActivityFeedRow = { item: ActivityFeedItem; nested: boolean }
+
+// Recovery rows follow their run so one failure reads as one group. The group
+// keeps its newest member's position; a recovery whose run is absent stands alone.
+export function groupActivityFeed(items: ActivityFeedItem[]): ActivityFeedRow[] {
+  const runIds = new Set(items.filter(item => item.kind === 'run').map(item => item.runId))
+  const position = new Map<string, number>()
+  items.forEach((item, index) => {
+    if (!position.has(item.runId)) position.set(item.runId, index)
+  })
+  return items
+    .map(item => ({ item, nested: item.kind === 'recovery' && runIds.has(item.runId) }))
+    .sort((left, right) => position.get(left.item.runId)! - position.get(right.item.runId)!
+      || Number(left.nested) - Number(right.nested))
+}
+
+export function compactActivityTime(
+  value: string | null | undefined,
+  locale: string,
+  now = new Date(),
+): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(locale, {
+    ...(date.toDateString() !== now.toDateString() && { month: 'short', day: 'numeric' }),
+    ...(date.getFullYear() !== now.getFullYear() && { year: 'numeric' }),
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+export function fullActivityTime(value: string | null | undefined, locale: string): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale)
+}
+
 export function countActivityFeed(
   feed: ActivityFeedItem[],
 ): Record<ActivityFilter, number> {

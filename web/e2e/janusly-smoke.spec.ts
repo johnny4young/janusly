@@ -97,11 +97,10 @@ test('the real web boots against Go and renders live data', async ({ page, reque
   // The Activity workspace is the app's home: it must mount against Go.
   await expect(page.getByTestId('activity-workspace')).toBeVisible()
 
-  // The feed reads /v1/runs from Go: both seeded runs render as articles.
-  const feed = page.getByTestId('activity-feed-list')
-  await expect(feed.getByRole('article').first()).toBeVisible()
-  const articles = await feed.getByRole('article').count()
-  expect(articles).toBeGreaterThanOrEqual(2)
+  // The feed reads /v1/runs from Go: both seeded runs render as rows.
+  const rows = page.getByTestId('activity-feed-list').locator('[data-testid^="activity-row-"]')
+  await expect(rows.first()).toBeVisible()
+  expect(await rows.count()).toBeGreaterThanOrEqual(2)
 
   // The waiting approval surfaces as needs-action — reading nodes through
   // Go's run projection, not just the list.
