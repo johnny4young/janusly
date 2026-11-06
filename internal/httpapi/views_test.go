@@ -48,7 +48,7 @@ func TestViewKeySetsPinned(t *testing.T) {
 		{"dlqSummary", DeadLetterSummaryView{}, "attempt,createdAt,errorJson,id,nodeId,nodeType,orgId,recovery,replayedAt,runId,status,workflowName"},
 		{"dlqDetail", DeadLetterDetailView{}, "attempt,createdAt,drill,drillOutcome,errorJson,id,nodeId,nodeJson,orgId,replayClaimedAt,replayedAt,runId,status,suspectVersion,workflowJson"},
 		{"recoveryOverlay", RecoveryOverlayView{}, "comments,id,lastOccurredAt,metadataWorkflowId,occurrenceCount,owner,resolutionReason,severity,slaTargetAt,status,workflowId"},
-		{"workflowListItem", WorkflowListItemView{}, "bufferedTriggerCount,createdAt,createdBy,currentVersion,deletedAt,folder,id,lastRunAt,lastRunStatus,name,openFailureCount,orgId,pausedReason,runCount,status,tags"},
+		{"workflowListItem", WorkflowListItemView{}, "bufferedTriggerCount,createdAt,createdBy,currentVersion,deletedAt,folder,id,lastRunAt,lastRunStatus,name,openFailureCount,orgId,pausedReason,productionVersion,rollout,runCount,status,tags"},
 		{"version", VersionView{}, "createdAt,createdBy,dagJson,id,orgId,sloJson,upstreamHealthSources,version,workflowId"},
 	}
 	for _, tc := range cases {
@@ -136,6 +136,36 @@ func TestParseRecoveryDrillProvenance(t *testing.T) {
 	} {
 		if parsed := parseRecoveryDrillProvenance(raw); parsed != nil {
 			t.Fatalf("untrusted drill provenance must fail closed: %+v", parsed)
+		}
+	}
+}
+
+func TestWorkflowStageFollowsTheRolloutThatRoutesTraffic(t *testing.T) {
+	row := func(status string, canary int32) store.ListWorkflowRowsRow {
+		return store.ListWorkflowRowsRow{CurrentVersion: 3, RolloutStatus: status,
+			RolloutTrafficPercent: 10, RolloutBaselineVersion: 2, RolloutCanaryVersion: canary}
+	}
+	cases := []struct {
+		name       string
+		row        store.ListWorkflowRowsRow
+		production int
+		rollout    bool
+		share      int
+	}{
+		{"no rollout", row("", 0), 3, false, 0},
+		{"active", row("active", 3), 2, true, 10},
+		{"rolled back", row("rolled_back", 3), 2, true, 0},
+		{"cancelled", row("cancelled", 3), 2, true, 0},
+		{"promoted", row("promoted", 3), 3, true, 100},
+		{"newer save", row("rolled_back", 2), 3, false, 0},
+	}
+	for _, tc := range cases {
+		production, rollout := workflowStage(tc.row)
+		if production != tc.production || (rollout != nil) != tc.rollout {
+			t.Fatalf("%s: production v%d rollout %+v", tc.name, production, rollout)
+		}
+		if rollout != nil && (rollout.Status != tc.row.RolloutStatus || rollout.TrafficPercent != tc.share) {
+			t.Fatalf("%s: rollout %+v, want share %d", tc.name, rollout, tc.share)
 		}
 	}
 }

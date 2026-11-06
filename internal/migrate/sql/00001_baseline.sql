@@ -1148,7 +1148,8 @@ CREATE TABLE public.schedule_entries (
     created_by text,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now(),
-    next_fire_at timestamp with time zone
+    next_fire_at timestamp with time zone,
+    claimed_due_at timestamp with time zone
 );
 
 

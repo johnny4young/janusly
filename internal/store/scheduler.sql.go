@@ -12,29 +12,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const advanceScheduleEntry = `-- name: AdvanceScheduleEntry :exec
+const advanceScheduleEntry = `-- name: AdvanceScheduleEntry :execrows
 UPDATE schedule_entries
-SET next_fire_at = $2, last_run_at = $3,
+SET next_fire_at = $2, last_run_at = $3, claimed_due_at = NULL,
     last_run_id = CASE WHEN $4::text = '' THEN last_run_id ELSE $4::text END,
     updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND claimed_due_at IS NOT DISTINCT FROM $5::timestamptz
 `
 
 type AdvanceScheduleEntryParams struct {
-	ID         string
-	NextFireAt *time.Time
-	LastRunAt  *time.Time
-	LastRunID  string
+	ID           string
+	NextFireAt   *time.Time
+	LastRunAt    *time.Time
+	LastRunID    string
+	ClaimedDueAt *time.Time
 }
 
-func (q *Queries) AdvanceScheduleEntry(ctx context.Context, arg AdvanceScheduleEntryParams) error {
-	_, err := q.db.Exec(ctx, advanceScheduleEntry,
+// Only the holder of the current claim advances; a stale holder changes nothing.
+func (q *Queries) AdvanceScheduleEntry(ctx context.Context, arg AdvanceScheduleEntryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, advanceScheduleEntry,
 		arg.ID,
 		arg.NextFireAt,
 		arg.LastRunAt,
 		arg.LastRunID,
+		arg.ClaimedDueAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteScheduleEntriesForWorkflow = `-- name: DeleteScheduleEntriesForWorkflow :exec
@@ -117,7 +123,7 @@ INSERT INTO schedule_entries (id, org_id, workflow_id, workflow_version_id, node
 VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)
 ON CONFLICT (org_id, workflow_version_id, node_id) DO UPDATE SET
   cron_expression = excluded.cron_expression, next_fire_at = excluded.next_fire_at,
-  enabled = true, updated_at = now()
+  claimed_due_at = NULL, enabled = true, updated_at = now()
 `
 
 type UpsertScheduleEntryParams struct {

@@ -12,6 +12,11 @@
   margin: 0 0 3px;
 }
 
+.we-rollout-panel > .we-rollout-panel__metrics,
+.we-rollout-panel > .ui-button {
+  margin-top: 10px;
+}
+
 .we-rollout-panel__qualification-blocked {
   margin: 0;
   color: var(--we-warning-text);
@@ -25,14 +30,6 @@
   background: var(--we-surface-muted);
   color: var(--we-muted);
   font-size: 12px;
-}
-
-.we-rollout-panel__pair {
-  align-items: stretch;
-}
-
-.we-rollout-panel__pair > * {
-  flex: 1;
 }
 
 .we-rollout-panel__fields {

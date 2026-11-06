@@ -5801,6 +5801,40 @@
               "null"
             ]
           },
+          "productionVersion": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rollout": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "active",
+                      "promoted",
+                      "rolled_back",
+                      "cancelled"
+                    ],
+                    "type": "string"
+                  },
+                  "trafficPercent": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "status",
+                  "trafficPercent"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "runCount": {
             "minimum": 0,
             "type": "integer"
@@ -5831,7 +5865,9 @@
           "pausedReason",
           "tags",
           "folder",
-          "deletedAt"
+          "deletedAt",
+          "productionVersion",
+          "rollout"
         ],
         "type": "object"
       },

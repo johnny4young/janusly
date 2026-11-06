@@ -819,6 +819,7 @@ type ScheduleEntry struct {
 	CreatedAt         *time.Time
 	UpdatedAt         *time.Time
 	NextFireAt        *time.Time
+	ClaimedDueAt      *time.Time
 }
 
 type ScimDirectory struct {

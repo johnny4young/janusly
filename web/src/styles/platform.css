@@ -551,8 +551,7 @@
   margin-top: 4px;
 }
 
-.we-rollout-panel__status,
-.we-rollout-panel__form {
+.we-rollout-panel__status {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -562,7 +561,6 @@
 }
 
 .we-rollout-panel__versions,
-.we-rollout-panel__pair,
 .we-rollout-panel__actions {
   display: flex;
   align-items: center;
@@ -571,7 +569,6 @@
 }
 
 .we-rollout-panel__versions span,
-.we-rollout-panel__canary span,
 .we-rollout-panel__metrics span {
   color: var(--we-muted);
   font-size: 11px;
@@ -594,8 +591,7 @@
   gap: 8px;
 }
 
-.we-rollout-panel__metrics > div,
-.we-rollout-panel__canary {
+.we-rollout-panel__metrics > div {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -606,8 +602,7 @@
   background: var(--we-surface-muted);
 }
 
-.we-rollout-panel__metrics strong,
-.we-rollout-panel__canary strong {
+.we-rollout-panel__metrics strong {
   color: var(--we-text-1);
   font-size: 13px;
 }

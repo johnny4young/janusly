@@ -56,7 +56,11 @@ SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        COALESCE(open_failures.open_count, 0)::int AS open_failure_count,
        (SELECT COALESCE(max(wv.version), 0) FROM workflow_versions wv
         WHERE wv.org_id = w.org_id AND wv.workflow_id = w.id)::int
-         AS current_version
+         AS current_version,
+       COALESCE(rollout.status, '') AS rollout_status,
+       COALESCE(rollout.traffic_percent, 0)::int AS rollout_traffic_percent,
+       COALESCE(rollout.baseline_version, 0)::int AS rollout_baseline_version,
+       COALESCE(rollout.canary_version, 0)::int AS rollout_canary_version
 FROM workflows w
 LEFT JOIN workflow_metadata m ON m.org_id = w.org_id AND m.workflow_id = w.id
 LEFT JOIN open_failures ON open_failures.workflow_id = w.id
@@ -67,6 +71,15 @@ LEFT JOIN LATERAL (
     AND r.replay_mode IS NULL
   ORDER BY r.created_at DESC, r.id DESC LIMIT 1
 ) last_run ON true
+LEFT JOIN LATERAL ( /* the row GetLatestWorkflowRolloutRow hands the engine's assignment */
+  SELECT wr.status, wr.traffic_percent, bv.version AS baseline_version, cv.version AS canary_version
+  FROM workflow_rollouts wr
+  JOIN workflow_versions bv ON bv.org_id = wr.org_id AND bv.id = wr.baseline_version_id
+  JOIN workflow_versions cv ON cv.org_id = wr.org_id AND cv.id = wr.canary_version_id
+  WHERE wr.org_id = w.org_id AND wr.workflow_id = w.id
+  ORDER BY CASE WHEN wr.status = 'active' THEN 0 ELSE 1 END, wr.created_at DESC, wr.id DESC
+  LIMIT 1
+) rollout ON true
 WHERE w.org_id = $1 AND w.deleted_at IS NULL
   AND (w.created_at, w.id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
   AND (COALESCE(sqlc.arg(tags)::jsonb, '[]'::jsonb) = '[]'::jsonb
@@ -141,6 +154,12 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
 FROM workflow_versions
 WHERE id = $1 AND org_id = $2 AND workflow_id = $3;
+
+-- name: GetLatestWorkflowVersionRef :one
+SELECT id, version FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY version DESC
+LIMIT 1;
 
 -- name: GetLatestWorkflowVersion :one
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
