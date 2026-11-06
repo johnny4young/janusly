@@ -309,6 +309,8 @@ for (const locale of ['en', 'es'] as const) {
     await pollRun(request, orgId, runId, snapshot => (
       snapshot.nodes.some(node => node.nodeId === 'collect' && node.status === 'waiting')
     ))
+    // Switching sections while the opened run remounts can drop it, and its form with it.
+    await expect(page.getByTestId('run-overview')).toContainText(runId.slice(0, 12))
 
     await openWorkspaceSection(page, copy.activity, copy.recover)
     await page.getByRole('button', { name: copy.fillForm }).click()
