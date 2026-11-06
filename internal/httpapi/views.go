@@ -237,10 +237,36 @@ type WorkflowListItemView struct {
 	Tags                 []string `json:"tags"`
 	Folder               *string  `json:"folder"`
 	DeletedAt            *string  `json:"deletedAt"`
+	// ProductionVersion is the version that takes production traffic outside a canary share.
+	ProductionVersion int                      `json:"productionVersion"`
+	Rollout           *WorkflowListRolloutView `json:"rollout"`
+}
+
+// WorkflowListRolloutView is the rollout that routes the workflow's traffic; its
+// canary is always the latest version.
+type WorkflowListRolloutView struct {
+	Status         string `json:"status"`
+	TrafficPercent int    `json:"trafficPercent"`
+}
+
+// workflowStage mirrors engine.ResolveWorkflowRolloutAssignment: a rollout routes
+// traffic only while its canary is the latest version, and only a promoted
+// canary replaces the baseline outside the canary share.
+func workflowStage(row store.ListWorkflowRowsRow) (int, *WorkflowListRolloutView) {
+	if row.RolloutStatus == "" || row.RolloutCanaryVersion != row.CurrentVersion {
+		return int(row.CurrentVersion), nil
+	}
+	production := row.RolloutBaselineVersion
+	if row.RolloutStatus == "promoted" {
+		production = row.RolloutCanaryVersion
+	}
+	return int(production), &WorkflowListRolloutView{Status: row.RolloutStatus, TrafficPercent: int(row.RolloutTrafficPercent)}
 }
 
 func newWorkflowListItemView(row store.ListWorkflowRowsRow) WorkflowListItemView {
+	production, rollout := workflowStage(row)
 	return WorkflowListItemView{
+		ProductionVersion: production, Rollout: rollout,
 		ID: row.ID, OrgID: row.OrgID, Name: row.Name,
 		CreatedBy: nullableTextValue(row.CreatedBy), CreatedAt: nullableTimeValue(row.CreatedAt),
 		LastRunStatus: textOrNullString(row.LastRunStatus), LastRunAt: nullableTimeValue(row.LastRunAt),

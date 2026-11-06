@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A workflow's Deployment tools show the latest saved version next to the
+  version in production, which stays the baseline while a canary runs and after
+  it is rolled back. Promote opens a dialog that compares the latest version
+  with the chosen baseline and holds the outcome comparison and the canary
+  traffic, minimum sample and success floor before Start canary. The workflow
+  list API returns the same production version and rollout for each workflow.
 - Failures in What needs you on Home have an Investigate action. It opens a side
   panel that checks four causes for the failed step, network, credential,
   upstream status and a version change, and marks each one Validated, Ruled out

@@ -1,5 +1,7 @@
 package contract
 
+import "github.com/johnny4young/janusly/internal/domain"
+
 var runSummary = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "workflowId": str(), "workflowName": nullableString(),
 	"workflowVersionId": str(), "status": runStatusSchema,
@@ -16,7 +18,11 @@ var workflowListItem = closedObj(map[string]any{
 	"bufferedTriggerCount": map[string]any{"type": "integer", "minimum": 0}, "status": str(),
 	"openFailureCount": map[string]any{"type": "integer", "minimum": 0}, "currentVersion": map[string]any{"type": "integer", "minimum": 0},
 	"pausedReason": nullableString(), "tags": arr(str()), "folder": nullableString(), "deletedAt": nullableString(),
-}, "id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus", "lastRunAt", "runCount", "bufferedTriggerCount", "openFailureCount", "currentVersion", "status", "pausedReason", "tags", "folder", "deletedAt")
+	"productionVersion": map[string]any{"type": "integer", "minimum": 0},
+	"rollout": nullable(closedObj(map[string]any{
+		"status": strEnum(domain.WorkflowRolloutStatuses), "trafficPercent": countT(),
+	}, "status", "trafficPercent")),
+}, "id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus", "lastRunAt", "runCount", "bufferedTriggerCount", "openFailureCount", "currentVersion", "status", "pausedReason", "tags", "folder", "deletedAt", "productionVersion", "rollout")
 
 var workflowVersion = closedObj(map[string]any{
 	"id": str(), "orgId": str(), "workflowId": str(), "version": map[string]any{"type": "integer", "minimum": 1},

@@ -543,6 +543,9 @@ pending confirmations. A stale confirmation cannot dispatch even if its dialog
 was already open. Cancellation does not undo a write the server already received;
 the next read is authoritative.
 
+While an operator can start a canary, the start controls and the
+qualification for the chosen pair live in the Promote dialog, next to the
+version compare; otherwise the panel shows the qualification itself.
 Qualification evidence must match the selected immutable baseline/candidate pair.
 Malformed deployment or qualification payloads fail closed with an inline retry,
 not an empty deployment or permission to start. The numeric controls retain

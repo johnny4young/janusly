@@ -1290,6 +1290,11 @@ export type WorkflowListItem = {
   "openFailureCount": number
   "orgId": string
   "pausedReason": string | null
+  "productionVersion": number
+  "rollout": {
+    "status": "active" | "promoted" | "rolled_back" | "cancelled"
+    "trafficPercent": number
+  } | null
   "runCount": number
   "status": string
   "tags": string[]

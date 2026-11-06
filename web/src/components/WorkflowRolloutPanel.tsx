@@ -10,7 +10,7 @@ import { GitBranch } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, contractApi } from '../api'
-import { readWorkflowVersionPage } from '../lib/list-contract'
+import { readWorkflowVersionPage, type WorkflowVersionRow } from '../lib/list-contract'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { useConfirm } from './ConfirmDialog'
@@ -18,9 +18,9 @@ import type {
   RecoveryQualificationGate,
 } from './WorkflowRecoveryQualification'
 import { Button } from '@/components/ui/Button'
-import { FormField } from '@/components/ui/Form'
 import { isRecord } from '../lib/guards'
 import type { WorkflowRollout } from '../lib/api-types.generated'
+import type { PromoteDraft } from './WorkflowPromoteDialog'
 import { isWorkflowRollout } from '../lib/api-guards/components/WorkflowRollout'
 import { isPostWorkflowsWorkflowIdRolloutResponse } from '../lib/api-guards/operations/PostWorkflowsWorkflowIdRollout'
 import { isPostWorkflowsWorkflowIdRolloutRolloutIdDecisionResponse } from '../lib/api-guards/operations/PostWorkflowsWorkflowIdRolloutRolloutIdDecision'
@@ -38,18 +38,12 @@ const WorkflowRecoveryQualification = lazy(() => import('./WorkflowRecoveryQuali
 const WorkflowRolloutStatus = lazy(() => import('./WorkflowRolloutStatus').then(module => ({
   default: module.WorkflowRolloutStatus,
 })))
-
-type VersionRow = { id: string; version: number }
-
-type Draft = {
-  baselineVersionId: string
-  trafficPercent: number
-  minimumSampleSize: number
-  minimumSuccessRatePercent: number
-}
+const WorkflowPromoteDialog = lazy(() => import('./WorkflowPromoteDialog').then(module => ({
+  default: module.WorkflowPromoteDialog,
+})))
 
 // Form defaults for operator input mirror internal/engine/rollouts.go.
-const DEFAULT_DRAFT: Draft = {
+const DEFAULT_DRAFT: PromoteDraft = {
   baselineVersionId: '',
   trafficPercent: 10, // wire-policy: form default.
   minimumSampleSize: 10, // wire-policy: form default.
@@ -92,9 +86,10 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
   const [refreshNonce, refresh] = useResourceRefresh(WORKFLOW_ROLLOUT_TAGS)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const addToast = useWorkflowStore(state => state.addToast)
-  const [versions, setVersions] = useState<VersionRow[]>([])
+  const [versions, setVersions] = useState<WorkflowVersionRow[]>([])
   const [rollout, setRollout] = useState<WorkflowRollout | null>(null)
-  const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT)
+  const [draft, setDraft] = useState<PromoteDraft>(DEFAULT_DRAFT)
+  const [promoteOpen, setPromoteOpen] = useState(false)
   const [qualificationGate, setQualificationGate] = useState<RecoveryQualificationGate | null>(null)
   const [loadState, setLoadState] = useState<'loading' | 'error' | 'ready'>('loading')
   const loading = loadState === 'loading'
@@ -152,6 +147,10 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
     ? successRate(rollout.canarySucceeded, rollout.canaryFailed)
     : null
 
+  // Mirrors the engine's assignment: outside the canary share, only a promoted canary replaces baseline.
+  const production = rollout && rolloutControlsLatest ? (rollout.status === 'promoted' ? canary : baseline) : latest
+  const canPromote = !readOnly && !loading && versions.length >= MIN_ROLLOUT_VERSIONS
+    && (!rollout || !rolloutControlsLatest)
   const canStart = !readOnly && !loading && !loadError && !mutating && Boolean(latest && draft.baselineVersionId
     && qualificationGate && !qualificationGate.loading
     && qualificationGate.baselineVersionId === draft.baselineVersionId && qualificationGate.candidateVersionId === latest.id
@@ -166,6 +165,7 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
       const updated = acceptRollout(payload.rollout, workflowId)
       if (!updated || !accepts(updated)) throw new Error(t('workflowRollout.invalidResponse'))
       setRollout(updated)
+      setPromoteOpen(false)
       addToast(t(success), 'success')
       bumpPlatformVersion(WORKFLOW_ROLLOUT_MUTATION_TAGS)
     } catch (error) {
@@ -203,6 +203,20 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
     decision === 'promote' ? 'workflowRollout.promoted' : 'workflowRollout.rolledBack', value => value.id === rollout.id)
   }
 
+  const qualification = !loading && versions.length >= MIN_ROLLOUT_VERSIONS
+    && qualificationBaselineVersionId && qualificationCandidateVersionId ? (
+    <Suspense fallback={<p className="helper-text" role="status">{t('workflowRollout.qualification.loading')}</p>}>
+      <WorkflowRecoveryQualification
+        key={`${refreshNonce}:${qualificationBaselineVersionId}:${qualificationCandidateVersionId}`}
+        workflowId={workflowId}
+        baselineVersionId={qualificationBaselineVersionId}
+        candidateVersionId={qualificationCandidateVersionId}
+        readOnly={readOnly}
+        onGateChange={setQualificationGate}
+      />
+    </Suspense>
+  ) : null
+
   return (
     <section className="we-card we-rollout-panel" aria-labelledby="workflow-rollout-title" data-testid="workflow-rollout-panel">
       <div className="we-card__header">
@@ -219,6 +233,13 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
       <p className="helper-text">{t('workflowRollout.description')}</p>
 
       {loading && <p className="helper-text" role="status">{t('workflowRollout.loading')}</p>}
+
+      {!loading && latest && (
+        <div className="we-rollout-panel__metrics" data-testid="workflow-stage">
+          <div><span>{t('workflowRollout.stage.latest')}</span><strong>v{latest.version}</strong></div>
+          <div><span>{t('workflowRollout.stage.production')}</span><strong>{production ? `v${production.version}` : '—'}</strong></div>
+        </div>
+      )}
 
       {!loading && rollout && rolloutControlsLatest && (
         <Suspense fallback={<p className="helper-text" role="status">{t('workflowRollout.loading')}</p>}>
@@ -246,85 +267,29 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
         <p className="we-rollout-panel__empty">{t('workflowRollout.needsVersions')}</p>
       )}
 
-      {!loading
-        && versions.length >= MIN_ROLLOUT_VERSIONS
-        && qualificationBaselineVersionId
-        && qualificationCandidateVersionId && (
-        <Suspense fallback={<p className="helper-text" role="status">{t('workflowRollout.qualification.loading')}</p>}>
-          <WorkflowRecoveryQualification
-            key={`${refreshNonce}:${qualificationBaselineVersionId}:${qualificationCandidateVersionId}`}
-            workflowId={workflowId}
-            baselineVersionId={qualificationBaselineVersionId}
-            candidateVersionId={qualificationCandidateVersionId}
-            readOnly={readOnly}
-            onGateChange={setQualificationGate}
-          />
-        </Suspense>
+      {canPromote && latest && (
+        <Button variant="primary" onClick={() => setPromoteOpen(true)} data-testid="workflow-promote-open">
+          {t('workflowRollout.promoteOpen', { version: latest.version })}
+        </Button>
       )}
 
-      {!readOnly
-        && !loading
-        && versions.length >= MIN_ROLLOUT_VERSIONS
-        && (!rollout || !rolloutControlsLatest)
-        && latest && (
-        <form className="we-rollout-panel__form" onSubmit={event => { event.preventDefault(); void createRollout() }}>
-          <div className="we-rollout-panel__pair">
-            <FormField label={t('workflowRollout.baseline')}>
-              {(controlProps) => (
-                <select
-                  {...controlProps}
-                  value={draft.baselineVersionId}
-                  onChange={event => setDraft({ ...draft, baselineVersionId: event.target.value })}
-                  disabled={mutating}
-                >
-                  {versions.slice(1).map(version => <option key={version.id} value={version.id}>v{version.version}</option>)}
-                </select>
-              )}
-            </FormField>
-            <div className="we-rollout-panel__canary">
-              <span>{t('workflowRollout.canary')}</span>
-              <strong>v{latest.version}</strong>
-            </div>
-          </div>
-          <div className="we-rollout-panel__fields">
-            {/* Form bounds for operator input mirror internal/engine/rollouts.go. */}
-            {([
-              ['trafficPercent', 'traffic', 1, 50], // wire-policy: form bound.
-              ['minimumSampleSize', 'sample', 5, 100], // wire-policy: form bound.
-              ['minimumSuccessRatePercent', 'successRate', 1, 100], // wire-policy: form bound.
-            ] as const).map(([field, label, min, max]) => (
-              <FormField key={field} label={t(`workflowRollout.${label}`)}>
-                {controlProps => (
-                  <span className="we-rollout-panel__input-unit" data-unit={field !== 'minimumSampleSize'}>
-                    <input
-                      {...controlProps}
-                      type="number"
-                      min={min}
-                      max={max}
-                      value={draft[field]}
-                      disabled={mutating}
-                      onChange={event => setDraft({ ...draft, [field]: Number(event.target.value) })}
-                    />
-                    {field !== 'minimumSampleSize' && <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>}
-                  </span>
-                )}
-              </FormField>
-            ))}
-          </div>
-          <p className="helper-text">{t('workflowRollout.guardrailHint')}</p>
-          {qualificationGate?.required && qualificationGate.status !== 'passed' && (
-            <p className="we-rollout-panel__qualification-blocked">
-              {t('workflowRollout.qualification.blockedHint')}
-            </p>
-          )}
-          <Button variant="primary"
-            type="submit"
+      {/* The comparison gates the start, so it moves into the dialog while an operator can promote. */}
+      {!canPromote && qualification}
 
-            disabled={!canStart}
-          >
-            {mutating ? t('workflowRollout.starting') : t('workflowRollout.start')}
-          </Button>
-        </form>
+      {canPromote && promoteOpen && (
+        <Suspense fallback={<p className="helper-text" role="status">{t('common.working')}</p>}>
+          <WorkflowPromoteDialog
+            versions={versions}
+            draft={draft}
+            onDraft={setDraft}
+            qualification={qualification}
+            blocked={Boolean(qualificationGate?.required && qualificationGate.status !== 'passed')}
+            canStart={canStart}
+            mutating={mutating}
+            onStart={() => { void createRollout() }}
+            onClose={() => setPromoteOpen(false)}
+          />
+        </Suspense>
       )}
     </section>
   )

@@ -82,6 +82,11 @@ function passedQualification(overrides: Record<string, unknown> = {}) {
   }
 }
 
+async function openPromote() {
+  fireEvent.click(await screen.findByTestId('workflow-promote-open'))
+  return screen.findByTestId('workflow-promote-dialog')
+}
+
 type QualificationPayload = {
   required: boolean
   qualification: ReturnType<typeof passedQualification>['qualification'] | null
@@ -111,10 +116,12 @@ describe('<WorkflowRolloutPanel />', () => {
       return { rollout: null }
     })
     render(<WorkflowRolloutPanel />)
+    await openPromote()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled())
     act(() => useWorkflowStore.setState({ currentWorkflowId: 'workflow-2' }))
     await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
     expect(screen.queryByRole('button', { name: 'Start canary' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-open')).not.toBeInTheDocument()
     expect(vi.mocked(api).mock.calls.some(([path]) => path.includes('workflow-2/rollout/qualification'))).toBe(false)
   })
 
@@ -152,6 +159,7 @@ describe('<WorkflowRolloutPanel />', () => {
       return { rollout: null }
     })
     render(<WorkflowRolloutPanel />)
+    await openPromote()
     const start = await screen.findByRole('button', { name: 'Start canary' })
     await waitFor(() => expect(start).toBeEnabled())
     fireEvent.click(start)
@@ -170,7 +178,7 @@ describe('<WorkflowRolloutPanel />', () => {
     render(<WorkflowRolloutPanel />)
     await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
     expect(screen.queryByTestId('workflow-rollout-status')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Start canary' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-open')).not.toBeInTheDocument()
   })
 
   it.each(['orgId', 'userId'] as const)('refetches the same workflow when %s changes and aborts the previous read owner', async field => {
@@ -182,6 +190,7 @@ describe('<WorkflowRolloutPanel />', () => {
       return { rollout: null }
     })
     const view = render(<WorkflowRolloutPanel />)
+    await openPromote()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled())
     const oldSignal = vi.mocked(api).mock.calls.find(([path]) => path.startsWith('/workflows/versions'))?.[1]?.signal
     unavailable = true
@@ -189,8 +198,10 @@ describe('<WorkflowRolloutPanel />', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument()
     expect(oldSignal?.aborted).toBe(true)
     expect(screen.queryByRole('button', { name: 'Start canary' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-open')).not.toBeInTheDocument()
     unavailable = false
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await openPromote()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled())
     const newSignal = vi.mocked(api).mock.calls.filter(([path]) => path.startsWith('/workflows/versions')).at(-1)?.[1]?.signal
     expect(newSignal).toBeInstanceOf(AbortSignal)
@@ -208,6 +219,7 @@ describe('<WorkflowRolloutPanel />', () => {
       return { rollout: null }
     })
     render(<WorkflowRolloutPanel />)
+    await openPromote()
     await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
@@ -222,6 +234,7 @@ describe('<WorkflowRolloutPanel />', () => {
       return { rollout: null }
     })
     render(<WorkflowRolloutPanel />)
+    await openPromote()
     const compare = await screen.findByRole('button', { name: 'Run comparison' })
     await waitFor(() => expect(compare).toBeEnabled())
     fireEvent.click(compare)
@@ -253,8 +266,7 @@ describe('<WorkflowRolloutPanel />', () => {
     })
     render(<WorkflowRolloutPanel />)
     await waitFor(() => expect(useWorkflowStore.getState().toasts).toHaveLength(1))
-    const start = screen.queryByRole('button', { name: 'Start canary' })
-    if (start) expect(start).toBeDisabled()
+    expect(screen.queryByTestId('workflow-promote-open')).not.toBeInTheDocument()
     expect(vi.mocked(api).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false)
   })
 
@@ -273,11 +285,14 @@ describe('<WorkflowRolloutPanel />', () => {
 
     render(<WorkflowRolloutPanel />)
 
-    expect(await screen.findByText('Canary version')).toBeInTheDocument()
-    expect(screen.getByText('v2')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Traffic share'), { target: { value: '20' } })
-    fireEvent.change(screen.getByLabelText('Min. outcomes'), { target: { value: '5' } })
-    const startButton = screen.getByRole('button', { name: 'Start canary' })
+    expect(await screen.findByTestId('workflow-promote-open')).toHaveTextContent('Promote v2…')
+    const dialog = await openPromote()
+    expect(within(dialog).getByRole('heading', { name: 'Promote v2' })).toBeInTheDocument()
+    expect(within(dialog).getByTestId('workflow-promote-baseline')).toHaveValue('version-1')
+    fireEvent.change(within(dialog).getByTestId('workflow-promote-trafficPercent'), { target: { value: '20' } })
+    fireEvent.change(within(dialog).getByTestId('workflow-promote-minimumSampleSize'), { target: { value: '5' } })
+    expect(within(dialog).getByTestId('workflow-promote-minimumSuccessRatePercent')).toHaveValue(90)
+    const startButton = within(dialog).getByTestId('workflow-promote-start')
     await waitFor(() => expect(startButton).toBeEnabled())
     await act(async () => { fireEvent.click(startButton) })
 
@@ -291,6 +306,14 @@ describe('<WorkflowRolloutPanel />', () => {
       minimumSuccessRatePercent: 90,
     })
     expect(await screen.findByText('20% to canary · v2')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-dialog')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-open')).not.toBeInTheDocument()
+
+    // A later read where promotion is possible again must not reopen the finished dialog.
+    rollout = null
+    act(() => invalidateTags([PLATFORM_TAG]))
+    expect(await screen.findByTestId('workflow-promote-open')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-dialog')).not.toBeInTheDocument()
   })
 
   it('renders measured outcomes and guardrail for an active rollout', async () => {
@@ -348,7 +371,7 @@ describe('<WorkflowRolloutPanel />', () => {
     render(<WorkflowRolloutPanel />)
 
     expect(await screen.findByRole('alert')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Start canary' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-open')).not.toBeInTheDocument()
     expect(screen.queryByTestId('workflow-rollout-status')).not.toBeInTheDocument()
   })
 
@@ -375,6 +398,7 @@ describe('<WorkflowRolloutPanel />', () => {
 
     render(<WorkflowRolloutPanel />)
 
+    await openPromote()
     const comparison = await screen.findByTestId('workflow-recovery-qualification')
     expect(comparison).toHaveTextContent('Outcome dataset comparison')
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
@@ -427,9 +451,71 @@ describe('<WorkflowRolloutPanel />', () => {
 
     render(<WorkflowRolloutPanel />)
 
+    await openPromote()
     const comparison = await screen.findByTestId('workflow-recovery-qualification')
     await waitFor(() => expect(comparison).toHaveTextContent('Baseline · approved-payment · outcome'))
     expect(comparison).toHaveTextContent('The candidate no longer evaluates this source node.')
     expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
+  })
+  it('shows the version compare for the chosen baseline and closes without writing', async () => {
+    const node = (id: string) => ({ id, type: 'transform', config: {} })
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return [
+        { ...versionRow, id: 'version-3', version: 3, dagJson: { nodes: [node('shape'), node('notify')], edges: [] } },
+        { ...versionRow, id: 'version-2', version: 2, dagJson: { nodes: [node('shape')], edges: [] } },
+        { ...versionRow, id: 'version-1', version: 1, dagJson: { nodes: [node('shape'), node('notify')], edges: [] } },
+      ]
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout: null }
+    })
+    render(<WorkflowRolloutPanel />)
+
+    let dialog = await openPromote()
+    expect(within(dialog).getByText('Baseline · v2')).toBeInTheDocument()
+    expect(within(dialog).getByText('Canary · v3')).toBeInTheDocument()
+    expect(within(dialog).getByText('notify')).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByTestId('workflow-promote-baseline'), { target: { value: 'version-1' } })
+    expect(within(dialog).getByText('Baseline · v1')).toBeInTheDocument()
+    expect(within(dialog).queryByText('notify')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByTestId('workflow-promote-cancel'))
+    expect(screen.queryByTestId('workflow-promote-dialog')).not.toBeInTheDocument()
+
+    dialog = await openPromote()
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByTestId('workflow-promote-dialog')).not.toBeInTheDocument())
+    dialog = await openPromote()
+    fireEvent.click(within(dialog).getByTestId('workflow-promote-close'))
+    expect(screen.queryByTestId('workflow-promote-dialog')).not.toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false)
+  })
+
+  it('keeps the comparison in the panel and offers no promotion when read-only', async () => {
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: true, qualification: null }
+      return { rollout: null }
+    })
+    render(<WorkflowRolloutPanel readOnly />)
+
+    expect(await screen.findByTestId('workflow-recovery-qualification')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-open')).not.toBeInTheDocument()
+  })
+  it.each([
+    ['no rollout', null, versions, 'v2'],
+    ['an active canary', activeRollout(), versions, 'v1'],
+    ['a rolled-back canary', activeRollout({ status: 'rolled_back' }), versions, 'v1'],
+    ['a promoted canary', activeRollout({ status: 'promoted' }), versions, 'v2'],
+    ['a rollout behind a newer save', activeRollout({ status: 'rolled_back' }), [{ ...versions[0], id: 'version-3', version: 3 }, ...versions], 'v3'],
+  ] as const)('shows the version in production with %s', async (_case, rollout, rows, production) => {
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return rows
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout }
+    })
+    render(<WorkflowRolloutPanel readOnly />)
+
+    const stage = await screen.findByTestId('workflow-stage')
+    expect(stage).toHaveTextContent(`Latest savedv${rows[0].version}`)
+    expect(stage).toHaveTextContent(`In production${production}`)
   })
 })

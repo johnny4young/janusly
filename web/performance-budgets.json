@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 627.3,
+  "artifactGzipKiB": 628.5,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 580.8
+    "maxGzipKiB": 582.1
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,7 +85,7 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 84.44,
+    "app-workspace.js": 84.5,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
@@ -98,8 +98,8 @@
     "BudgetSettingsPanel.js": 3.25,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 42.24,
-    "catalog-es.js": 47.04,
+    "catalog-en.js": 42.26,
+    "catalog-es.js": 47.05,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,

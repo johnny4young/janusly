@@ -82,7 +82,11 @@ typecheck against the generated union.
 
 `GET /v1/workflows` rows carry `lastRunAt`, `openFailureCount` (open production
 dead letters attributed to the workflow, edited-draft runs included) and
-`currentVersion` next to the existing run aggregates.
+`currentVersion` next to the existing run aggregates. `productionVersion` is
+the version that takes production traffic outside a canary share, and
+`rollout` (`status`, `trafficPercent`) is the rollout routing that traffic,
+or null. Both follow the engine's assignment rule: a rollout routes traffic
+only while its canary is the latest saved version.
 
 `GET /v1/workflows/versions` is a keyset page of one workflow's history,
 newest first: `limit` (default 50, at most 200), `beforeVersion` as the

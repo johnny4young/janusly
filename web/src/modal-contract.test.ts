@@ -37,6 +37,7 @@ describe('modal accessibility contract', () => {
       './components/RunInputDialog.tsx',
       './components/ShortcutsModal.tsx',
       './components/SnippetInsertMenu.tsx',
+      './components/WorkflowPromoteDialog.tsx',
       './Layout.tsx',
     ])
   })
