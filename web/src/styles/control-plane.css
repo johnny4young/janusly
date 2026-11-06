@@ -1269,24 +1269,6 @@
 .we-list-row__pill--cobalt { background: var(--we-primary-soft); color: var(--we-primary); border-color: color-mix(in srgb, var(--we-primary) 28%, transparent); }
 .we-list-row__pill--cyan { background: var(--we-accent-soft); color: var(--we-accent-text); border-color: color-mix(in srgb, var(--we-accent) 30%, transparent); }
 
-/* Severity 3px left-border (mirrors operations / cluster row pattern). */
-.we-list-row[data-severity="success"] { border-left: 3px solid var(--we-success); }
-.we-list-row[data-severity="warning"] { border-left: 3px solid var(--we-warning); }
-.we-list-row[data-severity="danger"] { border-left: 3px solid var(--we-danger); }
-.we-list-row[data-severity="cobalt"] { border-left: 3px solid var(--we-primary); }
-.we-list-row[data-severity="cyan"] { border-left: 3px solid var(--we-accent); }
-.we-list-row[data-severity="added"] { border-left: 3px solid var(--we-success); background: color-mix(in srgb, var(--we-success) 4%, var(--we-surface) 96%); }
-.we-list-row[data-severity="removed"] { border-left: 3px solid var(--we-danger); background: color-mix(in srgb, var(--we-danger) 4%, var(--we-surface) 96%); }
-.we-list-row[data-severity="changed"] { border-left: 3px solid var(--we-warning); background: color-mix(in srgb, var(--we-warning) 4%, var(--we-surface) 96%); }
-
-.we-list-row--healthy {
-  border-left: 3px solid var(--we-success);
-}
-
-.we-list-row--warn {
-  border-left: 3px solid var(--we-warning);
-}
-
 .we-list-row--empty {
   color: var(--we-muted);
   font-size: 12px;

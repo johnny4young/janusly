@@ -603,8 +603,8 @@ describe('<DeadLettersPanel />', () => {
     await waitFor(() => expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument())
   })
 
-  it('shows the warning stripe from the org-wide open count, not the visible page', async () => {
-    // Empty loaded page, but the org-wide counts report opens → stripe still on.
+  it('shows the warning outline from the org-wide open count, not the visible page', async () => {
+    // Empty loaded page, but the org-wide counts report opens → outline still on.
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path.startsWith('/dlq/counts')) return { total: 5, open: 3, replayed: 1, resolved: 1 }
       if (path.startsWith('/dlq/queue')) return { items: [], nextCursor: null, hasMore: false }

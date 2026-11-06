@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Cards, rows and callouts no longer mark status with a colored strip on their
+  left edge. A warning or critical item in What needs you gets a tinted
+  background, a full colored border and a named icon. Metric tiles in Activity
+  and Reports show their status as a labeled pill, recent alert outcomes are
+  colored by result, and the selected row in Activity, the selected recovery
+  candidate, the recovery passport, the queue card and workflow diffs use a
+  full border instead.
 - Activity lists runs and recoveries as a dense table with kind, workflow,
   step, status, time, run and next action. A recovery sits under its run with
   the workflow name muted. Hovering a row shows every field a column cuts off.

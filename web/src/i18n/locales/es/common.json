@@ -3635,6 +3635,8 @@
   "home.priority.unavailableTitle": "El resumen de prioridades no está disponible temporalmente",
   "home.priority.unavailableBody": "No se marcó el trabajo como resuelto. Actualiza el estado antes de decidir qué atender.",
   "home.priority.degraded": "Algunas fuentes operativas no estuvieron disponibles. Las prioridades visibles son seguras, pero pueden estar incompletas.",
+  "home.priority.severity.warning": "Advertencia",
+  "home.priority.severity.danger": "Crítico",
   "operations.brief.recoveryApproval.title": "Aprobar una recuperación validada",
   "operations.brief.recoveryApproval.body": "Un candidato de recuperación semántica pasó la validación y espera una decisión humana independiente.",
   "operations.brief.recoveryApproval.cta": "Revisar recuperación",

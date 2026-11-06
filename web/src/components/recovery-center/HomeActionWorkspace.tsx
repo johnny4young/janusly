@@ -5,6 +5,7 @@ import {
   CircleDot,
   Clock3,
   LoaderCircle,
+  OctagonAlert,
   Sparkles,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -18,6 +19,13 @@ import type {
 
 function runTone(run: RunSummary): 'warning' | 'primary' {
   return run.status === 'waiting' || run.hasWaitingNodes ? 'warning' : 'primary'
+}
+
+function SeverityMark({ severity }: { severity: RecommendedAction['severity'] }) {
+  const { t } = useT()
+  if (severity !== 'warning' && severity !== 'danger') return null
+  const Icon = severity === 'danger' ? OctagonAlert : AlertTriangle
+  return <Icon className="we-home-priority__severity" size={13} role="img" aria-label={t(`home.priority.severity.${severity}`)} />
 }
 
 /** Failures with a run to read; recovery cases and approvals have their own flows. */
@@ -110,7 +118,7 @@ export function HomeActionWorkspace({
                   {index + 1}
                 </span>
                 <div className="we-home-priority__copy">
-                  <strong>{action.title}</strong>
+                  <strong><SeverityMark severity={action.severity} />{action.title}</strong>
                   <p>{action.body}</p>
                 </div>
                 {onInvestigate && canInvestigate(action) && (

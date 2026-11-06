@@ -516,7 +516,6 @@ export function DeadLetterQueueView({
                       role="row"
                       data-clickable="true"
                       data-selection-mode={selectionMode ? 'true' : undefined}
-                      data-severity={severity}
                       data-testid={`dlq-row-${item.id}`}
                       data-dead-letter-id={item.id}
                       data-selected={selected?.id === item.id ? 'true' : undefined}

@@ -1,10 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Activity, AlertTriangle } from 'lucide-react'
 import { describe, expect, it, vi } from 'vitest'
 import { Sparkline, VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 
 describe('<VitalSignsStrip />', () => {
-  it('renders one card per tile with severity-keyed classes and rationale copy', () => {
+  it('renders one card per tile with a visible severity pill and rationale copy', () => {
     render(
       <VitalSignsStrip
         ariaLabel="Test strip"
@@ -14,6 +14,7 @@ describe('<VitalSignsStrip />', () => {
             label: 'Success rate',
             display: '95.0%',
             severity: 'healthy',
+            severityLabel: 'Healthy',
             rationale: '11 of 12 runs succeeded.',
             testId: 'tile-success',
           },
@@ -22,8 +23,17 @@ describe('<VitalSignsStrip />', () => {
             label: 'Failures',
             display: '3',
             severity: 'warn',
+            severityLabel: 'Needs attention',
             rationale: '3 open dead-letters.',
             testId: 'tile-failures',
+          },
+          {
+            icon: <Activity />,
+            label: 'Queue lag',
+            display: '—',
+            severity: 'neutral',
+            severityLabel: 'Neutral',
+            testId: 'tile-neutral',
           },
         ]}
       />,
@@ -33,8 +43,9 @@ describe('<VitalSignsStrip />', () => {
     const failures = screen.getByTestId('tile-failures')
 
     expect(success).toBeInTheDocument()
-    expect(success.className).toContain('we-ops-metric-card--healthy')
-    expect(failures.className).toContain('we-ops-metric-card--warn')
+    expect(within(success).getByText('Healthy')).toHaveAttribute('data-tone', 'success')
+    expect(within(failures).getByText('Needs attention')).toHaveAttribute('data-tone', 'warning')
+    expect(within(screen.getByTestId('tile-neutral')).getByText('Neutral')).toHaveClass('we-sr-only')
     expect(screen.getByText('Success rate')).toBeInTheDocument()
     expect(screen.getByText('95.0%')).toBeInTheDocument()
     expect(screen.getByText('11 of 12 runs succeeded.')).toBeInTheDocument()
@@ -77,7 +88,7 @@ describe('<VitalSignsStrip />', () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
-  it('announces the severity to screen readers (static tile) since it is color-only', () => {
+  it('names the severity in visible text, not by color alone (static tile)', () => {
     render(
       <VitalSignsStrip
         tiles={[
@@ -92,8 +103,9 @@ describe('<VitalSignsStrip />', () => {
         ]}
       />,
     )
-    const srText = screen.getByText('Healthy')
-    expect(srText).toHaveClass('we-sr-only')
+    const pill = screen.getByText('Healthy')
+    expect(pill).toHaveClass('we-pill')
+    expect(pill).not.toHaveClass('we-sr-only')
     expect(screen.getByTestId('tile-success')).toHaveTextContent('Healthy')
   })
 

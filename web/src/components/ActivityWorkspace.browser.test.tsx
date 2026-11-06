@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ActivityWorkspace } from './ActivityWorkspace'
 import type { ActivityWorkspaceProps } from './ActivityWorkspace'
 import type { DeadLetter } from './DeadLettersPanel'
+import { leadingAccents } from '../test/leading-accent'
 
 vi.mock('./RunWorkspace', () => ({
   RunWorkspace: () => <div>Run detail</div>,
@@ -198,8 +199,11 @@ describe('<ActivityWorkspace /> (browser smoke)', () => {
     const selected = { ...props(), activeRecoveryId: 'recovery-browser' }
     render(<div style={{ width: 1200 }}><ActivityWorkspace {...selected} /></div>)
 
-    const style = getComputedStyle(screen.getByTestId('activity-row-recovery:recovery-browser'))
+    const row = screen.getByTestId('activity-row-recovery:recovery-browser')
+    const style = getComputedStyle(row)
     expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    expect(style.boxShadow).toContain('inset')
+    expect(leadingAccents(row.parentElement!)).toEqual([])
     expect(getComputedStyle(screen.getByTestId('activity-row-run:run-live')).backgroundColor)
       .toBe('rgba(0, 0, 0, 0)')
   })

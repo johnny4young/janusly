@@ -1,4 +1,5 @@
 import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
+import { leadingAccents } from '../test/leading-accent'
 /**
  * Real-Chromium regression smoke for the recovery dialog lifecycle.
  * A successful cluster apply schedules a platform refresh; the refreshed
@@ -121,9 +122,11 @@ describe('<FailureClustersCard /> recovery lifecycle (browser smoke)', () => {
       return { ok: true }
     })
 
-    render(<FailureClustersCard />)
+    const { container } = render(<FailureClustersCard />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /HTTP 502 on fetch/i }))
+    const summary = await screen.findByRole('button', { name: /HTTP 502 on fetch/i })
+    expect(leadingAccents(container)).toEqual([])
+    fireEvent.click(summary)
     fireEvent.click(screen.getByRole('button', { name: /Recover this pattern/i }))
     await screen.findByRole(
       'heading',

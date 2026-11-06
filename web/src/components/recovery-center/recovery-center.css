@@ -517,25 +517,6 @@ button.we-recovery-heatmap__cell:focus-visible {
 
 .we-home-operator input::placeholder { color: var(--we-muted); }
 
-/* Tile severity left-border — applies to every `[data-severity]` tile inside
-   `.we-recovery-center-tile`. Mirrors preview/25-operations.html cards. */
-.we-recovery-center-tile {
-  border-left-width: 3px;
-  border-left-style: solid;
-}
-
-.we-recovery-center-tile[data-severity="cobalt"] { border-left-color: var(--we-primary); }
-
-.we-recovery-center-tile[data-severity="cyan"] { border-left-color: var(--we-accent); }
-
-.we-recovery-center-tile[data-severity="success"] { border-left-color: var(--we-success); }
-
-.we-recovery-center-tile[data-severity="warning"] { border-left-color: var(--we-warning); }
-
-.we-recovery-center-tile[data-severity="danger"] { border-left-color: var(--we-danger); }
-
-.we-recovery-center-tile[data-severity="neutral"] { border-left-color: var(--we-line-strong); }
-
 /* Watch-rows for the AI is watching tile (failure clusters). */
 .we-recovery-watch {
   list-style: none;

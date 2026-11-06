@@ -228,7 +228,6 @@
 }
 
 .we-run-event {
-  border-left: 3px solid var(--we-line-strong);
   box-sizing: border-box;
   display: grid;
   gap: 5px;
@@ -245,15 +244,9 @@
   outline: 0;
 }
 
-.we-run-event[data-tone="info"] { border-left-color: var(--we-primary); }
-
-.we-run-event[data-tone="success"] { border-left-color: var(--we-success); }
-
-.we-run-event[data-tone="warning"] { border-left-color: var(--we-warning); }
-
 .we-run-event[data-tone="error"] {
   background: var(--we-danger-soft);
-  border-left-color: var(--we-danger);
+  border-color: var(--we-danger-text);
 }
 
 .we-run-event[data-noise="true"] { opacity: 0.62; }

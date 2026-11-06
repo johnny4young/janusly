@@ -60,7 +60,6 @@
   margin-top: 12px;
   padding: 14px;
   border: 1px solid color-mix(in srgb, var(--we-primary) 28%, var(--we-line));
-  border-left: 4px solid var(--we-primary);
   border-radius: 10px;
   background: color-mix(in srgb, var(--we-primary) 5%, var(--we-surface));
   font-size: 12px;
@@ -73,15 +72,14 @@
 .we-recovery-passport {
   margin-top: 12px;
   padding: 12px;
-  border: 1px solid var(--we-border);
-  border-left: 4px solid var(--we-warning);
+  border: 1px solid var(--we-warning-text);
   border-radius: 10px;
   background: color-mix(in srgb, var(--we-surface-2) 72%, transparent);
 }
 
-.we-recovery-passport[data-verdict="safe_to_apply"] { border-left-color: var(--we-success); }
+.we-recovery-passport[data-verdict="safe_to_apply"] { border-color: var(--we-success-text); }
 
-.we-recovery-passport[data-verdict="unsafe"] { border-left-color: var(--we-danger); }
+.we-recovery-passport[data-verdict="unsafe"] { border-color: var(--we-danger-text); }
 
 .we-recovery-passport__header {
   display: flex;

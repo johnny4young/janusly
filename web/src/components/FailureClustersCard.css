@@ -22,12 +22,6 @@
   overflow: hidden;
 }
 
-.we-cluster-row--fail { border-left: 3px solid var(--we-danger); }
-
-.we-cluster-row--warn { border-left: 3px solid var(--we-warning); }
-
-.we-cluster-row--pass { border-left: 3px solid var(--we-success); }
-
 .we-cluster-row__summary {
   display: grid;
   grid-template-columns: auto 1fr auto;

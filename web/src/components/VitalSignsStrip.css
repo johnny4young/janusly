@@ -11,22 +11,11 @@
   flex-direction: column;
   gap: 8px;
   padding: 14px;
-  border-left-width: 3px;
-  border-left-style: solid;
 }
-
-.we-ops-metric-card--healthy { border-left-color: var(--we-success); }
-
-.we-ops-metric-card--warn { border-left-color: var(--we-warning); }
-
-.we-ops-metric-card--unhealthy { border-left-color: var(--we-danger); }
-
-.we-ops-metric-card--neutral { border-left-color: var(--we-line-strong); }
-
-.we-ops-metric-card--info { border-left-color: var(--we-info); }
 
 .we-ops-metric-card__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -40,6 +29,8 @@
 .we-ops-metric-card__label {
   margin-bottom: 0;
 }
+
+.we-ops-metric-card__severity { margin-left: auto; white-space: nowrap; }
 
 .we-ops-metric-card__value {
   font-size: 22px;

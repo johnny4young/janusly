@@ -42,16 +42,10 @@
   gap: 6px;
   margin-top: 8px;
   border-radius: 8px;
-  border-left: 3px solid transparent;
 }
 
 .version-row[data-latest="true"] {
-  border-left-color: var(--we-primary);
   background: color-mix(in srgb, var(--we-primary) 4%, var(--we-surface) 96%);
-}
-
-.version-row[data-selected="true"] {
-  border-left-color: var(--we-accent);
 }
 
 .version-row .version-button {

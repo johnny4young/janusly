@@ -225,12 +225,11 @@ export function FailureClustersCard({ canRecover = true, canStartRuns = false }:
 
       <ul className="we-cluster-list">
         {clusters.map((cluster) => {
-          const severity = severityForCategory(cluster.category)
           const isOpen = expanded[cluster.signature] ?? false
           const lastSeenLabel = formatRelative(cluster.lastSeen, fetchedAtMs)
 
           return (
-            <li key={cluster.signature} className={`we-cluster-row we-cluster-row--${severity}`}>
+            <li key={cluster.signature} className="we-cluster-row">
               <button
                 type="button"
                 className="we-cluster-row__summary"

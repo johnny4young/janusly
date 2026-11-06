@@ -37,7 +37,7 @@ export type VitalSignsTile = {
   label: string
   /** Pre-formatted value string, e.g. "95.0%", "1m 30s", "$12.34", or "—". */
   display: string
-  /** Severity-tinted left border + value color. */
+  /** Drives the severity pill and the progress tint. */
   severity: VitalSignsTileSeverity
   /** Optional one-line "why this value" copy below the metric. */
   rationale?: string
@@ -65,21 +65,18 @@ export type VitalSignsTile = {
   onSelectSparklinePoint?: (index: number) => void
   /** Optional aria-label override. Defaults to the tile's `label`. */
   ariaLabel?: string
-  /** Pre-translated severity word (e.g. "Healthy" / "Needs attention") announced
-   *  to screen readers. The severity is otherwise conveyed by color ONLY (the
-   *  card's left border + value tint), so without this a non-sighted operator
-   *  can't tell a healthy metric from an unhealthy one. Use `withSeverityLabels`
-   *  to populate it from the catalog. */
+  /** Pre-translated severity word (e.g. "Healthy" / "Needs attention") shown as
+   *  the tile's pill; neutral tiles keep it for screen readers only. Use
+   *  `withSeverityLabels` to populate it from the catalog. */
   severityLabel?: string
   /** Surface-specific test id (e.g. `recovery-center-metric-failures`). */
   testId?: string
 }
 
 /**
- * Decorate tiles with a localized `severityLabel` (screen-reader text for the
- * color-only severity band). The caller supplies its own `t`, keeping this
- * component presentational — it never imports the i18n module. A tile that
- * already set `severityLabel` is left untouched.
+ * Decorate tiles with a localized `severityLabel`. The caller supplies its own
+ * `t`, keeping this component presentational — it never imports the i18n
+ * module. A tile that already set `severityLabel` is left untouched.
  */
 export function withSeverityLabels(
   tiles: VitalSignsTile[],
@@ -90,6 +87,8 @@ export function withSeverityLabels(
     severityLabel: tile.severityLabel ?? String(t(`vitals.severity.${tile.severity}`)),
   }))
 }
+
+const SEVERITY_TONE = { healthy: 'success', warn: 'warning', unhealthy: 'danger', info: 'info' } as const
 
 export function VitalSignsStrip({
   tiles,
@@ -121,7 +120,6 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
   const className = [
     'we-card',
     'we-ops-metric-card',
-    `we-ops-metric-card--${tile.severity}`,
     isClickable && !hasInteractiveSparkline ? 'we-ops-metric-card--button' : '',
     isClickable && hasInteractiveSparkline ? 'we-ops-metric-card--split-action' : '',
   ]
@@ -135,14 +133,12 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
       <div className="we-ops-metric-card__head">
         <span className="we-ops-metric-card__icon" aria-hidden="true">{tile.icon}</span>
         <span className="section-kicker we-ops-metric-card__label">{tile.label}</span>
+        {tile.severityLabel && tile.severity !== 'neutral' && (
+          <span className="we-pill we-ops-metric-card__severity" data-tone={SEVERITY_TONE[tile.severity]}>{tile.severityLabel}</span>
+        )}
       </div>
       <div className="we-ops-metric-card__value">{animatedValue}</div>
-      {/* Screen-reader-only severity word — the visible severity is color-only
-          (border + value tint). Read after the value: "…, 95.0%, Healthy". On
-          the clickable variant the button's aria-label carries it instead (an
-          aria-label overrides inner content), so this span only feeds the static
-          section variant. */}
-      {tile.severityLabel && <span className="we-sr-only">{tile.severityLabel}</span>}
+      {tile.severityLabel && tile.severity === 'neutral' && <span className="we-sr-only">{tile.severityLabel}</span>}
       {typeof tile.progressValue === 'number' && tile.progressValue !== null && (
         <div className="we-ops-progress" role="presentation">
           <span className="we-ops-progress__rail" />

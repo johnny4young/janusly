@@ -3,6 +3,7 @@ import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { initI18n } from '../i18n'
 import { useWorkflowStore } from '../store'
+import { leadingAccents } from '../test/leading-accent'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }))
@@ -102,6 +103,7 @@ describe('Version history in Chromium', () => {
       await userEvent.click(screen.getByRole('button', { name: /^v2/ }))
       await userEvent.click(screen.getByRole('button', { name: /^v1$/ }))
       expect(screen.getByRole('button', { name: /^v1$/ })).toHaveAttribute('aria-pressed', 'true')
+      expect(leadingAccents(document.querySelector('.version-row')!.parentElement!)).toEqual([])
       await userEvent.click(screen.getByRole('button', { name: cancel }))
       screen.getByRole('button', { name: /^v1$/ }).focus()
       await userEvent.keyboard('{Enter}')

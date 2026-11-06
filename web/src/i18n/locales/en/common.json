@@ -3635,6 +3635,8 @@
   "home.priority.unavailableTitle": "Priority brief is temporarily unavailable",
   "home.priority.unavailableBody": "No work has been marked clear. Refresh status before deciding what to handle next.",
   "home.priority.degraded": "Some operational sources were unavailable. The visible priorities are safe but may be incomplete.",
+  "home.priority.severity.warning": "Warning",
+  "home.priority.severity.danger": "Critical",
   "operations.brief.recoveryApproval.title": "Approve a validated recovery",
   "operations.brief.recoveryApproval.body": "A semantic recovery candidate passed validation and is waiting for an independent human decision.",
   "operations.brief.recoveryApproval.cta": "Review recovery",
