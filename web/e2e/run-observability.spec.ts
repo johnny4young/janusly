@@ -11,6 +11,8 @@ import { expect, test, type Locator, type Page, type Route } from '@playwright/t
 import { pollUntilTerminal, pollUntilWaitingOrTerminal, startRun } from './_helpers/demo-helpers'
 
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
+const UPSTREAM_HOST = process.env.E2E_UPSTREAM_HOST ?? '127.0.0.1'
+const UPSTREAM_BIND = process.env.E2E_UPSTREAM_BIND ?? '127.0.0.1'
 
 function installConsoleErrorGuards(page: Page): string[] {
   const errors: string[] = []
@@ -120,7 +122,7 @@ async function createHeldHttpTarget(): Promise<{
     response = nextResponse
     markConnected()
   })
-  server.listen(0, '127.0.0.1')
+  server.listen(0, UPSTREAM_BIND)
   await once(server, 'listening')
   const release = () => {
     if (!response || response.writableEnded) return
@@ -128,7 +130,7 @@ async function createHeldHttpTarget(): Promise<{
     response.end(JSON.stringify({ ok: true }))
   }
   return {
-    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/held-run`,
+    url: `http://${UPSTREAM_HOST}:${(server.address() as AddressInfo).port}/held-run`,
     connected,
     release,
     close: async () => {
