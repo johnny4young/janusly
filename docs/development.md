@@ -63,6 +63,17 @@ acceptance pass. Those still require the separate study in
 The same lane runs `usability-study-readiness.spec.ts` against real failures
 and routes in both locales; it verifies affordances only, not interviews or
 unassisted participant completion.
+`activity-workspace.spec.ts` includes an axe scan of the Activity table, and
+`run-observability.spec.ts` runs its held-HTTP running-node journey because the
+lane sets `JANUSLY_E2E_PRIVATE_HTTP=1`: its owned stack already allows private
+targets, and the held upstream binds through `E2E_UPSTREAM_HOST`/`E2E_UPSTREAM_BIND`
+like the smoke spec. Playwright also receives the lane's `COMPOSE_PROJECT_NAME`,
+so specs that seed fixtures through `e2e/_helpers/postgres.ts` write to the
+lane's own database. `scripts/test-e2e.test.sh` pins the spec list and fails if
+a selected file is missing. Opt-in suites gated by their own variable
+(`local-*`, `pre-main-visual-matrix`, `semantic-outcome-recovery`,
+`pagerduty-prompt-flow`, `real-recovery-lab`, `marketing-screens`) stay out of
+the lane; any other unselected spec runs only through `make test-e2e-full`.
 
 It also runs `authoring-experience.spec.ts` in EN/ES against the same embedded
 application and fresh PostgreSQL stack, replacing only its owned executable
