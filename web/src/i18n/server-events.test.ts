@@ -73,6 +73,12 @@ describe('tRunEvent', () => {
     expect(result).toBe('Step http_call failed')
   })
 
+  it('labels every tool approval decision on the timeline', () => {
+    for (const [type, label] of [['tool_approval.approved', 'approved'], ['tool_approval.denied', 'denied'], ['tool_approval.expired', 'expired']]) {
+      expect(tRunEvent({ id: type, type, nodeId: 'snooze' })).toMatch(new RegExp(`${label} for snooze$`))
+    }
+  })
+
   it('falls back to a debug-friendly description for unknown types', () => {
     const result = tRunEvent({ id: 'evt2', type: 'totally.new.event', nodeId: 'foo' })
     expect(result).toContain('totally.new.event')

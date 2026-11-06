@@ -69,6 +69,10 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 	if err != nil {
 		return opError(http.StatusBadRequest, "org_config_invalid", err.Error(), nil)
 	}
+	if def.Key == orgconfig.ToolApprovalPolicyKey {
+		return opError(http.StatusConflict, "tool_approval_policy_path",
+			"Change tools.approvalRequired one tool at a time with POST /org/tool-approval-policy", nil)
+	}
 	valueJSON, err := json.Marshal(normalized)
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)

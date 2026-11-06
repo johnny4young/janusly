@@ -245,12 +245,14 @@ UPDATE run_nodes SET status = 'waiting', state_json = sqlc.arg(state_json)
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'running';
 
+-- A tool approval resumes only through its decision, which runs the tool.
 -- name: MarkWaitingNodeSucceeded :one
 UPDATE run_nodes
 SET status = 'succeeded', state_json = sqlc.arg(state_json),
     finished_at = sqlc.arg(finished_at)
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'waiting'
+  AND state_json #>> '{waiting,kind}' IS DISTINCT FROM 'tool_approval'
 RETURNING id;
 
 -- Exact approval-deadline generation CAS. Manual resume, cancellation,

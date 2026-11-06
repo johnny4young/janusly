@@ -91,6 +91,7 @@ var Definitions = []Definition{
 	{Key: "mcp.stdioMaxVmKb", Category: "mcp", Description: "Reserved virtual-memory cap (KB) for stdio MCP children. NOT enforced by the current runtime: the production image is distroless and carries no prlimit, and Go cannot set a child rlimit without one. The active sandbox bounds are the command allowlist, env whitelist, bounded lifetime, and capped stderr; the container's own memory limit bounds the process tree. Kept for forward compatibility. Range 131072..4194304 (128 MiB..4 GiB).", ValueType: "number", Default: float64(524288), EnvKeys: []string{"JANUSLY_MCP_STDIO_MAX_VM_KB"}, Min: new(float64(131072)), Max: new(float64(4194304))},
 	{Key: "slack.rateLimitPerMin", Category: "integrations", Description: "Per-org slack.post tool calls per minute.", ValueType: "number", Default: float64(60), EnvKeys: []string{"JANUSLY_SLACK_RATE_LIMIT_PER_MIN"}, Min: new(float64(1))},
 	{Key: "github.rateLimitPerMin", Category: "integrations", Description: "Per-org github.create_issue tool calls per minute.", ValueType: "number", Default: float64(60), EnvKeys: []string{"JANUSLY_GITHUB_RATE_LIMIT_PER_MIN"}, Min: new(float64(1))},
+	{Key: ToolApprovalPolicyKey, Category: "integrations", Description: "Comma-separated built-in tool names (http.request included) that need a person's approval before every call in any workflow; report and digest deliveries of a listed tool are refused, while alert notifications are not held back. Change it one tool at a time through POST /org/tool-approval-policy. Nobody who caused the call can approve it: whoever started the run or a run above it, anyone who submitted a form, replaced a step's output or applied a redrive with a fixed document anywhere in its run tree, anyone who redrove that run or a run above it, and, for a run no person started (schedule, webhook, service token), whoever saved its version.", ValueType: "string", Default: "", AllowEmpty: true, Validate: validateToolApprovalPolicy},
 	{Key: "webhook.rateLimitPerMin", Category: "integrations", Description: "Per-org webhook.send tool calls per minute.", ValueType: "number", Default: float64(120), EnvKeys: []string{"JANUSLY_WEBHOOK_RATE_LIMIT_PER_MIN"}, Min: new(float64(1))},
 	{Key: "pdf.rateLimitPerMin", Category: "integrations", Description: "Per-org pdf.generate tool calls per minute.", ValueType: "number", Default: float64(30), EnvKeys: []string{"JANUSLY_PDF_RATE_LIMIT_PER_MIN"}, Min: new(float64(1))},
 	{Key: "db.rateLimitPerMin", Category: "integrations", Description: "Per-org db.schema.describe / db.query.* tool calls per minute.", ValueType: "number", Default: float64(60), EnvKeys: []string{"JANUSLY_DB_TOOL_RATE_LIMIT_PER_MIN"}, Min: new(float64(1))},
@@ -344,4 +345,38 @@ func validateRecoverySLAPolicies(value any) error {
 		}
 	}
 	return nil
+}
+
+// ToolApprovalPolicyKey lists the tools whose every call waits for a person.
+const ToolApprovalPolicyKey = "tools.approvalRequired"
+
+var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`)
+
+// ParseToolApprovalPolicy returns the listed tool names, or an error for any
+// malformed entry so a gate can fail closed on a bad stored value.
+func ParseToolApprovalPolicy(text string) (map[string]bool, error) {
+	names := map[string]bool{}
+	for entry := range strings.SplitSeq(text, ",") {
+		name := strings.TrimSpace(entry)
+		if name == "" {
+			continue
+		}
+		if len(name) > 80 || !toolNamePattern.MatchString(name) {
+			return nil, fmt.Errorf("%s entry %q is not a tool name", ToolApprovalPolicyKey, name)
+		}
+		names[name] = true
+	}
+	if len(names) > 64 {
+		return nil, fmt.Errorf("%s lists more than 64 tools", ToolApprovalPolicyKey)
+	}
+	return names, nil
+}
+
+func validateToolApprovalPolicy(value any) error {
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("%s must be a string", ToolApprovalPolicyKey)
+	}
+	_, err := ParseToolApprovalPolicy(text)
+	return err
 }

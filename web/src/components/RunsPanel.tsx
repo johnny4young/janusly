@@ -37,7 +37,7 @@ import { UsageSummaryCard } from './UsageSummaryCard'
 import { RunStreamChip } from './RunStreamChip'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 import { pickErrorMessage } from './recovery-dialog/recovery-dialog-model'
-import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, type RunWaitKind } from '../run-observability'
+import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, getToolApprovalRequest, type RunWaitKind, type ToolApprovalDecision } from '../run-observability'
 import { RunHistoryList } from './RunHistoryList'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
 import { SemanticOutcomePill } from './SemanticOutcomePill'
@@ -95,7 +95,7 @@ export type RunsPanelProps = {
   activeRunId?: string | null
   onOpenRun: (id: string) => void | Promise<void>
   onRefreshPlatform: () => void
-  onApproveNode: (nodeId: string) => void
+  onApproveNode: (nodeId: string, toolDecision?: ToolApprovalDecision) => void
   onSubmitHumanForm: SubmitHumanFormHandler
   onReplayNode: (nodeId: string) => void
   onRedriveNode: (nodeId: string) => void
@@ -181,6 +181,7 @@ export function RunsPanel({
   const [humanFormErrors, setHumanFormErrors] = useState<string[]>([])
   const [humanFormSubmitting, setHumanFormSubmitting] = useState(false)
   const addToast = useWorkflowStore(state => state.addToast)
+  const userId = useWorkflowStore(state => state.userId)
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   // Replay Lab source — set when the operator clicks "Open in Lab" from
   // the active-run card or a history row. The dialog mounts overlay-style
@@ -474,6 +475,7 @@ export function RunsPanel({
           {waitingNodes.map(node => {
             const form = readHumanFormWaiting(node)
             const waiting = getRunWaitingInfo(node)
+            const toolApproval = getToolApprovalRequest(node)
             const waitingSinceMs = waiting.waitingSince ? Date.parse(waiting.waitingSince) : Number.NaN
             const wakeAtMs = waiting.wakeAt ? Date.parse(waiting.wakeAt) : Number.NaN
             const deadlineAtMs = waiting.deadlineAt ? Date.parse(waiting.deadlineAt) : Number.NaN
@@ -495,9 +497,42 @@ export function RunsPanel({
                   <code>{node.nodeId}</code>
                 </div>
                 <div>
-                  <strong>{waiting.title ?? t('rightPanel.runs.waitingStep', { nodeId: node.nodeId })}</strong>
+                  {toolApproval
+                    ? <strong data-testid={`tool-approval-tool-${node.nodeId}`}><code>{toolApproval.tool}</code></strong>
+                    : <strong>{waiting.title ?? t('rightPanel.runs.waitingStep', { nodeId: node.nodeId })}</strong>}
                   {waiting.description && <p className="helper-text">{waiting.description}</p>}
                 </div>
+                {toolApproval && (
+                  <div className="we-run-overview__payload">
+                    <strong>{t('rightPanel.runs.toolApproval.params')}</strong>
+                    <pre className="code-field" data-testid={`tool-approval-params-${node.nodeId}`}>
+                      {JSON.stringify(toolApproval.params, null, 2)}
+                    </pre>
+                    {toolApproval.maskedPaths.length > 0 && (
+                      <p className="helper-text" data-testid={`tool-approval-masked-${node.nodeId}`}>
+                        {t('rightPanel.runs.toolApproval.masked', { paths: toolApproval.maskedPaths.join(', ') })}
+                      </p>
+                    )}
+                    <dl className="we-run-overview__facts" data-testid={`tool-approval-policy-${node.nodeId}`}>
+                      <div>
+                        <dt>{t('rightPanel.runs.toolApproval.approvers')}</dt>
+                        <dd>{toolApproval.requiredApprovals}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('rightPanel.runs.toolApproval.selfApproval')}</dt>
+                        <dd>{t('rightPanel.runs.toolApproval.selfApprovalOff')}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('rightPanel.runs.toolApproval.onDeny')}</dt>
+                        <dd>{t('rightPanel.runs.toolApproval.onDenyValue')}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('rightPanel.runs.toolApproval.onTimeout')}</dt>
+                        <dd>{t('rightPanel.runs.toolApproval.onTimeoutValue')}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                )}
                 {(waitDuration || wakeDuration || deadlineDuration || waiting.assignee || waiting.kind === 'approval') && (
                   <div className="we-wait-card__timing">
                     {waitDuration && <span>{t('rightPanel.runs.waitingFor', { duration: waitDuration })}</span>}
@@ -530,7 +565,29 @@ export function RunsPanel({
                     )}
                   </div>
                 )}
-                {form && canStartRuns ? (
+                {toolApproval ? (
+                  toolApproval.eligibleApprovers === 0 ? (
+                    <span className="helper-text" data-testid={`tool-approval-no-eligible-${node.nodeId}`}>{t('rightPanel.runs.toolApproval.noEligible')}</span>
+                  ) : canStartRuns && !(userId && toolApproval.requesterIds.includes(userId)) && (
+                    <div className="we-run-overview__actions">
+                      {(['approve', 'deny'] as const).map(decision => (
+                        <Button
+                          key={decision}
+                          size="sm"
+                          variant={decision === 'approve' ? 'primary' : 'danger'}
+                          data-testid={`tool-approval-${decision}-${node.nodeId}`}
+                          onClick={() => onApproveNode(node.nodeId, {
+                            approvalId: toolApproval.approvalId,
+                            paramsDigest: toolApproval.paramsDigest,
+                            decision,
+                          })}
+                        >
+                          {t(`rightPanel.runs.toolApproval.${decision}`)}
+                        </Button>
+                      ))}
+                    </div>
+                  )
+                ) : form && canStartRuns ? (
                 <Button
                   size="sm"
                   variant="primary"

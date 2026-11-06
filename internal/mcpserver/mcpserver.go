@@ -303,7 +303,7 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 	started, err := (runstart.Service{
 		Engine: d.Engine, Pool: d.Pool, NewID: d.NewID,
 	}).Start(ctx, runstart.Request{
-		OrgID: d.OrgID, CreatedBy: d.UserID, Workflow: wf,
+		OrgID: d.OrgID, CreatedBy: d.UserID, ServicePrincipal: d.UserID, Workflow: wf,
 		RequestedVersionID: requestedVersionID, Input: startInput, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
@@ -504,7 +504,7 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	if !validMCPIdentifier(deadLetterID) {
 		return expected("deadLetterId is required and must be at most 256 characters")
 	}
-	err := d.Engine.RedriveDeadLetter(ctx, d.OrgID, deadLetterID)
+	err := d.Engine.RedriveDeadLetterWithOptions(ctx, d.OrgID, deadLetterID, engine.RedriveOptions{Actor: d.UserID})
 	switch {
 	case err == nil:
 		d.Audit.Write(ctx, d.Pool, d.auditContext(), "dlq.replayed", audit.Options{

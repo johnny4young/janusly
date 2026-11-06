@@ -32,6 +32,9 @@ func executeRegisteredTool(ctx context.Context, registry *tools.Registry, httpEx
 	if err := registry.ValidateResolvedInput(name, input); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
+	if refusal := approvalRefusal(registry, name, input, in); refusal != nil {
+		return refusal
+	}
 	// http.request must be semantically identical whether selected by a tool,
 	// loop, or agent node. The shared HTTP executor is the only path that
 	// applies tenant bounds, method-aware dry-run behavior, SSRF protection,
@@ -87,6 +90,28 @@ func executeRegisteredTool(ctx context.Context, registry *tools.Registry, httpEx
 	return result
 }
 
+// approvalRefusal stops a tool the org lists unless it is the call its tool
+// step already approved; loops and agents cannot reach it. A validation run
+// still skips the write as usual.
+func approvalRefusal(registry *tools.Registry, name string, input map[string]any, in Input) map[string]any {
+	if in.ApprovalRequired == nil || !in.ApprovalRequired(name) || name == in.ApprovedTool ||
+		(in.DryRun && ToolCallWriteSide(registry, name, input)) {
+		return nil
+	}
+	return map[string]any{"ok": false, "code": "TOOL_APPROVAL_REQUIRED",
+		"error": fmt.Sprintf("Tool %s needs a person's approval and runs only as an approved tool or http step", name)}
+}
+
+// ToolCallWriteSide classifies one call: http.request by its method, every
+// other tool by its static capability metadata.
+func ToolCallWriteSide(registry *tools.Registry, name string, input map[string]any) bool {
+	if name == "http.request" {
+		method, _ := input["method"].(string)
+		return httpMethodWriteSide(method)
+	}
+	return registry.IsWriteSide(name)
+}
+
 // NewToolExecutor builds the tool-node executor over a registry.
 func NewToolExecutor(registry *tools.Registry, httpExecutors ...Func) Func {
 	httpExec := NewHTTPExecutor(HTTPOptions{})
@@ -102,11 +127,7 @@ func NewToolExecutor(registry *tools.Registry, httpExecutors ...Func) Func {
 		if input == nil {
 			input = map[string]any{}
 		}
-		writeSide := registry.IsWriteSide(name)
-		if name == "http.request" {
-			method, _ := input["method"].(string)
-			writeSide = httpMethodWriteSide(method)
-		}
+		writeSide := ToolCallWriteSide(registry, name, input)
 		policy, _ := in.Config["resultPolicy"].(string)
 		requireOK := policy == domain.ResultPolicyRequireOK || (writeSide && policy != domain.ResultPolicyEnvelope)
 

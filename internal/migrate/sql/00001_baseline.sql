@@ -3565,4 +3565,42 @@ $$;
 CREATE TRIGGER authoring_experience_consent_revocation AFTER INSERT OR UPDATE OR DELETE ON public.org_configs
 FOR EACH ROW EXECUTE FUNCTION public.revoke_authoring_experience_consent();
 
+-- One request per tool execution: it stays live until a worker acts on its
+-- decision, so a retry, redrive or restart has to ask again.
+CREATE TABLE public.tool_approval_requests (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    run_id text NOT NULL,
+    node_id text NOT NULL,
+    tool text NOT NULL,
+    params_json jsonb NOT NULL,
+    params_digest text NOT NULL,
+    requester_ids text[] NOT NULL,
+    status text DEFAULT 'pending' NOT NULL,
+    decided_by text,
+    decided_at timestamp with time zone,
+    consumed_at timestamp with time zone,
+    expires_at timestamp with time zone NOT NULL,
+    eligible_approvers integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT tool_approval_requests_status_check CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
+    CONSTRAINT tool_approval_requests_decision_check CHECK ((status IN ('approved', 'denied')) = (decided_by IS NOT NULL AND decided_at IS NOT NULL)),
+    CONSTRAINT tool_approval_requests_self_check CHECK (decided_by IS NULL OR decided_by <> ALL (requester_ids)),
+    CONSTRAINT tool_approval_requests_consumed_check CHECK (consumed_at IS NULL OR status <> 'pending')
+);
+CREATE UNIQUE INDEX tool_approval_requests_live_idx ON public.tool_approval_requests (run_id, node_id) WHERE consumed_at IS NULL;
+CREATE INDEX tool_approval_requests_run_node_idx ON public.tool_approval_requests (run_id, node_id);
+
+-- People who moved a step along: a form submitter or a redriver may not
+-- approve the calls that step leads to.
+CREATE TABLE public.run_actors (
+    run_id text NOT NULL,
+    node_id text NOT NULL,
+    role text NOT NULL,
+    actor text NOT NULL,
+    acted_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (run_id, node_id, role, actor),
+    CONSTRAINT run_actors_role_check CHECK (role IN ('redrive', 'fix', 'resume', 'output', 'service'))
+);
+
 -- +goose StatementEnd

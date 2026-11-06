@@ -738,6 +738,14 @@ type Run struct {
 	TriggerKind                          pgtype.Text
 }
 
+type RunActor struct {
+	RunID   string
+	NodeID  string
+	Role    string
+	Actor   string
+	ActedAt time.Time
+}
+
 type RunEvent struct {
 	ID        string
 	RunID     string
@@ -932,6 +940,24 @@ type SsoStateNonce struct {
 	Nonce     string
 	ExpiresAt time.Time
 	CreatedAt *time.Time
+}
+
+type ToolApprovalRequest struct {
+	ID                string
+	OrgID             string
+	RunID             string
+	NodeID            string
+	Tool              string
+	ParamsJson        json.RawMessage
+	ParamsDigest      string
+	RequesterIds      []string
+	Status            string
+	DecidedBy         pgtype.Text
+	DecidedAt         *time.Time
+	ConsumedAt        *time.Time
+	ExpiresAt         time.Time
+	EligibleApprovers pgtype.Int4
+	CreatedAt         time.Time
 }
 
 type TriggerEvent struct {

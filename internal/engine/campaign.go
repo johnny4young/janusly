@@ -98,7 +98,7 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 	// on; it never wedges the campaign.
 	var itemError pgtype.Text
 	status := "replayed"
-	if err := e.RedriveDeadLetter(ctx, campaign.OrgID, item.DeadLetterID); err != nil {
+	if err := e.RedriveDeadLetterWithOptions(ctx, campaign.OrgID, item.DeadLetterID, RedriveOptions{Actor: campaign.CreatedBy}); err != nil {
 		status = "failed"
 		itemError = pgtype.Text{String: err.Error(), Valid: true}
 	}

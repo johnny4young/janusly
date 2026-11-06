@@ -427,6 +427,13 @@ func TestGovernedSemanticRecoveryLifecycle(t *testing.T) {
 	if winners != 1 || !applied.Resumed || applied.Decision != "replace" || len(applied.ResolvedCaseIDs) != 2 {
 		t.Fatalf("exactly one governed apply must resume: winners=%d result=%+v errors=%v", winners, applied, errs)
 	}
+	// The person who applied the replacement shaped downstream calls, so a tool
+	// approval in this run tree must not accept them as approver.
+	var outputActors int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM run_actors WHERE run_id = $1 AND role = 'output' AND actor = $2`,
+		runID, actor.UserID).Scan(&outputActors); err != nil || outputActors != 1 {
+		t.Fatalf("replacement actor not recorded: %d %v", outputActors, err)
+	}
 	if err := pool.QueryRow(ctx, `SELECT state, revision FROM recovery_cases WHERE org_id = $1 AND id = $2`, org, caseID).
 		Scan(&state, &revision); err != nil {
 		t.Fatalf("read monitoring case: %v", err)

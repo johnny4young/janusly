@@ -61,6 +61,9 @@ type RedriveOptions struct {
 	// RequestedBy attributes the eventual terminal-impact win to the
 	// operator who initiated the replay (the contract's recoveryActorId).
 	RequestedBy string
+	// Actor is the person behind a redrive without impact attribution; either
+	// one is barred from approving the tool calls the redrive re-runs.
+	Actor string
 }
 
 // RedriveDeadLetter revives the run behind one dead letter: claim the row,
@@ -125,6 +128,18 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 			return ErrRedriveConflict
 		}
 		return fmt.Errorf("requeue failed node: %w", err)
+	}
+	actor := opts.Actor
+	if actor == "" {
+		actor = opts.RequestedBy
+	}
+	// A redrive that replaces the document can reshape any call in the tree.
+	role := "redrive"
+	if len(opts.FixWorkflowJSON) > 0 {
+		role = "fix"
+	}
+	if err := recordRedriveForApprovals(ctx, q, deadLetter.RunID, deadLetter.NodeID, role, actor); err != nil {
+		return err
 	}
 	// The GENERATION-BOUND claim: a fresh token per replay binds this exact
 	// revival to its future terminal success — an old claim can never
@@ -230,7 +245,7 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 // panel posts {runId, nodeId} without a dead-letter id. Same in-place
 // revival (attempt re-armed to 1) minus the dead-letter claim — the
 // contract's second /dlq/replay branch.
-func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID string) error {
+func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID, actor string) error {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -261,6 +276,9 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID string
 		}
 		return fmt.Errorf("requeue failed node: %w", err)
 	}
+	if err := recordRedriveForApprovals(ctx, q, runID, nodeID, "redrive", actor); err != nil {
+		return err
+	}
 	if _, err := q.ReviveFailedRun(ctx, runID); err != nil {
 		return fmt.Errorf("revive run: %w", err)
 	}
@@ -286,5 +304,17 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID string
 		return fmt.Errorf("commit: %w", err)
 	}
 	metricRedrives.Inc()
+	return nil
+}
+
+// recordRedriveForApprovals bars the redriver from approving what the redrive
+// re-runs and retires any undecided or unspent approval for the step.
+func recordRedriveForApprovals(ctx context.Context, q *store.Queries, runID, nodeID, role, actor string) error {
+	if err := recordRunActor(ctx, q, runID, nodeID, role, actor); err != nil {
+		return err
+	}
+	if err := q.RetireToolApprovals(ctx, store.RetireToolApprovalsParams{RunID: runID, NodeID: nodeID}); err != nil {
+		return fmt.Errorf("retire tool approvals: %w", err)
+	}
 	return nil
 }

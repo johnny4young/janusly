@@ -53,7 +53,9 @@ type Service struct {
 // Request is the already-parsed caller intent. The service validates the
 // executable document again after any rollout replacement before committing.
 type Request struct {
-	OrgID, CreatedBy   string
+	OrgID, CreatedBy string
+	// ServicePrincipal is set when a service token started the run.
+	ServicePrincipal   string
 	Workflow           *domain.Workflow
 	RequestedVersionID string
 	Input              any
@@ -186,7 +188,7 @@ func (s Service) Start(ctx context.Context, request Request) (Result, error) {
 
 	startInput := engine.StartInput{
 		OrgID: request.OrgID, Workflow: wf, Input: request.Input,
-		CreatedBy: request.CreatedBy, IdempotencyKey: request.IdempotencyKey,
+		CreatedBy: request.CreatedBy, ServicePrincipal: request.ServicePrincipal, IdempotencyKey: request.IdempotencyKey,
 		WorkflowVersionID: binding.VersionID, Rerun: request.Rerun,
 	}
 	if request.DraftTest != nil {

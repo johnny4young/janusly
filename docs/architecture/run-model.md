@@ -72,6 +72,96 @@ missing predecessors, and malformed cycles fail closed. Explicit `http`,
 mutation is known during authoring because their effect, inputs, retries, and
 approval topology stay directly inspectable.
 
+## Tool approval
+
+The org setting `tools.approvalRequired` lists tool names whose every call
+waits for a person. Admins change it with `org.config.write` through
+`POST /org/tool-approval-policy`, which adds or removes one tool under a
+per-org lock so two admins never drop each other's entries, and is audited.
+`POST /org/config` refuses this key with `tool_approval_policy_path`; reading
+it there still works.
+The setting accepts only names the gate can enforce: the built-in tools,
+including `http.request`. Any other name, such as an MCP tool, is refused with
+`tool_approval_unenforceable`.
+
+The dispatcher reads the policy for `tool`, `http`, `loop`, `agent` and
+`multi_agent` steps and fails closed when it is unreadable or malformed. It
+matches the tool name rendered for the call (an `http` step is
+`http.request`), so the step id, a decoy step, a replayed fix or a rerun
+override cannot move a listed call out of the gate. A listed tool runs only as
+an approved `tool` or `http` step. A `for_each` loop or an agent that reaches
+it, including an agent's `http.request`, gets a `TOOL_APPROVAL_REQUIRED`
+refusal. Report and digest deliveries go through
+`Engine.ExecuteIntegrationTool`, which refuses a listed tool because nobody
+approves them: report delivery answers 409 `tool_approval_required`, and
+listing `email.send` stops the weekly digest, whose `last_error` names
+`TOOL_APPROVAL_REQUIRED`. A policy that cannot be read refuses as
+`TOOL_APPROVAL_POLICY_UNAVAILABLE` (report delivery answers 503), which a later
+attempt may clear. Alert notifications are sent through the HTTP executor
+directly, so listing `http.request` does not hold them back.
+Validation runs and draft tests keep suppressing writes as before, so the gate
+waits only for listed calls that would really run there, which are reads.
+
+Once a step has a live request, that request decides it whatever the policy
+says later. Removing the tool from the list does not run a denied or expired
+call, and an undecided request keeps waiting until it expires.
+
+A tool step whose call is listed pauses before the executor runs, under the
+run's completion lock. The request records:
+
+- the tool;
+- its parameters with resolved secrets and sensitive keys masked, plus the
+  paths of the masked values (at most 64 KB, or the step fails);
+- an HMAC digest of the full rendered call that also covers the id, kind,
+  reference and revision of a named `credential`. The digest is computed under
+  the lock, and the integration refuses a credential whose revision changed
+  after the approval was spent;
+- the requesters, who are the people who caused this call. `run_actors` records
+  them by role:
+  - anywhere in the run tree (the lineage up through subworkflow, rerun and
+    replay links, plus every subworkflow descendant): form submitters and resumes
+    with input (`resume`), a redrive that replaced the document (`fix`), a
+    person who created or applied a semantic output replacement (`output`),
+    and a service-token starter (`service`);
+  - in this run and the runs above it: a plain redrive (`redrive`), whose
+    re-run steps can feed this call;
+  - the creators up the lineage, and everyone an earlier request for the same
+    step excluded;
+  - whoever saved the versions the lineage runs, when no person started this
+    run or a subworkflow parent (a `system:*` creator, a schedule or webhook
+    trigger, or a service token). A rerun or replay source does not count as
+    that person, so an auto-healing validation run started by the system bars
+    the author, and the source run's actors count as above.
+
+  A service token's user id is a free-form header, so its actions are recorded
+  as `service-token:<suffix>`;
+- how many members can approve: members who can start runs and are not
+  requesters. When none can, the card says so.
+
+The node then waits with `kind: "tool_approval"` and a 30-minute decision
+deadline (`tool_approval_timeout` wake-up).
+
+`POST /runs/tool-approvals/decide` takes the approval id, the digest the person
+reviewed and `approve` or `deny`. It:
+
+- needs `runs.start` and refuses service tokens;
+- refuses the requesters, also with a database check;
+- refuses a stale digest or a request past its decision deadline;
+- serializes concurrent approvers on the run lock, so the first decision wins;
+  repeating your own decision is a no-op.
+
+A decision requeues the step, and the next claim spends it exactly once. An
+approval may be spent up to 30 minutes after it was given, even past the
+decision deadline, so a busy queue does not fail a timely approval. It runs only
+when the freshly rendered call has the approved digest. A deny, an expiry or a
+changed digest fails the step with a `ToolApprovalError` that never retries.
+
+Any later claim of the step asks again: a retry, a redrive, a replay, or a
+restart that reaches the gate. A retry or redrive also gives up an approval
+nobody spent. Every redrive path records its operator: the HTTP user, the MCP
+principal, or the user who started a replay campaign. The generic resume route
+cannot complete a tool approval.
+
 ## Retry policy
 
 `config.retry` uses one closed grammar at authoring and execution. A present

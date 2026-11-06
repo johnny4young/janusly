@@ -5,6 +5,7 @@ import { ResilienceFieldset } from './ResilienceFieldset'
 import { ToolInputEditor } from './ToolInputEditor'
 import { ToolPicker } from './ToolPicker'
 import { Button } from './ui/Button'
+import { ToolApprovalPolicy } from './ToolApprovalPolicy'
 import { FormActions } from './ui/Form'
 
 export function ToolConfigEditor({
@@ -55,6 +56,7 @@ export function ToolConfigEditor({
           <p className="helper-text">{t('rightPanel.quickConfig.toolChangeHelper')}</p>
         </>
       )}
+      {selectedTool && <ToolApprovalPolicy tool={selectedTool} />}
       <ResilienceFieldset
         nodeId={nodeId}
         nodeType="tool"
