@@ -271,6 +271,11 @@ WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id)
   AND state = sqlc.arg(from_state) AND revision = sqlc.arg(expected_revision)
 RETURNING *;
 
+-- name: GetLatestRecoveryCaseTransitionAt :one
+SELECT coalesce(max(occurred_at), 'epoch'::timestamptz)::timestamptz AS occurred_at
+FROM recovery_case_transitions
+WHERE org_id = $1 AND case_id = $2;
+
 -- name: InsertRecoveryCaseTransition :execrows
 INSERT INTO recovery_case_transitions (id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
