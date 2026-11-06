@@ -29,6 +29,42 @@ specs=(
   e2e/responsive.spec.ts
   e2e/usability-study-readiness.spec.ts
   e2e/credential-revoke.spec.ts
+  e2e/activity-workspace.spec.ts
+  e2e/run-observability.spec.ts
+  e2e/ai-studio-provider.spec.ts
+  e2e/api-contract-v1.spec.ts
+  e2e/approachable-authoring.spec.ts
+  e2e/approachable-branch-rule.spec.ts
+  e2e/approachable-human-form.spec.ts
+  e2e/approachable-run-inputs.spec.ts
+  e2e/auth-policy.spec.ts
+  e2e/bounded-waiting.spec.ts
+  e2e/budget.spec.ts
+  e2e/confirm-dialog-focus.spec.ts
+  e2e/credential-rotation-focus.spec.ts
+  e2e/css-system-contract.spec.ts
+  e2e/docs-capability.spec.ts
+  e2e/external-runtime-shadow.spec.ts
+  e2e/inbound-webhook-trigger.spec.ts
+  e2e/recovery-drill-outcomes.spec.ts
+  e2e/recovery-exploration.spec.ts
+  e2e/recovery-impact.spec.ts
+  e2e/replay-campaigns.spec.ts
+  e2e/report-delivery.spec.ts
+  e2e/run-explainability.spec.ts
+  e2e/run-workspace.spec.ts
+  e2e/settings-inventory.spec.ts
+  e2e/solution-packs.spec.ts
+  e2e/step-kind-change.spec.ts
+  e2e/subworkflow-composition.spec.ts
+  e2e/task-space-navigation.spec.ts
+  e2e/technical-recovery-autonomy.spec.ts
+  e2e/views.spec.ts
+  e2e/workflow.spec.ts
+  e2e/workflow-folders.spec.ts
+  e2e/workflow-language.spec.ts
+  e2e/workflow-tags.spec.ts
+  e2e/workflow-trash.spec.ts
 )
 
 usage() {
@@ -174,6 +210,8 @@ fi
 PLAYWRIGHT_SKIP_WEB_SERVER=1 \
 JANUSLY_SMOKE=1 \
 JANUSLY_TEXT_SEARCH_E2E=1 \
+JANUSLY_E2E_PRIVATE_HTTP=1 \
+COMPOSE_PROJECT_NAME="$project" \
 JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
 E2E_API_URL="$origin" \
 E2E_UPSTREAM_HOST=host.docker.internal \

@@ -26,10 +26,32 @@ jq -e --arg commit "$expected_commit" --arg tree "$expected_tree" --arg id "$exp
 jq -e '.specs == [
   "e2e/janusly-smoke.spec.ts", "e2e/guided-authoring.spec.ts",
   "e2e/durable-authoring.spec.ts", "e2e/text-search.spec.ts",
+  "e2e/flows-table.spec.ts",
   "e2e/operator-velocity.spec.ts", "e2e/workflow-rollouts.spec.ts",
   "e2e/recovery-confidence-passport.spec.ts", "e2e/responsive.spec.ts",
-  "e2e/usability-study-readiness.spec.ts", "e2e/credential-revoke.spec.ts"
-]' <<<"$result" >/dev/null
+  "e2e/usability-study-readiness.spec.ts", "e2e/credential-revoke.spec.ts",
+  "e2e/activity-workspace.spec.ts", "e2e/run-observability.spec.ts",
+  "e2e/ai-studio-provider.spec.ts", "e2e/api-contract-v1.spec.ts",
+  "e2e/approachable-authoring.spec.ts", "e2e/approachable-branch-rule.spec.ts",
+  "e2e/approachable-human-form.spec.ts", "e2e/approachable-run-inputs.spec.ts",
+  "e2e/auth-policy.spec.ts", "e2e/bounded-waiting.spec.ts",
+  "e2e/budget.spec.ts", "e2e/confirm-dialog-focus.spec.ts",
+  "e2e/credential-rotation-focus.spec.ts", "e2e/css-system-contract.spec.ts",
+  "e2e/docs-capability.spec.ts", "e2e/external-runtime-shadow.spec.ts",
+  "e2e/inbound-webhook-trigger.spec.ts", "e2e/recovery-drill-outcomes.spec.ts",
+  "e2e/recovery-exploration.spec.ts", "e2e/recovery-impact.spec.ts",
+  "e2e/replay-campaigns.spec.ts", "e2e/report-delivery.spec.ts",
+  "e2e/run-explainability.spec.ts", "e2e/run-workspace.spec.ts",
+  "e2e/settings-inventory.spec.ts", "e2e/solution-packs.spec.ts",
+  "e2e/step-kind-change.spec.ts", "e2e/subworkflow-composition.spec.ts",
+  "e2e/task-space-navigation.spec.ts", "e2e/technical-recovery-autonomy.spec.ts",
+  "e2e/views.spec.ts", "e2e/workflow.spec.ts",
+  "e2e/workflow-folders.spec.ts", "e2e/workflow-language.spec.ts",
+  "e2e/workflow-tags.spec.ts", "e2e/workflow-trash.spec.ts"
+]' <<<"$result" >/dev/null || { echo "lane spec selection drifted from the expected list" >&2; exit 1; }
+while IFS= read -r spec; do
+  [[ -f "$root/web/$spec" ]] || { echo "lane selects a missing spec: $spec" >&2; exit 1; }
+done < <(jq -r '.specs[], .experience.specs[]' <<<"$result")
 
 jq -e '.experience == {
   specs:["e2e/authoring-experience.spec.ts"],
