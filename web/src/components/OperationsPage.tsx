@@ -142,7 +142,8 @@ export function OperationsPage({
   const { t } = useT()
   const platformVersion = useInvalidationNonce(OPERATIONS_TAGS)
   const budgetBlocked = useWorkflowStore((state) => state.budgetBlocked)
-  const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
+  // `undefined` until the first read settles, so loading never reads as empty.
+  const [metrics, setMetrics] = useState<RecoveryMetrics | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   // Rate-limiter health is independent of metrics and degrades silently on
   // /health failure — operators still see the rest of the page.
@@ -193,11 +194,9 @@ export function OperationsPage({
       })
       .catch((err) => {
         if (cancelled) return
+        setMetrics(null)
         // An unreadable payload is the same as no metrics: the page's quiet unavailable state.
-        if (err instanceof MalformedResponseError) {
-          setMetrics(null)
-          return
-        }
+        if (err instanceof MalformedResponseError) return
         setError(err instanceof Error ? err.message : (t('operations.metricsUnavailable', { detail: '' })))
       })
     return () => { cancelled = true }
@@ -360,13 +359,11 @@ export function OperationsPage({
             {effectiveSection === 'ai' && <AiSection permissions={permissions} aiHealth={aiHealth} />}
             {effectiveSection === 'usage' && (
               <SettingsUsageSection
-                providers={metrics?.costThisWindow.providers ?? []}
-                cache={metrics?.costThisWindow.cache ?? {
-                  inputTokens: 0,
-                  readTokens: 0,
-                  creationTokens: 0,
-                  readSharePercent: null,
-                }}
+                cost={metrics && metrics.costThisWindow}
+                windowDays={metrics?.windowDays ?? 30}
+                onOpenCostSteps={hasPermission(permissions, 'recovery.read') && hasPermission(permissions, 'runs.read')
+                  ? () => onOpenTab('reports')
+                  : undefined}
               />
             )}
             {effectiveSection === 'infrastructure' && (

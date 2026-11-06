@@ -91,12 +91,15 @@ func TestMCPToolCatalogHasTruthfulAnnotationsAndNoApprovalTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tools) != 17 {
+	if len(listed.Tools) != 23 {
 		t.Fatalf("tool catalog drifted: got %d", len(listed.Tools))
 	}
 	byName := map[string]*mcp.Tool{}
 	for _, tool := range listed.Tools {
 		byName[tool.Name] = tool
+		if tool.OutputSchema == nil {
+			t.Fatalf("%s lacks an outputSchema", tool.Name)
+		}
 		if tool.Annotations == nil || tool.Annotations.OpenWorldHint == nil || *tool.Annotations.OpenWorldHint {
 			t.Fatalf("tool lacks closed-world annotations: %+v", tool)
 		}
@@ -104,7 +107,7 @@ func TestMCPToolCatalogHasTruthfulAnnotationsAndNoApprovalTool(t *testing.T) {
 	if byName["recovery.cases.approve"] != nil {
 		t.Fatal("MCP must never expose human approval")
 	}
-	for _, name := range []string{"operations.brief", "workflows.propose", "recovery.cases.inspect", "catalog.describe", "workflows.validate"} {
+	for _, name := range []string{"operations.brief", "workflows.propose", "recovery.cases.inspect", "catalog.describe", "workflows.validate", "workflows.get", "runs.output"} {
 		if tool := byName[name]; tool == nil || !tool.Annotations.ReadOnlyHint {
 			t.Fatalf("read tool annotation drifted: %s %+v", name, tool)
 		}
@@ -114,8 +117,10 @@ func TestMCPToolCatalogHasTruthfulAnnotationsAndNoApprovalTool(t *testing.T) {
 			t.Fatalf("write tool annotation drifted: %s %+v", name, tool)
 		}
 	}
-	if tool := byName["recovery.cases.apply"]; tool.Annotations.DestructiveHint == nil || !*tool.Annotations.DestructiveHint {
-		t.Fatal("recovery apply must be marked destructive")
+	for _, name := range []string{"recovery.cases.apply", "workflows.deactivate", "runs.cancel"} {
+		if tool := byName[name]; tool == nil || tool.Annotations.DestructiveHint == nil || !*tool.Annotations.DestructiveHint {
+			t.Fatalf("%s must be marked destructive", name)
+		}
 	}
 }
 

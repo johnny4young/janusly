@@ -142,4 +142,7 @@ func (s *V1Server) mountRunUsageRoutes(mux *http.ServeMux) {
 	s.route(mux, "GET /run/usage", routeGate{auth.RoleViewer, "runs.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.runUsageCore(r, rc))
 	})
+	s.route(mux, "GET /v1/usage/costs", routeGate{auth.RoleViewer, "runs.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.usageCostsCore(r, rc))
+	})
 }

@@ -9,12 +9,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
-	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -53,42 +50,11 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 	// Workflow lifecycle: soft delete, trash, restore on the unversioned routes.
 	s.route(mux, "DELETE /workflows/{workflowId}", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		workflowID := r.PathValue("workflowId")
-		// Tombstone + rollout cancellation commit TOGETHER: no active
-		// deployment may outlive its deleted workflow (the create path takes
-		// the same parent lock, so none can appear in between either).
-		tx, err := s.pool.Begin(r.Context())
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		defer func() { _ = tx.Rollback(r.Context()) }()
-		txq := store.New(tx)
-		rows, err := txq.SoftDeleteWorkflow(r.Context(), store.SoftDeleteWorkflowParams{
-			ID: workflowID, OrgID: rc.orgID,
-		})
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		if rows == 0 {
-			writeUnversioned(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
-			return
-		}
-		if _, err := txq.CancelActiveWorkflowRollout(r.Context(), store.CancelActiveWorkflowRolloutParams{
-			OrgID: rc.orgID, WorkflowID: workflowID, Reason: pgtype.Text{String: "workflow_deleted", Valid: true},
-		}); err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		// A tombstoned workflow must never fire: its schedule entries go
-		// with it in the SAME transaction.
-		if err := txq.DeleteScheduleEntriesForWorkflow(r.Context(), store.DeleteScheduleEntriesForWorkflowParams{
-			OrgID: rc.orgID, WorkflowID: workflowID,
-		}); err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		if err := tx.Commit(r.Context()); err != nil {
+		if err := s.engine.DeactivateWorkflow(r.Context(), rc.orgID, workflowID); err != nil {
+			if errors.Is(err, engine.ErrWorkflowLifecycleNotFound) {
+				writeUnversioned(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
+				return
+			}
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
@@ -100,51 +66,16 @@ func (s *V1Server) unversionedRoutes(mux *http.ServeMux) {
 	})
 	s.route(mux, "POST /workflows/{workflowId}/restore", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		workflowID := r.PathValue("workflowId")
-		tx, err := s.pool.Begin(r.Context())
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		defer func() { _ = tx.Rollback(r.Context()) }()
-		txq := store.New(tx)
-		rows, err := txq.RestoreWorkflow(r.Context(), store.RestoreWorkflowParams{
-			ID: workflowID, OrgID: rc.orgID,
-		})
-		if err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		if rows == 0 {
-			writeUnversioned(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
-			return
-		}
-		// Restoring the parent and reconstructing its schedules are one state
-		// transition. Never report success for an active workflow whose latest
-		// snapshot could not be loaded, parsed, or registered.
-		version, err := txq.GetLatestWorkflowVersion(r.Context(), store.GetLatestWorkflowVersionParams{
-			WorkflowID: workflowID, OrgID: rc.orgID,
-		})
-		switch {
-		case err == nil:
-			wf, _ := domain.Parse(version.DagJson)
-			if wf == nil {
+		if err := s.engine.ReactivateWorkflow(r.Context(), rc.orgID, workflowID, rc.userID); err != nil {
+			switch {
+			case errors.Is(err, engine.ErrWorkflowLifecycleNotFound):
+				writeUnversioned(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
+			case errors.Is(err, engine.ErrWorkflowVersionMalformed):
 				writeUnversioned(w, opError(http.StatusUnprocessableEntity, "workflows_version_malformed",
 					"Workflow version is malformed", nil))
-				return
-			}
-			if err := s.engine.SyncWorkflowSchedules(r.Context(), txq,
-				rc.orgID, workflowID, version.ID, rc.userID, wf); err != nil {
+			default:
 				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-				return
 			}
-		case errors.Is(err, pgx.ErrNoRows):
-			// A workflow created before its first save has no schedules to restore.
-		default:
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		if err := tx.Commit(r.Context()); err != nil {
-			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.restored", audit.Options{

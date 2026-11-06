@@ -65,6 +65,8 @@ describe('<UsageSummaryCard />', () => {
   it('shows the empty state when usage is empty', () => {
     render(<UsageSummaryCard usage={{}} onRefreshPlatform={() => undefined} />)
     expect(screen.getByText(/No usage recorded yet/i)).toBeInTheDocument()
+    // Tools and memory record usage too, so the copy must not claim only AI does.
+    expect(screen.getByTestId('usage-empty')).toHaveTextContent('Runs record usage when they call an AI model, a tool, or memory.')
   })
 
   it('fetches the breakdown when a chip is activated', async () => {
