@@ -1,3 +1,4 @@
+import { lazy, Suspense, useRef, useState } from 'react'
 import { OnboardingReplayButton } from './OnboardingReplayButton'
 import { OnboardingBanner } from './OnboardingBanner'
 import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
@@ -6,9 +7,14 @@ import { HomeActionWorkspace } from './recovery-center/HomeActionWorkspace'
 import { HomeBudgetBanner } from './recovery-center/HomeBudgetBanner'
 import { HomeTodayStrip } from './recovery-center/HomeTodayStrip'
 import { HomeOperatorField } from './recovery-center/HomeOperatorField'
-import { downtimeSeverity } from './recovery-center/recovery-center-model'
+import { downtimeSeverity, type RecommendedAction } from './recovery-center/recovery-center-model'
 import { useT } from '../i18n'
+import { useWorkflowStore } from '../store'
 import type { RecoveryCenterController } from './RecoveryCenterPanel'
+
+const HomeInvestigationPanel = lazy(() => import('./recovery-center/HomeInvestigationPanel').then((module) => ({
+  default: module.HomeInvestigationPanel,
+})))
 
 export function RecoveryCenterView({ model }: { model: RecoveryCenterController }) {
   const { t } = useT()
@@ -21,8 +27,22 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
     openDeadLetters, openFailureCount, operatorBriefStatus, operatorBriefWarnings, operatorWins,
     recommendedActions, recoveryClearEligible, runsToday, showOnboarding, streak,
   } = model
+  const orgId = useWorkflowStore((state) => state.orgId)
+  // Bound to the workspace it was opened in: a switch unmounts it and aborts its read.
+  const [opened, setOpened] = useState<{ action: RecommendedAction; orgId: string | null } | null>(null)
+  const investigating = opened?.orgId === orgId ? opened.action : null
+  const investigateTrigger = useRef<HTMLElement | null>(null)
+  const investigate = (action: RecommendedAction) => {
+    investigateTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setOpened({ action, orgId })
+  }
+  const closeInvestigation = () => {
+    setOpened(null)
+    investigateTrigger.current?.focus()
+  }
   const operator = (
     <HomeOperatorField
+      key={orgId}
       openFailures={openDeadLetters}
       onOpenTab={onOpenTab}
       onOpenRun={onOpenRun}
@@ -76,6 +96,7 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         setup={<OnboardingBanner onOpenTab={onOpenTab} />}
         operator={operator}
         onSelectAction={handleRecommendedAction}
+        onInvestigate={investigate}
         onOpenRun={onOpenRun}
         onOpenActivity={onOpenActivity}
       />}
@@ -96,6 +117,19 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
       )}
 
       <OnboardingReplayButton />
+
+      {investigating?.target.runId && (
+        <Suspense fallback={null}>
+          <HomeInvestigationPanel
+            key={investigating.id}
+            runId={investigating.target.runId}
+            title={investigating.title}
+            onClose={closeInvestigation}
+            onOpenRun={onOpenRun}
+            onOpenRecoveryQueue={onOpenRecoveryQueue}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

@@ -334,4 +334,6 @@ var Routes = []Route{
 		Response: workflowProposalResponse},
 	{Method: "GET", Path: "/v1/operations/brief", Summary: "Bounded deterministic Operator Brief shared by UI and MCP",
 		Response: operatorBrief},
+	{Method: "GET", Path: "/v1/runs/{runId}/investigation", Summary: "Rules-based hypotheses for a run's failed step",
+		Response: runInvestigation},
 }

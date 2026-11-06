@@ -121,13 +121,15 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 	for _, name := range []string{"redrive", "runs-redrive", "resolve", "patch"} {
 		failedRun := failRun(t, h, "conformance-fail-"+name+"-"+suffix)
 		failed[name] = conformanceDeadLetter(t, h, failedRun)
-		if name == "runs-redrive" {
-			failed["runs-redrive-run"] = failedRun
+		if name == "runs-redrive" || name == "patch" {
+			failed[name+"-run"] = failedRun
 		}
 	}
 	rec.record("GET /v1/dlq", h.call("GET", "/v1/dlq", nil, ""), http.StatusOK)
 	rec.record("GET /v1/dlq/entries/{deadLetterId}", h.call("GET", "/v1/dlq/entries/"+failed["patch"], nil, ""), http.StatusOK)
 	rec.record("GET /v1/dlq/clusters", h.call("GET", "/v1/dlq/clusters", nil, ""), http.StatusOK)
+	rec.record("GET /v1/runs/{runId}/investigation", h.call("GET",
+		"/v1/runs/"+failed["patch-run"]+"/investigation", nil, ""), http.StatusOK)
 	rec.record("POST /v1/ai/patch-workflow", h.call("POST", "/v1/ai/patch-workflow",
 		map[string]any{"deadLetterId": failed["patch"]}, ""), http.StatusOK)
 	rec.record("POST /v1/dlq/redrive", h.call("POST", "/v1/dlq/redrive",
