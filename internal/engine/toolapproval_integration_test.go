@@ -515,14 +515,28 @@ func TestToolApprovalRequesterScope(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Forms in a sibling subworkflow and in a grandchild can feed this call too.
+	subRun := func(parentRunID, parentNodeID string) string {
+		runID, err := eng.StartRun(ctx, StartInput{OrgID: org, ParentRunID: parentRunID, ParentNodeID: parentNodeID, ParentLinkKind: "subworkflow",
+			Workflow: &domain.Workflow{ID: "wf-sub", Name: "Sub", DSLVersion: "1.0", Nodes: []domain.Node{{ID: "ask", Type: "noop"}}, Edges: []domain.Edge{}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return runID
+	}
+	for _, row := range [][2]string{{subRun(parent, "sub"), "sam"}, {subRun(child, "other"), "carla"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, 'ask', 'resume', $2)`, row[0], row[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO tool_approval_requests (id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, status, consumed_at, expires_at)
 		VALUES ($1, $2, $3, 'call', 'text.uppercase', '{}', 'd', '{gina}', 'expired', now(), now())`, child+"-old", org, child); err != nil {
 		t.Fatal(err)
 	}
 	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{
-		RunID: child, NodeID: "call", NodeIds: []string{"call", "form"},
+		RunID: child, NodeID: "call", NodeIds: []string{"call", "form"}, MaxDepth: subworkflowDepthWalkerMax,
 	})
-	if err != nil || strings.Join(requesters, ",") != "alice,dave,fiona,gina,otto,paula" {
+	if err != nil || strings.Join(requesters, ",") != "alice,carla,dave,fiona,gina,otto,paula,sam" {
 		t.Fatalf("requesters %v %v", requesters, err)
 	}
 }
@@ -588,7 +602,7 @@ func TestVersionAuthorIsBarredOnlyFromUnattendedRuns(t *testing.T) {
 		if _, err := pool.Exec(ctx, `UPDATE runs SET workflow_version_id = $2 WHERE id = $1`, runID, runID+"-v"); err != nil {
 			t.Fatal(err)
 		}
-		requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: runID, NodeID: "call", NodeIds: []string{"call"}})
+		requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: runID, NodeID: "call", NodeIds: []string{"call"}, MaxDepth: subworkflowDepthWalkerMax})
 		if err != nil || slices.Contains(requesters, "erin") != test.authorBarred {
 			t.Fatalf("%s run: requesters %v %v", test.createdBy, requesters, err)
 		}

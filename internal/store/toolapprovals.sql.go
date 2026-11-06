@@ -204,7 +204,14 @@ WITH RECURSIVE lineage (id, parent_run_id, parent_node_id, follow, nodes, depth)
          p.parent_node_id IS NOT NULL AND coalesce(p.parent_link_kind, 'subworkflow') = 'subworkflow',
          ARRAY[l.parent_node_id]::text[], l.depth + 1
   FROM runs p JOIN lineage l ON p.id = l.parent_run_id
-  WHERE l.follow AND l.depth < 32
+  WHERE l.follow AND l.depth < $4::int
+),
+tree (id, depth) AS (
+  SELECT root.id, 0 FROM (SELECT l.id FROM lineage l ORDER BY l.depth DESC LIMIT 1) root
+  UNION ALL
+  SELECT c.id, t.depth + 1 FROM runs c JOIN tree t ON c.parent_run_id = t.id
+  WHERE c.parent_node_id IS NOT NULL AND coalesce(c.parent_link_kind, 'subworkflow') = 'subworkflow'
+    AND t.depth < $4::int
 ),
 started AS (
   SELECT r.created_by, r.trigger_kind, r.workflow_version_id FROM runs r JOIN lineage l ON r.id = l.id
@@ -212,8 +219,10 @@ started AS (
 SELECT DISTINCT actor::text FROM (
   SELECT created_by AS actor FROM started
   UNION ALL
+  SELECT a.actor FROM run_actors a JOIN tree t ON a.run_id = t.id WHERE a.role = 'resume'
+  UNION ALL
   SELECT a.actor FROM run_actors a JOIN lineage l ON a.run_id = l.id
-  WHERE a.role = 'resume' OR a.node_id = ANY(l.nodes)
+  WHERE a.role = 'redrive' AND a.node_id = ANY(l.nodes)
   UNION ALL
   SELECT unnest(t.requester_ids) FROM tool_approval_requests t
   WHERE t.run_id = $1 AND t.node_id = $2
@@ -229,19 +238,26 @@ ORDER BY actor
 `
 
 type ListToolApprovalRequestersParams struct {
-	RunID   string
-	NodeID  string
-	NodeIds []string
+	RunID    string
+	NodeID   string
+	NodeIds  []string
+	MaxDepth int32
 }
 
-// The people who caused this call: the creators along the subworkflow
-// lineage; anyone who submitted a form or resumed with input anywhere in it,
-// since rendered parameters can read any step; whoever redrove this step or
-// one upstream (node_ids; in a parent run, the step that started the child);
-// everyone an earlier request for the step excluded; and, when no person
-// started the lineage, whoever saved the versions it runs.
+// The people who caused this call: the creators up the subworkflow lineage;
+// anyone who submitted a form or resumed with input anywhere in the run tree
+// (up to the root, then down through every subworkflow descendant), since
+// data can flow between those runs; whoever redrove this step or one upstream
+// (node_ids; in a parent run, the step that started the child); everyone an
+// earlier request for the step excluded; and, when no person started the
+// lineage, whoever saved the versions it runs. Walks stop at max_depth.
 func (q *Queries) ListToolApprovalRequesters(ctx context.Context, arg ListToolApprovalRequestersParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listToolApprovalRequesters, arg.RunID, arg.NodeID, arg.NodeIds)
+	rows, err := q.db.Query(ctx, listToolApprovalRequesters,
+		arg.RunID,
+		arg.NodeID,
+		arg.NodeIds,
+		arg.MaxDepth,
+	)
 	if err != nil {
 		return nil, err
 	}

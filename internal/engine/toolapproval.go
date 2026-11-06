@@ -122,7 +122,7 @@ func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool s
 				return err
 			}
 			requesters, err := q.ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{
-				RunID: claim.RunID, NodeID: claim.NodeID, NodeIds: upstream,
+				RunID: claim.RunID, NodeID: claim.NodeID, NodeIds: upstream, MaxDepth: subworkflowDepthWalkerMax,
 			})
 			if err != nil {
 				return fmt.Errorf("list tool approval requesters: %w", err)
