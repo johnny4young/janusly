@@ -70,12 +70,16 @@ describe('Recovery queue layout and focus in Chromium', () => {
 
   it('keeps search, status chips and menus on one row in the 852px card beside the sidebar', async () => {
     initI18n('en')
-    render(<div style={{ width: 852 }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
-    await screen.findByTestId('dlq-row-invoice')
-    const centers = ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']
-      .map(id => { const box = document.getElementById(id)!.getBoundingClientRect(); return box.top + box.height / 2 })
-    expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1)
-    expect(screen.getByTestId('dlq-toolbar').getBoundingClientRect().height).toBeLessThanOrEqual(40)
+    // No web font ships, so check wide fallback metrics: Verdana on macOS, DejaVu Sans on Linux.
+    document.documentElement.style.setProperty('--font-sans', 'Verdana, "DejaVu Sans", sans-serif')
+    try {
+      render(<div style={{ width: 852 }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
+      await screen.findByTestId('dlq-row-invoice')
+      const centers = ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']
+        .map(id => { const box = document.getElementById(id)!.getBoundingClientRect(); return box.top + box.height / 2 })
+      expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1)
+      expect(screen.getByTestId('dlq-toolbar').getBoundingClientRect().height).toBeLessThanOrEqual(40)
+    } finally { document.documentElement.style.removeProperty('--font-sans') }
   })
 
   it.each(['en', 'es'] as const)('triages side by side in %s: J/K moves neither pane and the action bar stays in view', async locale => {

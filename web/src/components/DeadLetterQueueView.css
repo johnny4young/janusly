@@ -94,6 +94,11 @@
 
 .we-dlq-filters { margin-block: 10px; }
 
+/* Search grows into any spare width; a small basis keeps one row with wide fallback fonts. */
+.we-dlq-filters .we-list-search { flex-basis: 9rem; }
+
+.we-dlq-filters .we-list-search > input { text-overflow: ellipsis; }
+
 .we-dlq-filters .ui-control {
   min-height: var(--we-control-sm);
   padding-block: 4px;
