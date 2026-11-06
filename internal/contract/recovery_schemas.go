@@ -208,6 +208,32 @@ var runUsage = closedObj(map[string]any{
 	}, "recalls", "commits", "failures", "kinds"),
 }, "loadedRows", "truncated", "rowCap", "llm", "memory")
 
+var usageCostTally = map[string]any{
+	"calls": countT(), "uncachedInputTokens": countT(), "cachedInputTokens": countT(),
+	"cacheCreationInputTokens": countT(), "outputTokens": countT(),
+	"costUsd": nullableNum(), "unknownCostCalls": countT(), "simulatedCalls": countT(),
+}
+
+func usageCostRow(extra map[string]any) Schema {
+	props := maps.Clone(usageCostTally)
+	maps.Copy(props, extra)
+	return closedObj(props, slices.Sorted(maps.Keys(props))...)
+}
+
+var usageCosts = closedObj(map[string]any{
+	"windowDays": intT(), "retentionDays": countT(), "aiConfigured": boolT(),
+	"stepsTruncated": boolT(), "stepsCoveredSince": nullableString(), "rowCap": countT(),
+	"stepsTotal": countT(), "modelsTotal": countT(),
+	"totals":     usageCostRow(nil),
+	"withoutRun": usageCostRow(nil),
+	"steps": arr(usageCostRow(map[string]any{
+		"runId": str(), "runAvailable": boolT(), "workflowName": str(),
+		"nodeId": nullableString(), "provider": str(), "model": str(),
+	})),
+	"models": arr(usageCostRow(map[string]any{"provider": str(), "model": str()})),
+}, "windowDays", "retentionDays", "aiConfigured", "stepsTruncated", "stepsCoveredSince", "rowCap", "stepsTotal", "modelsTotal",
+	"totals", "withoutRun", "steps", "models")
+
 var validationBreakdown = closedObj(map[string]any{
 	"key": str(), "total": countT(), "completed": countT(), "recovered": countT(),
 	"acceptedLoss": countT(), "recoveryRatePercent": nullableNum(),

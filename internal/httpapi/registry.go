@@ -190,6 +190,7 @@ var baseRouteAuthz = map[string]routeGate{
 	// F1 terminal-sweep closures: the missing wires the web reads.
 	"GET /v1/workflows/health":                                       {auth.RoleViewer, "workflows.read"},
 	"GET /v1/run/usage":                                              {auth.RoleViewer, "runs.read"},
+	"GET /v1/usage/costs":                                            {auth.RoleViewer, "runs.read"},
 	"GET /v1/workflows/schedule-preview":                             {auth.RoleViewer, "workflows.read"},
 	"GET /workflows/schedule-preview":                                {auth.RoleViewer, "workflows.read"},
 	"GET /v1/memory/consent-status":                                  {auth.RoleViewer, "recovery.read"},
