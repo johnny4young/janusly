@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Building a proposal with a registered example no longer drops the Reuse or
+  Adapt review when the database is slow to write to disk, and Apply no longer
+  rejects a reviewed copy for the same reason.
 - The experiment comparison lists metrics by row, with either arm as the
   baseline. Each change says Better or Worse according to whether higher or
   lower is better for that metric. Diff only hides metrics that did not change.

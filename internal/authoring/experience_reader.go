@@ -63,7 +63,7 @@ func (r *ExperienceRegistry) selectExperience(ctx context.Context, input Decisio
 	}
 	stage, cancel := context.WithTimeout(ctx, DecisionStageTimeout)
 	defer cancel()
-	tx, q, _, err := r.consentTx(stage, input.OrganizationID, previous != nil)
+	tx, q, _, err := r.consentTx(stage, input.OrganizationID, previous != nil, true)
 	if err != nil {
 		if stage.Err() != nil {
 			return ExperienceSelection{}, nil, stage.Err()
