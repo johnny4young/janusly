@@ -31,6 +31,8 @@ var outputSchemas = map[string]*jsonschema.Schema{
 	"dlq.list":       pageObject("deadLetters"),
 	"dlq.redrive": outputObject(fields{
 		"redriven": {kind: "boolean", required: true}, "deadLetterId": {kind: "string", required: true},
+		"runId": {kind: "string"}, "runVersion": {kind: "integer"}, "latestVersion": {kind: "integer"},
+		"staleVersion": {kind: "boolean"}, "hint": {kind: "string"},
 	}),
 	"workflows.assure": outputObject(fields{
 		"workflowId": {kind: "string", required: true}, "name": {kind: "string", required: true},

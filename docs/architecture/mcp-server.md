@@ -34,6 +34,11 @@ The list tools (`workflows.list`, `runs.list`, `dlq.list`) page by keyset:
 back to the first page, MCP rejects a malformed cursor or an out-of-range
 limit so an agent cannot loop on page one.
 
+`dlq.redrive` revives the run on its original workflow version. Its result
+reports that version and the workflow's latest one; when they differ it adds a
+hint to start a new run by `workflowId`, because a fix saved after the failure
+does not apply to the revived run.
+
 Consent never grants a permission missing from the service-account ceiling.
 Long-running operations return durable run IDs that clients poll; the server
 does not maintain another task store.
