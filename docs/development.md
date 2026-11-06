@@ -63,6 +63,10 @@ acceptance pass. Those still require the separate study in
 The same lane runs `usability-study-readiness.spec.ts` against real failures
 and routes in both locales; it verifies affordances only, not interviews or
 unassisted participant completion.
+`accessibility.spec.ts` holds the axe floor (serious and critical, WCAG 2.2 AA)
+for Home, the workflow builder, an applied AI proposal, Solution Packs, mobile
+navigation and Spanish dark mode, and `web-control-plane-contract.spec.ts` runs
+the bilingual authoring, Connections and Activity journey.
 `activity-workspace.spec.ts` includes an axe scan of the Activity table, and
 `run-observability.spec.ts` runs its held-HTTP running-node journey because the
 lane sets `JANUSLY_E2E_PRIVATE_HTTP=1`: its owned stack already allows private

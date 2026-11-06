@@ -31,6 +31,7 @@ specs=(
   e2e/credential-revoke.spec.ts
   e2e/activity-workspace.spec.ts
   e2e/run-observability.spec.ts
+  e2e/accessibility.spec.ts
   e2e/ai-studio-provider.spec.ts
   e2e/api-contract-v1.spec.ts
   e2e/approachable-authoring.spec.ts
@@ -60,6 +61,7 @@ specs=(
   e2e/task-space-navigation.spec.ts
   e2e/technical-recovery-autonomy.spec.ts
   e2e/views.spec.ts
+  e2e/web-control-plane-contract.spec.ts
   e2e/workflow.spec.ts
   e2e/workflow-folders.spec.ts
   e2e/workflow-language.spec.ts

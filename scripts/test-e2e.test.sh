@@ -31,6 +31,7 @@ jq -e '.specs == [
   "e2e/recovery-confidence-passport.spec.ts", "e2e/responsive.spec.ts",
   "e2e/usability-study-readiness.spec.ts", "e2e/credential-revoke.spec.ts",
   "e2e/activity-workspace.spec.ts", "e2e/run-observability.spec.ts",
+  "e2e/accessibility.spec.ts",
   "e2e/ai-studio-provider.spec.ts", "e2e/api-contract-v1.spec.ts",
   "e2e/approachable-authoring.spec.ts", "e2e/approachable-branch-rule.spec.ts",
   "e2e/approachable-human-form.spec.ts", "e2e/approachable-run-inputs.spec.ts",
@@ -45,7 +46,8 @@ jq -e '.specs == [
   "e2e/settings-inventory.spec.ts", "e2e/solution-packs.spec.ts",
   "e2e/step-kind-change.spec.ts", "e2e/subworkflow-composition.spec.ts",
   "e2e/task-space-navigation.spec.ts", "e2e/technical-recovery-autonomy.spec.ts",
-  "e2e/views.spec.ts", "e2e/workflow.spec.ts",
+  "e2e/views.spec.ts", "e2e/web-control-plane-contract.spec.ts",
+  "e2e/workflow.spec.ts",
   "e2e/workflow-folders.spec.ts", "e2e/workflow-language.spec.ts",
   "e2e/workflow-tags.spec.ts", "e2e/workflow-trash.spec.ts"
 ]' <<<"$result" >/dev/null || { echo "lane spec selection drifted from the expected list" >&2; exit 1; }
