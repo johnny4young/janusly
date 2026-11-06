@@ -2,6 +2,7 @@ package webdist
 
 import (
 	"io"
+	"mime"
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
@@ -77,5 +78,19 @@ func TestEmbeddedPlaceholder(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest("GET", "/", nil))
 	if recorder.Code != 200 {
 		t.Fatalf("embedded root: %d", recorder.Code)
+	}
+}
+
+// The font type must not come from the host's MIME files or from sniffing.
+func TestWoff2TypeIgnoresHostMimeTable(t *testing.T) {
+	if err := mime.AddExtensionType(".woff2", "application/x-host-mapping"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mime.AddExtensionType(".woff2", "font/woff2") })
+	handler := HandlerFor(fstest.MapFS{"assets/font-abc123.woff2": {Data: []byte("not sniffable")}})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest("GET", "/assets/font-abc123.woff2", nil))
+	if got := recorder.Header().Get("Content-Type"); got != "font/woff2" {
+		t.Fatalf("woff2 content type: %q", got)
 	}
 }

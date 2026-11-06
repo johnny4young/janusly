@@ -497,13 +497,16 @@ critical axe findings, overflow and readable text at compact and desktop widths.
 Inter Tight ships with the bundle; nothing loads from another origin. The face
 lives in `src/assets/fonts/` with its OFL license and `foundations.css` imports it,
 so Vite emits it under `/assets/` with a content hash and the one-year immutable
-cache. It is a 20.5 KB woff2 subset of the Fontsource 5.3.0 Latin file: the
+cache; the handler sets `font/woff2` itself rather than relying on host MIME files. It is a 20.5 KB woff2 subset of the Fontsource 5.3.0 Latin file: the
 400–800 weight axis the CSS uses, `kern` and `tnum`, no hinting, and only
 U+0020-007E, U+00A0-00FF, en and em dashes, curly quotes, bullet, ellipsis, euro
 and minus. `unicode-range` lists exactly those code points, so arrows, check
 marks and other symbols render from the next face in the stack. `font-display:
 swap` with no preload keeps the first paint on the system fallback; a preload
-measured 130 ms later LCP. JetBrains Mono is not shipped; the mono stack falls
+measured 130 ms later LCP. No italic file ships: the three italic uses (readiness
+suggestions, `<em>` in SafeMarkdown and the recovery delta skeleton hint)
+render as a synthesized oblique, because an italic face would add cold-path bytes.
+JetBrains Mono is not shipped; the mono stack falls
 through to the system monospace faces. `cold-load-polish.test.ts` pins the face, the range
 and both stacks, and `test/browser-setup.ts` loads the face before any browser
 test measures text. The Recover toolbar test keeps a Verdana override as a

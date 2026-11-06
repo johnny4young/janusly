@@ -3,9 +3,10 @@
 ## Unreleased
 
 - The interface ships its Inter Tight typeface instead of depending on what
-  each machine has installed, so text looks and measures the same on macOS,
-  Windows and Linux. The font loads from the app itself, is cached for a year
-  and swaps in after the first paint; arrows and symbols keep the system font.
+  each machine has installed, so sans text measures the same on macOS and
+  Linux. The font loads from the app itself, is cached for a year and swaps in
+  after the first paint. Monospace text and characters outside the Latin
+  subset, such as arrows and symbols, still use system fonts.
 - Cards, rows and callouts no longer mark status with a colored strip on their
   left edge. A warning or critical item in What needs you gets a tinted
   background, a full colored border and a named icon. Metric tiles in Activity
