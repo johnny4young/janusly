@@ -934,6 +934,7 @@ export type RunStatus = "created" | "running" | "waiting" | "succeeded" | "faile
 export type RunSummary = {
   "createdAt": string | null
   "createdBy": string | null
+  "cursor": string | null
   "hasWaitingNodes": boolean
   "id": string
   "orgId": string

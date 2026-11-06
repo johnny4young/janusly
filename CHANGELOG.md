@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Quick jump (⌘K) finds runs from a sentence such as "failed runs of
+  demo-flaky-ingest since yesterday" or "ejecuciones fallidas desde el lunes".
+  It shows what it understood as status, workflow and time chips you can change
+  or remove, lists words it did not understand, and pages the matching runs.
+  Enter opens a run in Activity. A run with an open failure offers Retry in
+  Recover, which opens that failure where Retry still asks you to act; Quick
+  jump itself never writes.
+- Each row of the runs list (`GET /runs`) now carries `cursor`, the exact
+  `before` value for the next page. Paging by `createdAt` could skip runs
+  created in the same millisecond.
 - Building a proposal with a registered example no longer drops the Reuse or
   Adapt review when the database is slow to write to disk, and Apply no longer
   rejects a reviewed copy for the same reason.
