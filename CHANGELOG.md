@@ -8,6 +8,10 @@
   with the chosen baseline and holds the outcome comparison and the canary
   traffic, minimum sample and success floor before Start canary. The workflow
   list API returns the same production version and rollout for each workflow.
+- Scheduled runs follow a workflow's canary like other starts. An active canary
+  gets its share of ticks and its outcomes count toward the guardrail, and after
+  a rollback every tick runs the baseline. A subworkflow call whose canary
+  cannot be read now fails instead of running the latest version.
 - Quick jump (⌘K) finds runs from a sentence such as "failed runs of
   demo-flaky-ingest since yesterday" or "ejecuciones fallidas desde el lunes".
   It shows what it understood as status, workflow and time chips you can change

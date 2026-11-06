@@ -10,6 +10,21 @@ so a run always records the exact evaluator and version pair used.
 
 Rollback changes future assignment; it never rewrites existing run history.
 
+While a rollout's canary is the latest saved version, these starts take the
+assignment and record the rollout on the run, so its outcomes count toward
+the guardrail:
+
+- HTTP and MCP starts, keyed per start;
+- webhook and trigger deliveries, keyed by the accepted event, which keeps its
+  assignment when it is buffered and continued later;
+- schedule ticks, keyed by the schedule entry and the tick's due time, so a
+  retried tick lands on the same arm;
+- subworkflow calls without a pinned version, keyed by the parent run and node.
+
+Reruns, draft tests, validation runs, recovery replays and subworkflows pinned
+to a version keep their exact version. A start whose assignment cannot be read
+fails instead of running the latest version.
+
 ## Promotion
 
 Saving a version makes it the latest, and the latest version takes production

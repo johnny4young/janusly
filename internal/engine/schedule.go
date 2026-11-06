@@ -215,15 +215,27 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 	if entry.DueAt != nil {
 		dueAt = entry.DueAt.UTC()
 	}
-	runID, err := e.StartRun(ctx, StartInput{
+	tick := entry.ID + "@" + dueAt.Format(time.RFC3339Nano)
+	start := StartInput{
 		OrgID: entry.OrgID, Workflow: wf, WorkflowVersionID: entry.WorkflowVersionID,
 		CreatedBy:      "system:scheduler",
-		IdempotencyKey: "schedule:" + entry.ID + "@" + dueAt.Format(time.RFC3339Nano),
+		IdempotencyKey: "schedule:" + tick,
 		Input: map[string]any{
 			"triggeredBy": "schedule", "nodeId": entry.NodeID,
 			"scheduledAt": dueAt.Format(time.RFC3339),
 		},
-	})
+	}
+	// Ticks follow the deployment like every production start, keyed by the
+	// tick so a retry lands on the same arm. An unreadable rollout skips the tick.
+	assignment, err := e.ResolveWorkflowRolloutAssignment(ctx, entry.OrgID, entry.WorkflowID, tick)
+	if err != nil {
+		return false
+	}
+	if assignment != nil {
+		start.Workflow, start.WorkflowVersionID = assignment.Workflow, assignment.VersionID
+		start.WorkflowRolloutID, start.WorkflowRolloutVariant = assignment.Rollout.ID, assignment.Variant
+	}
+	runID, err := e.StartRun(ctx, start)
 	if err != nil {
 		var replay *ErrStartIdempotencyReplay
 		if errors.As(err, &replay) {

@@ -136,8 +136,13 @@ func (e *Engine) executeSubworkflowNode(
 	childVersionID, childVersion := "", 0
 	rolloutID, rolloutVariant := "", ""
 	if pinnedVersion == nil && !dryRun {
-		if assignment, err := e.ResolveWorkflowRolloutAssignment(ctx, claim.OrgID, workflowID,
-			claim.RunID+":"+claim.NodeID); err == nil && assignment != nil {
+		// Like every production start, an unreadable deployment fails closed
+		// instead of silently running the latest version.
+		assignment, err := e.ResolveWorkflowRolloutAssignment(ctx, claim.OrgID, workflowID, claim.RunID+":"+claim.NodeID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve subworkflow rollout assignment: %w", err)
+		}
+		if assignment != nil {
 			childWorkflow = assignment.Workflow
 			childVersionID = assignment.VersionID
 			rolloutID, rolloutVariant = assignment.Rollout.ID, assignment.Variant
