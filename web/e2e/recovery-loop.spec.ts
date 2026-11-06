@@ -7,7 +7,9 @@
  * Deterministic + provider-free: F3's `charge` node fails with
  * "Missing secret: BILLING_API_KEY" (a template-resolution error, NOT skipped
  * by the writes-skipped sandbox), so the sandbox gate can be exercised without
- * an AI key or network. The "real fix" replaces the failing http node with a
+ * an AI key or network. The lane has no mailer and write-side tools fail on
+ * an unsent email, so `confirm_email` runs as a `noop`; `charge` stays as
+ * shipped. The "real fix" replaces the failing http node with a
  * `noop` of the same id — it succeeds in BOTH the sandbox and a real production
  * replay (no network), so the replayed run genuinely recovers. (An auth-only
  * edit would pass the sandbox — which skips the write — but still fail a real
@@ -39,13 +41,18 @@ const ORG_ID = `recovery-loop-${STAMP}`;
 const AUTH = { "x-org-id": ORG_ID, "x-user-id": "dev-user" };
 const OTHER_AUTH = { "x-org-id": `recovery-loop-other-${STAMP}`, "x-user-id": "other-user" };
 
-/** Deep-clone F3 and replace the failing `charge` http node with a `noop` of
- *  the same id — a real fix that succeeds in the sandbox AND a real replay. */
+/** Deep-clone the workflow with node `id` replaced by a `noop` of the same id. */
+function withNoop(workflow: WorkflowJson, id: string): WorkflowJson {
+  const copy = JSON.parse(JSON.stringify(workflow)) as WorkflowJson;
+  const idx = copy.nodes.findIndex((n) => n.id === id);
+  expect(idx, `F3 has a \`${id}\` node`).toBeGreaterThanOrEqual(0);
+  copy.nodes[idx] = { id, type: "noop", config: {} };
+  return copy;
+}
+
+/** The real fix: `charge` becomes a `noop`, which succeeds in the sandbox AND a real replay. */
 function fixChargeToNoop(workflow: WorkflowJson): WorkflowJson {
-  const fixed = JSON.parse(JSON.stringify(workflow)) as WorkflowJson;
-  const idx = fixed.nodes.findIndex((n) => n.id === "charge");
-  if (idx >= 0) fixed.nodes[idx] = { id: "charge", type: "noop", config: {} };
-  return fixed;
+  return withNoop(workflow, "charge");
 }
 
 test.describe.configure({ mode: "serial" });
@@ -63,7 +70,8 @@ test.describe("Recovery loop", () => {
     const otherLedgerBaseline = await otherLedgerBefore.json() as { totalRecovered: number };
 
     // 1. Run F3 to failure — `charge` throws "Missing secret" → DLQ.
-    const workflow = (await loadTemplate(request, "failed-workflow-recovery", ORG_ID)) as unknown as WorkflowJson;
+    const template = (await loadTemplate(request, "failed-workflow-recovery", ORG_ID)) as unknown as WorkflowJson;
+    const workflow = withNoop(template, "confirm_email");
     const payload = { customer: "leah@example.com", amountUsd: 49 };
     const { runId } = await startRun(request, workflow, payload, ORG_ID);
 

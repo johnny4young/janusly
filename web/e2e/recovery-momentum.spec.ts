@@ -17,7 +17,8 @@ type LocaleContract = {
   homeName: RegExp
   retryName: string
   recoveringText: string
-  cleanPosture: string
+  emptyEvidence: string
+  emptyHealth: string
   queuedToast: string
 }
 
@@ -26,7 +27,8 @@ const ENGLISH: LocaleContract = {
   homeName: /^Home\b/,
   retryName: 'Retry',
   recoveringText: 'Replaying',
-  cleanPosture: 'Recovery posture is clean',
+  emptyEvidence: 'No completed runs in this reporting window yet. There is not enough evidence to assess health.',
+  emptyHealth: 'No evidence yet',
   queuedToast: 'Replay queued',
 }
 
@@ -35,7 +37,8 @@ const SPANISH: LocaleContract = {
   homeName: /^Inicio\b/,
   retryName: 'Reintentar',
   recoveringText: 'Reintentando',
-  cleanPosture: 'La postura de recuperación está limpia',
+  emptyEvidence: 'Aún no hay ejecuciones completadas en este periodo. No hay suficiente evidencia para evaluar la salud.',
+  emptyHealth: 'Aún sin evidencia',
   queuedToast: 'Reintento en cola',
 }
 
@@ -71,6 +74,13 @@ async function waitForHealthRingToSettle(hero: Locator): Promise<void> {
   await expect(ring).toBeVisible()
   const score = (await ring.getAttribute('aria-label'))?.match(/\d+/)?.[0]
   if (score) await expect(ring.locator('.we-recovery-center-ring__value')).toHaveText(score)
+}
+
+// Drill runs are validation evidence, so Home keeps reporting no production evidence and no operator work.
+async function expectDrillKeptOutOfHome(hero: Locator, contract: LocaleContract): Promise<void> {
+  await expect(hero).toContainText(contract.emptyEvidence)
+  await expect(hero.getByTestId('home-health-summary')).toContainText(contract.emptyHealth)
+  await expect(hero.page().getByTestId('recovery-center-action-triage_failures')).toHaveCount(0)
 }
 
 async function prepareIsolatedSession(page: Page, locale: 'en' | 'es', reducedMotion: boolean): Promise<string> {
@@ -130,8 +140,7 @@ async function runRecoveryCycle(
   await page.getByRole('button', { name: contract.homeName }).click()
   const hero = page.locator('.we-recovery-center-hero')
   await waitForHealthRingToSettle(hero)
-  await expect(hero).toContainText(contract.cleanPosture)
-  await expect(page.getByTestId('recovery-center-action-triage_failures')).toHaveCount(0)
+  await expectDrillKeptOutOfHome(hero, contract)
   await hideUnrelatedOverlays(page)
   await captureElement(hero, `web-${contract.locale}-recovery-hero-drill-isolated`)
   await captureElement(page.locator('.workspace-main'), `web-${contract.locale}-home-drill-isolated-workspace`)
@@ -157,7 +166,7 @@ async function runRecoveryCycle(
     const recovering = detail.locator('.status-pill')
     await expect(recovering).toHaveText(contract.recoveringText)
     await expect(retry).toBeDisabled()
-    await expect(detail.getByRole('button', { name: /Resolve|Resolver/ })).toBeDisabled()
+    await expect(detail.getByRole('button', { name: /Close without recovery|Cerrar sin recuperar/ })).toBeDisabled()
     await hideUnrelatedOverlays(page)
     await captureElement(detail, `web-${contract.locale}-activity-recovery-loading`, { finishAnimations: false })
 
@@ -174,8 +183,7 @@ async function runRecoveryCycle(
   await captureElement(queuedToast.locator('..'), `web-${contract.locale}-recovery-toast-queued`)
 
   await page.getByRole('button', { name: contract.homeName }).click()
-  await expect(hero).toContainText(contract.cleanPosture)
-  await expect(page.getByTestId('recovery-center-action-triage_failures')).toHaveCount(0)
+  await expectDrillKeptOutOfHome(hero, contract)
   await waitForHealthRingToSettle(hero)
   await hideUnrelatedOverlays(page)
   await captureElement(hero, `web-${contract.locale}-recovery-hero-drill-replayed`, { finishAnimations: false })
@@ -228,6 +236,5 @@ test('two validation drills stay inspectable without fabricating operator work',
 
   await page.getByRole('button', { name: ENGLISH.homeName }).click()
   const hero = page.locator('.we-recovery-center-hero')
-  await expect(hero).toContainText(ENGLISH.cleanPosture)
-  await expect(page.getByTestId('recovery-center-action-triage_failures')).toHaveCount(0)
+  await expectDrillKeptOutOfHome(hero, ENGLISH)
 })
