@@ -62,6 +62,7 @@ func toolParamsDigest(ctx context.Context, q *store.Queries, orgID, tool string,
 			pinned[name] = tools.CredentialRevision{ID: row.ID, UpdatedAt: row.UpdatedAt}
 		case errors.Is(err, pgx.ErrNoRows):
 			credentials[name] = nil
+			pinned[name] = tools.CredentialRevision{} // absent: creating it later changes the call
 		default:
 			return "", nil, fmt.Errorf("read credential for tool approval: %w", err)
 		}
@@ -101,11 +102,6 @@ func maskedPaths(original, masked any, path string, out []string) []string {
 		}
 	}
 	return out
-}
-
-func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool string, input map[string]any, redacted []string) (executors.Waiting, bool, error) {
-	waiting, paused, _, err := e.gateToolCall(ctx, claim, tool, input, redacted)
-	return waiting, paused, err
 }
 
 // gateToolCall runs immediately before the call, under the run's completion

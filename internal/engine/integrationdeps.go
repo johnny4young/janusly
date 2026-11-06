@@ -113,9 +113,13 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 		if err != nil {
 			return "", "credential not found: " + credentialName
 		}
-		if pinned, ok := deps.PinnedCredentials[credentialName]; ok &&
-			(credential.ID != pinned.ID || !credential.UpdatedAt.Equal(pinned.UpdatedAt)) {
-			return "", "credential changed after approval: " + credentialName
+		// An approved call may only use the credential revision it was bound to;
+		// one it did not name, or named while absent, changes the call.
+		if deps.PinnedCredentials != nil {
+			pinned, ok := deps.PinnedCredentials[credentialName]
+			if !ok || credential.ID != pinned.ID || !credential.UpdatedAt.Equal(pinned.UpdatedAt) {
+				return "", "credential changed after approval: " + credentialName
+			}
 		}
 		if credential.ExpiresAt != nil && !credential.ExpiresAt.After(e.now().UTC()) {
 			return "", "credential expired: " + credentialName

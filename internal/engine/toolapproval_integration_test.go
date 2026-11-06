@@ -14,10 +14,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/tools"
 )
+
+// gateToolApproval is gateToolCall without the pinned credential revisions.
+func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool string, input map[string]any, redacted []string) (executors.Waiting, bool, error) {
+	waiting, paused, _, err := e.gateToolCall(ctx, claim, tool, input, redacted)
+	return waiting, paused, err
+}
 
 func startToolApprovalRun(t *testing.T, ctx context.Context, eng *Engine, org, createdBy string, nodes []domain.Node, edges []domain.Edge) string {
 	t.Helper()
@@ -837,5 +844,43 @@ func TestApprovedCallRefusesARotatedCredential(t *testing.T) {
 	}
 	if _, message := deps.Gate(ctx, "webhook.send", "webhook_secret", "hook", 60); message != "credential changed after approval: hook" {
 		t.Fatalf("gate after rotation: %q", message)
+	}
+}
+
+// A credential that was absent at approval, or never named by the approved
+// call, cannot be used once it appears.
+func TestApprovedCallRefusesACredentialCreatedAfterApproval(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	requireApprovalFor(t, ctx, pool, org, "webhook.send")
+	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	input := map[string]any{"credential": "hook", "url": "https://hooks.example.test/x", "payload": map[string]any{}}
+	claim := claimNext(t, ctx, pool, org, runID)
+	waiting, paused, _, err := eng.gateToolCall(ctx, claim, "webhook.send", input, nil)
+	if err != nil || !paused {
+		t.Fatalf("gate: %v", err)
+	}
+	if err := eng.MarkNodeWaiting(ctx, claim, waiting); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := eng.DecideToolApproval(ctx, ToolApprovalDecision{OrgID: org, ApprovalID: waiting.Metadata["approvalId"].(string),
+		Actor: "bob", ParamsDigest: waiting.Metadata["paramsDigest"].(string), Status: ToolApprovalApproved}); err != nil {
+		t.Fatal(err)
+	}
+	claim = claimNext(t, ctx, pool, org, runID)
+	_, paused, pinned, err := eng.gateToolCall(ctx, claim, "webhook.send", input, nil)
+	if err != nil || paused {
+		t.Fatalf("the approval did not spend: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO credentials (id, org_id, name, kind, secret_ref) VALUES ($1, $2, 'hook', 'webhook_secret', 'env:A')`, org+"-late", org); err != nil {
+		t.Fatal(err)
+	}
+	deps := eng.buildIntegrationDeps(org, runID, "call")
+	deps.PinnedCredentials = pinned
+	if _, message := deps.Gate(ctx, "webhook.send", "webhook_secret", "hook", 60); message != "credential changed after approval: hook" {
+		t.Fatalf("a credential created after approval was used: %q", message)
+	}
+	deps.PinnedCredentials = map[string]tools.CredentialRevision{}
+	if _, message := deps.Gate(ctx, "webhook.send", "webhook_secret", "hook", 60); message != "credential changed after approval: hook" {
+		t.Fatalf("a credential the approved call never named was used: %q", message)
 	}
 }
