@@ -230,7 +230,7 @@ if (profile === 'review') {
         await open(page, org, locale, workflowId)
         const entry = await registerExample(page, request, org, locale, workflowId, older.versionId)
         const preview = await propose(page, locale)
-        expect(preview.experienceDecision.mode).toBe('REUSE')
+        expect(preview.experienceDecision?.mode, decisionContext(preview)).toBe('REUSE')
         if (boundary === 'withdrawal') await write(request, org, '/v1/authoring/experiences/revoke', { id: entry.id })
         else if (boundary === 'source deletion') {
           const deleted = await request.delete(`${API_URL}/workflows/${workflowId}`, { headers: headers(org) })
