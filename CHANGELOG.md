@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A recovery case's history lists its steps in the order they happened, even
+  when two land in the same millisecond.
 - The experiment comparison lists metrics by row, with either arm as the
   baseline. Each change says Better or Worse according to whether higher or
   lower is better for that metric. Diff only hides metrics that did not change.

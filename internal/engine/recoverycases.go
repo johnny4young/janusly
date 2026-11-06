@@ -120,6 +120,16 @@ func (e *Engine) TransitionRecoveryCase(
 	}); err != nil {
 		return fmt.Errorf("revoke stale recovery approvals: %w", err)
 	}
+	// Receipts order by occurred_at, so each one must land after the last.
+	last, err := q.GetLatestRecoveryCaseTransitionAt(ctx, store.GetLatestRecoveryCaseTransitionAtParams{
+		OrgID: orgID, CaseID: receipt.CaseID,
+	})
+	if err != nil {
+		return fmt.Errorf("read last receipt: %w", err)
+	}
+	if !occurredAt.After(last) {
+		occurredAt = last.Add(time.Millisecond)
+	}
 	moved, err := q.TransitionRecoveryCaseState(ctx, store.TransitionRecoveryCaseStateParams{
 		OrgID: orgID, ID: receipt.CaseID,
 		ToState: receipt.To, FromState: receipt.From,
