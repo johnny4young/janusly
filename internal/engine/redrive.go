@@ -133,7 +133,12 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	if actor == "" {
 		actor = opts.RequestedBy
 	}
-	if err := recordRedriveForApprovals(ctx, q, deadLetter.RunID, deadLetter.NodeID, actor); err != nil {
+	// A redrive that replaces the document can reshape any call in the tree.
+	role := "redrive"
+	if len(opts.FixWorkflowJSON) > 0 {
+		role = "fix"
+	}
+	if err := recordRedriveForApprovals(ctx, q, deadLetter.RunID, deadLetter.NodeID, role, actor); err != nil {
 		return err
 	}
 	// The GENERATION-BOUND claim: a fresh token per replay binds this exact
@@ -271,7 +276,7 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID, actor
 		}
 		return fmt.Errorf("requeue failed node: %w", err)
 	}
-	if err := recordRedriveForApprovals(ctx, q, runID, nodeID, actor); err != nil {
+	if err := recordRedriveForApprovals(ctx, q, runID, nodeID, "redrive", actor); err != nil {
 		return err
 	}
 	if _, err := q.ReviveFailedRun(ctx, runID); err != nil {
@@ -304,11 +309,9 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID, actor
 
 // recordRedriveForApprovals bars the redriver from approving what the redrive
 // re-runs and retires any undecided or unspent approval for the step.
-func recordRedriveForApprovals(ctx context.Context, q *store.Queries, runID, nodeID, actor string) error {
-	if actor != "" {
-		if err := q.RecordRunActor(ctx, store.RecordRunActorParams{RunID: runID, NodeID: nodeID, Role: "redrive", Actor: actor}); err != nil {
-			return fmt.Errorf("record redriver: %w", err)
-		}
+func recordRedriveForApprovals(ctx context.Context, q *store.Queries, runID, nodeID, role, actor string) error {
+	if err := recordRunActor(ctx, q, runID, nodeID, role, actor); err != nil {
+		return err
 	}
 	if err := q.RetireToolApprovals(ctx, store.RetireToolApprovalsParams{RunID: runID, NodeID: nodeID}); err != nil {
 		return fmt.Errorf("retire tool approvals: %w", err)

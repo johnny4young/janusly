@@ -364,8 +364,8 @@ func (e *Engine) ResumeRunAs(ctx context.Context, runID, nodeID string, input ma
 			return fmt.Errorf("clear wakeup: %w", err)
 		}
 		if actor != "" && (target.Type == "human_form" || len(input) > 0) {
-			if err := q.RecordRunActor(ctx, store.RecordRunActorParams{RunID: runID, NodeID: nodeID, Role: "resume", Actor: actor}); err != nil {
-				return fmt.Errorf("record resume actor: %w", err)
+			if err := recordRunActor(ctx, q, runID, nodeID, "resume", actor); err != nil {
+				return err
 			}
 		}
 		eventPayload := json.RawMessage(`{}`)

@@ -75,11 +75,13 @@ approval topology stay directly inspectable.
 ## Tool approval
 
 The org setting `tools.approvalRequired` lists tool names whose every call
-waits for a person. It is changed only by `org.config.write` through
-`POST /org/config`, which audits the change. The tool inspector shows the rule,
-and admins can switch it there. The setting accepts only names the gate can
-enforce: the built-in tools, including `http.request`. Any other name, such as
-an MCP tool, is refused with `tool_approval_unenforceable`.
+waits for a person. Admins change it with `org.config.write`: the tool
+inspector adds or removes one tool through `POST /org/tool-approval-policy`,
+which edits the list under a per-org lock so two admins never drop each
+other's entries, and `POST /org/config` sets the whole list. Both are audited.
+The setting accepts only names the gate can enforce: the built-in tools,
+including `http.request`. Any other name, such as an MCP tool, is refused with
+`tool_approval_unenforceable`.
 
 The dispatcher reads the policy for `tool`, `http`, `loop`, `agent` and
 `multi_agent` steps and fails closed when it is unreadable or malformed. It
@@ -88,9 +90,15 @@ matches the tool name rendered for the call (an `http` step is
 override cannot move a listed call out of the gate. A listed tool runs only as
 an approved `tool` or `http` step. A `for_each` loop or an agent that reaches
 it, including an agent's `http.request`, gets a `TOOL_APPROVAL_REQUIRED`
-refusal.
+refusal. System deliveries go through `Engine.ExecuteIntegrationTool`, which
+refuses a listed tool because nobody approves them: report delivery answers
+409 `tool_approval_required`, and listing `email.send` stops the weekly digest.
 Validation runs and draft tests keep suppressing writes as before, so the gate
 waits only for listed calls that would really run there, which are reads.
+
+Once a step has a live request, that request decides it whatever the policy
+says later. Removing the tool from the list does not run a denied or expired
+call, and an undecided request keeps waiting until it expires.
 
 A tool step whose call is listed pauses before the executor runs, under the
 run's completion lock. The request records:
@@ -99,19 +107,26 @@ run's completion lock. The request records:
 - its parameters with resolved secrets and sensitive keys masked, plus the
   paths of the masked values (at most 64 KB, or the step fails);
 - an HMAC digest of the full rendered call that also covers the id, kind,
-  reference and revision of a named `credential`;
-- the requesters, who are the people who caused this call:
-  - the creators of the run and its subworkflow parents;
-  - everyone who submitted a form or resumed with input anywhere in the run
-    tree (up to the root run, then down through every subworkflow
-    descendant), because data can flow between those runs;
-  - everyone who redrove this step or a step upstream of it (`run_actors`,
-    recorded per step; in a subworkflow parent, the step that started the
-    child);
-  - everyone an earlier request for the same step excluded;
-  - whoever saved the versions the lineage runs, when no person started it (the
-    creator is `system:*` or the run came from a schedule or webhook), so the
-    author of the parameters cannot approve them;
+  reference and revision of a named `credential`. The digest is computed under
+  the lock, and the integration refuses a credential whose revision changed
+  after the approval was spent;
+- the requesters, who are the people who caused this call. `run_actors` records
+  them by role:
+  - anywhere in the run tree (the lineage up through subworkflow and rerun
+    links, plus every subworkflow descendant): form submitters and resumes
+    with input (`resume`), a redrive that replaced the document (`fix`), a
+    person who created or applied a semantic output replacement (`output`),
+    and a service-token starter (`service`);
+  - in this run and the runs above it: a plain redrive (`redrive`), whose
+    re-run steps can feed this call;
+  - the creators up the lineage, and everyone an earlier request for the same
+    step excluded;
+  - whoever saved the versions the lineage runs, when no person started it (a
+    `system:*` creator, a schedule or webhook trigger, or a service token), so
+    the author of the parameters cannot approve them.
+
+  A service token's user id is a free-form header, so its actions are recorded
+  as `service-token:<suffix>`;
 - how many members can approve: members who can start runs and are not
   requesters. When none can, the card says so.
 

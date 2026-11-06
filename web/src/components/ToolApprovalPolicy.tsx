@@ -43,11 +43,12 @@ export function ToolApprovalPolicy({ tool }: { tool: string }) {
       label={t('rightPanel.quickConfig.toolApprovalPolicySwitch')}
       data-testid="tool-approval-policy-switch"
       onChange={async event => {
-        const next = event.target.checked ? [...listed, tool] : listed.filter(name => name !== tool)
         setSaving(true)
         try {
-          await api('/org/config', { method: 'POST', body: JSON.stringify({ key: POLICY_KEY, value: next.join(', ') }) })
-          setListed(next)
+          // The server adds or removes this one tool, so a stale list never overwrites another admin's change.
+          const result = await api('/org/tool-approval-policy', { method: 'POST', body: JSON.stringify({ tool, required: event.target.checked }) })
+          const tools = (result as { tools?: unknown } | undefined)?.tools
+          setListed(Array.isArray(tools) ? tools.filter((name): name is string => typeof name === 'string') : listed)
         } catch (error) {
           addToast(error instanceof Error ? error.message : t('rightPanel.quickConfig.toolApprovalPolicyFailed'), 'error')
         } finally {

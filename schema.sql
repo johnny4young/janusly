@@ -1122,7 +1122,7 @@ CREATE TABLE public.run_actors (
     role text NOT NULL,
     actor text NOT NULL,
     acted_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT run_actors_role_check CHECK ((role = ANY (ARRAY['redrive'::text, 'resume'::text])))
+    CONSTRAINT run_actors_role_check CHECK ((role = ANY (ARRAY['redrive'::text, 'fix'::text, 'resume'::text, 'output'::text, 'service'::text])))
 );
 
 

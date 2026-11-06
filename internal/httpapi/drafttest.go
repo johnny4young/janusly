@@ -154,7 +154,7 @@ func (s *V1Server) draftTestCore(r *http.Request, rc v1Request) opResult {
 		test.Pins[nodeID] = data
 	}
 	started, err := (runstart.Service{Engine: s.engine, Pool: s.pool, NewID: s.newID}).Start(r.Context(), runstart.Request{
-		OrgID: rc.orgID, CreatedBy: rc.userID, Workflow: wf, Input: body.Input, DraftTest: &test,
+		OrgID: rc.orgID, CreatedBy: rc.userID, ServicePrincipal: servicePrincipal(rc), Workflow: wf, Input: body.Input, DraftTest: &test,
 		IdempotencyKey: draftTestIdempotencyKey(idempotencyKey, body),
 	})
 	if err != nil {

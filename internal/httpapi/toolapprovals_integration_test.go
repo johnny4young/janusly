@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,5 +107,39 @@ func TestToolApprovalPolicyGatesTheCallWhateverTheDocument(t *testing.T) {
 	}
 	if output != "" || !strings.Contains(requesters, "operator") || !strings.Contains(requesters, "api-tester") {
 		t.Fatalf("the moved call ran or its redriver may approve it: output=%q requesters=%q", output, requesters)
+	}
+}
+
+// Concurrent admins each add one tool without dropping the other's, and a
+// listed tool is never delivered by a report.
+func TestToolApprovalPolicyEditsAndReportDelivery(t *testing.T) {
+	h := newAPIHarness(t)
+	var wg sync.WaitGroup
+	for _, tool := range []string{"slack.post", "github.create_issue", "webhook.send"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if res := h.call("POST", "/org/tool-approval-policy", map[string]any{"tool": tool, "required": true}, ""); res.status != 200 {
+				t.Errorf("add %s: %d %+v", tool, res.status, res.body)
+			}
+		}()
+	}
+	wg.Wait()
+	res := h.call("POST", "/org/tool-approval-policy", map[string]any{"tool": "webhook.send", "required": false}, "")
+	if fmt.Sprint(res.body["tools"]) != "[github.create_issue slack.post]" {
+		t.Fatalf("policy after concurrent edits: %+v", res.body)
+	}
+	if res := h.call("POST", "/org/tool-approval-policy", map[string]any{"tool": "crm.lookup", "required": true}, ""); res.status != 400 || res.body["code"] != "tool_approval_unenforceable" {
+		t.Fatalf("an unenforceable tool was listed: %d %+v", res.status, res.body)
+	}
+
+	runID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": gateWorkflow(fmt.Sprintf("wf-report-%d", time.Now().UnixNano()),
+		map[string]any{"id": "done", "type": "noop", "config": map[string]any{}})}, ""))
+	h.waitRun(runID, "succeeded")
+	delivery := h.call("POST", "/reports/run-explain/deliver", map[string]any{
+		"runId": runID, "destination": map[string]any{"kind": "slack", "credentialName": "ops-slack"},
+	}, "")
+	if delivery.status != 409 || delivery.body["code"] != "tool_approval_required" {
+		t.Fatalf("a report was delivered through a listed tool: %d %+v", delivery.status, delivery.body)
 	}
 }

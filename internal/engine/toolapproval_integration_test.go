@@ -16,6 +16,7 @@ import (
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/store"
+	"github.com/johnny4young/janusly/internal/tools"
 )
 
 func startToolApprovalRun(t *testing.T, ctx context.Context, eng *Engine, org, createdBy string, nodes []domain.Node, edges []domain.Edge) string {
@@ -490,9 +491,9 @@ func TestOlderDocumentsAndRunsStillStartAndRedrive(t *testing.T) {
 	}
 }
 
-// A form submitter anywhere in the lineage is barred, since rendered
-// parameters can read any step; a redriver is barred only for this step and
-// the steps upstream of it; earlier requesters carry forward.
+// Form submitters, document fixes and output replacements count anywhere in
+// the run tree; a plain redrive counts in this run and the runs above it;
+// earlier requesters carry forward.
 func TestToolApprovalRequesterScope(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
 	parent := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{{ID: "intake", Type: "noop", Config: map[string]any{}}, {ID: "sub", Type: "noop", Config: map[string]any{}}},
@@ -505,10 +506,10 @@ func TestToolApprovalRequesterScope(t *testing.T) {
 	}
 	for _, row := range [][4]string{
 		{parent, "intake", "resume", "paula"}, // parent-run form upstream of the subworkflow step
-		{parent, "intake", "redrive", "pete"}, // parent redrive of a step that did not start the child
+		{parent, "intake", "redrive", "pete"}, // a parent redrive re-runs the child
 		{child, "form", "resume", "fiona"},
 		{child, "other", "resume", "otto"},  // not upstream of the call, but its output is readable
-		{child, "other", "redrive", "rita"}, // redrove an unrelated step
+		{child, "other", "redrive", "rita"}, // a redrive in this run changes what the call can read
 		{child, "call", "redrive", "dave"},
 	} {
 		if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, $2, $3, $4)`, row[0], row[1], row[2], row[3]); err != nil {
@@ -524,8 +525,13 @@ func TestToolApprovalRequesterScope(t *testing.T) {
 		}
 		return runID
 	}
-	for _, row := range [][2]string{{subRun(parent, "sub"), "sam"}, {subRun(child, "other"), "carla"}} {
-		if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, 'ask', 'resume', $2)`, row[0], row[1]); err != nil {
+	sibling := subRun(parent, "sub")
+	for _, row := range [][3]string{
+		{sibling, "resume", "sam"}, {subRun(child, "other"), "resume", "carla"},
+		{sibling, "fix", "fred"}, {sibling, "output", "olga"}, // document and output changes count tree-wide
+		{sibling, "redrive", "simon"}, // a plain redrive in a sibling run cannot feed this call
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, 'ask', $2, $3)`, row[0], row[1], row[2]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -534,9 +540,9 @@ func TestToolApprovalRequesterScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{
-		RunID: child, NodeID: "call", NodeIds: []string{"call", "form"}, MaxDepth: subworkflowDepthWalkerMax,
+		RunID: child, NodeID: "call", MaxDepth: subworkflowDepthWalkerMax,
 	})
-	if err != nil || strings.Join(requesters, ",") != "alice,carla,dave,fiona,gina,otto,paula,sam" {
+	if err != nil || strings.Join(requesters, ",") != "alice,carla,dave,fiona,fred,gina,olga,otto,paula,pete,rita,sam" {
 		t.Fatalf("requesters %v %v", requesters, err)
 	}
 }
@@ -602,7 +608,7 @@ func TestVersionAuthorIsBarredOnlyFromUnattendedRuns(t *testing.T) {
 		if _, err := pool.Exec(ctx, `UPDATE runs SET workflow_version_id = $2 WHERE id = $1`, runID, runID+"-v"); err != nil {
 			t.Fatal(err)
 		}
-		requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: runID, NodeID: "call", NodeIds: []string{"call"}, MaxDepth: subworkflowDepthWalkerMax})
+		requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: runID, NodeID: "call", MaxDepth: subworkflowDepthWalkerMax})
 		if err != nil || slices.Contains(requesters, "erin") != test.authorBarred {
 			t.Fatalf("%s run: requesters %v %v", test.createdBy, requesters, err)
 		}
@@ -697,5 +703,139 @@ func TestToolApprovalGatesHTTPSteps(t *testing.T) {
 	}
 	if tool != "http.request" || strings.Contains(params, "Bearer live") || !strings.Contains(params, "hooks.example.test/page") {
 		t.Fatalf("http step request: %s %s", tool, params)
+	}
+}
+
+// A redrive that replaces the document can put a listed call on any step, so
+// its actor is a requester everywhere in the tree; a plain redrive is not.
+func TestFixRedriveActorCannotApproveAnyStep(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"}), {ID: "later", Type: "noop"}},
+		[]domain.Edge{{From: "call", To: "later"}})
+	if err := eng.FailNode(ctx, claimNext(t, ctx, pool, org, runID), errors.New("upstream down")); err != nil {
+		t.Fatal(err)
+	}
+	var deadLetterID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&deadLetterID); err != nil {
+		t.Fatal(err)
+	}
+	fix, _ := json.Marshal(domain.Workflow{ID: "wf-tool-approval", Name: "Fixed", DSLVersion: "1.0", Edges: []domain.Edge{{From: "call", To: "later"}},
+		Nodes: []domain.Node{approvalTool(map[string]any{"value": "a"}),
+			{ID: "later", Type: "tool", Config: map[string]any{"tool": "text.uppercase", "input": map[string]any{"value": "moved"}}}}})
+	if err := eng.RedriveDeadLetterWithOptions(ctx, org, deadLetterID, RedriveOptions{FixWorkflowJSON: fix, Actor: "mallory"}); err != nil {
+		t.Fatal(err)
+	}
+	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: runID, NodeID: "later", MaxDepth: subworkflowDepthWalkerMax})
+	if err != nil || !slices.Contains(requesters, "mallory") {
+		t.Fatalf("the fix author may approve the call they moved: %v %v", requesters, err)
+	}
+	var role string
+	if err := pool.QueryRow(ctx, `SELECT role FROM run_actors WHERE run_id = $1 AND actor = 'mallory'`, runID).Scan(&role); err != nil || role != "fix" {
+		t.Fatalf("fix redrive recorded as %q %v", role, err)
+	}
+}
+
+// Once a step has a request, that request decides it even after the tool
+// leaves the policy: a deny or an expiry still fails the step.
+func TestExistingRequestDecidesAfterThePolicyDropsTheTool(t *testing.T) {
+	for _, outcome := range []string{"deny", "expire"} {
+		t.Run(outcome, func(t *testing.T) {
+			ctx, pool, eng, org := newHarness(t)
+			requireApprovalFor(t, ctx, pool, org, "text.uppercase")
+			runToolApprovalWorkers(t, eng)
+			runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+			approvalID := waitForApproval(t, ctx, pool, runID)
+			if _, err := pool.Exec(ctx, `DELETE FROM org_configs WHERE org_id = $1 AND key = 'tools.approvalRequired'`, org); err != nil {
+				t.Fatal(err)
+			}
+			want := "TOOL_APPROVAL_DENIED"
+			if outcome == "deny" {
+				if _, _, err := eng.DecideToolApproval(ctx, ToolApprovalDecision{OrgID: org, ApprovalID: approvalID, Actor: "bob",
+					ParamsDigest: approvalDigest(t, ctx, pool, approvalID), Status: ToolApprovalDenied}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				want = "TOOL_APPROVAL_EXPIRED"
+				if _, err := pool.Exec(ctx, `UPDATE tool_approval_requests SET expires_at = now() - interval '1 second' WHERE id = $1`, approvalID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := pool.Exec(ctx, `UPDATE run_wakeups SET wake_at = now() - interval '1 second'
+					WHERE run_node_id = (SELECT id FROM run_nodes WHERE run_id = $1)`, runID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			waitForSQL(t, ctx, pool, "failed", `SELECT status FROM runs WHERE id = $1`, runID)
+			waitForSQL(t, ctx, pool, want, `SELECT coalesce(error_json->>'code', '') FROM run_nodes WHERE run_id = $1`, runID)
+		})
+	}
+}
+
+// A system delivery never runs a listed tool, because nobody approves it.
+func TestSystemDeliveryRefusesAListedTool(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	requireApprovalFor(t, ctx, pool, org, "email.send")
+	got := eng.ExecuteIntegrationTool(ctx, org, "", "email.send", map[string]any{"to": "ops@example.test", "subject": "Digest", "text": "x"})
+	if got["code"] != "TOOL_APPROVAL_REQUIRED" {
+		t.Fatalf("a listed system delivery ran: %v", got)
+	}
+}
+
+// A service-token run has no person behind it, so the version author is
+// barred and the token itself is a requester.
+func TestServiceTokenRunBarsTheVersionAuthor(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, CreatedBy: "spoofed-user", ServicePrincipal: "service-token:abcd", Workflow: &domain.Workflow{
+		ID: "wf-service", Name: "Service", DSLVersion: "1.0", Nodes: []domain.Node{approvalTool(map[string]any{"value": "a"})}, Edges: []domain.Edge{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by) VALUES ($1, $2, 'wf-service', 1, '{}', 'erin')`, runID+"-v", org); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE runs SET workflow_version_id = $2 WHERE id = $1`, runID, runID+"-v"); err != nil {
+		t.Fatal(err)
+	}
+	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: runID, NodeID: "call", MaxDepth: subworkflowDepthWalkerMax})
+	if err != nil || !slices.Contains(requesters, "erin") || !slices.Contains(requesters, "service-token:abcd") {
+		t.Fatalf("requesters %v %v", requesters, err)
+	}
+}
+
+// A rerun reuses its source's form outputs, so their submitters count.
+func TestRerunInheritsTheSourceFormSubmitters(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	source := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, 'call', 'resume', 'rhea')`, source); err != nil {
+		t.Fatal(err)
+	}
+	rerun, err := eng.StartRun(ctx, StartInput{OrgID: org, CreatedBy: "bob", ParentRunID: source, ParentNodeID: "call", ParentLinkKind: "rerun",
+		Workflow: &domain.Workflow{ID: "wf-tool-approval", Name: "Rerun", DSLVersion: "1.0", Nodes: []domain.Node{approvalTool(map[string]any{"value": "a"})}, Edges: []domain.Edge{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: rerun, NodeID: "call", MaxDepth: subworkflowDepthWalkerMax})
+	if err != nil || !slices.Contains(requesters, "rhea") {
+		t.Fatalf("requesters %v %v", requesters, err)
+	}
+}
+
+// The integration refuses a credential that changed after the approval was
+// spent, even in the gap before it resolves the secret.
+func TestApprovedCallRefusesARotatedCredential(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	if _, err := pool.Exec(ctx, `INSERT INTO credentials (id, org_id, name, kind, secret_ref) VALUES ($1, $2, 'hook', 'webhook_secret', 'env:A')`, org+"-cred", org); err != nil {
+		t.Fatal(err)
+	}
+	var updatedAt time.Time
+	if err := pool.QueryRow(ctx, `SELECT updated_at FROM credentials WHERE id = $1`, org+"-cred").Scan(&updatedAt); err != nil {
+		t.Fatal(err)
+	}
+	deps := eng.buildIntegrationDeps(org, "", "")
+	deps.PinnedCredentials = map[string]tools.CredentialRevision{"hook": {ID: org + "-cred", UpdatedAt: updatedAt}}
+	if _, err := pool.Exec(ctx, `UPDATE credentials SET secret_ref = 'env:B', updated_at = now() + interval '1 second' WHERE id = $1`, org+"-cred"); err != nil {
+		t.Fatal(err)
+	}
+	if _, message := deps.Gate(ctx, "webhook.send", "webhook_secret", "hook", 60); message != "credential changed after approval: hook" {
+		t.Fatalf("gate after rotation: %q", message)
 	}
 }

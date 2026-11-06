@@ -315,6 +315,12 @@ func (e *Engine) applySemanticResolution(
 		if changed != 1 {
 			return ResolveSemanticOutcomeResult{}, ErrRecoveryCaseConflict
 		}
+		// Whoever wrote or applied the replacement shaped what runs downstream.
+		for _, actor := range []string{ApprovalActorID(input.Auth), target.candidateArtifact.ActorID.String} {
+			if err := recordRunActor(ctx, q, snapshot.RunID, snapshot.SourceNodeID, "output", actor); err != nil {
+				return ResolveSemanticOutcomeResult{}, err
+			}
+		}
 		if err := e.recordRecoveryImpact(ctx, q, ClaimedNode{
 			RunID: snapshot.RunID, NodeID: snapshot.SourceNodeID,
 		}, resolvedAt); err != nil {

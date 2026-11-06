@@ -303,7 +303,7 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 	started, err := (runstart.Service{
 		Engine: d.Engine, Pool: d.Pool, NewID: d.NewID,
 	}).Start(ctx, runstart.Request{
-		OrgID: d.OrgID, CreatedBy: d.UserID, Workflow: wf,
+		OrgID: d.OrgID, CreatedBy: d.UserID, ServicePrincipal: d.UserID, Workflow: wf,
 		RequestedVersionID: requestedVersionID, Input: startInput, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {

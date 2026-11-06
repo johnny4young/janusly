@@ -104,33 +104,38 @@ func toUpperSnake(family string) string {
 // buildIntegrationDeps wires the chokepoint for one node execution.
 func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.IntegrationDeps {
 	limiter := ratelimit.New(e.pool, ratelimit.Hooks{})
-	return &tools.IntegrationDeps{
-		DBPools: e.dbPools,
-		Gate: func(ctx context.Context, tool, credentialKind, credentialName string, rateLimitPerMin int) (string, string) {
-			q := store.New(e.pool)
-			credential, err := q.GetCredentialByName(ctx, store.GetCredentialByNameParams{
-				OrgID: orgID, Kind: credentialKind, Name: credentialName,
-			})
-			if err != nil {
-				return "", "credential not found: " + credentialName
-			}
-			if credential.ExpiresAt != nil && !credential.ExpiresAt.After(e.now().UTC()) {
-				return "", "credential expired: " + credentialName
-			}
-			secret := secretstore.ResolveCredentialSecretRef(ctx, q, orgID, credential.SecretRef)
-			if secret == "" {
-				// Deliberately generic — never echo the managed/legacy ref.
-				return "", "credential secret missing for " + credentialName
-			}
-			// The bucket is org+credential-scoped: one noisy credential
-			// cannot starve the tenant's other integrations.
-			if err := limiter.Enforce(ctx, orgID, ratelimit.Options{
-				Name: "tool." + tool + "." + credentialName, Max: rateLimitPerMin, Window: time.Minute,
-			}); err != nil {
-				return "", err.Error()
-			}
-			return secret, ""
-		},
+	deps := &tools.IntegrationDeps{DBPools: e.dbPools}
+	deps.Gate = func(ctx context.Context, tool, credentialKind, credentialName string, rateLimitPerMin int) (string, string) {
+		q := store.New(e.pool)
+		credential, err := q.GetCredentialByName(ctx, store.GetCredentialByNameParams{
+			OrgID: orgID, Kind: credentialKind, Name: credentialName,
+		})
+		if err != nil {
+			return "", "credential not found: " + credentialName
+		}
+		if pinned, ok := deps.PinnedCredentials[credentialName]; ok &&
+			(credential.ID != pinned.ID || !credential.UpdatedAt.Equal(pinned.UpdatedAt)) {
+			return "", "credential changed after approval: " + credentialName
+		}
+		if credential.ExpiresAt != nil && !credential.ExpiresAt.After(e.now().UTC()) {
+			return "", "credential expired: " + credentialName
+		}
+		secret := secretstore.ResolveCredentialSecretRef(ctx, q, orgID, credential.SecretRef)
+		if secret == "" {
+			// Deliberately generic — never echo the managed/legacy ref.
+			return "", "credential secret missing for " + credentialName
+		}
+		// The bucket is org+credential-scoped: one noisy credential
+		// cannot starve the tenant's other integrations.
+		if err := limiter.Enforce(ctx, orgID, ratelimit.Options{
+			Name: "tool." + tool + "." + credentialName, Max: rateLimitPerMin, Window: time.Minute,
+		}); err != nil {
+			return "", err.Error()
+		}
+		return secret, ""
+	}
+	*deps = tools.IntegrationDeps{
+		DBPools: deps.DBPools, Gate: deps.Gate,
 		Record: func(tool, credentialName string, ok bool, statusCode int, errMessage string, latencyMs int) {
 			metadata := map[string]any{
 				"credentialName": credentialName, "ok": ok, "latencyMs": latencyMs, "nodeId": nodeID,
@@ -212,6 +217,7 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 			return integrationEnvBound(family, fallback)
 		},
 	}
+	return deps
 }
 
 // ExecuteIntegrationTool routes API-level delivery surfaces through the same
@@ -223,5 +229,11 @@ func (e *Engine) ExecuteIntegrationTool(
 	orgID, runID, name string,
 	input map[string]any,
 ) map[string]any {
+	// Nobody approves a system delivery, so a tool the org lists never runs here.
+	policy, err := e.toolApprovalPolicy(ctx, orgID)
+	if err != nil || policy[name] {
+		return map[string]any{"ok": false, "code": "TOOL_APPROVAL_REQUIRED",
+			"error": fmt.Sprintf("%s needs a person's approval and cannot be sent from here", name)}
+	}
 	return tools.ExecuteIntegrationTool(ctx, name, input, e.buildIntegrationDeps(orgID, runID, ""))
 }

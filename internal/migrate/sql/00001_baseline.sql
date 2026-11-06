@@ -3600,7 +3600,7 @@ CREATE TABLE public.run_actors (
     actor text NOT NULL,
     acted_at timestamp with time zone DEFAULT now() NOT NULL,
     PRIMARY KEY (run_id, node_id, role, actor),
-    CONSTRAINT run_actors_role_check CHECK (role IN ('redrive', 'resume'))
+    CONSTRAINT run_actors_role_check CHECK (role IN ('redrive', 'fix', 'resume', 'output', 'service'))
 );
 
 -- +goose StatementEnd

@@ -24,6 +24,7 @@ import (
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/tokenhmac"
+	"github.com/johnny4young/janusly/internal/tools"
 )
 
 // Decisions an approver may record.
@@ -35,11 +36,10 @@ const (
 const toolApprovalParamsMaxBytes = 64_000
 
 var (
-	ErrRedriveWorkflowIDChanged = errors.New("A fix must keep the run's workflow id")                    //nolint:staticcheck // wire message
-	ErrToolApprovalNotFound     = errors.New("Tool approval not found")                                  //nolint:staticcheck // wire message
-	ErrToolApprovalSelf         = errors.New("You cannot decide a tool call from a run you started")     //nolint:staticcheck // wire message
-	ErrToolApprovalConflict     = errors.New("Tool approval is no longer pending")                       //nolint:staticcheck // wire message
-	ErrToolApprovalStale        = errors.New("Tool approval does not match the parameters you reviewed") //nolint:staticcheck // wire message
+	ErrToolApprovalNotFound = errors.New("Tool approval not found")                                  //nolint:staticcheck // wire message
+	ErrToolApprovalSelf     = errors.New("You cannot decide a tool call from a run you started")     //nolint:staticcheck // wire message
+	ErrToolApprovalConflict = errors.New("Tool approval is no longer pending")                       //nolint:staticcheck // wire message
+	ErrToolApprovalStale    = errors.New("Tool approval does not match the parameters you reviewed") //nolint:staticcheck // wire message
 )
 
 func toolApprovalError(code, message string) *ExecError {
@@ -49,24 +49,29 @@ func toolApprovalError(code, message string) *ExecError {
 // toolParamsDigest covers the rendered call with its resolved secrets and the
 // identity and revision of any named credential, so repointing or rotating
 // one changes the digest. It is keyed so the digest reveals none of them.
-func toolParamsDigest(ctx context.Context, q *store.Queries, orgID, tool string, input map[string]any) (string, error) {
+// It also returns the credential revision the integration must still find
+// when it resolves the secret.
+func toolParamsDigest(ctx context.Context, q *store.Queries, orgID, tool string, input map[string]any) (string, map[string]tools.CredentialRevision, error) {
 	credentials := map[string]any{}
+	pinned := map[string]tools.CredentialRevision{}
 	if name, ok := input["credential"].(string); ok {
 		row, err := q.GetCredentialByOrgName(ctx, store.GetCredentialByOrgNameParams{OrgID: orgID, Name: name})
 		switch {
 		case err == nil:
 			credentials[name] = []any{row.ID, row.Kind, row.SecretRef, row.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+			pinned[name] = tools.CredentialRevision{ID: row.ID, UpdatedAt: row.UpdatedAt}
 		case errors.Is(err, pgx.ErrNoRows):
 			credentials[name] = nil
 		default:
-			return "", fmt.Errorf("read credential for tool approval: %w", err)
+			return "", nil, fmt.Errorf("read credential for tool approval: %w", err)
 		}
 	}
 	raw, err := json.Marshal(map[string]any{"tool": tool, "input": input, "credentials": credentials})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return tokenhmac.Digest("janusly.tool-approval.v1", raw)
+	digest, err := tokenhmac.Digest("janusly.tool-approval.v1", raw)
+	return digest, pinned, err
 }
 
 // maskedPaths lists where masking changed a value, so approvers know a hidden
@@ -98,31 +103,36 @@ func maskedPaths(original, masked any, path string, out []string) []string {
 	return out
 }
 
-// gateToolApproval runs immediately before the call, under the run's
-// completion lock. It pauses on a missing or pending request, executes only
-// after spending an approval whose digest matches, and otherwise fails.
 func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool string, input map[string]any, redacted []string) (executors.Waiting, bool, error) {
-	digest, err := toolParamsDigest(ctx, store.New(e.pool), claim.OrgID, tool, input)
-	if err != nil {
-		return executors.Waiting{}, false, toolApprovalError("TOOL_APPROVAL_UNREVIEWABLE", "Tool parameters cannot be bound to an approval")
-	}
+	waiting, paused, _, err := e.gateToolCall(ctx, claim, tool, input, redacted)
+	return waiting, paused, err
+}
+
+// gateToolCall runs immediately before the call, under the run's completion
+// lock. It pauses on a missing or pending request, executes only after
+// spending an approval whose digest matches, and otherwise fails. The digest,
+// credential revision included, is computed under that lock.
+func (e *Engine) gateToolCall(ctx context.Context, claim ClaimedNode, tool string, input map[string]any, redacted []string) (executors.Waiting, bool, map[string]tools.CredentialRevision, error) {
 	masked := grammar.RedactSensitiveKeys(grammar.RedactValues(input, redacted))
 	params, err := json.Marshal(map[string]any{"values": masked, "masked": maskedPaths(input, masked, "", []string{})})
 	if err != nil || len(params) > toolApprovalParamsMaxBytes {
-		return executors.Waiting{}, false, toolApprovalError("TOOL_APPROVAL_UNREVIEWABLE", "Tool parameters are too large to review")
+		return executors.Waiting{}, false, nil, toolApprovalError("TOOL_APPROVAL_UNREVIEWABLE", "Tool parameters are too large to review")
 	}
 	var waiting executors.Waiting
 	paused := false
 	var outcome error
+	var pinned map[string]tools.CredentialRevision
 	err = e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, _ *runEventBuffer) error {
+		digest, revisions, err := toolParamsDigest(ctx, q, claim.OrgID, tool, input)
+		if err != nil {
+			outcome = toolApprovalError("TOOL_APPROVAL_UNREVIEWABLE", "Tool parameters cannot be bound to an approval")
+			return errSkipCommit
+		}
+		pinned = revisions
 		live, err := q.GetLiveToolApproval(ctx, store.GetLiveToolApprovalParams{RunID: claim.RunID, NodeID: claim.NodeID})
 		if errors.Is(err, pgx.ErrNoRows) {
-			upstream, err := stepAndUpstream(ctx, q, claim)
-			if err != nil {
-				return err
-			}
 			requesters, err := q.ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{
-				RunID: claim.RunID, NodeID: claim.NodeID, NodeIds: upstream, MaxDepth: subworkflowDepthWalkerMax,
+				RunID: claim.RunID, NodeID: claim.NodeID, MaxDepth: subworkflowDepthWalkerMax,
 			})
 			if err != nil {
 				return fmt.Errorf("list tool approval requesters: %w", err)
@@ -169,9 +179,9 @@ func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool s
 		return nil
 	})
 	if err != nil {
-		return executors.Waiting{}, false, err
+		return executors.Waiting{}, false, nil, err
 	}
-	return waiting, paused, outcome
+	return waiting, paused, pinned, outcome
 }
 
 func toolApprovalWaiting(row store.ToolApprovalRequest) executors.Waiting {
@@ -342,18 +352,25 @@ func (e *Engine) toolApprovalPolicy(ctx context.Context, orgID string) (map[stri
 	return orgconfig.ParseToolApprovalPolicy(text)
 }
 
-// stepAndUpstream is the step and every step that can lead to it, whose
-// redrivers caused this call.
-func stepAndUpstream(ctx context.Context, q *store.Queries, claim ClaimedNode) ([]string, error) {
-	run, err := q.GetRunExecution(ctx, claim.RunID)
-	if err != nil {
-		return nil, fmt.Errorf("read run for tool approval: %w", err)
+// ApprovalActorID is who acted, for tool-approval purposes. A service token's
+// user id is a free-form header, so its actions count as the token itself.
+func ApprovalActorID(actor *auth.Context) string {
+	if actor == nil {
+		return ""
 	}
-	wf, _, err := workflowFromRunInput(run.InputJson)
-	if err != nil {
-		return nil, err
+	if actor.Mode == auth.ModeServiceToken {
+		return "service-token:" + actor.ServiceTokenSuffix
 	}
-	nodes := collectRelatives(wf, claim.NodeID, true)
-	nodes[claim.NodeID] = true
-	return slices.Sorted(maps.Keys(nodes)), nil
+	return actor.UserID
+}
+
+// recordRunActor bars actor from approving the calls their action affects.
+func recordRunActor(ctx context.Context, q *store.Queries, runID, nodeID, role, actor string) error {
+	if actor == "" {
+		return nil
+	}
+	if err := q.RecordRunActor(ctx, store.RecordRunActorParams{RunID: runID, NodeID: nodeID, Role: role, Actor: actor}); err != nil {
+		return fmt.Errorf("record %s actor: %w", role, err)
+	}
+	return nil
 }

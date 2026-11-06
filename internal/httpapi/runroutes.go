@@ -109,7 +109,7 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	started, err := (runstart.Service{
 		Engine: s.engine, Pool: s.pool, NewID: s.newID,
 	}).Start(r.Context(), runstart.Request{
-		OrgID: rc.orgID, CreatedBy: rc.userID, Workflow: wf,
+		OrgID: rc.orgID, CreatedBy: rc.userID, ServicePrincipal: servicePrincipal(rc), Workflow: wf,
 		RequestedVersionID: body.WorkflowVersionID, Input: body.Input,
 		IdempotencyKey: idempotencyKey,
 	})
@@ -321,7 +321,7 @@ func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	if err := s.engine.ResumeRunAs(r.Context(), body.RunID, body.NodeID, body.Input, body.ResumeToken, rc.userID); err != nil {
+	if err := s.engine.ResumeRunAs(r.Context(), body.RunID, body.NodeID, body.Input, body.ResumeToken, engine.ApprovalActorID(rc.authContext)); err != nil {
 		var inputErr *engine.InputValidationError
 		switch {
 		case errors.As(err, &inputErr):
@@ -456,7 +456,7 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
 		return
 	}
-	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, body.DeadLetterID, engine.RedriveOptions{Actor: rc.userID}); err != nil {
+	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, body.DeadLetterID, engine.RedriveOptions{Actor: engine.ApprovalActorID(rc.authContext)}); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			writeV1Error(w, rc.id, http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
@@ -498,7 +498,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 		if body.RunID == "" || body.NodeID == "" {
 			return opError(http.StatusBadRequest, "dlq_fields_required", "runId and nodeId are required", nil)
 		}
-		if err := s.engine.RedriveRunNode(r.Context(), rc.orgID, body.RunID, body.NodeID, rc.userID); err != nil {
+		if err := s.engine.RedriveRunNode(r.Context(), rc.orgID, body.RunID, body.NodeID, engine.ApprovalActorID(rc.authContext)); err != nil {
 			switch {
 			case errors.Is(err, engine.ErrDeadLetterNotFound):
 				return opError(http.StatusForbidden, "dlq_forbidden", "Forbidden", nil)
@@ -570,7 +570,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, body.DeadLetterID,
 		engine.RedriveOptions{
 			PlaybookID: body.RecoveryPlaybookID, ValidationRunID: body.RecoveryValidationRunID,
-			FixWorkflowJSON: fixJSON, RequestedBy: rc.userID,
+			FixWorkflowJSON: fixJSON, RequestedBy: rc.userID, Actor: engine.ApprovalActorID(rc.authContext),
 		}); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):

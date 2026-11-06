@@ -38,9 +38,10 @@ describe('<ToolApprovalPolicy />', () => {
     render(<ToolApprovalPolicy tool="webhook.send" />)
     const toggle = await screen.findByTestId('tool-approval-policy-switch')
     expect(toggle).not.toBeChecked()
+    vi.mocked(api).mockResolvedValueOnce({ tools: ['slack.post', 'webhook.send'] })
     fireEvent.click(toggle)
-    await waitFor(() => expect(api).toHaveBeenLastCalledWith('/org/config', {
-      method: 'POST', body: JSON.stringify({ key: 'tools.approvalRequired', value: 'slack.post, webhook.send' }),
+    await waitFor(() => expect(api).toHaveBeenLastCalledWith('/org/tool-approval-policy', {
+      method: 'POST', body: JSON.stringify({ tool: 'webhook.send', required: true }),
     }))
     await waitFor(() => expect(toggle).toBeChecked())
   })

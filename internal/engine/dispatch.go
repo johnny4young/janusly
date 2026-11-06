@@ -329,8 +329,18 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 				input = map[string]any{}
 			}
 		}
-		if approvalRequired(name) && (!dryRun || !executors.ToolCallWriteSide(executors.SharedToolRegistry(), name, input)) {
-			waiting, paused, err := d.engine.gateToolApproval(ctx, claim, name, input, rendered.RedactedValues)
+		gated := approvalRequired(name) && (!dryRun || !executors.ToolCallWriteSide(executors.SharedToolRegistry(), name, input))
+		if !gated {
+			// A request already raised for this step still decides it, so
+			// dropping a tool from the policy cannot run a denied or expired call.
+			live, err := q.HasLiveToolApproval(ctx, store.HasLiveToolApprovalParams{RunID: claim.RunID, NodeID: claim.NodeID})
+			if err != nil {
+				return nil, fmt.Errorf("read tool approval: %w", err)
+			}
+			gated = live
+		}
+		if gated {
+			waiting, paused, pinned, err := d.engine.gateToolCall(ctx, claim, name, input, rendered.RedactedValues)
 			if err != nil {
 				return nil, err
 			}
@@ -338,6 +348,9 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 				return waiting, nil
 			}
 			approvedTool = name
+			if integrationDeps != nil {
+				integrationDeps.PinnedCredentials = pinned
+			}
 		}
 	}
 	output, execErr := execute(ctx, executors.Input{
