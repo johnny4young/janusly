@@ -331,6 +331,7 @@ func (e *Engine) failClaim(ctx context.Context, claim ClaimedNode, cause error, 
 	}); err != nil {
 		logger.Error("fail node failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
 	}
+	e.DeliverParentNotifications(ctx, claim.RunID)
 }
 
 // sweepWakeups applies due waiting policies, garbage-collects consumed rows,
