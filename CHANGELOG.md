@@ -12,6 +12,14 @@
   scheduled and webhook runs, whoever saved the workflow cannot decide. The card
   says when nobody else can. HTTP request steps follow the same rule, and a
   listed tool cannot run inside a loop or an agent.
+- Failures in What needs you on Home have an Investigate action. It opens a side
+  panel that checks four causes for the failed step, network, credential,
+  upstream status and a version change, and marks each one Validated, Ruled out
+  or Inconclusive with the run it is based on. A cause the stored data cannot
+  settle stays Inconclusive. Steps lists the checks in order and Tree shows them
+  under the question. When a cause is validated and your role can use recovery,
+  Fix in Recover opens the failure in the Recover queue. The checks follow fixed
+  rules and work without an AI provider.
 - A recovery case's history lists its steps in the order they happened, even
   when two land in the same millisecond.
 - The experiment comparison lists metrics by row, with either arm as the

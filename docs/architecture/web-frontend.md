@@ -604,6 +604,17 @@ answers return no run, so they cite nothing and offer only AI Studio. A fallback
 answer always says that no AI provider answered, and shows the report's root
 cause, failed step, error and next action with the full report one click away.
 
+A failure cluster or open failure in What needs you that names a run has an
+Investigate action. It opens a second lazy, non-modal side panel that reads
+`GET /v1/runs/{runId}/investigation` and shows the same rules-based result as
+Steps, an ordered list of checks with their evidence runs, or Tree, the question
+with one card per cause. Tabs follow the arrow-key tab pattern and closing
+returns focus to Investigate. The panel belongs to the workspace it was opened
+in; switching workspace closes it and the Operator panel and drops their reads. Its only action, Fix in Recover, opens the Recover
+queue on the open failure, where Suggest fix keeps its own permissions and
+confirmation; the server omits it when nothing is validated or the role cannot
+use recovery.
+
 ### Home evidence states
 
 Home derives health from validated production metrics, not the visible run page.
