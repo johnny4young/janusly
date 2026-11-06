@@ -129,7 +129,7 @@ describe('<ActivityWorkspace />', () => {
     expect(screen.queryByTestId('activity-row-run:run-live')).not.toBeInTheDocument()
   })
 
-  it('groups a recovery under its run and stops repeating the workflow name', () => {
+  it('groups a recovery under its run and keeps its workflow name in the row', () => {
     const runs = [{
       id: 'run-failed',
       workflowId: 'workflow-1',
@@ -145,7 +145,8 @@ describe('<ActivityWorkspace />', () => {
     expect(runRow).toHaveAttribute('aria-rowindex', '2')
     expect(recoveryRow).toHaveAttribute('aria-rowindex', '3')
     expect(recoveryRow).toHaveAttribute('data-nested', 'true')
-    expect(recoveryRow).not.toHaveTextContent('Invoice recovery')
+    expect(recoveryRow.querySelector('.we-activity-cell-workflow')).toHaveTextContent('Invoice recovery')
+    expect(recoveryRow.querySelector('.we-activity-cell-workflow strong')).toBeNull()
     expect(recoveryRow).toHaveTextContent('notify_finance')
     expect(screen.getByTestId('activity-open-recovery:dead-letter-1')).toHaveAccessibleName(
       expect.stringContaining('Invoice recovery'),
@@ -157,12 +158,14 @@ describe('<ActivityWorkspace />', () => {
     expect(standalone).toHaveTextContent('Invoice recovery')
   })
 
-  it('keeps the full run id, step id and time reachable from a compact row', () => {
+  it('keeps every truncated field reachable from a compact row', () => {
     render(<ActivityWorkspace {...props()} />)
 
     const details = screen.getByTestId('activity-open-recovery:dead-letter-1').title
     expect(details).toContain('run-failed')
-    expect(details).toContain('notify_finance')
+    expect(details).toContain('notify_finance · Ask approval')
+    expect(details).toContain('Needs action')
+    expect(details).toContain('Recover this step')
     expect(details).toContain('2026')
     expect(screen.getByTestId('activity-row-run:run-live')).toHaveTextContent('run-live…')
   })

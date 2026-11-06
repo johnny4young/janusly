@@ -28,6 +28,7 @@ import {
   compactActivityTime,
   countActivityFeed,
   filterActivityFeed,
+  fullActivityTime,
   groupActivityFeed,
   type ActivityFeedRow,
   type ActivityFilter,
@@ -101,6 +102,9 @@ function ActivityRow({
   const KindIcon = nested ? CornerDownRight : recovery ? ShieldAlert : Activity
   const nextAction = t(`activity.nextAction.${item.nextAction}`)
   const kind = t(`activity.kind.${item.kind}`)
+  const step = recovery && (recovery.nodeType
+    ? `${recovery.nodeId} · ${getNodeLabel(recovery.nodeType)}`
+    : recovery.nodeId)
   const cells: Record<(typeof ACTIVITY_COLUMNS)[number], ReactNode> = {
     kind: (
       <button
@@ -110,9 +114,11 @@ function ActivityRow({
         aria-pressed={selected}
         title={[
           workflowName,
-          recovery?.nodeId,
+          step,
+          displayedStatus,
+          nextAction,
           item.runId,
-          item.createdAt && new Date(item.createdAt).toLocaleString(getResolvedLocale()),
+          fullActivityTime(item.createdAt, getResolvedLocale()),
         ].filter(Boolean).join(' · ')}
         onClick={onSelect}
         aria-label={t('activity.rowAria', {
@@ -126,10 +132,8 @@ function ActivityRow({
         <span>{kind}</span>
       </button>
     ),
-    workflow: nested ? null : <strong>{workflowName}</strong>,
-    step: recovery && (recovery.nodeType
-      ? `${recovery.nodeId} · ${getNodeLabel(recovery.nodeType)}`
-      : recovery.nodeId),
+    workflow: nested ? workflowName : <strong>{workflowName}</strong>,
+    step,
     status: (
       <span className="status-pill" data-status={needsAction ? 'waiting' : status}>{displayedStatus}</span>
     ),
@@ -152,8 +156,10 @@ function ActivityRow({
       data-nested={nested ? 'true' : undefined}
       data-testid={`activity-row-${item.key}`}
     >
-      {ACTIVITY_COLUMNS.map(column => (
-        <div role="cell" key={column} className={`we-activity-cell-${column}`}>{cells[column]}</div>
+      {ACTIVITY_COLUMNS.map((column, index) => (
+        <div role="cell" key={column} aria-colindex={index + 1} className={`we-activity-cell-${column}`}>
+          {cells[column]}
+        </div>
       ))}
     </div>
   )
@@ -432,36 +438,38 @@ export function ActivityWorkspace({
             />
           ) : (
             <div
-              ref={containerRef}
               role="table"
               aria-rowcount={filtered.length + 1}
-              className="we-activity-feed__list"
-              data-testid="activity-feed-list"
+              aria-colcount={ACTIVITY_COLUMNS.length}
+              className="we-activity-feed__table"
               aria-label={t('activity.feed.listAria')}
             >
               <div role="rowgroup" className="we-activity-feed__head">
                 <div role="row" aria-rowindex={1} className="we-activity-row">
-                  {ACTIVITY_COLUMNS.map(column => (
-                    <div role="columnheader" key={column} className={`we-activity-cell-${column}`}>
+                  {ACTIVITY_COLUMNS.map((column, index) => (
+                    <div role="columnheader" key={column} aria-colindex={index + 1} className={`we-activity-cell-${column}`}>
                       {t(`activity.table.${column}`)}
                     </div>
                   ))}
                 </div>
               </div>
-              <div style={{ height: totalHeight, position: 'relative' }}>
-                <div role="rowgroup" style={{ transform: `translateY(${startOffset}px)` }}>
-                  {visibleItems.map(({ item: row, index }) => (
-                    <ActivityRow
-                      key={row.item.key}
-                      row={row}
-                      rowIndex={index + 2}
-                      selected={selectedItem?.key === row.item.key}
-                      onSelect={() => {
-                        if (row.item.kind === 'run') selectRun(row.item.entityId)
-                        else selectRecovery(row.item.entityId)
-                      }}
-                    />
-                  ))}
+              {/* The header stays outside the scroller so the virtual height matches its scroll range. */}
+              <div ref={containerRef} className="we-activity-feed__list" data-testid="activity-feed-list">
+                <div style={{ height: totalHeight, position: 'relative' }}>
+                  <div role="rowgroup" style={{ transform: `translateY(${startOffset}px)` }}>
+                    {visibleItems.map(({ item: row, index }) => (
+                      <ActivityRow
+                        key={row.item.key}
+                        row={row}
+                        rowIndex={index + 2}
+                        selected={selectedItem?.key === row.item.key}
+                        onSelect={() => {
+                          if (row.item.kind === 'run') selectRun(row.item.entityId)
+                          else selectRecovery(row.item.entityId)
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>

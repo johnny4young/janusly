@@ -5,6 +5,7 @@ import {
   compactActivityTime,
   countActivityFeed,
   filterActivityFeed,
+  fullActivityTime,
   groupActivityFeed,
 } from './activity-feed'
 import type { RunSummary, SavedWorkflow } from './types'
@@ -170,11 +171,14 @@ describe('activity feed model', () => {
     it('shows only the time today and adds the date otherwise', () => {
       expect(compactActivityTime(new Date(2026, 8, 21, 13, 5).toISOString(), 'en-US', now)).toMatch(/^1:05\sPM$/)
       expect(compactActivityTime(new Date(2026, 8, 20, 13, 5).toISOString(), 'en-US', now)).toMatch(/^Sep 20, 1:05\sPM$/)
+      expect(compactActivityTime(new Date(2025, 8, 20, 13, 5).toISOString(), 'en-US', now)).toMatch(/^Sep 20, 2025, 1:05\sPM$/)
     })
 
     it('keeps unknown and unparseable values honest', () => {
       expect(compactActivityTime(null, 'en-US', now)).toBe('—')
       expect(compactActivityTime('not-a-date', 'en-US', now)).toBe('not-a-date')
+      expect(fullActivityTime('not-a-date', 'en-US')).toBe('not-a-date')
+      expect(fullActivityTime(null, 'en-US')).toBeNull()
     })
   })
 })

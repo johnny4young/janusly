@@ -157,6 +157,43 @@ describe('<ActivityWorkspace /> (browser smoke)', () => {
     expect(hit).toBe(screen.getByTestId('activity-open-recovery:recovery-browser'))
   })
 
+  it.each([1200, 430])('scrolls a long feed far enough to show and focus its last row at %i px', async width => {
+    const runs = Array.from({ length: 40 }, (_, index) => ({
+      id: `run-${String(index).padStart(2, '0')}`,
+      workflowId: 'workflow-browser',
+      workflowName: 'Refund review',
+      status: 'succeeded',
+      createdAt: new Date(Date.UTC(2026, 6, 28, 11, 59 - index)).toISOString(),
+    }))
+    render(<div style={{ width }}><ActivityWorkspace {...props()} runs={runs} deadLetters={[]} /></div>)
+
+    const list = screen.getByTestId('activity-feed-list')
+    list.scrollTop = list.scrollHeight
+    list.dispatchEvent(new Event('scroll'))
+    const last = await screen.findByTestId('activity-open-run:run-39')
+    last.focus()
+    await new Promise(resolve => setTimeout(resolve, 100))
+    expect(document.activeElement).toBe(last)
+    const row = screen.getByTestId('activity-row-run:run-39').getBoundingClientRect()
+    expect(row.bottom).toBeLessThanOrEqual(list.getBoundingClientRect().bottom + 1)
+  })
+
+  // Hidden empty cells must not shift later cells under an earlier header.
+  it.each([1200, 430])('ties every cell to its own column header at %i px', width => {
+    render(<div style={{ width }}><ActivityWorkspace {...props()} /></div>)
+
+    const table = screen.getByRole('table')
+    const headers = [...table.querySelectorAll<HTMLElement>('[role="columnheader"]')]
+    expect(table).toHaveAttribute('aria-colcount', String(headers.length))
+    const rows = table.querySelectorAll<HTMLElement>('[data-testid^="activity-row-"]')
+    for (const row of rows) {
+      for (const cell of row.querySelectorAll<HTMLElement>('[role="cell"]')) {
+        const header = headers.find(item => item.getAttribute('aria-colindex') === cell.getAttribute('aria-colindex'))
+        expect(header?.className).toBe(cell.className)
+      }
+    }
+  })
+
   it('tints the selected row and leaves the others clear', () => {
     const selected = { ...props(), activeRecoveryId: 'recovery-browser' }
     render(<div style={{ width: 1200 }}><ActivityWorkspace {...selected} /></div>)
