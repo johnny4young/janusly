@@ -328,6 +328,13 @@ const (
 	ResultPolicyEnvelope  = "envelope"
 )
 
+// ToolApprovalRequired reads the authored flag. Anything but a literal false
+// keeps the gate, so a template or a typo can never remove it at runtime.
+func ToolApprovalRequired(config map[string]any) bool {
+	value, present := config["requireApproval"]
+	return present && value != false
+}
+
 func validateToolNode(node Node, ctx nodeContext) {
 	push := ctx.push
 	options := ctx.options
@@ -335,6 +342,11 @@ func validateToolNode(node Node, ctx nodeContext) {
 	toolName = strings.TrimSpace(toolName)
 	if policy, present := node.Config["resultPolicy"]; present && policy != ResultPolicyRequireOK && policy != ResultPolicyEnvelope {
 		push(Issue{Code: CodeToolInvalidInput, Message: "Tool node config.resultPolicy must be require_ok or envelope", NodeID: node.ID})
+	}
+	if value, present := node.Config["requireApproval"]; present {
+		if _, ok := value.(bool); !ok {
+			push(Issue{Code: CodeToolInvalidInput, Message: "Tool node config.requireApproval must be a boolean", NodeID: node.ID})
+		}
 	}
 	if toolName == "" {
 		push(Issue{Code: CodeToolMissingName, Message: "Tool node requires config.tool", NodeID: node.ID})

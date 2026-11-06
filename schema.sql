@@ -1425,6 +1425,32 @@ CREATE TABLE public.sso_state_nonces (
 
 
 --
+-- Name: tool_approval_requests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.tool_approval_requests (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    run_id text NOT NULL,
+    node_id text NOT NULL,
+    tool text NOT NULL,
+    params_json jsonb NOT NULL,
+    params_digest text NOT NULL,
+    requester_ids text[] NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    decided_by text,
+    decided_at timestamp with time zone,
+    consumed_at timestamp with time zone,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT tool_approval_requests_consumed_check CHECK (((consumed_at IS NULL) OR (status <> 'pending'::text))),
+    CONSTRAINT tool_approval_requests_decision_check CHECK (((status = ANY (ARRAY['approved'::text, 'denied'::text])) = ((decided_by IS NOT NULL) AND (decided_at IS NOT NULL)))),
+    CONSTRAINT tool_approval_requests_self_check CHECK (((decided_by IS NULL) OR (decided_by <> ALL (requester_ids)))),
+    CONSTRAINT tool_approval_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'denied'::text, 'expired'::text])))
+);
+
+
+--
 -- Name: trigger_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2246,6 +2272,14 @@ ALTER TABLE ONLY public.sso_connections
 
 ALTER TABLE ONLY public.sso_state_nonces
     ADD CONSTRAINT sso_state_nonces_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: tool_approval_requests tool_approval_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tool_approval_requests
+    ADD CONSTRAINT tool_approval_requests_pkey PRIMARY KEY (id);
 
 
 --
@@ -3433,6 +3467,13 @@ CREATE INDEX sso_state_nonces_expires_idx ON public.sso_state_nonces USING btree
 --
 
 CREATE UNIQUE INDEX sso_state_nonces_org_nonce_idx ON public.sso_state_nonces USING btree (org_id, nonce);
+
+
+--
+-- Name: tool_approval_requests_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX tool_approval_requests_live_idx ON public.tool_approval_requests USING btree (run_id, node_id) WHERE (consumed_at IS NULL);
 
 
 --

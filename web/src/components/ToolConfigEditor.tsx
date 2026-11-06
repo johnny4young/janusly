@@ -5,6 +5,7 @@ import { ResilienceFieldset } from './ResilienceFieldset'
 import { ToolInputEditor } from './ToolInputEditor'
 import { ToolPicker } from './ToolPicker'
 import { Button } from './ui/Button'
+import { SwitchField } from './ui/SwitchField'
 import { FormActions } from './ui/Form'
 
 export function ToolConfigEditor({
@@ -55,6 +56,12 @@ export function ToolConfigEditor({
           <p className="helper-text">{t('rightPanel.quickConfig.toolChangeHelper')}</p>
         </>
       )}
+      <SwitchField
+        checked={config.requireApproval === true}
+        label={t('rightPanel.quickConfig.toolRequireApproval')}
+        data-testid="tool-require-approval"
+        onChange={event => patch({ requireApproval: event.target.checked })}
+      />
       <ResilienceFieldset
         nodeId={nodeId}
         nodeType="tool"

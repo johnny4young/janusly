@@ -25,6 +25,7 @@ import { Workflow } from 'lucide-react'
 import { isCanvasTab } from '../types'
 import type { ActiveTab, AiAuthoringActionRequest, AiHealth, AiMode, AuthoringCapabilityCatalog, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowBriefCompilation, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion, WorkflowIntentBrief, WorkflowProposalApplyOutcome, WorkflowProposalResponse } from '../types'
 import type { DeadLetter } from './dead-letter-types'
+import type { ToolApprovalDecision } from '../run-observability'
 import type { AuthoringPanelModel } from './AuthoringPanel'
 import { panelLoaders, preloadPanel } from './panel-loaders'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
@@ -120,6 +121,7 @@ export type RightPanelExecution = {
   onOpenRun: (id: string, targetTab?: ActiveTab) => void | Promise<void>
   onRefreshPlatform: () => void
   onApproveNode: (nodeId: string) => void
+  onDecideToolApproval?: (decision: ToolApprovalDecision) => void
   onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) =>
     Promise<string[] | undefined> | string[] | undefined
   onReplayNode: (nodeId: string) => void
@@ -217,6 +219,7 @@ function RightPanelRouter(props: RightPanelProps) {
     onOpenRun: execution.onOpenRun,
     onRefreshPlatform: execution.onRefreshPlatform,
     onApproveNode: execution.onApproveNode,
+    onDecideToolApproval: execution.onDecideToolApproval,
     onSubmitHumanForm: execution.onSubmitHumanForm,
     onReplayNode: execution.onReplayNode,
     onRedriveNode: execution.onRedriveNode,

@@ -540,7 +540,7 @@ FROM (
   JOIN runs r ON r.id = rn.run_id
   WHERE w.wake_at <= now() AND rn.status = 'waiting'
     AND r.status = 'running'
-    AND w.reason IN ('wait_until', 'approval_timeout')
+    AND w.reason IN ('wait_until', 'approval_timeout', 'tool_approval_timeout')
 ) ranked
 ORDER BY run_rank, run_node_id
 LIMIT $1

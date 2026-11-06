@@ -934,6 +934,23 @@ type SsoStateNonce struct {
 	CreatedAt *time.Time
 }
 
+type ToolApprovalRequest struct {
+	ID           string
+	OrgID        string
+	RunID        string
+	NodeID       string
+	Tool         string
+	ParamsJson   json.RawMessage
+	ParamsDigest string
+	RequesterIds []string
+	Status       string
+	DecidedBy    pgtype.Text
+	DecidedAt    *time.Time
+	ConsumedAt   *time.Time
+	ExpiresAt    time.Time
+	CreatedAt    time.Time
+}
+
 type TriggerEvent struct {
 	ID                     string
 	OrgID                  string

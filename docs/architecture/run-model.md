@@ -72,6 +72,31 @@ missing predecessors, and malformed cycles fail closed. Explicit `http`,
 mutation is known during authoring because their effect, inputs, retries, and
 approval topology stay directly inspectable.
 
+## Tool approval
+
+A `tool` node with the authored `config.requireApproval` waits for a person
+right before its call. Only a literal `false` removes the gate, the rendered
+config is never consulted, and a rerun override cannot change the flag. The
+dispatcher checks it under the run's completion lock after rendering, so no
+executor runs first. A missing request is created with the tool, its parameters
+with resolved secrets and sensitive keys masked (at most 64 KB, or the step
+fails), an HMAC digest of the full rendered call, and everyone who started the
+execution: the run's creator, its subworkflow parents' creators and any
+redrive operator in that lineage. The node then waits with
+`kind: "tool_approval"` and a 30-minute `tool_approval_timeout` wake-up.
+
+`POST /runs/tool-approvals/decide` takes the approval id, the digest the
+person reviewed and `approve` or `deny`. It needs `runs.start`, refuses service
+tokens and the requesters (also a database check), refuses a stale digest or
+an expired request, and serializes concurrent approvers on the run lock; the
+first decision wins, and repeating your own is a no-op. A decision requeues the
+step, and the next claim spends it exactly once: an approval runs only when the
+freshly rendered call has the approved digest, while a deny, an expiry or a
+changed digest fails the step with a `ToolApprovalError` that never retries.
+Every later claim of that step, by retry, restart, redrive or replay, asks
+again. The generic resume route cannot complete a tool approval. Validation
+runs skip the gate only for write-side calls, which they suppress anyway.
+
 ## Retry policy
 
 `config.retry` uses one closed grammar at authoring and execution. A present

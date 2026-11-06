@@ -14,7 +14,7 @@
 import type { JsonObject, RunEvent, RunNode, RunSummary } from './types'
 
 export type RunWorkflowIdentity = { id: string | null; name: string | null }
-export type RunWaitKind = 'approval' | 'human_form' | 'webhook' | 'timer' | 'subworkflow' | 'unknown'
+export type RunWaitKind = 'approval' | 'tool_approval' | 'human_form' | 'webhook' | 'timer' | 'subworkflow' | 'unknown'
 export type RunWaitingInfo = {
   kind: RunWaitKind
   title: string | null
@@ -84,7 +84,8 @@ export function getRunWaitingInfo(node: RunNode): RunWaitingInfo {
   const reason = readNonEmptyString(waiting.reason)?.toLowerCase() ?? ''
   const explicitKind = readNonEmptyString(waiting.kind)
   let kind: RunWaitKind = 'unknown'
-  if (explicitKind === 'human_form') kind = 'human_form'
+  if (explicitKind === 'tool_approval') kind = 'tool_approval'
+  else if (explicitKind === 'human_form') kind = 'human_form'
   else if (explicitKind === 'approval') kind = 'approval'
   else if (explicitKind === 'webhook') kind = 'webhook'
   else if (explicitKind === 'timer' || waiting.wakeAt) kind = 'timer'
@@ -108,4 +109,31 @@ export function getRunWaitingInfo(node: RunNode): RunWaitingInfo {
     timeoutState: readNonEmptyString(waiting.timeoutState),
     escalatedFrom: readNonEmptyString(waiting.escalatedFrom),
   }
+}
+
+export type ToolApprovalRequest = {
+  approvalId: string
+  tool: string
+  params: unknown
+  paramsDigest: string
+  requiredApprovals: number
+}
+
+export type ToolApprovalDecision = {
+  nodeId: string
+  approvalId: string
+  paramsDigest: string
+  decision: 'approve' | 'deny'
+}
+
+/** The exact call an approver decides on; null unless every binding field is present. */
+export function getToolApprovalRequest(node: RunNode): ToolApprovalRequest | null {
+  const waiting = asObject(asObject(node.stateJson)?.waiting)
+  if (waiting?.kind !== 'tool_approval') return null
+  const approvalId = readNonEmptyString(waiting.approvalId)
+  const tool = readNonEmptyString(waiting.tool)
+  const paramsDigest = readNonEmptyString(waiting.paramsDigest)
+  if (!approvalId || !tool || !paramsDigest || !Object.hasOwn(waiting, 'params')) return null
+  const required = typeof waiting.requiredApprovals === 'number' ? waiting.requiredApprovals : 1
+  return { approvalId, tool, params: waiting.params, paramsDigest, requiredApprovals: required }
 }

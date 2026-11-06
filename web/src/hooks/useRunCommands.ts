@@ -5,6 +5,7 @@ import { formatStatusLabel } from '../constants'
 import { isRunRequestCurrent } from '../run-transition'
 import { useWorkflowStore } from '../store'
 import type { ActiveTab } from '../types'
+import type { ToolApprovalDecision } from '../run-observability'
 import { isTerminalRunStatus } from '@/lib/status'
 import { parseRunStatusSnapshot } from '../lib/run-status-contract'
 import type { AppCommandsOptions } from './app-command-types'
@@ -257,6 +258,22 @@ export function useRunCommands(
     })
   }, [loadStatus, runId, runPlatformMutation, t])
 
+  const decideToolApproval = useCallback(async (decision: ToolApprovalDecision) => {
+    if (!runId) return
+    const { nodeId, ...body } = decision
+    await runPlatformMutation({
+      request: () => api('/runs/tool-approvals/decide', { method: 'POST', body: JSON.stringify(body) }),
+      failureMessage: t('toasts.toolApprovalFailed'),
+      successToast: {
+        message: t(decision.decision === 'approve' ? 'toasts.toolApprovalApproved' : 'toasts.toolApprovalDenied', { nodeId }),
+        tone: 'success',
+      },
+      onSuccess: async () => {
+        await loadStatus(runId)
+      },
+    })
+  }, [loadStatus, runId, runPlatformMutation, t])
+
   const submitHumanForm = useCallback(async (
     nodeId: string,
     input: unknown,
@@ -385,6 +402,7 @@ export function useRunCommands(
 
   return {
     approveNode,
+    decideToolApproval,
     cancelActiveRun,
     clearActiveRun,
     loadOlderEvents,

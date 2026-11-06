@@ -119,6 +119,7 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		"public.rate_limit_windows",
 		"public.org_digest_state",
 		"public.schedule_entries",
+		"public.tool_approval_requests",
 		"public.workflows_active_search_trgm_idx",
 		"public.dead_letters_recovery_search_trgm_idx",
 	} {

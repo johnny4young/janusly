@@ -73,6 +73,9 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 			}
 			wakeReason = "approval_timeout"
 		}
+	case "tool_approval":
+		wakeAt = waiting.WakeAt
+		wakeReason = "tool_approval_timeout"
 	}
 	stateJSON := safePersist(map[string]any{"waiting": metadata}, stateJSONMaxBytes)
 	eventJSON := safePersist(map[string]any{
@@ -390,6 +393,14 @@ func (e *Engine) processDueWaitingWakeups(ctx context.Context, q *store.Queries)
 			switch wakeup.Reason {
 			case "approval_timeout":
 				applied, err := e.processApprovalTimeout(ctx, wakeup.RunID, wakeup.NodeID, wakeup.WakeAt)
+				if err == nil {
+					progressed++
+					if applied {
+						processed++
+					}
+				}
+			case "tool_approval_timeout":
+				applied, err := e.expireToolApproval(ctx, wakeup.RunID, wakeup.NodeID)
 				if err == nil {
 					progressed++
 					if applied {

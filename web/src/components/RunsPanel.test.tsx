@@ -342,6 +342,54 @@ describe('<RunsPanel /> observability', () => {
     expect(screen.getByTestId('waiting-step-child_flow').querySelector('button')).not.toBeInTheDocument()
   })
 
+  it('shows the exact tool call and records a bound decision', () => {
+    const onDecideToolApproval = vi.fn()
+    const node: RunNode = {
+      nodeId: 'snooze',
+      status: 'waiting',
+      stateJson: {
+        waiting: {
+          kind: 'tool_approval',
+          reason: 'Waiting for human approval',
+          approvalId: 'approval-1',
+          tool: 'pagerduty.incident.snooze',
+          params: { incident_id: 'Q1X2YZ', token: '[REDACTED]' },
+          paramsDigest: 'digest-1',
+          requiredApprovals: 1,
+          deadlineAt: new Date(Date.now() + 120_000).toISOString(),
+        },
+      },
+    }
+    const { rerender } = render(
+      <RunsPanel {...handlers} onDecideToolApproval={onDecideToolApproval} mode="recovery" activeRunId="run-1" workflows={[]}
+        runs={[{ id: 'run-1', status: 'running' }]} runNodes={[node]} usage={{}} />,
+    )
+
+    const card = screen.getByTestId('waiting-step-snooze')
+    expect(card).toHaveAttribute('data-wait-kind', 'tool_approval')
+    expect(card).toHaveTextContent('Tool approval')
+    expect(screen.getByTestId('tool-approval-tool-snooze')).toHaveTextContent('pagerduty.incident.snooze')
+    expect(screen.getByTestId('tool-approval-params-snooze')).toHaveTextContent('"incident_id": "Q1X2YZ"')
+    expect(screen.getByTestId('tool-approval-params-snooze')).toHaveTextContent('[REDACTED]')
+    expect(screen.getByTestId('tool-approval-policy-snooze')).toHaveTextContent('Self-approvalNot allowed')
+    expect(card).toHaveTextContent('Decision due in')
+    expect(screen.queryByRole('button', { name: 'Approve and resume' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('tool-approval-deny-snooze'))
+    fireEvent.click(screen.getByTestId('tool-approval-approve-snooze'))
+    expect(onDecideToolApproval.mock.calls).toEqual([
+      [{ nodeId: 'snooze', approvalId: 'approval-1', paramsDigest: 'digest-1', decision: 'deny' }],
+      [{ nodeId: 'snooze', approvalId: 'approval-1', paramsDigest: 'digest-1', decision: 'approve' }],
+    ])
+
+    rerender(
+      <RunsPanel {...handlers} onDecideToolApproval={onDecideToolApproval} canStartRuns={false} mode="recovery" activeRunId="run-1"
+        workflows={[]} runs={[{ id: 'run-1', status: 'running' }]} runNodes={[node]} usage={{}} />,
+    )
+    expect(screen.queryByTestId('tool-approval-approve-snooze')).not.toBeInTheDocument()
+    expect(screen.getByTestId('tool-approval-params-snooze')).toBeInTheDocument()
+  })
+
   it('mounts the owner live region before announcing an SSE escalation update', () => {
     const assigned: RunNode = {
       nodeId: 'gate',

@@ -2375,6 +2375,7 @@ SET status = 'succeeded', state_json = $1,
     finished_at = $2
 WHERE run_id = $3 AND node_id = $4
   AND status = 'waiting'
+  AND state_json #>> '{waiting,kind}' IS DISTINCT FROM 'tool_approval'
 RETURNING id
 `
 
@@ -2385,6 +2386,7 @@ type MarkWaitingNodeSucceededParams struct {
 	NodeID     string
 }
 
+// A tool approval resumes only through its decision, which runs the tool.
 func (q *Queries) MarkWaitingNodeSucceeded(ctx context.Context, arg MarkWaitingNodeSucceededParams) (string, error) {
 	row := q.db.QueryRow(ctx, markWaitingNodeSucceeded,
 		arg.StateJson,

@@ -87,6 +87,16 @@ func executeRegisteredTool(ctx context.Context, registry *tools.Registry, httpEx
 	return result
 }
 
+// ToolCallWriteSide classifies one call: http.request by its method, every
+// other tool by its static capability metadata.
+func ToolCallWriteSide(registry *tools.Registry, name string, input map[string]any) bool {
+	if name == "http.request" {
+		method, _ := input["method"].(string)
+		return httpMethodWriteSide(method)
+	}
+	return registry.IsWriteSide(name)
+}
+
 // NewToolExecutor builds the tool-node executor over a registry.
 func NewToolExecutor(registry *tools.Registry, httpExecutors ...Func) Func {
 	httpExec := NewHTTPExecutor(HTTPOptions{})
@@ -102,11 +112,7 @@ func NewToolExecutor(registry *tools.Registry, httpExecutors ...Func) Func {
 		if input == nil {
 			input = map[string]any{}
 		}
-		writeSide := registry.IsWriteSide(name)
-		if name == "http.request" {
-			method, _ := input["method"].(string)
-			writeSide = httpMethodWriteSide(method)
-		}
+		writeSide := ToolCallWriteSide(registry, name, input)
 		policy, _ := in.Config["resultPolicy"].(string)
 		requireOK := policy == domain.ResultPolicyRequireOK || (writeSide && policy != domain.ResultPolicyEnvelope)
 

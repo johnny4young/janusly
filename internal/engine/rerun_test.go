@@ -333,6 +333,18 @@ func TestApplyRerunOverride(t *testing.T) {
 	if _, rejected := ApplyRerunOverride(agent, "a", map[string]any{"goal": "x", "allowWriteTools": true}); rejected == nil {
 		t.Fatal("an override must not opt an agent into writes")
 	}
+	gated := rerunDoc(t, `{"dslVersion":"1.0","nodes":[{"id":"t","type":"tool","config":{"tool":"text.uppercase","input":{"value":"a"},"requireApproval":true}}],"edges":[]}`)
+	for _, override := range []map[string]any{
+		{"tool": "text.uppercase", "input": map[string]any{"value": "b"}},
+		{"tool": "text.uppercase", "input": map[string]any{"value": "b"}, "requireApproval": false},
+	} {
+		if _, rejected := ApplyRerunOverride(gated, "t", override); rejected == nil {
+			t.Fatalf("an override must not drop the tool approval: %v", override)
+		}
+	}
+	if _, rejected := ApplyRerunOverride(gated, "t", map[string]any{"tool": "text.uppercase", "input": map[string]any{"value": "b"}, "requireApproval": true}); rejected != nil {
+		t.Fatalf("an override that keeps the approval is allowed: %+v", rejected)
+	}
 	if _, rejected := ApplyRerunOverride(wf, "ghost", map[string]any{}); rejected == nil {
 		t.Fatal("an unknown step must be refused")
 	}

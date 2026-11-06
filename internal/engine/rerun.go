@@ -298,6 +298,9 @@ func ApplyRerunOverride(wf *domain.Workflow, nodeID string, override map[string]
 	if wants && !had {
 		return nil, &RerunRejection{Code: "invalid_input", Message: "An override cannot enable allowWriteTools", NodeID: nodeID}
 	}
+	if !reflect.DeepEqual(config["requireApproval"], original["requireApproval"]) {
+		return nil, &RerunRejection{Code: "invalid_input", Message: "An override cannot change requireApproval", NodeID: nodeID}
+	}
 	patched := *wf
 	patched.Nodes = slices.Clone(wf.Nodes)
 	patched.Nodes[index].Config = config

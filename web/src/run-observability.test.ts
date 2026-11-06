@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity } from './run-observability'
+import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, getToolApprovalRequest } from './run-observability'
 import { getRunWorkflowSnapshot } from './canvas-projections'
 
 describe('run observability projections', () => {
@@ -114,5 +114,15 @@ describe('run observability projections', () => {
       { id: '2', type: 'run.failed', createdAt: '2026-07-12T10:00:08.000Z' },
     ])).toBe('2026-07-12T10:00:09.000Z')
     expect(getRunTerminalAt([{ id: '1', type: 'node.failed', createdAt: '2026-07-12T10:00:08.000Z' }])).toBeNull()
+  })
+
+  it('reads a tool approval only when every binding field is present', () => {
+    const waiting = { kind: 'tool_approval', reason: 'Waiting for human approval', approvalId: 'a1', tool: 'slack.post', params: { text: 'hi' }, paramsDigest: 'd1' }
+    const node = { nodeId: 'post', status: 'waiting', stateJson: { waiting } }
+    expect(getRunWaitingInfo(node).kind).toBe('tool_approval')
+    expect(getToolApprovalRequest(node)).toEqual({ approvalId: 'a1', tool: 'slack.post', params: { text: 'hi' }, paramsDigest: 'd1', requiredApprovals: 1 })
+    const { paramsDigest: _, ...unbound } = waiting
+    expect(getToolApprovalRequest({ nodeId: 'post', status: 'waiting', stateJson: { waiting: unbound } })).toBeNull()
+    expect(getToolApprovalRequest({ nodeId: 'gate', status: 'waiting', stateJson: { waiting: { kind: 'approval' } } })).toBeNull()
   })
 })

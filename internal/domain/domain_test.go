@@ -332,6 +332,24 @@ func TestToolResultPolicyValues(t *testing.T) {
 	}
 }
 
+func TestToolRequireApprovalIsAuthoredAndFailsClosed(t *testing.T) {
+	result := Validate(parseOK(t, `{"nodes":[
+		{"id":"templated","type":"tool","config":{"tool":"text.uppercase","requireApproval":"{{context.input.gate}}"}},
+		{"id":"gated","type":"tool","config":{"tool":"text.uppercase","requireApproval":true}}
+	],"edges":[]}`), nil)
+	if issue := requireIssue(t, result, CodeToolInvalidInput, "requireApproval must be a boolean"); issue.NodeID != "templated" {
+		t.Fatalf("only the non-boolean flag is invalid: %+v", result.Issues)
+	}
+	for value, want := range map[any]bool{true: true, false: false, "false": true, "{{x}}": true, 0: true} {
+		if got := ToolApprovalRequired(map[string]any{"requireApproval": value}); got != want {
+			t.Errorf("requireApproval %#v: got %v", value, got)
+		}
+	}
+	if ToolApprovalRequired(map[string]any{}) {
+		t.Error("an unflagged tool must not wait")
+	}
+}
+
 func TestToolAndLoopStructuralConfigValidation(t *testing.T) {
 	result := Validate(parseOK(t, `{"nodes":[
 		{"id":"tool","type":"tool","config":{}},

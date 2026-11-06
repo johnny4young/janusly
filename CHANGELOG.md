@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A tool step can require approval (Requires approval in its inspector). The run
+  pauses right before the call, and the paused step shows the tool, its exact
+  parameters with secrets masked, and the policy. Approve runs exactly those
+  parameters once; Deny, or no decision within 30 minutes, fails the step so it
+  takes its error route. The person who started the run cannot decide, and
+  neither can a service token. A retry, redrive or restart asks again.
 - Login has Forgot password?, which emails a reset link that ends at the
   set-password step. The answer is the same whether or not the email has an
   account, including when the auth server limits how often it sends.

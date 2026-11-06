@@ -308,6 +308,24 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 			d.engine.claimConfigBool(ctx, claim, "ai.agentWriteConsent") &&
 			domain.HasApprovalAncestorIn(wf, node.ID)
 	}
+	// The authored flag, never the rendered one, decides; a validation run
+	// skips only calls whose write the executor suppresses anyway.
+	if node.Type == "tool" && domain.ToolApprovalRequired(config) {
+		name, _ := renderedConfig["tool"].(string)
+		input, _ := renderedConfig["input"].(map[string]any)
+		if input == nil {
+			input = map[string]any{}
+		}
+		if !dryRun || !executors.ToolCallWriteSide(executors.SharedToolRegistry(), name, input) {
+			waiting, paused, err := d.engine.gateToolApproval(ctx, claim, name, input, rendered.RedactedValues)
+			if err != nil {
+				return nil, err
+			}
+			if paused {
+				return waiting, nil
+			}
+		}
+	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
 		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds,
