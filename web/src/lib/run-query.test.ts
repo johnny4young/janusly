@@ -6,6 +6,9 @@ const workflows = [
   { id: 'wf-1', name: 'Order pipeline' },
   { id: 'wf-2', name: 'Refund triage' },
   { id: 'wf-3', name: 'Refund triage' },
+  { id: 'wf-4', name: 'Failed payment recovery' },
+  { id: 'wf-5', name: 'Failed payment recovery' },
+  { id: 'wf-6', name: 'Run' },
 ]
 
 function summary(query: string) {
@@ -44,7 +47,30 @@ describe('parseRunQuery', () => {
   it('keeps unknown, ambiguous and repeated words visible instead of guessing', () => {
     const parsed = summary('failed succeeded runs of refund triage since lastweek banana')
     expect(parsed.chips).toEqual(['status=failed'])
-    expect(parsed.unparsed).toEqual(['succeeded', 'refund', 'triage', 'since', 'lastweek', 'banana'])
+    expect(parsed.unparsed).toEqual(['succeeded', 'refund triage', 'since', 'lastweek', 'banana'])
+  })
+
+  it('keeps an ambiguous, repeated or unknown workflow phrase whole instead of reading filters inside it', () => {
+    expect(summary('runs of failed payment recovery')).toEqual({ chips: [], unparsed: ['failed payment recovery'], isRunQuery: false })
+    expect(summary('failed payment recovery runs today').chips).toEqual(['time={"kind":"today"}'])
+    expect(summary('runs of order pipeline of demo-flaky-ingest today')).toMatchObject({
+      chips: ['workflow=wf-1', 'time={"kind":"today"}'], unparsed: ['demo-flaky-ingest'],
+    })
+    expect(summary('runs of failed billing sync since yesterday')).toEqual({
+      chips: ['time={"kind":"since","anchor":"yesterday"}'], unparsed: ['failed billing sync'], isRunQuery: true,
+    })
+    expect(summary('failed run').chips).toEqual(['status=failed'])
+    expect(summary('failed runs of run').chips).toEqual(['status=failed', 'workflow=wf-6'])
+  })
+
+  it('leaves negated, relative and zero-length time out instead of applying it', () => {
+    expect(summary('not failed runs')).toEqual({ chips: [], unparsed: ['not failed'], isRunQuery: false })
+    expect(summary('ejecuciones no fallidas hoy')).toMatchObject({ chips: ['time={"kind":"today"}'], unparsed: ['no fallidas'] })
+    expect(summary('failed runs 2d ago').chips).toEqual(['status=failed'])
+    expect(summary('failed runs since 1d').unparsed).toEqual(['since', '1d'])
+    expect(summary('failed runs last 0d').unparsed).toEqual(['last', '0d'])
+    expect(summary('failed runs last 7 days ago')).toMatchObject({ chips: ['status=failed'], unparsed: ['last 7 days ago'] })
+    expect(summary('failed runs last 24h').chips).toEqual(['status=failed', 'time={"kind":"last","amount":24,"unit":"h"}'])
   })
 
   it('never reads object prototype keys as vocabulary', () => {

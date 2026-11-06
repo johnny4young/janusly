@@ -473,6 +473,7 @@
   "palette.runs.error": "No se pudieron cargar las ejecuciones.",
   "palette.runs.empty": "Ninguna ejecución coincide con estos filtros.",
   "palette.runs.more": "Cargar ejecuciones anteriores",
+  "palette.runs.moreError": "No se pudieron cargar las ejecuciones anteriores. Intentar de nuevo",
   "palette.runs.replay": "Reintentar la ejecución {{id}}… en Recuperar",
   "snippets.menu.trigger": "Insertar snippet…",
   "snippets.menu.title": "Insertar un snippet",

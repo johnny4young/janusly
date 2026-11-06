@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -43,7 +44,7 @@ func TestViewKeySetsPinned(t *testing.T) {
 		{"runNode", RunNodeView{}, "attempts,errorJson,finishedAt,id,nodeId,runId,startedAt,stateJson,status"},
 		{"runEvent", RunEventView{}, "createdAt,holdUntil,id,nodeId,payload,runId,type"},
 		{"run", RunView{}, "createdAt,createdBy,id,inputJson,orgId,outcomeStatus,outputJson,parentLinkKind,parentNodeId,parentNotificationAfter,parentRunId,recoveryPlaybookAppliedRecordedAt,recoveryPlaybookValidationRecordedAt,replayMode,semanticViolationCount,status,traceId,validationEvidenceLevel,workflowRolloutId,workflowRolloutVariant,workflowVersionId"},
-		{"runSummary", RunSummaryView{}, "createdAt,createdBy,hasWaitingNodes,id,orgId,outcomeStatus,outputJson,parentNodeId,parentRunId,replayMode,semanticViolationCount,status,traceId,validationEvidenceLevel,workflowId,workflowName,workflowVersionId"},
+		{"runSummary", RunSummaryView{}, "createdAt,createdBy,cursor,hasWaitingNodes,id,orgId,outcomeStatus,outputJson,parentNodeId,parentRunId,replayMode,semanticViolationCount,status,traceId,validationEvidenceLevel,workflowId,workflowName,workflowVersionId"},
 		{"dlqSummary", DeadLetterSummaryView{}, "attempt,createdAt,errorJson,id,nodeId,nodeType,orgId,recovery,replayedAt,runId,status,workflowName"},
 		{"dlqDetail", DeadLetterDetailView{}, "attempt,createdAt,drill,drillOutcome,errorJson,id,nodeId,nodeJson,orgId,replayClaimedAt,replayedAt,runId,status,suspectVersion,workflowJson"},
 		{"recoveryOverlay", RecoveryOverlayView{}, "comments,id,lastOccurredAt,metadataWorkflowId,occurrenceCount,owner,resolutionReason,severity,slaTargetAt,status,workflowId"},
@@ -89,6 +90,24 @@ func TestRunSummaryProjectsAssurancePosture(t *testing.T) {
 		view.SemanticViolationCount != 2 ||
 		view.ValidationEvidenceLevel == nil || *view.ValidationEvidenceLevel != "provider_simulated" {
 		t.Fatalf("run summary dropped assurance posture: %+v", view)
+	}
+}
+
+func TestRunSummaryCursorKeepsFullPrecision(t *testing.T) {
+	createdAt := time.Date(2026, 11, 6, 5, 11, 35, 986123000, time.UTC)
+	view := newRunSummaryView(store.ListRunSummariesRow{ID: "run-b", CreatedAt: &createdAt})
+	if view.Cursor == nil {
+		t.Fatal("run summary with a timestamp has no cursor")
+	}
+	at, id, ok := parseEventsCursor(*view.Cursor)
+	if !ok || !at.Equal(createdAt) || id != "run-b" {
+		t.Fatalf("cursor %q does not resume exactly after the row: %v %q", *view.Cursor, at, id)
+	}
+	if *view.CreatedAt != "2026-11-06T05:11:35.986Z" {
+		t.Fatalf("createdAt changed shape: %q", *view.CreatedAt)
+	}
+	if newRunSummaryView(store.ListRunSummariesRow{ID: "run-c"}).Cursor != nil {
+		t.Fatal("a run without a timestamp cannot be a cursor")
 	}
 }
 

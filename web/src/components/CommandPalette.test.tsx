@@ -143,8 +143,9 @@ describe('<CommandPalette /> effective permissions', () => {
 describe('<CommandPalette /> run filters', () => {
   const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString()
   const flaky = { id: 'demo-flaky-ingest', name: 'Demo · flaky ingest' }
-  const recent = { id: 'run-recent-0001', workflowId: flaky.id, workflowName: flaky.name, status: 'failed', createdAt: hoursAgo(1) }
-  const old = { id: 'run-old-000002', workflowId: flaky.id, workflowName: flaky.name, status: 'failed', createdAt: hoursAgo(24 * 5) }
+  const row = (id: string, createdAt: string) => ({ id, workflowId: flaky.id, workflowName: flaky.name, status: 'failed', createdAt, cursor: `${createdAt.replace('Z', '123Z')}|${id}` })
+  const recent = row('run-recent-0001', hoursAgo(1))
+  const old = row('run-old-000002', hoursAgo(24 * 5))
 
   function runProps(overrides: Partial<CommandPaletteProps> = {}) {
     return props({
@@ -230,7 +231,7 @@ describe('<CommandPalette /> run filters', () => {
   })
 
   it('pages older runs with the keyset cursor', async () => {
-    const page = Array.from({ length: 25 }, (_, index) => ({ ...recent, id: `run-${String(index).padStart(3, '0')}`, createdAt: hoursAgo(index + 1) }))
+    const page = Array.from({ length: 25 }, (_, index) => row(`run-${String(index).padStart(3, '0')}`, hoursAgo(index + 1)))
     vi.mocked(readRunSummaryPage).mockResolvedValueOnce(page).mockResolvedValueOnce([old]).mockResolvedValue(page)
     render(<CommandPalette {...runProps({ recoveryTargets: [] })} />)
     const input = screen.getByRole('combobox')
@@ -241,7 +242,7 @@ describe('<CommandPalette /> run filters', () => {
     expect(await screen.findByTestId(`palette-run-${old.id}`)).toBeInTheDocument()
     const last = page[24]
     expect(vi.mocked(readRunSummaryPage)).toHaveBeenLastCalledWith(
-      `/runs?limit=25&status=failed&before=${encodeURIComponent(`${last.createdAt}|${last.id}`)}`,
+      `/runs?limit=25&status=failed&before=${encodeURIComponent(last.cursor)}`,
       expect.any(AbortSignal),
     )
 
@@ -251,6 +252,78 @@ describe('<CommandPalette /> run filters', () => {
     await waitFor(() => expect(screen.queryByTestId(`palette-run-${old.id}`)).not.toBeInTheDocument())
     expect(await screen.findByTestId('palette-run-run-000')).toBeInTheDocument()
     expect(vi.mocked(readRunSummaryPage)).toHaveBeenLastCalledWith('/runs?limit=25&status=failed', expect.any(AbortSignal))
+  })
+
+  it('keeps workflows and commands while the query is the start of a name', () => {
+    vi.mocked(readRunSummaryPage).mockClear()
+    render(<CommandPalette {...runProps({
+      workflows: [flaky, { id: 'wf-fp', name: 'Failed payment recovery' }],
+      permissions: ['runs.read', 'workflows.read'],
+    })} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed pay' } })
+    expect(screen.getByRole('option', { name: /Failed payment recovery/ })).toBeInTheDocument()
+    expect(screen.queryByTestId('palette-run-filters')).not.toBeInTheDocument()
+    expect(readRunSummaryPage).not.toHaveBeenCalled()
+  })
+
+  it('seeks a bounded window to its end and says when it is empty', async () => {
+    vi.mocked(readRunSummaryPage).mockClear().mockResolvedValue([])
+    render(<CommandPalette {...runProps()} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed runs yesterday' } })
+    const today = new Date()
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString()
+    await waitFor(() => expect(readRunSummaryPage).toHaveBeenCalledWith(
+      `/runs?limit=25&status=failed&before=${encodeURIComponent(`${end}|\uffff`)}`,
+      expect.any(AbortSignal),
+    ))
+    await waitFor(() => expect(screen.getByTestId('palette-runs-state')).toHaveTextContent('No runs match these filters.'))
+    expect(screen.queryByTestId('palette-runs-more')).not.toBeInTheDocument()
+  })
+
+  it('keeps the active option inside the results while they load', async () => {
+    let resolve: (rows: typeof recent[]) => void = () => undefined
+    vi.mocked(readRunSummaryPage).mockReturnValue(new Promise(done => { resolve = done }))
+    render(<CommandPalette {...runProps({ recoveryTargets: [] })} />)
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: 'failed runs' } })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(input).not.toHaveAttribute('aria-activedescendant')
+
+    await act(async () => { resolve([recent]) })
+    expect(input).toHaveAttribute('aria-activedescendant', (await screen.findByTestId(`palette-run-${recent.id}`)).id)
+  })
+
+  it('keeps the time options in one order as the value changes', () => {
+    vi.mocked(readRunSummaryPage).mockResolvedValue([])
+    render(<CommandPalette {...runProps()} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed runs today' } })
+    const labels = () => [...(screen.getByTestId('palette-chip-select-time') as HTMLSelectElement).options].map(option => option.text)
+    const before = labels()
+    expect(before.slice(1)).toEqual(['Yesterday', 'Since yesterday', 'Last 7 days'])
+
+    fireEvent.change(screen.getByTestId('palette-chip-select-time'), { target: { value: 'yesterday' } })
+    const after = labels()
+    expect(after).toHaveLength(4)
+    expect([after[0], ...after.slice(2)]).toEqual(['Today', 'Since yesterday', 'Last 7 days'])
+    expect((screen.getByTestId('palette-chip-select-time') as HTMLSelectElement).selectedIndex).toBe(1)
+  })
+
+  it('keeps loaded runs when an older page fails and retries that page', async () => {
+    const page = Array.from({ length: 25 }, (_, index) => row(`run-${String(index).padStart(3, '0')}`, hoursAgo(index + 1)))
+    vi.mocked(readRunSummaryPage).mockReset().mockResolvedValueOnce(page).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([old])
+    render(<CommandPalette {...runProps({ recoveryTargets: [] })} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'failed runs' } })
+
+    fireEvent.mouseDown(await screen.findByTestId('palette-runs-more'))
+    await waitFor(() => expect(screen.getByTestId('palette-runs-more')).toHaveTextContent('Older runs could not be loaded. Try again'))
+    expect(screen.getByTestId('palette-run-run-000')).toBeInTheDocument()
+
+    fireEvent.mouseDown(screen.getByTestId('palette-runs-more'))
+    expect(await screen.findByTestId(`palette-run-${old.id}`)).toBeInTheDocument()
+    expect(vi.mocked(readRunSummaryPage).mock.calls.slice(1).map(([path]) => path)).toEqual([
+      `/runs?limit=25&status=failed&before=${encodeURIComponent(page[24].cursor)}`,
+      `/runs?limit=25&status=failed&before=${encodeURIComponent(page[24].cursor)}`,
+    ])
   })
 
   it('stays a command search without the runs grant', () => {

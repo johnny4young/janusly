@@ -48,7 +48,7 @@ import { applyTheme, type ThemePreference } from '../theme'
 import { openDocsUrl, parseDocsUrl } from '../docs-link'
 import { rankPaletteMatches } from '../command-palette-search'
 import { formatStatusLabel } from '../constants'
-import { parseRunQuery } from '../lib/run-query'
+import { parseRunQuery, workflowSlug } from '../lib/run-query'
 import type { RunSummary } from '../types'
 import { PaletteRunFilters, formatRunTime, runRequestFor, usePaletteRunResults } from './CommandPaletteRuns'
 import './CommandPalette.css'
@@ -253,19 +253,7 @@ export function CommandPalette({
   const dialogRef = useRef<HTMLDivElement | null>(null)
   // Always-mounted (renders null while closed) → drive the trap off `open`.
   useDialogFocusTrap(dialogRef, { active: open })
-  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   const [now, setNow] = useState(() => new Date())
-  const parsedRuns = useMemo(() => parseRunQuery(query, workflows), [query, workflows])
-  const runMode = parsedRuns.isRunQuery && can('runs.read') && Boolean(onOpenRun)
-  const runResults = usePaletteRunResults(runMode ? runRequestFor(parsedRuns, now) : null)
-  const canReplay = can('dlq.replay') && can('dlq.read') && Boolean(onOpenRecovery)
-  const runEntries = useMemo<RunEntry[]>(() => {
-    const entries = runResults.runs.flatMap<RunEntry>(run => {
-      const target = canReplay ? recoveryTargets.find(item => item.runId === run.id) : undefined
-      return target ? [{ kind: 'run', run }, { kind: 'replay', run, deadLetterId: target.id }] : [{ kind: 'run', run }]
-    })
-    return runResults.next ? [...entries, { kind: 'more' }] : entries
-  }, [canReplay, recoveryTargets, runResults.next, runResults.runs])
 
   const commands = useMemo<Command[]>(() => {
     const base = buildCommands(safeDocsUrl, permissions)
@@ -353,6 +341,24 @@ export function CommandPalette({
     setActiveIndex(0)
   }, [query])
 
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
+  const parsedRuns = useMemo(() => parseRunQuery(query, workflows), [query, workflows])
+  // A query that starts a command, workflow or recipe name stays a command search while it is typed.
+  const startsName = useMemo(() => {
+    const typed = workflowSlug(query)
+    return typed !== '' && commands.some(cmd => workflowSlug(labelFor(cmd)).startsWith(typed))
+  }, [commands, labelFor, query])
+  const runMode = parsedRuns.isRunQuery && !startsName && can('runs.read') && Boolean(onOpenRun)
+  const runResults = usePaletteRunResults(runMode ? runRequestFor(parsedRuns, now) : null)
+  const canReplay = can('dlq.replay') && can('dlq.read') && Boolean(onOpenRecovery)
+  const runEntries = useMemo<RunEntry[]>(() => {
+    const entries = runResults.runs.flatMap<RunEntry>(run => {
+      const target = canReplay ? recoveryTargets.find(item => item.runId === run.id) : undefined
+      return target ? [{ kind: 'run', run }, { kind: 'replay', run, deadLetterId: target.id }] : [{ kind: 'run', run }]
+    })
+    return runResults.next ? [...entries, { kind: 'more' }] : entries
+  }, [canReplay, recoveryTargets, runResults.next, runResults.runs])
+
   const entryCount = runMode ? runEntries.length : ordered.length
   useEffect(() => {
     setActiveIndex(idx => Math.min(idx, Math.max(0, entryCount - 1)))
@@ -412,7 +418,7 @@ export function CommandPalette({
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown') {
                 event.preventDefault()
-                setActiveIndex(idx => Math.min(idx + 1, entryCount - 1))
+                setActiveIndex(idx => Math.max(0, Math.min(idx + 1, entryCount - 1)))
               } else if (event.key === 'ArrowUp') {
                 event.preventDefault()
                 setActiveIndex(idx => Math.max(idx - 1, 0))
@@ -426,7 +432,7 @@ export function CommandPalette({
             aria-autocomplete="list"
             aria-controls={COMMAND_LISTBOX_ID}
             aria-expanded="true"
-            aria-activedescendant={activeIndex < entryCount ? commandOptionId(activeIndex) : undefined}
+            aria-activedescendant={(runMode ? runEntries[activeIndex] : ordered[activeIndex]) ? commandOptionId(activeIndex) : undefined}
           />
           <kbd>{t('palette.key.escape')}</kbd>
         </div>
@@ -457,7 +463,7 @@ export function CommandPalette({
           )}
           {runMode && runEntries.map((entry, idx) => {
             const label = entry.kind === 'more'
-              ? t('palette.runs.more')
+              ? t(runResults.moreError ? 'palette.runs.moreError' : 'palette.runs.more')
               : entry.kind === 'replay'
                 ? t('palette.runs.replay', { id: entry.run.id.slice(0, 8) })
                 : entry.run.workflowName || workflows.find(item => item.id === entry.run.workflowId)?.name || entry.run.workflowId || entry.run.id

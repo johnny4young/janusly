@@ -397,17 +397,24 @@ version of each workflow, not other credential consumers.
 `lib/run-query.ts` parses the palette text on the client, deterministically, in
 English and Spanish: one status, one workflow (its id or its name as a slug) and
 one time window. It never sends the text anywhere. Unknown words, a second value
-for a filter and a name two workflows share stay listed as not understood.
-Chips edit by rewriting their words in the query, so the text stays the single
-source of truth. A bare workflow name or "run" remains a command search.
+for a filter, negated or relative phrases ("not failed", "2d ago") and a name two
+workflows share stay listed as not understood, and the words inside them are not
+read as filters. After "of"/"de" an unknown name is kept whole up to the next
+filter word. Chips edit by rewriting their words in the query, so the text stays
+the single source of truth. A bare workflow name or "run", and any query that is
+the start of a visible command, workflow or recipe name, remain a command search.
 
-Results come from the org-scoped `/runs` list, 25 rows per page with its keyset
-cursor. The API has no time filter, so the client drops rows outside the window
-and stops offering older pages once a page reaches past its start. Run mode needs
-`runs.read`. Opening a run is direct. Retry appears only for a run with an open
-dead letter and `dlq.read` plus `dlq.replay`, and it hands off to that failure in
-Activity; the palette calls no write endpoint. Cancel, bulk replay and promote
-are not offered from the palette.
+Results come from the org-scoped `/runs` list, 25 rows per page. Each row carries
+`cursor`, the keyset `before` value at full timestamp precision; `createdAt` is
+cut to milliseconds and would skip rows created in the same millisecond. The API
+has no time filter, so a bounded window seeks its first page with
+`before=<window end>|\uffff` (the server's own id sentinel), the client drops rows
+outside the window and stops offering older pages once a page reaches past its
+start. A failed older page keeps the loaded rows and offers that page again. Run
+mode needs `runs.read`. Opening a run is direct. Retry appears only for a run with
+an open dead letter and `dlq.read` plus `dlq.replay`, and it hands off to that
+failure in Activity; the palette calls no write endpoint. Cancel, bulk replay and
+promote are not offered from the palette.
 
 ## Canvas authoring clarity
 

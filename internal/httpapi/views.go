@@ -77,6 +77,9 @@ type RunSummaryView struct {
 	ValidationEvidenceLevel *string         `json:"validationEvidenceLevel"`
 	CreatedBy               *string         `json:"createdBy"`
 	CreatedAt               *string         `json:"createdAt"`
+	// Cursor is the keyset `before` value for the next page at full timestamp
+	// precision; createdAt is cut to milliseconds, which would skip rows.
+	Cursor *string `json:"cursor"`
 }
 
 func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
@@ -92,7 +95,16 @@ func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
 		ReplayMode: nullableTextValue(row.ReplayMode), TraceID: nullableTextValue(row.TraceID),
 		ValidationEvidenceLevel: nullableTextValue(row.ValidationEvidenceLevel),
 		CreatedBy:               nullableTextValue(row.CreatedBy), CreatedAt: nullableTimeValue(row.CreatedAt),
+		Cursor: runListCursor(row.CreatedAt, row.ID),
 	}
+}
+
+func runListCursor(createdAt *time.Time, id string) *string {
+	if createdAt == nil {
+		return nil
+	}
+	cursor := createdAt.UTC().Format(time.RFC3339Nano) + "|" + id
+	return &cursor
 }
 
 /* ---------------------------------- dlq ----------------------------------- */

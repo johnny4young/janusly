@@ -473,6 +473,7 @@
   "palette.runs.error": "Runs could not be loaded.",
   "palette.runs.empty": "No runs match these filters.",
   "palette.runs.more": "Load older runs",
+  "palette.runs.moreError": "Older runs could not be loaded. Try again",
   "palette.runs.replay": "Retry run {{id}}… in Recover",
   "snippets.menu.trigger": "Insert snippet…",
   "snippets.menu.title": "Insert a snippet",

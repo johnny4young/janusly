@@ -5,22 +5,21 @@ import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, useT } from '../i18n'
 import { readRunSummaryPage } from '../lib/list-contract'
 import {
+  RUN_QUERY_PRESETS,
   RUN_QUERY_TEXT,
   replaceRunQuerySpan,
   resolveRunQueryTime,
   workflowSlug,
   type ParsedRunQuery,
   type RunQueryChip,
-  type RunQueryPreset,
 } from '../lib/run-query'
 import type { RunSummary } from '../types'
 
 const PAGE_SIZE = 25
-const PRESETS: RunQueryPreset[] = ['today', 'yesterday', 'sinceYesterday', 'last7d']
 
 export type PaletteRunRequest = { status?: RunStatus; workflowId?: string; from?: number; to?: number }
 
-type Results = { key: string; kind: 'loading' | 'ready' | 'error'; runs: RunSummary[]; next?: string; more?: boolean }
+type Results = { key: string; kind: 'loading' | 'ready' | 'error'; runs: RunSummary[]; next?: string; more?: boolean; moreError?: boolean }
 
 export function runRequestFor(parsed: ParsedRunQuery, now: Date): PaletteRunRequest {
   const request: PaletteRunRequest = {}
@@ -32,7 +31,10 @@ export function runRequestFor(parsed: ParsedRunQuery, now: Date): PaletteRunRequ
   return request
 }
 
-/** Newest-first pages of the org-scoped `/runs` list; the time window is applied here because the API has none. */
+/**
+ * Newest-first pages of the org-scoped `/runs` list. The API has no time filter, so a bounded
+ * window seeks its first page to the window's end and the client drops rows outside it.
+ */
 export function usePaletteRunResults(request: PaletteRunRequest | null) {
   const key = request ? JSON.stringify(request) : ''
   const [results, setResults] = useState<Results>({ key: '', kind: 'loading', runs: [] })
@@ -46,18 +48,22 @@ export function usePaletteRunResults(request: PaletteRunRequest | null) {
     const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
     if (status) params.set('status', status)
     if (workflowId) params.set('workflowId', workflowId)
-    if (cursor) params.set('before', cursor)
+    // The server's own upper-bound id sentinel, so every row before `to` is included.
+    const before = cursor ?? (to === undefined ? undefined : `${new Date(to).toISOString()}|\uffff`)
+    if (before) params.set('before', before)
     readRunSummaryPage(`/runs?${params}`, controller.signal).then(rows => {
       if (controller.signal.aborted) return
       const at = (row: RunSummary) => Date.parse(row.createdAt ?? '')
       const last = rows.at(-1)
-      const next = rows.length === PAGE_SIZE && last?.createdAt && (from === undefined || at(last) >= from)
-        ? `${last.createdAt}|${last.id}`
-        : undefined
+      const next = rows.length === PAGE_SIZE && last?.cursor && (from === undefined || at(last) >= from) ? last.cursor : undefined
       const page = rows.filter(row => (from === undefined || at(row) >= from) && (to === undefined || at(row) < to))
       setResults(previous => ({ key, kind: 'ready', runs: cursor && previous.key === key ? [...previous.runs, ...page] : page, next }))
     }).catch(() => {
-      if (!controller.signal.aborted) setResults({ key, kind: 'error', runs: [] })
+      if (controller.signal.aborted) return
+      // A failed older page keeps what is loaded and its cursor, so it can be retried.
+      setResults(previous => cursor && previous.key === key
+        ? { ...previous, more: false, moreError: true }
+        : { key, kind: 'error', runs: [] })
     })
   }, [key])
 
@@ -73,7 +79,7 @@ export function usePaletteRunResults(request: PaletteRunRequest | null) {
   const current: Results = results.key === key ? results : { key, kind: 'loading', runs: [] }
   const loadMore = () => {
     if (!current.next || current.more) return
-    setResults({ ...current, more: true })
+    setResults({ ...current, more: true, moreError: false })
     fetchPage(current.next)
   }
   return { ...current, loading: current.kind === 'loading' || Boolean(current.more), loadMore }
@@ -122,8 +128,12 @@ export function PaletteRunFilters({ query, parsed, workflows, now, onQueryChange
     const label = range.to !== undefined
       ? t('palette.runs.time.on', { date: formatRunTime(range.from, false) })
       : t('palette.runs.time.since', { date: formatRunTime(range.from) })
-    const presets = PRESETS.map(preset => ({ value: text.time[preset], label: t(`palette.runs.preset.${preset}`) }))
-    return { value: current, options: [{ value: current, label }, ...presets.filter(preset => preset.value !== current)] }
+    // Presets keep their order; the current window takes its preset's place or leads when it has none.
+    const matched = RUN_QUERY_PRESETS.find(item => JSON.stringify(item.time) === JSON.stringify(chip.time))
+    const options = RUN_QUERY_PRESETS.map(item => item === matched
+      ? { value: current, label }
+      : { value: text.time[item.preset], label: t(`palette.runs.preset.${item.preset}`) })
+    return { value: current, options: matched ? options : [{ value: current, label }, ...options] }
   }
 
   return (

@@ -9,6 +9,9 @@
   Enter opens a run in Activity. A run with an open failure offers Retry in
   Recover, which opens that failure where Retry still asks you to act; Quick
   jump itself never writes.
+- Each row of the runs list (`GET /runs`) now carries `cursor`, the exact
+  `before` value for the next page. Paging by `createdAt` could skip runs
+  created in the same millisecond.
 - The step Inspector has a Test data section that shows the output of the step
   and of every step before it from the open run. Pin a step's output or type a
   mock, then Run this step or Test draft: those steps return the pinned or mocked
