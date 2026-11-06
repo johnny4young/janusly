@@ -152,7 +152,7 @@ func TestWorkflowRolloutAssignment(t *testing.T) {
 	if promotedVersion != v3 || promotedVariant != "canary" {
 		t.Fatalf("promoted traffic must be all-canary: %s %s", promotedVersion, promotedVariant)
 	}
-	if production, rollout := workflowListStage(t, h, wfID); production != 3 || rollout["status"] != "promoted" {
+	if production, rollout := workflowListStage(t, h, wfID); production != 3 || rollout["status"] != "promoted" || rollout["trafficPercent"] != float64(100) {
 		t.Fatalf("promoted canary is production: v%v %+v", production, rollout)
 	}
 	if res = h.call("POST", "/workflows/"+wfID+"/rollout/"+rolloutID+"/rollback", map[string]any{}, ""); res.status != 409 {
@@ -312,7 +312,7 @@ func TestRolloutAutoRollback(t *testing.T) {
 	if status != "rolled_back" || reason != "canary_success_rate_breach" {
 		t.Fatalf("auto-rollback: %s %s", status, reason)
 	}
-	if production, rollout := workflowListStage(t, h, wfID); production != 1 || rollout["status"] != "rolled_back" {
+	if production, rollout := workflowListStage(t, h, wfID); production != 1 || rollout["status"] != "rolled_back" || rollout["trafficPercent"] != float64(0) {
 		t.Fatalf("rolled-back canary leaves the baseline in production: v%v %+v", production, rollout)
 	}
 	if canaryFailed < 5 || receipts < canaryFailed {

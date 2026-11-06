@@ -255,7 +255,7 @@ type WorkflowListItemView struct {
 }
 
 // WorkflowListRolloutView is the rollout that routes the workflow's traffic; its
-// canary is always the latest version.
+// canary is always the latest version and TrafficPercent is the canary's effective share.
 type WorkflowListRolloutView struct {
 	Status         string `json:"status"`
 	TrafficPercent int    `json:"trafficPercent"`
@@ -268,11 +268,14 @@ func workflowStage(row store.ListWorkflowRowsRow) (int, *WorkflowListRolloutView
 	if row.RolloutStatus == "" || row.RolloutCanaryVersion != row.CurrentVersion {
 		return int(row.CurrentVersion), nil
 	}
-	production := row.RolloutBaselineVersion
-	if row.RolloutStatus == "promoted" {
-		production = row.RolloutCanaryVersion
+	production, share := row.RolloutBaselineVersion, 0
+	switch row.RolloutStatus {
+	case "promoted":
+		production, share = row.RolloutCanaryVersion, 100
+	case "active":
+		share = int(row.RolloutTrafficPercent)
 	}
-	return int(production), &WorkflowListRolloutView{Status: row.RolloutStatus, TrafficPercent: int(row.RolloutTrafficPercent)}
+	return int(production), &WorkflowListRolloutView{Status: row.RolloutStatus, TrafficPercent: share}
 }
 
 func newWorkflowListItemView(row store.ListWorkflowRowsRow) WorkflowListItemView {

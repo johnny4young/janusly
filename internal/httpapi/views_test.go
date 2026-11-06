@@ -150,21 +150,22 @@ func TestWorkflowStageFollowsTheRolloutThatRoutesTraffic(t *testing.T) {
 		row        store.ListWorkflowRowsRow
 		production int
 		rollout    bool
+		share      int
 	}{
-		{"no rollout", row("", 0), 3, false},
-		{"active", row("active", 3), 2, true},
-		{"rolled back", row("rolled_back", 3), 2, true},
-		{"cancelled", row("cancelled", 3), 2, true},
-		{"promoted", row("promoted", 3), 3, true},
-		{"newer save", row("rolled_back", 2), 3, false},
+		{"no rollout", row("", 0), 3, false, 0},
+		{"active", row("active", 3), 2, true, 10},
+		{"rolled back", row("rolled_back", 3), 2, true, 0},
+		{"cancelled", row("cancelled", 3), 2, true, 0},
+		{"promoted", row("promoted", 3), 3, true, 100},
+		{"newer save", row("rolled_back", 2), 3, false, 0},
 	}
 	for _, tc := range cases {
 		production, rollout := workflowStage(tc.row)
 		if production != tc.production || (rollout != nil) != tc.rollout {
 			t.Fatalf("%s: production v%d rollout %+v", tc.name, production, rollout)
 		}
-		if rollout != nil && (rollout.Status != tc.row.RolloutStatus || rollout.TrafficPercent != 10) {
-			t.Fatalf("%s: rollout %+v", tc.name, rollout)
+		if rollout != nil && (rollout.Status != tc.row.RolloutStatus || rollout.TrafficPercent != tc.share) {
+			t.Fatalf("%s: rollout %+v, want share %d", tc.name, rollout, tc.share)
 		}
 	}
 }
