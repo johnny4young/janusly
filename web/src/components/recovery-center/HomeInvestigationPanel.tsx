@@ -144,8 +144,8 @@ export function HomeInvestigationPanel({ runId, title, onClose, onOpenRun, onOpe
                   <p>{reason(item)}</p>
                   {item.evidence.length > 0 && (
                     <ul className="we-investigation__evidence" aria-label={t('home.investigation.evidence')}>
-                      {item.evidence.map((evidence) => (
-                        <li key={`${evidence.kind}-${evidence.runId}`}>
+                      {item.evidence.filter((evidence, index, all) => all.findIndex((other) => other.runId === evidence.runId) === index).map((evidence) => (
+                        <li key={evidence.runId}>
                           <Button
                             size="sm"
                             variant="ghost"

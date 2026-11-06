@@ -1730,7 +1730,7 @@ export interface ApiResponses {
     "generatedAt": string
     "hypotheses": ({
       "evidence": ({
-        "kind": "failed_step" | "similar_failure" | "last_success"
+        "kind": "failed_step" | "last_success"
         "nodeId"?: string
         "runId": string
       })[]
@@ -1738,6 +1738,7 @@ export interface ApiResponses {
       "params": {
         "signature"?: never
         "count"?: never
+        "runs"?: never
         "category"?: never
         "credential"?: never
         "expiredAt"?: never
@@ -1749,6 +1750,7 @@ export interface ApiResponses {
       } | {
         "signature": string
         "count"?: never
+        "runs"?: never
         "category"?: never
         "credential"?: never
         "expiredAt"?: never
@@ -1759,6 +1761,7 @@ export interface ApiResponses {
         "to"?: never
       } | {
         "count": number
+        "runs": number
         "signature": string
         "category"?: never
         "credential"?: never
@@ -1772,6 +1775,7 @@ export interface ApiResponses {
         "category": "secret_missing" | "http_error" | "network_timeout" | "ai_provider" | "parse_error" | "tool_input" | "unknown"
         "signature"?: never
         "count"?: never
+        "runs"?: never
         "credential"?: never
         "expiredAt"?: never
         "source"?: never
@@ -1784,6 +1788,7 @@ export interface ApiResponses {
         "expiredAt": string
         "signature"?: never
         "count"?: never
+        "runs"?: never
         "category"?: never
         "source"?: never
         "sources"?: never
@@ -1794,6 +1799,7 @@ export interface ApiResponses {
         "source": string
         "signature"?: never
         "count"?: never
+        "runs"?: never
         "category"?: never
         "credential"?: never
         "expiredAt"?: never
@@ -1805,6 +1811,7 @@ export interface ApiResponses {
         "sources": string
         "signature"?: never
         "count"?: never
+        "runs"?: never
         "category"?: never
         "credential"?: never
         "expiredAt"?: never
@@ -1816,6 +1823,7 @@ export interface ApiResponses {
         "version": number
         "signature"?: never
         "count"?: never
+        "runs"?: never
         "category"?: never
         "credential"?: never
         "expiredAt"?: never
@@ -1828,6 +1836,7 @@ export interface ApiResponses {
         "to": number
         "signature"?: never
         "count"?: never
+        "runs"?: never
         "category"?: never
         "credential"?: never
         "expiredAt"?: never
@@ -1835,7 +1844,7 @@ export interface ApiResponses {
         "sources"?: never
         "version"?: never
       }
-      "reason": "no_error" | "error_unclassified" | "network_dns" | "network_unreachable" | "network_other_category" | "credential_missing" | "credential_rejected" | "credential_expired" | "credential_unused" | "credential_unproven" | "upstream_hidden" | "upstream_unwatched" | "upstream_stale" | "upstream_degraded" | "upstream_healthy" | "upstream_unchecked" | "change_no_baseline" | "change_same_version" | "change_new_version"
+      "reason": "no_error" | "error_unclassified" | "network_dns" | "network_failed" | "network_other_category" | "credential_missing" | "credential_rejected" | "credential_expired" | "credential_expired_unconfirmed" | "credential_unused" | "credential_unproven" | "upstream_hidden" | "upstream_unwatched" | "upstream_degraded" | "upstream_current_only" | "upstream_unchecked" | "change_unsaved" | "change_no_baseline" | "change_same_version" | "change_outside_version" | "change_new_version"
       "verdict": "validated" | "ruled_out" | "inconclusive"
     })[]
     "nodeId": string

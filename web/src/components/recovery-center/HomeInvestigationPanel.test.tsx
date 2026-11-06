@@ -14,14 +14,16 @@ const investigation = {
   runId: 'run-2222aaaa-failed', nodeId: 'fetch', workflowName: 'Demo ingest',
   signature: 'DNS lookup failed on http node', category: 'network_timeout',
   hypotheses: [
-    { id: 'network', verdict: 'validated', reason: 'network_dns', params: { signature: 'DNS lookup failed on http node', count: 2 },
+    { id: 'network', verdict: 'validated', reason: 'network_dns', params: { signature: 'DNS lookup failed on http node', count: 2, runs: 5 },
+      evidence: [{ kind: 'failed_step', runId: 'run-2222aaaa-failed', nodeId: 'fetch' }] },
+    { id: 'credential', verdict: 'ruled_out', reason: 'credential_unused', params: {},
+      evidence: [{ kind: 'failed_step', runId: 'run-2222aaaa-failed', nodeId: 'fetch' }] },
+    { id: 'upstream', verdict: 'inconclusive', reason: 'upstream_current_only', params: { sources: 'ingest' }, evidence: [] },
+    { id: 'change', verdict: 'inconclusive', reason: 'change_outside_version', params: { version: 3 },
       evidence: [
-        { kind: 'failed_step', runId: 'run-2222aaaa-failed', nodeId: 'fetch' },
-        { kind: 'similar_failure', runId: 'run-1111bbbb-earlier' },
+        { kind: 'last_success', runId: 'run-1111bbbb-earlier' },
+        { kind: 'last_success', runId: 'run-1111bbbb-earlier' },
       ] },
-    { id: 'credential', verdict: 'ruled_out', reason: 'credential_unused', params: {}, evidence: [] },
-    { id: 'upstream', verdict: 'inconclusive', reason: 'upstream_unwatched', params: {}, evidence: [] },
-    { id: 'change', verdict: 'inconclusive', reason: 'change_no_baseline', params: { version: 1 }, evidence: [] },
   ],
   conclusion: 'network',
   action: { kind: 'open_recovery', deadLetterId: 'dlq-9' },
@@ -49,12 +51,16 @@ describe('<HomeInvestigationPanel />', () => {
     expect(within(steps).getAllByRole('listitem').filter((item) => item.parentElement === steps)).toHaveLength(4)
     expect(screen.getByText('Why does fetch fail on Demo ingest?')).toBeInTheDocument()
     expect(screen.getByTestId('home-investigation-step-network')).toHaveTextContent(
-      'Host cannot be reachedValidatedDNS lookup failed on http node · 2 failures in 30 days')
+      'Network failureValidatedDNS lookup failed on http node: the host name does not resolve · same error in 2 of 5 recent runs of this step')
     expect(screen.getByTestId('home-investigation-step-credential')).toHaveTextContent('Ruled outThe step uses no credential')
-    expect(screen.getByTestId('home-investigation-step-change')).toHaveTextContent('Inconclusive')
+    expect(screen.getByTestId('home-investigation-step-upstream')).toHaveTextContent(
+      'Inconclusiveingest: only the latest reading is kept, and it does not cover the failure time')
+    expect(screen.getByTestId('home-investigation-step-change')).toHaveTextContent(
+      'InconclusiveVersion 3 succeeded before, but credentials, connections, AI settings or child workflows can change without a new version')
     expect(screen.getByTestId('home-investigation-tab-steps')).toHaveTextContent('Steps4')
+    expect(screen.getAllByTestId('home-investigation-evidence-change-run-1111bbbb-earlier')).toHaveLength(1)
 
-    fireEvent.click(screen.getByTestId('home-investigation-evidence-network-run-1111bbbb-earlier'))
+    fireEvent.click(screen.getByTestId('home-investigation-evidence-change-run-1111bbbb-earlier'))
     expect(onOpenRun).toHaveBeenCalledWith('run-1111bbbb-earlier')
     expect(screen.getByTestId(`home-investigation-evidence-network-${investigation.runId}`))
       .toHaveTextContent('Step fetch · run run-2222')
@@ -73,8 +79,8 @@ describe('<HomeInvestigationPanel />', () => {
     const tree = screen.getByTestId('home-investigation-tree')
     expect(within(tree).getByRole('list', { name: 'Why does fetch fail on Demo ingest?' })).toBeInTheDocument()
     expect(screen.getByTestId('home-investigation-node-network')).toHaveAttribute('data-verdict', 'validated')
-    expect(screen.getByTestId('home-investigation-node-upstream')).toHaveTextContent('No upstream status source watches this workflow')
-    expect(screen.getByTestId('home-investigation-conclusion')).toHaveTextContent('The step cannot reach its host.')
+    expect(screen.getByTestId('home-investigation-node-upstream')).toHaveAttribute('data-verdict', 'inconclusive')
+    expect(screen.getByTestId('home-investigation-conclusion')).toHaveTextContent("The step's network call failed.")
 
     fireEvent.click(screen.getByTestId('home-investigation-action'))
     expect(onOpenRecoveryQueue).toHaveBeenCalledWith('dlq-9')
@@ -104,7 +110,7 @@ describe('<HomeInvestigationPanel />', () => {
     setup()
     await screen.findByTestId('home-investigation-steps')
     expect(screen.getByText('¿Por qué falla fetch en Demo ingest?')).toBeInTheDocument()
-    expect(screen.getByTestId('home-investigation-step-network')).toHaveTextContent('No se llega al hostConfirmada')
+    expect(screen.getByTestId('home-investigation-step-network')).toHaveTextContent('Falla de redConfirmada')
     expect(screen.getByTestId('home-investigation-step-credential')).toHaveTextContent('DescartadaEl paso no usa ninguna credencial')
     expect(screen.getByTestId('home-investigation-action')).toHaveTextContent('Corregir en Recuperar')
   })

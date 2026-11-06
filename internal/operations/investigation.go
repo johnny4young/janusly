@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/internal/authoring"
+	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -19,15 +22,23 @@ var (
 	HypothesisIDs      = []string{"network", "credential", "upstream", "change"}
 	HypothesisVerdicts = []string{"validated", "ruled_out", "inconclusive"}
 	HypothesisReasons  = []string{
-		"no_error", "error_unclassified", "network_dns", "network_unreachable", "network_other_category",
-		"credential_missing", "credential_rejected", "credential_expired", "credential_unused", "credential_unproven",
-		"upstream_hidden", "upstream_unwatched", "upstream_stale", "upstream_degraded", "upstream_healthy", "upstream_unchecked",
-		"change_no_baseline", "change_same_version", "change_new_version",
+		"no_error", "error_unclassified", "network_dns", "network_failed", "network_other_category",
+		"credential_missing", "credential_rejected", "credential_expired", "credential_expired_unconfirmed",
+		"credential_unused", "credential_unproven",
+		"upstream_hidden", "upstream_unwatched", "upstream_degraded", "upstream_current_only", "upstream_unchecked",
+		"change_unsaved", "change_no_baseline", "change_same_version", "change_outside_version", "change_new_version",
 	}
-	EvidenceKinds = []string{"failed_step", "similar_failure", "last_success"}
+	EvidenceKinds = []string{"failed_step", "last_success"}
 )
 
 var ErrNoFailedStep = errors.New("run has no failed step")
+
+const (
+	stepWindow      = 30 * 24 * time.Hour
+	historyRunLimit = 200
+	// A reading this close to the failure is the only one that can speak for it.
+	upstreamNearMinimum = 5 * time.Minute
+)
 
 type InvestigationEvidence struct {
 	Kind   string `json:"kind"`
@@ -61,29 +72,37 @@ type Investigation struct {
 	GeneratedAt  string               `json:"generatedAt"`
 }
 
-type upstreamState struct {
-	Name              string
-	Checked, Degraded bool
+type upstreamReading struct {
+	Name                 string
+	Successful, Degraded bool
+	CheckedAt            *time.Time
+	Interval             time.Duration
 }
 
 type investigationFacts struct {
 	RunID, NodeID, WorkflowName string
 	Result                      signature.Result
 	HasError                    bool
-	Credential                  string
-	UsesCredential, ConfigKnown bool
-	CredentialExpiredAt         *time.Time
-	FailedAt, Now               time.Time
-	Version                     int
-	LastSuccessRunID            string
-	LastSuccessVersion          int
-	UpstreamVisible             bool
-	UpstreamTags                []string
-	Upstream                    []upstreamState
-	Similar                     []signature.ClusterSampleRef
-	SimilarCount                int
-	DeadLetterID                string
-	CanFix                      bool
+	// UsesCredential: the step binds a credential or holds a secret template.
+	// CredentialsComplete: its bindings describe every credential it can use.
+	UsesCredential, CredentialsComplete bool
+	ExpiredCredential                   string
+	ExpiredAt                           *time.Time
+	FailedAt, Now                       time.Time
+	Version                             int
+	SameVersionSuccess                  string
+	OlderSuccess                        string
+	OlderVersion                        int
+	// OutsideVersion: the workflow depends on credentials, connections, AI
+	// settings or child workflows, which change without a new version.
+	OutsideVersion   bool
+	UpstreamVisible  bool
+	UpstreamTags     []string
+	Upstream         []upstreamReading
+	StepRuns         int
+	StepSameFailures int
+	DeadLetterID     string
+	CanFix           bool
 }
 
 var secretTemplate = regexp.MustCompile(`\{\{\s*(secret|env)\.`)
@@ -111,10 +130,14 @@ func hypothesis(id, verdict, reason string, params map[string]any, evidence ...I
 	if params == nil {
 		params = map[string]any{}
 	}
-	if evidence == nil {
-		evidence = []InvestigationEvidence{}
+	unique, seen := []InvestigationEvidence{}, map[string]bool{}
+	for _, item := range evidence {
+		if !seen[item.RunID] {
+			seen[item.RunID] = true
+			unique = append(unique, item)
+		}
 	}
-	return Hypothesis{ID: id, Verdict: verdict, Reason: reason, Params: params, Evidence: evidence}
+	return Hypothesis{ID: id, Verdict: verdict, Reason: reason, Params: params, Evidence: unique}
 }
 
 func (f investigationFacts) failedStep() InvestigationEvidence {
@@ -126,18 +149,14 @@ func networkHypothesis(f investigationFacts) Hypothesis {
 	case !f.HasError:
 		return hypothesis("network", "inconclusive", "no_error", nil)
 	case f.Result.Category == "network_timeout":
-		evidence := []InvestigationEvidence{f.failedStep()}
-		for _, sample := range f.Similar {
-			if sample.RunID != f.RunID {
-				evidence = append(evidence, InvestigationEvidence{Kind: "similar_failure", RunID: sample.RunID})
-			}
-		}
-		reason := "network_unreachable"
+		reason := "network_failed"
 		if strings.HasPrefix(f.Result.Signature, "DNS lookup failed") {
 			reason = "network_dns"
 		}
-		params := map[string]any{"signature": f.Result.Signature, "count": max(f.SimilarCount, 1)}
-		return hypothesis("network", "validated", reason, params, evidence...)
+		params := map[string]any{
+			"signature": f.Result.Signature, "count": max(f.StepSameFailures, 1), "runs": max(f.StepRuns, 1),
+		}
+		return hypothesis("network", "validated", reason, params, f.failedStep())
 	case f.Result.Category == "unknown":
 		return hypothesis("network", "inconclusive", "error_unclassified", nil, f.failedStep())
 	default:
@@ -148,27 +167,43 @@ func networkHypothesis(f investigationFacts) Hypothesis {
 
 func credentialHypothesis(f investigationFacts) Hypothesis {
 	signatureParams := map[string]any{"signature": f.Result.Signature}
+	// Only an auth rejection proves the call reached a service that refused the credential.
+	rejected := strings.HasPrefix(f.Result.Signature, "HTTP 401 ") || strings.HasPrefix(f.Result.Signature, "HTTP 403 ")
+	var expired map[string]any
+	if f.ExpiredAt != nil {
+		expired = map[string]any{"credential": f.ExpiredCredential, "expiredAt": f.ExpiredAt.UTC().Format(time.RFC3339)}
+	}
 	switch {
 	case f.Result.Category == "secret_missing":
 		return hypothesis("credential", "validated", "credential_missing", signatureParams, f.failedStep())
-	case strings.HasPrefix(f.Result.Signature, "HTTP 401 ") || strings.HasPrefix(f.Result.Signature, "HTTP 403 "):
+	case rejected && expired != nil:
+		return hypothesis("credential", "validated", "credential_expired", expired, f.failedStep())
+	case rejected:
 		return hypothesis("credential", "validated", "credential_rejected", signatureParams, f.failedStep())
-	case f.CredentialExpiredAt != nil && !f.CredentialExpiredAt.After(f.FailedAt):
-		return hypothesis("credential", "validated", "credential_expired", map[string]any{
-			"credential": f.Credential, "expiredAt": f.CredentialExpiredAt.UTC().Format(time.RFC3339),
-		}, f.failedStep())
+	case expired != nil:
+		return hypothesis("credential", "inconclusive", "credential_expired_unconfirmed", expired, f.failedStep())
 	case !f.HasError:
 		return hypothesis("credential", "inconclusive", "no_error", nil)
-	case f.ConfigKnown && !f.UsesCredential:
+	case f.CredentialsComplete && !f.UsesCredential:
 		return hypothesis("credential", "ruled_out", "credential_unused", nil, f.failedStep())
 	default:
 		return hypothesis("credential", "inconclusive", "credential_unproven", nil, f.failedStep())
 	}
 }
 
-// Upstream status is a current reading, so it says nothing about a failure older than a day.
-const upstreamWindow = 24 * time.Hour
+// near reports whether a reading was taken close enough to the failure to describe it.
+func (r upstreamReading) near(failedAt time.Time) bool {
+	if r.CheckedAt == nil {
+		return false
+	}
+	gap := r.CheckedAt.Sub(failedAt)
+	if gap < 0 {
+		gap = -gap
+	}
+	return gap <= max(2*r.Interval, upstreamNearMinimum)
+}
 
+// Only the latest reading of each source is stored, so upstream is never ruled out.
 func upstreamHypothesis(f investigationFacts) Hypothesis {
 	if !f.UpstreamVisible {
 		return hypothesis("upstream", "inconclusive", "upstream_hidden", nil)
@@ -176,34 +211,40 @@ func upstreamHypothesis(f investigationFacts) Hypothesis {
 	if len(f.UpstreamTags) == 0 {
 		return hypothesis("upstream", "inconclusive", "upstream_unwatched", nil)
 	}
-	if f.Now.Sub(f.FailedAt) > upstreamWindow {
-		return hypothesis("upstream", "inconclusive", "upstream_stale", nil)
-	}
-	healthy := []string{}
-	for _, source := range f.Upstream {
-		if source.Degraded {
-			return hypothesis("upstream", "validated", "upstream_degraded", map[string]any{"source": source.Name})
+	read := []string{}
+	for _, reading := range f.Upstream {
+		if !reading.Successful {
+			continue
 		}
-		if source.Checked {
-			healthy = append(healthy, source.Name)
+		if reading.Degraded && reading.near(f.FailedAt) {
+			return hypothesis("upstream", "validated", "upstream_degraded", map[string]any{"source": reading.Name})
 		}
+		read = append(read, reading.Name)
 	}
-	if len(healthy) == 0 {
+	if len(read) == 0 {
 		return hypothesis("upstream", "inconclusive", "upstream_unchecked", nil)
 	}
-	return hypothesis("upstream", "ruled_out", "upstream_healthy", map[string]any{"sources": strings.Join(healthy, ", ")})
+	return hypothesis("upstream", "inconclusive", "upstream_current_only", map[string]any{"sources": strings.Join(read, ", ")})
 }
 
 func changeHypothesis(f investigationFacts) Hypothesis {
-	if f.LastSuccessRunID == "" {
+	switch {
+	case f.Version == 0:
+		return hypothesis("change", "inconclusive", "change_unsaved", nil)
+	case f.SameVersionSuccess != "":
+		baseline := InvestigationEvidence{Kind: "last_success", RunID: f.SameVersionSuccess}
+		params := map[string]any{"version": f.Version}
+		if f.OutsideVersion {
+			return hypothesis("change", "inconclusive", "change_outside_version", params, baseline)
+		}
+		return hypothesis("change", "ruled_out", "change_same_version", params, baseline)
+	case f.OlderSuccess != "":
+		return hypothesis("change", "validated", "change_new_version",
+			map[string]any{"from": f.OlderVersion, "to": f.Version},
+			InvestigationEvidence{Kind: "last_success", RunID: f.OlderSuccess})
+	default:
 		return hypothesis("change", "inconclusive", "change_no_baseline", map[string]any{"version": f.Version})
 	}
-	baseline := InvestigationEvidence{Kind: "last_success", RunID: f.LastSuccessRunID}
-	if f.LastSuccessVersion == f.Version {
-		return hypothesis("change", "ruled_out", "change_same_version", map[string]any{"version": f.Version}, baseline)
-	}
-	return hypothesis("change", "validated", "change_new_version",
-		map[string]any{"from": f.LastSuccessVersion, "to": f.Version}, baseline)
 }
 
 // Investigate gathers tenant-scoped facts for the run's failed step and evaluates every rule.
@@ -212,22 +253,12 @@ func (b Builder) Investigate(ctx context.Context, orgID, runID string, permissio
 	if b.Now != nil {
 		now = b.Now().UTC()
 	}
-	// Unsaved draft runs have no version row, so they have no version to compare.
-	var workflowID string
-	var inputJSON, tags []byte
-	var createdAt *time.Time
-	facts := investigationFacts{RunID: runID, Now: now, UpstreamVisible: permissions["upstream.read"]}
-	if err := b.Pool.QueryRow(ctx, `
-		SELECT r.input_json, r.created_at, coalesce(r.workflow_id, wv.workflow_id, ''), coalesce(wv.version, 0),
-		       coalesce(wv.upstream_health_sources, '[]'::jsonb)
-		FROM runs r
-		LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id AND wv.org_id = r.org_id
-		WHERE r.org_id = $1 AND r.id = $2`, orgID, runID,
-	).Scan(&inputJSON, &createdAt, &workflowID, &facts.Version, &tags); err != nil {
+	q := store.New(b.Pool)
+	run, err := q.GetRunInvestigationContext(ctx, store.GetRunInvestigationContextParams{OrgID: orgID, RunID: runID})
+	if err != nil {
 		return Investigation{}, err
 	}
-	_ = json.Unmarshal(tags, &facts.UpstreamTags)
-	nodes, err := store.New(b.Pool).ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: runID, OrgID: orgID})
+	nodes, err := q.ListRunNodesByRunForOrg(ctx, store.ListRunNodesByRunForOrgParams{RunID: runID, OrgID: orgID})
 	if err != nil {
 		return Investigation{}, err
 	}
@@ -242,74 +273,113 @@ func (b Builder) Investigate(ctx context.Context, orgID, runID string, permissio
 	if failed == nil {
 		return Investigation{}, ErrNoFailedStep
 	}
-	facts.NodeID, facts.FailedAt = failed.NodeID, now
-	if failed.FinishedAt != nil {
-		facts.FailedAt = failed.FinishedAt.UTC()
-	}
-	sample := signature.FailureSample{NodeID: failed.NodeID, ErrorJSON: failed.ErrorJson}
-	enrichSample(&sample, inputJSON)
-	facts.WorkflowName = signature.ScrubSecretShapes(sample.WorkflowName)
-	facts.HasError = len(failed.ErrorJson) > 0 && string(failed.ErrorJson) != "null"
-	facts.Result = signature.NormalizeJSON(failed.ErrorJson, signature.Context{
-		NodeType: sample.NodeType, NodeID: sample.NodeID, ToolName: sample.ToolName,
-	})
-	credential, uses, known := nodeCredential(inputJSON, failed.NodeID)
-	facts.Credential, facts.UsesCredential, facts.ConfigKnown = signature.ScrubSecretShapes(credential), uses, known
-	if credential != "" && permissions["credentials.read"] {
-		err := b.Pool.QueryRow(ctx, `SELECT expires_at FROM credentials WHERE org_id = $1 AND name = $2`,
-			orgID, credential).Scan(&facts.CredentialExpiredAt)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return Investigation{}, err
-		}
+	facts := investigationFacts{
+		RunID: runID, NodeID: failed.NodeID, Now: now, Version: int(run.Version),
+		UpstreamVisible: permissions["upstream.read"], FailedAt: failureTime(failed.FinishedAt, run.CreatedAt, now),
+		HasError: len(failed.ErrorJson) > 0 && string(failed.ErrorJson) != "null",
 	}
 
-	if workflowID != "" && facts.Version > 0 {
-		err = b.Pool.QueryRow(ctx, `
-			SELECT r.id, wv.version
-			FROM runs r
-			JOIN workflow_versions wv ON wv.id = r.workflow_version_id AND wv.org_id = r.org_id
-			WHERE r.org_id = $1 AND coalesce(r.workflow_id, wv.workflow_id) = $2 AND r.status = 'succeeded'
-			  AND r.replay_mode IS NULL AND r.created_at < $3
-			ORDER BY r.created_at DESC, r.id DESC
-			LIMIT 1`, orgID, workflowID, createdAt).Scan(&facts.LastSuccessRunID, &facts.LastSuccessVersion)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return Investigation{}, err
+	workflow := snapshotWorkflow(run.InputJson)
+	errorContext := signature.Context{NodeID: failed.NodeID}
+	var credentialNames []string
+	if workflow != nil {
+		facts.WorkflowName = signature.ScrubSecretShapes(workflow.Name)
+		uses := authoring.StepCredentials(workflow)
+		for _, node := range workflow.Nodes {
+			use := uses[node.ID]
+			config, _ := json.Marshal(node.Config)
+			templated := secretTemplate.Match(config)
+			if !use.Complete || len(use.Names) > 0 || templated {
+				facts.OutsideVersion = true
+			}
+			if node.ID == failed.NodeID {
+				errorContext.NodeType = node.Type
+				errorContext.ToolName, _ = node.Config["tool"].(string)
+				credentialNames = use.Names
+				facts.CredentialsComplete = use.Complete
+				facts.UsesCredential = len(use.Names) > 0 || templated
+			}
 		}
+	} else {
+		facts.OutsideVersion = true
 	}
+	facts.Result = signature.NormalizeJSON(failed.ErrorJson, errorContext)
 
-	if facts.UpstreamVisible && len(facts.UpstreamTags) > 0 {
-		rows, err := b.Pool.Query(ctx, `
-			SELECT name, last_status IS NOT NULL AND last_error_reason IS NULL, last_degraded
-			FROM upstream_health_sources
-			WHERE org_id = $1 AND enabled AND name = ANY($2::text[])
-			ORDER BY lower(name)`, orgID, facts.UpstreamTags)
+	if len(credentialNames) > 0 && permissions["credentials.read"] {
+		rows, err := q.ListCredentialExpiries(ctx, store.ListCredentialExpiriesParams{OrgID: orgID, Names: credentialNames})
 		if err != nil {
 			return Investigation{}, err
 		}
-		facts.Upstream, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (upstreamState, error) {
-			var state upstreamState
-			return state, row.Scan(&state.Name, &state.Checked, &state.Degraded)
+		for _, row := range rows {
+			if row.ExpiresAt != nil && !row.ExpiresAt.After(facts.FailedAt) && earlier(row.ExpiresAt, facts.ExpiredAt) {
+				facts.ExpiredCredential, facts.ExpiredAt = signature.ScrubSecretShapes(row.Name), row.ExpiresAt
+			}
+		}
+	}
+
+	workflowID := pgtype.Text{String: run.WorkflowID, Valid: run.WorkflowID != ""}
+	if workflowID.Valid && facts.Version > 0 {
+		successes, err := q.ListRecentWorkflowSuccesses(ctx, store.ListRecentWorkflowSuccessesParams{
+			OrgID: orgID, WorkflowID: workflowID, Before: run.CreatedAt, RunLimit: historyRunLimit,
 		})
 		if err != nil {
 			return Investigation{}, err
 		}
-	}
-
-	clusters, _ := b.failureClusters(ctx, orgID, now, permissions["dlq.read"], true, false)
-	for _, cluster := range clusters {
-		if cluster.Signature == facts.Result.Signature {
-			facts.Similar, facts.SimilarCount = cluster.Samples, cluster.Frequency
-			break
+		for _, success := range successes {
+			if success.WorkflowVersionID == run.WorkflowVersionID {
+				facts.SameVersionSuccess = success.ID
+				break
+			}
+			if facts.OlderSuccess == "" && success.Version > 0 && int(success.Version) < facts.Version {
+				facts.OlderSuccess, facts.OlderVersion = success.ID, int(success.Version)
+			}
 		}
 	}
+
+	if workflowID.Valid && facts.Result.Category == "network_timeout" {
+		since, until := facts.FailedAt.Add(-stepWindow), facts.FailedAt
+		if run.CreatedAt != nil && run.CreatedAt.After(until) {
+			until = *run.CreatedAt
+		}
+		outcomes, err := q.ListRecentStepOutcomes(ctx, store.ListRecentStepOutcomesParams{
+			OrgID: orgID, WorkflowID: workflowID, Since: &since, Until: &until,
+			RunLimit: historyRunLimit, NodeID: failed.NodeID,
+		})
+		if err != nil {
+			return Investigation{}, err
+		}
+		facts.StepRuns = len(outcomes)
+		for _, outcome := range outcomes {
+			if outcome.Status == "failed" && signature.NormalizeJSON(outcome.ErrorJson, errorContext).Signature == facts.Result.Signature {
+				facts.StepSameFailures++
+			}
+		}
+	}
+
+	_ = json.Unmarshal(run.UpstreamTags, &facts.UpstreamTags)
+	if facts.UpstreamVisible && len(facts.UpstreamTags) > 0 {
+		rows, err := q.ListWatchedUpstreamReadings(ctx, store.ListWatchedUpstreamReadingsParams{OrgID: orgID, Names: facts.UpstreamTags})
+		if err != nil {
+			return Investigation{}, err
+		}
+		for _, row := range rows {
+			// A poll error keeps the previous degraded flag, which no longer describes anything.
+			facts.Upstream = append(facts.Upstream, upstreamReading{
+				Name: row.Name, Successful: row.LastStatus.Valid && !row.LastErrorReason.Valid,
+				Degraded: row.LastDegraded, CheckedAt: row.LastCheckedAt,
+				Interval: time.Duration(row.CheckIntervalSeconds) * time.Second,
+			})
+		}
+	}
+
 	if permissions["dlq.read"] {
-		err := b.Pool.QueryRow(ctx, `
-			SELECT id FROM dead_letters
-			WHERE org_id = $1 AND run_id = $2 AND node_id = $3 AND status = 'open'
-			ORDER BY created_at DESC, id DESC LIMIT 1`, orgID, runID, failed.NodeID).Scan(&facts.DeadLetterID)
+		id, err := q.FindOpenDeadLetterForNode(ctx, store.FindOpenDeadLetterForNodeParams{
+			OrgID: orgID, RunID: runID, NodeID: failed.NodeID,
+		})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return Investigation{}, err
 		}
+		facts.DeadLetterID = id
 	}
 	// The same permissions the Recover queue requires before it offers Suggest fix.
 	facts.CanFix = permissions["ai.write"] && permissions["recovery.write"] && permissions["workflows.write"] &&
@@ -317,40 +387,30 @@ func (b Builder) Investigate(ctx context.Context, orgID, runID string, permissio
 	return evaluateInvestigation(facts), nil
 }
 
+// failureTime never falls back to now: a step without a finish time failed no later than its run started.
+func failureTime(finishedAt, runCreatedAt *time.Time, now time.Time) time.Time {
+	switch {
+	case finishedAt != nil:
+		return finishedAt.UTC()
+	case runCreatedAt != nil:
+		return runCreatedAt.UTC()
+	default:
+		return now
+	}
+}
+
 func earlier(left, right *time.Time) bool {
 	return left != nil && (right == nil || left.Before(*right))
 }
 
-// nodeCredential reports the named credential, whether any config value references a secret,
-// and whether the step's config was found at all.
-func nodeCredential(inputJSON []byte, nodeID string) (string, bool, bool) {
+// snapshotWorkflow parses the workflow the run executed, or nil when the snapshot is unreadable.
+func snapshotWorkflow(inputJSON []byte) *domain.Workflow {
 	var input struct {
-		Workflow struct {
-			Nodes []struct {
-				ID     string          `json:"id"`
-				Config json.RawMessage `json:"config"`
-			} `json:"nodes"`
-		} `json:"workflow"`
+		Workflow json.RawMessage `json:"workflow"`
 	}
-	if json.Unmarshal(inputJSON, &input) != nil {
-		return "", false, false
+	if json.Unmarshal(inputJSON, &input) != nil || len(input.Workflow) == 0 {
+		return nil
 	}
-	for _, node := range input.Workflow.Nodes {
-		if node.ID != nodeID {
-			continue
-		}
-		var config struct {
-			Credential string `json:"credential"`
-			Input      struct {
-				Credential string `json:"credential"`
-			} `json:"input"`
-		}
-		_ = json.Unmarshal(node.Config, &config)
-		name := config.Credential
-		if name == "" {
-			name = config.Input.Credential
-		}
-		return name, name != "" || secretTemplate.Match(node.Config), true
-	}
-	return "", false, false
+	workflow, _ := domain.Parse(input.Workflow)
+	return workflow
 }

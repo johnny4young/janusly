@@ -8564,7 +8564,6 @@
                                         "kind": {
                                           "enum": [
                                             "failed_step",
-                                            "similar_failure",
                                             "last_success"
                                           ],
                                           "type": "string"
@@ -8619,13 +8618,18 @@
                                             "minimum": 0,
                                             "type": "integer"
                                           },
+                                          "runs": {
+                                            "minimum": 0,
+                                            "type": "integer"
+                                          },
                                           "signature": {
                                             "type": "string"
                                           }
                                         },
                                         "required": [
                                           "signature",
-                                          "count"
+                                          "count",
+                                          "runs"
                                         ],
                                         "type": "object"
                                       },
@@ -8725,21 +8729,23 @@
                                       "no_error",
                                       "error_unclassified",
                                       "network_dns",
-                                      "network_unreachable",
+                                      "network_failed",
                                       "network_other_category",
                                       "credential_missing",
                                       "credential_rejected",
                                       "credential_expired",
+                                      "credential_expired_unconfirmed",
                                       "credential_unused",
                                       "credential_unproven",
                                       "upstream_hidden",
                                       "upstream_unwatched",
-                                      "upstream_stale",
                                       "upstream_degraded",
-                                      "upstream_healthy",
+                                      "upstream_current_only",
                                       "upstream_unchecked",
+                                      "change_unsaved",
                                       "change_no_baseline",
                                       "change_same_version",
+                                      "change_outside_version",
                                       "change_new_version"
                                     ],
                                     "type": "string"

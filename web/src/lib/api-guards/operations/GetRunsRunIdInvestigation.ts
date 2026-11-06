@@ -16,7 +16,7 @@ export function isGetRunsRunIdInvestigationResponse(value: unknown): value is Ap
     generatedAt: isString,
     hypotheses: arrayOf(shape({
       evidence: arrayOf(shape({
-        kind: literal("failed_step", "similar_failure", "last_success"),
+        kind: literal("failed_step", "last_success"),
         runId: isString,
       }, {
         nodeId: isString,
@@ -26,6 +26,7 @@ export function isGetRunsRunIdInvestigationResponse(value: unknown): value is Ap
         signature: isString,
       }), shape({
         count: isInteger,
+        runs: isInteger,
         signature: isString,
       }), shape({
         category: literal("secret_missing", "http_error", "network_timeout", "ai_provider", "parse_error", "tool_input", "unknown"),
@@ -42,7 +43,7 @@ export function isGetRunsRunIdInvestigationResponse(value: unknown): value is Ap
         from: isInteger,
         to: isInteger,
       })),
-      reason: literal("no_error", "error_unclassified", "network_dns", "network_unreachable", "network_other_category", "credential_missing", "credential_rejected", "credential_expired", "credential_unused", "credential_unproven", "upstream_hidden", "upstream_unwatched", "upstream_stale", "upstream_degraded", "upstream_healthy", "upstream_unchecked", "change_no_baseline", "change_same_version", "change_new_version"),
+      reason: literal("no_error", "error_unclassified", "network_dns", "network_failed", "network_other_category", "credential_missing", "credential_rejected", "credential_expired", "credential_expired_unconfirmed", "credential_unused", "credential_unproven", "upstream_hidden", "upstream_unwatched", "upstream_degraded", "upstream_current_only", "upstream_unchecked", "change_unsaved", "change_no_baseline", "change_same_version", "change_outside_version", "change_new_version"),
       verdict: literal("validated", "ruled_out", "inconclusive"),
     })),
     nodeId: isString,

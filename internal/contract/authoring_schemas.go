@@ -132,7 +132,7 @@ var runInvestigation = closedObj(map[string]any{
 		"params": map[string]any{"oneOf": []any{
 			closedObj(map[string]any{}),
 			closedObj(map[string]any{"signature": str()}, "signature"),
-			closedObj(map[string]any{"signature": str(), "count": countT()}, "signature", "count"),
+			closedObj(map[string]any{"signature": str(), "count": countT(), "runs": countT()}, "signature", "count", "runs"),
 			closedObj(map[string]any{"category": strEnum(signature.Categories)}, "category"),
 			closedObj(map[string]any{"credential": str(), "expiredAt": str()}, "credential", "expiredAt"),
 			closedObj(map[string]any{"source": str()}, "source"),

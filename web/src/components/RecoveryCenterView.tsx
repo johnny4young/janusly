@@ -9,6 +9,7 @@ import { HomeTodayStrip } from './recovery-center/HomeTodayStrip'
 import { HomeOperatorField } from './recovery-center/HomeOperatorField'
 import { downtimeSeverity, type RecommendedAction } from './recovery-center/recovery-center-model'
 import { useT } from '../i18n'
+import { useWorkflowStore } from '../store'
 import type { RecoveryCenterController } from './RecoveryCenterPanel'
 
 const HomeInvestigationPanel = lazy(() => import('./recovery-center/HomeInvestigationPanel').then((module) => ({
@@ -26,18 +27,22 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
     openDeadLetters, openFailureCount, operatorBriefStatus, operatorBriefWarnings, operatorWins,
     recommendedActions, recoveryClearEligible, runsToday, showOnboarding, streak,
   } = model
-  const [investigating, setInvestigating] = useState<RecommendedAction | null>(null)
+  const orgId = useWorkflowStore((state) => state.orgId)
+  // Bound to the workspace it was opened in: a switch unmounts it and aborts its read.
+  const [opened, setOpened] = useState<{ action: RecommendedAction; orgId: string | null } | null>(null)
+  const investigating = opened?.orgId === orgId ? opened.action : null
   const investigateTrigger = useRef<HTMLElement | null>(null)
   const investigate = (action: RecommendedAction) => {
     investigateTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    setInvestigating(action)
+    setOpened({ action, orgId })
   }
   const closeInvestigation = () => {
-    setInvestigating(null)
+    setOpened(null)
     investigateTrigger.current?.focus()
   }
   const operator = (
     <HomeOperatorField
+      key={orgId}
       openFailures={openDeadLetters}
       onOpenTab={onOpenTab}
       onOpenRun={onOpenRun}

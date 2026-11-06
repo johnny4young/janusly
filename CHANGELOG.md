@@ -4,11 +4,12 @@
 
 - Failures in What needs you on Home have an Investigate action. It opens a side
   panel that checks four causes for the failed step, network, credential,
-  upstream status and a recent version change, and marks each one Validated,
-  Ruled out or Inconclusive with the runs it is based on. Steps lists the checks
-  in order and Tree shows them under the question. When a cause is validated and
-  your role can use recovery, Fix in Recover opens the failure in the Recover
-  queue. The checks follow fixed rules and work without an AI provider.
+  upstream status and a version change, and marks each one Validated, Ruled out
+  or Inconclusive with the run it is based on. A cause the stored data cannot
+  settle stays Inconclusive. Steps lists the checks in order and Tree shows them
+  under the question. When a cause is validated and your role can use recovery,
+  Fix in Recover opens the failure in the Recover queue. The checks follow fixed
+  rules and work without an AI provider.
 - The experiment comparison lists metrics by row, with either arm as the
   baseline. Each change says Better or Worse according to whether higher or
   lower is better for that metric. Diff only hides metrics that did not change.

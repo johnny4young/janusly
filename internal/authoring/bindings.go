@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/tools"
 )
@@ -265,6 +266,46 @@ func (b *workflowBinder) bindNode(node domain.Node) {
 			b.addMissing(Binding{Kind: "credential", NodeID: node.ID, Field: "config.webhookCredential", Requested: credential, Alternatives: availableCredentialNames(b.catalog, "pagerduty_webhook_secret"), Reason: reason})
 		}
 	}
+}
+
+// credentialSilentNodeTypes are the step types whose bindings name every
+// credential they can use. AI steps also use the organization's provider key,
+// MCP steps a connection's environment refs and subworkflows a child workflow.
+var credentialSilentNodeTypes = map[string]bool{
+	"noop": true, "transform": true, "condition": true, "http": true, "wait_until": true, "webhook": true,
+	"approval": true, "human_form": true, "tool": true, "parallel_fork": true, "join": true, "loop": true,
+	"webhook_received": true, "router": true, "email_received": true, "file_dropped": true, "schedule": true,
+	"pagerduty_incident": true,
+}
+
+// StepCredentialUse is what one step's bindings say about credentials.
+// Complete reports that they name every credential the step can use; secret
+// templates in the config are the caller's to check.
+type StepCredentialUse struct {
+	Names    []string
+	Complete bool
+}
+
+// StepCredentials binds every step against the runtime tool registry and
+// returns each step's credential use, keyed by node id.
+func StepCredentials(workflow *domain.Workflow) map[string]StepCredentialUse {
+	b := newWorkflowBinder(Catalog{BuiltinTools: executors.SharedToolRegistry().CatalogEntries()}, workflow)
+	out := map[string]StepCredentialUse{}
+	for _, node := range workflow.Nodes {
+		b.bindNode(node)
+		out[node.ID] = StepCredentialUse{Names: []string{}, Complete: credentialSilentNodeTypes[node.Type]}
+	}
+	for _, binding := range slices.Concat(b.report.Resolved, b.report.Missing) {
+		use := out[binding.NodeID]
+		switch {
+		case binding.Kind == "credential" && binding.Requested != "":
+			use.Names = append(use.Names, binding.Requested)
+		case binding.Kind == "builtin_tool" && binding.ResolvedID == "":
+			use.Complete = false
+		}
+		out[binding.NodeID] = use
+	}
+	return out
 }
 
 // BindWorkflow resolves every node's capability identities against the

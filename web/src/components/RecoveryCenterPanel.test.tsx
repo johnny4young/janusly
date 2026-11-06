@@ -44,6 +44,7 @@ vi.mock('../store', () => ({
       userId: string | null
       recoveryIntroDismissedThisSession: boolean
       dismissRecoveryIntroThisSession: typeof dismissRecoveryIntroThisSession
+      nodes: unknown[]
     }) => unknown,
   ) => selector({
     bumpPlatformVersion,
@@ -53,6 +54,7 @@ vi.mock('../store', () => ({
     userId: activeUserId,
     recoveryIntroDismissedThisSession: false,
     dismissRecoveryIntroThisSession,
+    nodes: [],
   }),
 }))
 
@@ -941,8 +943,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       )
       if (path === '/v1/runs/run-1/investigation') return {
         runId: 'run-1', nodeId: 'fetch', workflowName: '', signature: 'Network timeout on http node', category: 'network_timeout',
-        hypotheses: [{ id: 'network', verdict: 'validated', reason: 'network_unreachable',
-          params: { signature: 'Network timeout on http node', count: 1 }, evidence: [] }],
+        hypotheses: [{ id: 'network', verdict: 'validated', reason: 'network_failed',
+          params: { signature: 'Network timeout on http node', count: 1, runs: 1 }, evidence: [] }],
         conclusion: 'network', action: null, generatedAt: '2026-11-06T12:00:00Z',
       }
       if (path === '/recovery/metrics') return baseMetrics
@@ -952,7 +954,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       }
       throw new Error(`unexpected fetch: ${path}`)
     })
-    render(<RecoveryCenterPanel
+    const { rerender } = render(<RecoveryCenterPanel
       {...baseProps}
       runs={populatedRuns as never}
       runNodes={populatedNodes as never}
@@ -972,6 +974,20 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     fireEvent.click(screen.getByTestId('home-investigation-close'))
     expect(screen.queryByTestId('home-investigation-panel')).toBeNull()
     expect(investigate).toHaveFocus()
+
+    fireEvent.click(investigate)
+    expect(await screen.findByTestId('home-investigation-panel')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('home-operator-suggestions'))
+    expect(await screen.findByTestId('home-operator-panel')).toBeInTheDocument()
+    activeOrgId = 'org-b'
+    rerender(<RecoveryCenterPanel
+      {...baseProps}
+      runs={populatedRuns as never}
+      runNodes={populatedNodes as never}
+      deadLetters={populatedDlq as never}
+    />)
+    expect(screen.queryByTestId('home-investigation-panel')).toBeNull()
+    expect(screen.queryByTestId('home-operator-panel')).toBeNull()
   })
 
   it('routes clustered recovery work to the recovery queue', async () => {
