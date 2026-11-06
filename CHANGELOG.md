@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The success rate, open failures and longest downtime links beside the Home
+  health score are at least 24 px tall, so each one is an easier touch target.
 - In Spanish, the Recover queue toolbar fits on one row with the detail pane
   open, for every menu choice, from a 1280 px window on macOS and from 1310 px
   on Linux, where text renders slightly wider. Sort options read "Más

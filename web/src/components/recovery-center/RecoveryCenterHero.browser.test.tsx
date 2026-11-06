@@ -197,6 +197,20 @@ describe('Home evidence truth in Chromium', () => {
     expect(onOpenRecoveryQueue).toHaveBeenCalledTimes(2)
   })
 
+  it('gives every contributor link the WCAG 2.2 minimum pointer target', () => {
+    render(<RecoveryCenterHero
+      {...baseProps}
+      openFailures={2}
+      priorityCount={1}
+      longestOpenMs={6 * 60 * 1000}
+      successRateDisplay="71.4%"
+    />)
+
+    const targets = screen.getByRole('list', { name: 'Health contributors' }).querySelectorAll('button')
+    expect(targets).toHaveLength(3)
+    for (const target of targets) expect(target.getBoundingClientRect().height).toBeGreaterThanOrEqual(24)
+  })
+
   it('keeps open failures and downtime without metrics evidence, but no success rate', () => {
     render(<RecoveryCenterHero
       {...baseProps}
