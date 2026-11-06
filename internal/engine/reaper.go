@@ -114,6 +114,9 @@ func (e *Engine) reapStalledCandidate(ctx context.Context, row stalledCandidate,
 	metricReapedNodes.Inc()
 	logger.Warn("stalled node reaped into the DLQ",
 		"runId", row.RunID, "nodeId", row.NodeID, "attempt", row.Attempt)
+	// The reap may have flipped a subworkflow child terminal; hand off to
+	// its parent now instead of waiting for the reconciler.
+	e.DeliverParentNotifications(ctx, row.RunID)
 	return true
 }
 
