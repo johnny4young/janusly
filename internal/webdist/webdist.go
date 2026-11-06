@@ -47,6 +47,10 @@ func HandlerFor(dist fs.FS) http.Handler {
 				} else {
 					w.Header().Set("Cache-Control", "no-cache")
 				}
+				// Go's built-in MIME table lacks .woff2; do not depend on the host's mime.types.
+				if strings.HasSuffix(path, ".woff2") {
+					w.Header().Set("Content-Type", "font/woff2")
+				}
 				fileServer.ServeHTTP(w, r)
 				return
 			}

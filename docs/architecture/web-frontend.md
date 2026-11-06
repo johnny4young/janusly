@@ -494,11 +494,23 @@ feedback uses status/alert semantics, and decorative edge badges do not duplicat
 the directed edge announcement. Browser checks cover keyboard focus, serious and
 critical axe findings, overflow and readable text at compact and desktop widths.
 
-Typography deliberately has no remote or bundled font dependency. The existing
-local-preferred sans and mono token stacks fall through to platform system faces;
-`cold-load-polish.test.ts` prevents a remote font dependency and pins those
-fallbacks. This preserves the dense control-plane layout without adding a download
-or a first-render font swap. Spanish product copy uses neutral Latin American
+Inter Tight ships with the bundle; nothing loads from another origin. The face
+lives in `src/assets/fonts/` with its OFL license and `foundations.css` imports it,
+so Vite emits it under `/assets/` with a content hash and the one-year immutable
+cache; the handler sets `font/woff2` itself rather than relying on host MIME files. It is a 20.5 KB woff2 subset of the Fontsource 5.3.0 Latin file: the
+400–800 weight axis the CSS uses, `kern` and `tnum`, no hinting, and only
+U+0020-007E, U+00A0-00FF, en and em dashes, curly quotes, bullet, ellipsis, euro
+and minus. `unicode-range` lists exactly those code points, so arrows, check
+marks and other symbols render from the next face in the stack. `font-display:
+swap` with no preload keeps the first paint on the system fallback; a preload
+measured 130 ms later LCP. No italic file ships: the three italic uses (readiness
+suggestions, `<em>` in SafeMarkdown and the recovery delta skeleton hint)
+render as a synthesized oblique, because an italic face would add cold-path bytes.
+JetBrains Mono is not shipped; the mono stack falls
+through to the system monospace faces. `cold-load-polish.test.ts` pins the face, the range
+and both stacks, and `test/browser-setup.ts` loads the face before any browser
+test measures text. The Recover toolbar test keeps a Verdana override as a
+wider bound for the swap period. Spanish product copy uses neutral Latin American
 tuteo. Canonical product terms stay distinct: workflow/flujo, run/ejecución,
 replay/reproducción or reejecución, retry/reintento, and redrive are not treated
 as interchangeable.
@@ -602,7 +614,10 @@ and a 0.5 KiB single-locale allowance for the fail-closed RecoveryDialog AI
 response parser. The complete-artifact cap remained 605 KiB for that security
 change; the parser stays in the existing lazy dialog rather than adding a
 network request. The cold path is what the caps protect: `index.css`, `workflow-workspace` and the
-route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB). In 2026-11 the owner approved moving the artifact, worst-locale and per-chunk caps by each workspace redesign change's measured cost, stated in its pull request.
+route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB). In 2026-11 the owner approved moving the artifact, worst-locale and per-chunk caps by each workspace redesign change's measured cost, stated in its pull request. The owner approved one exception for the self-hosted
+Inter Tight face, which every cold load downloads: the Home route budget moved
+250 → 252 KiB and the Spanish Home budget 250 → 257 KiB (measured 251.6 and
+256.9 KiB).
 
 ## Closing failures without recovery
 

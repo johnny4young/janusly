@@ -6,7 +6,8 @@
  * (1) `index.html` MUST NOT load external styles or fonts. Production CSP
  *     intentionally allows styles and fonts from self only; keeping a remote
  *     font link here produces a blocked request and a console error on every
- *     cold load. The CSS font stacks provide the offline/system fallback.
+ *     cold load. Inter Tight ships from `src/assets` without a preload, and
+ *     the CSS font stacks provide the fallback while it swaps in.
  *
  * (2) The ordered CSS modules imported by `index.css` MUST contain a universal
  *     `@media (prefers-reduced-motion: reduce)` block with `!important` on
@@ -18,7 +19,7 @@
  * so they survive any vitest cwd posture.
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -66,6 +67,24 @@ describe("production font boundary", () => {
   it("keeps the document free of external font and stylesheet dependencies", () => {
     expect(indexHtml).not.toMatch(/fonts\.(?:googleapis|gstatic)\.com/);
     expect(indexHtml).not.toMatch(/<link\b[^>]*\b(?:href|src)="https?:\/\//);
+  });
+
+  it("self-hosts only Inter Tight, hashed from src and swapped in without a preload", () => {
+    const faces = [...joinedCssBundleSource.matchAll(/@font-face\s*\{([^}]+)\}/g)].map((match) => match[1]);
+    expect(faces).toHaveLength(1);
+    const face = faces[0]!;
+    expect(face).toContain('font-family: "Inter Tight";');
+    expect(face).toContain("font-weight: 400 800;");
+    expect(face).toContain("font-display: swap;");
+    expect(face).toContain('src: url("../assets/fonts/inter-tight-latin-wght.woff2") format("woff2");');
+    expect(face).toContain(
+      "unicode-range: U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+20AC, U+2212;",
+    );
+    for (const file of ["inter-tight-latin-wght.woff2", "OFL.txt"]) {
+      expect(existsSync(resolve(PACKAGE_ROOT, "src/assets/fonts", file)), file).toBe(true);
+    }
+    expect(existsSync(resolve(PACKAGE_ROOT, "public/fonts"))).toBe(false);
+    expect(indexHtml).not.toMatch(/rel="preload"/);
   });
 
   it("retains local system font fallbacks", () => {

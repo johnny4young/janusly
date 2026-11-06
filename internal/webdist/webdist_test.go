@@ -2,6 +2,7 @@ package webdist
 
 import (
 	"io"
+	"mime"
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
@@ -11,10 +12,11 @@ import (
 // falls back to index.html (SPA client routes).
 func TestHandlerServingContract(t *testing.T) {
 	dist := fstest.MapFS{
-		"index.html":            {Data: []byte("<html>app shell</html>")},
-		"logo.svg":              {Data: []byte("<svg/>")},
-		"assets/app-abc123.js":  {Data: []byte("console.log(1)")},
-		"assets/app-abc123.css": {Data: []byte("body{}")},
+		"index.html":               {Data: []byte("<html>app shell</html>")},
+		"logo.svg":                 {Data: []byte("<svg/>")},
+		"assets/app-abc123.js":     {Data: []byte("console.log(1)")},
+		"assets/app-abc123.css":    {Data: []byte("body{}")},
+		"assets/font-abc123.woff2": {Data: []byte("wOF2\x00\x01\x00\x00")},
 	}
 	handler := HandlerFor(dist)
 	get := func(path string) *httptest.ResponseRecorder {
@@ -34,6 +36,11 @@ func TestHandlerServingContract(t *testing.T) {
 	asset := get("/assets/app-abc123.js")
 	if asset.Code != 200 || asset.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
 		t.Fatalf("asset caching: %d %q", asset.Code, asset.Header().Get("Cache-Control"))
+	}
+
+	font := get("/assets/font-abc123.woff2")
+	if font.Code != 200 || font.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" || font.Header().Get("Content-Type") != "font/woff2" {
+		t.Fatalf("font: %d %q %q", font.Code, font.Header().Get("Cache-Control"), font.Header().Get("Content-Type"))
 	}
 
 	spa := get("/flows/wf-123/runs")
@@ -71,5 +78,19 @@ func TestEmbeddedPlaceholder(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest("GET", "/", nil))
 	if recorder.Code != 200 {
 		t.Fatalf("embedded root: %d", recorder.Code)
+	}
+}
+
+// The font type must not come from the host's MIME files or from sniffing.
+func TestWoff2TypeIgnoresHostMimeTable(t *testing.T) {
+	if err := mime.AddExtensionType(".woff2", "application/x-host-mapping"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mime.AddExtensionType(".woff2", "font/woff2") })
+	handler := HandlerFor(fstest.MapFS{"assets/font-abc123.woff2": {Data: []byte("not sniffable")}})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest("GET", "/assets/font-abc123.woff2", nil))
+	if got := recorder.Header().Get("Content-Type"); got != "font/woff2" {
+		t.Fatalf("woff2 content type: %q", got)
 	}
 }

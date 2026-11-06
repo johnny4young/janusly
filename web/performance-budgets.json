@@ -49,11 +49,11 @@
   },
   "routeBudgets": {
     "home": {
-      "maxTransferredKiB": 250,
+      "maxTransferredKiB": 252,
       "maxLongTaskMs": 500
     },
     "homeEs": {
-      "maxTransferredKiB": 250,
+      "maxTransferredKiB": 257,
       "maxLongTaskMs": 500
     },
     "workflowBuilder": {

@@ -52,6 +52,17 @@
   --font-mono: "JetBrains Mono", "SF Mono", "Menlo", monospace;
 }
 
+/* Imported from src so it ships hashed under /assets/ with the immutable cache.
+   The range lists exactly the file's glyphs; arrows and symbols use the fallback. */
+@font-face {
+  font-family: "Inter Tight";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("../assets/fonts/inter-tight-latin-wght.woff2") format("woff2");
+  unicode-range: U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+20AC, U+2212;
+}
+
 /* ==========================================================================
    Runtime token aliases
    Short semantic aliases used by hand-written component CSS. These make
