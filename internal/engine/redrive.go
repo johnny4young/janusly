@@ -155,14 +155,17 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	// recorded configuration reflects what actually ran (the contract
 	// replays the patched snapshot; the runtime's revive-in-place equivalent
 	// is the snapshot swap).
+	var fix *domain.Workflow
 	if len(opts.FixWorkflowJSON) > 0 {
-		fix, _ := domain.Parse(opts.FixWorkflowJSON)
-		if fix == nil {
+		if fix, _ = domain.Parse(opts.FixWorkflowJSON); fix == nil {
 			return fmt.Errorf("apply fix snapshot: the fix does not parse")
 		}
-		if err := requireRunToolApprovals(ctx, q, orgID, deadLetter.RunID, fix); err != nil {
-			return err
-		}
+	}
+	// Every redrive re-runs a step, so it meets the same gates as a start.
+	if err := requireRunToolApprovals(ctx, q, orgID, deadLetter.RunID, fix, true); err != nil {
+		return err
+	}
+	if fix != nil {
 		if err := q.UpdateRunWorkflowSnapshot(ctx, store.UpdateRunWorkflowSnapshotParams{
 			ID: deadLetter.RunID, Workflow: opts.FixWorkflowJSON,
 		}); err != nil {
@@ -278,6 +281,9 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID, actor
 			return ErrRedriveConflict
 		}
 		return fmt.Errorf("requeue failed node: %w", err)
+	}
+	if err := requireRunToolApprovals(ctx, q, orgID, runID, nil, true); err != nil {
+		return err
 	}
 	if err := recordRedriveForApprovals(ctx, q, runID, nodeID, actor); err != nil {
 		return err

@@ -26,7 +26,7 @@ func (e *Engine) ReplayRunAsValidation(
 	ctx context.Context, orgID, sourceRunID string, wf *domain.Workflow,
 	input any, createdBy string, hasPatch bool,
 ) (string, error) {
-	if err := requireRunToolApprovals(ctx, store.New(e.pool), orgID, sourceRunID, wf); err != nil {
+	if err := requireRunToolApprovals(ctx, store.New(e.pool), orgID, sourceRunID, wf, false); err != nil {
 		return "", err
 	}
 	runID := e.newID()
@@ -116,7 +116,7 @@ func (e *Engine) ReplayRunAsValidationFork(
 	ctx context.Context, orgID, sourceRunID string, wf *domain.Workflow,
 	forkNodeID string, inputOverride, input any, createdBy string,
 ) (ReplayLabForkResult, error) {
-	if err := requireRunToolApprovals(ctx, store.New(e.pool), orgID, sourceRunID, wf); err != nil {
+	if err := requireRunToolApprovals(ctx, store.New(e.pool), orgID, sourceRunID, wf, false); err != nil {
 		return ReplayLabForkResult{}, err
 	}
 	found := false

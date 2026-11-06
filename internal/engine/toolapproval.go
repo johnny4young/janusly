@@ -34,10 +34,11 @@ const (
 const toolApprovalParamsMaxBytes = 64_000
 
 var (
-	ErrToolApprovalNotFound = errors.New("Tool approval not found")                                  //nolint:staticcheck // wire message
-	ErrToolApprovalSelf     = errors.New("You cannot decide a tool call from a run you started")     //nolint:staticcheck // wire message
-	ErrToolApprovalConflict = errors.New("Tool approval is no longer pending")                       //nolint:staticcheck // wire message
-	ErrToolApprovalStale    = errors.New("Tool approval does not match the parameters you reviewed") //nolint:staticcheck // wire message
+	ErrRedriveWorkflowIDChanged = errors.New("A fix must keep the run's workflow id")                    //nolint:staticcheck // wire message
+	ErrToolApprovalNotFound     = errors.New("Tool approval not found")                                  //nolint:staticcheck // wire message
+	ErrToolApprovalSelf         = errors.New("You cannot decide a tool call from a run you started")     //nolint:staticcheck // wire message
+	ErrToolApprovalConflict     = errors.New("Tool approval is no longer pending")                       //nolint:staticcheck // wire message
+	ErrToolApprovalStale        = errors.New("Tool approval does not match the parameters you reviewed") //nolint:staticcheck // wire message
 )
 
 func toolApprovalError(code, message string) *ExecError {
@@ -284,43 +285,63 @@ func (e *ToolApprovalDroppedError) Error() string {
 }
 
 // requireToolApprovals refuses wf when it drops a gate that before, or the
-// latest saved version of the same workflow id, puts on a tool step.
+// latest saved version of either workflow id, puts on a tool step. Checking
+// before's id too means a document cannot dodge the saved gates by renaming.
 func requireToolApprovals(ctx context.Context, q *store.Queries, orgID string, before, wf *domain.Workflow) error {
 	if id := domain.DroppedToolApproval(before, wf); id != "" {
 		return &ToolApprovalDroppedError{NodeID: id}
 	}
-	if wf == nil || wf.ID == "" {
+	if wf == nil {
 		return nil
 	}
 	if orgID == "" {
 		orgID = "default"
 	}
-	row, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: wf.ID, OrgID: orgID})
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !bytes.Contains(row.DagJson, []byte("requireApproval"))) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("read saved workflow for tool approvals: %w", err)
+	ids := []string{wf.ID}
+	if before != nil && before.ID != wf.ID {
+		ids = append(ids, before.ID)
 	}
-	saved, _ := domain.Parse(row.DagJson)
-	if saved == nil {
-		return fmt.Errorf("saved workflow %s cannot be parsed for tool approvals", wf.ID)
-	}
-	if id := domain.DroppedToolApproval(saved, wf); id != "" {
-		return &ToolApprovalDroppedError{NodeID: id}
+	for _, workflowID := range ids {
+		if workflowID == "" {
+			continue
+		}
+		row, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: orgID})
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !bytes.Contains(row.DagJson, []byte("requireApproval"))) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("read saved workflow for tool approvals: %w", err)
+		}
+		saved, _ := domain.Parse(row.DagJson)
+		if saved == nil {
+			return fmt.Errorf("saved workflow %s cannot be parsed for tool approvals", workflowID)
+		}
+		if id := domain.DroppedToolApproval(saved, wf); id != "" {
+			return &ToolApprovalDroppedError{NodeID: id}
+		}
 	}
 	return nil
 }
 
 // requireRunToolApprovals applies requireToolApprovals against the snapshot
-// of the run wf replaces or replays.
-func requireRunToolApprovals(ctx context.Context, q *store.Queries, orgID, runID string, wf *domain.Workflow) error {
+// of the run wf replays or replaces; a nil wf re-runs that snapshot as is.
+// keepID refuses a replacement that would rename the run's workflow.
+func requireRunToolApprovals(ctx context.Context, q *store.Queries, orgID, runID string, wf *domain.Workflow, keepID bool) error {
 	run, err := q.GetRunExecution(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("read run snapshot for tool approvals: %w", err)
 	}
 	before, _, err := workflowFromRunInput(run.InputJson)
 	if err != nil {
+		if wf == nil && errors.Is(err, ErrRunSnapshotInvalid) {
+			return nil // the claim fails this snapshot durably before any executor runs
+		}
 		return err
+	}
+	if wf == nil {
+		wf = before
+	}
+	if keepID && wf.ID != before.ID {
+		return ErrRedriveWorkflowIDChanged
 	}
 	return requireToolApprovals(ctx, q, orgID, before, wf)
 }

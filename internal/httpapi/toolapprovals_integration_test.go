@@ -77,6 +77,7 @@ func TestToolApprovalCannotBeDroppedThroughAnyStartOrReplay(t *testing.T) {
 	requireDropped(t, "a rerun of an older run", h.call("POST", "/runs/rerun", map[string]any{"sourceRunId": oldRun, "nodeId": "call"}, ""))
 	requireDropped(t, "a Replay Lab run", h.call("POST", "/runs/replay-lab", map[string]any{"sourceRunId": oldRun}, ""))
 	requireDropped(t, "a Replay Lab fork", h.call("POST", "/runs/replay-lab/fork", map[string]any{"sourceRunId": oldRun, "forkNodeId": "call"}, ""))
+	requireDropped(t, "a renamed Replay Lab patch", h.call("POST", "/runs/replay-lab", map[string]any{"sourceRunId": oldRun, "suggestedWorkflow": gateWorkflow(id+"-renamed", false)}, ""))
 
 	gatedRun := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": gateWorkflow(id, true)}, ""))
 	var approvalID, digest string
@@ -100,6 +101,11 @@ func TestToolApprovalCannotBeDroppedThroughAnyStartOrReplay(t *testing.T) {
 	requireDropped(t, "a dead-letter replay", h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": deadLetter, "suggestedWorkflow": unflagged}, ""))
 	requireDropped(t, "a v1 dead-letter replay", h.call("POST", "/v1/dlq/replay", map[string]any{"deadLetterId": deadLetter, "suggestedWorkflow": unflagged}, ""))
 	requireDropped(t, "a fix validation", h.call("POST", "/dlq/validate-fix", map[string]any{"deadLetterId": deadLetter, "suggestedWorkflow": unflagged}, ""))
+	renamed := gateWorkflow(id+"-renamed", false)
+	requireDropped(t, "a renamed fix validation", h.call("POST", "/dlq/validate-fix", map[string]any{"deadLetterId": deadLetter, "suggestedWorkflow": renamed}, ""))
+	if res := h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": deadLetter, "suggestedWorkflow": renamed}, ""); res.status != 409 || res.body["code"] != "dlq_workflow_id_changed" {
+		t.Fatalf("a renamed fix replaced the snapshot: %d %+v", res.status, res.body)
+	}
 	row, err := store.New(pool).GetDeadLetter(ctx, store.GetDeadLetterParams{ID: deadLetter, OrgID: h.org})
 	if err != nil {
 		t.Fatal(err)

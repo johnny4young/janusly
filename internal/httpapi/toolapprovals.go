@@ -63,6 +63,9 @@ func (s *V1Server) decideToolApprovalCore(r *http.Request, rc v1Request) opResul
 
 // toolApprovalDropped maps the engine's refusal to run a gated step without its gate.
 func toolApprovalDropped(err error) (opResult, bool) {
+	if errors.Is(err, engine.ErrRedriveWorkflowIDChanged) {
+		return opError(http.StatusConflict, "dlq_workflow_id_changed", err.Error(), nil), true
+	}
 	var dropped *engine.ToolApprovalDroppedError
 	if !errors.As(err, &dropped) {
 		return opResult{}, false

@@ -115,13 +115,17 @@ campaign. The generic resume route cannot complete a tool approval. Validation
 runs skip the gate only for write-side calls, which they suppress anyway.
 
 Nothing may run a gated step without its gate. A start, rerun, Replay Lab run
-or fork, fix validation, sample run, or dead-letter replay that swaps the run's
-snapshot is refused with `tool_approval_dropped` in either case:
+or fork, fix validation, sample run, or any redrive (with or without a fix, and
+including the run-panel redrive) is refused with `tool_approval_dropped` in
+either case:
 
 - its document removes, retypes or ungates a step that the source run's
   snapshot gates;
 - its document removes, retypes or ungates a step that the latest saved
-  version of the same workflow id gates.
+  version of the run's own workflow id, or of the document's id, gates.
+
+A fix that would rename the run's workflow is refused with
+`dlq_workflow_id_changed`.
 
 The refusal also covers explicit older versions, active rollouts and
 subworkflow pins. An AI config patch that changes the flag is not offered. A

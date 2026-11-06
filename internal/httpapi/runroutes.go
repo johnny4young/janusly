@@ -459,6 +459,10 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 		return
 	}
 	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, body.DeadLetterID, engine.RedriveOptions{Actor: rc.userID}); err != nil {
+		if refused, ok := toolApprovalDropped(err); ok {
+			writeV1Error(w, rc.id, refused.status, refused.code, refused.message, refused.params)
+			return
+		}
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			writeV1Error(w, rc.id, http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
@@ -501,6 +505,9 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusBadRequest, "dlq_fields_required", "runId and nodeId are required", nil)
 		}
 		if err := s.engine.RedriveRunNode(r.Context(), rc.orgID, body.RunID, body.NodeID, rc.userID); err != nil {
+			if refused, ok := toolApprovalDropped(err); ok {
+				return refused
+			}
 			switch {
 			case errors.Is(err, engine.ErrDeadLetterNotFound):
 				return opError(http.StatusForbidden, "dlq_forbidden", "Forbidden", nil)

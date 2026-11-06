@@ -58,7 +58,7 @@ func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
 	if !found {
 		return "", ErrValidateFixFailingNodeMissing
 	}
-	if err := requireRunToolApprovals(ctx, q, orgID, item.RunID, suggested); err != nil {
+	if err := requireRunToolApprovals(ctx, q, orgID, item.RunID, suggested, false); err != nil {
 		return "", err
 	}
 
