@@ -382,6 +382,14 @@ func (s *V1Server) runExplainDeliveryHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	outcome := s.engine.ExecuteIntegrationTool(r.Context(), rc.orgID, body.RunID, toolName, toolInput)
+	switch outcome["code"] {
+	case "TOOL_APPROVAL_REQUIRED":
+		writeUnversioned(w, opError(http.StatusConflict, "tool_approval_required", fmt.Sprint(outcome["error"]), nil))
+		return
+	case "TOOL_APPROVAL_POLICY_UNAVAILABLE":
+		writeUnversioned(w, opError(http.StatusServiceUnavailable, "tool_approval_policy_unavailable", fmt.Sprint(outcome["error"]), nil))
+		return
+	}
 	result := map[string]any{
 		"ok": outcome["ok"] == true, "destination": destination.Kind,
 		"latencyMs": numberOrZero(outcome["latencyMs"]),

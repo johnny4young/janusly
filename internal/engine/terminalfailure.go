@@ -49,6 +49,9 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 		if requeued == 0 {
 			return errSkipCommit
 		}
+		if err := q.RetireToolApprovals(ctx, store.RetireToolApprovalsParams{RunID: claim.RunID, NodeID: claim.NodeID}); err != nil {
+			return fmt.Errorf("retire tool approvals: %w", err)
+		}
 		if err := e.recordRoutingOutcome(ctx, q, claim, -1, false, retriedAt); err != nil {
 			return err
 		}

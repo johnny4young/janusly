@@ -162,7 +162,8 @@ func matchesPattern(label, pattern string) bool {
 // have happened, then honours ignoreOn, then retryOn (empty retryOn = retry
 // everything not ignored); no policy means no retry.
 func shouldRetry(serr map[string]any, policy *RetryPolicy) bool {
-	if policy == nil || serr["writeSide"] == true {
+	// An approver's answer covers one execution; a retry would ask again.
+	if policy == nil || serr["writeSide"] == true || serr["name"] == "ToolApprovalError" {
 		return false
 	}
 	labels := classifyError(serr)

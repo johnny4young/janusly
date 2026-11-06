@@ -162,7 +162,7 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 		applyError := ""
 		if fixed := s.patchedDeadLetterSnapshot(r, rc.orgID, row.DeadLetterID, patch); fixed != nil {
 			if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, row.DeadLetterID,
-				redriveFixOptions(fixed, textOrNull(row.ValidationRunID), rc.userID)); err != nil {
+				redriveFixOptions(fixed, textOrNull(row.ValidationRunID), rc.userID, engine.ApprovalActorID(rc.authContext))); err != nil {
 				applyError = err.Error()
 			}
 		} else {
@@ -268,8 +268,8 @@ func (s *V1Server) patchedDeadLetterSnapshot(r *http.Request, orgID, deadLetterI
 
 // redriveFixOptions packages the fix-snapshot redrive for an accepted
 // auto-healing decision.
-func redriveFixOptions(fixed []byte, validationRunID any, requestedBy string) engine.RedriveOptions {
-	options := engine.RedriveOptions{FixWorkflowJSON: fixed, RequestedBy: requestedBy}
+func redriveFixOptions(fixed []byte, validationRunID any, requestedBy, actor string) engine.RedriveOptions {
+	options := engine.RedriveOptions{FixWorkflowJSON: fixed, RequestedBy: requestedBy, Actor: actor}
 	if id, ok := validationRunID.(string); ok {
 		options.ValidationRunID = id
 	}

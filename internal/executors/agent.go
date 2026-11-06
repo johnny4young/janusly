@@ -421,6 +421,9 @@ func executeAgentTool(ctx context.Context, in Input, plan AgentPlan, agentConfig
 				"ok": false, "error": "agent_http_url_not_authorized",
 			}
 		}
+		if refusal := approvalRefusal(registry, "http.request", trustedRequest, in); refusal != nil {
+			return refusal
+		}
 		// Execute the exact authored request, not model-produced fields. A
 		// planner selects whether to call; workflow configuration owns what is
 		// sent over the network.

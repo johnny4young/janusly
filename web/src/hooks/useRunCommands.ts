@@ -5,6 +5,7 @@ import { formatStatusLabel } from '../constants'
 import { isRunRequestCurrent } from '../run-transition'
 import { useWorkflowStore } from '../store'
 import type { ActiveTab } from '../types'
+import type { ToolApprovalDecision } from '../run-observability'
 import { isTerminalRunStatus } from '@/lib/status'
 import { parseRunStatusSnapshot } from '../lib/run-status-contract'
 import type { AppCommandsOptions } from './app-command-types'
@@ -242,15 +243,18 @@ export function useRunCommands(
     t,
   ])
 
-  const approveNode = useCallback(async (nodeId: string) => {
+  // A tool approval is decided against the exact call it shows; other waits resume.
+  const approveNode = useCallback(async (nodeId: string, toolDecision?: ToolApprovalDecision) => {
     if (!runId) return
     await runPlatformMutation({
-      request: () => api('/resume', {
-        method: 'POST',
-        body: JSON.stringify({ runId, nodeId }),
-      }),
-      failureMessage: t('toasts.resumeFailed'),
-      successToast: { message: t('toasts.stepApproved', { nodeId }), tone: 'success' },
+      request: () => toolDecision
+        ? api('/runs/tool-approvals/decide', { method: 'POST', body: JSON.stringify(toolDecision) })
+        : api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) }),
+      failureMessage: t(toolDecision ? 'toasts.toolApprovalFailed' : 'toasts.resumeFailed'),
+      successToast: {
+        message: t(toolDecision?.decision === 'deny' ? 'toasts.toolApprovalDenied' : 'toasts.stepApproved', { nodeId }),
+        tone: 'success',
+      },
       onSuccess: async () => {
         await loadStatus(runId)
       },

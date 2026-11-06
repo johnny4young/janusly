@@ -158,6 +158,9 @@ func TestShouldRetryHonoursIgnoreThenRetryPatterns(t *testing.T) {
 	if shouldRetry(map[string]any{"message": "bad input", "statusCode": 400}, scoped) {
 		t.Fatal("4xx must not match a 5xx/timeout policy")
 	}
+	if shouldRetry(map[string]any{"name": "ToolApprovalError", "code": "TOOL_APPROVAL_DENIED"}, all) {
+		t.Fatal("a denied tool call must follow its branch instead of asking again")
+	}
 }
 
 func TestStatusFamilyPatternMatchesOnlyThreeDigitLabels(t *testing.T) {

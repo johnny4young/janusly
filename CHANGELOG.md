@@ -12,6 +12,16 @@
   gets its share of ticks and its outcomes count toward the guardrail, and after
   a rollback every tick runs the baseline. A subworkflow call whose canary
   cannot be read now fails instead of running the latest version.
+- Admins can make a tool require approval in every workflow (Require approval
+  for this tool in every workflow, in the tool inspector). Each call of that
+  tool pauses right before it runs, and the paused step shows the tool, its
+  exact parameters with secrets masked and where masked values sit, and the
+  policy. Approve runs exactly those parameters once; Deny, or no decision
+  within 30 minutes, fails the step so it takes its error route. The person who
+  started the run, anyone who submitted a form or redrove the step, and, for
+  scheduled and webhook runs, whoever saved the workflow cannot decide. The card
+  says when nobody else can. HTTP request steps follow the same rule, and a
+  listed tool cannot run inside a loop or an agent.
 - Quick jump (⌘K) finds runs from a sentence such as "failed runs of
   demo-flaky-ingest since yesterday" or "ejecuciones fallidas desde el lunes".
   It shows what it understood as status, workflow and time chips you can change

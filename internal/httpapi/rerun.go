@@ -219,7 +219,7 @@ func (s *V1Server) rerunStartCore(r *http.Request, rc v1Request) opResult {
 		}
 	}
 	started, err := (runstart.Service{Engine: s.engine, Pool: s.pool, NewID: s.newID}).Start(r.Context(), runstart.Request{
-		OrgID: rc.orgID, CreatedBy: rc.userID, Workflow: prepared.workflow,
+		OrgID: rc.orgID, CreatedBy: rc.userID, ServicePrincipal: servicePrincipal(rc), Workflow: prepared.workflow,
 		RequestedVersionID: s.rerunVersion(r.Context(), rc.orgID, prepared),
 		Input:              prepared.input, IdempotencyKey: rerunIdempotencyKey(idempotencyKey, body), Rerun: prepared.plan.Seed,
 	})
