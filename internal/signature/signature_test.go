@@ -6,6 +6,39 @@ import (
 	"time"
 )
 
+func TestFailureMatchersKeepTimeoutsApartFromConnections(t *testing.T) {
+	cases := []struct {
+		text        string
+		wantNetwork bool
+		wantTimeout bool
+	}{
+		{"dial tcp 10.0.0.1:443: connect: connection refused", true, false},
+		{"lookup demo.invalid: no such host", true, false},
+		{"connect: no route to host", true, false},
+		{"connect: network is unreachable", true, false},
+		{`Post "https://api.example.com/v1": EOF`, true, false},
+		{"ECONNREFUSED", true, false},
+		{"UND_ERR_SOCKET", true, false},
+		{"context deadline exceeded", false, true},
+		{"request timed out", false, true},
+		{"UND_ERR_HEADERS_TIMEOUT", false, true},
+		{"dial tcp 10.0.0.1:443: i/o timeout", true, true},
+		{"unexpected EOF", false, false},
+		{"refusing to dial unvalidated host: example.com", false, false},
+		{"tls: failed to verify certificate: x509: certificate signed by unknown authority", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.text, func(t *testing.T) {
+			if got := IsNetworkFailure(tc.text); got != tc.wantNetwork {
+				t.Fatalf("IsNetworkFailure = %v, want %v", got, tc.wantNetwork)
+			}
+			if got := IsTimeoutFailure(tc.text); got != tc.wantTimeout {
+				t.Fatalf("IsTimeoutFailure = %v, want %v", got, tc.wantTimeout)
+			}
+		})
+	}
+}
+
 // Table ports representative cases per rule from error-signature.ts,
 // in the contract's priority order.
 func TestNormalizeRules(t *testing.T) {

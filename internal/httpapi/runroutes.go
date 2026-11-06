@@ -109,36 +109,12 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	started, err := (runstart.Service{
 		Engine: s.engine, Pool: s.pool, NewID: s.newID,
 	}).Start(r.Context(), runstart.Request{
-		OrgID: rc.orgID, CreatedBy: rc.userID, Workflow: wf,
+		OrgID: rc.orgID, CreatedBy: rc.userID, ServicePrincipal: servicePrincipal(rc), Workflow: wf,
 		RequestedVersionID: body.WorkflowVersionID, Input: body.Input,
 		IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
-		var rejection *runstart.Rejection
-		if errors.As(err, &rejection) {
-			switch rejection.Code {
-			case runstart.CodeValidationFailed:
-				result := opError(http.StatusBadRequest, rejection.Code,
-					rejection.Message, map[string]any{"issues": rejection.Issues})
-				result.unversionedExtras = map[string]any{"issues": rejection.Issues}
-				return result
-			case runstart.CodeNotProductionReady:
-				return opError(http.StatusUnprocessableEntity, rejection.Code, rejection.Message, nil)
-			case runstart.CodeCircuitPaused, runstart.CodeUpstreamDegraded:
-				return opError(http.StatusConflict, rejection.Code, rejection.Message,
-					map[string]any{"status": rejection.WorkflowStatus})
-			case runstart.CodeVersionMismatch:
-				return opError(http.StatusConflict, rejection.Code, rejection.Message, nil)
-			case runstart.CodeAdhocDisabled:
-				return opError(http.StatusForbidden, rejection.Code, rejection.Message, nil)
-			}
-		}
-		var invalid *engine.InputValidationError
-		if errors.As(err, &invalid) {
-			return opError(http.StatusBadRequest, "runs_input_invalid",
-				err.Error(), map[string]any{"errors": invalid.Errors})
-		}
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+		return runStartFailure(err)
 	}
 	// A duplicate idempotency key is success by definition. The original start
 	// already owns its audit record, so replaying the response must not add one.
@@ -158,6 +134,35 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 		},
 	})
 	return opOK(map[string]any{"runId": started.RunID})
+}
+
+// runStartFailure maps the shared admission path's refusals to their responses.
+func runStartFailure(err error) opResult {
+	var rejection *runstart.Rejection
+	if errors.As(err, &rejection) {
+		switch rejection.Code {
+		case runstart.CodeValidationFailed:
+			result := opError(http.StatusBadRequest, rejection.Code,
+				rejection.Message, map[string]any{"issues": rejection.Issues})
+			result.unversionedExtras = map[string]any{"issues": rejection.Issues}
+			return result
+		case runstart.CodeNotProductionReady:
+			return opError(http.StatusUnprocessableEntity, rejection.Code, rejection.Message, nil)
+		case runstart.CodeCircuitPaused, runstart.CodeUpstreamDegraded:
+			return opError(http.StatusConflict, rejection.Code, rejection.Message,
+				map[string]any{"status": rejection.WorkflowStatus})
+		case runstart.CodeVersionMismatch:
+			return opError(http.StatusConflict, rejection.Code, rejection.Message, nil)
+		case runstart.CodeAdhocDisabled:
+			return opError(http.StatusForbidden, rejection.Code, rejection.Message, nil)
+		}
+	}
+	var invalid *engine.InputValidationError
+	if errors.As(err, &invalid) {
+		return opError(http.StatusBadRequest, "runs_input_invalid",
+			err.Error(), map[string]any{"errors": invalid.Errors})
+	}
+	return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 }
 
 const eventsPageDefault = 200
@@ -316,7 +321,7 @@ func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	if err := s.engine.ResumeRunWithInput(r.Context(), body.RunID, body.NodeID, body.Input, body.ResumeToken); err != nil {
+	if err := s.engine.ResumeRunAs(r.Context(), body.RunID, body.NodeID, body.Input, body.ResumeToken, engine.ApprovalActorID(rc.authContext)); err != nil {
 		var inputErr *engine.InputValidationError
 		switch {
 		case errors.As(err, &inputErr):
@@ -451,12 +456,12 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
 		return
 	}
-	if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, body.DeadLetterID); err != nil {
+	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, body.DeadLetterID, engine.RedriveOptions{Actor: engine.ApprovalActorID(rc.authContext)}); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			writeV1Error(w, rc.id, http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
 		case errors.Is(err, engine.ErrRedriveConflict):
-			writeV1Error(w, rc.id, http.StatusConflict, "dlq_replay_conflict", "Dead letter replay already claimed", nil)
+			writeV1Error(w, rc.id, http.StatusConflict, "dlq_replay_conflict", redriveConflictMessage(err, "Dead letter replay already claimed"), nil)
 		default:
 			s.internal(w, rc, err)
 		}
@@ -493,13 +498,13 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 		if body.RunID == "" || body.NodeID == "" {
 			return opError(http.StatusBadRequest, "dlq_fields_required", "runId and nodeId are required", nil)
 		}
-		if err := s.engine.RedriveRunNode(r.Context(), rc.orgID, body.RunID, body.NodeID); err != nil {
+		if err := s.engine.RedriveRunNode(r.Context(), rc.orgID, body.RunID, body.NodeID, engine.ApprovalActorID(rc.authContext)); err != nil {
 			switch {
 			case errors.Is(err, engine.ErrDeadLetterNotFound):
 				return opError(http.StatusForbidden, "dlq_forbidden", "Forbidden", nil)
 			case errors.Is(err, engine.ErrRedriveConflict):
 				return opError(http.StatusConflict, "dlq_replay_conflict",
-					"This run can no longer be replayed — it was cancelled or already recovered", nil)
+					redriveConflictMessage(err, "This run can no longer be replayed — it was cancelled or already recovered"), nil)
 			default:
 				return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 			}
@@ -565,14 +570,14 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, body.DeadLetterID,
 		engine.RedriveOptions{
 			PlaybookID: body.RecoveryPlaybookID, ValidationRunID: body.RecoveryValidationRunID,
-			FixWorkflowJSON: fixJSON, RequestedBy: rc.userID,
+			FixWorkflowJSON: fixJSON, RequestedBy: rc.userID, Actor: engine.ApprovalActorID(rc.authContext),
 		}); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
 		case errors.Is(err, engine.ErrRedriveConflict):
 			return opError(http.StatusConflict, "dlq_replay_conflict",
-				"This run can no longer be replayed — it was cancelled or already recovered", nil)
+				redriveConflictMessage(err, "This run can no longer be replayed — it was cancelled or already recovered"), nil)
 		default:
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
@@ -581,6 +586,14 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 		TargetType: "dlq", TargetID: body.DeadLetterID,
 	})
 	return opOK(map[string]any{"ok": true})
+}
+
+// redriveConflictMessage keeps a refusal that names the rerun to open.
+func redriveConflictMessage(err error, fallback string) string {
+	if errors.Is(err, engine.ErrRedriveRerunExists) {
+		return err.Error()
+	}
+	return fallback
 }
 
 func (s *V1Server) replayAlias(w http.ResponseWriter, r *http.Request, rc v1Request) {

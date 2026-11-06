@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { page } from 'vitest/browser'
 
 import { api } from '../api'
 import { ExperimentsPanel } from './ExperimentsPanel'
@@ -25,10 +26,44 @@ describe('<ExperimentsPanel /> (browser smoke)', () => {
 
     render(<ExperimentsPanel />)
 
-    const button = await screen.findByRole('button', { name: 'Run comparison' })
+    await screen.findByRole('option', { name: 'Accepted recoveries · 4 examples' })
+    const button = screen.getByRole('button', { name: 'Run comparison' })
     const rect = button.getBoundingClientRect()
     expect(rect.height).toBeGreaterThan(0)
     expect(getComputedStyle(button).display).not.toBe('none')
-    expect(screen.getByLabelText('Evaluation dataset')).toBeInTheDocument()
+
+    const tiles = ['dataset', 'arms', 'run'].map((id) => screen.getByTestId(`experiment-step-${id}`))
+    const tops = tiles.map((tile) => tile.getBoundingClientRect().top)
+    expect(new Set(tops).size).toBe(1)
+    for (const tile of tiles) {
+      const style = getComputedStyle(tile)
+      expect(style.borderLeftWidth).toBe(style.borderRightWidth)
+    }
+    expect(getComputedStyle(tiles[0]!).backgroundColor).not.toBe(getComputedStyle(tiles[1]!).backgroundColor)
+    expect(screen.getByTestId('experiment-run-blocker')).toHaveTextContent('Step 2')
+
+    await page.viewport(375, 812)
+    const inputs = ['experiment-dataset-name', 'experiment-dataset-description'].map((id) => document.getElementById(id)!.getBoundingClientRect())
+    expect(inputs[1]!.top).toBeGreaterThan(inputs[0]!.bottom)
+  })
+
+  it('keeps the comparison card inside a phone-width viewport', async () => {
+    const side = { meanScore: 0.5, totalCostUsd: 0.01, costKnownCount: 4, meanLatencyMs: 100, errorCount: 0, judgedByLlmCount: 0, scoringFallbackCount: 0 }
+    const experiment = {
+      id: 'exp-1', name: 'Narrow', kind: 'prompt', controlRef: 'a@1', candidateRef: 'a@2', evalDatasetId: 'd', scorerKind: 'string_equality',
+      status: 'completed', createdAt: null, completedAt: null,
+      summary: { scorerKind: 'string_equality', exampleCount: 4, control: side, candidate: side, scoreDelta: 0, costDelta: 0, recommendation: 'keep_control', recommendationReasonCode: 'within_noise' },
+    }
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/experiments') return { experiments: [experiment] }
+      if (path === '/eval/datasets') return { datasets: [] }
+      return {}
+    })
+    await page.viewport(375, 812)
+    render(<ExperimentsPanel />)
+
+    ;(await screen.findByRole('button', { name: /Narrow/ })).click()
+    const card = await screen.findByTestId('experiment-detail')
+    expect(card.getBoundingClientRect().right).toBeLessThanOrEqual(375)
   })
 })

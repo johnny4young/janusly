@@ -17,7 +17,10 @@ Every tool is tenant-scoped in process and passes the same authority envelope:
 
 Tool requests are explicitly bounded before business parsing and every result
 passes a final 256000-byte fail-closed response gate. Expected errors are
-secret-scrubbed and truncated. Individual projections remain substantially
+secret-scrubbed and truncated. A call rejected before any handler runs, for an
+unknown tool name or a schema violation, still fails closed, is denial-rate
+limited and is audited with a fixed reason; the caller additionally receives the
+tool name and the schema violation, which `tools/list` already exposes. Individual projections remain substantially
 smaller where their contract permits it; the global gate is a backstop, not a
 pagination substitute.
 
@@ -25,17 +28,31 @@ The permission ceiling is validated before database access or background workers
 start. An unknown entry rejects the entire ceiling with a key-only error; invalid
 input is never echoed to logs. Omitted permissions retain the read-only default.
 
+The list tools (`workflows.list`, `runs.list`, `dlq.list`) page by keyset:
+`limit` defaults to 20 and must be at most 100, and `cursor` must be a
+`nextCursor` returned by the previous page. Unlike the HTTP lists, which fall
+back to the first page, MCP rejects a malformed cursor or an out-of-range
+limit so an agent cannot loop on page one.
+
+`dlq.redrive` revives the run on its original workflow version. Its result
+reports that version and the workflow's latest one; when they differ it adds a
+hint to start a new run by `workflowId`, because a fix saved after the failure
+does not apply to the revived run.
+
 Consent never grants a permission missing from the service-account ceiling.
 Long-running operations return durable run IDs that clients poll; the server
 does not maintain another task store.
 
 ## Catalog
 
-The stable catalog contains 15 tools:
+The stable catalog contains 23 tools:
 
-- workflow: `workflows.list`, `workflows.assure`, `workflows.propose`,
-  `workflows.save`;
-- run: `runs.list`, `runs.status`, `runs.inspect`, `runs.start`;
+- authoring: `catalog.describe`, `workflows.validate`;
+- workflow: `workflows.list`, `workflows.get`, `workflows.assure`,
+  `workflows.propose`, `workflows.save`, `workflows.rollback`,
+  `workflows.deactivate`, `workflows.reactivate`;
+- run: `runs.list`, `runs.status`, `runs.inspect`, `runs.output`,
+  `runs.start`, `runs.cancel`;
 - dead letter: `dlq.list`, `dlq.redrive`;
 - operations: `operations.brief`;
 - semantic recovery: `recovery.cases.inspect`,
@@ -55,8 +72,32 @@ the composite `recovery.cases.diagnose` tool for candidate creation, DLQ
 inspection maps to `dlq.list`, and human-only approval actions are omitted.
 `workflows.propose` compiles a bounded Intent Brief and binds either a
 caller draft or the provider-free template to the exact tenant capability
-catalog. Its result contains node id/type summaries and assurance evidence,
-not the complete DAG or node configuration.
+catalog. Its result contains node id/type summaries and assurance evidence.
+With `includeDocument: true` it also returns the bound draft, scrubbed of
+secret-shaped literals, so an agent can validate and save it. The draft is the
+caller's own document or a template filled with capability names the catalog
+already exposes; it is never a saved workflow.
+
+`catalog.describe` lets an agent author without repository docs. The index and
+the `nodes`, `tools`, `triggers` and `subworkflows` sections require
+`workflows.read`; `nodes` gives the document shape and a validated example per
+executable step type, and `tools` lists names unless `tool` selects one entry
+with its input fields. The `credentials` section requires `credentials.read`
+and returns credential names, kinds and status plus exposed external MCP tools,
+never secret material.
+
+`workflows.validate` (`workflows.read`) runs the same structural gate as
+`workflows.save`, plus readiness, and saves nothing. Tenant bindings, whose
+alternatives name credentials, are added only when the ceiling also holds
+`credentials.read`. Every
+issue carries a message and a suggestion. `workflows.save` and `runs.start`
+return the same JSON report as their `isError` text when they reject a
+document, so one call shows every problem.
+
+`runs.start` accepts either a document or a `workflowId`. A `workflowId` runs
+the active workflow's latest immutable version, bound exactly as if that
+document had been sent. `idempotencyKey` shares the HTTP start's per-tenant key
+space: a retry with the same key returns the first run with `replayed: true`.
 
 `workflows.save` calls the same canonical atomic engine append as HTTP. It does
 not allocate `MAX(version)+1` independently, persist raw caller JSON, or skip
@@ -90,6 +131,23 @@ types. Recovery inspection withholds case message/details, transition reasons,
 artifact payloads, candidate output/rationale/evidence, and every approval
 grant. This makes the surface useful without turning MCP into an alternate
 unbounded evidence or workflow-export API.
+
+`workflows.get` (`workflows.read`) and `runs.output` (`runs.read`) are the two
+tools that put saved tenant data into a model's context. `workflows.get`
+returns one active workflow's document, either the latest or an exact version,
+plus up to 20 versions and its schedules with `nextFireAt`. `runs.output`
+returns a run's declared output and its steps' outputs. Both remove
+secret-shaped literals before returning, but that removal is shape-based: a
+secret written in clear text in an unusual format, or business data in a step
+output, reaches the model as is. Each output value is bounded to 32000 bytes and
+replaced by its size beyond that. `workflows.assure`, `runs.inspect` and the
+recovery tools keep their withheld projections.
+
+`workflows.rollback`, `workflows.deactivate` and `workflows.reactivate`
+(`workflows.write`) and `runs.cancel` (`runs.cancel`) call the same engine
+operations as the HTTP rollback, trash, restore and cancel routes. They are
+business writes, so they also need write consent, and deactivate and cancel are
+annotated destructive.
 
 Never expose credential material, identity secrets, organization-wide security
 settings, or unbounded raw evidence through MCP.

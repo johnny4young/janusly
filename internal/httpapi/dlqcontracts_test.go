@@ -2,9 +2,13 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/contract"
 	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -121,5 +125,68 @@ func TestDLQResolveManifestRequiresAffirmativeReceipt(t *testing.T) {
 		if err := schema.Validate(value); err == nil {
 			t.Fatalf("invalid receipt accepted: %v", value)
 		}
+	}
+}
+
+func TestCloseReasonBoundMatchesContract(t *testing.T) {
+	for _, route := range contract.Routes {
+		if route.Method != "POST" || route.Path != "/v1/dlq/resolve" {
+			continue
+		}
+		reason := route.Request["properties"].(map[string]any)["reason"].(map[string]any)
+		if reason["maxLength"] != closeReasonMaxRunes {
+			t.Fatalf("contract maxLength %v, handler %d", reason["maxLength"], closeReasonMaxRunes)
+		}
+		return
+	}
+	t.Fatal("route not in the manifest")
+}
+
+func TestReadCloseReason(t *testing.T) {
+	full := strings.Repeat("é", closeReasonMaxRunes)
+	valid := []struct {
+		name string
+		raw  any
+		want string
+	}{
+		{"absent", nil, ""},
+		{"trimmed", "  refunded by hand\n", "refunded by hand"},
+		{"multiline", "refunded\n\tby hand", "refunded\n\tby hand"},
+		{"limit counts characters, not bytes", full, full},
+	}
+	for _, tc := range valid {
+		t.Run(tc.name, func(t *testing.T) {
+			got, bad := readCloseReason(tc.raw)
+			if bad != nil || got != tc.want {
+				t.Fatalf("got %q, rejection %+v", got, bad)
+			}
+		})
+	}
+	secret := "do-not-echo"
+	invalid := []struct {
+		name string
+		raw  any
+	}{
+		{"empty", ""},
+		{"blank", " \n\t "},
+		{"over the limit", secret + strings.Repeat("x", closeReasonMaxRunes)},
+		{"NUL cannot reach jsonb", secret + "\x00"},
+		{"control character", secret + "\x1b[2J"},
+		{"number", 7},
+		{"array", []any{secret}},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			_, bad := readCloseReason(tc.raw)
+			if bad == nil {
+				t.Fatal("expected a rejection")
+			}
+			if bad.status != http.StatusBadRequest {
+				t.Fatalf("status %d", bad.status)
+			}
+			if strings.Contains(fmt.Sprintf("%+v", *bad), secret) {
+				t.Fatalf("rejection echoes the reason: %+v", *bad)
+			}
+		})
 	}
 }

@@ -15,12 +15,66 @@ impact attribution, and feedback.
   Savepoint recovery failures abort completion rather than claiming success.
 - Replay claims are compare-and-set and bound to the exact failed task.
 - Validation replay suppresses external write effects.
+- A replay campaign preview lists, per eligible entry, the steps that may change
+  external state when the failed step runs again: that step and everything
+  downstream of it in the run's snapshot, including branches the run may not
+  take. It is the classifier rerun from a step uses, so the two previews cannot
+  disagree: write-side tools, tools the registry does not know, non-read HTTP
+  methods, MCP tools, subworkflows and write-enabled agents. It reads what a step
+  can do, not what it will do. Without a readable snapshot, or past the bound on
+  distinct workflows parsed in one preview, `effectsKnown` is false and
+  `sideEffect` true, never a silent zero. Entries the rerun lineage will refuse
+  stay in the cohort, marked `supersededByRerun`, and settle as failed.
+- A replayed campaign item means its redrive committed, before the node runs.
+  Nothing tracks whether the run then recovered, so the job's copy says replays
+  started and each run's outcome lives in Activity. Item errors reach the client
+  as a stable `errorCode`; the raw text stays in the database and the audit trail.
+- Rerun from a step (`run-model.md`) is a new linked production run, unlike a
+  redrive, which revives the failed node in place. It claims no dead letter and
+  credits no recovery impact, and a step it has run again can no longer be
+  redriven or replayed.
 - Circuit breaking pauses every run entry point and requires explicit resume.
 - Buffered event triggers resume oldest-first; missed schedule ticks are not
   synthesized.
 - Recovery impact is credited only after generation-bound terminal success.
 - AI patches are suggestions. Deterministic evidence, permissions, and
-  operator action retain authority.
+  operator action retain authority. The Suggest fix dialog reads AI availability
+  from the bootstrap `GET /ai/health`, with no request of its own. Without a key
+  it leads with Replay in Lab when the operator has `runs.start`, stacked over
+  the dialog so closing it returns there, and the deterministic fallback envelope stays reachable as Review evidence. An
+  unreadable status claims no connection and keeps the suggestion action. Its
+  stage rail covers only the steps the dialog has, Patch, Validate and Apply, and
+  Validate reads done only after a sandbox pass; errors show no rail.
+- A run investigation (`GET /v1/runs/{runId}/investigation`, `runs.read`) is
+  deterministic and stores nothing. It evaluates four causes for the run's
+  earliest failed step, in a fixed order, from rows the organization already
+  has; missing evidence is always inconclusive, and each cause cites only the
+  run that decided it.
+  Network is validated when the error classifies as `network_timeout`, ruled out
+  when it classifies as another known category, and inconclusive otherwise; it
+  counts the same error on the same step across at most 200 runs of the same
+  workflow in the 30 days before the failure.
+  Credential is validated by a `secret_missing` category or an HTTP 401 or 403
+  signature (named as expired when a step credential expired before the
+  failure). An expired credential with any other error is reported but stays
+  inconclusive. It is ruled out only when the step type's authoring bindings
+  name every credential it can use, they name none, and the config holds no
+  secret template; AI, MCP and subworkflow steps are never ruled out.
+  Upstream reads the status sources the run's saved version watches. Only the
+  latest reading is stored, so it is never ruled out: it is validated only by a
+  successful degraded reading taken within twice the check interval (at least
+  five minutes) of the failure, and a reading left by a failed poll counts as no
+  reading.
+  Change looks at at most 200 runs of the workflow before the failure. It is
+  ruled out when the same saved version succeeded earlier and the workflow uses
+  nothing that changes outside a version (credentials, secret templates, MCP
+  connections, AI settings, child workflows); it is inconclusive when it does,
+  validated when only an older version succeeded, and inconclusive for unsaved
+  drafts or without an earlier success.
+  The conclusion is the first validated cause. The single action names the
+  open dead letter and is returned only with the same permissions the Recover
+  queue requires for Suggest fix; it navigates and never executes. No credential
+  value, prompt or tool payload is read into the response.
 - Playbooks require exact workflow/signature matching and fresh validation.
 - Failure signatures normalize identically in `internal/signature` and
   `web/src/lib/error-signature.ts`. The failure detail derives its summary, cause

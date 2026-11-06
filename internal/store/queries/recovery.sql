@@ -31,6 +31,8 @@ WHERE dl.org_id = $1
              nullif(r.input_json->'workflow'->>'id', ''),
              r.workflow_version_id
            ) = sqlc.narg(filter_workflow_id)))
+  AND (sqlc.narg(before_created_at)::timestamptz IS NULL
+       OR (dl.created_at, dl.id) < (sqlc.narg(before_created_at)::timestamptz, sqlc.narg(before_id)::text))
 ORDER BY dl.created_at DESC, dl.id DESC
 LIMIT sqlc.arg(page_limit);
 
@@ -268,6 +270,11 @@ SET state = sqlc.arg(to_state), revision = revision + 1,
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id)
   AND state = sqlc.arg(from_state) AND revision = sqlc.arg(expected_revision)
 RETURNING *;
+
+-- name: GetLatestRecoveryCaseTransitionAt :one
+SELECT coalesce(max(occurred_at), 'epoch'::timestamptz)::timestamptz AS occurred_at
+FROM recovery_case_transitions
+WHERE org_id = $1 AND case_id = $2;
 
 -- name: InsertRecoveryCaseTransition :execrows
 INSERT INTO recovery_case_transitions (id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at)

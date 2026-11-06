@@ -12,8 +12,9 @@ export default defineConfig({
   // Browser discovery must not restart after encountering a runtime schema
   // for the first time. A reload can strand files at "0 test" and invalidate
   // the entire run, so pre-bundle the production browser contract entrypoint.
+  // Pre-bundle what tests import lazily, so Vite never reloads mid-run.
   optimizeDeps: {
-    include: ['zod/mini'],
+    include: ['zod/mini', 'react-dom/client'],
   },
   // Mirror the dev/build plugin set so any test that imports `index.css` (or a
   // styled component that depends on the workflow palette tokens) sees the

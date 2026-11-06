@@ -321,6 +321,47 @@ func TestHTTPMutatingFailureDoesNotRetry(t *testing.T) {
 	}
 }
 
+func TestHTTPConnectionFailureRetriesOnlySafeMethods(t *testing.T) {
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	closed := httptest.NewServer(http.NotFoundHandler())
+	target := closed.URL
+	closed.Close()
+
+	cases := []struct {
+		method       string
+		wantAttempts int
+		wantWrite    bool
+	}{
+		{method: "GET", wantAttempts: 3},
+		{method: "POST", wantAttempts: 1, wantWrite: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method, func(t *testing.T) {
+			ctx, pool, eng, org := newHarness(t)
+			doc := `{"nodes":[{"id":"call","type":"http","config":{
+				"url":"` + target + `","method":"` + tc.method + `",
+				"retry":{"maxAttempts":3,"delayMs":1,"retryOn":["network"]}
+			}}],"edges":[]}`
+			runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
+			if err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			runDispatcherToTerminal(t, eng, pool, runID, "failed")
+
+			var attempts int
+			var errorJSON string
+			if err := pool.QueryRow(ctx, `SELECT attempts, error_json::text FROM run_nodes
+				WHERE run_id=$1 AND node_id='call'`, runID).Scan(&attempts, &errorJSON); err != nil {
+				t.Fatal(err)
+			}
+			if attempts != tc.wantAttempts || strings.Contains(errorJSON, `"writeSide": true`) != tc.wantWrite ||
+				!strings.Contains(errorJSON, "connection refused") {
+				t.Fatalf("attempts=%d error=%s", attempts, errorJSON)
+			}
+		})
+	}
+}
+
 func TestParallelForkJoinAssemblesLabelledBranches(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
 	doc := `{"nodes":[

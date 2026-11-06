@@ -37,7 +37,8 @@ field, are called without it.
 - `POST /ai/explain-run`
 
 The React AI Studio consumes these routes and clearly labels provider-backed
-and fallback results.
+and fallback results. The Home Operator panel consumes the two explain routes
+with the same labels, and cites a run only from the `report` the response returns.
 
 ## Registered authoring examples
 
@@ -95,6 +96,19 @@ inconclusive. Janusly also refuses to recommend a candidate that produced more
 failed outputs than the control. A canceled HTTP request cannot strand a run in
 `running`: terminal persistence uses a separate five-second finalization
 context and records the failure explicitly.
+
+Setup has three steps: Dataset, Control vs candidate, and Scorer and run. A
+disabled Run comparison names the first thing still missing.
+
+The comparison shows the aggregates in each summary, with either arm as the
+baseline. The recommendation always compares candidate with control. Failed
+examples add no cost or latency, so those two metrics get no better or worse
+verdict when the arms finished different counts, and cost gets none when the
+arms measured cost on different call counts. A judge fallback scores by token
+overlap and records no judge latency, so score and latency get no verdict then.
+Score changes under the recommendation's 0.05 floor get no verdict. A cost with
+no measured calls stays unknown and is never compared. Summaries hold aggregates only, so a
+per-example view needs per-example outputs and scores to be persisted first.
 
 See [AI pipeline architecture](architecture/ai-pipeline.md) and
 [memory policy](memory-policy.md).

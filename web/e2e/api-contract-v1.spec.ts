@@ -1,4 +1,4 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openReports, openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -159,9 +159,8 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
     observedReadPaths.add(path)
   })
 
-  await page.goto('/')
-  await page.getByTestId('home-insights-toggle').click()
-  const metricStrip = page.getByTestId('recovery-center-metric-strip')
+  await openReports(page)
+  const metricStrip = page.getByTestId('reports-metric-strip')
   await expect(metricStrip).toBeVisible()
   await captureElement(metricStrip, 'web-en-v1-recovery-metrics')
 

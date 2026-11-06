@@ -72,6 +72,10 @@ type Input struct {
 	// DryRun marks a validation (sandbox) execution: write-side tools and
 	// sensitive http methods SKIP instead of producing external effects.
 	DryRun bool
+	// ApprovalRequired reports the org's approval policy for a tool name.
+	// Only ApprovedTool, already approved at the tool-step gate, may run.
+	ApprovalRequired func(name string) bool
+	ApprovedTool     string
 }
 
 // MemoryDeps are thin closures over the memory substrate — the vector

@@ -9,13 +9,19 @@ import { RunsPanel } from './RunsPanel'
 import type { RunNode, RunSummary } from '../types'
 import { useWorkflowStore } from '../store'
 
-vi.mock('./DeadLettersPanel', () => ({ DeadLettersPanel: () => null }))
+const deadLettersProps = vi.hoisted(() => vi.fn())
+vi.mock('./DeadLettersPanel', () => ({
+  DeadLettersPanel: (props: unknown) => {
+    deadLettersProps(props)
+    return null
+  },
+}))
 vi.mock('./RunExplainChat', () => ({ RunExplainChat: () => null }))
 vi.mock('./UsageSummaryCard', () => ({ UsageSummaryCard: () => null }))
 vi.mock('./RunStreamChip', () => ({ RunStreamChip: () => <span>Live</span> }))
 vi.mock('./ReplayLabDialog', () => ({ ReplayLabDialog: () => null }))
 vi.mock('./ReplayLabForkDialog', () => ({ ReplayLabForkDialog: () => null }))
-vi.mock('./ReportDeliveryDialog', () => ({ ReportDeliveryDialog: () => null }))
+vi.mock('./ReportDeliveryDialog', () => ({ ReportDeliveryDialog: () => <div role="dialog" aria-label="Send run report" /> }))
 vi.mock('./HumanFormDialog', () => ({ HumanFormDialog: () => null }))
 vi.mock('../hooks/useVirtualList', () => ({
   useVirtualList: ({ items }: { items: unknown[] }) => ({
@@ -38,6 +44,17 @@ const handlers = {
   onResolveDeadLetter: vi.fn(),
 }
 
+describe('recovery run links', () => {
+  it('offers a run link only to an operator who can read runs', () => {
+    const { unmount } = render(<RunsPanel {...handlers} mode="recovery" runs={[]} workflows={[]} runNodes={[]} usage={{}} />)
+    expect(deadLettersProps.mock.lastCall?.[0]).toMatchObject({ onOpenRun: handlers.onOpenRun })
+    unmount()
+
+    render(<RunsPanel {...handlers} mode="recovery" canReadRuns={false} runs={[]} workflows={[]} runNodes={[]} usage={{}} />)
+    expect(deadLettersProps.mock.lastCall?.[0]).toMatchObject({ onOpenRun: undefined })
+  })
+})
+
 describe('selected-run outcome evidence', () => {
   it.each([
     ['semantic_violation', 'Semantic failure'],
@@ -59,6 +76,17 @@ describe('selected-run outcome evidence', () => {
 
     expect(screen.getByTestId('active-run-validation-evidence')).toHaveTextContent('Evidence unavailable')
     expect(screen.getByTestId('run-validation-evidence-run-validation')).toHaveTextContent('Evidence unavailable')
+  })
+
+  it('marks a run that used pinned or mocked data', () => {
+    const run: RunSummary = { id: 'run-draft', status: 'succeeded', replayMode: 'validation', validationEvidenceLevel: 'writes_skipped', inputJson: { draftTest: { pins: {} } } }
+    const { unmount } = render(<RunsPanel {...handlers} activeRunId={run.id} runs={[run]} workflows={[]} runNodes={[]} usage={{}} />)
+    expect(screen.getByTestId('active-run-test-data')).toHaveTextContent('Test data')
+    expect(screen.getByTestId('active-run-validation-evidence')).toHaveTextContent('External writes skipped')
+    unmount()
+
+    render(<RunsPanel {...handlers} activeRunId="run-plain" runs={[{ id: 'run-plain', status: 'succeeded', inputJson: {} }]} workflows={[]} runNodes={[]} usage={{}} />)
+    expect(screen.queryByTestId('active-run-test-data')).toBeNull()
   })
 })
 
@@ -183,12 +211,54 @@ describe('<RunsPanel /> observability', () => {
     expect(screen.getByTestId('run-overview')).toHaveTextContent('5s')
     expect(screen.getByRole('button', { name: 'Copy trace ID' })).toBeInTheDocument()
     expect(screen.getByTestId('run-trigger-input')).toHaveTextContent('inv-42')
-    fireEvent.click(screen.getByRole('button', { name: 'View timeline' }))
-    expect(useWorkflowStore.getState().activeTab).toBe('reasoning')
   })
 
-  it('delegates timeline navigation when hosted by the Runs workspace', () => {
-    const onViewTimeline = vi.fn()
+  it('keeps the data row and every run action in the sheet header', () => {
+    const onClose = vi.fn()
+    const dropped = vi.fn()
+    render(
+      <RunsPanel
+        {...handlers}
+        activeRunId="run-1234567890"
+        workflows={[]}
+        runs={[{
+          id: 'run-1234567890',
+          status: 'succeeded',
+          workflowVersionId: 'version-abcdef1234',
+          traceId: 'trace-abcdef1234',
+          createdAt: '2026-07-12T10:00:00.000Z',
+          outputJson: { total: 42 },
+          parentRunId: 'source-run-id-1',
+        }]}
+        runNodes={[]}
+        usage={{}}
+        onClose={onClose}
+        renderSheet={({ header, overview }) => {
+          dropped(overview)
+          return header
+        }}
+      />,
+    )
+
+    const header = screen.getByTestId('run-overview')
+    for (const fact of ['Status', 'Duration', 'Started', 'Version reference', 'Trace ID', 'Run ID']) {
+      expect(header).toHaveTextContent(fact)
+    }
+    expect(screen.getByTestId('run-sheet-status')).toHaveTextContent('Done')
+    expect(screen.getByTestId('active-run-replay-in-lab')).toBeInTheDocument()
+    expect(screen.getByTestId('run-sheet-export')).toHaveAccessibleName(/run-1234567890/)
+    expect(screen.getByTestId('run-sheet-send')).toHaveAccessibleName(/run-1234567890/)
+    fireEvent.click(screen.getByTestId('run-sheet-source-run'))
+    expect(handlers.onOpenRun).toHaveBeenCalledWith('source-run-id-1')
+    fireEvent.click(screen.getByTestId('run-sheet-close'))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    // Outputs belong to the overview slot, and a finished run offers no cancel.
+    expect(header).not.toHaveTextContent('Workflow output')
+    expect(screen.queryByRole('button', { name: 'Cancel run' })).not.toBeInTheDocument()
+    expect(dropped).toHaveBeenCalled()
+  })
+
+  it('opens the sheet dialogs from the header while another tab replaces the overview', () => {
     render(
       <RunsPanel
         {...handlers}
@@ -197,14 +267,30 @@ describe('<RunsPanel /> observability', () => {
         runs={[{ id: 'run-1', status: 'succeeded' }]}
         runNodes={[]}
         usage={{}}
-        onViewTimeline={onViewTimeline}
+        renderSheet={({ header }) => header}
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'View timeline' }))
+    fireEvent.click(screen.getByTestId('run-sheet-send'))
 
-    expect(onViewTimeline).toHaveBeenCalledTimes(1)
-    expect(useWorkflowStore.getState().activeTab).toBe('runs')
+    expect(screen.getByRole('dialog', { name: 'Send run report' })).toBeInTheDocument()
+  })
+
+  it('offers cancel only while the run can still stop', () => {
+    render(
+      <RunsPanel
+        {...handlers}
+        activeRunId="run-1"
+        workflows={[]}
+        runs={[{ id: 'run-1', status: 'running' }]}
+        runNodes={[]}
+        usage={{}}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel run' }))
+
+    expect(handlers.onCancelActiveRun).toHaveBeenCalledTimes(1)
   })
 
   it('labels approval and timer waits with actionable copy and timing', () => {
@@ -265,6 +351,76 @@ describe('<RunsPanel /> observability', () => {
     expect(screen.getByRole('button', { name: 'Resume now' })).toBeInTheDocument()
     expect(screen.getByTestId('waiting-step-child_flow')).toHaveTextContent('Resumes automatically when the subworkflow finishes')
     expect(screen.getByTestId('waiting-step-child_flow').querySelector('button')).not.toBeInTheDocument()
+  })
+
+  it('shows the exact tool call and records a bound decision', () => {
+    const onApproveNode = vi.fn()
+    const node: RunNode = {
+      nodeId: 'snooze',
+      status: 'waiting',
+      stateJson: {
+        waiting: {
+          kind: 'tool_approval',
+          reason: 'Waiting for human approval',
+          approvalId: 'approval-1',
+          tool: 'pagerduty.incident.snooze',
+          params: { incident_id: 'Q1X2YZ', token: '[REDACTED]' },
+          paramsDigest: 'digest-1',
+          maskedPaths: ['token'],
+          requesterIds: ['starter'],
+          eligibleApprovers: 1,
+          requiredApprovals: 1,
+          deadlineAt: new Date(Date.now() + 120_000).toISOString(),
+        },
+      },
+    }
+    const { rerender } = render(
+      <RunsPanel {...handlers} onApproveNode={onApproveNode} mode="recovery" activeRunId="run-1" workflows={[]}
+        runs={[{ id: 'run-1', status: 'running' }]} runNodes={[node]} usage={{}} />,
+    )
+
+    const card = screen.getByTestId('waiting-step-snooze')
+    expect(card).toHaveAttribute('data-wait-kind', 'tool_approval')
+    expect(card).toHaveTextContent('Tool approval')
+    expect(screen.getByTestId('tool-approval-tool-snooze')).toHaveTextContent('pagerduty.incident.snooze')
+    expect(screen.getByTestId('tool-approval-params-snooze')).toHaveTextContent('"incident_id": "Q1X2YZ"')
+    expect(screen.getByTestId('tool-approval-params-snooze')).toHaveTextContent('[REDACTED]')
+    expect(screen.getByTestId('tool-approval-masked-snooze')).toHaveTextContent('Hidden values in this call: token')
+    expect(screen.getByTestId('tool-approval-policy-snooze')).toHaveTextContent('Self-approvalNot allowed')
+    expect(card).toHaveTextContent('Decision due in')
+    expect(screen.queryByRole('button', { name: 'Approve and resume' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('tool-approval-deny-snooze'))
+    fireEvent.click(screen.getByTestId('tool-approval-approve-snooze'))
+    expect(onApproveNode.mock.calls).toEqual([
+      ['snooze', { approvalId: 'approval-1', paramsDigest: 'digest-1', decision: 'deny' }],
+      ['snooze', { approvalId: 'approval-1', paramsDigest: 'digest-1', decision: 'approve' }],
+    ])
+
+    rerender(
+      <RunsPanel {...handlers} onApproveNode={onApproveNode} canStartRuns={false} mode="recovery" activeRunId="run-1"
+        workflows={[]} runs={[{ id: 'run-1', status: 'running' }]} runNodes={[node]} usage={{}} />,
+    )
+    expect(screen.queryByTestId('tool-approval-approve-snooze')).not.toBeInTheDocument()
+    expect(screen.getByTestId('tool-approval-params-snooze')).toBeInTheDocument()
+
+    // The person who started the run sees the request but cannot decide it.
+    useWorkflowStore.setState({ userId: 'starter' })
+    rerender(
+      <RunsPanel {...handlers} onApproveNode={onApproveNode} mode="recovery" activeRunId="run-1"
+        workflows={[]} runs={[{ id: 'run-1', status: 'running' }]} runNodes={[node]} usage={{}} />,
+    )
+    expect(screen.queryByTestId('tool-approval-approve-snooze')).not.toBeInTheDocument()
+
+    const waiting = node.stateJson?.waiting as Record<string, unknown>
+    const nobody = { ...node, stateJson: { waiting: { ...waiting, eligibleApprovers: 0 } } }
+    useWorkflowStore.setState({ userId: 'reviewer' })
+    rerender(
+      <RunsPanel {...handlers} onApproveNode={onApproveNode} mode="recovery" activeRunId="run-1"
+        workflows={[]} runs={[{ id: 'run-1', status: 'running' }]} runNodes={[nobody]} usage={{}} />,
+    )
+    expect(screen.getByTestId('tool-approval-no-eligible-snooze')).toHaveTextContent('No eligible approver')
+    expect(screen.queryByTestId('tool-approval-approve-snooze')).not.toBeInTheDocument()
   })
 
   it('mounts the owner live region before announcing an SSE escalation update', () => {

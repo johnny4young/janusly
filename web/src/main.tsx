@@ -7,12 +7,15 @@
 
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import { captureAuthCallback, markAuthCallbackFailed, passwordSetupUser, pendingAuthCallbackToken } from './auth-callback'
 import { bootstrapI18n, FALLBACK_LOCALE, getStoredLanguage, resolveAppLanguage } from './i18n'
 import { bootTheme } from './theme'
 import { ConfirmProvider } from './components/ConfirmDialog'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { PanelErrorFallback } from './components/PanelErrorFallback'
 import './index.css'
+
+captureAuthCallback()
 
 // Resolve the user's preferred locale BEFORE React mounts so the very first
 // render (boot screen, login form) is already in the right language. The
@@ -47,6 +50,16 @@ async function mountApp(): Promise<void> {
     await bootstrapI18n(FALLBACK_LOCALE)
   }
 
+  const root = createRoot(document.getElementById('root')!)
+  if (pendingAuthCallbackToken() || passwordSetupUser()) {
+    try {
+      const { settleAuthCallback } = await import('./components/AuthCallbackGate')
+      await settleAuthCallback(root)
+    } catch {
+      markAuthCallbackFailed()
+    }
+  }
+
   const { default: App } = await appModulePromise
   // `<App>` is dynamically imported so the entry chunk stays lean. The React
   // Flow provider is deliberately NOT mounted here — it lives inside the lazy
@@ -56,7 +69,7 @@ async function mountApp(): Promise<void> {
   // path, so the Recovery Center landing downloads zero React Flow. The
   // canvas wrapper stays mounted across every non-home tab, so the viewport
   // (zoom / pan) still survives `inspector → operations → inspector`.
-  createRoot(document.getElementById('root')!).render(
+  root.render(
     <React.StrictMode>
       {/* Panels and the canvas have their own boundaries; this one covers the
           shell chrome around them (sidebar, badges, banners, status bar), which

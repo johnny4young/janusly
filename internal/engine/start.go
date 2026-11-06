@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"strings"
 	"time"
@@ -104,6 +105,9 @@ type StartInput struct {
 	// Input is the caller's payload; nil means none was supplied.
 	Input     any
 	CreatedBy string
+	// ServicePrincipal names the service token that started the run; such a
+	// run has no person behind it for tool-approval purposes.
+	ServicePrincipal string
 	// ReplayMode marks a validation replay ("validation"): write-side
 	// skips apply and the ai node never dials the SDK. Empty = production.
 	ReplayMode string
@@ -137,6 +141,10 @@ type StartInput struct {
 	// (subworkflow starts). Empty = a fresh id is stamped, so every root
 	// run gets one up front — the contract start-run posture.
 	TraceID string
+	// Rerun, when set, queues only its node, seeds the rest and links the source.
+	Rerun *RerunSeed
+	// DraftTest carries a validation run's pinned and mocked step outputs.
+	DraftTest *DraftTest
 }
 
 // ErrStartIdempotencyReplay reports a duplicate Idempotency-Key: the
@@ -202,10 +210,11 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	if _, present := workflowSnapshot["metadata"]; !present {
 		workflowSnapshot["metadata"] = map[string]any{"tags": []any{}}
 	}
-	inputJSON, err := json.Marshal(map[string]any{
-		"workflow": workflowSnapshot,
-		"input":    input,
-	})
+	envelope := map[string]any{"workflow": workflowSnapshot, "input": input}
+	if in.DraftTest != nil {
+		envelope["draftTest"] = in.DraftTest
+	}
+	inputJSON, err := json.Marshal(envelope)
 	if err != nil {
 		return "", fmt.Errorf("marshal run input: %w", err)
 	}
@@ -216,6 +225,14 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	}
 	for _, edge := range in.Workflow.Edges {
 		delete(roots, edge.To)
+	}
+	if in.Rerun != nil {
+		roots = map[string]bool{in.Rerun.NodeID: true}
+		in.ParentRunID, in.ParentNodeID, in.ParentLinkKind = in.Rerun.SourceRunID, in.Rerun.NodeID, RerunLinkKind
+	}
+	stepScope := draftStepScope(in)
+	if stepScope != nil {
+		maps.DeleteFunc(roots, func(id string, _ bool) bool { return !stepScope[id] })
 	}
 
 	// Root span per run: a no-op without a registered provider.
@@ -234,6 +251,36 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(e.wrapTx(tx))
 
+	if in.Rerun != nil {
+		// Redrive takes this lock before it looks for a rerun, so one of the two
+		// always sees the other and a failed write cannot run from both.
+		if err := q.AcquireRunCompletionLock(ctx, in.Rerun.SourceRunID); err != nil {
+			return "", fmt.Errorf("lock rerun source: %w", err)
+		}
+		source, err := q.GetRunHeader(ctx, in.Rerun.SourceRunID)
+		if err != nil {
+			return "", fmt.Errorf("read rerun source: %w", err)
+		}
+		switch source.Status {
+		case "succeeded", "failed", "cancelled", "timed_out":
+		default:
+			return "", ErrRerunSourceOpen
+		}
+		// A redrive that settled again leaves the run terminal but the plan stale.
+		selected, err := q.GetRunNode(ctx, store.GetRunNodeParams{RunID: in.Rerun.SourceRunID, NodeID: in.Rerun.NodeID})
+		if err != nil {
+			return "", fmt.Errorf("read rerun step: %w", err)
+		}
+		if rerunRowMoved(in.Rerun, selected) {
+			return "", ErrRerunSourceOpen
+		}
+	}
+
+	evidenceLevel, triggerKind := "static", runTriggerKind(in.Input)
+	if in.DraftTest != nil {
+		// A draft test proves nothing and never reads as a schedule or webhook fire.
+		evidenceLevel, triggerKind = DraftTestEvidence, pgtype.Text{}
+	}
 	traceID := in.TraceID
 	if traceID == "" {
 		traceID = uuid.NewString()
@@ -246,7 +293,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		// A validation replay carries its evidence level from birth: the
 		// sandbox produced STATIC evidence (write sides skipped), and the
 		// contract ladder reads this to decide what the run may prove.
-		ValidationEvidenceLevel: pgtype.Text{String: "static", Valid: in.ReplayMode == "validation"},
+		ValidationEvidenceLevel: pgtype.Text{String: evidenceLevel, Valid: in.ReplayMode == "validation"},
 		ParentRunID:             pgtype.Text{String: in.ParentRunID, Valid: in.ParentRunID != ""},
 		ParentNodeID:            pgtype.Text{String: in.ParentNodeID, Valid: in.ParentNodeID != ""},
 		ParentLinkKind:          pgtype.Text{String: in.ParentLinkKind, Valid: in.ParentLinkKind != ""},
@@ -254,9 +301,12 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		WorkflowRolloutVariant:  pgtype.Text{String: in.WorkflowRolloutVariant, Valid: in.WorkflowRolloutVariant != ""},
 		TraceID:                 pgtype.Text{String: traceID, Valid: true},
 		WorkflowID:              runWorkflowID(in.Workflow, versionID),
-		TriggerKind:             runTriggerKind(in.Input),
+		TriggerKind:             triggerKind,
 	}); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
+	}
+	if err := recordRunActor(ctx, q, runID, "", "service", in.ServicePrincipal); err != nil {
+		return "", err
 	}
 
 	if in.IdempotencyKey != "" {
@@ -301,6 +351,12 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		}
 		if roots[node.ID] {
 			row.Status, row.Attempts = "queued", pgtype.Int4{Int32: 1, Valid: true}
+		} else if stepScope != nil && !stepScope[node.ID] {
+			row.Status, row.StateJson = "skipped", json.RawMessage(`{"skipped":{"reason":"outside_draft_step"}}`)
+		} else if in.Rerun != nil {
+			if seed, ok := in.Rerun.Nodes[node.ID]; ok {
+				row.Status, row.StateJson = seed.Status, seed.State
+			}
 		}
 		nodeRows = append(nodeRows, row)
 	}
@@ -312,6 +368,12 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	if in.WorkflowRolloutID != "" {
 		startedFields["workflowRolloutId"] = in.WorkflowRolloutID
 		startedFields["workflowRolloutVariant"] = in.WorkflowRolloutVariant
+	}
+	if in.Rerun != nil {
+		startedFields["sourceRunId"], startedFields["rerunNodeId"] = in.Rerun.SourceRunID, in.Rerun.NodeID
+	}
+	if in.DraftTest != nil {
+		startedFields["draftTest"] = "true"
 	}
 	startedPayload, _ := json.Marshal(startedFields)
 	startedAt := e.eventNow()

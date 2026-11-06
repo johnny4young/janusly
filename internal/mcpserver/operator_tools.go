@@ -34,6 +34,9 @@ type mcpWorkflowProposalArgs struct {
 	Brief          *authoring.IntentBrief `json:"brief,omitempty" jsonschema:"optional structured intent brief fields"`
 	Workflow       map[string]any         `json:"workflow,omitempty" jsonschema:"optional caller-authored Janusly workflow draft to bind; omitted uses the deterministic provider-free template"`
 	CatalogVersion string                 `json:"catalogVersion,omitempty" jsonschema:"optional catalog version previously inspected by the caller"`
+	// The draft is the caller's own document or a template bound to names the
+	// catalog already exposes, never a saved workflow.
+	IncludeDocument bool `json:"includeDocument,omitempty" jsonschema:"also return the bound draft document so it can be validated and saved; default false"`
 }
 
 type mcpRecoveryInspectArgs struct {
@@ -75,7 +78,7 @@ func registerOperatorTools(server *mcp.Server, deps Deps) {
 
 	mcp.AddTool(server, readTool(
 		"workflows.propose", "Propose workflow",
-		"Compile an intent brief and bind a provider-free or caller-supplied workflow draft to exact tenant capabilities. Returns a bounded summary, never a full DAG.",
+		"Compile an intent brief and bind a provider-free or caller-supplied workflow draft to exact tenant capabilities. Returns a bounded summary, plus the draft document when includeDocument is true.",
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args mcpWorkflowProposalArgs) (*mcp.CallToolResult, any, error) {
 		return deps.proposeWorkflow(ctx, args)
 	})
@@ -181,7 +184,11 @@ func (d Deps) proposeWorkflow(ctx context.Context, args mcpWorkflowProposalArgs)
 		})
 		bindings.Complete = false
 	}
-	return ok(mcpWorkflowProposalView(compiled, catalog, bindings, workflow, parseIssues, mode))
+	view := mcpWorkflowProposalView(compiled, catalog, bindings, workflow, parseIssues, mode)
+	if args.IncludeDocument && workflow != nil {
+		view["document"] = scrubSecretShapes(document)
+	}
+	return ok(view)
 }
 
 func mcpWorkflowProposalView(

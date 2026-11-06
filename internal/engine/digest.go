@@ -81,6 +81,7 @@ func (e *Engine) sendWeeklyDigest(ctx context.Context, orgID, leaseToken string)
 		"Janusly weekly digest\n\nLast 7 days:\n- Runs: %d (%d succeeded, %d failed, %d%% success)\n- Open failures awaiting recovery: %d\n\nOpen the Operations page for details. You receive this because your organization enabled the weekly digest (Settings > Organization > digest.weeklyEnabled).\n",
 		total, stats.Succeeded, stats.Failed, rate, stats.OpenDeadLetters)
 	var failures []string
+	cause := ""
 	for _, to := range pending {
 		if rows, renewErr := q.RenewWeeklyDigestLease(ctx, store.RenewWeeklyDigestLeaseParams{
 			OrgID: orgID, LeaseToken: leaseToken,
@@ -94,6 +95,9 @@ func (e *Engine) sendWeeklyDigest(ctx context.Context, orgID, leaseToken string)
 		if ok, _ := envelope["ok"].(bool); !ok {
 			message, _ := envelope["error"].(string)
 			failures = append(failures, fmt.Sprintf("%s: %s", to, message))
+			if code, _ := envelope["code"].(string); code != "" && cause == "" {
+				cause = code + ": " + message
+			}
 			continue
 		}
 		if rows, recordErr := q.RecordWeeklyDigestRecipient(ctx, store.RecordWeeklyDigestRecipientParams{
@@ -104,6 +108,10 @@ func (e *Engine) sendWeeklyDigest(ctx context.Context, orgID, leaseToken string)
 	}
 	if len(failures) > 0 || remaining > 0 {
 		reason := fmt.Sprintf("%d recipient(s) pending", len(failures)+remaining)
+		if cause != "" {
+			// Without the cause an admin cannot tell a policy hold from an outage.
+			reason += ": " + cause
+		}
 		return e.retryWeeklyDigest(ctx, q, orgID, leaseToken, fmt.Errorf("%s", reason))
 	}
 	rows, err := q.CompleteWeeklyDigest(ctx, store.CompleteWeeklyDigestParams{

@@ -109,6 +109,7 @@ function options(): AppCommandsOptions {
     permissions: ['workflows.read', 'workflows.write', 'ai.write'],
     projectedRuns: [],
     refreshPlatform: vi.fn(async () => undefined),
+    setCredentials: vi.fn(),
     projectRunSummary: vi.fn(),
     loadStatus: vi.fn(async () => undefined),
     runTransitionGuard: {} as AppCommandsOptions['runTransitionGuard'],

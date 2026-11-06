@@ -7,16 +7,13 @@ import './RecoveryAutomationDisclosure.css'
 const FailureClustersCard = lazy(() => import('./FailureClustersCard').then((module) => ({
   default: module.FailureClustersCard,
 })))
-const ReplayCampaignsCard = lazy(() => import('./ReplayCampaignsCard').then((module) => ({
-  default: module.ReplayCampaignsCard,
-})))
 const AutoHealingPendingCard = lazy(() => import('./AutoHealingPendingCard').then((module) => ({
   default: module.AutoHealingPendingCard,
 })))
 
 type RecoveryAutomationDisclosureProps = {
   canRecover: boolean
-  canCancelCampaign: boolean
+  canStartRuns: boolean
   canReadAutoHealing: boolean
   canDecideAutoHealing: boolean
 }
@@ -27,7 +24,7 @@ type RecoveryAutomationDisclosureProps = {
  */
 export function RecoveryAutomationDisclosure({
   canRecover,
-  canCancelCampaign,
+  canStartRuns,
   canReadAutoHealing,
   canDecideAutoHealing,
 }: RecoveryAutomationDisclosureProps) {
@@ -62,8 +59,7 @@ export function RecoveryAutomationDisclosure({
       {open && (
         <div id={contentId} className="we-recovery-automation__content">
           <Suspense fallback={<p className="helper-text">{t('dlq.automation.loading')}</p>}>
-            <FailureClustersCard canRecover={canRecover} />
-            <ReplayCampaignsCard canCancel={canCancelCampaign} />
+            <FailureClustersCard canRecover={canRecover} canStartRuns={canStartRuns} />
             {canReadAutoHealing && <AutoHealingPendingCard canDecide={canDecideAutoHealing} />}
           </Suspense>
         </div>

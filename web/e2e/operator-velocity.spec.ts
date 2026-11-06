@@ -153,6 +153,9 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
 
   await page.keyboard.press('Control+Enter')
   await expect(page.getByRole('alertdialog')).toBeVisible()
+  await expect(page.getByTestId('dlq-close-reason')).toBeFocused()
+  await expect(page.getByTestId('dlq-close-confirm')).toBeDisabled()
+  await page.keyboard.type('Accepted during triage')
   await page.getByTestId('dlq-close-confirm').click()
   await expect(page.getByText('Failure closed without recovery')).toBeVisible()
   await expect(thirdRow).toBeFocused()
@@ -194,7 +197,7 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
   await spanishDetail.getByRole('button', { name: 'Cerrar sin recuperar' }).click()
   const spanishClose = page.getByRole('alertdialog')
   await expect(spanishClose).toContainText('pérdidas aceptadas')
-  await expect(page.getByTestId('dlq-close-cancel')).toBeFocused()
+  await expect(page.getByTestId('dlq-close-reason')).toBeFocused()
   await captureElement(spanishClose, 'web-es-accepted-loss-confirmation')
   await page.keyboard.press('Escape')
   await expect(spanishClose).toBeHidden()

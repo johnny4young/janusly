@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/store"
@@ -199,7 +202,7 @@ func TestExperienceResolveConsentSerializesRegistrationWithoutLockUpgrade(t *tes
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	tx, _, _, err := registry.consentTx(ctx, request.OrganizationID, true)
+	tx, _, _, err := registry.consentTx(ctx, request.OrganizationID, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +231,79 @@ func TestExperienceResolveConsentSerializesRegistrationWithoutLockUpgrade(t *tes
 	}
 	if _, err := registry.Resolve(ctx, request, selected.Receipt, catalog, "stale-draft"); !errors.Is(err, ErrExperienceSourceUnavailable) {
 		t.Fatalf("new registration not seen after serialized fence: %v", err)
+	}
+}
+
+type experienceStatementRecorder struct {
+	mu         sync.Mutex
+	statements []string
+}
+
+func (r *experienceStatementRecorder) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.statements = append(r.statements, strings.TrimSpace(data.SQL))
+	return ctx
+}
+
+func (*experienceStatementRecorder) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {
+}
+
+// transactions returns the statements recorded since the last call, one slice per transaction.
+func (r *experienceStatementRecorder) transactions() [][]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var transactions [][]string
+	for _, statement := range r.statements {
+		if statement == "begin" {
+			transactions = append(transactions, nil)
+		}
+		if len(transactions) > 0 {
+			transactions[len(transactions)-1] = append(transactions[len(transactions)-1], statement)
+		}
+	}
+	r.statements = nil
+	return transactions
+}
+
+func TestExperienceReadsCommitWithoutWaitingForWALFlush(t *testing.T) {
+	registry, request, catalog, pool := registeredDecisionFixture(t)
+	config := pool.Config()
+	recorder := &experienceStatementRecorder{}
+	config.ConnConfig.Tracer = recorder
+	traced, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer traced.Close()
+	registry.Pool = traced
+	// Consent row locks give every read an xid. A durable commit would put a
+	// WAL flush inside the decision stage budget.
+	selected, err := registry.Decide(t.Context(), request, catalog)
+	if err != nil || selected.Receipt.Mode != DecisionReuse {
+		t.Fatalf("decision: %+v %v", selected, err)
+	}
+	if _, err := registry.Resolve(t.Context(), request, selected.Receipt, catalog, "traced-draft"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.List(t.Context(), "org-a", "wf-a"); err != nil {
+		t.Fatal(err)
+	}
+	reads := recorder.transactions()
+	if len(reads) != 3 {
+		t.Fatalf("expected decide, resolve and list transactions, got %q", reads)
+	}
+	for _, statements := range reads {
+		if len(statements) < 3 || statements[1] != "SET LOCAL synchronous_commit = off" || statements[len(statements)-1] != "commit" {
+			t.Fatalf("read transaction waits on a WAL flush: %q", statements)
+		}
+	}
+	if _, err := registry.Register(t.Context(), ExperienceRegistration{ID: "durable-registration", OrganizationID: "org-a", ActorID: "operator", WorkflowID: "wf-a", VersionID: "ver-a2", Brief: request.Brief, Catalog: catalog}); err != nil {
+		t.Fatal(err)
+	}
+	writes := recorder.transactions()
+	if len(writes) != 1 || writes[0][len(writes[0])-1] != "commit" || slices.Contains(writes[0], "SET LOCAL synchronous_commit = off") {
+		t.Fatalf("registration must commit durably: %q", writes)
 	}
 }
 

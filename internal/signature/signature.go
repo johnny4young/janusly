@@ -93,7 +93,8 @@ var (
 	missingSecretPattern     = regexp.MustCompile(`(?i)Missing\s+secret[: ]+['"]?([\w\-.]+)`)
 	httpStatusPattern        = regexp.MustCompile(`(?i)\bHTTP\s+(\d{3})\b`)
 	dnsFailurePattern        = regexp.MustCompile(`(?i)\bno\s+such\s+host\b|\bserver\s+misbehaving\b|did\s+not\s+resolve\s+to\s+any\s+address|\b(?:ENOTFOUND|EAI_AGAIN)\b|getaddrinfo|name\s+resolution`)
-	networkFailurePattern    = regexp.MustCompile(`(?i)\b(?:timeout|timed\s+out|deadline\s+exceeded|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ECONNABORTED|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET)|dial\s+tcp|connection\s+(?:refused|reset)|broken\s+pipe)\b|fetch\s+failed`)
+	timeoutFailurePattern    = regexp.MustCompile(`(?i)\b(?:timeout|timed\s+out|deadline\s+exceeded|ETIMEDOUT|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT))\b`)
+	connectionFailurePattern = regexp.MustCompile(`(?i)\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_SOCKET|dial\s+tcp|connection\s+(?:refused|reset)|broken\s+pipe|no\s+route\s+to\s+host|network\s+is\s+unreachable)\b|fetch\s+failed|:\s+EOF$`)
 	parseErrorPattern        = regexp.MustCompile(`(?i)\b(?:invalid\s+JSON|is\s+not\s+valid\s+JSON|JSON\.parse|unexpected\s+token|unexpected\s+end\s+of\s+JSON|parse\s+error|in\s+JSON\s+at\s+position|expected\s+property\s+name)\b`)
 	httpGuardPattern         = regexp.MustCompile(`(?i)\b(?:exceeds?\s+maxResponseBytes|redirect\s+limit\s+exceeded|target\s+is\s+private\s+and\s+blocked|resolves?\s+to\s+a\s+private\s+address|Unsupported\s+HTTP\s+target\s+protocol|response\s+(?:body\s+)?too\s+large)\b`)
 	rateLimitPattern         = regexp.MustCompile(`(?i)\b(?:rate[_\s-]?limit(?:ed|s)?\s+(?:exceeded|reached|hit)|429\s+too\s+many\s+requests|too\s+many\s+requests)\b`)
@@ -110,6 +111,16 @@ var aiProviderReasons = []struct {
 	{regexp.MustCompile(`(?i)\binsufficient_quota\b|\bquota\s+exceeded\b`), "quota exceeded"},
 	{regexp.MustCompile(`(?i)\brate[_\s]?limit(?:ed|s)?\b`), "rate limit"},
 	{regexp.MustCompile(`(?i)\bmodel\s+not\s+found\b|\bunknown\s+model\b`), "model not found"},
+}
+
+// IsNetworkFailure reports resolver and connection wording or error codes.
+func IsNetworkFailure(text string) bool {
+	return dnsFailurePattern.MatchString(text) || connectionFailurePattern.MatchString(text)
+}
+
+// IsTimeoutFailure reports timeout wording or error codes.
+func IsTimeoutFailure(text string) bool {
+	return timeoutFailurePattern.MatchString(text)
 }
 
 // Normalize extracts the stable cluster signature from one raw error value
@@ -173,7 +184,7 @@ func Normalize(errValue any, ctx Context) Result {
 
 	// 3. Network failures. DNS keeps its own cluster: the fix is the host, not a retry.
 	dnsFailure := dnsFailurePattern.MatchString(message)
-	if dnsFailure || networkFailurePattern.MatchString(message) {
+	if IsNetworkFailure(message) || IsTimeoutFailure(message) {
 		label := "Network timeout"
 		if dnsFailure {
 			label = "DNS lookup failed"

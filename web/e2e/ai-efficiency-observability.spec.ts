@@ -17,7 +17,6 @@ const copy = {
     costTable: 'Cost breakdown table',
     cacheLabel: 'Prompt cache efficiency',
     runs: 'Runs',
-    timeline: 'View timeline',
     loading: 'Loading persisted usage',
     usageAria: 'Run resource usage',
     empty: 'No AI or memory usage has been recorded',
@@ -34,7 +33,6 @@ const copy = {
     costTable: 'Tabla de desglose de costo',
     cacheLabel: 'Eficiencia de la caché de instrucciones',
     runs: 'Ejecuciones',
-    timeline: 'Ver cronología',
     loading: 'Cargando el uso registrado',
     usageAria: 'Uso de recursos de la ejecución',
     empty: 'No se registró uso de IA ni de memoria',
@@ -153,7 +151,7 @@ async function openRunFromHistory(page: Page, runId: string, locale: Locale): Pr
   await expect(card).toBeVisible()
   await card.locator('button.list-card-row').click()
   await expect(page.getByTestId('run-overview')).toContainText(runId.slice(0, 12))
-  await page.getByTestId('run-overview').getByRole('button', { name: copy[locale].timeline, exact: true }).click()
+  await page.getByTestId('run-workspace-tab-events').click()
 }
 
 function emptyUsage() {

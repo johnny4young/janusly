@@ -273,6 +273,8 @@ for (const locale of ['en', 'es'] as const) {
     await page.getByTestId('activity-filter-all').click()
     await selectActivityRow(page, 'run', seeded.failedRunId)
     await expect(page.getByTestId('run-overview')).toContainText(seeded.failedRunId.slice(0, 12))
+    await expect(page.getByText(copy[locale].askJanusly, { exact: true })).toHaveCount(0)
+    await page.getByTestId('run-workspace-tab-ask').click()
     await expect(page.getByText(copy[locale].askJanusly, { exact: true })).toBeVisible()
     await expect(feed).toBeVisible()
     await expectAccessible(page, `${locale} Activity run detail`)

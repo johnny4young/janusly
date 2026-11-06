@@ -246,7 +246,7 @@ func TestStartStatusRunAndListShapes(t *testing.T) {
 	requireEnvelope(t, list)
 	items := list.body["data"].([]any)
 	requireKeys(t, items[0].(map[string]any),
-		"createdAt", "createdBy", "hasWaitingNodes", "id", "orgId", "outcomeStatus",
+		"createdAt", "createdBy", "cursor", "hasWaitingNodes", "id", "orgId", "outcomeStatus",
 		"outputJson", "parentNodeId", "parentRunId", "replayMode",
 		"semanticViolationCount", "status", "traceId", "validationEvidenceLevel",
 		"workflowId", "workflowName", "workflowVersionId")
@@ -627,7 +627,10 @@ func TestWorkflowReadSurfaces(t *testing.T) {
 	requireKeys(t, row,
 		"id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus", "lastRunAt",
 		"runCount", "bufferedTriggerCount", "openFailureCount", "currentVersion", "status", "pausedReason",
-		"tags", "folder", "deletedAt")
+		"tags", "folder", "deletedAt", "productionVersion", "rollout")
+	if row["productionVersion"] != row["currentVersion"] || row["rollout"] != nil {
+		t.Fatalf("without a rollout the latest version is production: %v", row)
+	}
 	// Exact copies posted by older clients auto-bind to the latest immutable
 	// version. They therefore count as saved workflow traffic; an edited draft
 	// remains ad-hoc and is covered by TestVersionAttributionSemantics.

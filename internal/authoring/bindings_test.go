@@ -333,3 +333,35 @@ func TestBindWorkflowRequiresNodeLevelAgentWriteOptIn(t *testing.T) {
 		})
 	}
 }
+
+func TestStepCredentialsNamesBoundCredentialsAndUndescribedSteps(t *testing.T) {
+	workflow := &domain.Workflow{Nodes: []domain.Node{
+		{ID: "post", Type: "tool", Config: map[string]any{"tool": "slack.post", "input": map[string]any{"credential": "ops-slack", "text": "hi"}}},
+		{ID: "crew", Type: "multi_agent", Config: map[string]any{"allowWriteTools": true, "agents": []any{
+			map[string]any{"goal": "Notify", "tool": "slack.post", "input": map[string]any{"credential": "incidents", "text": "Ready"}},
+		}}},
+		{ID: "pager", Type: "pagerduty_incident", Config: map[string]any{"webhookCredential": "pd-webhook"}},
+		{ID: "fetch", Type: "http", Config: map[string]any{"url": "https://example.com"}},
+		{ID: "invented", Type: "tool", Config: map[string]any{"tool": "invented.tool", "input": map[string]any{}}},
+		{ID: "mcp", Type: "mcp_tool", Config: map[string]any{"connectionAlias": "crm", "toolName": "lookup"}},
+		{ID: "child", Type: "subworkflow", Config: map[string]any{"workflowId": "wf-child"}},
+		{ID: "summarize", Type: "ai", Config: map[string]any{"prompt": "Summarize"}},
+	}}
+	uses := StepCredentials(workflow)
+	want := map[string]StepCredentialUse{
+		"post":      {Names: []string{"ops-slack"}, Complete: true},
+		"crew":      {Names: []string{"incidents"}, Complete: false},
+		"pager":     {Names: []string{"pd-webhook"}, Complete: true},
+		"fetch":     {Names: []string{}, Complete: true},
+		"invented":  {Names: []string{}, Complete: false},
+		"mcp":       {Names: []string{}, Complete: false},
+		"child":     {Names: []string{}, Complete: false},
+		"summarize": {Names: []string{}, Complete: false},
+	}
+	for id, expected := range want {
+		got := uses[id]
+		if !slices.Equal(got.Names, expected.Names) || got.Complete != expected.Complete {
+			t.Fatalf("%s = %+v, want %+v", id, got, expected)
+		}
+	}
+}

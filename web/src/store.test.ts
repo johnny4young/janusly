@@ -704,6 +704,17 @@ describe('useWorkflowStore', () => {
     expect(useWorkflowStore.getState()).toMatchObject({ identityContext: null, identityReady: false })
   })
 
+  it('drops AI availability with the identity that read it', () => {
+    const aiHealth = { enabled: true, model: 'model-x', timeoutMs: 1, maxRetries: 0 }
+    useWorkflowStore.setState({ userId: 'user-a', orgId: 'org-a', aiHealth })
+    useWorkflowStore.getState().setAuth({ session: null, user: null, userId: 'user-a', orgId: 'org-b' })
+    expect(useWorkflowStore.getState().aiHealth).toBeNull()
+
+    useWorkflowStore.setState({ aiHealth })
+    useWorkflowStore.getState().clearAuth()
+    expect(useWorkflowStore.getState().aiHealth).toBeNull()
+  })
+
   it('resets the session-only recovery intro dismissal across auth owners', () => {
     useWorkflowStore.setState({
       userId: 'user-a',

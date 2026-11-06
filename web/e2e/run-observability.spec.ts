@@ -322,7 +322,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   await expect(englishInput).toContainText('billing-webhook')
   await captureElement(englishOverview, 'web-en-run-overview-trigger-expanded')
 
-  await englishOverview.getByRole('button', { name: 'View timeline', exact: true }).click()
+  await page.getByTestId('run-workspace-tab-events').click()
   const englishTimeline = page.getByTestId('run-event-timeline')
   const englishReasoningMap = await assertRunObservationMap(page, 'fetch_invoice', 'failed', 'en')
   await captureElement(englishReasoningMap, 'web-en-reasoning-map-failed-readonly')
@@ -350,7 +350,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
 
   await openRuns(page, 'en')
   await openRunFromHistory(page, long.runId)
-  await page.getByTestId('run-overview').getByRole('button', { name: 'View timeline', exact: true }).click()
+  await page.getByTestId('run-workspace-tab-events').click()
   const englishLoadedTimeline = page.getByTestId('run-event-timeline')
   await expect(englishLoadedTimeline.getByText(/\d+ of \d+ loaded events/)).toBeVisible()
   await expect(englishLoadedTimeline.getByRole('button', { name: 'Jump to first loaded failure' })).toBeDisabled()
@@ -390,7 +390,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   await expect(spanishInput).toContainText(`inv-${stamp}`)
   await captureElement(spanishOverview, 'web-es-run-overview-trigger-expanded')
 
-  await spanishOverview.getByRole('button', { name: 'Ver cronología', exact: true }).click()
+  await page.getByTestId('run-workspace-tab-events').click()
   const spanishTimeline = page.getByTestId('run-event-timeline')
   await assertRunObservationMap(page, 'fetch_invoice', 'failed', 'es')
   await expect(spanishTimeline.locator('[data-tone="error"]')).not.toHaveCount(0)
@@ -408,7 +408,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
 
   await openRuns(page, 'es')
   await openRunFromHistory(page, long.runId)
-  await page.getByTestId('run-overview').getByRole('button', { name: 'Ver cronología', exact: true }).click()
+  await page.getByTestId('run-workspace-tab-events').click()
   const spanishLoadedTimeline = page.getByTestId('run-event-timeline')
   await expect(spanishLoadedTimeline.getByText(/\d+ de \d+ eventos cargados/)).toBeVisible()
   await expect(spanishLoadedTimeline.getByRole('button', { name: 'Ir al primer fallo cargado' })).toBeDisabled()

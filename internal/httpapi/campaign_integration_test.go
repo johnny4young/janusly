@@ -68,6 +68,13 @@ func TestReplayCampaignLifecycle(t *testing.T) {
 		t.Fatalf("cohort signature: %+v", preview.body)
 	}
 
+	// The GET http node is read-side, so the preview marks no side effect.
+	for _, raw := range preview.body["eligible"].([]any) {
+		if raw.(map[string]any)["sideEffect"] != false {
+			t.Fatalf("read-side entry marked: %+v", raw)
+		}
+	}
+
 	// A single-item cohort can never be a campaign (minimum two).
 	solo := h.call("POST", "/recovery/campaigns", map[string]any{
 		"deadLetterIds": ids[:1], "name": "solo", "pacingMs": float64(1000),
@@ -90,6 +97,12 @@ func TestReplayCampaignLifecycle(t *testing.T) {
 	campaignID := campaign["id"].(string)
 	if len(created.body["items"].([]any)) != 2 {
 		t.Fatalf("items snapshot: %+v", created.body["items"])
+	}
+	for _, raw := range created.body["items"].([]any) {
+		item := raw.(map[string]any)
+		if item["nodeId"] != "call" || item["runId"] == nil || item["runId"] == "" {
+			t.Fatalf("item must link its run and step: %+v", item)
+		}
 	}
 
 	// The pump drains one item per pacing period until completion. Two
@@ -150,6 +163,238 @@ func TestReplayCampaignLifecycle(t *testing.T) {
 		if got := countAudit(t, pool, h.org, action); got != want {
 			t.Fatalf("%s: want %d rows, got %d", action, want, got)
 		}
+	}
+}
+
+func TestReplayCampaignPreviewMarksSideEffects(t *testing.T) {
+	h := newAPIHarness(t)
+	for _, suffix := range []string{"a", "b"} {
+		doc := map[string]any{
+			"id": "wf-camp-write-" + suffix + "-" + h.org, "name": "Campaign Write Flow",
+			"nodes": []any{map[string]any{"id": "charge", "type": "http", "config": map[string]any{
+				"url": "http://127.0.0.1:1", "method": "POST", "timeoutMs": float64(200),
+			}}},
+			"edges": []any{},
+		}
+		res := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
+		if res.status != 200 {
+			t.Fatalf("start: %+v", res.body)
+		}
+		h.waitRun(res.body["data"].(map[string]any)["runId"].(string), "failed")
+	}
+	preview := h.call("POST", "/recovery/campaigns/preview",
+		map[string]any{"deadLetterIds": deadLetterIDs(t, h)}, "")
+	eligible, _ := preview.body["eligible"].([]any)
+	if preview.status != 200 || len(eligible) != 2 {
+		t.Fatalf("preview: %d %+v", preview.status, preview.body)
+	}
+	for _, raw := range eligible {
+		if raw.(map[string]any)["sideEffect"] != true {
+			t.Fatalf("POST step must be marked: %+v", raw)
+		}
+	}
+}
+
+// failCohortRun starts a workflow whose first step, fetch, fails on a blocked GET.
+func failCohortRun(t *testing.T, h *apiHarness, id string, nodes, edges []any) string {
+	t.Helper()
+	fetch := map[string]any{"id": "fetch", "type": "http", "config": map[string]any{
+		"url": "http://127.0.0.1:1", "method": "GET", "timeoutMs": float64(200),
+	}}
+	doc := map[string]any{"id": id, "name": "Cohort Flow", "nodes": append([]any{fetch}, nodes...), "edges": append([]any{}, edges...)}
+	res := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
+	if res.status != 200 {
+		t.Fatalf("start %s: %+v", id, res.body)
+	}
+	runID := res.body["data"].(map[string]any)["runId"].(string)
+	h.waitRun(runID, "failed")
+	return runID
+}
+
+func httpStep(id, method string) map[string]any {
+	return map[string]any{"id": id, "type": "http", "config": map[string]any{"url": "http://127.0.0.1:1", "method": method}}
+}
+
+func edge(from, to string) map[string]any { return map[string]any{"from": from, "to": to} }
+
+// previewByRun previews the org's open dead letters, keyed by run.
+func previewByRun(t *testing.T, h *apiHarness) map[string]map[string]any {
+	t.Helper()
+	preview := h.call("POST", "/recovery/campaigns/preview", map[string]any{"deadLetterIds": deadLetterIDs(t, h)}, "")
+	if preview.status != 200 {
+		t.Fatalf("preview: %d %+v", preview.status, preview.body)
+	}
+	byRun := map[string]map[string]any{}
+	for _, raw := range preview.body["eligible"].([]any) {
+		entry := raw.(map[string]any)
+		byRun[entry["runId"].(string)] = entry
+	}
+	return byRun
+}
+
+func effectIDs(entry map[string]any) []string {
+	ids := []string{}
+	for _, raw := range entry["effects"].([]any) {
+		ids = append(ids, raw.(map[string]any)["nodeId"].(string))
+	}
+	return ids
+}
+
+func TestReplayCampaignPreviewClassifiesTheDownstreamClosure(t *testing.T) {
+	h := newAPIHarness(t)
+	readOnly := failCohortRun(t, h, "wf-read-"+h.org,
+		[]any{httpStep("receipt", "GET")}, []any{edge("fetch", "receipt")})
+	chain := failCohortRun(t, h, "wf-chain-"+h.org,
+		[]any{httpStep("charge-card", "POST"), httpStep("receipt", "GET")},
+		[]any{edge("fetch", "charge-card"), edge("charge-card", "receipt")})
+	branch := failCohortRun(t, h, "wf-branch-"+h.org,
+		[]any{
+			map[string]any{"id": "route", "type": "noop", "config": map[string]any{}},
+			httpStep("refund", "POST"), httpStep("lookup", "GET"),
+		},
+		[]any{edge("fetch", "route"), edge("route", "refund"), edge("route", "lookup")})
+	// Start validation rejects these today, but an older snapshot can hold them.
+	if _, err := testPool(t).Exec(context.Background(), `
+		update runs set input_json = jsonb_set(jsonb_set(input_json, '{workflow,nodes}', input_json #> '{workflow,nodes}' ||
+			'[{"id":"notify","type":"tool","config":{"tool":"retired.tool"}},{"id":"child","type":"subworkflow","config":{"workflowId":"wf-child"}}]'),
+			'{workflow,edges}', input_json #> '{workflow,edges}' ||
+			'[{"from":"lookup","to":"notify"},{"from":"lookup","to":"child"}]')
+		where id = $1`, branch); err != nil {
+		t.Fatal(err)
+	}
+
+	byRun := previewByRun(t, h)
+	for runID, want := range map[string][]string{
+		readOnly: {},
+		chain:    {"charge-card"},
+		branch:   {"refund", "notify", "child"},
+	} {
+		entry := byRun[runID]
+		if fmt.Sprint(effectIDs(entry)) != fmt.Sprint(want) {
+			t.Fatalf("%v: effects %+v", want, entry)
+		}
+		if entry["effectsKnown"] != true || entry["sideEffect"] != (len(want) > 0) || entry["supersededByRerun"] != false {
+			t.Fatalf("%v: entry %+v", want, entry)
+		}
+	}
+}
+
+func TestReplayCampaignPreviewFailsSafeWithoutASnapshot(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := context.Background()
+	missing := failCohortRun(t, h, "wf-missing-"+h.org, nil, nil)
+	malformed := failCohortRun(t, h, "wf-malformed-"+h.org, nil, nil)
+	opaque := failCohortRun(t, h, "wf-opaque-"+h.org, nil, nil)
+	if _, err := pool.Exec(ctx, "update runs set input_json = null where id = any($1)", []string{missing, opaque}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update runs set input_json = '{"workflow":{"nodes":"x"}}' where id = $1`, malformed); err != nil {
+		t.Fatal(err)
+	}
+
+	byRun := previewByRun(t, h)
+	for _, runID := range []string{missing, malformed, opaque} {
+		entry := byRun[runID]
+		if entry["sideEffect"] != true || entry["effectsKnown"] != false || len(effectIDs(entry)) != 0 {
+			t.Fatalf("no readable snapshot must never read as no side effect: %+v", entry)
+		}
+	}
+
+	// With no snapshot left, only the failed step's own record can be classified.
+	var deadLetterID string
+	if err := pool.QueryRow(ctx, `update dead_letters set node_json = '{"id":"fetch","type":"subworkflow","config":{}}'
+		where run_id = $1 returning id`, opaque).Scan(&deadLetterID); err != nil {
+		t.Fatal(err)
+	}
+	preview := h.call("POST", "/recovery/campaigns/preview", map[string]any{"deadLetterIds": []string{deadLetterID}}, "")
+	entry := preview.body["eligible"].([]any)[0].(map[string]any)
+	if entry["effectsKnown"] != false || fmt.Sprint(effectIDs(entry)) != "[fetch]" {
+		t.Fatalf("failed subworkflow without a snapshot: %+v", entry)
+	}
+}
+
+func TestReplayCampaignPreviewBoundsParsedSnapshots(t *testing.T) {
+	h := newAPIHarness(t)
+	previous := replayCampaignMaxSnapshots
+	replayCampaignMaxSnapshots = 1
+	t.Cleanup(func() { replayCampaignMaxSnapshots = previous })
+	first := failCohortRun(t, h, "wf-same-"+h.org, []any{httpStep("charge-card", "POST")}, []any{edge("fetch", "charge-card")})
+	second := failCohortRun(t, h, "wf-same-"+h.org, []any{httpStep("charge-card", "POST")}, []any{edge("fetch", "charge-card")})
+
+	// One workflow shared by the cohort is one snapshot, whatever the run count.
+	byRun := previewByRun(t, h)
+	if byRun[first]["effectsKnown"] != true || byRun[second]["effectsKnown"] != true {
+		t.Fatalf("a shared workflow must parse once: %+v", byRun)
+	}
+
+	third := failCohortRun(t, h, "wf-other-"+h.org, []any{httpStep("refund", "POST")}, []any{edge("fetch", "refund")})
+	byRun = previewByRun(t, h)
+	known := 0
+	for _, runID := range []string{first, second, third} {
+		entry := byRun[runID]
+		if entry["effectsKnown"] == true {
+			known++
+			continue
+		}
+		if entry["sideEffect"] != true {
+			t.Fatalf("a run past the bound must fail safe: %+v", entry)
+		}
+	}
+	if known == 0 || known == 3 {
+		t.Fatalf("the bound must leave some runs known and some not, got %d of 3", known)
+	}
+}
+
+func TestReplayCampaignPreviewMarksARerunLineageTheRedriveRefuses(t *testing.T) {
+	h := newAPIHarness(t)
+	target := newRerunTarget(t)
+	superseded := failCohortRun(t, h, "wf-sup-"+h.org, nil, nil)
+	other := failCohortRun(t, h, "wf-free-"+h.org, nil, nil)
+	started := h.call("POST", "/runs/rerun", map[string]any{
+		"sourceRunId": superseded, "nodeId": "fetch",
+		"inputOverride": map[string]any{"url": target.URL, "method": "GET"},
+	}, "")
+	if started.status != 200 {
+		t.Fatalf("rerun: %d %+v", started.status, started.body)
+	}
+	h.waitRun(started.body["runId"].(string), "succeeded")
+
+	byRun := previewByRun(t, h)
+	if byRun[superseded]["supersededByRerun"] != true || byRun[other]["supersededByRerun"] != false {
+		t.Fatalf("lineage marks: %+v", byRun)
+	}
+
+	created := h.call("POST", "/recovery/campaigns", map[string]any{
+		"deadLetterIds": deadLetterIDs(t, h), "name": "lineage", "pacingMs": float64(1000),
+	}, "")
+	if created.status != 202 {
+		t.Fatalf("create: %d %+v", created.status, created.body)
+	}
+	campaignID := created.body["campaign"].(map[string]any)["id"].(string)
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		detail := h.call("GET", "/recovery/campaigns/"+campaignID, nil, "")
+		if detail.body["campaign"].(map[string]any)["status"] == "completed" {
+			for _, raw := range detail.body["items"].([]any) {
+				item := raw.(map[string]any)
+				if _, leaked := item["error"]; leaked {
+					t.Fatalf("raw item error must stay out of the payload: %+v", item)
+				}
+				want := any(nil)
+				if item["runId"] == superseded {
+					want = "rerun_exists"
+				}
+				if item["errorCode"] != want {
+					t.Fatalf("item code: %+v", item)
+				}
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job never completed: %+v", detail.body)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

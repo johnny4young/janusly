@@ -14,6 +14,7 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { ApiResponses, RecoveryActorKind, RecoveryArtifact, RecoveryCaseState, RecoveryCase as WireRecoveryCase } from './lib/api-types.generated'
 import type { WorkflowRecovery } from './lib/recovery-contract'
+import type { AuthoringProblem } from './components/authoring-problems'
 
 export type JsonObject = Record<string, unknown>
 export type RunNode = {
@@ -38,6 +39,8 @@ type WorkflowNodeData = {
   /** One-line error of a failed step while observing a run. */
   errorSummary?: string | null
   onRecover?: () => void
+  /** The step's worst authoring problem; projected for display, never persisted. */
+  problem?: AuthoringProblem
 }
 type WorkflowEdgeData = {
   condition?: string
@@ -109,7 +112,7 @@ export type Credential = {
 }
 
 /** One required credential a solution pack declares (name + kind + purpose; never a secret value). */
-type PackRequiredCredential = { name: string; kind: string; purpose: string }
+export type PackRequiredCredential = { name: string; kind: string; purpose: string }
 /** One required org-config key a solution pack declares. */
 type PackRequiredOrgConfig = { key: string; purpose: string }
 export type SolutionPackFailureMode =
@@ -184,6 +187,8 @@ export type RunSummary = {
   semanticViolationCount?: number
   createdBy?: string | null
   createdAt?: string | null
+  /** Full-precision keyset `before` value from the bounded `/runs` list. */
+  cursor?: string | null
   /** Full run-start envelope. Present on `/run` and `/status`; omitted from the bounded `/runs` list. */
   inputJson?: JsonObject | null
   /** Correlation id shared by a subworkflow chain. Null on historical root runs that predate trace assignment. */
@@ -196,6 +201,7 @@ export type RunSummary = {
    * Drives whether the "Open in Lab" button surfaces (no nested labs).
    */
   replayMode?: string | null
+  parentRunId?: string | null
   /** Strength of evidence produced by a validation run. */
   validationEvidenceLevel?: ValidationEvidenceLevel | null
 }

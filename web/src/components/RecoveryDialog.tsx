@@ -2,8 +2,8 @@
  * Failure-recovery dialog. Walks an operator through a sandbox-validated
  * apply flow:
  *
- *   1. **Idle** — explain what's about to happen, expose a "Generate
- *      suggestion" button.
+ *   1. **Idle** — state the failed step, attempts and AI availability. Without
+ *      a key, Replay in Lab leads and the deterministic envelope stays reachable.
  *   2. **Loading** — `POST /ai/patch-workflow` is in flight.
  *   3. **Review** — render the AI-suggested workflow as a diff against
  *      the failing version (via `WorkflowDiffView`) and surface the LLM
@@ -39,14 +39,18 @@
 import { lazy, Suspense, useLayoutEffect, useRef } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, Sparkles, X } from 'lucide-react'
-import { Trans, useT } from '../i18n'
+import { useT } from '../i18n'
 import { AppliedBody } from './recovery-dialog/AppliedBody'
 import { CancellingBody } from './recovery-dialog/CancellingBody'
 import { ReviewBody } from './recovery-dialog/ReviewBody'
 import { ValidationFailedBody } from './recovery-dialog/ValidationFailedBody'
 import { RecoveryDialogFooter } from './recovery-dialog/RecoveryDialogFooter'
+import { recoveryStages } from './recovery-dialog/recovery-dialog-model'
 import { useRecoveryDialogController, type RecoveryDialogProps } from './recovery-dialog/useRecoveryDialogController'
 
+const ReplayLabDialog = lazy(() => import('./ReplayLabDialog').then((module) => ({
+  default: module.ReplayLabDialog,
+})))
 const PlaybookMatchCard = lazy(() => import('./recovery-dialog/PlaybookMatchCard').then((module) => ({
   default: module.PlaybookMatchCard,
 })))
@@ -57,6 +61,11 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
   const {
     dlq,
     onClose,
+    canReplayInLab,
+    labOpen,
+    setLabOpen,
+    aiStatus,
+    aiModel,
     step,
     busy,
     matchingPlaybook,
@@ -90,21 +99,10 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
     }
   }, [step.kind, primaryRef])
 
-  // Two-step progress for cluster recovery so the validate-1-then-replay-N flow
-  // reads as staged work, not a hung dialog. Visual only — the body line below
-  // each step carries the live-region announcement.
-  const renderClusterSteps = (active: 'validate' | 'replay') => (
-    <ol className="we-recovery-cluster-steps" aria-hidden="true" data-testid="recovery-cluster-steps">
-      <li data-state={active === 'validate' ? 'active' : 'done'}>
-        {t('recoveryDialog.clusterProgress.validate')}
-      </li>
-      <li data-state={active === 'replay' ? 'active' : 'pending'}>
-        {t('recoveryDialog.clusterProgress.replay', { total: clusterMemberCount })}
-      </li>
-    </ol>
-  )
+  const stages = recoveryStages(step)
 
   return (
+    <>
     <div className="run-input-backdrop" onClick={onBackdropClick}>
       <div
         ref={dialogRef}
@@ -122,7 +120,6 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
           <div className="run-input-dialog__heading">
             <div className="section-kicker">{t('recoveryDialog.kicker')}</div>
             <h2 id="recovery-dialog-title">{t('recoveryDialog.titleRecover', { nodeId: dlq.nodeId, runIdShort: dlq.runId.slice(0, 8) })}</h2>
-            <p className="helper-text">{t('recoveryDialog.description')}</p>
           </div>
           <button
             type="button"
@@ -136,33 +133,72 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
         </header>
 
         <div className="run-input-dialog__body" aria-live="polite">
+          {stages && (
+            <ol className="we-recovery-stages" aria-hidden="true" data-testid="recovery-stages">
+              <li data-state={stages[0]}>{t('recoveryDialog.stage.patch')}</li>
+              <li data-state={stages[1]}>
+                {t(isClusterMode ? 'recoveryDialog.clusterProgress.validate' : 'recoveryDialog.stage.validate')}
+              </li>
+              <li data-state={stages[2]}>
+                {isClusterMode
+                  ? t('recoveryDialog.clusterProgress.replay', { total: clusterMemberCount })
+                  : t('recoveryDialog.stage.apply')}
+              </li>
+            </ol>
+          )}
+
           {step.kind === 'idle' && (
             <>
-            <p className="helper-text">
-              {t('recoveryDialog.idle.failingNodeIs')} <code>{dlq.nodeId}</code> {t('recoveryDialog.idle.onRun')} <code>{dlq.runId.slice(0, 8)}…</code>{' '}
-              {t('recoveryDialog.idle.afterAttempts', { count: dlq.attempt })}
-              {isClusterMode ? (
-                <>
-                  {' '}{t('recoveryDialog.idle.clusterMatch')}{' '}
-                  <strong>
-                    {clusterMembersCapped
-                      ? t('recoveryDialog.idle.clusterMatchOf', { visible: clusterMemberCount, total: clusterVisibleTotal })
-                      : clusterMemberCount}
-                  </strong>
-                  {/* Noun only — the count is already in the <strong> above, and a
-                      counted string here would print it twice. Agreement follows the
-                      set being described: the capped form reads "1 of 31 open DLQ
-                      entries", so the total governs, not the visible slice. */}
-                  {' '}{t('recoveryDialog.idle.clusterEntriesNoun', {
-                    count: clusterMembersCapped ? clusterVisibleTotal : clusterMemberCount,
-                  })} —{' '}
+            <dl className="we-recovery-passport__facts we-recovery-availability" data-testid="recovery-availability" data-ai={aiStatus}>
+              <div>
+                <dt>{t('activity.recoveryDetail.stepLabel')}</dt>
+                <dd><code>{dlq.nodeId}</code></dd>
+              </div>
+              <div>
+                <dt>{t('recoveryDialog.facts.attempts')}</dt>
+                <dd>{dlq.attempt}</dd>
+              </div>
+              <div>
+                <dt>{t('recoveryDialog.facts.ai')}</dt>
+                <dd>
+                  <span className="we-pill" data-tone={aiStatus === 'on' ? 'success' : aiStatus === 'off' ? 'warning' : 'neutral'}>
+                    {t(aiStatus === 'on'
+                      ? 'recoveryDialog.ai.connected'
+                      : aiStatus === 'off' ? 'recoveryDialog.ai.notConnected' : 'recoveryDialog.ai.unknown')}
+                  </span>
+                  {aiStatus === 'on' && aiModel ? <> <code>{aiModel}</code></> : null}
+                </dd>
+              </div>
+            </dl>
+            {aiStatus === 'off' && (
+              <div className="we-recovery-warning" data-testid="recovery-no-ai">
+                <AlertCircle size={14} aria-hidden="true" />
+                <div>
+                  <strong>{t('recoveryDialog.noAi.title')}</strong> {t('recoveryDialog.noAi.configure')}
+                  {canReplayInLab ? ` ${t('recoveryDialog.noAi.lab')}` : null}
+                </div>
+              </div>
+            )}
+            {isClusterMode ? (
+              <p className="helper-text">
+                {t('recoveryDialog.idle.clusterMatch')}{' '}
+                <strong>
                   {clusterMembersCapped
-                    ? t('recoveryDialog.idle.clusterReplayCapped')
-                    : t('recoveryDialog.idle.clusterReplayAll')}
-                </>
-              ) : null}
-              {' '}<Trans i18nKey="recoveryDialog.idle.clickGenerate" components={{ strong: <strong /> }} />
-            </p>
+                    ? t('recoveryDialog.idle.clusterMatchOf', { visible: clusterMemberCount, total: clusterVisibleTotal })
+                    : clusterMemberCount}
+                </strong>
+                {/* Noun only — the count is already in the <strong> above, and a
+                    counted string here would print it twice. Agreement follows the
+                    set being described: the capped form reads "1 of 31 open DLQ
+                    entries", so the total governs, not the visible slice. */}
+                {' '}{t('recoveryDialog.idle.clusterEntriesNoun', {
+                  count: clusterMembersCapped ? clusterVisibleTotal : clusterMemberCount,
+                })} —{' '}
+                {clusterMembersCapped
+                  ? t('recoveryDialog.idle.clusterReplayCapped')
+                  : t('recoveryDialog.idle.clusterReplayAll')}
+              </p>
+            ) : null}
             {matchingPlaybook ? (
               <Suspense fallback={<p className="helper-text">{t('recoveryDialog.playbook.loading')}</p>}>
               <PlaybookMatchCard
@@ -197,14 +233,11 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
           )}
 
           {step.kind === 'validating' && (
-            <>
-              {isClusterMode && renderClusterSteps('validate')}
-              <p className="helper-text we-recovery-loading" aria-live="polite">
-                {isClusterMode
-                  ? t('recoveryDialog.validating.clusterBody', { total: clusterMemberCount })
-                  : t('recoveryDialog.validating.body')}
-              </p>
-            </>
+            <p className="helper-text we-recovery-loading" aria-live="polite">
+              {isClusterMode
+                ? t('recoveryDialog.validating.clusterBody', { total: clusterMemberCount })
+                : t('recoveryDialog.validating.body')}
+            </p>
           )}
 
           {step.kind === 'validation-failed' && (
@@ -230,14 +263,11 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
           )}
 
           {step.kind === 'applying' && (
-            <>
-              {step.mode === 'cluster' && step.total ? renderClusterSteps('replay') : null}
-              <p className="helper-text we-recovery-loading" aria-live="polite">
-                {step.mode === 'cluster' && step.total
-                  ? t('recoveryDialog.applying.clusterBody', { total: step.total })
-                  : t('recoveryDialog.applying.singleBody')}
-              </p>
-            </>
+            <p className="helper-text we-recovery-loading" aria-live="polite">
+              {step.mode === 'cluster' && step.total
+                ? t('recoveryDialog.applying.clusterBody', { total: step.total })
+                : t('recoveryDialog.applying.singleBody')}
+            </p>
           )}
 
           {step.kind === 'applied' && (
@@ -256,5 +286,12 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
 
       </div>
     </div>
+    {/* Stacked, not swapped: closing Lab returns focus to the action that opened it. */}
+    {labOpen && (
+      <Suspense fallback={null}>
+        <ReplayLabDialog sourceRun={{ id: dlq.runId, status: 'failed' }} onClose={() => setLabOpen(false)} />
+      </Suspense>
+    )}
+    </>
   )
 }

@@ -101,6 +101,11 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM
   if ((attempted)); then
+    # CI uploads output/ on failure; the stack and its logs end with this trap.
+    if ((status != 0)); then
+      mkdir -p "$root/output/e2e"
+      compose logs --no-color --timestamps >"$root/output/e2e/compose.log" 2>&1 || true
+    fi
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   fi
   exit "$status"

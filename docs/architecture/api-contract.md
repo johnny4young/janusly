@@ -82,7 +82,14 @@ typecheck against the generated union.
 
 `GET /v1/workflows` rows carry `lastRunAt`, `openFailureCount` (open production
 dead letters attributed to the workflow, edited-draft runs included) and
-`currentVersion` next to the existing run aggregates.
+`currentVersion` next to the existing run aggregates. `productionVersion` is
+the version that takes production traffic outside a canary share, and
+`rollout` is the rollout routing that traffic, or null: its `status` and
+`trafficPercent`, the canary's effective share (the configured share while
+active, 100 once promoted, 0 after a rollback or cancellation). Both follow
+the engine's assignment rule: a rollout routes traffic only while its canary
+is the latest saved version, for the starts listed in
+[workflow deployments](workflow-deployments.md).
 
 `GET /v1/workflows/versions` is a keyset page of one workflow's history,
 newest first: `limit` (default 50, at most 200), `beforeVersion` as the
@@ -151,7 +158,7 @@ ships in the chunk of the call sites that import it: a guard used only by a lazy
 panel stays in that panel's chunk. A guard the eager Home controller imports
 ships eagerly: all eight `/recovery/home` section guards, including
 `RecoveryMetrics` and `FailureClusters`, land in `app-workspace.js` even though
-the lazy `HomeInsights` chunk renders them. The generator rewrites the whole
+only the lazy Reports chunk renders the clusters. The generator rewrites the whole
 directory, so a removed schema leaves no orphan module.
 
 A guard enforces shape: JSON types, nullability, `enum`/`const`, required keys,
@@ -363,11 +370,19 @@ keeps legacy `/dlq/queue`, `/dlq/counts` and `/dlq/cluster-members` out of the
 versioned-path rewrite.
 
 `POST /v1/dlq/resolve` and its existing unversioned alias require editor-level
-`recovery.write`, accept `{id}`, and return `{ok: true}` only when an owned row
-was updated. Missing/foreign ids return `dlq_not_found` without a success audit.
-This is acceptance of loss, not verified recovery; the linked recovery item
-retains `accepted_loss`. The browser checks the affirmative receipt before
-showing success or refreshing projections.
+`recovery.write`, accept `{id, reason?}`, and return `{ok: true}` only when an
+owned row was updated. Missing/foreign ids return `dlq_not_found` without a
+success audit. This is acceptance of loss, not verified recovery; the linked
+recovery item retains `accepted_loss`. The browser checks the affirmative
+receipt before showing success or refreshing projections.
+
+`reason`, also accepted by `POST /dlq/bulk-resolve`, is the operator's note on
+the loss. The browser requires it. The API keeps it optional so clients that
+send only `{id}` keep working and their audit rows carry no `reason`; when sent
+it is trimmed and must be 1 to 280 characters with no control characters other
+than newline and tab, or the call returns `dlq_reason_invalid` without echoing
+the text and without closing anything. It is stored only as `metadata.reason` on
+the `dlq.resolved` audit row, which commits in one transaction with the closure.
 
 ### List and catalog projections
 

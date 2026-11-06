@@ -16,6 +16,11 @@ export async function openActivityRecoveryDetail(
   return detail
 }
 
+export async function openReports(page: Page): Promise<void> {
+  await page.goto('/#/reports')
+  await expect(page.getByTestId('reports-panel')).toBeVisible()
+}
+
 export async function openWorkspaceDestination(
   page: Page,
   destination: string,
@@ -82,6 +87,12 @@ export async function openWorkspaceSection(
     await page.getByTestId('activity-open-run-history').click()
     await runHistory.waitFor({ state: 'visible' })
   }
+}
+
+/** Solution packs live in the Packs view of the Templates section. */
+export async function openTemplatePacks(page: Page, spanish = false): Promise<void> {
+  await openWorkspaceSection(page, spanish ? 'Flujos' : 'Workflows', spanish ? 'Plantillas' : 'Templates')
+  await page.getByTestId('template-view-packs').click()
 }
 
 export async function openWorkflowAiAction(

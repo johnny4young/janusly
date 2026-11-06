@@ -5,17 +5,16 @@
  * footer link) and the `AllClearState` empty-state. These are secondary
  * insight tiles only; operational queue, approval, and semantic-case rows
  * belong to Activity or their exact workspaces. Most tiles take data from
- * Home, while `BudgetTile` and `CalibrationHealthTile` own distinct
- * read-only endpoints that the Home snapshot does not fetch.
+ * Reports, while `BudgetTile` and `CalibrationHealthTile` own distinct
+ * read-only endpoints.
  *
  * Pure presentational logic lives in `recovery-center-model.ts`.
  *
- * Used by `HomeInsights.tsx` and `ReportsPanel.tsx`.
+ * Used by `ReportsPanel.tsx`.
  */
 
 import React, { useEffect, useState } from 'react'
 import {
-  BarChart3,
   ChevronRight,
   CircleCheck,
   Coins,
@@ -26,7 +25,6 @@ import type { ActiveTab } from '../../types'
 import { api } from '../../api'
 import { getResolvedLocale, useT } from '../../i18n'
 import { requestOperationsSection } from '../operations-section-bus'
-import { selectRecoveryTimeMetric } from '../recovery-metrics'
 import { approachLabelDisplay } from '../recovery-dialog/recovery-dialog-model'
 import type { PatchApproachLabel } from '../recovery-dialog/types'
 import {
@@ -37,7 +35,6 @@ import {
   type BudgetEnvelope,
   type FailureCluster,
   type RecommendedActionSeverity,
-  type RecoveryMetrics,
 } from './recovery-center-model'
 import './recovery-center.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../../lib/query-cache'
@@ -105,67 +102,6 @@ function AllClearState({ message, testId }: { message: string; testId?: string }
         <span>{message}</span>
       </div>
     </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// OperatorTodayTile — mini stats grid mirroring the right rail of
-// `ui_kits/studio/home-operator.html` (Runs / Success / Spend / MTTR).
-// ─────────────────────────────────────────────────────────────────────────
-
-export function OperatorTodayTile({
-  metrics,
-  openDeadLetters,
-  waitingNodes,
-  onOpenTab,
-}: {
-  metrics: RecoveryMetrics | null
-  openDeadLetters: number
-  waitingNodes: number
-  onOpenTab: (tab: ActiveTab) => void
-}) {
-  const { t } = useT()
-  const recoveryTime = metrics ? selectRecoveryTimeMetric(metrics) : null
-  return (
-    <RecoveryCenterTile
-      title={t('recoveryCenter.tile.today.title')}
-      kicker={t('recoveryCenter.tile.today.kicker')}
-      severity="cobalt"
-      icon={<BarChart3 size={18} aria-hidden="true" />}
-      testId="recovery-center-tile-today"
-      footer={(
-        <button
-          type="button"
-          className="we-recovery-center-tile__link"
-          onClick={() => onOpenTab('operations')}
-        >
-          {t('recoveryCenter.tile.today.openAll')} <ChevronRight size={14} aria-hidden="true" />
-        </button>
-      )}
-    >
-      <div className="we-operator-mini">
-        <div className="we-operator-mini__cell">
-          <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.runs')}</div>
-          <div className="we-operator-mini__val">{metrics?.terminalRuns ?? 0}</div>
-          <div className="we-operator-mini__delta">{t('recoveryCenter.tile.today.windowDays', { days: metrics?.windowDays ?? 30 })}</div>
-        </div>
-        <div className="we-operator-mini__cell">
-          <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.success')}</div>
-          <div className="we-operator-mini__val">{metrics?.successRate.display ?? '—'}</div>
-          <div className="we-operator-mini__delta" data-severity={metrics?.successRate.severity ?? 'neutral'}>{metrics?.successRate.severity ?? '—'}</div>
-        </div>
-        <div className="we-operator-mini__cell">
-          <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.failures')}</div>
-          <div className="we-operator-mini__val">{openDeadLetters}</div>
-          <div className="we-operator-mini__delta" data-severity={openDeadLetters === 0 ? 'success' : 'danger'}>{openDeadLetters === 0 ? t('recoveryCenter.tile.today.clean') : t('recoveryCenter.tile.today.pending')}</div>
-        </div>
-        <div className="we-operator-mini__cell">
-          <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.mttr')}</div>
-          <div className="we-operator-mini__val">{recoveryTime?.display ?? '—'}</div>
-          <div className="we-operator-mini__delta">{t('recoveryCenter.tile.today.pending')} {waitingNodes}</div>
-        </div>
-      </div>
-    </RecoveryCenterTile>
   )
 }
 

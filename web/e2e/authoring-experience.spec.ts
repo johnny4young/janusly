@@ -67,6 +67,10 @@ async function open(page: Page, org: string, locale: keyof typeof copies, id: st
   await openWorkflowOperation(page, copy.versions)
   await expect(page.locator('.version-row')).toHaveCount(2)
 }
+// A proposal without a decision carries its reason in the missing bindings.
+function decisionContext(wire: { mode?: string, bindings?: { missing?: unknown[] } }) {
+  return `mode=${wire.mode} missing=${JSON.stringify(wire.bindings?.missing ?? [])}`
+}
 async function propose(page: Page, locale: keyof typeof copies) {
   const copy = copies[locale]
   await openWorkflowAiAction(page, copy.flows)
@@ -144,7 +148,7 @@ for (const locale of ['en', 'es'] as const) {
     }
     const initial = await propose(page, locale)
     if (profile === 'review') {
-      expect(initial.experienceDecision).toMatchObject({ mode: 'REUSE', source: { workflowId, versionId: older.versionId, version: 1 } })
+      expect(initial.experienceDecision, decisionContext(initial)).toMatchObject({ mode: 'REUSE', source: { workflowId, versionId: older.versionId, version: 1 } })
       expect(graphWithoutIdentity(initial.proposal.workflow)).toEqual(graphWithoutIdentity(source.dagJson))
       const receipt = page.getByTestId('experience-review')
       await expect(receipt).toContainText(copy.reuse)
@@ -209,7 +213,7 @@ if (profile === 'review') {
       await expect(page.getByRole('button', { name: copy.withdraw, exact: true })).toHaveCount(0)
       expect((await read(request, org, `/v1/authoring/experiences?workflowId=${workflowId}`)).entries).toEqual([])
       const proposal = await propose(page, locale)
-      expect(proposal.experienceDecision).toMatchObject({ mode: 'GENERATE' })
+      expect(proposal.experienceDecision, decisionContext(proposal)).toMatchObject({ mode: 'GENERATE' })
       expect(proposal.experienceDecision).not.toHaveProperty('source')
       await expect(page.getByTestId('experience-review')).not.toContainText(older.versionId)
       expect(observed.mutations.filter(path => path === '/workflows/save' || path === '/start')).toEqual([])
@@ -226,7 +230,7 @@ if (profile === 'review') {
         await open(page, org, locale, workflowId)
         const entry = await registerExample(page, request, org, locale, workflowId, older.versionId)
         const preview = await propose(page, locale)
-        expect(preview.experienceDecision.mode).toBe('REUSE')
+        expect(preview.experienceDecision?.mode, decisionContext(preview)).toBe('REUSE')
         if (boundary === 'withdrawal') await write(request, org, '/v1/authoring/experiences/revoke', { id: entry.id })
         else if (boundary === 'source deletion') {
           const deleted = await request.delete(`${API_URL}/workflows/${workflowId}`, { headers: headers(org) })

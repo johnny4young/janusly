@@ -3,7 +3,7 @@
  * Surfaces the `mode` ("ai" / "fallback") + `aiError` chip per AGENTS.md
  * fallback contract; also shows the resolved `model` when AI mode succeeds.
  *
- * Used by `RightPanel.tsx` (Runs tab → AI Run Explainer card).
+ * Used by the run sheet's Ask tab and by `ActivityRecoveryDetail.tsx`.
  */
 
 import { useState } from 'react'

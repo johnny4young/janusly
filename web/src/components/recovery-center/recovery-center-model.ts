@@ -19,7 +19,7 @@
 import { t as runtimeT } from '../../i18n/runtime'
 import type { RunNode, RunSummary } from '../../types'
 import type { ApiResponse, FailureCluster as FailureClusterWire } from '../../lib/api-types.generated'
-import { isOpenRunStatus } from '@/lib/status'
+import { isOpenRunStatus, isTerminalRunStatus } from '@/lib/status'
 
 // ─────────────────────────────────────────────────────────────────────────
 // Types / data shapes — mirror the API envelopes the existing panels read.
@@ -330,6 +330,25 @@ export function listActiveRuns(runs: readonly RunSummary[], limit = 3): RunSumma
       return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
     })
     .slice(0, boundedLimit)
+}
+
+export type RunsToday = { count: number; capped: boolean; successRatio: number | null }
+
+const RUN_SUMMARY_PAGE_SIZE = 100
+
+/** Today in the operator's timezone, from the newest-first run page. A page
+ *  full of today's runs means the true count may be higher. */
+export function summarizeRunsToday(runs: readonly RunSummary[], nowMs: number): RunsToday {
+  const midnight = new Date(nowMs).setHours(0, 0, 0, 0)
+  const today = runs.filter((run) => run.createdAt && Date.parse(run.createdAt) >= midnight)
+  const terminal = today.filter((run) => isTerminalRunStatus(run.status))
+  return {
+    count: today.length,
+    capped: today.length >= RUN_SUMMARY_PAGE_SIZE,
+    successRatio: terminal.length === 0
+      ? null
+      : terminal.filter((run) => run.status === 'succeeded').length / terminal.length,
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

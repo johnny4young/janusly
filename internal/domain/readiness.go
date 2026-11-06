@@ -164,13 +164,14 @@ func checkToolResultPolicy(node Node, opts ReadinessOptions, issues *[]Readiness
 	if !isWriteSideTool(opts, toolName, toolInput) {
 		return
 	}
-	if policy, _ := node.Config["resultPolicy"].(string); policy == "require_ok" {
+	// Write-side tools default to require_ok; only an explicit opt-out hides a failure.
+	if policy, _ := node.Config["resultPolicy"].(string); policy != ResultPolicyEnvelope {
 		return
 	}
 	*issues = append(*issues, ReadinessIssue{
 		Code: "tool_result_policy_missing", Severity: "fail", NodeID: node.ID,
-		Message:    fmt.Sprintf("Write-side tool node %q can return a failed result envelope without failing the run.", node.ID),
-		Suggestion: "Set `config.resultPolicy` to `require_ok` so failed provider envelopes enter DLQ and recovery without unsafe blind retries.",
+		Message:    fmt.Sprintf("Write-side tool node %q sets resultPolicy envelope, so a failed result envelope does not fail the run.", node.ID),
+		Suggestion: "Remove `config.resultPolicy` or set it to `require_ok` so failed provider envelopes enter DLQ and recovery without unsafe blind retries.",
 	})
 }
 
@@ -193,6 +194,11 @@ func checkRawSecretsInConfig(node Node, issues *[]ReadinessIssue) {
 				strings.ToUpper(key), strings.ToUpper(key)),
 		})
 	})
+}
+
+// StripSecretReferences returns what a value carries besides named secrets.
+func StripSecretReferences(text string) string {
+	return secretTemplatePattern.ReplaceAllString(text, "")
 }
 
 func checkSensitiveApproval(node Node, wf *Workflow, opts ReadinessOptions, cache map[string]bool, issues *[]ReadinessIssue) {
@@ -515,6 +521,13 @@ func ComputeSuggestionSafetyWithOptions(wf *Workflow, nodeID string, opts Readin
 // read-only action by the legacy name fallback.
 func IsSensitiveActionNodeWithOptions(node Node, opts ReadinessOptions) bool {
 	return isSensitiveAction(node, opts)
+}
+
+// ConsumesHumanDecision reports a step whose completion is one person's answer,
+// which covers one execution. It grants no agent write authority: only an
+// approval does, through HasApprovalAncestorIn.
+func ConsumesHumanDecision(nodeType string) bool {
+	return nodeType == "approval" || nodeType == "human_form"
 }
 
 // HasApprovalAncestorIn reports whether human approval dominates every path

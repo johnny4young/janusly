@@ -71,7 +71,7 @@ export function Layout({ sidebar, main, panel, header, overlay, statusBar, autho
   return (
     <div className={shellClass}>
       {header && (
-        <header className="top-bar">
+        <header className={authoring ? 'top-bar top-bar--authoring' : 'top-bar'}>
           {header}
         </header>
       )}

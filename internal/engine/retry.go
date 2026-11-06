@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/signature"
 )
 
 // ExecError is the structured executor error — the Go shape of the
@@ -134,10 +135,13 @@ func classifyError(serr map[string]any) []string {
 	message, _ := serr["message"].(string)
 	lower := strings.ToLower(message)
 	if strings.Contains(lower, "timeout") || strings.Contains(lower, "timed out") ||
-		code == "ETIMEDOUT" || code == "NODE_TIMEOUT" {
+		signature.IsTimeoutFailure(message) || signature.IsTimeoutFailure(code) || code == "NODE_TIMEOUT" {
 		add("timeout")
 	}
-	if strings.Contains(lower, "network") || code == "ECONNRESET" || code == "ENOTFOUND" {
+	// A status means the peer answered, so message wording cannot prove a transport fault.
+	status, _ := serr["statusCode"].(int)
+	messageNetwork := status == 0 && (strings.Contains(lower, "network") || signature.IsNetworkFailure(message))
+	if messageNetwork || signature.IsNetworkFailure(code) {
 		add("network")
 	}
 	return labels
@@ -154,10 +158,12 @@ func matchesPattern(label, pattern string) bool {
 	return strings.HasPrefix(label, match[1]) && len(label) == 3
 }
 
-// shouldRetry honours ignoreOn first, then retryOn (empty retryOn = retry
+// shouldRetry refuses a writeSide error, because external effects may already
+// have happened, then honours ignoreOn, then retryOn (empty retryOn = retry
 // everything not ignored); no policy means no retry.
 func shouldRetry(serr map[string]any, policy *RetryPolicy) bool {
-	if policy == nil {
+	// An approver's answer covers one execution; a retry would ask again.
+	if policy == nil || serr["writeSide"] == true || serr["name"] == "ToolApprovalError" {
 		return false
 	}
 	labels := classifyError(serr)

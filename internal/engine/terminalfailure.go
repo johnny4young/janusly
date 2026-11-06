@@ -22,10 +22,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 	if policy != nil && policy.MaxAttempts > 0 {
 		maxAttempts = policy.MaxAttempts
 	}
-	// A writeSide error means external effects may already have happened —
-	// never whole-node retry it; operator-gated
-	// replay is safer than duplicate effects.
-	if serr["writeSide"] == true || int(claim.Attempt) >= maxAttempts || !shouldRetry(serr, policy) {
+	if int(claim.Attempt) >= maxAttempts || !shouldRetry(serr, policy) {
 		return e.FailNode(ctx, claim, execErr)
 	}
 
@@ -51,6 +48,9 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 		}
 		if requeued == 0 {
 			return errSkipCommit
+		}
+		if err := q.RetireToolApprovals(ctx, store.RetireToolApprovalsParams{RunID: claim.RunID, NodeID: claim.NodeID}); err != nil {
+			return fmt.Errorf("retire tool approvals: %w", err)
 		}
 		if err := e.recordRoutingOutcome(ctx, q, claim, -1, false, retriedAt); err != nil {
 			return err
@@ -209,7 +209,11 @@ func (e *Engine) afterTerminalFailure(ctx context.Context, claim ClaimedNode) {
 	if err != nil {
 		return
 	}
-	e.maybeTripCircuitBreaker(ctx, run.OrgID, wf.ID, claim.RunID)
+	// A rerun is an operator's attempt, not production traffic: its failure must
+	// not pause the workflow, even by re-reading an older streak.
+	if run.ParentLinkKind.String != RerunLinkKind {
+		e.maybeTripCircuitBreaker(ctx, run.OrgID, wf.ID, claim.RunID)
+	}
 	// Rollout outcome receipt (idempotent; repair covers crash windows).
 	e.maybeRecordRolloutOutcome(ctx, claim.RunID)
 	e.maybeCommitRunSummaryMemory(ctx, claim.RunID)

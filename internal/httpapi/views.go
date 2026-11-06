@@ -77,6 +77,9 @@ type RunSummaryView struct {
 	ValidationEvidenceLevel *string         `json:"validationEvidenceLevel"`
 	CreatedBy               *string         `json:"createdBy"`
 	CreatedAt               *string         `json:"createdAt"`
+	// Cursor is the keyset `before` value for the next page at full timestamp
+	// precision; createdAt is cut to milliseconds, which would skip rows.
+	Cursor *string `json:"cursor"`
 }
 
 func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
@@ -92,7 +95,16 @@ func newRunSummaryView(row store.ListRunSummariesRow) RunSummaryView {
 		ReplayMode: nullableTextValue(row.ReplayMode), TraceID: nullableTextValue(row.TraceID),
 		ValidationEvidenceLevel: nullableTextValue(row.ValidationEvidenceLevel),
 		CreatedBy:               nullableTextValue(row.CreatedBy), CreatedAt: nullableTimeValue(row.CreatedAt),
+		Cursor: runListCursor(row.CreatedAt, row.ID),
 	}
+}
+
+func runListCursor(createdAt *time.Time, id string) *string {
+	if createdAt == nil {
+		return nil
+	}
+	cursor := createdAt.UTC().Format(time.RFC3339Nano) + "|" + id
+	return &cursor
 }
 
 /* ---------------------------------- dlq ----------------------------------- */
@@ -237,10 +249,39 @@ type WorkflowListItemView struct {
 	Tags                 []string `json:"tags"`
 	Folder               *string  `json:"folder"`
 	DeletedAt            *string  `json:"deletedAt"`
+	// ProductionVersion is the version that takes production traffic outside a canary share.
+	ProductionVersion int                      `json:"productionVersion"`
+	Rollout           *WorkflowListRolloutView `json:"rollout"`
+}
+
+// WorkflowListRolloutView is the rollout that routes the workflow's traffic; its
+// canary is always the latest version and TrafficPercent is the canary's effective share.
+type WorkflowListRolloutView struct {
+	Status         string `json:"status"`
+	TrafficPercent int    `json:"trafficPercent"`
+}
+
+// workflowStage mirrors engine.ResolveWorkflowRolloutAssignment: a rollout routes
+// traffic only while its canary is the latest version, and only a promoted
+// canary replaces the baseline outside the canary share.
+func workflowStage(row store.ListWorkflowRowsRow) (int, *WorkflowListRolloutView) {
+	if row.RolloutStatus == "" || row.RolloutCanaryVersion != row.CurrentVersion {
+		return int(row.CurrentVersion), nil
+	}
+	production, share := row.RolloutBaselineVersion, 0
+	switch row.RolloutStatus {
+	case "promoted":
+		production, share = row.RolloutCanaryVersion, 100
+	case "active":
+		share = int(row.RolloutTrafficPercent)
+	}
+	return int(production), &WorkflowListRolloutView{Status: row.RolloutStatus, TrafficPercent: share}
 }
 
 func newWorkflowListItemView(row store.ListWorkflowRowsRow) WorkflowListItemView {
+	production, rollout := workflowStage(row)
 	return WorkflowListItemView{
+		ProductionVersion: production, Rollout: rollout,
 		ID: row.ID, OrgID: row.OrgID, Name: row.Name,
 		CreatedBy: nullableTextValue(row.CreatedBy), CreatedAt: nullableTimeValue(row.CreatedAt),
 		LastRunStatus: textOrNullString(row.LastRunStatus), LastRunAt: nullableTimeValue(row.LastRunAt),

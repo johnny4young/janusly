@@ -1,4 +1,4 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openTemplatePacks, openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -65,18 +65,32 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
 
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await openTemplatePacks(page)
   await expect(page.getByRole('heading', { name: 'Templates', exact: true })).toBeVisible()
 
   const incidentPack = page.getByTestId('solution-pack-incident-triage')
   await expect(incidentPack).toBeVisible()
-  await expect(incidentPack.getByLabel('ops_github missing (github_token)')).toBeVisible()
-  await expect(incidentPack.getByLabel('ops_slack missing (slack_webhook)')).toBeVisible()
+  await expect(incidentPack.getByLabel('ops_github (github_token): Credential missing')).toBeVisible()
+  await expect(incidentPack.getByLabel('ops_slack (slack_webhook): Credential missing')).toBeVisible()
+  const checklist = incidentPack.getByRole('region', { name: /^Before installing/ })
+  await expect(checklist).toContainText('0 of 2 ready')
+
+  await incidentPack.getByTestId('pack-connect-incident-triage-ops_slack').click()
+  const connectDialog = page.getByRole('dialog')
+  await expect(connectDialog.getByLabel(/^Connection name/)).toHaveValue('ops_slack')
+  await expect(connectDialog.getByLabel(/^Connection kind/)).toHaveValue('slack_webhook')
+  await connectDialog.getByLabel(/^Secret value/).fill('e2e-solution-pack-secret')
+  await connectDialog.getByRole('button', { name: 'Add connection', exact: true }).click()
+  await expect(incidentPack.getByLabel('ops_slack (slack_webhook): Connected')).toBeVisible()
+  await expect(checklist).toContainText('1 of 2 ready')
+  await expect(incidentPack.getByTestId('pack-connect-incident-triage-ops_github')).toBeFocused()
+  await dismissToasts(page)
+
   const drillSelect = incidentPack.getByLabel('Failure scenario')
   await drillSelect.selectOption('github_secret_unbound')
   await expect(incidentPack.getByText('Credential unavailable', { exact: true })).toBeVisible()
   await expect(incidentPack.getByText('Real runtime path')).toBeVisible()
-  await expect(incidentPack.getByText(/real worker and terminal-failure boundary/)).toBeVisible()
+  await expect(incidentPack.getByText(/classifies a controlled missing GitHub secret/)).toBeVisible()
   await captureEvidence(incidentPack, 'solution-packs-en-runtime-failure-drill')
 
   await drillSelect.selectOption('worker_interrupted_during_page')
@@ -91,7 +105,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Incident triage')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Run a tool' })).toHaveCount(2)
 
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await openTemplatePacks(page)
   const sampleResponsePromise = page.waitForResponse(response => response.url().endsWith('/solution-packs/incident-triage/sample-run'))
   await incidentPack.getByRole('button', { name: 'Preview sample run', exact: true }).click()
   const sampleResponse = await sampleResponsePromise
@@ -108,7 +122,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
     expect.objectContaining({ nodeId: 'page_oncall', status: 'skipped' }),
   ]))
 
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await openTemplatePacks(page)
   await incidentPack.getByLabel('Failure scenario').selectOption('worker_interrupted_during_page')
   const requestPromise = page.waitForRequest((request) => request.url().endsWith('/solution-packs/incident-triage/inject-failure'))
   const responsePromise = page.waitForResponse((response) => response.url().endsWith('/solution-packs/incident-triage/inject-failure'))
@@ -131,7 +145,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   await expect(activityRecovery).toHaveAttribute('data-dead-letter-id', drillBody.deadLetterId)
   await expect(activityRecovery).toContainText('Incident triage')
   await expect(activityRecovery).toContainText('Run a tool')
-  await expect(activityRecovery).toContainText('worker_stalled')
+  await expect(activityRecovery).toContainText('Failed by the stalled-node reaper')
   const drillContext = activityRecovery.getByTestId('dlq-recovery-drill-context')
   await expect(drillContext).toContainText('Recovery drill')
   await expect(drillContext).toContainText('Real reaper path')
@@ -147,7 +161,7 @@ test('Spanish recovery drills remain usable on mobile without horizontal overflo
   await prepareSession(page, 'es')
   await page.goto('/')
   await page.getByRole('button', { name: 'Navegación' }).click()
-  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  await openTemplatePacks(page, true)
 
   await expect(page.getByRole('heading', { name: 'Plantillas', exact: true })).toBeVisible()
   const incidentPack = page.getByTestId('solution-pack-incident-triage')
@@ -155,7 +169,7 @@ test('Spanish recovery drills remain usable on mobile without horizontal overflo
   await incidentPack.getByLabel('Escenario de fallo').selectOption('github_secret_unbound')
   await expect(incidentPack.getByText('Credencial no disponible')).toBeVisible()
   await expect(incidentPack.getByText('Ruta real del runtime')).toBeVisible()
-  await expect(incidentPack.getByText(/worker real y el límite de fallo terminal/)).toBeVisible()
+  await expect(incidentPack.getByText(/worker real clasifica un secreto GitHub/)).toBeVisible()
   await captureEvidence(incidentPack, 'solution-packs-es-runtime-failure-mobile')
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)

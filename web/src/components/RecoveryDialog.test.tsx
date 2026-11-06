@@ -104,6 +104,88 @@ describe('<RecoveryDialog />', () => {
     expect(screen.getByRole('button', { name: /Generate suggestion/i })).toBeInTheDocument()
   })
 
+  describe('AI availability', () => {
+    const fallbackEnvelope = {
+      mode: 'fallback' as const,
+      suggestedWorkflow: baseDlq.workflowJson,
+      rationale: 'AI is not configured.',
+      aiError: 'no_llm_configured',
+    }
+
+    it('states the failed step, attempts and the connected model before any AI call', () => {
+      useWorkflowStore.setState({ aiHealth: { enabled: true, model: 'model-x', timeoutMs: 1, maxRetries: 0 } })
+      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} canReplayInLab />)
+      const facts = screen.getByTestId('recovery-availability')
+      expect(facts).toHaveAttribute('data-ai', 'on')
+      expect(facts).toHaveTextContent('fetch')
+      expect(facts).toHaveTextContent('3')
+      expect(facts).toHaveTextContent('Connected model-x')
+      expect(screen.getByRole('button', { name: /Generate suggestion/i })).toBeInTheDocument()
+      expect(screen.queryByTestId('recovery-no-ai')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('recovery-replay-in-lab')).not.toBeInTheDocument()
+      expect(api).not.toHaveBeenCalled()
+    })
+
+    it('does not claim a connection when the status is unknown and keeps the suggestion action', () => {
+      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} canReplayInLab />)
+      const facts = screen.getByTestId('recovery-availability')
+      expect(facts).toHaveAttribute('data-ai', 'unknown')
+      expect(facts).toHaveTextContent('Status unavailable')
+      expect(screen.getByRole('button', { name: /Generate suggestion/i })).toBeInTheDocument()
+      expect(screen.queryByTestId('recovery-no-ai')).not.toBeInTheDocument()
+    })
+
+    describe('without a key', () => {
+      beforeEach(() => {
+        useWorkflowStore.setState({ aiHealth: { enabled: false, model: 'model-x', timeoutMs: 1, maxRetries: 0 } })
+      })
+
+      it('leads with Replay in Lab and spends no request opening it', async () => {
+        const onClose = vi.fn()
+        render(<RecoveryDialog dlq={baseDlq} onClose={onClose} canReplayInLab />)
+        expect(screen.getByTestId('recovery-availability')).toHaveTextContent('Not connected')
+        expect(screen.getByTestId('recovery-no-ai')).toHaveTextContent(/ANTHROPIC_API_KEY.*Replay in Lab/)
+        expect(screen.queryByRole('button', { name: /Generate suggestion/i })).not.toBeInTheDocument()
+        const replayInLab = screen.getByTestId('recovery-replay-in-lab')
+        expect(replayInLab).toHaveFocus()
+        fireEvent.click(replayInLab)
+        expect(await screen.findByRole('button', { name: 'Start replay' })).toBeInTheDocument()
+        expect(screen.getByText(baseDlq.runId)).toBeInTheDocument()
+        expect(api).not.toHaveBeenCalled()
+
+        // Escape belongs to Lab while it is open, and focus returns to its opener.
+        fireEvent.keyDown(window, { key: 'Escape' })
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'Start replay' })).not.toBeInTheDocument())
+        expect(onClose).not.toHaveBeenCalled()
+        await waitFor(() => expect(replayInLab).toHaveFocus())
+
+        // Lab's backdrop is not the recovery dialog's: dismissing Lab keeps this dialog open.
+        fireEvent.click(replayInLab)
+        const startReplay = await screen.findByRole('button', { name: 'Start replay' })
+        fireEvent.click(startReplay.closest('.run-input-backdrop')!)
+        expect(onClose).not.toHaveBeenCalled()
+      })
+
+      it('keeps the deterministic envelope reachable, unvalidated and not actionable', async () => {
+        vi.mocked(api).mockResolvedValueOnce(fallbackEnvelope)
+        render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} canReplayInLab />)
+        fireEvent.click(screen.getByTestId('recovery-review-evidence'))
+        await screen.findByText(/AI was unavailable/i)
+        expect(vi.mocked(api).mock.calls[0]?.[0]).toBe('/ai/patch-workflow')
+        const stages = screen.getByTestId('recovery-stages').querySelectorAll('li')
+        expect([...stages].map((stage) => stage.dataset.state)).toEqual(['review', 'pending', 'pending'])
+        expect(screen.getByRole('button', { name: /Validate in sandbox/i })).toBeDisabled()
+      })
+
+      it('offers no Lab action or copy to an operator who may not start runs', () => {
+        render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+        expect(screen.queryByTestId('recovery-replay-in-lab')).not.toBeInTheDocument()
+        expect(screen.getByTestId('recovery-no-ai')).not.toHaveTextContent('Replay in Lab')
+        expect(screen.getByTestId('recovery-review-evidence')).toHaveClass('ui-button--primary')
+      })
+    })
+  })
+
   it('shows the diff after a suggestion arrives, with the Validate in sandbox primary button', async () => {
     vi.mocked(api).mockResolvedValueOnce(aiSuggestion)
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
@@ -434,6 +516,8 @@ describe('<RecoveryDialog />', () => {
     }, { timeout: 4000 })
     expect(screen.getByText(/still 502 after retry/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Iterate/i })).toBeInTheDocument()
+    const stages = screen.getByTestId('recovery-stages').querySelectorAll('li')
+    expect([...stages].map((stage) => stage.dataset.state)).toEqual(['done', 'failed', 'pending'])
     // Save + replay must NOT have been invoked when validation fails.
     const calls = vi.mocked(api).mock.calls.map((call) => call[0])
     expect(calls).not.toContain('/workflows/save')
@@ -809,7 +893,7 @@ describe('<RecoveryDialog />', () => {
       await waitFor(() => screen.getByRole('button', { name: /Validate 1 sample.*3 entr/i }))
       fireEvent.click(screen.getByRole('button', { name: /Validate 1 sample.*3 entr/i }))
 
-      const steps = await screen.findByTestId('recovery-cluster-steps')
+      const steps = await screen.findByTestId('recovery-stages')
       // Step 1 (validate) is active while validating; the replay step names the count.
       expect(steps.querySelector('li[data-state="active"]')).toHaveTextContent(/Validate/i)
       expect(steps).toHaveTextContent(/Replay 3 runs/i)

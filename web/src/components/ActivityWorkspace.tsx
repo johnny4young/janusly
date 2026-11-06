@@ -251,6 +251,13 @@ export function ActivityWorkspace({
     onClearActiveRun()
   }, [onClearActiveRun, onSelectRecovery])
 
+  const closeRun = useCallback(() => {
+    setPendingRunId(null)
+    onClearActiveRun()
+    // Without a run the shell drops the snapshot and remounts this panel, so the ref is gone.
+    requestAnimationFrame(() => document.getElementById('activity-feed-heading')?.focus())
+  }, [onClearActiveRun])
+
   const adoptRecoveryRequest = useCallback((request: RecoveryQueueFocusRequest) => {
     setShowDetailedHistory(false)
     setPendingRunId(null)
@@ -407,7 +414,7 @@ export function ActivityWorkspace({
         <section className="we-card we-activity-feed">
           <div className="split-row we-activity-feed__heading">
             <div>
-              <h2 ref={feedHeadingRef} tabIndex={-1}>{t('activity.feed.title')}</h2>
+              <h2 id="activity-feed-heading" ref={feedHeadingRef} tabIndex={-1}>{t('activity.feed.title')}</h2>
               <p>{t('activity.feed.description')}</p>
             </div>
             <span aria-live="polite">{t('activity.feed.count', { count: filtered.length })}</span>
@@ -474,6 +481,7 @@ export function ActivityWorkspace({
                   <RunWorkspace
                     {...runWorkspaceProps}
                     runsPanelVariant="activity-detail"
+                    onClose={closeRun}
                   />
                 ) : (
                   <p className="we-activity-detail__state" role="status">

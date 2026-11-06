@@ -1,0 +1,57 @@
+.we-cmdk-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--we-line);
+}
+
+.we-cmdk-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--we-line-strong);
+  border-radius: var(--we-radius-pill);
+  background: var(--we-primary-soft);
+  color: var(--we-primary-text);
+  font-size: 12px;
+}
+
+.we-cmdk-chip select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 3px 4px 3px 10px;
+  max-width: 220px;
+}
+
+.we-cmdk-chip button {
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 3px 8px 3px 2px;
+  cursor: pointer;
+}
+
+.we-cmdk-chip select:focus-visible,
+.we-cmdk-chip button:focus-visible {
+  outline: none;
+  box-shadow: var(--we-focus-ring);
+  border-radius: var(--we-radius-pill);
+}
+
+.we-cmdk-unparsed {
+  color: var(--we-muted);
+  font-size: 12px;
+}
+
+.we-cmdk-row__id {
+  margin-left: 8px;
+  color: var(--we-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}

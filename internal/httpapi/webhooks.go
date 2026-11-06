@@ -535,12 +535,12 @@ func (s *V1Server) runsRedriveCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, deadLetterID); err != nil {
+	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, deadLetterID, engine.RedriveOptions{Actor: engine.ApprovalActorID(rc.authContext)}); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			return opError(http.StatusNotFound, "dlq_not_found", "Not found", nil)
 		case errors.Is(err, engine.ErrRedriveConflict):
-			return opError(http.StatusConflict, "dlq_replay_conflict", "Dead letter replay already claimed", nil)
+			return opError(http.StatusConflict, "dlq_replay_conflict", redriveConflictMessage(err, "Dead letter replay already claimed"), nil)
 		default:
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}

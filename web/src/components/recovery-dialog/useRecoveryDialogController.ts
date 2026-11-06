@@ -57,6 +57,8 @@ export type RecoveryDialogProps = {
   clusterSignature?: string
   clusterMembersCapped?: boolean
   clusterMembersTotal?: number
+  /** Whether the operator may start runs, which Replay in Lab does. */
+  canReplayInLab?: boolean
 }
 
 /**
@@ -106,11 +108,15 @@ export function useRecoveryDialogController({
   clusterSignature,
   clusterMembersCapped,
   clusterMembersTotal,
+  canReplayInLab = false,
 }: RecoveryDialogProps) {
   const { t } = useT()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
+  const aiHealth = useWorkflowStore((state) => state.aiHealth)
+  const aiStatus = aiHealth?.enabled === true ? 'on' : aiHealth?.enabled === false ? 'off' : 'unknown'
   const [step, setStep] = useState<Step>({ kind: 'idle' })
+  const [labOpen, setLabOpen] = useState(false)
   const validationRequestPendingRef = useRef(false)
   const suggestionRequestPendingRef = useRef(false)
   const [matchingPlaybook, setMatchingPlaybook] = useState<RecoveryPlaybookSummary | null>(null)
@@ -199,12 +205,12 @@ export function useRecoveryDialogController({
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape') return
-      if (busy) return
+      if (busy || labOpen) return
       onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, busy])
+  }, [onClose, busy, labOpen])
 
   // Poll the validation run until it reaches a terminal status. The poll
   // tears itself down when the dialog closes or the step transitions
@@ -600,6 +606,11 @@ export function useRecoveryDialogController({
   return {
     dlq,
     onClose,
+    canReplayInLab,
+    labOpen,
+    setLabOpen,
+    aiStatus,
+    aiModel: aiHealth?.model,
     step,
     busy,
     matchingPlaybook,

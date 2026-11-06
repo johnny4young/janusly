@@ -79,6 +79,7 @@ jobs:
       - if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: pnpm exec playwright install-deps chromium
       - run: pnpm test:browser
+      - run: pnpm test:auth-e2e
       - run: pnpm build
       - run: pnpm bundle-check
 
@@ -192,6 +193,17 @@ jobs:
       - if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: pnpm --dir web exec playwright install-deps chromium
       - run: bash scripts/test-e2e.sh
+      - name: Preserve E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            output/e2e/
+            output/playwright/
+            web/test-results/
+          if-no-files-found: warn
+          retention-days: 14
 
   parity:
     name: Browser route parity

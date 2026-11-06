@@ -51,6 +51,7 @@ function options(): AppCommandsOptions {
     permissions: ['runs.read', 'runs.start', 'workflows.write'],
     projectedRuns: [],
     refreshPlatform: vi.fn(async () => undefined),
+    setCredentials: vi.fn(),
     projectRunSummary: vi.fn(),
     loadStatus: vi.fn(async () => undefined),
     runTransitionGuard: createRunTransitionGuard(
@@ -157,7 +158,7 @@ it('closes a failure without publishing a recovered all-clear handoff', async ()
   const { result } = renderHook(() => useRunCommands({
     ...options(), runPlatformMutation: usePlatformMutation(),
   }, { validateWorkflow: vi.fn(async () => true) }))
-  await act(async () => { expect(await result.current.resolveDeadLetter('failure-1')).toBe(true) })
+  await act(async () => { expect(await result.current.resolveDeadLetter('failure-1', 'accepted')).toBe(true) })
   expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual(['/dlq/resolve'])
   expect(consumeRecoveryAllClear()).toBeNull()
 })

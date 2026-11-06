@@ -26,6 +26,19 @@ func rolloutWorkflowDoc(id, verdict string) map[string]any {
 	}
 }
 
+// workflowListStage reads the stage the workflow list shows for one workflow.
+func workflowListStage(t *testing.T, h *apiHarness, wfID string) (float64, map[string]any) {
+	t.Helper()
+	res := h.call("GET", "/v1/workflows?q="+wfID, nil, "")
+	rows, _ := res.body["data"].([]any)
+	if res.status != 200 || len(rows) != 1 {
+		t.Fatalf("workflow list: %d %+v", res.status, res.body)
+	}
+	row := rows[0].(map[string]any)
+	rollout, _ := row["rollout"].(map[string]any)
+	return row["productionVersion"].(float64), rollout
+}
+
 // The rollout substrate: create-validation ladder (bounds, canary
 // strictly newer AND latest, one active per workflow), the deterministic
 // sha256 assignment captured on the run row AND the run.started event,
@@ -77,6 +90,10 @@ func TestWorkflowRolloutAssignment(t *testing.T) {
 		t.Fatalf("create rollout: %d %+v", res.status, res.body)
 	}
 	rolloutID := res.body["rollout"].(map[string]any)["id"].(string)
+	if production, rollout := workflowListStage(t, h, wfID); production != 1 || rollout["status"] != "active" ||
+		rollout["trafficPercent"] != float64(50) {
+		t.Fatalf("active rollout keeps the baseline in production: v%v %+v", production, rollout)
+	}
 	if res = h.call("POST", "/workflows/"+wfID+"/rollout", createBody(v1, v3, 50), ""); res.status != 409 {
 		t.Fatalf("second active must 409: %d", res.status)
 	}
@@ -134,6 +151,9 @@ func TestWorkflowRolloutAssignment(t *testing.T) {
 		promotedRun).Scan(&promotedVersion, &promotedVariant)
 	if promotedVersion != v3 || promotedVariant != "canary" {
 		t.Fatalf("promoted traffic must be all-canary: %s %s", promotedVersion, promotedVariant)
+	}
+	if production, rollout := workflowListStage(t, h, wfID); production != 3 || rollout["status"] != "promoted" || rollout["trafficPercent"] != float64(100) {
+		t.Fatalf("promoted canary is production: v%v %+v", production, rollout)
 	}
 	if res = h.call("POST", "/workflows/"+wfID+"/rollout/"+rolloutID+"/rollback", map[string]any{}, ""); res.status != 409 {
 		t.Fatalf("second decision must 409: %d", res.status)
@@ -291,6 +311,9 @@ func TestRolloutAutoRollback(t *testing.T) {
 	status, reason, canaryFailed, receipts := rolloutStatus()
 	if status != "rolled_back" || reason != "canary_success_rate_breach" {
 		t.Fatalf("auto-rollback: %s %s", status, reason)
+	}
+	if production, rollout := workflowListStage(t, h, wfID); production != 1 || rollout["status"] != "rolled_back" || rollout["trafficPercent"] != float64(0) {
+		t.Fatalf("rolled-back canary leaves the baseline in production: v%v %+v", production, rollout)
 	}
 	if canaryFailed < 5 || receipts < canaryFailed {
 		t.Fatalf("counters/receipts: failed=%d receipts=%d", canaryFailed, receipts)

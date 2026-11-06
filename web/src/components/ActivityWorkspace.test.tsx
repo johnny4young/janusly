@@ -13,8 +13,11 @@ vi.mock('../lib/dead-letter-contract', async (importOriginal) => ({
 }))
 
 vi.mock('./RunWorkspace', () => ({
-  RunWorkspace: ({ runsPanelVariant }: { runsPanelVariant?: string }) => (
-    <div data-testid="run-detail-projection">{runsPanelVariant ?? 'standalone'}</div>
+  RunWorkspace: ({ runsPanelVariant, onClose }: { runsPanelVariant?: string; onClose?: () => void }) => (
+    <div data-testid="run-detail-projection">
+      {runsPanelVariant ?? 'standalone'}
+      {onClose && <button type="button" onClick={onClose}>Close sheet</button>}
+    </div>
   ),
 }))
 
@@ -197,6 +200,15 @@ describe('<ActivityWorkspace />', () => {
     expect(handlers.onSelectRecovery).toHaveBeenCalledWith('dead-letter-1')
     expect(handlers.onClearActiveRun).toHaveBeenCalled()
     expect(screen.getByTestId('activity-feed-list')).toBeVisible()
+  })
+
+  it('closes the run sheet and returns focus to the feed heading', async () => {
+    render(<ActivityWorkspace {...props({ activeRunId: 'run-failed' })} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Close sheet' }))
+
+    expect(handlers.onClearActiveRun).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Recent activity' })).toHaveFocus())
   })
 
   it('adopts a recovery attention handoff into the needs-action filter', async () => {

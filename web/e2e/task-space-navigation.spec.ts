@@ -312,7 +312,9 @@ for (const locale of LOCALES) {
     await expect(recoveryAutomation.getByRole('button', {
       name: new RegExp(locale.automation),
     })).toHaveAttribute('aria-expanded', 'false')
-    expect(recoveryAutomationRequests).toEqual([])
+    // The queue reads clusters itself, so only the others prove the disclosure stays closed.
+    const withoutClusters = () => recoveryAutomationRequests.filter((path) => path !== '/dlq/clusters').sort()
+    expect(withoutClusters()).toEqual([])
     await expect(page.getByTestId('runs-metric-strip')).toHaveCount(0)
     await expect(page.getByTestId('usage-summary-card')).toHaveCount(0)
     await expect(
@@ -327,11 +329,7 @@ for (const locale of LOCALES) {
     await recoveryAutomation.getByTestId('recovery-automation-toggle').click()
     await expect(recoveryAutomation.getByTestId('recovery-automation-toggle'))
       .toHaveAttribute('aria-expanded', 'true')
-    await expect.poll(() => recoveryAutomationRequests.sort()).toEqual([
-      '/auto-healing/pending',
-      '/dlq/clusters',
-      '/recovery/campaigns',
-    ])
+    await expect.poll(withoutClusters).toEqual(['/auto-healing/pending'])
     await expectAccessible(page, `${locale.locale} recovery automation disclosure`)
     await capture(
       recoveryAutomation,
@@ -339,6 +337,11 @@ for (const locale of LOCALES) {
     )
 
     await recoveryAutomation.getByTestId('recovery-automation-toggle').click()
+    await page.getByTestId('recover-section-jobs').click()
+    await expect(page.getByTestId('replay-campaigns-card')).toBeVisible()
+    await expect.poll(withoutClusters).toEqual(['/auto-healing/pending', '/recovery/campaigns'])
+    await expectAccessible(page, `${locale.locale} recovery jobs`)
+    await page.getByTestId('recover-section-queue').click()
     await page.setViewportSize({ width: 1024, height: 720 })
     await page.getByTestId('recovery-queue').scrollIntoViewIfNeeded()
     await expect(page.getByTestId('recovery-queue')).toBeVisible()

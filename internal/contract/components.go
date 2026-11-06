@@ -53,6 +53,7 @@ var Components = []Component{
 	{"RunSummary", runSummary},
 	{"RunJSON", runJSON},
 	{"RunUsage", runUsage},
+	{"UsageCosts", usageCosts},
 
 	// Dead letters
 	{"DeadLetterStatus", deadLetterStatus},
