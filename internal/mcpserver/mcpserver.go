@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -508,7 +510,9 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 		d.Audit.Write(ctx, d.Pool, d.auditContext(), "dlq.replayed", audit.Options{
 			TargetType: "dlq", TargetID: deadLetterID,
 		})
-		return ok(map[string]any{"redriven": true, "deadLetterId": deadLetterID})
+		payload := map[string]any{"redriven": true, "deadLetterId": deadLetterID}
+		maps.Copy(payload, d.redriveVersionView(ctx, deadLetterID))
+		return ok(payload)
 	case errors.Is(err, engine.ErrDeadLetterNotFound):
 		return expected("dead letter not found")
 	case errors.Is(err, engine.ErrRedriveRerunExists):
@@ -518,6 +522,42 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	default:
 		return nil, nil, err
 	}
+}
+
+// redriveVersionView says which version the revived run executes. A redrive
+// keeps the run's original snapshot, so right after a workflow fix it fails
+// the same way unless the agent starts a new run. Lookup failures omit it.
+func (d Deps) redriveVersionView(ctx context.Context, deadLetterID string) map[string]any {
+	q := store.New(d.Pool)
+	dead, err := q.GetDeadLetter(ctx, store.GetDeadLetterParams{ID: deadLetterID, OrgID: d.OrgID})
+	if err != nil {
+		return nil
+	}
+	run, err := q.GetRun(ctx, store.GetRunParams{ID: dead.RunID, OrgID: d.OrgID})
+	if err != nil || run.WorkflowVersionID == "" {
+		return nil
+	}
+	pinned, err := q.GetWorkflowVersionAnyWorkflow(ctx, store.GetWorkflowVersionAnyWorkflowParams{
+		ID: run.WorkflowVersionID, OrgID: d.OrgID,
+	})
+	if err != nil {
+		return nil
+	}
+	latest, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
+		WorkflowID: pinned.WorkflowID, OrgID: d.OrgID,
+	})
+	if err != nil {
+		return nil
+	}
+	view := map[string]any{
+		"runId": dead.RunID, "runVersion": pinned.Version, "latestVersion": latest.Version,
+		"staleVersion": latest.ID != pinned.ID,
+	}
+	if latest.ID != pinned.ID {
+		view["hint"] = fmt.Sprintf("the revived run keeps version %d; runs.start with workflowId %q runs version %d",
+			pinned.Version, pinned.WorkflowID, latest.Version)
+	}
+	return view
 }
 
 func farFuture() time.Time {
