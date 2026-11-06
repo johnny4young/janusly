@@ -90,6 +90,13 @@ export const INITIAL_RUN_FORM: RunForm = {
 
 export const DEFAULT_MAX_PROVIDER_CALLS = 20
 
+/** experiment.MinScoreDelta: smaller mean-score changes are noise to the recommendation. */
+export const MIN_SCORE_DELTA = 0.05
+
+export function formatList(items: string[]): string {
+  return new Intl.ListFormat(getResolvedLocale(), { type: 'conjunction' }).format(items)
+}
+
 /** Byte limits the API enforces on the trimmed values the panel sends. */
 export const TEXT_LIMITS = { name: 120, ref: 256, datasetName: 120, datasetDescription: 2000 } as const
 

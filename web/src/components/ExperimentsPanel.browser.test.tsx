@@ -46,4 +46,24 @@ describe('<ExperimentsPanel /> (browser smoke)', () => {
     const inputs = ['experiment-dataset-name', 'experiment-dataset-description'].map((id) => document.getElementById(id)!.getBoundingClientRect())
     expect(inputs[1]!.top).toBeGreaterThan(inputs[0]!.bottom)
   })
+
+  it('keeps the comparison card inside a phone-width viewport', async () => {
+    const side = { meanScore: 0.5, totalCostUsd: 0.01, costKnownCount: 4, meanLatencyMs: 100, errorCount: 0, judgedByLlmCount: 0, scoringFallbackCount: 0 }
+    const experiment = {
+      id: 'exp-1', name: 'Narrow', kind: 'prompt', controlRef: 'a@1', candidateRef: 'a@2', evalDatasetId: 'd', scorerKind: 'string_equality',
+      status: 'completed', createdAt: null, completedAt: null,
+      summary: { scorerKind: 'string_equality', exampleCount: 4, control: side, candidate: side, scoreDelta: 0, costDelta: 0, recommendation: 'keep_control', recommendationReasonCode: 'within_noise' },
+    }
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/experiments') return { experiments: [experiment] }
+      if (path === '/eval/datasets') return { datasets: [] }
+      return {}
+    })
+    await page.viewport(375, 812)
+    render(<ExperimentsPanel />)
+
+    ;(await screen.findByRole('button', { name: /Narrow/ })).click()
+    const card = await screen.findByTestId('experiment-detail')
+    expect(card.getBoundingClientRect().right).toBeLessThanOrEqual(375)
+  })
 })
