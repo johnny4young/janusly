@@ -735,9 +735,12 @@ Rows retain the fixed height required by virtualization. In a row's recovery
 badge the owner gives way first, then the severity text and, at the narrowest
 widths, the occurrence text; both end in an ellipsis and keep their full text in
 a tooltip, so the SLA pill is never clipped. From a 1280px window the toolbar
-holds one row in English and Spanish for every menu choice, because search
-absorbs width changes; Spanish sort labels are short ("Más recientes", "SLA
-próximo") so they fit. Counts in the thousands can wrap Sort to a second row.
+holds one row in English for every menu choice, because search absorbs width
+changes. Spanish, with short sort labels ("Más recientes", "SLA próximo") and
+menus that draw their own chevron, holds one row from 1280px on macOS and from
+1310px on Linux, where Chromium rounds glyph advances to whole pixels; the
+Chromium check uses a 1320px window. Counts in the thousands can wrap Sort to a
+second row.
 It reflows without hiding actions at narrower widths; full
 failure details remain available in the detail pane. Chromium checks cover long identifiers, English/Spanish labels,
 keyboard filter traversal and 390/640/1280 CSS-pixel widths. The 640px case is a

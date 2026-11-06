@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- In Spanish, the Recover queue toolbar fits on one row from a 1280 px window
-  with the detail pane open, for every menu choice. Sort options read "Más
+- In Spanish, the Recover queue toolbar fits on one row with the detail pane
+  open, for every menu choice, from a 1280 px window on macOS and from 1310 px
+  on Linux, where text renders slightly wider. Sort options read "Más
   recientes", "Más antiguos", "Más graves" and "SLA próximo". On narrow
   screens a queue row's SLA time is no longer cut off: the severity and
   occurrence labels shorten with an ellipsis instead and show their full text

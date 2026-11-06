@@ -105,7 +105,7 @@
   font-size: 12px;
 }
 
-/* A drawn chevron replaces the native arrow, whose width differs by platform. */
+/* A drawn chevron keeps each menu as wide as its text plus fixed padding, on every platform. */
 .we-dlq-filters select.ui-control {
   width: auto;
   appearance: none;
