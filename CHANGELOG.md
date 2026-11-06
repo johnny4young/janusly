@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The experiment comparison lists metrics by row, with either arm as the
+  baseline. Each change says Better or Worse according to whether higher or
+  lower is better for that metric. Diff only hides metrics that did not change.
+  A notice appears when control and candidate finished a different number of
+  examples, and latency and cost then get no verdict. A cost the run did not
+  measure stays Unknown and gets no change.
 - Experiments now start from the dataset. Run a comparison has three steps,
   Dataset, Control vs candidate, and Scorer and run, and the dataset form lives
   in the first step. A disabled Run comparison names the missing step and field,

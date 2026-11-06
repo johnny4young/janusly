@@ -100,5 +100,12 @@ context and records the failure explicitly.
 Setup has three steps: Dataset, Control vs candidate, and Scorer and run. A
 disabled Run comparison names the first thing still missing.
 
+The comparison shows the aggregates in each summary, with either arm as the
+baseline. The recommendation always compares candidate with control. Failed
+examples add no cost or latency, so those two metrics get no better or worse
+verdict when the arms finished different counts. A cost with no measured calls
+stays unknown and is never compared. Summaries hold aggregates only, so a
+per-example view needs per-example outputs and scores to be persisted first.
+
 See [AI pipeline architecture](architecture/ai-pipeline.md) and
 [memory policy](memory-policy.md).
