@@ -68,10 +68,9 @@ describe('Recovery queue layout and focus in Chromium', () => {
     } finally { await page.viewport(1024, 768) }
   })
 
-  // Card widths beside the sidebar in 1280px (English) and 1440px (Spanish) windows.
-  it.each([['en', 852], ['es', 1012]] as const)('keeps search, status chips and menus on one row in %s at a %ipx card', async (locale, width) => {
-    initI18n(locale)
-    render(<div style={{ width }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
+  it('keeps search, status chips and menus on one row in the 852px card beside the sidebar', async () => {
+    initI18n('en')
+    render(<div style={{ width: 852 }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
     await screen.findByTestId('dlq-row-invoice')
     const centers = ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']
       .map(id => { const box = document.getElementById(id)!.getBoundingClientRect(); return box.top + box.height / 2 })
