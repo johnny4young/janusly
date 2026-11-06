@@ -73,6 +73,9 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 			}
 			wakeReason = "approval_timeout"
 		}
+	case "tool_approval":
+		wakeAt = waiting.WakeAt
+		wakeReason = "tool_approval_timeout"
 	}
 	stateJSON := safePersist(map[string]any{"waiting": metadata}, stateJSONMaxBytes)
 	eventJSON := safePersist(map[string]any{
@@ -264,6 +267,9 @@ func (e *Engine) processApprovalTimeout(
 		applied = true
 		return nil
 	})
+	if applied && err == nil {
+		e.DeliverParentNotifications(ctx, runID)
+	}
 	return applied, err
 }
 
@@ -295,8 +301,14 @@ var (
 // still-`waiting` node completes (the CAS guard), so a replayed token
 // cannot double-write output or double-enqueue downstream work.
 func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, input map[string]any, token string) error {
+	return e.ResumeRunAs(ctx, runID, nodeID, input, token, "")
+}
+
+// ResumeRunAs is ResumeRunWithInput by a known person. Whoever supplies a
+// form or input becomes a requester of every tool approval downstream.
+func (e *Engine) ResumeRunAs(ctx context.Context, runID, nodeID string, input map[string]any, token, actor string) error {
 	finishedAt := e.eventNow()
-	return e.inCompletionTx(ctx, runID, func(q *store.Queries, events *runEventBuffer) error {
+	err := e.inCompletionTx(ctx, runID, func(q *store.Queries, events *runEventBuffer) error {
 		run, err := q.GetRunExecution(ctx, runID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -354,6 +366,11 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 		if err := q.DeleteWakeup(ctx, rowID); err != nil {
 			return fmt.Errorf("clear wakeup: %w", err)
 		}
+		if actor != "" && (target.Type == "human_form" || len(input) > 0) {
+			if err := recordRunActor(ctx, q, runID, nodeID, "resume", actor); err != nil {
+				return err
+			}
+		}
 		eventPayload := json.RawMessage(`{}`)
 		if target.Type == "human_form" || target.Type == "webhook" {
 			eventPayload = safePersist(map[string]any{"output": output}, e.persistence.MaxBytes())
@@ -362,6 +379,13 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 		_, err = e.scheduleDownstream(ctx, q, events, ClaimedNode{RunID: runID, NodeID: nodeID}, finishedAt)
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	// The resumed node may have been the child's last: hand off to a waiting
+	// parent now instead of on the reconciler's next sweep.
+	e.DeliverParentNotifications(ctx, runID)
+	return nil
 }
 
 // Waiting-sweep bounds: one poll tick keeps draining fair batches until the
@@ -390,6 +414,14 @@ func (e *Engine) processDueWaitingWakeups(ctx context.Context, q *store.Queries)
 			switch wakeup.Reason {
 			case "approval_timeout":
 				applied, err := e.processApprovalTimeout(ctx, wakeup.RunID, wakeup.NodeID, wakeup.WakeAt)
+				if err == nil {
+					progressed++
+					if applied {
+						processed++
+					}
+				}
+			case "tool_approval_timeout":
+				applied, err := e.expireToolApproval(ctx, wakeup.RunID, wakeup.NodeID)
 				if err == nil {
 					progressed++
 					if applied {
@@ -497,6 +529,9 @@ func (e *Engine) failInvalidSnapshotTimer(ctx context.Context, runID, nodeID str
 		applied = true
 		return nil
 	})
+	if applied && err == nil {
+		e.DeliverParentNotifications(ctx, runID)
+	}
 	return applied, err
 }
 

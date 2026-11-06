@@ -9,6 +9,8 @@
 // the dev seeder can import it without cycles.
 package failmatrix
 
+import "strings"
+
 // Env carries the ids the consuming suite seeded before iterating.
 type Env struct {
 	// OpenDeadLetterID is an open, replayable dead letter.
@@ -86,6 +88,18 @@ func Catalog() []Case {
 		{Surface: "replay", Name: "fields_required", Method: "POST", Path: staticPath("/dlq/replay"),
 			Body:       func(Env) map[string]any { return map[string]any{} },
 			WantStatus: 400, WantCode: "dlq_fields_required"},
+
+		// ── accepted-loss close: a bad reason closes nothing ───────────
+		{Surface: "close", Name: "reason_blank", Method: "POST", Path: staticPath("/dlq/resolve"),
+			Body: func(env Env) map[string]any {
+				return map[string]any{"id": env.OpenDeadLetterID, "reason": "   "}
+			},
+			WantStatus: 400, WantCode: "dlq_reason_invalid"},
+		{Surface: "close", Name: "reason_over_limit", Method: "POST", Path: staticPath("/dlq/bulk-resolve"),
+			Body: func(env Env) map[string]any {
+				return map[string]any{"deadLetterIds": []any{env.OpenDeadLetterID}, "reason": strings.Repeat("x", 281)}
+			},
+			WantStatus: 400, WantCode: "dlq_reason_invalid"},
 
 		// ── cluster-apply: the stale-list defenses ─────────────────────
 		{Surface: "cluster", Name: "missing_signature", Method: "POST", Path: staticPath("/dlq/cluster-apply"),

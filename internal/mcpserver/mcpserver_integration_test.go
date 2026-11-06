@@ -1069,7 +1069,7 @@ func TestMcpWorkflowAssuranceProjection(t *testing.T) {
 // The inspect list tools paginate by keyset: page one carries nextCursor,
 // page two picks up exactly where it left off, filters narrow runs.
 func TestMcpListToolsPaginate(t *testing.T) {
-	session, _ := newMCPSession(t)
+	session, org := newMCPSession(t)
 
 	for i := range 3 {
 		doc := map[string]any{
@@ -1110,6 +1110,42 @@ func TestMcpListToolsPaginate(t *testing.T) {
 	_, filtered := callTool(t, session, "runs.list", map[string]any{"workflowId": wfID})
 	if len(filtered["runs"].([]any)) != 1 || filtered["hasMore"] != false {
 		t.Fatalf("filtered runs: %+v", filtered)
+	}
+
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	for i := range 3 {
+		if _, err := pool.Exec(context.Background(), `
+			INSERT INTO dead_letters (id, org_id, run_id, node_id, workflow_json, node_json, error_json, created_at)
+			VALUES ($1, $2, $3, 'a', '{}', '{"type":"noop"}', '{"message":"boom"}', now() - make_interval(mins => $4))`,
+			fmt.Sprintf("%s-dl-%d", org, i), org, fmt.Sprintf("%s-run-%d", org, i), i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, dlq1 := callTool(t, session, "dlq.list", map[string]any{"limit": 2})
+	_, dlq2 := callTool(t, session, "dlq.list", map[string]any{"limit": 2, "cursor": dlq1["nextCursor"]})
+	letters1, _ := dlq1["deadLetters"].([]any)
+	letters2, _ := dlq2["deadLetters"].([]any)
+	if len(letters1) != 2 || dlq1["hasMore"] != true || len(letters2) != 1 || dlq2["hasMore"] != false ||
+		letters2[0].(map[string]any)["id"] != org+"-dl-2" {
+		t.Fatalf("dead letters must page by keyset: %+v then %+v", dlq1, dlq2)
+	}
+
+	for _, tool := range []string{"workflows.list", "runs.list", "dlq.list"} {
+		for _, args := range []map[string]any{
+			{"cursor": "not-a-cursor"},
+			{"cursor": "2026-01-02T03:04:05Z|"},
+			{"limit": 500},
+			{"limit": -1},
+		} {
+			result, _ := callTool(t, session, tool, args)
+			if !result.IsError {
+				t.Fatalf("%s must reject %+v instead of serving page one", tool, args)
+			}
+		}
 	}
 }
 
@@ -1165,4 +1201,237 @@ func poolForTest(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	return pool
+}
+
+func TestAgentAuthorsAndStartsWithoutExternalDocs(t *testing.T) {
+	session, org := newMCPSessionWithPermissions(t, map[string]bool{
+		"workflows.read": true, "workflows.write": true, "runs.read": true, "runs.start": true,
+		"ai.write": true,
+	})
+
+	index, view := callTool(t, session, "catalog.describe", map[string]any{})
+	if index.IsError || view["catalogVersion"] == "" || len(view["nodeTypes"].([]any)) != len(nodeGuides) {
+		t.Fatalf("catalog index: %+v", view)
+	}
+	_, nodes := callTool(t, session, "catalog.describe", map[string]any{"section": "nodes"})
+	if nodes["documentShape"] == nil || len(nodes["nodeTypes"].([]any)) != len(nodeGuides) {
+		t.Fatalf("node guide: %+v", nodes)
+	}
+	_, tools := callTool(t, session, "catalog.describe", map[string]any{"section": "tools"})
+	if summary := tools["tools"].([]any)[0].(map[string]any); summary["inputFields"] != nil {
+		t.Fatalf("tool index must stay compact: %+v", summary)
+	}
+	_, one := callTool(t, session, "catalog.describe", map[string]any{"section": "tools", "tool": "text.uppercase"})
+	if tool, _ := one["tool"].(map[string]any); tool["name"] != "text.uppercase" || tool["inputFields"] == nil {
+		t.Fatalf("single tool detail: %+v", one)
+	}
+	if denied, _ := callTool(t, session, "catalog.describe", map[string]any{"section": "credentials"}); !denied.IsError {
+		t.Fatal("credential names require credentials.read")
+	}
+
+	broken := map[string]any{"id": "wf-authored-" + org, "nodes": []any{
+		map[string]any{"id": "fetch", "type": "http", "config": map[string]any{}},
+		map[string]any{"id": "shape", "type": "transform", "config": map[string]any{}},
+	}, "edges": []any{map[string]any{"from": "fetch", "to": "missing"}}}
+	checked, report := callTool(t, session, "workflows.validate", map[string]any{"workflow": broken})
+	if checked.IsError || report["valid"] != false || len(report["issues"].([]any)) < 3 {
+		t.Fatalf("dry run must list every issue at once: %+v", report)
+	}
+	if report["bindings"] != nil || report["bindingsWithheld"] == nil {
+		t.Fatalf("bindings name credentials and need credentials.read: %+v", report)
+	}
+	for _, raw := range report["issues"].([]any) {
+		if issue := raw.(map[string]any); issue["suggestion"] == "" || issue["message"] == "" {
+			t.Fatalf("issue lacks guidance: %+v", issue)
+		}
+	}
+	rejected, rejection := callTool(t, session, "workflows.save", map[string]any{"workflow": broken})
+	if !rejected.IsError || rejection["error"] != "workflow validation failed" || len(rejection["issues"].([]any)) < 3 {
+		t.Fatalf("save rejection must carry the full report: %+v", rejection)
+	}
+
+	draft := map[string]any{"id": "wf-draft-" + org, "name": "Draft", "nodes": []any{
+		map[string]any{"id": "shape", "type": "transform", "config": map[string]any{
+			"mapping": map[string]any{"note": "sk-abcdefghijklmnopqrstuv"}}},
+	}, "edges": []any{}}
+	proposeArgs := map[string]any{"prompt": "Shape the order note", "workflow": draft, "includeDocument": true}
+	proposed, proposal := callTool(t, session, "workflows.propose", proposeArgs)
+	document, _ := proposal["document"].(map[string]any)
+	if proposed.IsError || document == nil || document["id"] != draft["id"] {
+		t.Fatalf("propose must return the draft on request: %+v", proposal)
+	}
+	if raw, _ := json.Marshal(document); strings.Contains(string(raw), "sk-abcdefghijklmnopqrstuv") {
+		t.Fatalf("returned draft kept a secret-shaped literal: %s", raw)
+	}
+	delete(proposeArgs, "includeDocument")
+	if _, compact := callTool(t, session, "workflows.propose", proposeArgs); compact["document"] != nil {
+		t.Fatal("the draft document is opt-in")
+	}
+
+	fixed := map[string]any{"id": "wf-authored-" + org, "name": "Authored", "nodes": []any{
+		map[string]any{"id": "shape", "type": "transform", "config": map[string]any{"mapping": map[string]any{"name": "{{context.input.name}}"}}},
+	}, "edges": []any{}}
+	if _, report := callTool(t, session, "workflows.validate", map[string]any{"workflow": fixed}); report["valid"] != true {
+		t.Fatalf("fixed draft should validate: %+v", report)
+	}
+	saved, savedView := callTool(t, session, "workflows.save", map[string]any{"workflow": fixed})
+	if saved.IsError {
+		t.Fatalf("save: %+v", saved.Content)
+	}
+
+	start := map[string]any{"workflowId": fixed["id"], "input": map[string]any{"name": "ada"}, "idempotencyKey": "retry-1"}
+	first, firstView := callTool(t, session, "runs.start", start)
+	second, secondView := callTool(t, session, "runs.start", start)
+	if first.IsError || second.IsError || firstView["runId"] != secondView["runId"] || secondView["replayed"] != true {
+		t.Fatalf("idempotent start by id: first=%+v second=%+v", firstView, secondView)
+	}
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var versionID string
+	if err := pool.QueryRow(context.Background(), `SELECT workflow_version_id FROM runs WHERE id = $1 AND org_id = $2`,
+		firstView["runId"], org).Scan(&versionID); err != nil || versionID != savedView["versionId"] {
+		t.Fatalf("start by id must bind the latest version: %q vs %v (%v)", versionID, savedView["versionId"], err)
+	}
+	for _, args := range []map[string]any{
+		{},
+		{"workflowId": fixed["id"], "workflow": fixed},
+		{"workflowId": "wf-unknown-" + org},
+	} {
+		if result, _ := callTool(t, session, "runs.start", args); !result.IsError {
+			t.Fatalf("start must reject %+v", args)
+		}
+	}
+}
+
+func TestAgentReadsAndManagesWorkflowLifecycle(t *testing.T) {
+	permissions := fullMCPTestPermissions()
+	permissions["runs.cancel"] = true
+	session, org := newMCPSessionWithPermissions(t, permissions)
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	id := "wf-lifecycle-" + org
+	document := func(note string) map[string]any {
+		return map[string]any{"id": id, "name": "Lifecycle", "nodes": []any{
+			map[string]any{"id": "cron", "type": "schedule", "config": map[string]any{"cronExpression": "0 9 * * *"}},
+			map[string]any{"id": "shape", "type": "transform", "config": map[string]any{
+				"mapping": map[string]any{"note": note, "token": "sk-abcdefghijklmnopqrstuv"}}},
+		}, "edges": []any{map[string]any{"from": "cron", "to": "shape"}}}
+	}
+	_, first := callTool(t, session, "workflows.save", map[string]any{"workflow": document("first")})
+	if _, second := callTool(t, session, "workflows.save", map[string]any{"workflow": document("second")}); second["version"] != float64(2) {
+		t.Fatalf("second save: %+v", second)
+	}
+
+	_, got := callTool(t, session, "workflows.get", map[string]any{"workflowId": id})
+	schedules, _ := got["schedules"].([]any)
+	if got["version"] != float64(2) || len(got["versions"].([]any)) != 2 || len(schedules) != 1 ||
+		schedules[0].(map[string]any)["nextFireAt"] == "" {
+		t.Fatalf("workflows.get: %+v", got)
+	}
+	if raw, _ := json.Marshal(got["document"]); !strings.Contains(string(raw), "second") || strings.Contains(string(raw), "sk-abcdefghijklmnopqrstuv") {
+		t.Fatalf("document must be the latest version with secret shapes removed: %s", raw)
+	}
+	if _, older := callTool(t, session, "workflows.get", map[string]any{"workflowId": id, "version": 1, "includeDocument": false}); older["versionId"] != first["versionId"] || older["document"] != nil {
+		t.Fatalf("exact version without document: %+v", older)
+	}
+
+	_, rolled := callTool(t, session, "workflows.rollback", map[string]any{"workflowId": id, "sourceVersionId": first["versionId"]})
+	if rolled["version"] != float64(3) || rolled["sourceVersion"] != float64(1) {
+		t.Fatalf("rollback: %+v", rolled)
+	}
+	_, started := callTool(t, session, "runs.start", map[string]any{"workflowId": id})
+	runID, _ := started["runId"].(string)
+	waitMCPRunStatus(t, pool, runID, "succeeded")
+	_, output := callTool(t, session, "runs.output", map[string]any{"runId": runID})
+	step, _ := output["steps"].(map[string]any)["shape"].(map[string]any)
+	if step["note"] != "first" || strings.Contains(fmt.Sprint(output), "sk-abcdefghijklmnopqrstuv") {
+		t.Fatalf("runs.output must show the rolled-back step output, scrubbed: %+v", output)
+	}
+
+	if result, _ := callTool(t, session, "workflows.deactivate", map[string]any{"workflowId": id}); result.IsError {
+		t.Fatalf("deactivate: %+v", result.Content)
+	}
+	var entries int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2`, org, id).Scan(&entries); err != nil || entries != 0 {
+		t.Fatalf("deactivated workflow kept %d schedule entries (%v)", entries, err)
+	}
+	if result, _ := callTool(t, session, "runs.start", map[string]any{"workflowId": id}); !result.IsError {
+		t.Fatal("a deactivated workflow must not start")
+	}
+	if result, _ := callTool(t, session, "workflows.reactivate", map[string]any{"workflowId": id}); result.IsError {
+		t.Fatalf("reactivate: %+v", result.Content)
+	}
+	if _, back := callTool(t, session, "workflows.get", map[string]any{"workflowId": id}); len(back["schedules"].([]any)) != 1 {
+		t.Fatalf("reactivation must rebuild schedules: %+v", back)
+	}
+
+	waiting := map[string]any{"id": "wf-wait-" + org, "nodes": []any{
+		map[string]any{"id": "pause", "type": "wait_until", "config": map[string]any{"duration": "PT1H"}},
+	}, "edges": []any{}}
+	_, pending := callTool(t, session, "runs.start", map[string]any{"workflow": waiting})
+	pendingID, _ := pending["runId"].(string)
+	if _, cancelled := callTool(t, session, "runs.cancel", map[string]any{"runId": pendingID, "reason": "no longer needed"}); cancelled["status"] != "cancelled" {
+		t.Fatalf("cancel: %+v", cancelled)
+	}
+	if again, _ := callTool(t, session, "runs.cancel", map[string]any{"runId": pendingID}); !again.IsError {
+		t.Fatal("cancelling a finished run must be an expected error")
+	}
+	if foreign, _ := callTool(t, session, "runs.cancel", map[string]any{"runId": "run-of-another-org"}); !foreign.IsError {
+		t.Fatal("unknown runs must not be cancellable")
+	}
+}
+
+// A redrive keeps the run's original version, so after a fix it must say so
+// and point at starting a new run.
+func TestRedriveReportsWhenTheRunKeepsAnOlderVersion(t *testing.T) {
+	session, org := newMCPSession(t)
+	missing := httptest.NewServer(http.NotFoundHandler())
+	defer missing.Close()
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	id := "wf-redrive-version-" + org
+	document := func(name string) map[string]any {
+		return map[string]any{"id": id, "name": name, "nodes": []any{
+			map[string]any{"id": "fetch", "type": "http", "config": map[string]any{"url": missing.URL}},
+		}, "edges": []any{}}
+	}
+	redriveFailed := func(runID string) map[string]any {
+		t.Helper()
+		waitMCPRunStatus(t, pool, runID, "failed")
+		var deadLetterID string
+		if err := pool.QueryRow(context.Background(), `SELECT id FROM dead_letters WHERE org_id = $1 AND run_id = $2`, org, runID).Scan(&deadLetterID); err != nil {
+			t.Fatal(err)
+		}
+		result, view := callTool(t, session, "dlq.redrive", map[string]any{"deadLetterId": deadLetterID})
+		if result.IsError {
+			t.Fatalf("redrive: %+v", result.Content)
+		}
+		return view
+	}
+
+	callTool(t, session, "workflows.save", map[string]any{"workflow": document("first")})
+	_, first := callTool(t, session, "runs.start", map[string]any{"workflowId": id})
+	callTool(t, session, "workflows.save", map[string]any{"workflow": document("second")})
+	stale := redriveFailed(first["runId"].(string))
+	if stale["staleVersion"] != true || stale["runVersion"] != float64(1) || stale["latestVersion"] != float64(2) ||
+		!strings.Contains(fmt.Sprint(stale["hint"]), "runs.start") {
+		t.Fatalf("redrive on an older version must say so: %+v", stale)
+	}
+
+	_, second := callTool(t, session, "runs.start", map[string]any{"workflowId": id})
+	current := redriveFailed(second["runId"].(string))
+	if current["staleVersion"] != false || current["hint"] != nil {
+		t.Fatalf("redrive on the latest version needs no hint: %+v", current)
+	}
 }

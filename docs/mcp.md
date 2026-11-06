@@ -28,13 +28,17 @@ controls, or write suppression.
 ## Server posture
 
 The server publishes a deterministic catalog of inspect, AI, and write tools.
-Descriptors include input validation, stable structured results, truthful
-read-only/destructive annotations, and static write capability. Every call is
+Descriptors include input validation, an output schema for the top level of
+each structured result, truthful read-only/destructive annotations, and static
+write capability. Every call is
 permission-checked, rate-limited and audited. `JANUSLY_MCP_PERMISSIONS` is the
 explicit stdio service-account ceiling; when omitted it grants only
 `workflows.read`, `runs.read`, `dlq.read`, and `recovery.read`. Write dispatch
 also requires `JANUSLY_MCP_WRITES_ENABLED=true` plus tenant
 `mcp.writeConsent=true`.
+
+`cmd/mcp` speaks MCP over stdio: stdout carries only JSON-RPC messages and the
+process writes its JSON logs to stderr.
 
 The server uses durable Janusly run IDs for asynchronous work. It does not keep
 a second task database and never exposes secrets, identity configuration, or
@@ -52,8 +56,15 @@ does not need unrelated recovery visibility. Ranking, targets and evidence stay
 shared, while `allowedActions` is projected onto the actual MCP catalog: it
 never advertises the UI-only candidate or approval endpoints, and a diagnosed
 case remains actionable through the composite `recovery.cases.diagnose` tool.
+`catalog.describe` and `workflows.validate` let an agent discover step types,
+tools and credential names and check a draft without saving it.
 `workflows.propose` performs exact CapabilityCatalog binding without saving a
-workflow or returning its complete DAG. Semantic recovery is exposed as bounded
+workflow, and returns the bound draft only when `includeDocument` is true.
+`runs.start` runs a saved `workflowId` at its latest version and accepts an
+`idempotencyKey` for safe retries. `workflows.get` and `runs.output` read a saved
+document and a run's outputs with secret-shaped literals removed;
+`workflows.rollback`, `workflows.deactivate`, `workflows.reactivate` and
+`runs.cancel` complete the lifecycle under write consent. Semantic recovery is exposed as bounded
 inspect/diagnose/validate/apply tools; apply requires a separately created,
 unexpired human approval and the immutable candidate's additional permissions.
 Diagnose is deterministic without a provider and can use bounded AI enrichment

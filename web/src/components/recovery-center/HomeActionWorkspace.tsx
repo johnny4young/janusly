@@ -5,6 +5,7 @@ import {
   CircleDot,
   Clock3,
   LoaderCircle,
+  Sparkles,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useT } from '../../i18n'
@@ -19,6 +20,11 @@ function runTone(run: RunSummary): 'warning' | 'primary' {
   return run.status === 'waiting' || run.hasWaitingNodes ? 'warning' : 'primary'
 }
 
+/** Failures with a run to read; recovery cases and approvals have their own flows. */
+function canInvestigate(action: RecommendedAction): boolean {
+  return Boolean(action.target.runId) && (action.kind === 'failure_cluster' || action.kind === 'routine_triage')
+}
+
 export function HomeActionWorkspace({
   actions,
   activeRuns,
@@ -26,7 +32,9 @@ export function HomeActionWorkspace({
   status,
   warnings,
   setup,
+  operator,
   onSelectAction,
+  onInvestigate,
   onOpenRun,
   onOpenActivity,
 }: {
@@ -37,7 +45,9 @@ export function HomeActionWorkspace({
   warnings: string[]
   /** Pending setup step, ranked after real work in the same inbox. */
   setup?: ReactNode
+  operator?: ReactNode
   onSelectAction: (action: RecommendedAction) => void
+  onInvestigate?: (action: RecommendedAction) => void
   onOpenRun: (runId: string) => void | Promise<void>
   onOpenActivity: () => void
 }) {
@@ -93,6 +103,7 @@ export function HomeActionWorkspace({
               <li
                 key={action.id}
                 data-severity={action.severity}
+                data-investigable={onInvestigate && canInvestigate(action) ? '' : undefined}
                 data-testid={`recovery-center-action-${action.id}`}
               >
                 <span className="we-home-priority__order" aria-hidden="true">
@@ -102,6 +113,18 @@ export function HomeActionWorkspace({
                   <strong>{action.title}</strong>
                   <p>{action.body}</p>
                 </div>
+                {onInvestigate && canInvestigate(action) && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    leadingIcon={<Sparkles size={14} />}
+                    aria-label={t('home.investigation.openAria', { title: action.title })}
+                    onClick={() => onInvestigate(action)}
+                    data-testid={`recovery-center-action-investigate-${action.id}`}
+                  >
+                    {t('home.investigation.open')}
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="primary"
@@ -122,6 +145,7 @@ export function HomeActionWorkspace({
             {t('home.priority.degraded')}
           </p>
         ) : null}
+        {operator}
       </section>
 
       <section

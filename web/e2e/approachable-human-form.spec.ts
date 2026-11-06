@@ -198,7 +198,7 @@ for (const locale of ['en', 'es'] as const) {
     await page.setViewportSize({ width: 1440, height: 1000 })
     await page.goto('/')
     await page.getByRole('button', { name: copy.workflows, exact: true }).click()
-    await page.getByTestId(`workflows-row-${workflowId}`).click()
+    await page.getByTestId(`workflows-row-${workflowId}`).locator('strong').click()
     await openWorkspaceSection(page, copy.workflows, copy.build)
 
     const canvas = page.locator('.canvas-frame[data-mode="author"]')

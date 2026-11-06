@@ -1,4 +1,4 @@
-import { contractApi } from '../api'
+import { api, contractApi } from '../api'
 import type { ApiResponses } from './api-types.generated'
 import { MalformedResponseError } from './malformed-response'
 import { isGetDlqEntriesDeadLetterIdResponse } from './api-guards/operations/GetDlqEntriesDeadLetterId'
@@ -29,7 +29,35 @@ export async function readDeadLetterDetail(id: string, signal?: AbortSignal): Pr
   return detail
 }
 
+type ClusterMembers = { deadLetterIds: string[]; total: number; capped: boolean }
+
+/** The open members of a failure signature, under the same 100-row cap as the apply route. */
+export async function readClusterMembers(signature: string): Promise<ClusterMembers> {
+  return await api(`/dlq/cluster-members?signature=${encodeURIComponent(signature)}`) as ClusterMembers
+}
+
+export type ClusterRecovery = { dlq: DeadLetterDetail; members: string[]; capped: boolean; total: number }
+
+/**
+ * Members plus the row whose snapshot validates a patch for the whole cluster.
+ * The representative may have been replayed or closed since the caller read it,
+ * so it falls back to the first open member. Null when no member is open.
+ */
+export async function readClusterRecovery(signature: string, representativeId: string): Promise<ClusterRecovery | null> {
+  const [members, representative] = await Promise.all([
+    readClusterMembers(signature),
+    readDeadLetterDetail(representativeId),
+  ])
+  let dlq = representative
+  if (!members.deadLetterIds.includes(representativeId)) {
+    const fallback = members.deadLetterIds[0]
+    if (!fallback) return null
+    dlq = await readDeadLetterDetail(fallback)
+  }
+  return { dlq, members: members.deadLetterIds, capped: members.capped, total: members.total }
+}
+
 /** Resolves only on the server's affirmative `{ ok: true }` receipt, which the guard requires. */
-export async function resolveDeadLetterEntry(id: string): Promise<void> {
-  await contractApi('POST /dlq/resolve', '/dlq/resolve', { id }, { guard: isPostDlqResolveResponse })
+export async function resolveDeadLetterEntry(id: string, reason: string): Promise<void> {
+  await contractApi('POST /dlq/resolve', '/dlq/resolve', { id, reason }, { guard: isPostDlqResolveResponse })
 }

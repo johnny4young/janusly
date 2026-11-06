@@ -271,6 +271,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(homeMeasurement.resources.some((path) => /catalog-en-.*\.js$/.test(path))).toBe(true)
   expect(homeMeasurement.resources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(false)
   expect(homeMeasurement.resources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
+  expect(homeMeasurement.resources.some((path) => /HomeOperatorPanel-.*\.(js|css)$/.test(path))).toBe(false)
   await captureElement(home, 'web-en-performance-home')
 
   const workflowsDestination = page.getByRole('button', { name: /^Workflows\b/ })
@@ -329,7 +330,6 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   await resetRouteMeasurement(page)
   const automationResponses = Promise.all([
     page.waitForResponse((response) => new URL(response.url()).pathname === '/v1/dlq/clusters'),
-    page.waitForResponse((response) => new URL(response.url()).pathname === '/recovery/campaigns'),
     page.waitForResponse((response) => new URL(response.url()).pathname === '/auto-healing/pending'),
   ])
   await page.getByTestId('recovery-automation-toggle').click()
@@ -342,13 +342,26 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   )).toBe(true)
   expect(recoveryAutomationMeasurement.resources.some(
     (path) => /ReplayCampaignsCard-.*\.js$/.test(path),
-  )).toBe(true)
+  )).toBe(false)
   expect(recoveryAutomationMeasurement.resources.some(
     (path) => /AutoHealingPendingCard-.*\.js$/.test(path),
   )).toBe(true)
   expect(recoveryAutomationMeasurement.resources.some((path) => path === '/v1/dlq/clusters')).toBe(true)
-  expect(recoveryAutomationMeasurement.resources.some((path) => path === '/recovery/campaigns')).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some((path) => path === '/recovery/campaigns')).toBe(false)
   expect(recoveryAutomationMeasurement.resources.some((path) => path === '/auto-healing/pending')).toBe(true)
+
+  // Recovery jobs load their chunk and list only when that view opens.
+  await resetRouteMeasurement(page)
+  const jobsList = page.waitForResponse((response) => new URL(response.url()).pathname === '/recovery/campaigns')
+  await page.getByTestId('recover-section-jobs').click()
+  await expect(page.getByTestId('replay-campaigns-card')).toBeVisible()
+  await (await jobsList).finished()
+  const recoveryJobsResources = await page.evaluate(() => (
+    (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
+      .map((entry) => new URL(entry.name).pathname)
+  ))
+  expect(recoveryJobsResources.some((path) => /ReplayCampaignsCard-.*\.js$/.test(path))).toBe(true)
+  await page.getByTestId('recover-section-queue').click()
 
   await resetRouteMeasurement(page)
   await page.getByRole('button', { name: 'Open user menu' }).click()

@@ -60,9 +60,17 @@ async function seed(request: APIRequestContext, orgId: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 100))
   }
   // A waiting approval feeds the "needs action" surface.
-  await request.post(`${API_URL}/start`, {
+  const gate = await request.post(`${API_URL}/start`, {
     headers: headers(orgId), data: { workflow: approval },
   })
+  const { runId: gateRunId } = await gate.json() as { runId: string }
+  for (;;) {
+    const res = await request.get(`${API_URL}/v1/status?runId=${gateRunId}`, { headers: headers(orgId) })
+    const body = await res.json() as { data?: { nodes?: Array<{ status?: string }> } }
+    if (body.data?.nodes?.some((node) => node.status === 'waiting')) break
+    if (Date.now() > deadline) throw new Error('seed approval never started waiting')
+    await new Promise((r) => setTimeout(r, 100))
+  }
 }
 
 async function preparePage(page: Page, orgId: string): Promise<void> {
@@ -298,7 +306,7 @@ test('human form against Go: pause, fill through the real UI, resume', async ({ 
   const { openWorkspaceDestination, openWorkspaceSection, addCanvasStep } = await import('./_helpers/workspace-navigation')
   await openWorkspaceDestination(page, 'Workflows')
   await page.getByRole('button', { name: 'New workflow', exact: true }).first().click()
-  await page.getByRole('button', { name: /^Start blank\b/ }).click()
+  await page.getByRole('menuitem', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(`Go form ${Date.now()}`)
   await addCanvasStep(page, 'Collect form')
 
@@ -455,7 +463,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     await singleRow.focus()
     await page.keyboard.press('Control+Enter')
     await expect(page.getByRole('alertdialog')).toContainText(singleId)
-    await expect(page.getByTestId('dlq-close-cancel')).toBeFocused()
+    await expect(page.getByTestId('dlq-close-reason')).toBeFocused()
     await page.keyboard.press('Escape')
     const readClosedStatus = async (id: string) => {
       const response = await request.get(`${API_URL}/v1/dlq/entries/${id}`, { headers: headers(orgId) })
@@ -465,7 +473,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     expect(await readClosedStatus(singleId)).toBe('open')
     await singleRow.focus()
     await page.keyboard.press('Control+Enter')
-    await expect(page.getByTestId('dlq-close-cancel')).toBeFocused()
+    await expect(page.getByTestId('dlq-close-reason')).toBeFocused()
     await page.screenshot({ path: test.info().outputPath('accepted-loss-confirmation-en.png'), animations: 'disabled' })
     const dialogBounds = await page.getByRole('alertdialog').boundingBox()
     const viewport = page.viewportSize()!
@@ -474,6 +482,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     expect(dialogBounds!.y).toBeGreaterThanOrEqual(0)
     expect(dialogBounds!.x + dialogBounds!.width).toBeLessThanOrEqual(viewport.width)
     expect(dialogBounds!.y + dialogBounds!.height).toBeLessThanOrEqual(viewport.height)
+    await page.getByTestId('dlq-close-reason').fill('Smoke test accepted loss')
     await page.getByTestId('dlq-close-confirm').click()
     await expect.poll(() => readClosedStatus(singleId)).toBe('resolved')
     await waitStatus(runIds[3], 'failed')
@@ -493,6 +502,7 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     for (const runId of runIds.slice(4)) {
       await expect(page.getByRole('alertdialog')).toContainText(byRun.get(runId)!)
     }
+    await page.getByTestId('dlq-close-reason').fill('Smoke test accepted loss')
     await page.getByTestId('dlq-close-confirm').click()
     await expect(page.getByRole('alertdialog')).toBeHidden()
     for (const runId of runIds.slice(4)) {
@@ -521,7 +531,7 @@ test('every workspace tab mounts against Go without page errors', async ({ page,
   const tabs = [
     'home', 'recover', 'workflows', 'members', 'ai-studio', 'experiments',
     'marketplace', 'templates', 'packs', 'credentials', 'inspector',
-    'runs', 'reasoning', 'multiAgent', 'operations',
+    'runs', 'reasoning', 'multiAgent', 'reports', 'operations',
   ] as const
 
   for (const tab of tabs) {
@@ -597,12 +607,13 @@ test('first kilometer against Go: Home cluster CTA lands on an actionable recove
   await expect(page.getByTestId('activity-recovery-detail')).toBeVisible()
 
   await page.getByRole('button', { name: 'Suggest fix', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Generate suggestion' })).toBeVisible()
-  await page.getByRole('button', { name: 'Generate suggestion' }).click()
-
-  // The container has no provider key on purpose: the dialog must stay
-  // honest — a passport verdict and a blocked candidate, never an
+  // The container has no provider key on purpose: the dialog must say so up
+  // front, lead with Replay in Lab, and stay honest after that — a passport
+  // verdict and a blocked candidate, never an
   // invented patch and never a fabricated occurrence count.
+  await expect(page.getByTestId('recovery-availability')).toHaveAttribute('data-ai', 'off')
+  await expect(page.getByTestId('recovery-replay-in-lab')).toBeVisible()
+  await page.getByTestId('recovery-review-evidence').click()
   const passport = page.getByTestId('recovery-confidence-passport')
   await expect(passport).toBeVisible()
   await expect(passport).toHaveAttribute('data-verdict', 'unsafe')
@@ -650,6 +661,8 @@ for (const locale of ['en', 'es'] as const) {
     expect(dlqResponse.ok()).toBe(true)
     const dlq = await dlqResponse.json() as { data: { status: string } }
     expect(dlq.data.status).toBe('open')
+    // The drill opens the queue once its refresh settles; going Home earlier loses that race.
+    await expect(page).toHaveURL(/#\/runs\/dlq/)
     await page.goto('/#/home')
     // Validation evidence never becomes a successful production sample.
     await expect(health).not.toContainText(locale === 'en' ? 'On track' : 'Todo encaminado')

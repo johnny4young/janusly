@@ -6,10 +6,10 @@
  * The index exposes current posture first and routes operators to one focused
  * configuration area instead of presenting a wall of forms.
  *
- * Active sub-tab is persisted to localStorage under
- * `janusly:operations:section` so the operator lands where they left
- * off. A defensive `isSection()` guard collapses unknown values back to
- * `overview` — same posture as `BuilderSidebar`'s stored-state loader.
+ * The active sub-tab is spelled in the route (`#/operations/<section>`) and
+ * mirrored to localStorage under `janusly:operations:section` so the operator
+ * lands where they left off. A defensive `isSection()` guard collapses unknown
+ * values back to `overview`.
  *
  * Wired into `RightPanel.tsx` for the `'operations'` tab — this shell owns
  * the mounted settings experience.
@@ -27,6 +27,7 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { api, contractApi, isForbiddenApiError } from '../api'
+import { onRouteChange } from '../lib/route'
 import { canOpenSettingsSection } from '../settings-sections'
 import { useWorkflowStore } from '../store'
 import type { ActiveTab, AiHealth } from '../types'
@@ -40,15 +41,20 @@ import { AiRuntimeStatusCard } from './AiRuntimeStatusCard'
 import { SettingsInfrastructureSection, type WorkerFleet } from './SettingsInfrastructureSection'
 import { SettingsOverview } from './SettingsOverview'
 import { SettingsUsageSection } from './SettingsUsageSection'
-import { parseRecoveryMetrics, type RecoveryMetrics } from '../lib/recovery-metrics-model'
 import {
-  OPERATIONS_SECTION_REQUEST_EVENT as SECTION_REQUEST_EVENT,
+  parseRecoveryMetrics,
+  type RecoveryMetric,
+  type RecoveryMetrics,
+} from '../lib/recovery-metrics-model'
+import {
   isOpsSection as isSection,
   loadStoredOpsSection as loadStoredSection,
   persistOpsSection as persistSection,
+  requestOperationsSection,
   type OpsSection,
 } from './operations-section-bus'
-import { useT } from '../i18n'
+import { tRecoveryMetricRationale, useT } from '../i18n'
+import type { Translate } from '../i18n/resources'
 import './OperationsPage.css'
 import { PLATFORM_TAG, useInvalidationNonce } from '../lib/query-cache'
 import { Button } from './ui/Button'
@@ -92,28 +98,32 @@ type HealthPayload = {
 }
 
 
-type SignalSummary = {
-  /** `/health` rate-limiter snapshot. Drives the chip and Infrastructure dot. */
-  rateLimiter: RateLimiterHealth | null
-  /** Admin queue snapshot; null means unavailable, undefined means not checked yet. */
-  queue: QueueHealth | null | undefined
-  /** Independent maintenance queue snapshot; absent against an older API. */
-  maintenanceQueue: QueueHealth | null | undefined
-  /** Most recent 402 envelope captured by the API wrapper. Drives the AI dot. */
-  budgetBlocked: unknown
-  /** True when any high-level metric is unhealthy. Drives the overview dot. */
-  overviewUnhealthy: boolean
-  /** True when a reliability metric is unhealthy. */
-  reliabilityUnhealthy: boolean
-  /** True when cost posture is unhealthy. */
-  usageUnhealthy: boolean
-}
+/** Why a rail section carries an attention dot; no entry means no dot. */
+type DotReasons = Partial<Record<OpsSection, string>>
 
 type QueueSignalState = {
   workflow: QueueHealth | null
   maintenance: QueueHealth | null | undefined
   workflowUnavailableReason: QueueUnavailableReason
   maintenanceUnavailableReason: QueueUnavailableReason
+}
+
+function unhealthyReason(metrics: readonly RecoveryMetric[]): string {
+  return metrics
+    .filter((metric) => metric.severity === 'unhealthy')
+    .map((metric) => [metric.display, tRecoveryMetricRationale(metric)].filter(Boolean).join(' — '))
+    .join(' ')
+}
+
+function queueIssue(
+  prefix: 'operations.queueLag' | 'operations.maintenanceQueueLag',
+  health: QueueHealth | null | undefined,
+  unavailableReason: QueueUnavailableReason | undefined,
+  t: Translate,
+): string | null {
+  if (health === undefined || !queueNeedsAttention(health)) return null
+  if (health === null) return t(`${prefix}.${unavailableReason === 'transport' ? 'unavailableTransport' : 'unavailableStore'}`)
+  return t(`${prefix}.${health.active > 0 ? 'delayedActiveStatus' : 'delayedIdleStatus'}`)
 }
 
 function hasPermission(permissions: readonly string[] | undefined, permission: string): boolean {
@@ -132,7 +142,8 @@ export function OperationsPage({
   const { t } = useT()
   const platformVersion = useInvalidationNonce(OPERATIONS_TAGS)
   const budgetBlocked = useWorkflowStore((state) => state.budgetBlocked)
-  const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
+  // `undefined` until the first read settles, so loading never reads as empty.
+  const [metrics, setMetrics] = useState<RecoveryMetrics | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   // Rate-limiter health is independent of metrics and degrades silently on
   // /health failure — operators still see the rest of the page.
@@ -155,19 +166,16 @@ export function OperationsPage({
     persistSection(effectiveSection)
   }, [effectiveSection])
 
-  useEffect(() => {
-    const handleSectionRequest = (event: Event) => {
-      const next = event instanceof CustomEvent ? event.detail : null
-      if (!isSection(next)) return
-      if (canOpenSettingsSection(next, permissions)) {
-        setSection(next)
-        return
-      }
-      persistSection(effectiveSection)
+  // The URL owns the open pane: a typed link, Back and in-app requests all land
+  // here. A hash naming no openable pane is rewritten to the one on screen.
+  useEffect(() => onRouteChange((route) => {
+    if (route?.tab !== 'operations') return
+    if (isSection(route.opsSection) && canOpenSettingsSection(route.opsSection, permissions)) {
+      setSection(route.opsSection)
+      return
     }
-    window.addEventListener(SECTION_REQUEST_EVENT, handleSectionRequest)
-    return () => window.removeEventListener(SECTION_REQUEST_EVENT, handleSectionRequest)
-  }, [effectiveSection, permissions])
+    persistSection(effectiveSection)
+  }), [effectiveSection, permissions])
 
   useEffect(() => {
     let cancelled = false
@@ -186,11 +194,9 @@ export function OperationsPage({
       })
       .catch((err) => {
         if (cancelled) return
+        setMetrics(null)
         // An unreadable payload is the same as no metrics: the page's quiet unavailable state.
-        if (err instanceof MalformedResponseError) {
-          setMetrics(null)
-          return
-        }
+        if (err instanceof MalformedResponseError) return
         setError(err instanceof Error ? err.message : (t('operations.metricsUnavailable', { detail: '' })))
       })
     return () => { cancelled = true }
@@ -270,29 +276,55 @@ export function OperationsPage({
 
   // Empty workspaces have no operational signal, so server-side zero bands do
   // not raise attention dots until a run reaches a terminal state.
-  const hasOperationalSignal = (metrics?.terminalRuns ?? 0) > 0
-  const reliabilityUnhealthy = metrics && hasOperationalSignal
-    ? [
-        metrics.successRate,
-        metrics.verifiedRecovery ?? metrics.mttr,
-        metrics.p95Latency,
-        metrics.replayRate,
-      ].some((metric) => metric.severity === 'unhealthy')
-    : false
-  const usageUnhealthy = hasOperationalSignal && metrics?.costThisWindow.severity === 'unhealthy'
-  const overviewUnhealthy = reliabilityUnhealthy || usageUnhealthy
-  const queueHealth = queueSignal === undefined ? undefined : queueSignal.workflow
-  const maintenanceQueueHealth = queueSignal === undefined ? undefined : queueSignal.maintenance
+  const operational = metrics && metrics.terminalRuns > 0 ? metrics : null
+  const reliabilityReason = operational
+    ? unhealthyReason([
+        operational.successRate,
+        operational.verifiedRecovery ?? operational.mttr,
+        operational.p95Latency,
+        operational.replayRate,
+      ])
+    : ''
+  const usageReason = operational ? unhealthyReason([operational.costThisWindow]) : ''
+  const queueHealth = queueSignal?.workflow
+  const maintenanceQueueHealth = queueSignal?.maintenance
+  const queued = (queueHealth?.waiting ?? 0) + (maintenanceQueueHealth?.waiting ?? 0)
 
-  const signals: SignalSummary = {
-    rateLimiter: rateLimiterHealth,
-    queue: queueHealth,
-    maintenanceQueue: maintenanceQueueHealth,
-    budgetBlocked,
-    overviewUnhealthy,
-    reliabilityUnhealthy,
-    usageUnhealthy,
+  const infrastructureIssues = [
+    rateLimiterHealth && !rateLimiterHealth.healthy
+      ? t('operations.rateLimiter.degraded', { count: rateLimiterHealth.degradedBuckets.length })
+      : null,
+    queueIssue('operations.queueLag', queueHealth, queueSignal?.workflowUnavailableReason, t),
+    queueIssue('operations.maintenanceQueueLag', maintenanceQueueHealth, queueSignal?.maintenanceUnavailableReason, t),
+  ].filter((issue) => issue !== null).join(' ')
+
+  // Dot-badge derivation is intentionally limited to page-level signals.
+  // Reading child-card health here would force those cards to fetch while
+  // inactive, which would break the lazy-mount traffic reduction.
+  const dotReasons: DotReasons = {
+    overview: [reliabilityReason, usageReason].filter(Boolean).join(' '),
+    reliability: reliabilityReason,
+    usage: usageReason,
+    infrastructure: infrastructureIssues,
+    ai: budgetBlocked
+      ? t('budgetBanner.exceeded', {
+          scope: t(budgetBlocked.exceededAt === 'workflow' ? 'budgetBanner.scope.workflow' : 'budgetBanner.scope.org'),
+        })
+      : '',
   }
+  // A malformed payload parses to a neutral metric with a null value: no line, not "no usage".
+  const usageStatus = !metrics || metrics.costThisWindow.value === null
+    ? null
+    : metrics.costThisWindow.providers.length === 0
+      ? t('operations.status.usageNone', { days: metrics.windowDays })
+      : t('operations.status.usage', { cost: metrics.costThisWindow.display, days: metrics.windowDays })
+  const infrastructureStatus = infrastructureIssues
+    || (queueHealth === undefined
+      ? null
+      : queued > 0
+        ? t('operations.status.queued', { count: queued })
+        : t('operations.status.queuesClear'))
+
   return (
     <div className="we-operations-page">
       <OperationsHeader
@@ -300,7 +332,7 @@ export function OperationsPage({
         error={error}
       />
       <div className="we-operations-page__body">
-        <OperationsRail section={effectiveSection} onChange={setSection} signals={signals} permissions={permissions} />
+        <OperationsRail section={effectiveSection} onChange={requestOperationsSection} dotReasons={dotReasons} permissions={permissions} />
         <div className="we-operations-page__content" data-section={effectiveSection}>
           {effectiveSection !== 'overview' && (
             <header className="we-card__header">
@@ -312,7 +344,9 @@ export function OperationsPage({
               <SettingsOverview
                 permissions={permissions}
                 aiHealth={aiHealth}
-                onOpenSection={setSection}
+                usageStatus={usageStatus}
+                infrastructureStatus={infrastructureStatus}
+                onOpenSection={requestOperationsSection}
                 onOpenTab={onOpenTab}
               />
             )}
@@ -325,13 +359,11 @@ export function OperationsPage({
             {effectiveSection === 'ai' && <AiSection permissions={permissions} aiHealth={aiHealth} />}
             {effectiveSection === 'usage' && (
               <SettingsUsageSection
-                providers={metrics?.costThisWindow.providers ?? []}
-                cache={metrics?.costThisWindow.cache ?? {
-                  inputTokens: 0,
-                  readTokens: 0,
-                  creationTokens: 0,
-                  readSharePercent: null,
-                }}
+                cost={metrics && metrics.costThisWindow}
+                windowDays={metrics?.windowDays ?? 30}
+                onOpenCostSteps={hasPermission(permissions, 'recovery.read') && hasPermission(permissions, 'runs.read')
+                  ? () => onOpenTab('reports')
+                  : undefined}
               />
             )}
             {effectiveSection === 'infrastructure' && (
@@ -388,39 +420,17 @@ const RAIL_ITEMS: Array<{ section: OpsSection; icon: ReactNode }> = [
 function OperationsRail({
   section,
   onChange,
-  signals,
+  dotReasons,
   permissions,
 }: {
   section: OpsSection
   onChange: (next: OpsSection) => void
-  signals: SignalSummary
+  dotReasons: DotReasons
   permissions?: readonly string[]
 }) {
   const { t } = useT()
   const visibleItems = RAIL_ITEMS.filter(({ section: candidate }) =>
     canOpenSettingsSection(candidate, permissions))
-
-  // Dot-badge derivation is intentionally limited to page-level signals.
-  // Reading child-card health here would force those cards to fetch while
-  // inactive, which would break the lazy-mount traffic reduction.
-  const queueAttention = (signals.queue !== undefined && queueNeedsAttention(signals.queue))
-    || (signals.maintenanceQueue !== undefined
-      && queueNeedsAttention(signals.maintenanceQueue))
-  const dotKind: Record<OpsSection, 'danger' | 'warning' | null> = {
-    overview: signals.overviewUnhealthy ? 'warning' : null,
-    organization: null,
-    reliability: signals.reliabilityUnhealthy ? 'warning' : null,
-    integrations: null,
-    access: null,
-    ai: signals.budgetBlocked != null ? 'danger' : null,
-    usage: signals.usageUnhealthy ? 'warning' : null,
-    infrastructure:
-      signals.rateLimiter && !signals.rateLimiter.healthy
-        ? 'warning'
-        : queueAttention
-          ? 'warning'
-          : null,
-  }
 
   return (
     <nav
@@ -431,7 +441,7 @@ function OperationsRail({
       <ul>
         {visibleItems.map((item) => {
           const isActive = item.section === section
-          const dot = dotKind[item.section]
+          const dotReason = dotReasons[item.section]
           return (
             <li key={item.section}>
               <button
@@ -441,18 +451,20 @@ function OperationsRail({
                 data-active={isActive ? 'true' : undefined}
                 data-section={item.section}
                 data-testid={`operations-rail-tab-${item.section}`}
+                title={dotReason || undefined}
                 onClick={() => onChange(item.section)}
               >
                 <span className="we-operations-rail__icon" aria-hidden="true">{item.icon}</span>
                 <span className="we-operations-rail__label">
                   {t(`operations.section.${item.section}.label`)}
                 </span>
-                {dot && (
+                {dotReason && (
                   <span
                     className="we-operations-rail__dot"
-                    data-severity={dot}
+                    data-severity={item.section === 'ai' ? 'danger' : 'warning'}
                     data-testid={`operations-rail-dot-${item.section}`}
-                    aria-label={t('operations.section.attentionDot')}
+                    role="img"
+                    aria-label={dotReason}
                   />
                 )}
               </button>
@@ -474,7 +486,7 @@ function ReliabilitySection({ permissions }: { permissions?: readonly string[] }
       {hasPermission(permissions, 'upstream.read') && (
         <UpstreamHealthPanel canWrite={hasPermission(permissions, 'upstream.write')} />
       )}
-      {hasPermission(permissions, 'dlq.read') && <FailureClustersCard />}
+      {hasPermission(permissions, 'dlq.read') && <FailureClustersCard canStartRuns={hasPermission(permissions, 'runs.start')} />}
     </>
   )
 }

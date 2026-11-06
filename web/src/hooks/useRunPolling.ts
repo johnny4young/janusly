@@ -159,7 +159,7 @@ export function useRunPolling(
       closed = true
       requestSequence.current += 1
       window.clearInterval(interval)
-      setStreamStatus('closed')
+      setStreamStatus('idle')
     }
   }, [addToast, loadStatus, onTerminal, runId, setStreamStatus, t])
 

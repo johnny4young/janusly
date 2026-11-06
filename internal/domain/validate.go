@@ -321,11 +321,21 @@ func validateHttpNode(node Node, ctx nodeContext) {
 	}
 }
 
+// Tool result policies. Write-side tools default to ResultPolicyRequireOK and
+// read-side tools to ResultPolicyEnvelope.
+const (
+	ResultPolicyRequireOK = "require_ok"
+	ResultPolicyEnvelope  = "envelope"
+)
+
 func validateToolNode(node Node, ctx nodeContext) {
 	push := ctx.push
 	options := ctx.options
 	toolName, _ := node.Config["tool"].(string)
 	toolName = strings.TrimSpace(toolName)
+	if policy, present := node.Config["resultPolicy"]; present && policy != ResultPolicyRequireOK && policy != ResultPolicyEnvelope {
+		push(Issue{Code: CodeToolInvalidInput, Message: "Tool node config.resultPolicy must be require_ok or envelope", NodeID: node.ID})
+	}
 	if toolName == "" {
 		push(Issue{Code: CodeToolMissingName, Message: "Tool node requires config.tool", NodeID: node.ID})
 	} else if options.ToolValidator != nil {

@@ -24,6 +24,16 @@ vi.mock('../api', async importOriginal => {
   }
 })
 
+vi.mock('./VersionCanvasCompare', () => ({
+  default: ({ pair, history, onClose }: {
+    pair: Array<{ version: number }> | null; history: Array<{ version: number }>; onClose: () => void
+  }) => (
+    <button type="button" data-testid="canvas-compare-stub" onClick={onClose}>
+      {pair ? `pair ${pair.map(version => version.version).join(',')}` : `draft ${history.map(version => version.version).join(',')}`}
+    </button>
+  ),
+}))
+
 const initialState = useWorkflowStore.getState()
 
 function makeWorkflow(url: string): WorkflowDefinition {
@@ -248,7 +258,7 @@ describe('<VersionHistoryPanel />', () => {
 
     fireEvent.click(screen.getByTestId('version-history-load-more'))
     await screen.findByText('v8')
-    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(vi.mocked(api)).toHaveBeenCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     // A short page means the history is exhausted.
     expect(screen.queryByTestId('version-history-load-more')).toBeNull()
   })
@@ -281,7 +291,7 @@ describe('<VersionHistoryPanel />', () => {
     await waitFor(() => expect(retry).toBeEnabled())
     fireEvent.click(retry)
     await screen.findByText('v10')
-    expect(vi.mocked(api)).toHaveBeenLastCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(vi.mocked(api)).toHaveBeenCalledWith(expect.stringContaining('beforeVersion=11'), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(screen.queryByTestId('version-history-load-more')).toBeNull()
   })
 
@@ -737,5 +747,91 @@ describe('<VersionHistoryPanel />', () => {
     })
     expect(await screen.findByRole('button', { name: /v1/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /v7/i })).not.toBeInTheDocument()
+  })
+
+  it('shows an unknown improvement angle by its own label', async () => {
+    useWorkflowStore.setState({ ...initialState, currentWorkflowId: 'wf_compare', currentWorkflowSaved: true, identityContext: {
+      identity: { userId: 'operator', email: null, mode: 'dev-headers', source: 'dev' }, profile: { name: null, email: null },
+      organizations: [{ id: 'tenant', name: 'Tenant', plan: null, role: 'editor', roleBase: 'editor', permissions: ['ai.write'],
+        usable: true, developmentFallback: false, isOwner: false }], invitations: [], currentOrganizationId: 'tenant',
+      selectionRequired: false, needsOrganization: false, truncated: false, invitationsTruncated: false,
+    } })
+    vi.mocked(api).mockImplementation(async (path) => path.startsWith('/workflows/versions')
+      ? [2, 1].map(version => ({ id: `v${version}`, version, workflowId: 'wf_compare', createdAt: null, dagJson: makeWorkflow(`https://example.com/${version}`) }))
+      : { mode: 'ai', suggestions: [{ workflow: makeWorkflow('https://example.com/new'), rationale: 'r', approachLabel: 'custom_angle', confidence: 0.5 }] })
+    render(<VersionHistoryPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Compare' }))
+    fireEvent.click(screen.getByRole('button', { name: /^v2/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^v1/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Suggest improvement' }))
+    expect(await screen.findByText(/Suggested · custom_angle/)).toBeInTheDocument()
+  })
+
+  describe('canvas compare', () => {
+    const history = () => [2, 1].map(version => ({
+      id: `v${version}`, version, workflowId: 'wf_compare', createdAt: null, dagJson: makeWorkflow(`https://example.com/${version}`),
+    }))
+    const mountHistory = async (rows: ReturnType<typeof history>) => {
+      mockVersionHistoryApi({ wf_compare: rows })
+      useWorkflowStore.setState({ ...initialState, currentWorkflowId: 'wf_compare', currentWorkflowSaved: true })
+      render(<ConfirmProvider><VersionHistoryPanel /></ConfirmProvider>)
+      await screen.findByText('v1')
+    }
+
+    it('opens the picked pair on the canvas, older side first, and closes it', async () => {
+      await mountHistory(history())
+      expect(screen.queryByTestId('version-compare-open')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Compare' }))
+      fireEvent.click(screen.getByRole('button', { name: /^v2/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^v1/ }))
+      fireEvent.click(screen.getByTestId('version-compare-open'))
+      const stub = await screen.findByTestId('canvas-compare-stub')
+      expect(stub).toHaveTextContent('pair 1,2')
+      expect(screen.getByTestId('version-compare-open')).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.click(stub)
+      expect(screen.queryByTestId('canvas-compare-stub')).not.toBeInTheDocument()
+    })
+
+    it('closes when a selected version is cleared or compare mode ends', async () => {
+      await mountHistory(history())
+      fireEvent.click(screen.getByRole('button', { name: 'Compare' }))
+      fireEvent.click(screen.getByRole('button', { name: /^v2/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^v1/ }))
+      fireEvent.click(screen.getByTestId('version-compare-open'))
+      await screen.findByTestId('canvas-compare-stub')
+      fireEvent.click(screen.getByRole('button', { name: /^v1/ }))
+      expect(screen.queryByTestId('canvas-compare-stub')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /^v1/ }))
+      expect(await screen.findByTestId('canvas-compare-stub')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByTestId('canvas-compare-stub')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('version-compare-open')).not.toBeInTheDocument()
+    })
+
+    it('does not turn a closed pair comparison into a draft comparison', async () => {
+      await mountHistory(history())
+      act(() => useWorkflowStore.setState({ workflowDirty: true }))
+      fireEvent.click(screen.getByRole('button', { name: 'Compare' }))
+      fireEvent.click(screen.getByRole('button', { name: /^v2/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^v1/ }))
+      fireEvent.click(screen.getByTestId('version-compare-open'))
+      await screen.findByTestId('canvas-compare-stub')
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(screen.getByTestId('version-compare-open')).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.queryByTestId('canvas-compare-stub')).not.toBeInTheDocument()
+    })
+
+    it('compares a draft with one saved version only while it has edits', async () => {
+      await mountHistory(history().slice(1))
+      expect(screen.queryByRole('button', { name: 'Compare' })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('version-compare-open')).not.toBeInTheDocument()
+      act(() => {
+        useWorkflowStore.getState().hydrateWorkflow(makeWorkflow('https://example.com/draft'), { saved: true, dirty: true })
+      })
+      fireEvent.click(await screen.findByRole('button', { name: 'Compare draft' }))
+      expect(await screen.findByTestId('canvas-compare-stub')).toHaveTextContent('draft 1')
+      fireEvent.click(screen.getByTestId('version-compare-open'))
+      expect(screen.queryByTestId('canvas-compare-stub')).not.toBeInTheDocument()
+    })
   })
 })

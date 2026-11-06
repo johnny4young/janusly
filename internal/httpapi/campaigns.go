@@ -6,9 +6,11 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -31,10 +35,20 @@ const (
 	replayCampaignListMaxLimit = 100
 )
 
+// Bounds a preview's parsing; runs past it report effectsKnown false.
+var replayCampaignMaxSnapshots int32 = 20
+
 type cohortEntry struct {
 	DeadLetterID string `json:"deadLetterId"`
 	RunID        string `json:"runId"`
 	NodeID       string `json:"nodeId"`
+	// The failed step and what is downstream of it may run. Without a readable
+	// snapshot EffectsKnown stays false and SideEffect true: never a silent zero.
+	SideEffect   bool                 `json:"sideEffect"`
+	Effects      []engine.RerunEffect `json:"effects"`
+	EffectsKnown bool                 `json:"effectsKnown"`
+	// The redrive will refuse this entry and the job will report it as failed.
+	SupersededByRerun bool `json:"supersededByRerun"`
 }
 
 type cohortRejection struct {
@@ -87,10 +101,7 @@ func (s *V1Server) previewCohort(r *http.Request, orgID string, requestedIDs []s
 			preview.Rejected = append(preview.Rejected, cohortRejection{DeadLetterID: id, Reason: "already_" + item.Status})
 			continue
 		}
-		var node struct {
-			Type   string         `json:"type"`
-			Config map[string]any `json:"config"`
-		}
+		var node domain.Node
 		if err := json.Unmarshal(item.NodeJson, &node); err != nil || node.Type == "" {
 			preview.Rejected = append(preview.Rejected, cohortRejection{DeadLetterID: id, Reason: "invalid_node_snapshot"})
 			continue
@@ -99,8 +110,16 @@ func (s *V1Server) previewCohort(r *http.Request, orgID string, requestedIDs []s
 		sig := signature.NormalizeJSON(item.ErrorJson, signature.Context{
 			NodeType: node.Type, NodeID: item.NodeID, ToolName: toolName,
 		}).Signature
+		effects := []engine.RerunEffect{}
+		if engine.NodeMayHaveEffect(node) {
+			effects = append(effects, engine.RerunEffect{NodeID: item.NodeID, Type: node.Type})
+		}
 		candidates = append(candidates, candidate{
-			entry: cohortEntry{DeadLetterID: id, RunID: item.RunID, NodeID: item.NodeID}, sig: sig,
+			entry: cohortEntry{
+				DeadLetterID: id, RunID: item.RunID, NodeID: item.NodeID,
+				SideEffect: true, Effects: effects,
+			},
+			sig: sig,
 		})
 	}
 
@@ -117,6 +136,49 @@ func (s *V1Server) previewCohort(r *http.Request, orgID string, requestedIDs []s
 	}
 	preview.CanCreate = len(preview.Eligible) >= 2 && len(preview.Rejected) == 0 && len(preview.Eligible) == len(ids)
 	return preview, nil
+}
+
+// describeCohortEffects reads each entry's run snapshot, which is what a redrive
+// executes, and the same lineage check the redrive enforces.
+func (s *V1Server) describeCohortEffects(ctx context.Context, orgID string, entries []cohortEntry) error {
+	q := store.New(s.pool)
+	runIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		runIDs = append(runIDs, entry.RunID)
+	}
+	rows, err := q.ListReplayCampaignWorkflowSnapshots(ctx, store.ListReplayCampaignWorkflowSnapshotsParams{
+		OrgID: orgID, RunIds: runIDs, MaxSnapshots: replayCampaignMaxSnapshots,
+	})
+	if err != nil {
+		return err
+	}
+	workflows := make(map[string]*domain.Workflow, len(runIDs))
+	for _, row := range rows {
+		wf, err := engine.WorkflowSnapshot(row.Workflow)
+		if err != nil {
+			continue
+		}
+		for _, runID := range row.RunIds {
+			workflows[runID] = wf
+		}
+	}
+	for index := range entries {
+		entry := &entries[index]
+		entry.SupersededByRerun, err = q.RunNodeSupersededByRerun(ctx, store.RunNodeSupersededByRerunParams{
+			OrgID: orgID, RunID: entry.RunID, NodeID: entry.NodeID,
+		})
+		if err != nil {
+			return err
+		}
+		wf := workflows[entry.RunID]
+		if wf == nil || !slices.ContainsFunc(wf.Nodes, func(node domain.Node) bool { return node.ID == entry.NodeID }) {
+			continue
+		}
+		entry.Effects = engine.ClosureEffects(wf, entry.NodeID)
+		entry.SideEffect = len(entry.Effects) > 0
+		entry.EffectsKnown = true
+	}
+	return nil
 }
 
 type campaignBody struct {
@@ -144,6 +206,9 @@ func (s *V1Server) campaignPreviewCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusBadRequest, "replay_campaign_invalid_body", "Invalid replay campaign cohort", nil)
 	}
 	preview, err := s.previewCohort(r, rc.orgID, body.DeadLetterIDs)
+	if err == nil {
+		err = s.describeCohortEffects(r.Context(), rc.orgID, preview.Eligible)
+	}
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
@@ -239,11 +304,16 @@ func (s *V1Server) campaignDetail(r *http.Request, rc v1Request, id string) (map
 	}
 	itemViews := make([]map[string]any, 0, len(items))
 	for _, item := range items {
+		var errorCode any
+		if item.Error.Valid {
+			errorCode = engine.ReplayItemFailureCode(item.Error.String)
+		}
 		itemViews = append(itemViews, map[string]any{
 			"id": item.ID, "orgId": item.OrgID, "campaignId": item.CampaignID,
-			"deadLetterId": item.DeadLetterID, "position": item.Position,
+			"deadLetterId": item.DeadLetterID, "runId": textOrNull(item.RunID),
+			"nodeId": textOrNull(item.NodeID), "position": item.Position,
 			"status": item.Status, "attemptCount": item.AttemptCount,
-			"error": textOrNull(item.Error), "completedAt": timeOrNull(item.CompletedAt),
+			"errorCode": errorCode, "completedAt": timeOrNull(item.CompletedAt),
 			"createdAt": isoMillis(item.CreatedAt),
 		})
 	}

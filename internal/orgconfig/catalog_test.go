@@ -88,3 +88,18 @@ func TestNormalizeCatalogValues(t *testing.T) {
 		})
 	}
 }
+
+func TestToolApprovalPolicyParsesToolNamesOnly(t *testing.T) {
+	names, err := ParseToolApprovalPolicy(" slack.post, pagerduty.incident.snooze ,,")
+	if err != nil || len(names) != 2 || !names["slack.post"] || !names["pagerduty.incident.snooze"] {
+		t.Fatalf("names %v %v", names, err)
+	}
+	for _, bad := range []string{"Slack.Post", "slack post", "slack.post;drop", strings.Repeat("a", 81)} {
+		if _, err := ParseToolApprovalPolicy(bad); err == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+	if _, err := Normalize(Get(ToolApprovalPolicyKey), "not a tool"); err == nil {
+		t.Error("the catalog accepted a malformed policy")
+	}
+}

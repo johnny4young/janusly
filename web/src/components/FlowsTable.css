@@ -1,0 +1,109 @@
+.we-flows-table-wrap {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  margin-top: 6px;
+}
+
+/* A fixed layout keeps columns aligned between folder sections. */
+.we-flows-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.we-flows-table th,
+.we-flows-table td {
+  border-bottom: 1px solid var(--we-line);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.we-flows-table th { padding: 6px; }
+.we-flows-table tbody tr:last-child td { border-bottom: 0; }
+.we-flows-table tbody tr { cursor: pointer; }
+.we-flows-table tbody tr:hover { background: var(--we-surface-muted); }
+.we-flows-table tr[data-dragging="true"] { opacity: 0.5; }
+
+.we-flows-table th[data-column="status"] { width: 172px; }
+.we-flows-table th[data-column="openFailures"] { width: 104px; }
+.we-flows-table th[data-column="health"] { width: 118px; }
+.we-flows-table th[data-column="lastRun"] { width: 120px; }
+.we-flows-table th[data-column="version"] { width: 88px; }
+.we-flows-table th[data-column="actions"] { width: 172px; }
+.we-flows-table th[data-column="deleted"] { width: 180px; }
+.we-flows-table th[data-column="runs"] { width: 72px; }
+.we-flows-table th[data-column="expires"] { width: 150px; }
+.we-flows-table[data-view="trash"] th { color: var(--we-muted); font-size: 11px; font-weight: 700; padding: 10px 12px; text-transform: uppercase; }
+.we-flows-table[data-view="trash"] tbody tr { cursor: default; }
+
+.we-flows-views {
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+.we-flows-views .ui-button { border-color: transparent; box-shadow: none; }
+.we-flows-views .ui-button[aria-pressed="true"] { background: var(--we-surface); border-color: var(--we-line); font-weight: 700; }
+.we-flows-views__count { color: var(--we-muted); font-variant-numeric: tabular-nums; margin-inline-start: 4px; }
+.we-flows-empty-choices { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+
+.we-flows-table .we-flows-table__sort {
+  color: var(--we-muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding-inline: 6px;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: normal;
+}
+
+.we-flows-table .we-flows-table__sort[data-active="true"] { color: var(--we-ink); }
+
+.we-flows-table__cell {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.we-flows-table__identity {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+
+.we-flows-table__title {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.we-flows-table small {
+  color: var(--we-muted);
+  display: block;
+  font-size: 11px;
+}
+
+.we-flows-table__mono { font-family: var(--font-mono); }
+.we-flows-table td[data-open="true"] { color: var(--we-danger-text); font-weight: 700; }
+.we-flows-table__actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1360px) {
+  .we-flows-table th[data-column="status"] { width: 140px; }
+  .we-flows-table th[data-column="health"] { width: 104px; }
+}
+
+/* Only here: horizontal scrolling would also clip the health breakdown popover. */
+@media (max-width: 1280px) {
+  .we-flows-table-wrap { overflow-x: auto; }
+  .we-flows-table { min-width: 860px; }
+}

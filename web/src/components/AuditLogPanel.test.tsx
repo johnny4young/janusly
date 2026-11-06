@@ -46,6 +46,25 @@ describe('<AuditLogPanel />', () => {
     expect(screen.getByText('workflow:wf1')).toBeInTheDocument()
   })
 
+  it('renders a close reason whole and as text, apart from the JSON preview', async () => {
+    const reason = `<img src=x onerror=alert(1)> ${'long '.repeat(40)}`.trim()
+    mockApi(() => ({
+      rows: [
+        row({ id: 'a1', action: 'dlq.resolved', metadata: { reason, source: 'dev' } }),
+        row({ id: 'a2', action: 'run.cancelled', metadata: { reason: 'operator' } }),
+      ],
+      nextCursor: null,
+      hasMore: false,
+    }))
+    const { container } = render(<AuditLogPanel />)
+    const shown = await screen.findByTestId('audit-close-reason')
+    expect(shown).toHaveTextContent(`Reason: ${reason}`)
+    expect(screen.getAllByTestId('audit-close-reason')).toHaveLength(1)
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.getByText('{"source":"dev"}')).toBeInTheDocument()
+    expect(screen.getByText('{"reason":"operator"}')).toBeInTheDocument()
+  })
+
   it('shows the empty state when no rows match', async () => {
     mockApi(() => ({ rows: [], nextCursor: null, hasMore: false }))
     render(<AuditLogPanel />)

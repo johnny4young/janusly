@@ -934,6 +934,7 @@ export type RunStatus = "created" | "running" | "waiting" | "succeeded" | "faile
 export type RunSummary = {
   "createdAt": string | null
   "createdBy": string | null
+  "cursor": string | null
   "hasWaitingNodes": boolean
   "id": string
   "orgId": string
@@ -1051,6 +1052,65 @@ export type TriggerIngestResponse = {
   "triggerEventId": string
   "runId"?: never
   "duplicate"?: never
+}
+
+export type UsageCosts = {
+  "aiConfigured": boolean
+  "models": ({
+    "cacheCreationInputTokens": number
+    "cachedInputTokens": number
+    "calls": number
+    "costUsd": number | null
+    "model": string
+    "outputTokens": number
+    "provider": string
+    "simulatedCalls": number
+    "uncachedInputTokens": number
+    "unknownCostCalls": number
+  })[]
+  "modelsTotal": number
+  "retentionDays": number
+  "rowCap": number
+  "steps": ({
+    "cacheCreationInputTokens": number
+    "cachedInputTokens": number
+    "calls": number
+    "costUsd": number | null
+    "model": string
+    "nodeId": string | null
+    "outputTokens": number
+    "provider": string
+    "runAvailable": boolean
+    "runId": string
+    "simulatedCalls": number
+    "uncachedInputTokens": number
+    "unknownCostCalls": number
+    "workflowName": string
+  })[]
+  "stepsCoveredSince": string | null
+  "stepsTotal": number
+  "stepsTruncated": boolean
+  "totals": {
+    "cacheCreationInputTokens": number
+    "cachedInputTokens": number
+    "calls": number
+    "costUsd": number | null
+    "outputTokens": number
+    "simulatedCalls": number
+    "uncachedInputTokens": number
+    "unknownCostCalls": number
+  }
+  "windowDays": number
+  "withoutRun": {
+    "cacheCreationInputTokens": number
+    "cachedInputTokens": number
+    "calls": number
+    "costUsd": number | null
+    "outputTokens": number
+    "simulatedCalls": number
+    "uncachedInputTokens": number
+    "unknownCostCalls": number
+  }
 }
 
 export type ValidationBreakdown = {
@@ -1221,13 +1281,21 @@ export type WorkflowListItem = {
   "bufferedTriggerCount": number
   "createdAt": string | null
   "createdBy": string | null
+  "currentVersion": number
   "deletedAt": string | null
   "folder": string | null
   "id": string
+  "lastRunAt": string | null
   "lastRunStatus": string | null
   "name": string
+  "openFailureCount": number
   "orgId": string
   "pausedReason": string | null
+  "productionVersion": number
+  "rollout": {
+    "status": "active" | "promoted" | "rolled_back" | "cancelled"
+    "trafficPercent": number
+  } | null
   "runCount": number
   "status": string
   "tags": string[]
@@ -1423,6 +1491,8 @@ export interface ApiRequests {
   "GET /run/usage": undefined
   /** Keyset-paginated run list */
   "GET /runs": undefined
+  /** Rules-based hypotheses for a run's failed step */
+  "GET /runs/{runId}/investigation": undefined
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": undefined
   /** Alias of /v1/run */
@@ -1431,6 +1501,8 @@ export interface ApiRequests {
   "GET /templates": undefined
   /** The AI Studio tool catalog */
   "GET /tools": undefined
+  /** Estimated AI cost of a bounded window: most expensive steps and cost by model */
+  "GET /usage/costs": undefined
   /** Keyset-paginated workflow list */
   "GET /workflows": undefined
   /** Recorded recovery qualification for a version pair */
@@ -1489,6 +1561,7 @@ export interface ApiRequests {
   /** Resolve one dead letter as accepted loss */
   "POST /dlq/resolve": {
     "id": string
+    "reason"?: string
   }
   /** Start a write-suppressed validation replay for a proposed fix */
   "POST /dlq/validate-fix": {
@@ -1652,6 +1725,139 @@ export interface ApiResponses {
   "GET /run/usage": RunUsage
   /** Keyset-paginated run list */
   "GET /runs": RunSummary[]
+  /** Rules-based hypotheses for a run's failed step */
+  "GET /runs/{runId}/investigation": {
+    "action": null | {
+      "deadLetterId": string
+      "kind": "open_recovery"
+    }
+    "category": "secret_missing" | "http_error" | "network_timeout" | "ai_provider" | "parse_error" | "tool_input" | "unknown"
+    "conclusion": "" | "network" | "credential" | "upstream" | "change"
+    "generatedAt": string
+    "hypotheses": ({
+      "evidence": ({
+        "kind": "failed_step" | "last_success"
+        "nodeId"?: string
+        "runId": string
+      })[]
+      "id": "network" | "credential" | "upstream" | "change"
+      "params": {
+        "signature"?: never
+        "count"?: never
+        "runs"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "signature": string
+        "count"?: never
+        "runs"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "count": number
+        "runs": number
+        "signature": string
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "category": "secret_missing" | "http_error" | "network_timeout" | "ai_provider" | "parse_error" | "tool_input" | "unknown"
+        "signature"?: never
+        "count"?: never
+        "runs"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "credential": string
+        "expiredAt": string
+        "signature"?: never
+        "count"?: never
+        "runs"?: never
+        "category"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "source": string
+        "signature"?: never
+        "count"?: never
+        "runs"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "sources"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "sources": string
+        "signature"?: never
+        "count"?: never
+        "runs"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "version"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "version": number
+        "signature"?: never
+        "count"?: never
+        "runs"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "from"?: never
+        "to"?: never
+      } | {
+        "from": number
+        "to": number
+        "signature"?: never
+        "count"?: never
+        "runs"?: never
+        "category"?: never
+        "credential"?: never
+        "expiredAt"?: never
+        "source"?: never
+        "sources"?: never
+        "version"?: never
+      }
+      "reason": "no_error" | "error_unclassified" | "network_dns" | "network_failed" | "network_other_category" | "credential_missing" | "credential_rejected" | "credential_expired" | "credential_expired_unconfirmed" | "credential_unused" | "credential_unproven" | "upstream_hidden" | "upstream_unwatched" | "upstream_degraded" | "upstream_current_only" | "upstream_unchecked" | "change_unsaved" | "change_no_baseline" | "change_same_version" | "change_outside_version" | "change_new_version"
+      "verdict": "validated" | "ruled_out" | "inconclusive"
+    })[]
+    "nodeId": string
+    "runId": string
+    "signature": string
+    "workflowName": string
+  }
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": {
     "enabled": boolean
@@ -1663,6 +1869,8 @@ export interface ApiResponses {
   "GET /templates": TemplateCatalogEntry[]
   /** The AI Studio tool catalog */
   "GET /tools": ToolCatalogEntry[]
+  /** Estimated AI cost of a bounded window: most expensive steps and cost by model */
+  "GET /usage/costs": UsageCosts
   /** Keyset-paginated workflow list */
   "GET /workflows": WorkflowListItem[]
   /** Recorded recovery qualification for a version pair */
@@ -1843,6 +2051,8 @@ export interface ApiSuccessStatuses {
   "GET /run/usage": 200
   /** Keyset-paginated run list */
   "GET /runs": 200
+  /** Rules-based hypotheses for a run's failed step */
+  "GET /runs/{runId}/investigation": 200
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": 200
   /** Alias of /v1/run */
@@ -1851,6 +2061,8 @@ export interface ApiSuccessStatuses {
   "GET /templates": 200
   /** The AI Studio tool catalog */
   "GET /tools": 200
+  /** Estimated AI cost of a bounded window: most expensive steps and cost by model */
+  "GET /usage/costs": 200
   /** Keyset-paginated workflow list */
   "GET /workflows": 200
   /** Recorded recovery qualification for a version pair */

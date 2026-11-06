@@ -58,6 +58,55 @@ test('narrow desktop keeps contextual navigation readable without overflow', asy
   expect(overflow).toBeLessThanOrEqual(2)
 })
 
+for (const locale of ['en', 'es'] as const) {
+  test(`Build opens its panel on the inspector with the sections in the top bar (${locale})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.addInitScript((selectedLocale) => {
+      window.localStorage.setItem('janusly:locale', selectedLocale)
+    }, locale)
+    await page.goto('/')
+
+    const copy = locale === 'en'
+      ? { workflows: 'Workflows', build: 'Build', all: 'All workflows' }
+      : { workflows: 'Flujos', build: 'Crear', all: 'Todos los flujos' }
+    await openWorkspaceSection(page, copy.workflows, copy.build)
+
+    const topBar = page.locator('.top-bar')
+    const sectionNav = page.getByTestId('workspace-section-nav')
+    await expect(topBar.getByTestId('workspace-section-nav')).toBeVisible()
+    await expect(sectionNav).toHaveCount(1)
+    await expect(sectionNav.getByRole('button', { name: copy.build, exact: true }))
+      .toHaveAttribute('aria-current', 'page')
+    await expect.poll(async () => {
+      const box = await sectionNav.boundingBox()
+      const bar = await topBar.boundingBox()
+      return box !== null && bar !== null && box.y + box.height <= bar.y + 56
+    }).toBe(true)
+
+    await page.getByTestId('top-bar-workflow-name').focus()
+    await page.keyboard.press('Tab')
+    await expect(page.getByTestId('workspace-section-workflows')).toBeFocused()
+
+    const panel = await page.locator('.workspace-panel').boundingBox()
+    const scope = await page.locator('.authoring-scope-nav').boundingBox()
+    const toolbar = page.getByTestId('authoring-ai-toolbar')
+    const toolbarBox = await toolbar.boundingBox()
+    expect(scope!.y - panel!.y).toBeLessThanOrEqual(20)
+    expect(toolbarBox!.y + toolbarBox!.height - panel!.y).toBeLessThanOrEqual(110)
+    for (const button of await toolbar.getByRole('button').all()) {
+      expect(await button.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    }
+
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await expect(sectionNav).toBeVisible()
+    expect(await topBar.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(2)
+
+    await sectionNav.getByRole('button', { name: copy.all, exact: true }).click()
+    await expect(sectionNav).toBeVisible()
+    await expect(topBar.getByTestId('workspace-section-nav')).toHaveCount(0)
+  })
+}
+
 test('200% logical zoom keeps the recovery workspace navigable in both locales', async ({ browser }) => {
   // A 1280x720 desktop at 200% browser zoom exposes approximately 640x360
   // CSS pixels. Chromium's 2x device scale exercises the corresponding

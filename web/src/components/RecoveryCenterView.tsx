@@ -1,30 +1,54 @@
-import { lazy, Suspense } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import { OnboardingReplayButton } from './OnboardingReplayButton'
 import { OnboardingBanner } from './OnboardingBanner'
 import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
 import { RecoveryLabEntry } from './recovery-center/RecoveryCenterEmptyState'
 import { HomeActionWorkspace } from './recovery-center/HomeActionWorkspace'
-import { downtimeSeverity } from './recovery-center/recovery-center-model'
+import { HomeBudgetBanner } from './recovery-center/HomeBudgetBanner'
+import { HomeTodayStrip } from './recovery-center/HomeTodayStrip'
+import { HomeOperatorField } from './recovery-center/HomeOperatorField'
+import { downtimeSeverity, type RecommendedAction } from './recovery-center/recovery-center-model'
 import { useT } from '../i18n'
+import { useWorkflowStore } from '../store'
 import type { RecoveryCenterController } from './RecoveryCenterPanel'
 
-const HomeInsights = lazy(() => import('./recovery-center/HomeInsights').then((module) => ({
-  default: module.HomeInsights,
+const HomeInvestigationPanel = lazy(() => import('./recovery-center/HomeInvestigationPanel').then((module) => ({
+  default: module.HomeInvestigationPanel,
 })))
 
 export function RecoveryCenterView({ model }: { model: RecoveryCenterController }) {
   const { t } = useT()
   const {
-    activeRuns, allActiveRuns, allClear, allClearDowntimeOverride, bumpPlatformVersion,
-    celebrationTrigger, clusters, dismissIntro, greeting, handleRecommendedAction,
-    healthScore, heatmap, heatmapCells, insightsOpen, ledger, longestOpen, memoryPurgeCountdownLabel,
+    activeRuns, allActiveRuns, allClear, allClearDowntimeOverride, approvalsPending, bumpPlatformVersion,
+    celebrationTrigger, dismissIntro, greeting, handleRecommendedAction,
+    healthScore, longestOpen, memoryPurgeCountdownLabel,
     metrics, metricsError, metricsLoading, metricsStatus, nowMs, onOpenActivity,
     onOpenMemoryGovernance, onOpenRecoveryQueue, onOpenRun, onOpenTab, onStartRecoveryDrill,
     openDeadLetters, openFailureCount, operatorBriefStatus, operatorBriefWarnings, operatorWins,
-    recommendedActions, recoveryClearEligible,
-    setInsightsOpen, showOnboarding, streak, validation, waitingNodes,
+    recommendedActions, recoveryClearEligible, runsToday, showOnboarding, streak,
   } = model
+  const orgId = useWorkflowStore((state) => state.orgId)
+  // Bound to the workspace it was opened in: a switch unmounts it and aborts its read.
+  const [opened, setOpened] = useState<{ action: RecommendedAction; orgId: string | null } | null>(null)
+  const investigating = opened?.orgId === orgId ? opened.action : null
+  const investigateTrigger = useRef<HTMLElement | null>(null)
+  const investigate = (action: RecommendedAction) => {
+    investigateTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setOpened({ action, orgId })
+  }
+  const closeInvestigation = () => {
+    setOpened(null)
+    investigateTrigger.current?.focus()
+  }
+  const operator = (
+    <HomeOperatorField
+      key={orgId}
+      openFailures={openDeadLetters}
+      onOpenTab={onOpenTab}
+      onOpenRun={onOpenRun}
+      onOpenRecoveryQueue={onOpenRecoveryQueue}
+    />
+  )
 
   return (
     <div className="we-recovery-center-panel we-recovery-center-panel--operator">
@@ -43,9 +67,14 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         celebrationTrigger={celebrationTrigger}
         personalWins={operatorWins}
         memoryPurgeCountdown={memoryPurgeCountdownLabel}
+        successRateDisplay={metrics?.successRate.display}
+        onOpenRuns={() => onOpenTab('runs')}
+        onOpenRecoveryQueue={() => onOpenRecoveryQueue()}
         onRefreshStatus={bumpPlatformVersion}
         onOpenMemoryGovernance={onOpenMemoryGovernance}
       />
+
+      <HomeBudgetBanner onOpenTab={onOpenTab} />
 
       {showOnboarding ? (
         <>
@@ -56,6 +85,7 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
             onDismiss={dismissIntro}
           />
           <OnboardingBanner onOpenTab={onOpenTab} />
+          {operator}
         </>
       ) : <HomeActionWorkspace
         actions={recommendedActions}
@@ -64,64 +94,42 @@ export function RecoveryCenterView({ model }: { model: RecoveryCenterController 
         status={operatorBriefStatus}
         warnings={operatorBriefWarnings}
         setup={<OnboardingBanner onOpenTab={onOpenTab} />}
+        operator={operator}
         onSelectAction={handleRecommendedAction}
+        onInvestigate={investigate}
         onOpenRun={onOpenRun}
         onOpenActivity={onOpenActivity}
       />}
 
-      <section className="we-home-insights" data-expanded={insightsOpen}>
-        <button
-          type="button"
-          className="we-home-insights__toggle"
-          aria-expanded={insightsOpen}
-          aria-controls="we-home-insights-content"
-          onClick={() => setInsightsOpen((open) => !open)}
-          data-testid="home-insights-toggle"
-        >
-          <span className="we-home-insights__toggle-copy">
-            <strong>{t('home.insights.title')}</strong>
-          </span>
-          <span className="we-home-insights__toggle-action" aria-hidden="true">
-            <ChevronDown size={16} aria-hidden="true" />
-          </span>
-        </button>
+      <HomeTodayStrip
+        runsToday={runsToday}
+        openFailures={openFailureCount}
+        approvals={approvalsPending}
+        onOpenRecoveryQueue={() => onOpenRecoveryQueue()}
+        onOpenRuns={() => onOpenTab('runs')}
+        onOpenReports={() => onOpenTab('reports')}
+      />
 
-        {insightsOpen && (
-          <div id="we-home-insights-content">
-            <Suspense
-              fallback={(
-                <p className="helper-text" role="status">
-                  {t('common.loading')}
-                </p>
-              )}
-            >
-              <HomeInsights
-                metrics={metrics}
-                openFailureCount={openFailureCount}
-                waitingApprovals={waitingNodes.length}
-                clusters={clusters}
-                heatmap={heatmap}
-                heatmapCells={heatmapCells}
-                nowMs={nowMs}
-                validation={validation}
-                ledger={ledger}
-                personalWins={operatorWins}
-                recentDlqRunId={openDeadLetters[0]?.runId}
-                onOpenTab={onOpenTab}
-                onOpenRecoveryQueue={onOpenRecoveryQueue}
-              />
-            </Suspense>
-
-            {metricsError && !metricsLoading && (
-              <p className="we-recovery-center-error" role="status">
-                {t('recoveryCenter.metricsUnavailable', { detail: metricsError })}
-              </p>
-            )}
-          </div>
-        )}
-      </section>
+      {metricsError && !metricsLoading && (
+        <p className="we-recovery-center-error" role="status">
+          {t('recoveryCenter.metricsUnavailable', { detail: metricsError })}
+        </p>
+      )}
 
       <OnboardingReplayButton />
+
+      {investigating?.target.runId && (
+        <Suspense fallback={null}>
+          <HomeInvestigationPanel
+            key={investigating.id}
+            runId={investigating.target.runId}
+            title={investigating.title}
+            onClose={closeInvestigation}
+            onOpenRun={onOpenRun}
+            onOpenRecoveryQueue={onOpenRecoveryQueue}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

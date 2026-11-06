@@ -138,3 +138,80 @@
 }
 
 .we-dlq-status label:has(:focus-visible) { box-shadow: var(--we-focus-ring); }
+
+/* The shared .we-virtual-list rule ships with the canvas chunk, absent on a direct Recover load. */
+.we-dlq-virtual-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The section is the container so the panes follow the width left by the sidebar. */
+.we-dlq-queue { container-type: inline-size; }
+
+.we-dlq-queue__tools { flex-wrap: wrap; justify-content: flex-end; }
+
+.we-dlq-panes {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.we-dlq-panes > * { min-width: 0; }
+
+.we-dlq-detail-pane .detail-box { margin-top: 0; }
+
+.we-dlq-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.we-dlq-detail__context { display: block; }
+
+.we-dlq-detail__head > .we-dlq-actions { column-gap: 16px; margin-top: 10px; }
+
+.we-dlq-cluster,
+.we-dlq-cluster:hover {
+  background: var(--we-surface-2);
+  border-color: var(--we-line);
+}
+
+@container (min-width: 760px) {
+  .we-dlq-panes[data-detail="true"] { grid-template-columns: minmax(22rem, 2fr) minmax(0, 3fr); }
+
+  /* Each pane scrolls on its own, so triaging with J/K moves neither off screen. */
+  .we-dlq-panes[data-detail="true"] > * { height: max(24rem, calc(100dvh - 31rem)); }
+
+  /* The narrow queue keeps severity, occurrences and SLA; the rest is one click away. */
+  .we-dlq-panes[data-detail="true"] :is(.we-dlq-row__date, .we-recovery-item-badge__status) { display: none; }
+
+  .we-dlq-queue-pane { display: flex; flex-direction: column; }
+
+  .we-dlq-queue-pane .panel-list { flex: 1; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
+
+  .we-dlq-panes[data-detail="true"] .we-dlq-virtual-list { height: 100%; max-height: none; }
+
+  .we-dlq-detail-pane {
+    border: 1px solid var(--we-line);
+    border-radius: 8px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .we-dlq-detail-pane .detail-box { border-top: 0; padding: 0 12px 12px; }
+
+  .we-dlq-detail-pane > .we-recovery-item-drawer { margin: 12px; }
+
+  .we-dlq-detail__head {
+    background: var(--we-surface);
+    padding-block: 12px 10px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+}
+
+.we-recover-sections { align-self: flex-start; }
+.we-recover-queue:not([hidden]) { display: contents; }

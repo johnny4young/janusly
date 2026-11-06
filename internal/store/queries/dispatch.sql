@@ -124,7 +124,7 @@ FROM (
   JOIN runs r ON r.id = rn.run_id
   WHERE w.wake_at <= now() AND rn.status = 'waiting'
     AND r.status = 'running'
-    AND w.reason IN ('wait_until', 'approval_timeout')
+    AND w.reason IN ('wait_until', 'approval_timeout', 'tool_approval_timeout')
 ) ranked
 ORDER BY run_rank, run_node_id
 LIMIT sqlc.arg(batch_size);
@@ -232,14 +232,14 @@ WHERE id IN (
 RETURNING id, status;
 
 -- The claim overwrites next_fire_at with the lease, so the tick's LOGICAL
--- due time is returned alongside the row: it is the tick's durable
--- identity, and firing keys run-start idempotency on it. Without that,
--- a lease that expires mid-batch or a crash between the run insert and
--- the advance fires the same scheduled tick twice.
+-- due time is kept in claimed_due_at until the entry advances and returned
+-- with the row: it is the tick's durable identity, and firing keys run-start
+-- idempotency and rollout assignment on it. A lease that expires mid-batch or
+-- a crash between the run insert and the advance re-claims the same tick.
 -- name: ClaimDueScheduleEntries :many
-UPDATE schedule_entries SET next_fire_at = sqlc.arg(lease_until)
+UPDATE schedule_entries SET next_fire_at = sqlc.arg(lease_until), claimed_due_at = claimed.due_at
 FROM (
-  SELECT due.id, due.next_fire_at AS due_at FROM schedule_entries AS due
+  SELECT due.id, COALESCE(due.claimed_due_at, due.next_fire_at) AS due_at FROM schedule_entries AS due
   WHERE due.enabled = true AND due.next_fire_at <= sqlc.arg(now)
   ORDER BY due.next_fire_at
   LIMIT sqlc.arg(row_limit)

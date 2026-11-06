@@ -63,6 +63,19 @@ func VerifyJSON(token string, out any) error {
 	return nil
 }
 
+// Digest keys data to this deployment's secret, so a stored or displayed
+// digest reveals nothing about low-entropy values it covers.
+func Digest(purpose string, data []byte) (string, error) {
+	key, err := secret()
+	if err != nil {
+		return "", err
+	}
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte(purpose + "\x00"))
+	mac.Write(data)
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
 func signPayload(encodedPayload string) (string, error) {
 	key, err := secret()
 	if err != nil {

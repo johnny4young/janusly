@@ -222,7 +222,10 @@ var Routes = []Route{
 		Response: map[string]any{"type": "array", "items": deadLetterSummary, "maxItems": 200}},
 	{Method: "GET", Path: "/v1/dlq/entries/{deadLetterId}", Summary: "Tenant-bound dead-letter snapshot", Response: deadLetterDetail},
 	{Method: "POST", Path: "/v1/dlq/resolve", Summary: "Resolve one dead letter as accepted loss",
-		Request:  closedObj(map[string]any{"id": map[string]any{"type": "string", "minLength": 1}}, "id"),
+		Request: closedObj(map[string]any{
+			"id":     map[string]any{"type": "string", "minLength": 1},
+			"reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 280},
+		}, "id"),
 		Response: closedObj(map[string]any{"ok": map[string]any{"const": true}}, "ok")},
 	{Method: "GET", Path: "/v1/dlq/clusters", Summary: "Failure clusters over open dead letters",
 		Response: failureClusters},
@@ -306,6 +309,8 @@ var Routes = []Route{
 		Response: memoryConsentStatus},
 	{Method: "GET", Path: "/v1/run/usage", Summary: "Bounded per-run AI and memory usage",
 		Response: runUsage},
+	{Method: "GET", Path: "/v1/usage/costs", Summary: "Estimated AI cost of a bounded window: most expensive steps and cost by model",
+		Response: usageCosts},
 	{Method: "GET", Path: "/v1/workflows/schedule-preview", Summary: "Validate a cron expression and preview its next fires",
 		Response: closedObj(map[string]any{"valid": boolT(), "nextFires": arr(str())}, "valid", "nextFires")},
 	{Method: "GET", Path: "/v1/tools", Summary: "The AI Studio tool catalog",
@@ -329,4 +334,6 @@ var Routes = []Route{
 		Response: workflowProposalResponse},
 	{Method: "GET", Path: "/v1/operations/brief", Summary: "Bounded deterministic Operator Brief shared by UI and MCP",
 		Response: operatorBrief},
+	{Method: "GET", Path: "/v1/runs/{runId}/investigation", Summary: "Rules-based hypotheses for a run's failed step",
+		Response: runInvestigation},
 }

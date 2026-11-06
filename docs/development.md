@@ -35,6 +35,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 | Go integration | `make test-integration` | `JANUSLY_DATABASE_URL` pointing at a migrated PostgreSQL test role with `CREATEDB`; runs `-p 1` |
 | Web unit (jsdom) | `cd web && pnpm test` | nothing; CSS is not parsed |
 | Web browser (Chromium) | `cd web && pnpm test:browser` | Playwright browsers |
+| Web auth callback | `cd web && pnpm test:auth-e2e` | Playwright browsers; builds its own Supabase-configured bundle and fakes the auth server |
 | Web scripts | `cd web && pnpm test:scripts` | nothing |
 | Web e2e | `make test-e2e` | Docker (fresh compose stack, built image) |
 | Everything | `make verify` | Docker plus the host test/lint toolchains |
@@ -43,7 +44,7 @@ make db-reset CONFIRM=reset && make db-up && make migrate
 compose project, migrates twice (the second run must be a no-op), regenerates
 `schema.sql` and checks it for drift, runs `make generate` drift, lint, deadcode, vuln,
 Go unit, integration and two-instance HA, the web verify (`audit:ci`, lint,
-app/unit/E2E typecheck, unit, scripts, browser, build, `bundle-check`) and the
+app/unit/E2E typecheck, unit, scripts, browser, auth callback, build, `bundle-check`) and the
 e2e lane, then ends with
 `git diff --exit-code`. Commit first, verify after, and do not touch tracked
 files while it runs.
@@ -52,6 +53,8 @@ The E2E harness labels its image with the exact Git commit and tree only when
 its source checkout is clean. Standalone `make test-e2e` still accepts WIP, but
 uses unverified placeholder labels rather than claiming the last commit built
 the dirty source. Ambient build-label variables cannot override this choice.
+When the lane fails it writes the Compose logs to `output/e2e/compose.log`
+before removing the stack; CI uploads them with the Playwright failure output.
 The selected real-executable lane includes `responsive.spec.ts`: its EN/ES
 640×360 CSS viewport at 2× device scale is an automated approximation of a
 1280×720 desktop at 200% browser zoom, not a physical zoom or screen-reader
@@ -236,15 +239,29 @@ recorded baseline. Styles for a lazy panel live next to the component
 (`<Component>.css`) so they ship with its chunk instead of the cold path. `pnpm bundle-check`
 reports; a new named asset must get a baseline entry after review. Structural
 changes that add object keys (a controller/view model, a router) cost gzip
-bytes no minifier removes; the caps were raised once for that in 2026-09 and
-are not raised for features. The bundle held no duplicated modules and the
-i18n catalogs are prefix-compressed, so "find dead bytes" is rarely an option.
+bytes no minifier removes; the caps were raised once for that in 2026-09. In
+2026-11 the owner approved moving the artifact, worst-locale and per-chunk caps
+by each workspace redesign change's measured cost, stated in its pull request;
+the cold-path caps and route budgets still only ratchet down. The bundle holds no duplicated first-party modules
+and the i18n catalogs are prefix-compressed, so dead bytes live in vendor code and
+interop. Production-only plugins remove them: named React bindings instead of
+CommonJS interop (`react-esm-facade-plugin.mjs`), `d3-color`, unused `d3-transition` methods and Lucide's React
+keys (`trim-vendor-plugin.mjs`), unused GoTrueClient methods
+(`prune-auth-client-plugin.mjs`), and always-true `color-mix` guards
+(`css-floor-plugin.mjs`). `scripts/production-trims.test.mjs` exercises them
+against the untrimmed vendors. Calling another auth method means adding it to
+the `Pick` in `src/auth.ts` and to the plugin's roots; the test holds both lists
+equal. Live browser validators use `src/lib/schema-lite.ts`, held to `zod/mini`
+by a differential test; importing a Zod-built schema into a production path
+brings about 8 KiB of Zod back. Together with dropping the modulepreload polyfill
+they measured 11.3 KiB off both totals; the caps did not move with them, so that
+room stays available until the caps are next lowered to the measured size.
 The artifact and worst-locale caps were rebased once more in 2026-10, by the
 measured 3.3 KiB of the generated response guards (605 → 608.3 and
 560.5 → 563.8 KiB); guards compose shared primitives so each new adoption costs
 only its own shape. Once the hand-written readers shrank to UI invariants and
 each guard became its own module (a lazy panel's guard ships in its chunk), the
-caps were lowered to the measured size plus about 1 KiB (605.9 and 562.0 KiB). The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB).
+caps were lowered to the measured size plus about 1 KiB (605.9 and 562.0 KiB). The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB). The Forgot password? request on Login, which is not a workspace redesign, moved them with the owner's approval by its measured 171 B artifact and 104 B worst-locale cost (613.4 → 613.5 and 568.5 → 568.6 KiB), and the `app-workspace.js` and `catalog-en.js` baselines by the same change.
 
 ## Marketing site (`website/`)
 

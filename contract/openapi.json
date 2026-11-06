@@ -4173,6 +4173,12 @@
               "null"
             ]
           },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "hasWaitingNodes": {
             "type": "boolean"
           },
@@ -4252,7 +4258,8 @@
           "traceId",
           "validationEvidenceLevel",
           "createdBy",
-          "createdAt"
+          "createdAt",
+          "cursor"
         ],
         "type": "object"
       },
@@ -4667,6 +4674,298 @@
             "type": "object"
           }
         ]
+      },
+      "UsageCosts": {
+        "additionalProperties": false,
+        "properties": {
+          "aiConfigured": {
+            "type": "boolean"
+          },
+          "models": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cacheCreationInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cachedInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "calls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "costUsd": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "outputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "simulatedCalls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "uncachedInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "unknownCostCalls": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "cacheCreationInputTokens",
+                "cachedInputTokens",
+                "calls",
+                "costUsd",
+                "model",
+                "outputTokens",
+                "provider",
+                "simulatedCalls",
+                "uncachedInputTokens",
+                "unknownCostCalls"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "modelsTotal": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retentionDays": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rowCap": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "steps": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cacheCreationInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cachedInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "calls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "costUsd": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "nodeId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "outputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "runAvailable": {
+                  "type": "boolean"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "simulatedCalls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "uncachedInputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "unknownCostCalls": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "workflowName": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cacheCreationInputTokens",
+                "cachedInputTokens",
+                "calls",
+                "costUsd",
+                "model",
+                "nodeId",
+                "outputTokens",
+                "provider",
+                "runAvailable",
+                "runId",
+                "simulatedCalls",
+                "uncachedInputTokens",
+                "unknownCostCalls",
+                "workflowName"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "stepsCoveredSince": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stepsTotal": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stepsTruncated": {
+            "type": "boolean"
+          },
+          "totals": {
+            "additionalProperties": false,
+            "properties": {
+              "cacheCreationInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "cachedInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "calls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "costUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "outputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "simulatedCalls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "uncachedInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "unknownCostCalls": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "cacheCreationInputTokens",
+              "cachedInputTokens",
+              "calls",
+              "costUsd",
+              "outputTokens",
+              "simulatedCalls",
+              "uncachedInputTokens",
+              "unknownCostCalls"
+            ],
+            "type": "object"
+          },
+          "windowDays": {
+            "type": "integer"
+          },
+          "withoutRun": {
+            "additionalProperties": false,
+            "properties": {
+              "cacheCreationInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "cachedInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "calls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "costUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "outputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "simulatedCalls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "uncachedInputTokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "unknownCostCalls": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "cacheCreationInputTokens",
+              "cachedInputTokens",
+              "calls",
+              "costUsd",
+              "outputTokens",
+              "simulatedCalls",
+              "uncachedInputTokens",
+              "unknownCostCalls"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "windowDays",
+          "retentionDays",
+          "aiConfigured",
+          "stepsTruncated",
+          "stepsCoveredSince",
+          "rowCap",
+          "stepsTotal",
+          "modelsTotal",
+          "totals",
+          "withoutRun",
+          "steps",
+          "models"
+        ],
+        "type": "object"
       },
       "V1Envelope": {
         "description": "The v1 success envelope: apiVersion + requestId (echoed as X-Request-Id) around the data payload.",
@@ -5455,6 +5754,10 @@
               "null"
             ]
           },
+          "currentVersion": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "deletedAt": {
             "type": [
               "string",
@@ -5470,6 +5773,12 @@
           "id": {
             "type": "string"
           },
+          "lastRunAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "lastRunStatus": {
             "type": [
               "string",
@@ -5479,6 +5788,10 @@
           "name": {
             "type": "string"
           },
+          "openFailureCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "orgId": {
             "type": "string"
           },
@@ -5486,6 +5799,40 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "productionVersion": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rollout": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "active",
+                      "promoted",
+                      "rolled_back",
+                      "cancelled"
+                    ],
+                    "type": "string"
+                  },
+                  "trafficPercent": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "status",
+                  "trafficPercent"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "runCount": {
@@ -5509,13 +5856,18 @@
           "createdBy",
           "createdAt",
           "lastRunStatus",
+          "lastRunAt",
           "runCount",
           "bufferedTriggerCount",
+          "openFailureCount",
+          "currentVersion",
           "status",
           "pausedReason",
           "tags",
           "folder",
-          "deletedAt"
+          "deletedAt",
+          "productionVersion",
+          "rollout"
         ],
         "type": "object"
       },
@@ -6833,6 +7185,11 @@
                 "additionalProperties": false,
                 "properties": {
                   "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "reason": {
+                    "maxLength": 280,
                     "minLength": 1,
                     "type": "string"
                   }
@@ -8173,6 +8530,338 @@
         "summary": "Search consented run-summary memory"
       }
     },
+    "/runs/{runId}/investigation": {
+      "get": {
+        "operationId": "get_v1_runs_runId_investigation",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "action": {
+                              "oneOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "deadLetterId": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "const": "open_recovery",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "deadLetterId"
+                                  ],
+                                  "type": "object"
+                                }
+                              ]
+                            },
+                            "category": {
+                              "enum": [
+                                "secret_missing",
+                                "http_error",
+                                "network_timeout",
+                                "ai_provider",
+                                "parse_error",
+                                "tool_input",
+                                "unknown"
+                              ],
+                              "type": "string"
+                            },
+                            "conclusion": {
+                              "enum": [
+                                "",
+                                "network",
+                                "credential",
+                                "upstream",
+                                "change"
+                              ],
+                              "type": "string"
+                            },
+                            "generatedAt": {
+                              "type": "string"
+                            },
+                            "hypotheses": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "evidence": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "kind": {
+                                          "enum": [
+                                            "failed_step",
+                                            "last_success"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "nodeId": {
+                                          "type": "string"
+                                        },
+                                        "runId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "runId"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "id": {
+                                    "enum": [
+                                      "network",
+                                      "credential",
+                                      "upstream",
+                                      "change"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "params": {
+                                    "oneOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {},
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "signature": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "signature"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "count": {
+                                            "minimum": 0,
+                                            "type": "integer"
+                                          },
+                                          "runs": {
+                                            "minimum": 0,
+                                            "type": "integer"
+                                          },
+                                          "signature": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "signature",
+                                          "count",
+                                          "runs"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "category": {
+                                            "enum": [
+                                              "secret_missing",
+                                              "http_error",
+                                              "network_timeout",
+                                              "ai_provider",
+                                              "parse_error",
+                                              "tool_input",
+                                              "unknown"
+                                            ],
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "category"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "credential": {
+                                            "type": "string"
+                                          },
+                                          "expiredAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "credential",
+                                          "expiredAt"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "source": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "source"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "sources": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "sources"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "version": {
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "version"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "from": {
+                                            "type": "integer"
+                                          },
+                                          "to": {
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "from",
+                                          "to"
+                                        ],
+                                        "type": "object"
+                                      }
+                                    ]
+                                  },
+                                  "reason": {
+                                    "enum": [
+                                      "no_error",
+                                      "error_unclassified",
+                                      "network_dns",
+                                      "network_failed",
+                                      "network_other_category",
+                                      "credential_missing",
+                                      "credential_rejected",
+                                      "credential_expired",
+                                      "credential_expired_unconfirmed",
+                                      "credential_unused",
+                                      "credential_unproven",
+                                      "upstream_hidden",
+                                      "upstream_unwatched",
+                                      "upstream_degraded",
+                                      "upstream_current_only",
+                                      "upstream_unchecked",
+                                      "change_unsaved",
+                                      "change_no_baseline",
+                                      "change_same_version",
+                                      "change_outside_version",
+                                      "change_new_version"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "verdict": {
+                                    "enum": [
+                                      "validated",
+                                      "ruled_out",
+                                      "inconclusive"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "verdict",
+                                  "reason",
+                                  "params",
+                                  "evidence"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "nodeId": {
+                              "type": "string"
+                            },
+                            "runId": {
+                              "type": "string"
+                            },
+                            "signature": {
+                              "type": "string"
+                            },
+                            "workflowName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "runId",
+                            "nodeId",
+                            "workflowName",
+                            "signature",
+                            "category",
+                            "hypotheses",
+                            "conclusion",
+                            "action",
+                            "generatedAt"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Rules-based hypotheses for a run's failed step"
+      }
+    },
     "/start": {
       "post": {
         "operationId": "post_v1_start",
@@ -8630,6 +9319,46 @@
           }
         },
         "summary": "Ingest a normalized MCP resource event"
+      }
+    },
+    "/usage/costs": {
+      "get": {
+        "operationId": "get_v1_usage_costs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/UsageCosts"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Estimated AI cost of a bounded window: most expensive steps and cost by model"
       }
     },
     "/validate": {

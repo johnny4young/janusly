@@ -228,26 +228,82 @@ type RolloutAssignment struct {
 	Workflow  *domain.Workflow
 }
 
+// ErrRolloutVersionUnavailable marks a rollout whose assigned version cannot
+// run; retrying does not help until the version or the rollout changes.
+var ErrRolloutVersionUnavailable = errors.New("workflow_rollout_version_unavailable")
+
+// RolloutVersionUnavailableError names the rollout and version an operator must fix.
+type RolloutVersionUnavailableError struct {
+	RolloutID, VersionID string
+	Version              int32
+}
+
+func (e *RolloutVersionUnavailableError) Error() string {
+	version := e.VersionID
+	if e.Version > 0 {
+		version = fmt.Sprintf("v%d (%s)", e.Version, e.VersionID)
+	}
+	return fmt.Sprintf("workflow_rollout_version_unavailable: rollout %s assigns version %s, which cannot run", e.RolloutID, version)
+}
+
+func (e *RolloutVersionUnavailableError) Unwrap() error { return ErrRolloutVersionUnavailable }
+
+// parsedVersion is one version document parsed once per caller-owned cache.
+type parsedVersion struct {
+	workflow *domain.Workflow
+	version  int32
+	valid    bool
+}
+
+// loadWorkflowVersion reads one org-scoped version, reusing cache when given.
+func loadWorkflowVersion(ctx context.Context, q *store.Queries, orgID, workflowID, versionID string, cache map[string]parsedVersion) (parsedVersion, error) {
+	key := orgID + "|" + workflowID + "|" + versionID
+	if parsed, ok := cache[key]; ok {
+		return parsed, nil
+	}
+	row, err := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
+		ID: versionID, OrgID: orgID, WorkflowID: workflowID,
+	})
+	if err != nil {
+		return parsedVersion{}, err
+	}
+	wf, issues := domain.Parse(row.DagJson)
+	parsed := parsedVersion{workflow: wf, version: row.Version, valid: wf != nil && len(issues) == 0}
+	if cache != nil {
+		cache[key] = parsed
+	}
+	return parsed, nil
+}
+
 // ResolveWorkflowRolloutAssignment resolves the deployment choice while
 // the rollout's canary is still the LATEST saved version; nil keeps
 // ordinary latest-version behaviour. Deterministic: active buckets by
 // (rolloutId, assignmentKey); promoted always canary; finished always
 // baseline.
 func (e *Engine) ResolveWorkflowRolloutAssignment(ctx context.Context, orgID, workflowID, assignmentKey string) (*RolloutAssignment, error) {
+	return e.resolveRolloutAssignment(ctx, orgID, workflowID, assignmentKey, nil)
+}
+
+// resolveRolloutAssignment reads the rollout row and the latest version id
+// before loading the one document the assignment needs.
+func (e *Engine) resolveRolloutAssignment(ctx context.Context, orgID, workflowID, assignmentKey string, cache map[string]parsedVersion) (*RolloutAssignment, error) {
 	q := store.New(e.pool)
 	rollout, err := q.GetLatestWorkflowRolloutRow(ctx, store.GetLatestWorkflowRolloutRowParams{
 		OrgID: orgID, WorkflowID: workflowID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	versions, err := q.ListWorkflowVersionsForRollout(ctx, store.ListWorkflowVersionsForRolloutParams{
+	latest, err := q.GetLatestWorkflowVersionRef(ctx, store.GetLatestWorkflowVersionRefParams{
 		OrgID: orgID, WorkflowID: workflowID,
 	})
-	if err != nil || len(versions) == 0 || versions[0].ID != rollout.CanaryVersionID {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil || latest.ID != rollout.CanaryVersionID {
 		return nil, err
 	}
 	variant := "baseline"
@@ -263,20 +319,17 @@ func (e *Engine) ResolveWorkflowRolloutAssignment(ctx context.Context, orgID, wo
 	if variant == "canary" {
 		versionID = rollout.CanaryVersionID
 	}
-	for i := range versions {
-		if versions[i].ID != versionID {
-			continue
-		}
-		wf, issues := domain.Parse(versions[i].DagJson)
-		if wf == nil || len(issues) > 0 {
-			return nil, fmt.Errorf("workflow_rollout_version_unavailable")
-		}
-		return &RolloutAssignment{
-			Rollout: rollout, Variant: variant,
-			VersionID: versionID, Version: versions[i].Version, Workflow: wf,
-		}, nil
+	parsed, err := loadWorkflowVersion(ctx, q, orgID, workflowID, versionID, cache)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
 	}
-	return nil, fmt.Errorf("workflow_rollout_version_unavailable")
+	if err != nil || !parsed.valid {
+		return nil, &RolloutVersionUnavailableError{RolloutID: rollout.ID, VersionID: versionID, Version: parsed.version}
+	}
+	return &RolloutAssignment{
+		Rollout: rollout, Variant: variant,
+		VersionID: versionID, Version: parsed.version, Workflow: parsed.workflow,
+	}, nil
 }
 
 // FinishRolloutKind enumerates the operator-decision outcomes.

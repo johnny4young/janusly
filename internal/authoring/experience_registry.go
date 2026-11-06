@@ -164,7 +164,10 @@ func rollbackExperienceTx(ctx context.Context, tx pgx.Tx) {
 	_ = tx.Rollback(cleanup)
 }
 
-func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string, resolving bool) (pgx.Tx, *store.Queries, int, error) {
+// Row locks give even a readOnly transaction an xid. It changes no data, so it
+// commits without waiting for a WAL flush whose disk latency can exceed the
+// decision stage budget.
+func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string, resolving, readOnly bool) (pgx.Tx, *store.Queries, int, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, 0, err
 	}
@@ -177,6 +180,12 @@ func (r *ExperienceRegistry) consentTx(ctx context.Context, orgID string, resolv
 	tx, err := r.Pool.Begin(ctx)
 	if err != nil {
 		return nil, nil, 0, err
+	}
+	if readOnly {
+		if _, err := tx.Exec(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
+			rollbackExperienceTx(ctx, tx)
+			return nil, nil, 0, err
+		}
 	}
 	q := store.New(tx)
 	// Both lock modes read the same key set; only the row-lock strength differs.
@@ -215,7 +224,7 @@ func (r *ExperienceRegistry) Register(ctx context.Context, input ExperienceRegis
 	if err != nil {
 		return ExperienceRecord{}, err
 	}
-	tx, q, days, err := r.consentTx(ctx, input.OrganizationID, false)
+	tx, q, days, err := r.consentTx(ctx, input.OrganizationID, false, false)
 	if err != nil {
 		return ExperienceRecord{}, err
 	}
@@ -253,7 +262,7 @@ func (r *ExperienceRegistry) List(ctx context.Context, orgID, workflowID string)
 	if !validExperienceID(workflowID) {
 		return ExperienceList{}, ErrExperienceBriefInvalid
 	}
-	tx, q, _, err := r.consentTx(ctx, orgID, false)
+	tx, q, _, err := r.consentTx(ctx, orgID, false, true)
 	if err != nil {
 		return ExperienceList{}, err
 	}

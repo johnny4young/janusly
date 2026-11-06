@@ -141,7 +141,9 @@ exclusive consent-row locks are acquired initially for resolution, avoiding
 lock upgrades and fencing both registration and consent writers. Source/version
 row locks fence mutation through the copy's admission point. Registration and
 ordinary provenance listing retain their shared consent locks. The stage remains
-bounded to 200 ms with caller cancellation terminal. The reader itself never
+bounded to 200 ms with caller cancellation terminal. Decision, resolution and
+listing change no data, so they commit without waiting for a WAL flush; only
+registration commits durably. The reader itself never
 calls a provider, saves a draft or grants Apply/Run permission. At HTTP admission,
 an initial operational lookup failure may preserve the existing generation path
 once while the parent request is alive. Source incompatibility or failed

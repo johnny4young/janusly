@@ -270,6 +270,17 @@ func (s *V1Server) pluginInstallCore(r *http.Request, rc v1Request) opResult {
 	return opOK(map[string]any{"id": id})
 }
 
+func (s *V1Server) pluginsInstalledCore(r *http.Request, rc v1Request) opResult {
+	ids, err := store.New(s.pool).ListInstalledPluginIDs(r.Context(), rc.orgID)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return opOK(map[string]any{"pluginIds": ids})
+}
+
 func (s *V1Server) mountIdentityRoutes(mux *http.ServeMux) {
 	// Membership projection and invitation acceptance use provider identity;
 	// profile updates remain tenant-authenticated like the contract.
@@ -287,5 +298,8 @@ func (s *V1Server) mountIdentityRoutes(mux *http.ServeMux) {
 	}))
 	s.route(mux, "POST /plugins/install", routeGate{auth.RoleAdmin, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.pluginInstallCore(r, rc))
+	})
+	s.route(mux, "GET /plugins/installed", routeGate{auth.RoleViewer, "workflows.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.pluginsInstalledCore(r, rc))
 	})
 }

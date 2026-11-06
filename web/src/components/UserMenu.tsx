@@ -50,6 +50,7 @@ import { parseDocsUrl } from '../docs-link'
 import { currentSessionOrganization, sessionCan } from '../identity-context'
 import { TextInput } from '@/components/ui/Form'
 import { Button } from './ui/Button'
+import { clearTestData } from '../lib/test-data'
 
 type UserMenuProps = {
   aiHealth?: AiHealth | null
@@ -175,6 +176,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
   const commitWorkspace = async (nextContext: typeof identityContext, organizationId: string) => {
     if (!nextContext) return
     const { auth } = await AuthProvider.updateOrg(organizationId)
+    clearTestData()
     setAuth(auth)
     setIdentityContext({
       ...nextContext,

@@ -19,6 +19,7 @@ import { BrandMark } from './components/BrandMark'
 import { BudgetBlockedBanner } from './components/BudgetBlockedBanner'
 import { BuilderSidebar } from './components/BuilderSidebar'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { useRouteOpsSection } from './components/operations-section-bus'
 import { PanelErrorFallback } from './components/PanelErrorFallback'
 import { UserMenu } from './components/UserMenu'
 import { WorkspaceArea, WorkspaceAreaLoading } from './components/WorkspaceArea'
@@ -59,6 +60,10 @@ const RecoveryCenterPanel = lazy(() => import('./components/RecoveryCenterPanel'
 })))
 const RightPanel = lazy(() => import('./components/RightPanel').then((module) => ({
   default: module.RightPanel,
+})))
+// Ships with the panel beside it, so the top bar adds no chunk or eager code.
+const WorkspaceSectionNav = lazy(() => import('./components/RightPanel').then((module) => ({
+  default: module.WorkspaceSectionNav,
 })))
 const RunInputDialog = lazy(() => import('./components/RunInputDialog').then((module) => ({
   default: module.RunInputDialog,
@@ -129,6 +134,7 @@ type AppWorkspaceProps = {
   onOpenTab: (tab: ActiveTab) => void
   onOpenHelp: () => void
   onOpenRecovery: () => void
+  onRecoverRunNode: (runId: string, nodeId: string) => void
   onReadinessResult: (result: ReadinessResult | null) => void
   onOpenPalette: () => void
   onCloseShortcuts: () => void
@@ -150,7 +156,10 @@ function WorkspaceContent(props: AppWorkspaceProps) {
   const destination = getWorkspaceDestination(workspaceDestinationForTab(activeTab))
   const section = workspaceSectionForTab(activeTab)
   const destinationLabel = t(destination.labelKey)
-  const sectionLabel = section ? t(section.labelKey) : null
+  const settingsPane = useRouteOpsSection()
+  const sectionLabel = activeTab === 'operations' && settingsPane && settingsPane !== 'overview'
+    ? t(`operations.section.${settingsPane}.label`)
+    : section ? t(section.labelKey) : null
   const environmentLabel = header.environment === 'production'
     ? t('topbar.env.production')
     : t('topbar.env.sandbox')
@@ -214,6 +223,9 @@ function WorkspaceContent(props: AppWorkspaceProps) {
                 readOnly={canvas.readOnly}
                 viewportWorkflowId={canvas.viewportWorkflowId}
                 active={visibility.visible}
+                validationIssues={props.rightPanel.authoring.validationIssues}
+                readiness={props.rightPanel.authoring.readinessResult}
+                aiReviewIssues={props.rightPanel.authoring.aiReviewIssues}
               />
             </Suspense>
           </div>
@@ -226,6 +238,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
                 run={observedRun}
                 runNodes={runNodes}
                 panel={rightPanelElement}
+                onRecoverNode={(nodeId) => props.onRecoverRunNode(observedRun.id, nodeId)}
               />
             </Suspense>
           ) : (
@@ -263,7 +276,19 @@ function WorkspaceContent(props: AppWorkspaceProps) {
             <nav className="top-bar-breadcrumb" aria-label={t('layout.workflowStatus')}>
               <span>{header.organizationLabel}</span>
               <ChevronRight size={12} aria-hidden="true" />
-              <b>{authoringMode ? header.workflowName : destinationLabel}</b>
+              {authoringMode ? (
+                <input
+                  className="top-bar-workflow-name"
+                  value={header.workflowName}
+                  onChange={(event) => props.onWorkflowNameChange(event.target.value)}
+                  aria-label={t('sidebar.field.name')}
+                  disabled={!canWriteWorkflows}
+                  data-testid="top-bar-workflow-name"
+                />
+              ) : <b>{destinationLabel}</b>}
+              {authoringMode && header.workflowVersion !== null && (
+                <span data-testid="top-bar-workflow-version">v{header.workflowVersion}</span>
+              )}
               {!authoringMode && activeTab !== 'home' && sectionLabel && sectionLabel !== destinationLabel && (
                 <>
                   <ChevronRight size={12} aria-hidden="true" />
@@ -277,6 +302,13 @@ function WorkspaceContent(props: AppWorkspaceProps) {
               )}
             </nav>
           </div>
+          {authoringMode && (
+            <ErrorBoundary resetKey={activeTab} logTag="top-bar:sections" fallback={null}>
+              <Suspense fallback={null}>
+                <WorkspaceSectionNav activeTab={activeTab} permissions={permissions} onOpenTab={props.onOpenTab} />
+              </Suspense>
+            </ErrorBoundary>
+          )}
           <div className="top-bar-right">
             <div className="top-bar-pill-group">
               {activeTab === 'inspector' && canWriteWorkflows && (
@@ -348,13 +380,11 @@ function WorkspaceContent(props: AppWorkspaceProps) {
         <BuilderSidebar
           activeTab={activeTab}
           aiHealth={header.aiHealth}
-          workflowName={header.workflowName}
           streamStatus={header.streamStatus}
           workflowEnv={header.environment}
           workflowVersion={header.workflowVersion}
           workflowRunsCount={header.workflowRunsCount}
           permissions={permissions}
-          onWorkflowNameChange={props.onWorkflowNameChange}
           onValidate={() => { void props.onValidate() }}
           onSave={() => { void props.onSave() }}
           onOpenTab={props.onOpenTab}

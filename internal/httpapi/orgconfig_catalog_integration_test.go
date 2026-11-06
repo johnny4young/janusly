@@ -25,8 +25,8 @@ import (
 // is implemented. Dead-letter retention adds one real executable control. Explicit experience
 // registration adds one default-off, tenant-only consent control.
 func TestOrgConfigCatalogSurface(t *testing.T) {
-	if len(orgconfig.Definitions) != 69 {
-		t.Fatalf("catalog must pin at 69 definitions, got %d", len(orgconfig.Definitions))
+	if len(orgconfig.Definitions) != 70 {
+		t.Fatalf("catalog must pin at 70 definitions, got %d", len(orgconfig.Definitions))
 	}
 	for _, key := range []string{"ai.anthropic.model", "http.timeoutMs", "runs.requireSavedWorkflow",
 		"mcp.writeConsent", "retention.deletedWorkflowsDays", "onboarding.enabled", "ai.authoringExperienceEnabled"} {

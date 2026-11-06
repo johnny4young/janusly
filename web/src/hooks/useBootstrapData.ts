@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import { api } from '../api'
 import { readRunSummaryPage, readSavedWorkflowPage, readTemplateCatalog, readToolCatalog } from '../lib/list-contract'
 import { useWorkflowStore } from '../store'
@@ -23,6 +24,9 @@ export type BootstrapData = {
   templates: Template[]
   solutionPacks: SolutionPackPublic[]
   credentials: Credential[]
+  /** False until a list was read for this organization, or when the role can't read one. */
+  credentialsKnown: boolean
+  setCredentials: Dispatch<SetStateAction<Credential[]>>
   runs: RunSummary[]
   savedWorkflows: SavedWorkflow[]
   deadLetters: DeadLetter[]
@@ -120,11 +124,12 @@ export function useBootstrapData(
   const [templates, setTemplates] = useState<Template[]>([])
   const [solutionPacks, setSolutionPacks] = useState<SolutionPackPublic[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
+  const [credentialsKnown, setCredentialsKnown] = useState(false)
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [savedWorkflows, setSavedWorkflows] = useState<SavedWorkflow[]>([])
   const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
   const [usage, setUsage] = useState<Record<string, number>>({})
-  const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
+  const aiHealth = useWorkflowStore(state => state.aiHealth)
   const activeTab = useWorkflowStore(state => state.activeTab)
   const tenantScopeRef = useRef<string | null>(tenantScope)
   const permissionsRef = useRef<ReadonlySet<string>>(new Set(permissions))
@@ -213,6 +218,7 @@ export function useBootstrapData(
     }
     if (credentialData.status === 'fulfilled' && credentialData.value !== null) {
       setCredentials(Array.isArray(credentialData.value) ? credentialData.value : [])
+      setCredentialsKnown(allowed.has('credentials.read') && Array.isArray(credentialData.value))
     }
     if (runData.status === 'fulfilled') {
       const incoming = runData.value
@@ -232,7 +238,7 @@ export function useBootstrapData(
       setUsage(usageData.value as Record<string, number>)
     }
     if (aiHealthData.status === 'fulfilled' && aiHealthData.value && typeof aiHealthData.value === 'object') {
-      setAiHealth(aiHealthData.value as AiHealth)
+      useWorkflowStore.getState().setAiHealth(aiHealthData.value as AiHealth)
     }
     if (workflowsData.status === 'fulfilled') setSavedWorkflows(workflowsData.value)
   }, [])
@@ -248,11 +254,12 @@ export function useBootstrapData(
     setTemplates([])
     setSolutionPacks([])
     setCredentials([])
+    setCredentialsKnown(false)
     setRuns([])
     setSavedWorkflows([])
     setDeadLetters([])
     setUsage({})
-    setAiHealth(null)
+    useWorkflowStore.getState().setAiHealth(null)
     if (tenantScope) void refreshPlatform()
   }, [tenantScope, permissionKey, refreshPlatform])
 
@@ -269,6 +276,8 @@ export function useBootstrapData(
     templates,
     solutionPacks,
     credentials,
+    credentialsKnown,
+    setCredentials,
     runs,
     savedWorkflows,
     deadLetters,

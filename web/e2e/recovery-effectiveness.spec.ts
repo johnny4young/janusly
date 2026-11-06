@@ -1,5 +1,6 @@
 /** Real-stack and bilingual UI proof for recovery reaction time and fix durability. */
 
+import { openReports } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { normalizeErrorSignature } from '../src/lib/error-signature'
@@ -197,9 +198,8 @@ test('Recovery effectiveness is measured and shown in English and Spanish', asyn
 
   await prepareSession(page, orgId)
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/')
-  await page.getByTestId('home-insights-toggle').click()
-  const metricStrip = page.getByTestId('recovery-center-metric-strip')
+  await openReports(page)
+  const metricStrip = page.getByTestId('reports-metric-strip')
   const clusterTile = page.getByTestId('recovery-center-tile-clusters')
   await expect(page.getByTestId('recovery-center-metric-first-action')).toContainText('Time to first action')
   await expect(page.getByTestId('recovery-center-metric-first-action')).toContainText('2m')
@@ -213,7 +213,6 @@ test('Recovery effectiveness is measured and shown in English and Spanish', asyn
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
-  await page.getByTestId('home-insights-toggle').click()
   await expect(page.getByTestId('recovery-center-metric-first-action')).toContainText('Tiempo hasta la primera acción')
   await expect(page.getByTestId('recovery-center-metric-durability')).toContainText('Correcciones que se mantienen')
   await expect(clusterTile).toContainText('Falló tras corregirse')

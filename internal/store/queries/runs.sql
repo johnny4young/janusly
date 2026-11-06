@@ -6,6 +6,38 @@ INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_b
   workflow_id, trigger_kind)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);
 
+-- name: RunNodeSupersededByRerun :one
+-- Walks the whole rerun lineage, siblings included. A later run that ran or will
+-- run the step, or any other run holding its success, makes a replay a repeat. A
+-- later clone of a failure is skipped, and an earlier failed attempt supersedes nothing.
+WITH RECURSIVE up AS (
+  SELECT r.id, r.parent_run_id, r.parent_link_kind FROM runs r
+  WHERE r.org_id = sqlc.arg(org_id) AND r.id = sqlc.arg(run_id)
+  UNION
+  SELECT p.id, p.parent_run_id, p.parent_link_kind FROM runs p JOIN up ON p.id = up.parent_run_id
+  WHERE up.parent_link_kind = 'rerun' AND p.org_id = sqlc.arg(org_id)
+), lineage AS (
+  SELECT up.id FROM up
+  UNION
+  SELECT c.id FROM runs c JOIN lineage l ON c.parent_run_id = l.id
+  WHERE c.parent_link_kind = 'rerun' AND c.org_id = sqlc.arg(org_id)
+)
+SELECT EXISTS (
+  SELECT 1 FROM lineage l JOIN runs c ON c.id = l.id JOIN run_nodes n ON n.run_id = c.id
+  WHERE c.id <> sqlc.arg(run_id) AND n.node_id = sqlc.arg(node_id)
+    AND (n.status = 'succeeded'
+      OR (c.created_at >= (SELECT s.created_at FROM runs s WHERE s.id = sqlc.arg(run_id))
+          AND (n.attempts > 0 OR n.status IN ('pending', 'queued', 'running', 'waiting'))))
+);
+
+-- name: RunHasLiveSubworkflowChild :one
+SELECT EXISTS (
+  SELECT 1 FROM runs
+  WHERE org_id = $1 AND parent_run_id = sqlc.arg(run_id)::text
+    AND (parent_link_kind = 'subworkflow' OR (parent_link_kind IS NULL AND replay_mode IS NULL))
+    AND status NOT IN ('succeeded', 'failed', 'cancelled', 'timed_out')
+);
+
 -- Recovery drills reproduce a server-authored historical claim and therefore
 -- need an explicit creation clock. Ordinary run starts must keep using
 -- InsertRun so callers cannot backdate production traffic.
@@ -139,7 +171,7 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'running';
 
 -- name: GetRunExecution :one
-SELECT status, org_id, workflow_version_id, input_json, replay_mode FROM runs WHERE id = $1;
+SELECT status, org_id, workflow_version_id, input_json, replay_mode, parent_link_kind FROM runs WHERE id = $1;
 
 -- input_json carries the whole workflow snapshot, so the callers that only
 -- need to know whether this is a sandbox replay must not pay to transfer
@@ -213,12 +245,14 @@ UPDATE run_nodes SET status = 'waiting', state_json = sqlc.arg(state_json)
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'running';
 
+-- A tool approval resumes only through its decision, which runs the tool.
 -- name: MarkWaitingNodeSucceeded :one
 UPDATE run_nodes
 SET status = 'succeeded', state_json = sqlc.arg(state_json),
     finished_at = sqlc.arg(finished_at)
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'waiting'
+  AND state_json #>> '{waiting,kind}' IS DISTINCT FROM 'tool_approval'
 RETURNING id;
 
 -- Exact approval-deadline generation CAS. Manual resume, cancellation,

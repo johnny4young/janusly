@@ -22,11 +22,13 @@ specs=(
   e2e/guided-authoring.spec.ts
   e2e/durable-authoring.spec.ts
   e2e/text-search.spec.ts
+  e2e/flows-table.spec.ts
   e2e/operator-velocity.spec.ts
   e2e/workflow-rollouts.spec.ts
   e2e/recovery-confidence-passport.spec.ts
   e2e/responsive.spec.ts
   e2e/usability-study-readiness.spec.ts
+  e2e/credential-revoke.spec.ts
 )
 
 usage() {
@@ -99,6 +101,11 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM
   if ((attempted)); then
+    # CI uploads output/ on failure; the stack and its logs end with this trap.
+    if ((status != 0)); then
+      mkdir -p "$root/output/e2e"
+      compose logs --no-color --timestamps >"$root/output/e2e/compose.log" 2>&1 || true
+    fi
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   fi
   exit "$status"

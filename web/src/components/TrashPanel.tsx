@@ -1,6 +1,6 @@
 /**
  * Trash view for the Flows dashboard — the soft-deleted-workflows list shown
- * when the `WorkflowsDashboard` "Trash" toggle is on. A flat, filter-free,
+ * when the `WorkflowsDashboard` Trash segment is on. A flat, filter-free,
  * Restore-only list (active-only affordances like folders/tags/bulk-move are
  * hidden here) with per-row + bulk Restore and a retention "expires in N days"
  * countdown.
@@ -11,10 +11,10 @@
  */
 
 import type { Dispatch, SetStateAction } from 'react'
-import { RotateCcw, Trash, Workflow } from 'lucide-react'
+import { RotateCcw, Trash } from 'lucide-react'
 import type { SavedWorkflow } from '../types'
 import { getResolvedLocale, useT } from '../i18n'
-import { daysUntilPurge } from '../trash-expiry'
+import { daysUntilPurge, purgeAtMs } from '../trash-expiry'
 import { Button } from './ui/Button'
 
 type TFunc = ReturnType<typeof useT>['t']
@@ -46,67 +46,63 @@ export function TrashPanel({
   trashNowMs,
   t,
 }: TrashPanelProps) {
-  // A trash-list row: a flat, non-openable card (a tombstoned workflow can't be
-  // opened — reads 404) showing the name, when it was deleted, its run count,
-  // and a Restore action. A leading checkbox feeds the bulk-restore action bar
-  // (always shown in Trash — selection is this view's purpose). No
-  // tags/folder/drag — those are active-only.
-  const renderTrashRow = (workflow: SavedWorkflow) => (
-    <li key={workflow.id}>
-      <div className="we-list-row" data-severity="cobalt" data-testid={`workflows-trash-row-${workflow.id}`}>
-        {canWrite && (
-          <input
-            type="checkbox"
-            className="we-list-row__select"
-            checked={selectedIds.has(workflow.id)}
-            onChange={() => toggleSelected(workflow.id)}
-            aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name })}
-            data-testid={`workflows-trash-select-${workflow.id}`}
-          />
-        )}
-        <span className="we-list-row__avatar" aria-hidden="true">
-          <Workflow size={14} />
-        </span>
-        <div className="we-list-row__body">
-          <strong>{workflow.name}</strong>
-          <small className="mono" title={workflow.id}>
-            {workflow.deletedAt
-              ? (t('workflowsDashboard.deletedAtLabel', { date: new Date(workflow.deletedAt).toLocaleString(getResolvedLocale()) }))
-              : workflow.id}
-          </small>
-        </div>
-        <div className="we-list-row__meta">
-          {typeof workflow.runCount === 'number' && (
-            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount })}>{workflow.runCount}</span>
+  // A tombstoned workflow can't be opened (reads 404), so rows have no click
+  // target. No tags/folder/drag: those are active-only.
+  const renderTrashRow = (workflow: SavedWorkflow) => {
+    const daysLeft = retentionDays != null && trashNowMs != null && workflow.deletedAt
+      ? daysUntilPurge(workflow.deletedAt, retentionDays, trashNowMs)
+      : null
+    return (
+      <tr key={workflow.id} data-testid={`workflows-trash-row-${workflow.id}`}>
+        <td>
+          <div className="we-flows-table__cell we-flows-table__identity">
+            {canWrite && (
+              <input
+                type="checkbox"
+                className="we-list-row__select"
+                checked={selectedIds.has(workflow.id)}
+                onChange={() => toggleSelected(workflow.id)}
+                aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name })}
+                data-testid={`workflows-trash-select-${workflow.id}`}
+              />
+            )}
+            <div className="we-flows-table__title">
+              <strong>{workflow.name}</strong>
+              <small className="we-flows-table__mono">{workflow.id}</small>
+            </div>
+          </div>
+        </td>
+        <td>
+          {workflow.deletedAt && (
+            <time dateTime={workflow.deletedAt}>{new Date(workflow.deletedAt).toLocaleString(getResolvedLocale(), { dateStyle: 'medium', timeStyle: 'short' })}</time>
           )}
-          {/* Retention countdown — only when the window is known (retentionDays
-              non-null) and the row carries a tombstone date. A non-positive
-              remaining count means the window elapsed (the daily sweep is due). */}
-          {retentionDays != null && trashNowMs != null && workflow.deletedAt && (() => {
-            const daysLeft = daysUntilPurge(workflow.deletedAt, retentionDays, trashNowMs)
-            return (
-              <span className="we-pill" data-tone="ghost" data-testid={`workflows-trash-expiry-${workflow.id}`}>
-                {daysLeft > 0
-                  ? (t('workflowsDashboard.expiresInDays', { count: daysLeft }))
-                  : (t('workflowsDashboard.expiresSoon'))}
-              </span>
-            )
-          })()}
-          {canWrite && (
-            <Button
-              size="sm"
-             
-             
-              onClick={() => void restoreWorkflow(workflow.id)}
-              data-testid={`workflows-restore-${workflow.id}`}
-            >
-              <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.restoreFlow')}
-            </Button>
+        </td>
+        <td>{workflow.runCount}</td>
+        <td>
+          {/* A non-positive remaining count means the window elapsed and the daily sweep is due. */}
+          {daysLeft !== null && (
+            <span data-testid={`workflows-trash-expiry-${workflow.id}`}>
+              {new Date(purgeAtMs(workflow.deletedAt as string, retentionDays as number)).toLocaleDateString(getResolvedLocale(), { dateStyle: 'medium' })}
+              <small>{daysLeft > 0 ? t('workflowsDashboard.expiresInDays', { count: daysLeft }) : t('workflowsDashboard.expiresSoon')}</small>
+            </span>
           )}
-        </div>
-      </div>
-    </li>
-  )
+        </td>
+        <td>
+          <div className="we-flows-table__cell we-flows-table__actions">
+            {canWrite && (
+              <Button
+                size="sm"
+                onClick={() => void restoreWorkflow(workflow.id)}
+                data-testid={`workflows-restore-${workflow.id}`}
+              >
+                <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.restoreFlow')}
+              </Button>
+            )}
+          </div>
+        </td>
+      </tr>
+    )
+  }
 
   // Trash view — a flat, filter-free list of soft-deleted workflows (uses
   // the raw server-ordered `workflows`, NOT `visible`, so a stale active-
@@ -151,9 +147,20 @@ export function TrashPanel({
           <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.trashRestoreSelected', { count: selectedIds.size })}
         </Button>
       </div>}
-      <ul className="we-list" data-testid="workflows-trash-list">
-        {workflows.map(renderTrashRow)}
-      </ul>
+      <div className="we-flows-table-wrap">
+        <table className="we-flows-table" data-view="trash" aria-label={t('workflowsDashboard.trashTableAria')} data-testid="workflows-trash-list">
+          <thead>
+            <tr>
+              <th scope="col">{t('workflowsDashboard.columnName')}</th>
+              <th scope="col" data-column="deleted">{t('workflowsDashboard.columnDeleted')}</th>
+              <th scope="col" data-column="runs">{t('workflowsDashboard.columnRuns')}</th>
+              <th scope="col" data-column="expires">{t('workflowsDashboard.columnExpires')}</th>
+              <th scope="col" data-column="actions"><span className="we-sr-only">{t('workflowsDashboard.columnActions')}</span></th>
+            </tr>
+          </thead>
+          <tbody>{workflows.map(renderTrashRow)}</tbody>
+        </table>
+      </div>
     </>
   ) : null
 }

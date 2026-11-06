@@ -94,7 +94,7 @@ func TestRunUsageAndCostRollup(t *testing.T) {
 		t.Fatalf("cache totals: %+v", cache)
 	}
 	share := cache["readSharePercent"].(float64)
-	if share < 59.52 || share > 59.53 {
+	if share < 37.31 || share > 37.32 {
 		t.Fatalf("cache share: %+v", cache)
 	}
 

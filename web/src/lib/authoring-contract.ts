@@ -220,8 +220,8 @@ export function isWorkflowProposalResponse(value: unknown): value is WorkflowPro
 }
 
 /**
- * Final Apply boundary. The synchronous envelope guard keeps Zod out of the
- * boot chunk; only a proposal that actually carries recovery policy loads the
+ * Final Apply boundary. The synchronous envelope guard keeps the validator out
+ * of the boot chunk; only a proposal that actually carries recovery policy loads the
  * complete strict Recovery Contract validator. Duplicated contracts and
  * qualification flags must describe the exact workflow that will be copied.
  */

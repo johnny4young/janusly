@@ -73,3 +73,18 @@ export type PendingTriageFocus = {
   queueSignature: string
   settled: boolean
 }
+
+export type DeadLetterCloseTarget = {
+  id: string
+  workflowName?: string | null
+  runId?: string
+  nodeId?: string
+  occurrences?: number
+}
+
+export function deadLetterCloseTarget(row: DeadLetter): DeadLetterCloseTarget {
+  return {
+    id: row.id, workflowName: row.workflowName, runId: row.runId, nodeId: row.nodeId,
+    occurrences: row.recovery?.occurrenceCount ?? 1,
+  }
+}

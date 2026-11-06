@@ -131,6 +131,7 @@ LEFT JOIN workflow_versions v ON v.id = r.workflow_version_id AND v.org_id = r.o
 WHERE r.org_id = $1
   AND COALESCE(v.workflow_id, r.workflow_version_id) = $2
   AND r.replay_mode IS NULL
+  AND r.parent_link_kind IS DISTINCT FROM 'rerun'
   AND r.status IN ('succeeded', 'failed')
 ORDER BY r.created_at DESC
 LIMIT $3
@@ -558,6 +559,30 @@ func (q *Queries) GetLatestWorkflowVersion(ctx context.Context, arg GetLatestWor
 		&i.CreatedBy,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const getLatestWorkflowVersionRef = `-- name: GetLatestWorkflowVersionRef :one
+SELECT id, version FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY version DESC
+LIMIT 1
+`
+
+type GetLatestWorkflowVersionRefParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+type GetLatestWorkflowVersionRefRow struct {
+	ID      string
+	Version int32
+}
+
+func (q *Queries) GetLatestWorkflowVersionRef(ctx context.Context, arg GetLatestWorkflowVersionRefParams) (GetLatestWorkflowVersionRefRow, error) {
+	row := q.db.QueryRow(ctx, getLatestWorkflowVersionRef, arg.OrgID, arg.WorkflowID)
+	var i GetLatestWorkflowVersionRefRow
+	err := row.Scan(&i.ID, &i.Version)
 	return i, err
 }
 
@@ -1547,7 +1572,7 @@ func (q *Queries) ListRecentDeadLettersForWorkflowDelta(ctx context.Context, arg
 }
 
 const listScheduleEntriesForWorkflow = `-- name: ListScheduleEntriesForWorkflow :many
-SELECT id, org_id, workflow_id, workflow_version_id, node_id, cron_expression, enabled, last_run_at, last_run_id, created_by, created_at, updated_at, next_fire_at FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2 ORDER BY node_id
+SELECT id, org_id, workflow_id, workflow_version_id, node_id, cron_expression, enabled, last_run_at, last_run_id, created_by, created_at, updated_at, next_fire_at, claimed_due_at FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2 ORDER BY node_id
 `
 
 type ListScheduleEntriesForWorkflowParams struct {
@@ -1578,6 +1603,7 @@ func (q *Queries) ListScheduleEntriesForWorkflow(ctx context.Context, arg ListSc
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.NextFireAt,
+			&i.ClaimedDueAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1731,6 +1757,16 @@ func (q *Queries) ListWorkflowInputPresets(ctx context.Context, arg ListWorkflow
 }
 
 const listWorkflowRows = `-- name: ListWorkflowRows :many
+WITH open_failures AS (
+  -- A failure from an edited draft still needs recovery, so unlike run_count
+  -- this is not limited to runs bound to a saved version.
+  SELECT coalesce(wv.workflow_id, r.workflow_id, r.workflow_version_id) AS workflow_id, count(*)::int AS open_count
+  FROM dead_letters dl
+  JOIN runs r ON r.org_id = dl.org_id AND r.id = dl.run_id
+  LEFT JOIN workflow_versions wv ON wv.org_id = dl.org_id AND wv.id = r.workflow_version_id
+  WHERE dl.org_id = $1 AND dl.status = 'open' AND dl.replay_mode IS NULL
+  GROUP BY 1
+)
 SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        w.paused_reason, w.deleted_at,
        (SELECT count(*) FROM runs r
@@ -1738,6 +1774,7 @@ SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
         WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
           AND r.replay_mode IS NULL)::int AS run_count,
        COALESCE(last_run.status, '') AS last_run_status,
+       last_run.created_at AS last_run_at,
        COALESCE(m.tags, '[]'::jsonb) AS tags,
        m.folder,
        (SELECT count(*) FROM trigger_events te
@@ -1745,16 +1782,34 @@ SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
           AND (te.status = 'buffered'
                OR (te.status = 'backfilling'
                    AND te.backfill_claimed_at < now() - interval '5 minutes')))::int
-         AS buffered_trigger_count
+         AS buffered_trigger_count,
+       COALESCE(open_failures.open_count, 0)::int AS open_failure_count,
+       (SELECT COALESCE(max(wv.version), 0) FROM workflow_versions wv
+        WHERE wv.org_id = w.org_id AND wv.workflow_id = w.id)::int
+         AS current_version,
+       COALESCE(rollout.status, '') AS rollout_status,
+       COALESCE(rollout.traffic_percent, 0)::int AS rollout_traffic_percent,
+       COALESCE(rollout.baseline_version, 0)::int AS rollout_baseline_version,
+       COALESCE(rollout.canary_version, 0)::int AS rollout_canary_version
 FROM workflows w
 LEFT JOIN workflow_metadata m ON m.org_id = w.org_id AND m.workflow_id = w.id
+LEFT JOIN open_failures ON open_failures.workflow_id = w.id
 LEFT JOIN LATERAL (
-  SELECT r.status FROM runs r
+  SELECT r.status, r.created_at FROM runs r
   JOIN workflow_versions wv ON wv.id = r.workflow_version_id
   WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
     AND r.replay_mode IS NULL
   ORDER BY r.created_at DESC, r.id DESC LIMIT 1
 ) last_run ON true
+LEFT JOIN LATERAL ( /* the row GetLatestWorkflowRolloutRow hands the engine's assignment */
+  SELECT wr.status, wr.traffic_percent, bv.version AS baseline_version, cv.version AS canary_version
+  FROM workflow_rollouts wr
+  JOIN workflow_versions bv ON bv.org_id = wr.org_id AND bv.id = wr.baseline_version_id
+  JOIN workflow_versions cv ON cv.org_id = wr.org_id AND cv.id = wr.canary_version_id
+  WHERE wr.org_id = w.org_id AND wr.workflow_id = w.id
+  ORDER BY CASE WHEN wr.status = 'active' THEN 0 ELSE 1 END, wr.created_at DESC, wr.id DESC
+  LIMIT 1
+) rollout ON true
 WHERE w.org_id = $1 AND w.deleted_at IS NULL
   AND (w.created_at, w.id) < ($2::timestamptz, $3::text)
   AND (COALESCE($4::jsonb, '[]'::jsonb) = '[]'::jsonb
@@ -1777,19 +1832,26 @@ type ListWorkflowRowsParams struct {
 }
 
 type ListWorkflowRowsRow struct {
-	ID                   string
-	OrgID                string
-	Name                 string
-	CreatedBy            pgtype.Text
-	CreatedAt            *time.Time
-	Status               string
-	PausedReason         pgtype.Text
-	DeletedAt            *time.Time
-	RunCount             int32
-	LastRunStatus        string
-	Tags                 json.RawMessage
-	Folder               pgtype.Text
-	BufferedTriggerCount int32
+	ID                     string
+	OrgID                  string
+	Name                   string
+	CreatedBy              pgtype.Text
+	CreatedAt              *time.Time
+	Status                 string
+	PausedReason           pgtype.Text
+	DeletedAt              *time.Time
+	RunCount               int32
+	LastRunStatus          string
+	LastRunAt              *time.Time
+	Tags                   json.RawMessage
+	Folder                 pgtype.Text
+	BufferedTriggerCount   int32
+	OpenFailureCount       int32
+	CurrentVersion         int32
+	RolloutStatus          string
+	RolloutTrafficPercent  int32
+	RolloutBaselineVersion int32
+	RolloutCanaryVersion   int32
 }
 
 // Workflow list rows with the read-surface aggregates: run count and last
@@ -1824,9 +1886,16 @@ func (q *Queries) ListWorkflowRows(ctx context.Context, arg ListWorkflowRowsPara
 			&i.DeletedAt,
 			&i.RunCount,
 			&i.LastRunStatus,
+			&i.LastRunAt,
 			&i.Tags,
 			&i.Folder,
 			&i.BufferedTriggerCount,
+			&i.OpenFailureCount,
+			&i.CurrentVersion,
+			&i.RolloutStatus,
+			&i.RolloutTrafficPercent,
+			&i.RolloutBaselineVersion,
+			&i.RolloutCanaryVersion,
 		); err != nil {
 			return nil, err
 		}

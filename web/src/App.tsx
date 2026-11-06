@@ -148,6 +148,8 @@ export default function App() {
     deadLetters,
     usage,
     aiHealth,
+    credentialsKnown,
+    setCredentials,
     refreshPlatform,
     patchRunSummary,
     beginRunSummaryUpdate,
@@ -401,6 +403,7 @@ export default function App() {
     clearActiveRun,
     confirmReplaceCanvas,
     createCredential,
+    revokeCredential,
     createNewWorkflow,
     compileWorkflowBrief,
     explainWorkflow,
@@ -437,6 +440,7 @@ export default function App() {
     permissions: tenantPermissions,
     projectedRuns,
     refreshPlatform,
+    setCredentials,
     projectRunSummary,
     loadStatus,
     runTransitionGuard,
@@ -482,6 +486,11 @@ export default function App() {
   // Shell derivations are memoized on their inputs: the shell renders on
   // every store tick, and these walks over runs, nodes and dead letters used
   // to run on each of them.
+  const recoverRunNode = useCallback((failedRunId: string, nodeId: string) => {
+    openRecoveryQueue(deadLetters.find((item) => (
+      item.runId === failedRunId && item.nodeId === nodeId && item.status === 'open'
+    ))?.id)
+  }, [deadLetters, openRecoveryQueue])
   const openDlqCount = useMemo(() => deadLetters.filter(dlq => dlq.status === 'open').length, [deadLetters])
   // Waiting is a run-level posture. Semantic quarantine deliberately leaves
   // its source node succeeded, so node-only counting would report all-clear
@@ -497,6 +506,10 @@ export default function App() {
   )
   const paletteWorkflows = useMemo(() => savedWorkflows.map(workflow => ({ id: workflow.id, name: workflow.name })), [savedWorkflows])
   const paletteRecipes = useMemo(() => templates.map(template => ({ id: template.id, name: template.name })), [templates])
+  const paletteRecoveryTargets = useMemo(
+    () => deadLetters.filter(item => item.status === 'open' && item.runId).map(item => ({ id: item.id, runId: item.runId })),
+    [deadLetters],
+  )
 
   if (!authReady || (userId !== null && !identityReady)) return (
     <div className="boot-screen" role="status" aria-live="polite">
@@ -573,6 +586,7 @@ export default function App() {
           templates,
           solutionPacks,
           credentials,
+          credentialsKnown,
           workflows: savedWorkflows,
           onOpenWorkflow: openWorkflow,
           onOpenWorkflowVersion: openWorkflowVersion,
@@ -583,6 +597,7 @@ export default function App() {
           onSampleRunPack: sampleRunPack,
           onInjectPackFailure: injectPackFailure,
           onCreateCredential: createCredential,
+          onRevokeCredential: revokeCredential,
         },
         execution: {
           events,
@@ -631,6 +646,7 @@ export default function App() {
       home={{
         runs: projectedRuns,
         runNodes,
+        canReadRuns: tenantPermissions.includes('runs.read'),
         deadLetters,
         onSemanticBlockerRunsChange: setSemanticBlockerRunIds,
         onOpenTab: openHomeTab,
@@ -671,6 +687,9 @@ export default function App() {
         permissions: tenantPermissions,
         workflows: paletteWorkflows,
         recipes: paletteRecipes,
+        onOpenRun: (id) => { void openRun(id) },
+        recoveryTargets: paletteRecoveryTargets,
+        onOpenRecovery: openRecoveryQueue,
         onOpenWorkflow: (id) => { void openWorkflow(id) },
         onOpenRecipe: (id) => {
           const template = templates.find(candidate => candidate.id === id)
@@ -692,6 +711,7 @@ export default function App() {
       onOpenTab={setActiveTab}
       onOpenHelp={openShortcuts}
       onOpenRecovery={openRecoveryQueue}
+      onRecoverRunNode={recoverRunNode}
       onReadinessResult={handleReadinessResult}
       onOpenPalette={() => setPaletteOpen(true)}
       onCloseShortcuts={closeShortcuts}

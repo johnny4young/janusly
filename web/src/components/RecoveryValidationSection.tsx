@@ -57,6 +57,8 @@ export type RecoveryValidationReport = {
 type RecoveryValidationSectionProps = {
   /** `undefined` while loading, `null` after a soft read failure. */
   report: RecoveryValidationReport | null | undefined
+  /** The exports are a separate permission from reading the numbers. */
+  canExport?: boolean
 }
 
 function formatPercent(value: number | null): string {
@@ -75,7 +77,7 @@ function formatMeasuredDuration(value: number | null): string {
   return value == null ? '—' : formatDuration(value)
 }
 
-export function RecoveryValidationSection({ report }: RecoveryValidationSectionProps) {
+export function RecoveryValidationSection({ report, canExport = true }: RecoveryValidationSectionProps) {
   const { t } = useT()
   const [exporting, setExporting] = useState<'markdown' | 'json' | null>(null)
 
@@ -117,28 +119,30 @@ export function RecoveryValidationSection({ report }: RecoveryValidationSectionP
             {t('recoveryCenter.validation.subtitle')}
           </p>
         </div>
-        <div className="we-recovery-validation__actions">
-          <Button
-            size="sm"
-           
-           
-            disabled={exporting !== null}
-            onClick={() => void handleExport('markdown')}
-          >
-            <FileText size={14} aria-hidden="true" />
-            {t('recoveryCenter.validation.export.markdown')}
-          </Button>
-          <Button
-            size="sm"
-           
-           
-            disabled={exporting !== null}
-            onClick={() => void handleExport('json')}
-          >
-            <Download size={14} aria-hidden="true" />
-            {t('recoveryCenter.validation.export.json')}
-          </Button>
-        </div>
+        {canExport && (
+          <div className="we-recovery-validation__actions">
+            <Button
+              size="sm"
+             
+             
+              disabled={exporting !== null}
+              onClick={() => void handleExport('markdown')}
+            >
+              <FileText size={14} aria-hidden="true" />
+              {t('recoveryCenter.validation.export.markdown')}
+            </Button>
+            <Button
+              size="sm"
+             
+             
+              disabled={exporting !== null}
+              onClick={() => void handleExport('json')}
+            >
+              <Download size={14} aria-hidden="true" />
+              {t('recoveryCenter.validation.export.json')}
+            </Button>
+          </div>
+        )}
       </header>
 
       {waiting && <p className="we-recovery-validation__state">{t('recoveryCenter.validation.loading')}</p>}

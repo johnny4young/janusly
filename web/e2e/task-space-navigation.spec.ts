@@ -24,6 +24,8 @@ const LOCALES = [
     activity: 'Activity',
     settings: 'Settings',
     recover: 'Recover',
+    agentActivity: 'Agent activity',
+    reports: 'Reports',
     allWorkflows: 'All workflows',
     emptyWorkflows: 'No flows saved yet',
     runs: 'Runs',
@@ -46,6 +48,8 @@ const LOCALES = [
     activity: 'Actividad',
     settings: 'Configuración',
     recover: 'Recuperar',
+    agentActivity: 'Actividad de agentes',
+    reports: 'Reportes',
     allWorkflows: 'Todos los flujos',
     emptyWorkflows: 'Aún no hay flujos guardados',
     runs: 'Ejecuciones',
@@ -137,7 +141,7 @@ test('workflow creation is reachable from the workflow inventory', async ({ page
   await expect(createWorkflowAction).toBeVisible()
   await expect(createWorkflowAction).toBeEnabled()
   await createWorkflowAction.click()
-  await page.getByRole('button', { name: /^Start blank\b/ }).click()
+  await page.getByRole('menuitem', { name: /^Start blank\b/ }).click()
 
   const canvas = page.locator('.workspace-main .react-flow').first()
   await expect(canvas).toBeVisible()
@@ -272,7 +276,11 @@ for (const locale of LOCALES) {
     }).click()
     const sectionNav = page.getByTestId('workspace-section-nav')
     await expect(sectionNav).toHaveAttribute('data-destination', 'activity')
-    await expect(sectionNav.getByRole('button')).toHaveCount(0)
+    await expect(sectionNav.getByRole('button')).toHaveText([
+      locale.runs, locale.recover, locale.agentActivity, locale.reports,
+    ])
+    await expect(sectionNav.getByTestId('workspace-section-runs')).toHaveAttribute('aria-current', 'page')
+    await expect(sectionNav.getByTestId('workspace-section-context')).toHaveCount(0)
     await expect(page.getByRole('heading', {
       name: locale.activity,
       exact: true,
@@ -289,12 +297,10 @@ for (const locale of LOCALES) {
     await expect(page).toHaveURL(/#\/recover$/)
     await expect(page.locator('.top-bar-breadcrumb')).toContainText(locale.activity)
     await expect(page.locator('.top-bar-breadcrumb')).toContainText(locale.recover)
-    await expect(sectionNav.getByTestId('workspace-section-context'))
-      .toHaveText(locale.recover)
+    await expect(sectionNav.getByTestId('workspace-section-recover')).toHaveAttribute('aria-current', 'page')
     await page.reload()
     await expect(page).toHaveURL(/#\/recover$/)
-    await expect(page.getByTestId('workspace-section-nav')
-      .getByTestId('workspace-section-context')).toHaveText(locale.recover)
+    await expect(page.getByTestId('workspace-section-recover')).toHaveAttribute('aria-current', 'page')
     await expect(page.getByTestId('recovery-queue')).toBeVisible()
     const recoveryQueueBox = await page.getByTestId('recovery-queue').boundingBox()
     const recoveryAutomation = page.getByTestId('recovery-automation')
@@ -306,7 +312,9 @@ for (const locale of LOCALES) {
     await expect(recoveryAutomation.getByRole('button', {
       name: new RegExp(locale.automation),
     })).toHaveAttribute('aria-expanded', 'false')
-    expect(recoveryAutomationRequests).toEqual([])
+    // The queue reads clusters itself, so only the others prove the disclosure stays closed.
+    const withoutClusters = () => recoveryAutomationRequests.filter((path) => path !== '/dlq/clusters').sort()
+    expect(withoutClusters()).toEqual([])
     await expect(page.getByTestId('runs-metric-strip')).toHaveCount(0)
     await expect(page.getByTestId('usage-summary-card')).toHaveCount(0)
     await expect(
@@ -321,11 +329,7 @@ for (const locale of LOCALES) {
     await recoveryAutomation.getByTestId('recovery-automation-toggle').click()
     await expect(recoveryAutomation.getByTestId('recovery-automation-toggle'))
       .toHaveAttribute('aria-expanded', 'true')
-    await expect.poll(() => recoveryAutomationRequests.sort()).toEqual([
-      '/auto-healing/pending',
-      '/dlq/clusters',
-      '/recovery/campaigns',
-    ])
+    await expect.poll(withoutClusters).toEqual(['/auto-healing/pending'])
     await expectAccessible(page, `${locale.locale} recovery automation disclosure`)
     await capture(
       recoveryAutomation,
@@ -333,6 +337,11 @@ for (const locale of LOCALES) {
     )
 
     await recoveryAutomation.getByTestId('recovery-automation-toggle').click()
+    await page.getByTestId('recover-section-jobs').click()
+    await expect(page.getByTestId('replay-campaigns-card')).toBeVisible()
+    await expect.poll(withoutClusters).toEqual(['/auto-healing/pending', '/recovery/campaigns'])
+    await expectAccessible(page, `${locale.locale} recovery jobs`)
+    await page.getByTestId('recover-section-queue').click()
     await page.setViewportSize({ width: 1024, height: 720 })
     await page.getByTestId('recovery-queue').scrollIntoViewIfNeeded()
     await expect(page.getByTestId('recovery-queue')).toBeVisible()
@@ -386,6 +395,7 @@ for (const locale of LOCALES) {
       await expect(tab).toHaveAttribute('aria-current', 'page')
       await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
       await expect(page).toHaveURL(new RegExp(`#\\/operations\\/${section}$`))
+      await expect(page.getByTestId('workspace-breadcrumb-section')).toHaveText(label)
     }
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(settingsRail).toBeVisible()
@@ -408,6 +418,21 @@ for (const locale of LOCALES) {
     expect(await page.evaluate(
       () => document.documentElement.scrollWidth - window.innerWidth,
     )).toBeLessThanOrEqual(2)
+
+    await sidebar.getByRole('button', { name: locale.activity, exact: true }).click()
+    await page.getByTestId('workspace-section-reports').click()
+    await expect(page).toHaveURL(/#\/reports$/)
+    await expect(page.getByTestId('workspace-section-reports')).toHaveAttribute('aria-current', 'page')
+    await expect(page.locator('.top-bar-breadcrumb')).toContainText(locale.reports)
+    await expect(page.getByTestId('reports-window-30')).toHaveAttribute('aria-pressed', 'true')
+    await page.getByTestId('reports-window-7').click()
+    await expect(page.getByTestId('reports-window-7')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('reports-metric-strip')).toBeVisible()
+    await expect(page.getByTestId('recovery-validation-section')).toBeVisible()
+    await page.reload()
+    await expect(page.getByTestId('reports-panel')).toBeVisible()
+    await expectAccessible(page, `${locale.locale} Reports task space`)
+    await capture(shell, `web-${locale.locale}-reports-task-space`)
     expect(consoleErrors).toEqual([])
     expect(pageErrors).toEqual([])
   })

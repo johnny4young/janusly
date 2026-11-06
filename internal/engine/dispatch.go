@@ -141,8 +141,8 @@ func authoredAgentWritesOptIn(config map[string]any) bool {
 
 // NewDispatcher wires the executor registry over this engine. Env access
 // defaults to the process environment filtered through the credential policy;
-// secrets default to none (every {{secret.X}} is a hard failure) until a
-// secret source is configured. Callers may still provide an explicit lookup.
+// secrets default to the claim organization's template_secret credentials. Callers
+// may still provide an explicit lookup.
 func (e *Engine) NewDispatcher(opts grammar.RenderOptions) *Dispatcher {
 	if opts.LookupEnv == nil {
 		opts.LookupEnv = secretstore.LookupAllowedEnv
@@ -177,6 +177,11 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		config = map[string]any{}
 	}
 	renderOpts := d.renderOpts
+	var secrets *templateSecretLookup
+	if renderOpts.LookupSecret == nil {
+		secrets = d.engine.newTemplateSecretLookup(ctx, claim.OrgID)
+		renderOpts.LookupSecret = secrets.find
+	}
 	if node.Type == "loop" {
 		// The loop's item/index scopes bind per iteration inside the
 		// executor; deferring them here mirrors the contract's
@@ -194,6 +199,9 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		"inputs":  config,
 	}, renderOpts)
 	if err != nil {
+		if secrets != nil && secrets.err != nil {
+			return nil, secrets.err
+		}
 		// A missing secret is already name-only — safe to surface verbatim.
 		return nil, err
 	}
@@ -300,6 +308,51 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 			d.engine.claimConfigBool(ctx, claim, "ai.agentWriteConsent") &&
 			domain.HasApprovalAncestorIn(wf, node.ID)
 	}
+	// The org policy names tools by the call actually rendered, so no node id
+	// or document edit can move a listed call out of the gate.
+	var approvalRequired func(string) bool
+	approvedTool := ""
+	if node.Type == "tool" || node.Type == "http" || node.Type == "loop" || node.Type == "agent" || node.Type == "multi_agent" {
+		policy, err := d.engine.toolApprovalPolicy(ctx, claim.OrgID)
+		if err != nil {
+			return nil, err
+		}
+		approvalRequired = func(name string) bool { return policy[name] }
+	}
+	if node.Type == "tool" || node.Type == "http" {
+		// An http step is the http.request call its rendered config describes.
+		name, input := "http.request", renderedConfig
+		if node.Type == "tool" {
+			name, _ = renderedConfig["tool"].(string)
+			input, _ = renderedConfig["input"].(map[string]any)
+			if input == nil {
+				input = map[string]any{}
+			}
+		}
+		gated := approvalRequired(name) && (!dryRun || !executors.ToolCallWriteSide(executors.SharedToolRegistry(), name, input))
+		if !gated {
+			// A request already raised for this step still decides it, so
+			// dropping a tool from the policy cannot run a denied or expired call.
+			live, err := q.HasLiveToolApproval(ctx, store.HasLiveToolApprovalParams{RunID: claim.RunID, NodeID: claim.NodeID})
+			if err != nil {
+				return nil, fmt.Errorf("read tool approval: %w", err)
+			}
+			gated = live
+		}
+		if gated {
+			waiting, paused, pinned, err := d.engine.gateToolCall(ctx, claim, name, input, rendered.RedactedValues)
+			if err != nil {
+				return nil, err
+			}
+			if paused {
+				return waiting, nil
+			}
+			approvedTool = name
+			if integrationDeps != nil {
+				integrationDeps.PinnedCredentials = pinned
+			}
+		}
+	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
 		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds,
@@ -309,6 +362,8 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		AgentAllowedHTTPRequests:        agentAllowedHTTPRequests,
 		AgentAllowedHTTPRequestsByIndex: agentAllowedHTTPRequestsByIndex,
 		DryRun:                          dryRun,
+		ApprovalRequired:                approvalRequired,
+		ApprovedTool:                    approvedTool,
 		Emit: func(eventType string, payload map[string]any) string {
 			eventAt := d.engine.eventNow()
 			raw := d.engine.persistence.Payload(payload, grammar.PersistOptions{

@@ -119,6 +119,8 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		"public.rate_limit_windows",
 		"public.org_digest_state",
 		"public.schedule_entries",
+		"public.tool_approval_requests",
+		"public.run_actors",
 		"public.workflows_active_search_trgm_idx",
 		"public.dead_letters_recovery_search_trgm_idx",
 	} {
@@ -152,7 +154,7 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		{"org_digest_state", []string{"org_id", "last_sent_at", "batch_started_at", "delivered_recipients", "lease_token", "lease_expires_at", "next_attempt_at"}},
 		{"authoring_experiences", []string{"org_id", "workflow_id", "workflow_version_id", "brief_key", "brief_json", "schema_version", "policy_version", "registered_at", "retain_until", "revoked_at", "created_by"}},
 		{"organizations", []string{"id", "owner_user_id", "name", "plan"}},
-		{"schedule_entries", []string{"next_fire_at"}},
+		{"schedule_entries", []string{"next_fire_at", "claimed_due_at"}},
 		{"runs", []string{"workflow_id", "trigger_kind"}},
 		{"run_nodes", []string{"org_id"}},
 		{"run_events", []string{"org_id"}},

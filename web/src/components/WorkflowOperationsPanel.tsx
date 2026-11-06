@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, type ComponentType, type ReactNode } from 're
 import { CalendarClock, Gauge, GitBranch, History, Info } from 'lucide-react'
 
 import { useT } from '../i18n'
+import { useAuthoringTargetFocus } from './authoring-focus-bus'
 import { Button } from './ui/Button'
 
 const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((module) => ({ default: module.VersionHistoryPanel })))
@@ -44,11 +45,12 @@ const SECTIONS: readonly SectionDefinition[] = [
 export function WorkflowOperationsPanel({ readOnly }: { readOnly: boolean }) {
   const { t } = useT()
   const [activeSection, setActiveSection] = useState<WorkflowOperationsSection | null>(null)
+  const rootRef = useAuthoringTargetFocus<HTMLElement>('versions', () => setActiveSection('versions'))
   const selected = SECTIONS.find((section) => section.id === activeSection)
   const SelectedPanel = selected?.component
 
   return (
-    <section className="authoring-workflow-tools" aria-labelledby="authoring-workflow-tools-title">
+    <section ref={rootRef} tabIndex={-1} className="authoring-workflow-tools" aria-labelledby="authoring-workflow-tools-title">
       <div className="authoring-workflow-tools__heading">
         <strong id="authoring-workflow-tools-title">{t('authoring.workflowTools.title')}</strong>
         <span>{t('authoring.workflowTools.description')}</span>

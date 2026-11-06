@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -83,16 +84,11 @@ func NewServer(deps Deps) *mcp.Server {
 		return deps.saveWorkflow(ctx, args.Workflow)
 	})
 
-	type startArgs struct {
-		Workflow          map[string]any `json:"workflow" jsonschema:"the workflow document to execute"`
-		WorkflowVersionID string         `json:"workflowVersionId,omitempty" jsonschema:"optional immutable version id that must exactly match the workflow document"`
-		Input             map[string]any `json:"input,omitempty" jsonschema:"optional run input payload"`
-	}
 	mcp.AddTool(server, writeTool(
 		"runs.start", "Start run",
-		"Start a run for the given workflow document; returns the run id.", false,
+		"Start a run from a saved workflowId or a workflow document; returns the run id. Pass idempotencyKey to make retries safe.", false,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args startArgs) (*mcp.CallToolResult, any, error) {
-		return deps.startRun(ctx, args.Workflow, args.WorkflowVersionID, args.Input)
+		return deps.startRun(ctx, args)
 	})
 
 	type runArgs struct {
@@ -144,14 +140,11 @@ func NewServer(deps Deps) *mcp.Server {
 		return deps.assureWorkflow(ctx, args.WorkflowID)
 	})
 
-	type dlqListArgs struct {
-		Limit int `json:"limit,omitempty" jsonschema:"maximum rows to return (default 20, max 100)"`
-	}
 	mcp.AddTool(server, readTool(
 		"dlq.list", "List dead letters",
-		"List bounded dead-letter summaries for the organization, newest first.",
-	), func(ctx context.Context, req *mcp.CallToolRequest, args dlqListArgs) (*mcp.CallToolResult, any, error) {
-		return deps.dlqList(ctx, args.Limit)
+		"List bounded dead-letter summaries for the organization newest first, keyset-paginated.",
+	), func(ctx context.Context, req *mcp.CallToolRequest, args pageArgs) (*mcp.CallToolResult, any, error) {
+		return deps.dlqList(ctx, args.Limit, args.Cursor)
 	})
 
 	type redriveArgs struct {
@@ -165,6 +158,8 @@ func NewServer(deps Deps) *mcp.Server {
 	})
 
 	registerOperatorTools(server, deps)
+	registerAuthoringTools(server, deps)
+	registerLifecycleTools(server, deps)
 	return server
 }
 
@@ -200,22 +195,17 @@ func (d Deps) saveWorkflow(ctx context.Context, document map[string]any) (*mcp.C
 	if err != nil || len(raw) > maxMCPWorkflowDocumentBytes {
 		return expected("workflow document is invalid or exceeds 128000 bytes")
 	}
-	wf, issues := domain.Parse(raw)
+	wf, _ := domain.Parse(raw)
 	if wf == nil {
-		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
+		return expectedReport("workflow contract invalid", d.validationReport(ctx, document))
 	}
 	if !validOptionalMCPIdentifier(wf.ID) {
 		return expected("workflow id must be at most 256 characters")
 	}
-	result := workflowvalidation.Validate(wf)
-	var blocking []domain.Issue
-	for _, issue := range result.Issues {
+	for _, issue := range workflowvalidation.Validate(wf).Issues {
 		if issue.Code != domain.CodeNodeTypeNotExecutable {
-			blocking = append(blocking, issue)
+			return expectedReport("workflow validation failed", d.validationReport(ctx, document))
 		}
-	}
-	if len(blocking) > 0 {
-		return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(blocking)))
 	}
 
 	workflowID := wf.ID
@@ -256,18 +246,38 @@ func (d Deps) saveWorkflow(ctx context.Context, document map[string]any) (*mcp.C
 	})
 }
 
-func (d Deps) startRun(
-	ctx context.Context,
-	document map[string]any,
-	requestedVersionID string,
-	input map[string]any,
-) (*mcp.CallToolResult, any, error) {
+type startArgs struct {
+	WorkflowID        string         `json:"workflowId,omitempty" jsonschema:"saved workflow to run at its latest version; pass this or workflow"`
+	Workflow          map[string]any `json:"workflow,omitempty" jsonschema:"the workflow document to execute; pass this or workflowId"`
+	WorkflowVersionID string         `json:"workflowVersionId,omitempty" jsonschema:"optional immutable version id that must exactly match the workflow document"`
+	Input             map[string]any `json:"input,omitempty" jsonschema:"optional run input payload"`
+	IdempotencyKey    string         `json:"idempotencyKey,omitempty" jsonschema:"retrying with the same key returns the first run instead of starting another"`
+}
+
+func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "runs.start", "runs.start", true); !allowed {
 		return expected(message)
 	}
-	requestedVersionID = strings.TrimSpace(requestedVersionID)
-	if !validOptionalMCPIdentifier(requestedVersionID) {
-		return expected("workflowVersionId must be at most 256 characters")
+	document, input := args.Workflow, args.Input
+	requestedVersionID := strings.TrimSpace(args.WorkflowVersionID)
+	workflowID := strings.TrimSpace(args.WorkflowID)
+	idempotencyKey := strings.TrimSpace(args.IdempotencyKey)
+	if !validOptionalMCPIdentifier(requestedVersionID) || !validOptionalMCPIdentifier(workflowID) ||
+		!validOptionalMCPIdentifier(idempotencyKey) {
+		return expected("workflowId, workflowVersionId and idempotencyKey must be at most 256 characters")
+	}
+	if (workflowID == "") == (document == nil) {
+		return expected("pass exactly one of workflowId or workflow; workflows.list shows saved ids")
+	}
+	if workflowID != "" {
+		if requestedVersionID != "" {
+			return expected("workflowVersionId only applies to a workflow document; workflowId runs the latest version")
+		}
+		latest, result := d.latestWorkflowDocument(ctx, workflowID)
+		if result != nil {
+			return result, nil, nil
+		}
+		document, requestedVersionID = latest.document, latest.versionID
 	}
 	requestRaw, err := json.Marshal(map[string]any{
 		"workflow": document, "workflowVersionId": requestedVersionID, "input": input,
@@ -279,9 +289,9 @@ func (d Deps) startRun(
 	if err != nil || len(raw) > maxMCPWorkflowDocumentBytes {
 		return expected("workflow document is invalid or exceeds 128000 bytes")
 	}
-	wf, issues := domain.Parse(raw)
+	wf, _ := domain.Parse(raw)
 	if wf == nil {
-		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
+		return expectedReport("workflow contract invalid", d.validationReport(ctx, document))
 	}
 	if !validOptionalMCPIdentifier(wf.ID) {
 		return expected("workflow id must be at most 256 characters")
@@ -293,14 +303,14 @@ func (d Deps) startRun(
 	started, err := (runstart.Service{
 		Engine: d.Engine, Pool: d.Pool, NewID: d.NewID,
 	}).Start(ctx, runstart.Request{
-		OrgID: d.OrgID, CreatedBy: d.UserID, Workflow: wf,
-		RequestedVersionID: requestedVersionID, Input: startInput,
+		OrgID: d.OrgID, CreatedBy: d.UserID, ServicePrincipal: d.UserID, Workflow: wf,
+		RequestedVersionID: requestedVersionID, Input: startInput, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
 		var rejection *runstart.Rejection
 		if errors.As(err, &rejection) {
 			if rejection.Code == runstart.CodeValidationFailed {
-				return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(rejection.Issues)))
+				return expectedReport("workflow validation failed", d.validationReport(ctx, document))
 			}
 			return expected(rejection.Code + ": " + rejection.Message)
 		}
@@ -311,7 +321,7 @@ func (d Deps) startRun(
 		return nil, nil, err
 	}
 	if started.Replayed {
-		return ok(map[string]any{"runId": started.RunID})
+		return ok(map[string]any{"runId": started.RunID, "replayed": true})
 	}
 	startAction := audit.Action("run.started")
 	if !started.Binding.Bound {
@@ -325,6 +335,39 @@ func (d Deps) startRun(
 		},
 	})
 	return ok(map[string]any{"runId": started.RunID})
+}
+
+type latestWorkflow struct {
+	document  map[string]any
+	versionID string
+}
+
+// latestWorkflowDocument loads the active workflow's newest immutable version
+// so a start by id binds to it exactly like a start with that document.
+func (d Deps) latestWorkflowDocument(ctx context.Context, workflowID string) (latestWorkflow, *mcp.CallToolResult) {
+	q := store.New(d.Pool)
+	reject := func(message string) (latestWorkflow, *mcp.CallToolResult) {
+		result, _, _ := expected(message)
+		return latestWorkflow{}, result
+	}
+	if _, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: d.OrgID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return reject("workflow not found or deactivated; workflows.list shows active workflows")
+		}
+		return reject("workflow lookup failed")
+	}
+	latest, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: d.OrgID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return reject("workflow has no saved version")
+		}
+		return reject("workflow lookup failed")
+	}
+	var document map[string]any
+	if json.Unmarshal(latest.DagJson, &document) != nil || document == nil {
+		return reject("saved workflow version is unreadable")
+	}
+	return latestWorkflow{document: document, versionID: latest.ID}, nil
 }
 
 func (d Deps) runStatus(ctx context.Context, runID string) (*mcp.CallToolResult, any, error) {
@@ -414,21 +457,29 @@ func (d Deps) runInspect(ctx context.Context, runID string) (*mcp.CallToolResult
 	})
 }
 
-func (d Deps) dlqList(ctx context.Context, limit int) (*mcp.CallToolResult, any, error) {
+func (d Deps) dlqList(ctx context.Context, limit int, cursor string) (*mcp.CallToolResult, any, error) {
 	if allowed, message := d.guardTool(ctx, "dlq.list", "dlq.read", false); !allowed {
 		return expected(message)
 	}
-	if limit <= 0 {
-		limit = 20
+	if !validOptionalMCPCursor(cursor) {
+		return expected("dead-letter list cursor exceeds 1024 characters")
 	}
-	if limit > 100 {
-		limit = 100
+	page, problem := pageBounds(limit, cursor)
+	if problem != "" {
+		return expected(problem)
 	}
-	rows, err := store.New(d.Pool).ListDeadLetterSummaries(ctx, store.ListDeadLetterSummariesParams{
-		OrgID: d.OrgID, PageLimit: int32(limit),
-	})
+	params := store.ListDeadLetterSummariesParams{OrgID: d.OrgID, PageLimit: page.limit + 1}
+	if cursor != "" {
+		params.BeforeCreatedAt = &page.before
+		params.BeforeID = pgtype.Text{String: page.beforeID, Valid: true}
+	}
+	rows, err := store.New(d.Pool).ListDeadLetterSummaries(ctx, params)
 	if err != nil {
 		return nil, nil, err
+	}
+	hasMore := len(rows) > int(page.limit)
+	if hasMore {
+		rows = rows[:page.limit]
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -438,7 +489,12 @@ func (d Deps) dlqList(ctx context.Context, limit int) (*mcp.CallToolResult, any,
 			"error": safeErrorProjection(row.ErrorJson),
 		})
 	}
-	return ok(map[string]any{"deadLetters": items})
+	payload := map[string]any{"deadLetters": items, "hasMore": hasMore}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		payload["nextCursor"] = createdAtISO(last.CreatedAt) + "|" + last.ID
+	}
+	return ok(payload)
 }
 
 func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolResult, any, error) {
@@ -448,15 +504,19 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	if !validMCPIdentifier(deadLetterID) {
 		return expected("deadLetterId is required and must be at most 256 characters")
 	}
-	err := d.Engine.RedriveDeadLetter(ctx, d.OrgID, deadLetterID)
+	err := d.Engine.RedriveDeadLetterWithOptions(ctx, d.OrgID, deadLetterID, engine.RedriveOptions{Actor: d.UserID})
 	switch {
 	case err == nil:
 		d.Audit.Write(ctx, d.Pool, d.auditContext(), "dlq.replayed", audit.Options{
 			TargetType: "dlq", TargetID: deadLetterID,
 		})
-		return ok(map[string]any{"redriven": true, "deadLetterId": deadLetterID})
+		payload := map[string]any{"redriven": true, "deadLetterId": deadLetterID}
+		maps.Copy(payload, d.redriveVersionView(ctx, deadLetterID))
+		return ok(payload)
 	case errors.Is(err, engine.ErrDeadLetterNotFound):
 		return expected("dead letter not found")
+	case errors.Is(err, engine.ErrRedriveRerunExists):
+		return expected(err.Error())
 	case errors.Is(err, engine.ErrRedriveConflict):
 		return expected("dead letter replay already claimed")
 	default:
@@ -464,39 +524,74 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	}
 }
 
-func issueSummary(issues []domain.Issue) string {
-	if len(issues) == 0 {
-		return "unknown issue"
+// redriveVersionView says which version the revived run executes. A redrive
+// keeps the run's original snapshot, so right after a workflow fix it fails
+// the same way unless the agent starts a new run. Lookup failures omit it.
+func (d Deps) redriveVersionView(ctx context.Context, deadLetterID string) map[string]any {
+	q := store.New(d.Pool)
+	dead, err := q.GetDeadLetter(ctx, store.GetDeadLetterParams{ID: deadLetterID, OrgID: d.OrgID})
+	if err != nil {
+		return nil
 	}
-	summary := boundedMCPText(issues[0].Message, maxMCPErrorSummaryRunes)
-	if len(issues) > 1 {
-		summary = fmt.Sprintf("%s (+%d more)", summary, len(issues)-1)
+	run, err := q.GetRun(ctx, store.GetRunParams{ID: dead.RunID, OrgID: d.OrgID})
+	if err != nil || run.WorkflowVersionID == "" {
+		return nil
 	}
-	return summary
+	pinned, err := q.GetWorkflowVersionAnyWorkflow(ctx, store.GetWorkflowVersionAnyWorkflowParams{
+		ID: run.WorkflowVersionID, OrgID: d.OrgID,
+	})
+	if err != nil {
+		return nil
+	}
+	latest, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
+		WorkflowID: pinned.WorkflowID, OrgID: d.OrgID,
+	})
+	if err != nil {
+		return nil
+	}
+	view := map[string]any{
+		"runId": dead.RunID, "runVersion": pinned.Version, "latestVersion": latest.Version,
+		"staleVersion": latest.ID != pinned.ID,
+	}
+	if latest.ID != pinned.ID {
+		view["hint"] = fmt.Sprintf("the revived run keeps version %d; runs.start with workflowId %q runs version %d",
+			pinned.Version, pinned.WorkflowID, latest.Version)
+	}
+	return view
 }
 
 func farFuture() time.Time {
 	return time.Now().Add(24 * time.Hour)
 }
 
-// pageBounds normalizes the shared limit contract (default 20, max 100)
-// and decodes the `<iso>|<id>` keyset cursor; a malformed cursor means
-// page one, never an error — same posture as the HTTP list surfaces.
-func pageBounds(limit int, cursor string) (int32, time.Time, string) {
-	if limit <= 0 {
+type pageWindow struct {
+	limit    int32
+	before   time.Time
+	beforeID string
+}
+
+// pageBounds applies the shared limit contract (default 20, at most 100) and
+// decodes the `<iso>|<id>` keyset cursor. Unlike the HTTP lists, which fall
+// back to page one, MCP rejects a bad cursor or limit: an agent that keeps
+// receiving page one never learns its loop is broken.
+func pageBounds(limit int, cursor string) (pageWindow, string) {
+	if limit < 0 || limit > 100 {
+		return pageWindow{}, "limit must be between 1 and 100; omit it for 20"
+	}
+	if limit == 0 {
 		limit = 20
 	}
-	if limit > 100 {
-		limit = 100
+	page := pageWindow{limit: int32(limit), before: farFuture(), beforeID: "￿"}
+	if cursor == "" {
+		return page, ""
 	}
-	before := farFuture()
-	beforeID := "￿"
-	if at, id, found := strings.Cut(cursor, "|"); found {
-		if parsed, err := time.Parse(time.RFC3339Nano, at); err == nil {
-			before, beforeID = parsed, id
-		}
+	at, id, found := strings.Cut(cursor, "|")
+	parsed, err := time.Parse(time.RFC3339Nano, at)
+	if !found || err != nil || id == "" {
+		return pageWindow{}, "cursor is malformed; pass nextCursor from the previous page unchanged"
 	}
-	return int32(limit), before, beforeID
+	page.before, page.beforeID = parsed, id
+	return page, ""
 }
 
 func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, status string) (*mcp.CallToolResult, any, error) {
@@ -509,9 +604,13 @@ func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, statu
 	if status != "" && status != "running" && status != "succeeded" && status != "failed" && status != "cancelled" {
 		return expected("run status must be running, succeeded, failed, or cancelled")
 	}
-	pageLimit, before, beforeID := pageBounds(limit, cursor)
+	page, problem := pageBounds(limit, cursor)
+	if problem != "" {
+		return expected(problem)
+	}
+	pageLimit := page.limit
 	rows, err := store.New(d.Pool).ListRunSummaries(ctx, store.ListRunSummariesParams{
-		OrgID: d.OrgID, BeforeCreatedAt: before, BeforeID: beforeID,
+		OrgID: d.OrgID, BeforeCreatedAt: page.before, BeforeID: page.beforeID,
 		FilterWorkflowID: pgtype.Text{String: workflowID, Valid: workflowID != ""},
 		FilterStatus:     pgtype.Text{String: status, Valid: status != ""},
 		PageLimit:        pageLimit + 1,
@@ -548,9 +647,13 @@ func (d Deps) workflowsList(ctx context.Context, limit int, cursor string) (*mcp
 	if !validOptionalMCPCursor(cursor) {
 		return expected("workflow list cursor exceeds 1024 characters")
 	}
-	pageLimit, before, beforeID := pageBounds(limit, cursor)
+	page, problem := pageBounds(limit, cursor)
+	if problem != "" {
+		return expected(problem)
+	}
+	pageLimit := page.limit
 	rows, err := store.New(d.Pool).ListWorkflowRows(ctx, store.ListWorkflowRowsParams{
-		OrgID: d.OrgID, BeforeCreatedAt: before, BeforeID: beforeID,
+		OrgID: d.OrgID, BeforeCreatedAt: page.before, BeforeID: page.beforeID,
 		PageLimit: pageLimit + 1,
 	})
 	if err != nil {

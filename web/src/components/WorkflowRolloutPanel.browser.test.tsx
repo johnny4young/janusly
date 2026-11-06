@@ -40,9 +40,9 @@ beforeEach(() => {
 
 describe('Rollout intent and form behavior in Chromium', () => {
   it.each([
-    { locale: 'en', fields: ['Traffic share', 'Min. outcomes', 'Success floor'], start: 'Start canary', retry: 'Retry' },
-    { locale: 'es', fields: ['Cuota de tráfico', 'Mín. de resultados', 'Umbral de éxito'], start: 'Iniciar canary', retry: 'Reintentar' },
-  ] as const)('keeps bounded, labeled inputs and recovers from a context read failure in $locale', async ({ locale, fields, start, retry }) => {
+    { locale: 'en', fields: ['Traffic share', 'Min. outcomes', 'Success floor'], promote: 'Promote v2…', start: 'Start canary', retry: 'Retry' },
+    { locale: 'es', fields: ['Cuota de tráfico', 'Mín. de resultados', 'Umbral de éxito'], promote: 'Promover v2…', start: 'Iniciar canary', retry: 'Reintentar' },
+  ] as const)('keeps bounded, labeled inputs and recovers from a context read failure in $locale', async ({ locale, fields, promote, start, retry }) => {
     initI18n(locale)
     let unavailable = false
     vi.mocked(api).mockImplementation(async path => {
@@ -54,9 +54,13 @@ describe('Rollout intent and form behavior in Chromium', () => {
     await page.viewport(390, 844)
     const view = render(<WorkflowRolloutPanel />)
     try {
+      await userEvent.click(page.getByRole('button', { name: promote }))
       await expect.element(page.getByRole('button', { name: start })).toBeEnabled()
       const panel = screen.getByTestId('workflow-rollout-panel')
       expect(panel.scrollWidth).toBeLessThanOrEqual(panel.clientWidth + 1)
+      const promoteDialog = screen.getByTestId('workflow-promote-dialog')
+      expect(promoteDialog.getBoundingClientRect().right).toBeLessThanOrEqual(390)
+      expect(promoteDialog.scrollWidth).toBeLessThanOrEqual(promoteDialog.clientWidth + 1)
       for (const [index, label] of fields.entries()) {
         const input = screen.getByLabelText<HTMLInputElement>(label)
         expect(input).toHaveAttribute('min', index === 1 ? '5' : '1')
@@ -80,13 +84,15 @@ describe('Rollout intent and form behavior in Chromium', () => {
       const alert = await screen.findByRole('alert')
       expect(oldSignal?.aborted).toBe(true)
       expect(screen.queryByRole('button', { name: start })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('workflow-promote-dialog')).not.toBeInTheDocument()
       unavailable = false
       const retryButton = within(alert).getByRole('button', { name: retry })
       retryButton.focus()
       await userEvent.keyboard('{Enter}')
+      await userEvent.click(page.getByRole('button', { name: promote }))
       await expect.element(page.getByRole('button', { name: start })).toBeEnabled()
       expect(vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
-      await page.getByTestId('workflow-rollout-panel').screenshot({ path: `../../test-results/rollout-${locale}-390.png` })
+      await page.getByTestId('workflow-promote-dialog').screenshot({ path: `../../test-results/rollout-${locale}-390.png` })
     } finally {
       view.unmount()
       await page.viewport(1024, 768)

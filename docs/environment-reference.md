@@ -38,6 +38,7 @@ key to the host `.env` does not automatically forward it into a container.
 | --- | --- | --- | --- |
 | `JANUSLY_ENV` | Process | string; `development`; trimmed case-insensitive `production` enables production posture | `internal/config/config.go`; boot validation |
 | `JANUSLY_PORT` | Process | integer; `3001`; 1–65535; must differ from internal port | `internal/config/config.go`; boot validation |
+| `JANUSLY_HTTP_HOST` | Process | string; empty (every interface); only `127.0.0.1`, `::1`, `0.0.0.0`, `::` | `internal/config/config.go`; boot validation |
 | `JANUSLY_INTERNAL_PORT` | Process | integer; `9464`; 1–65535; must differ from public port | `internal/config/config.go`; boot validation |
 | `JANUSLY_INTERNAL_HOST` | Process | string; `127.0.0.1`; only `127.0.0.1`, `::1`, `0.0.0.0`, `::` | `internal/config/config.go`; boot validation |
 | `JANUSLY_WORKER_CONCURRENCY` | Process | integer; `8`; 1–64 | `internal/config/config.go`; boot validation |

@@ -37,6 +37,14 @@ import {
   rotateApiRequestLifecycle,
   suspendApiRequestLifecycle,
 } from './api-request-lifecycle'
+import {
+  clearAuthCallback,
+  clearPasswordSetup,
+  markAuthCallbackFailed,
+  passwordSetupUser,
+  pendingAuthCallbackToken,
+  takeAuthCallbackSession,
+} from './auth-callback'
 import { t } from './i18n/runtime'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
@@ -46,19 +54,85 @@ const apiUrl = ''
 /** True when both Supabase env vars are present in the build. */
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 
-type SupabaseAuthFacade = { auth: GoTrueClient }
+// The production build removes every other GoTrueClient method.
+type SupabaseAuthClient = Pick<
+  GoTrueClient,
+  'getSession' | 'onAuthStateChange' | 'resetPasswordForEmail' | 'setSession' | 'signInWithPassword' | 'signOut' | 'signUp' | 'updateUser'
+>
+type SupabaseAuthFacade = { auth: SupabaseAuthClient }
 
 let supabaseClientPromise: Promise<SupabaseAuthFacade | null> | null = null
 
 /**
+ * The account a captured callback would sign in as, or null when there is nothing
+ * to approve. Asks the auth server directly: the client's user lookup can drop
+ * the stored session when it rejects a token.
+ */
+export async function resolveAuthCallbackIdentity(): Promise<{ id: string; email: string } | null> {
+  const token = pendingAuthCallbackToken()
+  if (!token) return null
+  if (!isSupabaseConfigured) {
+    clearAuthCallback()
+    return null
+  }
+  if (await ensureBrowserSession()) return null
+  try {
+    const base = supabaseUrl!.endsWith('/') ? supabaseUrl! : `${supabaseUrl}/`
+    const response = await fetch(new URL('auth/v1/user', base), {
+      headers: { apikey: supabaseAnonKey!, Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+    const user = response.ok ? await response.json() as { id?: unknown; email?: unknown } : null
+    if (typeof user?.id === 'string' && typeof user.email === 'string' && user.email) {
+      return { id: user.id, email: user.email }
+    }
+  } catch {
+    // Reported below with every other rejected link.
+  }
+  markAuthCallbackFailed()
+  return null
+}
+
+/**
+ * The email to set a password for, or null when no step is owed. A failed read
+ * keeps the marker, so a network error cannot retire the step.
+ */
+export async function resolvePasswordSetupEmail(): Promise<string | null> {
+  const userId = passwordSetupUser()
+  if (!userId) return null
+  const { data, error } = await AuthProvider.getSession()
+  const user = data.session?.user
+  if (user?.id === userId && user.email) return user.email
+  if (!error) clearPasswordSetup()
+  return null
+}
+
+/** A rejected link reports on the login form. */
+async function adoptAuthCallback(client: SupabaseAuthFacade): Promise<void> {
+  const session = takeAuthCallbackSession()
+  if (!session) return
+  try {
+    const { error } = await client.auth.setSession(session)
+    if (error) markAuthCallbackFailed()
+  } catch {
+    markAuthCallbackFailed()
+  }
+}
+
+/**
  * Demand-load the singleton Supabase client. Dev-header builds return before
  * evaluating the dynamic import, so the vendor chunk stays off the cold path.
+ * Callers receive it only after a captured callback has been adopted.
  */
 export function getSupabaseClient(): Promise<SupabaseAuthFacade | null> {
   if (!isSupabaseConfigured) return Promise.resolve(null)
   if (!supabaseClientPromise) {
     supabaseClientPromise = import('./supabase-runtime')
-      .then(({ createClient }) => createClient(supabaseUrl!, supabaseAnonKey!))
+      .then(async ({ createClient }) => {
+        const client = createClient(supabaseUrl!, supabaseAnonKey!)
+        await adoptAuthCallback(client)
+        return client
+      })
       .catch((error: unknown) => {
         // Allow a later retry after a transient chunk-loading failure.
         supabaseClientPromise = null
@@ -145,6 +219,8 @@ async function probeBrowserSession(): Promise<BrowserSessionIdentity | null> {
       email: payload.email ?? null,
       organizationId: payload.organizationId,
     }
+    // The cookie session outranks Supabase, so a captured callback is never adopted.
+    clearAuthCallback()
     writeToStorage(ACTIVE_ORG_STORAGE_KEY, payload.organizationId)
     return browserSessionIdentity
   } catch {
@@ -164,7 +240,6 @@ function ensureBrowserSession(): Promise<BrowserSessionIdentity | null> {
   return browserSessionProbe
 }
 
-type SupabaseAuthClient = GoTrueClient
 type SignOutResponse = Awaited<ReturnType<SupabaseAuthClient['signOut']>>
 type SessionResponse = Awaited<ReturnType<SupabaseAuthClient['getSession']>>
 type AuthSubscriptionResponse = ReturnType<SupabaseAuthClient['onAuthStateChange']>
@@ -283,7 +358,9 @@ export const AuthProvider = {
     resumeApiRequestLifecycle()
     const client = await getSupabaseClient()
     if (!client) return devAuthResponse
-    return client.auth.signInWithPassword({ email, password })
+    const response = await client.auth.signInWithPassword({ email, password })
+    if (!response.error) clearPasswordSetup()
+    return response
   },
   signUp: async (email: string, password: string) => {
     resumeApiRequestLifecycle()
@@ -296,6 +373,7 @@ export const AuthProvider = {
     // panel request that resolves auth concurrently with logout must never be
     // sent with a missing or departing identity.
     suspendApiRequestLifecycle()
+    clearAuthCallback()
     if (browserSessionIdentity) {
       try {
         await fetch(`${apiUrl}/auth/session/logout`, {
@@ -309,7 +387,24 @@ export const AuthProvider = {
     }
     const client = await getSupabaseClient()
     if (!client) return devSignOutResponse
-    return client.auth.signOut()
+    const response = await client.auth.signOut()
+    if (!response.error) clearPasswordSetup()
+    return response
+  },
+  updatePassword: async (password: string) => {
+    resumeApiRequestLifecycle()
+    const client = await getSupabaseClient()
+    if (!client) return { error: null }
+    const { error } = await client.auth.updateUser({ password })
+    if (!error) clearPasswordSetup()
+    return { error }
+  },
+  requestPasswordReset: async (email: string) => {
+    const client = await getSupabaseClient()
+    if (!client) return { error: null }
+    // No trailing slash: the auth server compares this with its allow list as text.
+    const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+    return { error }
   },
   getSession: async () => {
     if (await ensureBrowserSession()) return devSessionResponse

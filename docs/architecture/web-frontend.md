@@ -80,6 +80,13 @@ to the same visible scope. Old success/error paths cannot populate or unlock the
 new history snapshot. Client abort remains local result invalidation, not proof
 of remote cancellation.
 
+A picked pair of versions, or the draft against its source version, opens over the
+author canvas as a read-only merged graph (`VersionCanvasCompare`, loaded on demand).
+It reuses `computeWorkflowDiff`, marks steps and paths as new, modified or deleted,
+and masks secrets in the before and after JSON as the field diff does. The history
+panel owns it through a portal, so leaving the workflow or tab closes it, and
+`canvasCovered` turns off the covered editor's keyboard edits while it is open.
+
 The authoring controller and source Apply lose ownership on the first identity,
 organization, canvas, navigation or grant change, even if the store returns to
 its original values before React paints. Registry results use the saved-history
@@ -125,7 +132,9 @@ and tenant snippets from the existing API; importing it does not construct a
 second unused recipe index. The original library exports and recipes remain
 available to explicit catalog consumers.
 
-Browser-owned runtime schemas use the tree-shakeable `zod/mini` entry point.
+Live browser validators use `src/lib/schema-lite.ts`, a `zod/mini`-shaped subset
+held to Zod by a differential test. Schemas production never reaches keep the
+tree-shakeable `zod/mini` entry point.
 They must preserve the same strict-object, bound, default, transform, and
 refinement semantics as the API contract; do not trade validation coverage for
 bundle size. Read-only UI imports shared enums, constants and pure insertion helpers from
@@ -184,7 +193,10 @@ defined there and are passed to `contractApi` as its `guard` option (see
 reader, `src/lib/org-config-model.ts`. AI Studio and the Inspector load
 lazily like every other tab panel: `src/components/panel-loaders.ts` holds one
 dynamic importer per tab, `RightPanel` builds its `lazy()` components from
-them, and `WorkspaceSectionNav` reuses those importers on hover/focus. The
+them, and `WorkspaceSectionNav` reuses those importers on hover/focus. On the
+canvas tabs `AppWorkspace` renders that navigation in the top bar, lazily from
+the `RightPanel` chunk, and `RightPanel` omits it; every other tab keeps it as
+the panel's header row. The
 `authoring-workspace` group also contains shared dependencies, so its code can
 load before an authoring panel mounts. `lazy()` defers mounting, not necessarily
 transfer; a second destination-level preload effect is unnecessary. First-open
@@ -216,8 +228,11 @@ one action a surface leads with, `variant="danger"` for destructive ones,
 `size="icon" variant="ghost"` for icon-only controls, and `aria-pressed` for
 toggles (the primitive styles the pressed state). The legacy `small-command`
 and `icon-button` classes are gone from buttons; raw `<button>` remains only
-for non-action semantics — tabs, radios, menu items, list rows, chips — that
-carry their own component styles.
+for non-action semantics — tabs, radios, list rows, chips — that carry their
+own component styles. Action menus use `Menu` (`components/ui/Menu.tsx`): arrow
+keys, Home/End and optional single-key shortcuts move or select, Escape and Tab
+close and return focus to the trigger, and fixed positioning keeps the menu
+visible inside tables that scroll.
 
 ## Routing
 
@@ -246,6 +261,78 @@ Activity / Recover, and a recovery-case route resolves to the same Recover
 context. Reloading or browser navigation must preserve both the route and that
 context; grouping a section never makes its deep link anonymous.
 
+Activity shows the tabs Runs, Recover (with its open count), Agent activity and
+Reports, each filtered by the permission that opens it. Reports (`#/reports`,
+`recovery.read`) is a lazy panel with a 7, 30 or 90 day window. KPIs, failure
+clusters and the Value dashboard read `/recovery/metrics` and `/dlq/clusters`
+for that window behind `dlq.read`; windowed Recovery validation and every export
+need `reports.read`; the heatmap, ledger and wins come from `/recovery/home`,
+whose 90-day heatmap the panel narrows to the window. An operator without
+`dlq.read` or `reports.read` reads those reports from the same `/recovery/home`
+sections, which `recovery.read` allows: fixed at 30 days (90 for the heatmap),
+with no window control and no exports. Model calibration and AI spend
+are not windowed: their endpoints have no window parameter. A heatmap day opens
+Recover through `#/recover/day/<YYYY-MM-DD>`.
+
+Estimated AI cost in Reports reads `GET /v1/usage/costs` behind `runs.read`, the
+permission of `/run/usage`, and hides without it; an operator without `dlq.read`
+has no window control, so it stays at 30 days. Totals and cost by model aggregate the
+whole window in SQL through `usage_events_org_metric_created_idx`, so they match
+Settings > Usage. Only the steps list reads the newest 10,000 in-run calls, and when
+that cap applies it states the oldest time it reaches. Stored `inputTokens` exclude
+cache reads and cache writes, so they are the uncached count. A call with no
+recorded cost, such as a failed attempt, keeps a null cost; a simulated call adds no
+cost and no tokens. A step whose run is gone shows no link. Selecting a model
+re-reads only its steps. Settings > Usage links here in every state, and shows
+loading and a failed read apart from an empty window.
+
+Opening a run shows one run sheet (`RunWorkspace`). `RunsPanel` owns the header
+(identity, actions, data row) and its dialogs, so they stay available on every
+tab; `RunWorkspace` owns the tabs Overview, Timeline, Events, Agents and Ask and
+lays both out through `renderSheet`. Timeline (`RunStepTimeline`, a lazy chunk)
+projects the loaded events and `run_nodes` rows with `projectRunSteps`: attempts
+grouped by step on one scale, with the row as the authority for the attempt in
+progress. No tab adds a fetch, and changing the run returns to Overview.
+Timeline offers Rerun from this step on finished production runs. `RunWorkspace`
+injects `RerunStepDialog`, which ships with the `RunsPanel` chunk, so the lazy
+timeline does not preload what the panel needs; see `run-model.md`.
+
+The Inspector's Test data section (`NodeTestData`, in the authoring chunk) lists
+the output of the selected step and of every step it reads from, taken from the
+open run when it belongs to the workflow. Pins and mocks live in `lib/test-data`,
+an in-memory store keyed by workflow, never in the workflow document, so a save
+or publish cannot carry them and a reload drops them. Run this step and Test draft
+send them to `POST /runs/draft-test`; the canvas marks pinned and mocked steps.
+
+Recover keeps its filters above two panes once the queue section is at least
+760 px wide: the queue on the left and the selected failure on the right, each
+scrolling inside a height tied to the viewport. Narrower sections stack them, and
+selecting rows gives the queue the full width. A row's recovery item drawer opens
+in the detail pane. The default By cluster view groups
+the loaded rows client-side with `normalizeErrorSignature`, the normalizer the
+server clusters with, so every filter, sort and page keeps applying.
+`/dlq/clusters` only adds the totals on each header: a signature outside its
+30-day window, or a failed read, still groups from the loaded rows. Headers and
+rows share one fixed height, so the queue stays virtualized in both views, and
+J/K and triage focus walk the rows in the order shown.
+Investigate and Replay cluster read `/dlq/cluster-members` when clicked and open
+the cluster recovery and recovery job dialogs. The full rollup, with failed run
+nodes and suggested owners, remains under Automation and patterns.
+
+Recovery jobs is a second view of Recover, loaded when it opens. The queue stays
+mounted behind it so filters and selection survive. The list polls while any job
+runs, from a timer that outlives the view, so the end of a job raises a toast
+from any workspace tab until the page reloads or the session changes. Polls never
+overlap, an older response is dropped, a job is announced once, repeated failures
+back off and 401 or 403 stops the watch. A job started from
+the dialog opens this view; New recovery job returns to the queue in selection
+mode, because a job's cohort is always chosen there.
+
+Templates has two views over one shared search. Recipes groups by the category
+each template carries in `internal/httpapi/assets/templates.json`, so a new
+category gets its chip without a web change. Packs renders the embedded
+`SolutionPacksPanel` and is the only place packs appear on that page; `#/packs`
+remains the standalone route.
 The eager shell owns the core locale catalog. Non-home main and authoring-panel
 slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
 behind an accessible, height-preserving skeleton while the sidebar, top bar and
@@ -258,17 +345,76 @@ Settings keeps one workspace destination and a permission-aware focused-area
 rail. The configuration-first order is Organization, Access, Connections and
 AI configuration, followed by Reliability, Usage and Infrastructure. Organization
 owns workspace-wide data governance and audit history; Access owns membership,
-roles, authentication, SSO and SCIM. Connections is the stable user-facing name
-for credentials and external services, while the existing `integrations` route
+roles, authentication, SSO and SCIM. Its permission matrix holds unsaved grants
+per role apart from server state and drops a draft once it matches that state,
+so a refetch keeps edits and untouched roles follow the server. Drafts belong
+to one organization. Save posts only edited roles, one request per role with
+custom roles last, and names each role that failed while keeping its edits.
+Because `api()` reads the active organization per request, Save captures it
+first and stops if it changes or the panel unmounts, then reports which roles
+saved and which are unconfirmed; the API's floor and route gates remain the
+authority. Connections is the stable
+user-facing name for credentials and external services, while the existing `integrations` route
 identifier remains compatible with saved deep links. The canonical Connections
 inventory stays list-first with a separate add dialog; Settings links to it
 rather than duplicating the secret form. Focused areas expose their own heading,
-persist in the hash, remain horizontally reachable on narrow screens and mount
-only their active cards. On narrow Connections views, the primary action stacks
-inside the card and each fixed-height virtual row keeps status, kind, expiry and
-both mutation actions visible; secondary owner and last-used facts remain on the
-wider inventory. The overview no longer presents a credential-only count as if
+remain horizontally reachable on narrow screens and mount only their active
+cards. The hash owns the open area: `OperationsPage` follows
+`#/operations/<section>` while mounted, opening an area pushes a history entry,
+a hash naming no openable area is rewritten to the one on screen, and the shell
+breadcrumb names the routed area (the `operations.section.*` copy stays in the
+core catalog so it paints before the workspace catalog loads). The Find a setting
+index reads the counts on its cards only while it is open, each behind the
+permission of its panel; a denied or failed read omits that count. Attention dots
+carry their reason in the rail tab's `title` and the dot's accessible name. The AI budget card meters spend from `/billing/budget` and reads workflow overrides one visible row at a time, because no list endpoint exists. Its filter searches the 100 workflows `GET /workflows` returns by default, and says so when a full list has no match. On narrow Connections views, the primary action stacks
+inside the card. The inventory is a virtualized table (name, type, health, used
+by, last used, expiry, owner) that scrolls sideways on its own, with Rotate and
+Revoke pinned to the right edge above phone width. A header counts connections
+that are expiring or expired, with unresolved errors or a missing secret, and
+unused (no use in 30 days and no known workflow); it shows only once health has
+loaded, and unknown cells read as a dash, never as zero. Used by counts
+`referencingWorkflowIds`: the latest saved version of each workflow, top-level
+nodes only, so it is labelled as known. Last used covers the same 30-day window
+as the usage rows behind it, so an older use reads as none in 30 days, not never.
+The API has no rotation timestamp (`updated_at` also moves on expiry edits), so
+the header has no not-rotated count. Create, Rotate and Revoke load together as
+one lazy chunk on first open; the first requested dialog wins while it loads, and
+the trigger keeps focus until the dialog takes it. The overview no longer presents a credential-only count as if
 it represented every connection type.
+
+Rotate and Revoke share `AffectedWorkflowList`. Revoke reads
+`referencingWorkflowIds` from a fresh `GET /credentials/health` when its dialog
+opens and labels ids from the workspace's loaded workflow page; an id without a
+name keeps its row, labelled by the id. Any affected workflow requires typing
+the exact connection name. A failed, hung or malformed health read is never
+treated as "no workflows": the dialog reports it and requires the typed name.
+The typed name is a client-side guard; `DELETE /credentials/{name}` stays
+authorized by `credentials.write` alone. The list covers the latest saved
+version of each workflow, not other credential consumers.
+
+## Quick jump run filters
+
+`lib/run-query.ts` parses the palette text on the client, deterministically, in
+English and Spanish: one status, one workflow (its id or its name as a slug) and
+one time window. It never sends the text anywhere. Unknown words, a second value
+for a filter, negated or relative phrases ("not failed", "2d ago") and a name two
+workflows share stay listed as not understood, and the words inside them are not
+read as filters. After "of"/"de" an unknown name is kept whole up to the next
+filter word. Chips edit by rewriting their words in the query, so the text stays
+the single source of truth. A bare workflow name or "run", and any query that is
+the start of a visible command, workflow or recipe name, remain a command search.
+
+Results come from the org-scoped `/runs` list, 25 rows per page. Each row carries
+`cursor`, the keyset `before` value at full timestamp precision; `createdAt` is
+cut to milliseconds and would skip rows created in the same millisecond. The API
+has no time filter, so a bounded window seeks its first page with
+`before=<window end>|\uffff` (the server's own id sentinel), the client drops rows
+outside the window and stops offering older pages once a page reaches past its
+start. A failed older page keeps the loaded rows and offers that page again. Run
+mode needs `runs.read`. Opening a run is direct. Retry appears only for a run with
+an open dead letter and `dlq.read` plus `dlq.replay`, and it hands off to that
+failure in Activity; the palette calls no write endpoint. Cancel, bulk replay and
+promote are not offered from the palette.
 
 ## Canvas authoring clarity
 
@@ -287,6 +433,30 @@ AI Studio route, so the review context remains available. A blank writable canva
 has one primary assisted start and keeps Add step as the manual, provider-free
 path. The teaching overlay still passes palette drops through outside its action.
 
+The AI Studio header marks the current stage as the first incomplete one, with
+`aria-current="step"`. Each Solution Pack lists its required credentials and
+organization settings in a Before installing checklist. A role with
+`credentials.write` connects a missing credential in place, through the create
+dialog with its name and kind locked, because readiness compares both. A row is
+ready only when the name holds the right kind, has not expired and, per one
+`/credentials/health` read for the panel, has its secret set. Otherwise the row
+says which and offers Review, which opens Connections, because names are unique
+per organization and a create would conflict. A failed create refreshes the list,
+and the dialog closes once the list holds the name. A list that could not be read,
+or a role without `credentials.read`, shows the status as unavailable rather than
+missing. Organization settings have no per-organization state in the
+pack API, so they are listed but not counted. Install is disabled only by the
+`packs.install` permission. Credentials that are not ready take away its primary
+weight and are named under the button but never block it: every pack installs as a draft
+that is wired afterwards, and `packs.install` is granted to editors while
+`credentials.write` is not.
+Experiments setup keeps every field in panel state across its three steps, and
+`getRunBlockers` is the single source for both the disabled Run reason and the
+step completion marks. Only that reason names a missing field; the provider-call
+plan stays visible on every step. Writes need `evals.write` and an admin base
+role, matching the route gate, and text limits count UTF-8 bytes as the API does.
+The panel is keyed by organization, so no setup or selection crosses workspaces.
+
 Contextual authoring prefills never submit work. Replacing an intent invalidates
 pending compilation/proposal results and releases their loading state; late
 responses cannot clear a newer request's loading or restore the old proposal.
@@ -294,6 +464,15 @@ Focus returns after the input is enabled. An in-flight Apply retains its exact
 snapshot and stays pending until it settles; a prefill does not cancel it or
 start another operation. Identity and unrelated canvas changes discard pending
 focus alongside the old authoring state.
+
+Authoring problems have one source, `buildAuthoringProblems`, and one route to
+the element that resolves them, `openAuthoringProblem`. The canvas projects them
+without persisting anything: a chip on the Flow map opens the Problems scope, a
+step's worst problem sets its dot, and the rest fill a band capped at two entries
+with the overflow left to the Problems scope. A problem without a step or path
+opens its Workflow scope target when its code has one (Outputs, Versions) and the
+Problems scope otherwise. The canvas can precede the lazy panel, so
+`requestAuthoringScope` holds the scope and target until they mount and read them.
 
 The Home hero is a named region inside workspace main, not a second page banner.
 The authoring canvas is an explicitly named programmatic focus target, JSON
@@ -388,6 +567,9 @@ pending confirmations. A stale confirmation cannot dispatch even if its dialog
 was already open. Cancellation does not undo a write the server already received;
 the next read is authoritative.
 
+While an operator can start a canary, the start controls and the
+qualification for the chosen pair live in the Promote dialog, next to the
+version compare; otherwise the panel shows the qualification itself.
 Qualification evidence must match the selected immutable baseline/candidate pair.
 Malformed deployment or qualification payloads fail closed with an inline retry,
 not an empty deployment or permission to start. The numeric controls retain
@@ -406,16 +588,19 @@ and a 0.5 KiB single-locale allowance for the fail-closed RecoveryDialog AI
 response parser. The complete-artifact cap remained 605 KiB for that security
 change; the parser stays in the existing lazy dialog rather than adding a
 network request. The cold path is what the caps protect: `index.css`, `workflow-workspace` and the
-route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB).
+route budgets in `performance/routes.performance.spec.ts` only ratchet down. The review workspace fix that keeps ordinary AI Studio results and the example registry across unrelated refreshes added a measured 0.3 KiB of reset logic; the artifact and worst-locale caps moved by exactly that (605.9 → 606.3 and 562.0 → 562.1 KiB). In 2026-11 the owner approved moving the artifact, worst-locale and per-chunk caps by each workspace redesign change's measured cost, stated in its pull request.
 
 ## Closing failures without recovery
 
-Individual, bulk and keyboard DLQ closure share an explicit accepted-loss
-confirmation. The dialog snapshots IDs and available workflow/run/step labels;
-polling or a changed selection cannot change the acknowledged request. Cancel is
-the initial focus, Escape cancels before submission, and submission is guarded
-against duplicate activation. While a request is pending, dismissal and competing
-queue actions are disabled. Context/permission changes invalidate pending consent.
+Individual, bulk, keyboard and Activity-detail DLQ closure share an explicit
+accepted-loss confirmation. The dialog snapshots IDs and available workflow, step
+and occurrence facts; polling or a changed selection cannot change the
+acknowledged request. It requires a reason, which the API stores on the audit
+row, and the destructive action stays disabled until the reason is filled. The
+reason field is the initial focus, where Enter cannot submit; Escape cancels
+before submission, and submission is guarded against duplicate activation. While
+a request is pending, dismissal and competing queue actions are disabled.
+Context/permission changes invalidate pending consent.
 
 A partial bulk response keeps failed rows selected for a new acknowledgement.
 An unconfirmed or failed closure never advances triage or claims recovery. Closing
@@ -423,6 +608,39 @@ uses the existing tenant-scoped API authorization and transition rules; the UI i
 not a substitute for either. Accepted loss does not publish the recovered
 all-clear celebration or promise undo of external effects.
 
+
+### Home signals
+
+Home shows what needs a decision now; every trend, breakdown and history lives
+in Reports. The Operator prompt closes the What needs you card, and a Today strip
+sits below it. Today's runs and success come from the loaded run page in the
+operator's timezone, so they read `100+` once a full page is today's and are
+absent without `runs.read`; open failures and pending approvals link to where
+they are acted on. A recurring failure reaches the inbox through the operator
+brief. An AI budget banner renders only once `/billing/budget` reports the
+warning threshold crossed.
+
+The Operator panel is a lazy chunk with its own stylesheet, loaded the first time
+the operator asks or opens Suggestions. It is a non-modal side panel: Home stays
+usable behind it, focus moves into it on open, and closing or Escape returns focus
+to the field. A typed question goes to `/ai/explain-workflow` when a draft is
+loaded, otherwise to `/ai/explain-run` for the most recent open failure. The
+panel cites only the run in the response's `report.summary.runId`. Its action opens
+the recovery case when that run is the failed run Home asked about; workflow
+answers return no run, so they cite nothing and offer only AI Studio. A fallback
+answer always says that no AI provider answered, and shows the report's root
+cause, failed step, error and next action with the full report one click away.
+
+A failure cluster or open failure in What needs you that names a run has an
+Investigate action. It opens a second lazy, non-modal side panel that reads
+`GET /v1/runs/{runId}/investigation` and shows the same rules-based result as
+Steps, an ordered list of checks with their evidence runs, or Tree, the question
+with one card per cause. Tabs follow the arrow-key tab pattern and closing
+returns focus to Investigate. The panel belongs to the workspace it was opened
+in; switching workspace closes it and the Operator panel and drops their reads. Its only action, Fix in Recover, opens the Recover
+queue on the open failure, where Suggest fix keeps its own permissions and
+confirmation; the server omits it when nothing is validated or the role cannot
+use recovery.
 
 ### Home evidence states
 
@@ -450,10 +668,25 @@ known work remains accessible through the action inbox.
 A genuinely empty workspace leads with the existing permission-gated controlled
 drill and workflow creation actions rather than two empty work cards. No drill
 starts on mount; the missing-billing-secret fixture fails before provider egress,
-and its validation evidence stays out of production metrics. The entry is not
-duplicated in Insights, and dismissing it is session-only. Existing workspaces
+and its validation evidence stays out of production metrics. Dismissing the
+entry is session-only. Existing workspaces
 with a filtered empty run page keep their operational overview.
 
+
+### Workflows table
+
+The saved-workflows list is a real table, repeated per section when folders
+exist, with one sort state across sections and fixed column widths so sections
+stay aligned. Sort headers are buttons inside `th` elements carrying `aria-sort`;
+the column and direction persist with the other list filters, and the previous
+switch values map onto Last run, Name and Status. Sorting orders loaded rows only,
+like the filters it sits beside, and ties fall back to the most recent run.
+
+Open failures, last run and version come from the list row. Scores come from each
+row's health read, so a Health sort keeps not-yet-scored rows last until they
+report. The trend is `GET /workflows/health/delta` against the current version:
+single-version flows and samples under the server's floor show the score alone.
+The run count stays visible under Last run and is never reused as a failure count.
 
 ### Recovery queue hierarchy
 

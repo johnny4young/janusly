@@ -11,6 +11,7 @@ export function isRunSummary(value: unknown): value is Api.RunSummary {
   return isShape(value, {
     createdAt: nullable(isString),
     createdBy: nullable(isString),
+    cursor: nullable(isString),
     hasWaitingNodes: isBoolean,
     id: isString,
     orgId: isString,

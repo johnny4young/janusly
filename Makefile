@@ -95,7 +95,7 @@ test:
 	$(MAKE) test-ci
 	bash scripts/local-db-port.test.sh
 	go test -race ./...
-	cd web && $(PNPM) test && $(PNPM) test:scripts && $(PNPM) test:browser
+	cd web && $(PNPM) test && $(PNPM) test:scripts && $(PNPM) test:browser && $(PNPM) test:auth-e2e
 
 test-ci:
 	bash scripts/ci-contract.test.sh

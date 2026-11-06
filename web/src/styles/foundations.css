@@ -285,7 +285,7 @@ a { color: var(--we-primary); }
 }
 
 .app-shell--with-status {
-  grid-template-rows: 56px 1fr 32px;
+  grid-template-rows: minmax(56px, auto) 1fr 32px;
 }
 
 .mobile-nav-bar,
@@ -794,8 +794,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   white-space: nowrap;
   width: 1px;
 }
-.usecase-row p,
-.ai-studio-hero p {
+.usecase-row p {
   color: var(--we-muted);
   font-size: 12px;
   line-height: 1.45;

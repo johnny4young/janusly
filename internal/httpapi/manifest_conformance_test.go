@@ -299,6 +299,7 @@ func manifestConformanceRows() map[string]conformanceRow {
 		"GET /v1/recovery/my-wins":           onlyIntegration(),
 		"GET /v1/memory/consent-status":      onlyIntegration(),
 		"GET /v1/run/usage":                  onlyIntegration(),
+		"GET /v1/usage/costs":                onlyIntegration(),
 		"GET /v1/workflows/schedule-preview": onlyIntegration(),
 		"GET /v1/authoring/capabilities": {integration: true, fixtures: func(t *testing.T) []any {
 			catalog := (&authoring.Builder{Registry: executors.SharedToolRegistry(), Now: func() time.Time { return conformanceInstant }}).
@@ -326,6 +327,7 @@ func manifestConformanceRows() map[string]conformanceRow {
 		"GET /v1/authoring/experiences":           onlyIntegration(),
 		"POST /v1/authoring/experiences/register": onlyIntegration(),
 		"POST /v1/authoring/experiences/revoke":   onlyIntegration(),
+		"GET /v1/runs/{runId}/investigation":      onlyIntegration(),
 		"GET /v1/operations/brief": {integration: true, fixtures: func(t *testing.T) []any {
 			action := func(id string, params map[string]any) operations.Action {
 				return operations.Action{

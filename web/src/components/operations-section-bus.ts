@@ -13,7 +13,8 @@
  * Callers import from this bus rather than pulling the lazy settings page
  * into the main workspace chunk.
  */
-import { readRoute, writeRoute } from '../lib/route'
+import { useSyncExternalStore } from 'react'
+import { onRouteChange, readRoute, writeRoute } from '../lib/route'
 
 /** Closed-enum sub-section value shared by the Settings index, deep links,
  *  persisted navigation, and the active-only panel dispatcher. */
@@ -30,7 +31,6 @@ export const OPERATIONS_SUB_SECTIONS = [
 export type OpsSection = typeof OPERATIONS_SUB_SECTIONS[number]
 
 const STORAGE_KEY = 'janusly:operations:section'
-export const OPERATIONS_SECTION_REQUEST_EVENT = 'janusly:operations:section-request'
 
 export function isOpsSection(value: unknown): value is OpsSection {
   return typeof value === 'string' && (OPERATIONS_SUB_SECTIONS as readonly string[]).includes(value)
@@ -60,8 +60,8 @@ export function persistOpsSection(section: OpsSection): void {
   if (readRoute()?.tab === 'operations') writeRoute({ tab: 'operations', opsSection: section }, 'replace')
 }
 
-/** Deep-link into an Operations sub-section from anywhere (writes the route +
- *  emits the request event the mounted OperationsPage listens for). */
+/** Deep-link into an Operations sub-section from anywhere. The route write is
+ *  the request: the mounted OperationsPage follows it, a later mount reads it. */
 export function requestOperationsSection(section: OpsSection): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, section)
@@ -69,5 +69,14 @@ export function requestOperationsSection(section: OpsSection): void {
     // ignore
   }
   writeRoute({ tab: 'operations', opsSection: section })
-  window.dispatchEvent(new CustomEvent(OPERATIONS_SECTION_REQUEST_EVENT, { detail: section }))
+}
+
+function routeOpsSection(): OpsSection | null {
+  const route = readRoute()
+  return route?.tab === 'operations' && isOpsSection(route.opsSection) ? route.opsSection : null
+}
+
+/** The pane the URL names, for the shell breadcrumb outside the lazy page. */
+export function useRouteOpsSection(): OpsSection | null {
+  return useSyncExternalStore(onRouteChange, routeOpsSection)
 }

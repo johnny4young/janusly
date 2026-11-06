@@ -1,10 +1,7 @@
-import {
-  openRecoveryAutomation,
-  openWorkspaceSection,
-} from './_helpers/workspace-navigation'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
- * Real-stack proof for paced replay campaigns: genuine failed runs form one
- * server-verified cohort, the operator creates a durable campaign in English,
+ * Real-stack proof for recovery jobs: genuine failed runs form one
+ * server-verified cohort, the operator creates a durable job in English,
  * observes paced progress, then stops it from the Spanish mobile surface.
  */
 
@@ -133,7 +130,6 @@ test('creates, observes, and stops a paced campaign in English and Spanish', asy
   }, { activeOrg: orgId })
   await page.goto('/')
   await openWorkspaceSection(page, 'Activity', 'Recover')
-  await openRecoveryAutomation(page)
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()
@@ -149,6 +145,9 @@ test('creates, observes, and stops a paced campaign in English and Spanish', asy
   const dialog = page.getByTestId('replay-campaign-dialog')
   await expect(dialog).toContainText('4 of 4 eligible')
   await expect(dialog).toContainText('One failure cluster')
+  const sideEffects = dialog.getByTestId('replay-campaign-side-effects')
+  await expect(sideEffects).toContainText(FAILURE_NODE_ID)
+  await expect(sideEffects).toContainText('confirm_email')
   await dialog.getByTestId('replay-campaign-name').fill('Payments recovery')
   await dialog.getByTestId('replay-campaign-pace').selectOption('60000')
   await hideUnrelatedOverlays(page)
@@ -160,6 +159,8 @@ test('creates, observes, and stops a paced campaign in English and Spanish', asy
   await expect(campaign).toBeVisible()
   await expect(campaign).toContainText('Running')
   await expect(campaign).toContainText(/1 of 4 settled/, { timeout: 30_000 })
+  await campaign.getByRole('button', { name: 'View runs', exact: true }).click()
+  await expect(page.locator('[data-testid^="recovery-job-run-"]')).toHaveCount(4)
   await hideUnrelatedOverlays(page)
   await expectAccessible(page, 'Running replay campaign')
   await capture(page.getByTestId('replay-campaigns-card'), 'web-en-replay-campaign-running')
@@ -168,18 +169,18 @@ test('creates, observes, and stops a paced campaign in English and Spanish', asy
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
   await openWorkspaceSection(page, 'Actividad', 'Recuperar')
-  await openRecoveryAutomation(page)
+  await page.getByTestId('recover-section-jobs').click()
   const spanishCard = page.getByTestId('replay-campaigns-card')
   await expect(spanishCard).toContainText('Payments recovery')
   await expect(spanishCard).toContainText('En curso')
-  await spanishCard.getByRole('button', { name: 'Detener campaña', exact: true }).click()
+  await spanishCard.getByRole('button', { name: 'Abortar', exact: true }).click()
   await expect(spanishCard).toContainText('¿Dejar de tomar nuevos fallos?')
   await hideUnrelatedOverlays(page)
   await expectAccessible(page, 'Confirmación de campaña de reintentos')
   await capture(spanishCard, 'web-es-replay-campaign-cancel-confirm')
-  await spanishCard.getByRole('button', { name: 'Detener campaña', exact: true }).click()
-  await expect(spanishCard).toContainText('Detenida')
-  await expect(spanishCard).toContainText('Reintentados: 1 · Fallidos: 0')
+  await spanishCard.getByRole('button', { name: 'Abortar trabajo', exact: true }).click()
+  await expect(spanishCard).toContainText('Cancelado')
+  await expect(spanishCard).toContainText('1 de 4 finalizados')
   await hideUnrelatedOverlays(page)
   await expectAccessible(page, 'Campaña de reintentos detenida')
   await capture(spanishCard, 'web-es-replay-campaign-stopped')

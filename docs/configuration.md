@@ -15,6 +15,7 @@ names. It distinguishes strict boot validation from feature-specific fallbacks.
 | `JANUSLY_DATABASE_URL` | local `janusly` PostgreSQL URL on `127.0.0.1:15473` | PostgreSQL 18 connection string. Containers use the private `postgres:5432` endpoint. |
 | `JANUSLY_ENV` | development | Set to `production` to enable the production security and readiness posture. |
 | `JANUSLY_PORT` | `3001` | Public API and React listener. |
+| `JANUSLY_HTTP_HOST` | every interface | Public listener bind address; only loopback (`127.0.0.1`, `::1`) or wildcard (`0.0.0.0`, `::`) is accepted. Use `127.0.0.1` for a host-local process that trusts development auth headers. |
 | `JANUSLY_INTERNAL_HOST` | `127.0.0.1` | Internal metrics listener; only loopback (`127.0.0.1`, `::1`) or wildcard (`0.0.0.0`, `::`) is accepted. |
 | `JANUSLY_INTERNAL_PORT` | `9464` | Internal metrics and diagnostics port. |
 | `JANUSLY_LOG_LEVEL` | `info` | Floor for the structured log (`debug`, `info`, `warn`, `error`); unknown values keep `info`. |
@@ -203,6 +204,15 @@ calls after recorded spend reaches the threshold; concurrent or already
 in-flight calls may still settle above it. Use the separately bounded
 qualification harness for an exact call/cost breaker during provider tests.
 
+Settings shows this budget as an Off / Limit switch and a meter of the month's
+spend against the limit. Off stores `0`. `GET /billing/budget` only measures
+spend while a limit applies, so Off shows no spend figure. A workflow override
+replaces the org budget for that workflow; set back to Org-wide it stores `0`
+and the org budget applies again, so its row shows spend only while it has its
+own limit. The API does not read back an override's warning and policy once it
+stores `0`, so a new limit starts from the warning and policy governing the
+workflow at that point. With the org budget Off, workflow limits still apply.
+
 The catalog applies the same normalization to API writes and stored rows.
 Operator guidance is capped at 8 KiB and rejects secret-like content;
 `memory.allowedKinds`, `memory.retentionDaysByKind`, and
@@ -257,7 +267,8 @@ settings fail at boot and invalid new tenant/workflow writes are rejected.
 
 Tenant credentials are created through the credential API. Environment-backed
 credential references are restricted by the reserved namespace and optional
-`JANUSLY_CREDENTIAL_ENV_ALLOWLIST`.
+`JANUSLY_CREDENTIAL_ENV_ALLOWLIST`. Only `template_secret` credentials are
+reachable from `{{secret.NAME}}` templates; see [Templates](templates.md).
 
 ## Observability
 

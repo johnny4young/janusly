@@ -22,6 +22,7 @@ describe('workspace locations', () => {
       recover: 'activity',
       reasoning: 'activity',
       multiAgent: 'activity',
+      reports: 'activity',
       recoveryCase: 'activity',
       operations: 'settings',
       credentials: 'settings',
@@ -60,7 +61,11 @@ describe('workspace locations', () => {
       'workflows.read',
     ]).map((section) => section.tab)).toEqual([
       'runs',
+      'recover',
+      'multiAgent',
+      'reports',
     ])
+    expect(listWorkspaceSections('activity', ['runs.read']).map((section) => section.tab)).toEqual(['runs'])
   })
 
   it('retains the exact hidden subdestination as navigation context', () => {
@@ -68,6 +73,7 @@ describe('workspace locations', () => {
     expect(workspaceSectionForTab('recover')?.tab).toBe('recover')
     expect(workspaceSectionForTab('reasoning')?.tab).toBe('reasoning')
     expect(workspaceSectionForTab('multiAgent')?.tab).toBe('multiAgent')
+    expect(workspaceSectionForTab('reports')?.tab).toBe('reports')
     expect(workspaceSectionForTab('recoveryCase')?.tab).toBe('recover')
   })
 })

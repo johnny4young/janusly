@@ -1,6 +1,6 @@
-import {
+import { openReports,
   openActivityRecoveryDetail,
-  openWorkspaceSection,
+  openTemplatePacks,
 } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
@@ -111,7 +111,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   const orgId = await prepareSession(page, 'en')
 
   await page.goto('/')
-  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await openTemplatePacks(page)
   const drill = await startRuntimeDrill(page, 'Start recovery drill')
   const focusedFailure = await openActivityRecoveryDetail(page, drill.deadLetterId)
   const initialOutcome = focusedFailure.getByTestId('dlq-recovery-drill-outcome')
@@ -147,8 +147,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   await dismissToasts(page)
   await captureEvidence(recoveredOutcome, 'recovery-drill-outcome-en-recovered')
 
-  await page.getByRole('button', { name: /^Home\b/ }).click()
-  await page.getByTestId('home-insights-toggle').click()
+  await openReports(page)
   const validation = page.getByTestId('recovery-validation-section')
   await expect(validation).toContainText('Recovery validation')
   await expect(validation).toContainText('1/1')
@@ -174,7 +173,7 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Navegación' }).click()
-  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  await openTemplatePacks(page, true)
   const drill = await startRuntimeDrill(page, 'Iniciar ejercicio de recuperación')
   const focusedFailure = await openActivityRecoveryDetail(page, drill.deadLetterId)
   const outcome = focusedFailure.getByTestId('dlq-recovery-drill-outcome')
@@ -185,7 +184,9 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
     new URL(response.url()).pathname === '/dlq/resolve'
     && response.request().method() === 'POST'
   ))
-  await focusedFailure.getByRole('button', { name: 'Resolver', exact: true }).click()
+  await focusedFailure.getByRole('button', { name: 'Cerrar sin recuperar', exact: true }).click()
+  await page.getByTestId('dlq-close-reason').fill('Ejercicio de recuperación aceptado')
+  await page.getByTestId('dlq-close-confirm').click()
   expect((await resolveResponse).status()).toBe(200)
 
   const resolvedDetail = await openActivityRecoveryDetail(page, drill.deadLetterId)
@@ -200,9 +201,7 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
   await dismissToasts(page)
   await captureEvidence(resolvedOutcome, 'recovery-drill-outcome-es-accepted-loss-mobile')
 
-  await page.getByRole('button', { name: 'Navegación' }).click()
-  await page.locator('#workspace-sidebar').getByRole('button', { name: /^Inicio\b/ }).click()
-  await page.getByTestId('home-insights-toggle').click()
+  await openReports(page)
   const validation = page.getByTestId('recovery-validation-section')
   await expect(validation).toContainText('Validación de recuperación')
   await expect(validation).toContainText('1/1')

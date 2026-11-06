@@ -22,7 +22,8 @@ describe('modal accessibility contract', () => {
       './components/CanvasStepPicker.tsx',
       './components/CommandPalette.tsx',
       './components/ConfirmDialog.tsx',
-      './components/ConnectionsPanel.tsx',
+      './components/CredentialCreateDialog.tsx',
+      './components/CredentialRevokeDialog.tsx',
       './components/CredentialRotateModal.tsx',
       './components/DeadLetterCloseDialog.tsx',
       './components/RecoveryDialog.tsx',
@@ -30,11 +31,13 @@ describe('modal accessibility contract', () => {
       './components/ReplayLabDialog.tsx',
       './components/ReplayLabForkDialog.tsx',
       './components/ReportDeliveryDialog.tsx',
+      './components/RerunStepDialog.tsx',
       './components/RollbackConfirmDialog.tsx',
       './components/RunHistoryComparisonDialog.tsx',
       './components/RunInputDialog.tsx',
       './components/ShortcutsModal.tsx',
       './components/SnippetInsertMenu.tsx',
+      './components/WorkflowPromoteDialog.tsx',
       './Layout.tsx',
     ])
   })

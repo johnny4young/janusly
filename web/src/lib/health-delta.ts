@@ -1,5 +1,8 @@
 import type { ApiResponses } from './api-types.generated'
 import { isGetWorkflowsHealthDeltaResponse } from './api-guards/operations/GetWorkflowsHealthDelta'
+import { PLATFORM_TAG } from './query-cache'
+
+export const WORKFLOW_HEALTH_TAGS = [PLATFORM_TAG, 'workflows', 'runs', 'dlq', 'recovery'] as const
 
 export type HealthSnapshot = {
   score: number

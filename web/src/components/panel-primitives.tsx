@@ -10,8 +10,8 @@
  * `RightPanel.tsx → RunsPanel.tsx` dispatcher edge.
  *
  * Used by:
- * - `RightPanel.tsx` — dispatcher + small panels (Templates / Tools /
- *   Credentials / Reasoning) wrap themselves in `PanelChrome`; the four
+ * - `RightPanel.tsx` — dispatcher + small panels (Templates / Credentials /
+ *   Reasoning) wrap themselves in `PanelChrome`; those
  *   small panels also render `EmptyView` for their empty list states.
  * - `RunsPanel.tsx` — wraps in `PanelChrome`; renders `EmptyView` in the
  *   run-history empty state.
@@ -52,6 +52,7 @@ export function EmptyView({
   title,
   body,
   cta,
+  secondary,
 }: {
   icon: React.ReactNode
   title: string
@@ -59,8 +60,9 @@ export function EmptyView({
   /** Optional call-to-action — forwarded to `EmptyState` so a panel empty state
    *  can offer a next step (generate a template, clear a filter, …). */
   cta?: { label: string; onClick: () => void }
+  secondary?: { label: string; href: string }
 }) {
-  return <EmptyState icon={icon} kicker={title} body={body} cta={cta} />
+  return <EmptyState icon={icon} kicker={title} body={body} cta={cta} secondary={secondary} />
 }
 
 /**

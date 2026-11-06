@@ -14,6 +14,7 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { ApiResponses, RecoveryActorKind, RecoveryArtifact, RecoveryCaseState, RecoveryCase as WireRecoveryCase } from './lib/api-types.generated'
 import type { WorkflowRecovery } from './lib/recovery-contract'
+import type { AuthoringProblem } from './components/authoring-problems'
 
 export type JsonObject = Record<string, unknown>
 export type RunNode = {
@@ -35,6 +36,11 @@ type WorkflowNodeData = {
   status?: string
   helper?: string
   hasValidationError?: boolean
+  /** One-line error of a failed step while observing a run. */
+  errorSummary?: string | null
+  onRecover?: () => void
+  /** The step's worst authoring problem; projected for display, never persisted. */
+  problem?: AuthoringProblem
 }
 type WorkflowEdgeData = {
   condition?: string
@@ -106,7 +112,7 @@ export type Credential = {
 }
 
 /** One required credential a solution pack declares (name + kind + purpose; never a secret value). */
-type PackRequiredCredential = { name: string; kind: string; purpose: string }
+export type PackRequiredCredential = { name: string; kind: string; purpose: string }
 /** One required org-config key a solution pack declares. */
 type PackRequiredOrgConfig = { key: string; purpose: string }
 export type SolutionPackFailureMode =
@@ -152,7 +158,7 @@ export type SolutionPackPublic = {
  * `lastRunStatus`, which is the outcome of its most recent run. A paused
  * workflow refuses new runs, so the list must say so.
  */
-export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string | null; createdAt?: string | null; updatedAt?: string | null; lastRunStatus?: string | null; runCount?: number; bufferedTriggerCount?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
+export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string | null; createdAt?: string | null; updatedAt?: string | null; lastRunStatus?: string | null; lastRunAt?: string | null; runCount?: number; bufferedTriggerCount?: number; openFailureCount?: number; currentVersion?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
 export type ValidationEvidenceLevel =
   | 'static'
   | 'writes_skipped'
@@ -181,6 +187,8 @@ export type RunSummary = {
   semanticViolationCount?: number
   createdBy?: string | null
   createdAt?: string | null
+  /** Full-precision keyset `before` value from the bounded `/runs` list. */
+  cursor?: string | null
   /** Full run-start envelope. Present on `/run` and `/status`; omitted from the bounded `/runs` list. */
   inputJson?: JsonObject | null
   /** Correlation id shared by a subworkflow chain. Null on historical root runs that predate trace assignment. */
@@ -193,6 +201,7 @@ export type RunSummary = {
    * Drives whether the "Open in Lab" button surfaces (no nested labs).
    */
   replayMode?: string | null
+  parentRunId?: string | null
   /** Strength of evidence produced by a validation run. */
   validationEvidenceLevel?: ValidationEvidenceLevel | null
 }
@@ -410,7 +419,7 @@ export function parseAiCandidateBackoff(value: unknown): AiCandidateBackoff | un
   return { from, to }
 }
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
-export type ActiveTab = 'home' | 'recover' | 'workflows' | 'members' | 'ai-studio' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations' | 'recoveryCase'
+export type ActiveTab = 'home' | 'recover' | 'workflows' | 'members' | 'ai-studio' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'reports' | 'operations' | 'recoveryCase'
 
 /**
  * Tabs that NEED the React Flow canvas mounted as their main slot. Today

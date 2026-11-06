@@ -17,7 +17,7 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await openWorkflowCreation(page)
-  await page.getByRole('button', { name: /^Start blank\b/ }).click()
+  await page.getByRole('menuitem', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
   await addCanvasStep(page, 'Do nothing')
 
@@ -43,7 +43,7 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await openWorkflowCreation(page)
-  await page.getByRole('button', { name: /^Start blank\b/ }).click()
+  await page.getByRole('menuitem', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(`E2E Human Form ${Date.now()}`)
   await addCanvasStep(page, 'Collect form')
 

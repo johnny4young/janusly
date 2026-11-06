@@ -5,6 +5,7 @@
 .we-experiments {
   display: grid;
   gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .we-experiments__form,
@@ -16,10 +17,89 @@
 
 .we-experiments__dataset-form {
   align-items: end;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(150px, 0.6fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(190px, 0.6fr) auto;
+}
+
+/* This sheet loads after platform.css, so the narrow layout must be restated here. */
+@media (max-width: 700px) {
+  .we-experiments__dataset-form { grid-template-columns: 1fr; }
 }
 
 .we-experiments__ref-hint { margin-top: -2px; }
+
+.we-experiments__steps {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.we-experiments__step {
+  background: var(--we-surface-1);
+  border: 1px solid var(--we-line);
+  border-radius: 7px;
+  color: var(--we-text-1);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 2px;
+  height: 100%;
+  padding: 8px 10px;
+  position: relative;
+  text-align: left;
+  width: 100%;
+}
+
+.we-experiments__step[aria-current="step"] {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+}
+
+.we-experiments__step:focus-visible {
+  box-shadow: var(--we-focus-ring);
+  outline: none;
+}
+
+.we-experiments__step small {
+  color: var(--we-text-2);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.we-experiments__step-done {
+  color: var(--we-success-text);
+  display: inline-flex;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+
+.we-experiments__create:not(:first-child) {
+  border-top: 1px solid var(--we-line);
+  margin-top: 8px;
+  padding-top: 12px;
+}
+
+.we-experiments__create h4 { margin: 0 0 4px; }
+
+.we-experiments__actions {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.we-experiments__blocker {
+  height: auto;
+  margin-right: auto;
+  min-height: var(--we-control-sm);
+  padding-block: 4px;
+  text-align: left;
+  white-space: normal;
+}
 
 .we-experiments__list {
   display: grid;
@@ -64,7 +144,7 @@
 
 .we-experiments__table {
   border-collapse: collapse;
-  min-width: 620px;
+  min-width: 480px;
   width: 100%;
 }
 
@@ -85,30 +165,66 @@
   font-weight: 700;
 }
 
-.we-experiments__deltas {
+.we-experiments__diff-only {
+  margin-top: 10px;
+  width: fit-content;
+}
+
+.we-experiments__arm {
+  display: block;
+  font-size: 12px;
+}
+
+.we-experiments__arm code {
+  display: block;
+  font-weight: 400;
+  margin: 2px 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.we-experiments__baseline[aria-pressed="true"] {
+  cursor: default;
+}
+
+.we-experiments__baseline[data-baseline="true"] {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-ink);
+}
+
+.we-experiments__direction {
+  color: var(--we-text-2);
+  display: inline-flex;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.we-experiments__delta {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.we-experiments__delta[data-verdict="better"] { color: var(--we-success-text); }
+.we-experiments__delta[data-verdict="worse"] { color: var(--we-danger-text); }
+.we-experiments__delta[data-verdict="neutral"] { color: var(--we-text-2); }
+
+.we-experiments__notice {
+  align-items: flex-start;
+  background: var(--we-warning-soft);
+  border: 1px solid var(--we-warning);
+  border-radius: 7px;
+  color: var(--we-warning-text);
+  display: flex;
+  gap: 6px;
   margin: 12px 0 0;
+  padding: 8px 10px;
 }
 
-.we-experiments__deltas div {
-  background: var(--we-surface-muted);
-  border-radius: 6px;
-  padding: 7px 9px;
-}
-
-.we-experiments__deltas dt {
-  color: var(--we-text-2);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.we-experiments__deltas dd {
-  font-weight: 700;
-  margin: 2px 0 0;
-}
+.we-experiments__notice svg { flex: none; margin-top: 2px; }
 
 .we-experiments__recommendation {
   background: var(--we-primary-soft);

@@ -1,7 +1,7 @@
 import { currentApiRequestLifecycle } from '../api-request-lifecycle'
 import { useAliveRef } from '../hooks/useAliveRef'
-import { DeadLetterCloseDialog, type DeadLetterCloseTarget } from './DeadLetterCloseDialog'
-import { readDeadLetterDetail } from '../lib/dead-letter-contract'
+import { DeadLetterCloseDialog } from './DeadLetterCloseDialog'
+import { readClusterMembers, readClusterRecovery, readDeadLetterDetail, type ClusterRecovery } from '../lib/dead-letter-contract'
 /**
  * Dead-letter operations panel — surfaces `dead_letters` rows with replay
  * + resolve actions. Calls `bumpPlatformVersion(DEAD_LETTER_MUTATION_TAGS)` after a successful
@@ -10,12 +10,13 @@ import { readDeadLetterDetail } from '../lib/dead-letter-contract'
  * Mounted by `RunsPanel.tsx` for Activity → Recover.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 import { api, downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
+const ReplayCampaignsCard = lazy(() => import('./ReplayCampaignsCard').then((m) => ({ default: m.ReplayCampaignsCard })))
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { ReplayCampaignDialog } from './ReplayCampaignDialog'
 import { tApiError, useT } from '../i18n'
@@ -31,14 +32,19 @@ import {
   type RecoveryQueueFocusRequest,
 } from './recovery-queue-focus-bus'
 import {
+  groupQueueByCluster,
   isBulkReplayResult,
   isBulkResolveResult,
+  queueListItems,
   triageQueueSignature,
+  type QueueClusterGroup,
 } from './dead-letter-model'
-import type {
-  BulkDeadLetterError,
-  DeadLetter,
-  PendingTriageFocus,
+import {
+  deadLetterCloseTarget,
+  type BulkDeadLetterError,
+  type DeadLetter,
+  type DeadLetterCloseTarget,
+  type PendingTriageFocus,
 } from './dead-letter-types'
 import { DeadLetterQueueView } from './DeadLetterQueueView'
 import { RecoveryAutomationDisclosure } from './RecoveryAutomationDisclosure'
@@ -53,21 +59,21 @@ const DEAD_LETTER_MUTATION_TAGS = ['dlq', 'recovery', 'runs'] as const
 
 const DEAD_LETTER_TAGS = [PLATFORM_TAG, 'dlq', 'recovery', 'runs', 'auto-healing'] as const
 
-/** Fixed DLQ row height (54px) plus the 6px `.we-list` gap. The matching
- *  `.we-dlq-row` rule prevents metadata wrapping so virtual offsets stay
- *  exact even when the queue is long. */
-const DLQ_ROW_PITCH = 60
+/** Fixed row height (84px) plus the 6px `.we-list` gap, shared by failure rows
+ *  and cluster headers so virtual offsets stay exact in both queue views. */
+const DLQ_ROW_PITCH = 90
 
 type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
   onReplay: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
-  onResolve: (id: string) => boolean | Promise<boolean> | undefined
+  onResolve: (id: string, reason: string) => boolean | Promise<boolean> | undefined
   canReplay?: boolean
   canResolve?: boolean
   canStartRuns?: boolean
   canUseRecovery?: boolean
   canReadAutoHealing?: boolean
   canDecideAutoHealing?: boolean
+  onOpenRun?: (runId: string) => void | Promise<void>
 }
 
 /** Render the DLQ list with status filter, replay, and resolve controls. */
@@ -81,6 +87,7 @@ export function DeadLettersPanel({
   canUseRecovery = true,
   canReadAutoHealing = true,
   canDecideAutoHealing = true,
+  onOpenRun,
 }: DeadLettersPanelProps) {
   const { t } = useT()
   // Filter/sort state + persistence + the cap-correct server fetch + the
@@ -92,6 +99,8 @@ export function DeadLettersPanel({
     ownerScope,
     severityFilter,
     sortKey,
+    view,
+    clusters,
     filtered,
     recoveryFilterLoading,
     recoveryItems,
@@ -99,6 +108,16 @@ export function DeadLettersPanel({
     loadMore,
     counts,
   } = queue
+  const clusterGroups = useMemo(
+    () => (view === 'clusters' ? groupQueueByCluster(filtered, clusters) : null),
+    [clusters, filtered, view],
+  )
+  // Visual order: J/K and triage focus walk this, not the page order.
+  const orderedRows = useMemo(
+    () => clusterGroups?.flatMap((group) => group.rows) ?? filtered,
+    [clusterGroups, filtered],
+  )
+  const queueItems = useMemo(() => queueListItems(filtered, clusterGroups), [clusterGroups, filtered])
   const queueSectionRef = useRef<HTMLElement | null>(null)
   const queueRowRefs = useRef<Map<string, HTMLLIElement>>(new Map())
   const [queueFocusRequest, setQueueFocusRequest] = useState<RecoveryQueueFocusRequest | null>(null)
@@ -117,7 +136,8 @@ export function DeadLettersPanel({
   const openRecoveryItem = openRecoveryItemId
     ? recoveryItems.find((it) => it.id === openRecoveryItemId) ?? null
     : null
-  const [recoveryDeadLetter, setRecoveryDeadLetter] = useState<DeadLetter | null>(null)
+  const [recovery, setRecovery] = useState<{ dlq: DeadLetter; cluster?: ClusterRecovery & { signature: string } } | null>(null)
+  const [clusterActionSignature, setClusterActionSignature] = useState<string | null>(null)
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
   const addToast = useWorkflowStore((state) => state.addToast)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
@@ -158,12 +178,11 @@ export function DeadLettersPanel({
       && current.orgId === closeRequest.orgId && current.userId === closeRequest.userId
   }
 
-  const requestClose = (items: DeadLetterCloseTarget[], bulk: boolean) => {
-    if (!canResolve || closeRequest || items.length === 0) return
+  const requestClose = (targets: DeadLetterCloseTarget[], bulk: boolean) => {
+    if (!canResolve || closeRequest || targets.length === 0) return
     setPendingTriageFocus(null)
     setCloseRequest({
-      targets: items.map(({ id, workflowName, runId, nodeId }) => ({ id, workflowName, runId, nodeId })),
-      bulk, orgId, userId, signal: currentApiRequestLifecycle().signal,
+      targets, bulk, orgId, userId, signal: currentApiRequestLifecycle().signal,
     })
   }
   // Per-row failure reasons from the last bulk action's partial-success
@@ -171,6 +190,7 @@ export function DeadLettersPanel({
   // rows), so the operator can tell a transient blip from "already replayed".
   const [bulkErrors, setBulkErrors] = useState<BulkDeadLetterError[]>([])
   const [campaignDeadLetterIds, setCampaignDeadLetterIds] = useState<string[] | null>(null)
+  const [section, setSection] = useState<'queue' | 'jobs'>('queue')
 
   const handleRefresh = () => {
     refreshQueue()
@@ -225,13 +245,13 @@ export function DeadLettersPanel({
   // resolve's post-success behavior (bump + refetch + toast). The API uses a
   // 200 partial-success envelope, so inspect it before deciding whether to
   // clear or keep the remaining failed selections.
-  const bulkResolve = async () => {
+  const bulkResolve = async (reason: string) => {
     if (!canResolve || !closeIsCurrent() || !closeRequest) return false
     const ids = closeRequest.targets.map(item => item.id)
     if (ids.some(id => replayingIds.has(id))) return false
     setBulkErrors([])
     try {
-      const result = await api('/dlq/bulk-resolve', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
+      const result = await api('/dlq/bulk-resolve', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids, reason }) })
       if (!closeIsCurrent()) return false
       if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed'))
 
@@ -310,6 +330,7 @@ export function DeadLettersPanel({
     refreshQueue()
     void onRefresh()
     exitSelection()
+    setSection('jobs')
   }
 
   // Org-wide open count drives the warning stripe — there are opens to work
@@ -412,18 +433,22 @@ export function DeadLettersPanel({
     startOffset: virtualStartOffset,
     scrollToIndex: scrollToQueueIndex,
   } = useVirtualList({
-    items: filtered,
+    items: queueItems,
     rowHeight: DLQ_ROW_PITCH,
     // Reset scroll on filter swap, NOT on every refetch — the
     // `platformVersion`-driven refetch produces a new `filtered`
     // reference even when the content is identical, and resetting
     // scroll there would jump the operator's view to row 0 on every
     // bump. The filter signal is the real "visible set changed" cue.
-    resetScrollKey: `${status}|${ownerScope}|${severityFilter}|${sortKey}`,
+    resetScrollKey: `${status}|${ownerScope}|${severityFilter}|${sortKey}|${view}`,
   })
 
+  const scrollToQueueRow = useCallback((id: string) => {
+    scrollToQueueIndex(queueItems.findIndex((entry) => entry.kind === 'row' && entry.item.id === id), 'center')
+  }, [queueItems, scrollToQueueIndex])
+
   const focusQueueRow = useCallback((index: number) => {
-    const next = filtered[index]
+    const next = orderedRows[index]
     if (!next) return
     setQueueFocusRequest(null)
     setRequestedId(null)
@@ -434,9 +459,9 @@ export function DeadLettersPanel({
       row.focus({ preventScroll: true })
       return
     }
-    scrollToQueueIndex(index, 'center')
+    scrollToQueueRow(next.id)
     setPendingKeyboardFocusId(next.id)
-  }, [filtered, scrollToQueueIndex])
+  }, [orderedRows, scrollToQueueRow])
 
   useEffect(() => {
     if (closeRequest || !pendingKeyboardFocusId) return
@@ -452,8 +477,8 @@ export function DeadLettersPanel({
     target: Pick<DeadLetter, 'id'> | null = selected,
   ) => {
     if (!target) return false
-    const actionIndex = filtered.findIndex((item) => item.id === target.id)
-    const neighborIds = [filtered[actionIndex + 1]?.id, filtered[actionIndex - 1]?.id]
+    const actionIndex = orderedRows.findIndex((item) => item.id === target.id)
+    const neighborIds = [orderedRows[actionIndex + 1]?.id, orderedRows[actionIndex - 1]?.id]
       .filter((id): id is string => Boolean(id))
     const request: PendingTriageFocus = {
       actionId: target.id,
@@ -494,22 +519,22 @@ export function DeadLettersPanel({
 
   const resolveSelected = async () => {
     if (!canResolve || !selected || selected.status === 'resolved' || replayingIds.has(selected.id)) return
-    requestClose([selected], false)
+    requestClose([deadLetterCloseTarget(selected)], false)
   }
 
   useEffect(() => {
     if (selectionMode || closeRequest || !pendingTriageFocus?.settled || recoveryFilterLoading) return
     if (triageQueueSignature(filtered) === pendingTriageFocus.queueSignature) return
 
-    const actionIndex = filtered.findIndex((item) => item.id === pendingTriageFocus.actionId)
+    const actionIndex = orderedRows.findIndex((item) => item.id === pendingTriageFocus.actionId)
     if (actionIndex >= 0) {
       focusQueueRow(actionIndex)
       setPendingTriageFocus(null)
       return
     }
 
-    const neighborId = pendingTriageFocus.neighborIds.find((id) => filtered.some((item) => item.id === id))
-    const neighborIndex = neighborId ? filtered.findIndex((item) => item.id === neighborId) : -1
+    const neighborId = pendingTriageFocus.neighborIds.find((id) => orderedRows.some((item) => item.id === id))
+    const neighborIndex = neighborId ? orderedRows.findIndex((item) => item.id === neighborId) : -1
     if (neighborIndex >= 0) {
       focusQueueRow(neighborIndex)
     } else if (filtered.length > 0) {
@@ -518,7 +543,7 @@ export function DeadLettersPanel({
       queueSectionRef.current?.focus({ preventScroll: true })
     }
     setPendingTriageFocus(null)
-  }, [closeRequest, filtered, focusQueueRow, pendingTriageFocus, recoveryFilterLoading, selectionMode])
+  }, [closeRequest, filtered, focusQueueRow, orderedRows, pendingTriageFocus, recoveryFilterLoading, selectionMode])
 
   useEffect(() => {
     if (!pendingTriageFocus?.settled) return
@@ -535,11 +560,11 @@ export function DeadLettersPanel({
     const hasCommandModifier = event.metaKey || event.ctrlKey
 
     if (!hasCommandModifier && !event.altKey && !event.shiftKey && (key === 'j' || key === 'k')) {
-      const currentIndex = selected ? filtered.findIndex((item) => item.id === selected.id) : -1
+      const currentIndex = selected ? orderedRows.findIndex((item) => item.id === selected.id) : -1
       const nextIndex = key === 'j'
-        ? Math.min(filtered.length - 1, Math.max(0, currentIndex + 1))
+        ? Math.min(orderedRows.length - 1, Math.max(0, currentIndex + 1))
         : Math.max(0, currentIndex <= 0 ? 0 : currentIndex - 1)
-      if (filtered[nextIndex]) {
+      if (orderedRows[nextIndex]) {
         event.preventDefault()
         event.stopPropagation()
         focusQueueRow(nextIndex)
@@ -600,6 +625,7 @@ export function DeadLettersPanel({
       setRequestedNotFoundId(null)
       setRequestedId(request.deadLetterId ?? null)
       setQueueFocusRequest(request)
+      setSection('queue')
     }
     const pendingRequest = consumeRecoveryQueueFocus()
     if (pendingRequest) adopt(pendingRequest)
@@ -630,7 +656,7 @@ export function DeadLettersPanel({
         return
       }
       if (!targetRow && virtualContainerRef.current) {
-        scrollToQueueIndex(targetIndex, 'center')
+        scrollToQueueRow(targetId)
         return
       }
       if (targetRow) {
@@ -647,7 +673,7 @@ export function DeadLettersPanel({
     queue?.scrollIntoView?.({ block: 'start', inline: 'nearest' })
     queue?.focus({ preventScroll: true })
     setQueueFocusRequest(null)
-  }, [closeRequest, filtered, offListSelected, queueFocusRequest, recoveryFilterLoading, requestedNotFoundId, scrollToQueueIndex, virtualContainerRef, visibleDeadLetters])
+  }, [closeRequest, filtered, offListSelected, queueFocusRequest, recoveryFilterLoading, requestedNotFoundId, scrollToQueueRow, virtualContainerRef, visibleDeadLetters])
 
   const exportSelectedRunExplain = async () => {
     if (!selected) return
@@ -659,83 +685,149 @@ export function DeadLettersPanel({
     }
   }
 
+  const runClusterAction = async (group: QueueClusterGroup, load: (openRows: DeadLetter[]) => Promise<() => void>) => {
+    const origin = orgId
+    setClusterActionSignature(group.signature)
+    try {
+      const commit = await load(group.rows.filter((row) => row.status === 'open'))
+      if (alive.current && useWorkflowStore.getState().orgId === origin) commit()
+    } catch (error) {
+      if (alive.current) addToast(t('clusters.recoveryError', { detail: tApiError(error) || t('clusters.errorMembers') }), 'error')
+    } finally {
+      if (alive.current) setClusterActionSignature(null)
+    }
+  }
+
+  // Loaded rows answer for a signature the 30-day rollup no longer covers.
+  const investigateCluster = (group: QueueClusterGroup) => void runClusterAction(group, async ([representative]) => {
+    if (!representative) return () => {}
+    const loaded = await readClusterRecovery(group.signature, representative.id)
+    if (loaded && loaded.members.length > 1) {
+      return () => setRecovery({ dlq: loaded.dlq, cluster: { ...loaded, signature: group.signature } })
+    }
+    const dlq = loaded?.dlq ?? await readDeadLetterDetail(representative.id)
+    return () => setRecovery({ dlq })
+  })
+
+  const replayCluster = (group: QueueClusterGroup) => void runClusterAction(group, async (openRows) => {
+    const { deadLetterIds } = await readClusterMembers(group.signature)
+    return () => setCampaignDeadLetterIds(deadLetterIds.length > 0 ? deadLetterIds : openRows.map((row) => row.id))
+  })
+
   return (
     <>
-      <DeadLetterQueueView
-        queue={queue}
-        sectionRef={queueSectionRef}
-        rowRefs={queueRowRefs}
-        cardSeverity={cardSeverity}
-        virtual={{
-          containerRef: virtualContainerRef,
-          visibleItems: visibleDeadLetters,
-          totalHeight: virtualTotalHeight,
-          startOffset: virtualStartOffset,
-        }}
-        selection={{
-          selectionMode,
-          selectedIds,
-          selected,
-          selectedFull,
-          selectedDetailReady,
-          requestedNotFound,
-          replayingIds,
-          openRecoveryItem,
-          confirmBulkReplay,
-          closing: closeRequest !== null,
-          bulkErrors,
-          loadedIds,
-          allLoadedSelected,
-          showSuspectDiff,
-        }}
-        permissions={{ canReplay, canResolve, canStartRuns, canUseRecovery }}
-        actions={{
-          handleKeyDown: handleQueueKeyDown,
-          toggleSelectionMode: () => (selectionMode ? exitSelection() : enterSelection()),
-          refresh: handleRefresh,
-          toggleSelectAll,
-          toggleSelect,
-          setConfirmBulkReplay,
-          bulkReplay,
-          bulkResolve: async () => requestClose([...selectedIds]
-            .filter(id => !replayingIds.has(id))
-            .map(id => filtered.find(item => item.id === id) ?? { id }), true),
-          createReplayCampaign: setCampaignDeadLetterIds,
-          selectRow: (id) => { setQueueFocusRequest(null); setRequestedId(null); setSelectedId(id) },
-          openRecoveryItem: setOpenRecoveryItemId,
-          loadMore,
-          startRecovery: setRecoveryDeadLetter,
-          replaySelected,
-          resolveSelected,
-          copySelectedError,
-          openReplayLab: setLabSourceRunId,
-          exportRunExplain: exportSelectedRunExplain,
-          toggleSuspectDiff: () => setShowSuspectDiff((value) => !value),
-        }}
-      />
+      <div className="we-seg we-recover-sections" role="group" aria-label={t('dlq.sections.label')}>
+        {(['queue', 'jobs'] as const).map(option => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={section === option}
+            onClick={() => setSection(option)}
+            data-testid={`recover-section-${option}`}
+          >
+            {t(option === 'queue' ? 'dlq.sections.queue' : 'replayCampaign.title')}
+          </button>
+        ))}
+      </div>
+      {/* Hidden rather than unmounted: filters, selection and focus survive a look at the jobs. */}
+      <div className="we-recover-queue" hidden={section === 'jobs'}>
+        <DeadLetterQueueView
+          queue={queue}
+          queueItemCount={queueItems.length}
+          sectionRef={queueSectionRef}
+          rowRefs={queueRowRefs}
+          cardSeverity={cardSeverity}
+          virtual={{
+            containerRef: virtualContainerRef,
+            visibleItems: visibleDeadLetters,
+            totalHeight: virtualTotalHeight,
+            startOffset: virtualStartOffset,
+          }}
+          selection={{
+            selectionMode,
+            selectedIds,
+            selected,
+            selectedFull,
+            selectedDetailReady,
+            requestedNotFound,
+            replayingIds,
+            openRecoveryItem,
+            confirmBulkReplay,
+            closing: closeRequest !== null,
+            bulkErrors,
+            loadedIds,
+            allLoadedSelected,
+            showSuspectDiff,
+            clusterActionSignature,
+          }}
+          permissions={{ canReplay, canResolve, canStartRuns, canUseRecovery }}
+          actions={{
+            handleKeyDown: handleQueueKeyDown,
+            toggleSelectionMode: () => (selectionMode ? exitSelection() : enterSelection()),
+            refresh: handleRefresh,
+            toggleSelectAll,
+            toggleSelect,
+            setConfirmBulkReplay,
+            bulkReplay,
+            bulkResolve: async () => requestClose([...selectedIds]
+              .filter(id => !replayingIds.has(id))
+              .map(id => {
+                const row = filtered.find(item => item.id === id)
+                return row ? deadLetterCloseTarget(row) : { id }
+              }), true),
+            createReplayCampaign: setCampaignDeadLetterIds,
+            selectRow: (id) => { setQueueFocusRequest(null); setRequestedId(null); setSelectedId(id) },
+            openRecoveryItem: setOpenRecoveryItemId,
+            loadMore,
+            startRecovery: (dlq) => setRecovery({ dlq }),
+            replaySelected,
+            resolveSelected,
+            copySelectedError,
+            openReplayLab: setLabSourceRunId,
+            exportRunExplain: exportSelectedRunExplain,
+            toggleSuspectDiff: () => setShowSuspectDiff((value) => !value),
+            investigateCluster,
+            replayCluster,
+          }}
+        />
+        <RecoveryAutomationDisclosure
+          canRecover={canUseRecovery}
+          canStartRuns={canStartRuns}
+          canReadAutoHealing={canReadAutoHealing}
+          canDecideAutoHealing={canDecideAutoHealing}
+        />
+      </div>
+      {section === 'jobs' && (
+        <Suspense fallback={<p className="helper-text">{t('common.loading')}</p>}>
+          <ReplayCampaignsCard
+            canCancel={canReplay}
+            onNew={canReplay ? () => { setSection('queue'); enterSelection() } : undefined}
+            onOpenRun={onOpenRun}
+          />
+        </Suspense>
+      )}
       {closeRequest && (
         <DeadLetterCloseDialog targets={closeRequest.targets}
           onClose={() => setCloseRequest(current => current === closeRequest ? null : current)}
-          onConfirm={async () => {
+          onConfirm={async reason => {
             if (!canResolve || !closeIsCurrent()) return false
-            if (closeRequest.bulk) return bulkResolve()
+            if (closeRequest.bulk) return bulkResolve(reason)
             const target = closeRequest.targets[0]
             if (!target || replayingIds.has(target.id)) return false
-            return runSelectedTriageAction(onResolve, target)
+            return runSelectedTriageAction(id => onResolve(id, reason), target)
           }} />
       )}
-      <RecoveryAutomationDisclosure
-        canRecover={canUseRecovery}
-        canCancelCampaign={canReplay}
-        canReadAutoHealing={canReadAutoHealing}
-        canDecideAutoHealing={canDecideAutoHealing}
-      />
 
-      {recoveryDeadLetter && (
+      {recovery && (
         <Suspense fallback={null}>
           <RecoveryDialog
-            dlq={recoveryDeadLetter}
-            onClose={() => setRecoveryDeadLetter(null)}
+            dlq={recovery.dlq}
+            clusterMembers={recovery.cluster?.members}
+            clusterSignature={recovery.cluster?.signature}
+            clusterMembersCapped={recovery.cluster?.capped}
+            clusterMembersTotal={recovery.cluster?.total}
+            onClose={() => setRecovery(null)}
+            canReplayInLab={canStartRuns}
           />
         </Suspense>
       )}

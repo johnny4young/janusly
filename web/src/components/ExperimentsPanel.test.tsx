@@ -1,10 +1,13 @@
-import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { changeAppLanguage } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { ExperimentsPanel } from './ExperimentsPanel'
+import { MIN_SCORE_DELTA } from './experiments/types'
 import { useInvalidationNonce } from '../lib/query-cache'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
@@ -40,7 +43,7 @@ const experiment = {
 beforeEach(() => {
   changeAppLanguage('en')
   vi.mocked(api).mockReset()
-  useWorkflowStore.setState({ toasts: [] })
+  useWorkflowStore.setState({ toasts: [], identityContext: null })
 })
 
 describe('<ExperimentsPanel />', () => {
@@ -57,10 +60,10 @@ describe('<ExperimentsPanel />', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Triage candidate/i }))
 
     await waitFor(() => expect(screen.getByTestId('experiment-detail')).toBeInTheDocument())
-    expect(screen.getByRole('columnheader', { name: 'Score' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: 'Scoring fallbacks' })).toBeInTheDocument()
-    expect(screen.getByRole('rowheader', { name: 'Control' })).toBeInTheDocument()
-    expect(screen.getByRole('rowheader', { name: 'Candidate' })).toBeInTheDocument()
+    expect(screen.getByRole('rowheader', { name: /^Score/ })).toBeInTheDocument()
+    expect(screen.getByRole('rowheader', { name: /^Scoring fallbacks/ })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /^Control\s*triage@1/ })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /^Candidate\s*triage@2/ })).toBeInTheDocument()
     expect(screen.getByText('Candidate recommended')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy candidate reference' })).toBeInTheDocument()
   })
@@ -76,9 +79,11 @@ describe('<ExperimentsPanel />', () => {
     render(<ExperimentsPanel />)
 
     await screen.findByRole('option', { name: 'Accepted recoveries · 4 examples' })
-    fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Triage candidate' } })
+    fireEvent.click(screen.getByTestId('experiment-step-next'))
     fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'triage@1' } })
     fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'triage@2' } })
+    fireEvent.click(screen.getByTestId('experiment-step-next'))
+    fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Triage candidate' } })
     fireEvent.click(screen.getByRole('button', { name: 'Run comparison' }))
 
     await waitFor(() => {
@@ -212,9 +217,11 @@ describe('<ExperimentsPanel />', () => {
     render(<ExperimentsPanel />)
 
     await screen.findByRole('option', { name: 'Six cases · 6 examples' })
-    fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Judge candidate' } })
+    fireEvent.click(screen.getByTestId('experiment-step-arms'))
     fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'model-a' } })
     fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'model-b' } })
+    fireEvent.click(screen.getByTestId('experiment-step-run'))
+    fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Judge candidate' } })
     fireEvent.change(screen.getByLabelText('Scorer'), { target: { value: 'llm_judge' } })
 
     expect(screen.getByRole('alert')).toHaveTextContent('This plan needs 24 provider calls')
@@ -229,5 +236,463 @@ describe('<ExperimentsPanel />', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/network unavailable/i)
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  describe('three-step setup', () => {
+    const blocker = () => screen.getByTestId('experiment-run-blocker')
+    const runButton = () => screen.getByTestId('experiment-run')
+    function mockData(datasets: unknown[], limits?: unknown): void {
+      vi.mocked(api).mockImplementation(async (path: string) => {
+        if (path === '/experiments') return { experiments: [], limits }
+        if (path === '/eval/datasets') return { datasets }
+        return {}
+      })
+    }
+    const dataset = (exampleCount: number) => ({ id: 'dataset-1', name: 'Bed', description: '', exampleCount })
+
+    it('names the missing dataset step and offers only creation when none exists', async () => {
+      mockData([])
+      render(<ExperimentsPanel />)
+
+      await waitFor(() => expect(blocker()).toHaveTextContent('Step 1 · Dataset: create a dataset first'))
+      expect(runButton()).toBeDisabled()
+      expect(runButton()).toHaveAttribute('aria-describedby', 'experiment-run-blocker')
+      expect(screen.getByTestId('experiment-step-dataset')).toHaveAttribute('aria-current', 'step')
+      expect(screen.queryByLabelText('Evaluation dataset')).not.toBeInTheDocument()
+      expect(screen.getByTestId('experiment-create-dataset')).toBeInTheDocument()
+      expect(screen.getByTestId('experiment-dataset-create')).toBeDisabled()
+      expect(screen.getByTestId('experiment-panel-dataset')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('experiment-step-run'))
+      fireEvent.click(blocker())
+      expect(screen.getByTestId('experiment-step-dataset')).toHaveAttribute('aria-current', 'step')
+      expect(screen.getByLabelText('Dataset name')).toHaveFocus()
+    })
+
+    it('points loading and failed lists at the dataset list and Retry, never at creation', async () => {
+      let rejectDatasets: (error: Error) => void = () => undefined
+      let calls = 0
+      vi.mocked(api).mockImplementation((path: string) => {
+        if (path !== '/eval/datasets') return Promise.resolve({ experiments: [] })
+        calls += 1
+        return calls === 1
+          ? new Promise((_, reject) => { rejectDatasets = reject })
+          : Promise.resolve({ datasets: [dataset(4)] })
+      })
+      render(<ExperimentsPanel />)
+
+      expect(blocker()).toHaveTextContent('Step 1 · Dataset: loading datasets')
+      expect(screen.getByLabelText('Evaluation dataset')).toBeInTheDocument()
+      fireEvent.click(blocker())
+      await waitFor(() => expect(screen.getByLabelText('Evaluation dataset')).toHaveFocus())
+
+      rejectDatasets(new Error('offline'))
+      await waitFor(() => expect(blocker()).toHaveTextContent('Step 1 · Dataset: datasets could not be loaded'))
+      fireEvent.click(blocker())
+      await waitFor(() => expect(screen.getByTestId('experiment-datasets-retry')).toHaveFocus())
+      expect(screen.getByLabelText('Dataset name')).not.toHaveFocus()
+
+      fireEvent.click(screen.getByTestId('experiment-datasets-retry'))
+      await screen.findByRole('option', { name: 'Bed · 4 examples' })
+      expect(screen.queryByTestId('experiment-datasets-retry')).not.toBeInTheDocument()
+    })
+
+    it('blocks text the server would reject, counting UTF-8 bytes', async () => {
+      mockData([dataset(4)])
+      render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 4 examples' })
+
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'a'.repeat(257) } })
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'b'.repeat(256) } })
+      expect(blocker()).toHaveTextContent('Step 2 · Control vs candidate: shorten the reference')
+      expect(screen.getByLabelText('Control reference')).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByTestId('experiment-control-limit')).toHaveTextContent('257 of 256 bytes')
+      expect(screen.queryByTestId('experiment-candidate-limit')).not.toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'a'.repeat(256) } })
+
+      fireEvent.click(screen.getByTestId('experiment-step-run'))
+      // 60 accented letters are 60 characters but 120 bytes; one more letter crosses the limit.
+      fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'é'.repeat(60) } })
+      expect(screen.queryByTestId('experiment-run-blocker')).not.toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'é'.repeat(60) + 'a' } })
+      expect(blocker()).toHaveTextContent('Step 3 · Scorer and run: shorten the name')
+      expect(screen.getByTestId('experiment-name-limit')).toHaveTextContent('121 of 120 bytes')
+      expect(runButton()).toBeDisabled()
+    })
+
+    it('keeps an over-limit dataset from being sent and explains a rejected one truthfully', async () => {
+      vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+        if (path === '/experiments') return { experiments: [] }
+        if (path === '/eval/datasets' && options?.method === 'POST') throw Object.assign(new Error('Invalid eval dataset body'), { code: 'eval_dataset_name_required' })
+        return { datasets: [] }
+      })
+      render(<ExperimentsPanel />)
+      await waitFor(() => expect(blocker()).toHaveTextContent('create a dataset first'))
+
+      fireEvent.change(screen.getByLabelText('Dataset name'), { target: { value: 'ñ'.repeat(61) } })
+      expect(screen.getByTestId('experiment-dataset-name-limit')).toHaveTextContent('122 of 120 bytes')
+      expect(screen.getByTestId('experiment-dataset-create')).toBeDisabled()
+      fireEvent.change(screen.getByLabelText('Dataset name'), { target: { value: 'Reseñas' } })
+      fireEvent.change(screen.getByLabelText('Description (optional)'), { target: { value: 'x'.repeat(2001) } })
+      expect(screen.getByTestId('experiment-dataset-description-limit')).toHaveTextContent('2001 of 2000 bytes')
+      expect(screen.getByTestId('experiment-dataset-create')).toBeDisabled()
+      fireEvent.change(screen.getByLabelText('Description (optional)'), { target: { value: '' } })
+
+      fireEvent.click(screen.getByTestId('experiment-dataset-create'))
+      await waitFor(() => expect(useWorkflowStore.getState().toasts.at(-1)?.message)
+        .toBe('Check the dataset: a name up to 120 bytes and a description up to 2000 bytes'))
+    })
+
+    it('reloads datasets when the chosen one was deleted before the run', async () => {
+      let listed = [dataset(4)]
+      vi.mocked(api).mockImplementation(async (path: string) => {
+        if (path === '/experiments') return { experiments: [] }
+        if (path === '/eval/datasets') return { datasets: listed }
+        if (path === '/experiments/run') {
+          listed = []
+          throw Object.assign(new Error('Eval dataset not found'), { code: 'eval_dataset_not_found' })
+        }
+        return {}
+      })
+      render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 4 examples' })
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'a' } })
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'b' } })
+      fireEvent.click(screen.getByTestId('experiment-step-run'))
+      fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Run' } })
+      fireEvent.click(runButton())
+
+      await waitFor(() => expect(blocker()).toHaveTextContent('Step 1 · Dataset: create a dataset first'))
+      expect(runButton()).toBeDisabled()
+    })
+
+    it('needs admin rank as well as evals.write, as the server does', async () => {
+      const organization = (role: string, roleBase: 'editor' | 'admin') => ({
+        id: `org-${role}`, name: role, plan: null, role, roleBase, permissions: ['evals.read', 'evals.write'],
+        usable: true, developmentFallback: false, isOwner: false,
+      })
+      const identity = (org: ReturnType<typeof organization>) => ({
+        identity: { userId: 'u', email: null, mode: 'dev-headers' as const, source: 'dev' as const },
+        profile: { name: null, email: null }, organizations: [org], invitations: [],
+        currentOrganizationId: org.id, selectionRequired: false, needsOrganization: false, truncated: false, invitationsTruncated: false,
+      })
+      mockData([dataset(4)])
+      useWorkflowStore.setState({ identityContext: identity(organization('analyst', 'editor')) })
+      const { unmount } = render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 4 examples' })
+      expect(blocker()).toHaveTextContent('Your role can view experiments but not run them.')
+      expect(screen.queryByTestId('experiment-create-dataset')).not.toBeInTheDocument()
+      unmount()
+
+      useWorkflowStore.setState({ identityContext: identity(organization('lead', 'admin')) })
+      render(<ExperimentsPanel />)
+      expect(await screen.findByTestId('experiment-create-dataset')).toBeInTheDocument()
+    })
+
+    it('starts over when the workspace changes', async () => {
+      const org = (id: string) => ({ id, name: id, plan: null, role: 'admin', roleBase: 'admin' as const, permissions: ['evals.read', 'evals.write'], usable: true, developmentFallback: false, isOwner: false })
+      const context = (current: string) => ({
+        identity: { userId: 'u', email: null, mode: 'dev-headers' as const, source: 'dev' as const },
+        profile: { name: null, email: null }, organizations: [org('alpha'), org('beta')], invitations: [],
+        currentOrganizationId: current, selectionRequired: false, needsOrganization: false, truncated: false, invitationsTruncated: false,
+      })
+      vi.mocked(api).mockImplementation(async (path: string) => {
+        if (path === '/experiments') return { experiments: [experiment] }
+        if (path === '/eval/datasets') return { datasets: [dataset(4)] }
+        return {}
+      })
+      useWorkflowStore.setState({ identityContext: context('alpha') })
+      render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 4 examples' })
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'alpha-ref' } })
+      fireEvent.click(screen.getByRole('button', { name: /Triage candidate/i }))
+      expect(screen.getByTestId('experiment-detail')).toBeInTheDocument()
+
+      act(() => useWorkflowStore.setState({ identityContext: context('beta') }))
+
+      expect(screen.getByTestId('experiment-step-dataset')).toHaveAttribute('aria-current', 'step')
+      expect(screen.queryByTestId('experiment-detail')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      expect(screen.getByLabelText('Control reference')).toHaveValue('')
+    })
+
+    it('walks each missing field in step order until the run is allowed', async () => {
+      mockData([dataset(4)])
+      render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 4 examples' })
+
+      expect(screen.getByTestId('experiment-step-done-dataset')).toBeInTheDocument()
+      expect(screen.queryByTestId('experiment-step-done-arms')).not.toBeInTheDocument()
+      expect(blocker()).toHaveTextContent('Step 2 · Control vs candidate: enter the control reference')
+
+      fireEvent.click(screen.getByTestId('experiment-step-next'))
+      expect(screen.getByLabelText('Comparison kind')).toHaveFocus()
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'a@1' } })
+      expect(blocker()).toHaveTextContent('Step 2 · Control vs candidate: enter the candidate reference')
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: '   ' } })
+      expect(blocker()).toHaveTextContent('enter the candidate reference')
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'a@2' } })
+      expect(screen.getByTestId('experiment-step-done-arms')).toBeInTheDocument()
+      expect(blocker()).toHaveTextContent('Step 3 · Scorer and run: name the experiment')
+
+      fireEvent.click(blocker())
+      expect(screen.getByLabelText('Experiment name')).toHaveFocus()
+      expect(screen.getByTestId('experiment-panel-run')).toBeInTheDocument()
+      expect(screen.queryByTestId('experiment-step-next')).not.toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Run' } })
+      expect(screen.queryByTestId('experiment-run-blocker')).not.toBeInTheDocument()
+      expect(runButton()).toBeEnabled()
+      expect(screen.getByTestId('experiment-step-done-run')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      expect(screen.getByTestId('experiment-panel-arms')).toBeInTheDocument()
+      expect(screen.getByLabelText('Control reference')).toHaveValue('a@1')
+      expect(runButton()).toBeEnabled()
+    })
+
+    it('sends an empty dataset back to step 1 and says why', async () => {
+      mockData([dataset(0)])
+      render(<ExperimentsPanel />)
+
+      await screen.findByRole('option', { name: 'Bed · 0 examples' })
+      expect(blocker()).toHaveTextContent('Step 1 · Dataset: choose a dataset with examples')
+      expect(screen.getByRole('alert')).toHaveTextContent('This dataset has no examples')
+      expect(runButton()).toHaveAttribute('aria-describedby', 'experiment-call-plan experiment-run-blocker')
+    })
+
+    it('names the step that can actually lower the provider calls', async () => {
+      mockData([dataset(6)], { maxProviderCalls: 20 })
+      const { unmount } = render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 6 examples' })
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'a' } })
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'b' } })
+      fireEvent.click(screen.getByTestId('experiment-step-run'))
+      fireEvent.change(screen.getByLabelText('Scorer'), { target: { value: 'llm_judge' } })
+      expect(blocker()).toHaveTextContent('Step 3 · Scorer and run: choose a scorer without LLM calls')
+      unmount()
+
+      mockData([dataset(11)], { maxProviderCalls: 20 })
+      render(<ExperimentsPanel />)
+      await screen.findByRole('option', { name: 'Bed · 11 examples' })
+      expect(blocker()).toHaveTextContent('Step 1 · Dataset: choose a smaller dataset')
+    })
+
+    it('tells a read-only role why it cannot run and hides dataset creation', async () => {
+      mockData([dataset(4)])
+      render(<ExperimentsPanel canWrite={false} />)
+
+      await screen.findByRole('option', { name: 'Bed · 4 examples' })
+      expect(blocker()).toHaveTextContent('Your role can view experiments but not run them.')
+      expect(screen.queryByTestId('experiment-create-dataset')).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('experiment-step-arms'))
+      fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'a' } })
+      fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'b' } })
+      fireEvent.click(screen.getByTestId('experiment-step-run'))
+      fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Run' } })
+      expect(runButton()).toBeDisabled()
+      expect(runButton()).toHaveAttribute('aria-describedby', 'experiment-call-plan experiment-run-blocker')
+    })
+
+    it('renders the missing step in Spanish', async () => {
+      changeAppLanguage('es')
+      mockData([])
+      render(<ExperimentsPanel />)
+
+      await waitFor(() => expect(blocker()).toHaveTextContent('Paso 1 · Conjunto de evaluación: primero crea un conjunto'))
+    })
+  })
+
+  describe('comparison', () => {
+    async function open(next: Record<string, unknown>): Promise<void> {
+      const row = { ...experiment, summary: { ...summary, ...next } }
+      vi.mocked(api).mockImplementation(async (path: string) => {
+        if (path === '/experiments') return { experiments: [row] }
+        if (path === '/eval/datasets') return { datasets: [] }
+        return {}
+      })
+      render(<ExperimentsPanel />)
+      fireEvent.click(await screen.findByRole('button', { name: /Triage candidate/i }))
+    }
+    const side = { meanScore: 0.5, totalCostUsd: 0.01, costKnownCount: 4, meanLatencyMs: 100, errorCount: 0, judgedByLlmCount: 0, scoringFallbackCount: 0 }
+
+    it('labels every variation in words by metric direction, not by color alone', async () => {
+      await open({ control: side, candidate: { ...side, meanScore: 0.75, totalCostUsd: 0.03, meanLatencyMs: 40 } })
+
+      expect(screen.getByTestId('experiment-delta-score')).toHaveTextContent('+25.0%Better')
+      expect(screen.getByTestId('experiment-delta-score')).toHaveAttribute('data-verdict', 'better')
+      expect(screen.getByTestId('experiment-delta-cost')).toHaveTextContent('+$0.02Worse')
+      expect(screen.getByTestId('experiment-delta-latency')).toHaveTextContent('-60 msBetter')
+      expect(screen.getByRole('rowheader', { name: /^Score\s*Higher is better/ })).toBeInTheDocument()
+      expect(screen.getByRole('rowheader', { name: /^Cost\s*Lower is better/ })).toBeInTheDocument()
+      expect(screen.queryByTestId('experiment-coverage-notice')).not.toBeInTheDocument()
+    })
+
+    it('moves the baseline, flips each variation and leaves the recommendation alone', async () => {
+      await open({ control: side, candidate: { ...side, meanScore: 0.75, totalCostUsd: 0.03 } })
+      const candidateButton = screen.getByTestId('experiment-baseline-candidate')
+      expect(screen.getByTestId('experiment-baseline-control')).toHaveAttribute('aria-pressed', 'true')
+      expect(candidateButton).toHaveAttribute('aria-pressed', 'false')
+
+      fireEvent.click(candidateButton)
+
+      expect(screen.getByTestId('experiment-baseline-candidate')).toBe(candidateButton)
+      expect(candidateButton).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByTestId('experiment-baseline-control')).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.getByTestId('experiment-delta-score')).toHaveTextContent('-25.0%Worse')
+      expect(screen.getByTestId('experiment-delta-cost')).toHaveTextContent('-$0.02Better')
+      const cells = screen.getByTestId('experiment-metric-score').querySelectorAll('td')
+      expect(cells[0]).toContainElement(screen.getByTestId('experiment-delta-score'))
+      expect(screen.getByText('Candidate recommended')).toBeInTheDocument()
+    })
+
+    it('hides unchanged metrics with Diff only and says so when nothing differs', async () => {
+      await open({ control: side, candidate: { ...side, meanScore: 0.75 } })
+      expect(screen.getByTestId('experiment-metric-latency')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('experiment-diff-only'))
+
+      expect(screen.getByTestId('experiment-metric-score')).toBeInTheDocument()
+      expect(screen.queryByTestId('experiment-metric-latency')).not.toBeInTheDocument()
+      expect(screen.queryByText('Control and candidate measured the same on every metric.')).not.toBeInTheDocument()
+      cleanup()
+
+      await open({ control: side, candidate: side })
+      fireEvent.click(screen.getByTestId('experiment-diff-only'))
+      expect(screen.getByText('Control and candidate measured the same on every metric.')).toBeInTheDocument()
+    })
+
+    it('warns about unequal coverage and withholds a verdict on the skewed metrics', async () => {
+      await open({ control: side, candidate: { ...side, errorCount: 1, costKnownCount: 3, totalCostUsd: 0.005, meanLatencyMs: 70 } })
+
+      expect(screen.getByTestId('experiment-coverage-notice')).toHaveTextContent('Control 4 of 4, Candidate 3 of 4')
+      expect(screen.getByTestId('experiment-coverage-notice')).toHaveTextContent('No better or worse verdict for Cost and Latency.')
+      expect(screen.getByTestId('experiment-delta-latency')).toHaveTextContent('-30 ms')
+      expect(screen.getByTestId('experiment-delta-latency')).toHaveAttribute('data-verdict', 'neutral')
+      expect(screen.getByTestId('experiment-delta-latency')).not.toHaveTextContent('Better')
+      expect(screen.getByTestId('experiment-delta-cost')).toHaveAttribute('data-verdict', 'neutral')
+      expect(screen.getByTestId('experiment-delta-errors')).toHaveTextContent('+1Worse')
+      expect(screen.getByTestId('experiment-metric-errors').querySelectorAll('td')[1]).toHaveAttribute('data-severity', 'danger')
+    })
+
+    it('names each baseline toggle by arm and keeps the active one inert', async () => {
+      await open({ control: side, candidate: { ...side, meanScore: 0.75 } })
+      const active = screen.getByRole('button', { name: 'Baseline: Control', pressed: true })
+      expect(active).toHaveAttribute('aria-disabled', 'true')
+      expect(screen.getByRole('button', { name: 'Make baseline: Candidate', pressed: false })).not.toHaveAttribute('aria-disabled')
+
+      fireEvent.click(active)
+      expect(screen.getByTestId('experiment-delta-score')).toHaveTextContent('+25.0%Better')
+      fireEvent.click(screen.getByRole('button', { name: 'Make baseline: Candidate' }))
+      expect(screen.getByRole('button', { name: 'Baseline: Candidate', pressed: true })).toBeInTheDocument()
+    })
+
+    it('withholds score and latency verdicts when the LLM judge fell back', async () => {
+      await open({
+        scorerKind: 'llm_judge',
+        recommendation: 'inconclusive',
+        recommendationReasonCode: 'scoring_fallback',
+        control: { ...side, judgedByLlmCount: 4 },
+        candidate: { ...side, meanScore: 0.75, meanLatencyMs: 40, judgedByLlmCount: 3, scoringFallbackCount: 1 },
+      })
+
+      expect(screen.getByTestId('experiment-delta-score')).toHaveAttribute('data-verdict', 'neutral')
+      expect(screen.getByTestId('experiment-delta-score')).toHaveTextContent('+25.0%')
+      expect(screen.getByTestId('experiment-delta-latency')).toHaveAttribute('data-verdict', 'neutral')
+      expect(screen.getByTestId('experiment-coverage-notice')).toHaveTextContent('The LLM judge fell back to token overlap on some examples. No better or worse verdict for Score and Latency.')
+      cleanup()
+
+      // A fallback under llm_judge withholds verdicts even when an older summary has no reason code.
+      await open({
+        scorerKind: 'llm_judge',
+        recommendationReasonCode: undefined,
+        control: side,
+        candidate: { ...side, meanScore: 0.75, scoringFallbackCount: 1 },
+      })
+      expect(screen.getByTestId('experiment-delta-score')).toHaveAttribute('data-verdict', 'neutral')
+    })
+
+    it('uses the same noise floor as the server recommendation', () => {
+      const source = readFileSync(resolve(process.cwd(), '../internal/experiment/experiment.go'), 'utf8')
+      expect(Number(source.match(/MinScoreDelta\s*=\s*([\d.]+)/)?.[1])).toBe(MIN_SCORE_DELTA)
+    })
+
+    it('gives no score verdict inside the recommendation noise floor', async () => {
+      await open({ control: side, candidate: { ...side, meanScore: 0.53 }, recommendation: 'keep_control', recommendationReasonCode: 'within_noise' })
+
+      expect(screen.getByTestId('experiment-delta-score')).toHaveTextContent('+3.0%')
+      expect(screen.getByTestId('experiment-delta-score')).toHaveAttribute('data-verdict', 'neutral')
+      expect(screen.queryByTestId('experiment-coverage-notice')).not.toBeInTheDocument()
+      cleanup()
+
+      await open({ control: side, candidate: { ...side, meanScore: 0.55 } })
+      expect(screen.getByTestId('experiment-delta-score')).toHaveTextContent('+5.0%Better')
+    })
+
+    it('takes each change between the rounded values shown, in both directions', async () => {
+      await open({
+        control: { ...side, meanScore: 0.50049, meanLatencyMs: 100.4, totalCostUsd: 0.00004 },
+        candidate: { ...side, meanScore: 0.50051, meanLatencyMs: 100.6, totalCostUsd: 0.00006 },
+      })
+      const deltas = () => ['score', 'cost', 'latency'].map((id) => screen.getByTestId(`experiment-delta-${id}`).textContent)
+      expect(deltas()).toEqual(['+0.1%', '+$0.0001Worse', '+1 msWorse'])
+      fireEvent.click(screen.getByTestId('experiment-baseline-candidate'))
+      expect(deltas()).toEqual(['-0.1%', '-$0.0001Better', '-1 msBetter'])
+      cleanup()
+
+      await open({ control: { ...side, meanLatencyMs: 100.2 }, candidate: { ...side, meanLatencyMs: 100.4 } })
+      expect(screen.queryByTestId('experiment-delta-latency')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByTestId('experiment-baseline-candidate'))
+      expect(screen.queryByTestId('experiment-delta-latency')).not.toBeInTheDocument()
+      expect(screen.getByTestId('experiment-detail')).not.toHaveTextContent(/-0(?![.,]?\d*[1-9])/)
+    })
+
+    it('says exactly which verdicts it withholds and why', async () => {
+      await open({ control: side, candidate: { ...side, costKnownCount: 3, totalCostUsd: 0.005, meanLatencyMs: 70 } })
+      const notice = screen.getByTestId('experiment-coverage-notice')
+      expect(notice).toHaveTextContent('Cost was measured on 4 control calls and 3 candidate calls. No better or worse verdict for Cost.')
+      expect(notice).not.toHaveTextContent('did not finish')
+      expect(screen.getByTestId('experiment-delta-cost')).toHaveAttribute('data-verdict', 'neutral')
+      expect(screen.getByTestId('experiment-delta-latency')).toHaveTextContent('-30 msBetter')
+      cleanup()
+
+      await open({ control: side, candidate: { ...side, errorCount: 1, totalCostUsd: 0.005, meanLatencyMs: 70 } })
+      expect(screen.getByTestId('experiment-coverage-notice')).toHaveTextContent('Control 4 of 4, Candidate 3 of 4. No better or worse verdict for Latency.')
+      expect(screen.getByTestId('experiment-delta-cost')).toHaveTextContent('-$0.005Better')
+    })
+
+    it('never derives a variation from a cost the server did not measure', async () => {
+      await open({ control: { ...side, costKnownCount: 0, totalCostUsd: 0 }, candidate: side })
+
+      expect(screen.getByTestId('experiment-metric-cost')).toHaveTextContent('Unknown')
+      expect(screen.queryByTestId('experiment-delta-cost')).not.toBeInTheDocument()
+    })
+
+    it('starts each selected experiment from its own control baseline', async () => {
+      const second = { ...experiment, id: 'exp-2', name: 'Second candidate' }
+      vi.mocked(api).mockImplementation(async (path: string) => {
+        if (path === '/experiments') return { experiments: [experiment, second] }
+        if (path === '/eval/datasets') return { datasets: [] }
+        return {}
+      })
+      render(<ExperimentsPanel />)
+      fireEvent.click(await screen.findByRole('button', { name: /Triage candidate/i }))
+      fireEvent.click(screen.getByTestId('experiment-baseline-candidate'))
+      fireEvent.click(screen.getByRole('button', { name: /Second candidate/i }))
+
+      expect(screen.getByTestId('experiment-baseline-control')).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('labels the variation in Spanish', async () => {
+      changeAppLanguage('es')
+      await open({ control: side, candidate: { ...side, meanScore: 0.75 } })
+
+      expect(screen.getByTestId('experiment-delta-score')).toHaveTextContent('+25,0%Mejor')
+      expect(screen.getByTestId('experiment-baseline-candidate')).toHaveTextContent('Usar como línea base')
+    })
   })
 })

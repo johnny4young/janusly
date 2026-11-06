@@ -4,13 +4,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { WorkflowsDashboardView } from './WorkflowsDashboardView'
 import {
   UNGROUPED_FOLDER,
+  sortFlows,
   updateCollapsedFolders,
 } from './workflows-dashboard-model'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
-import { readFlowsFilters, writeFlowsFilters, type SortKey } from '../flows-filters'
+import { DEFAULT_FLOWS_SORT, nextFlowsSort, readFlowsFilters, writeFlowsFilters, type FlowsSort, type SortKey } from '../flows-filters'
 import {
   activeTextSearch,
   classifyTextSearch,
@@ -24,16 +25,19 @@ const WORKFLOW_MUTATION_TAGS = ['workflows'] as const
 
 const WORKFLOW_DASHBOARD_TAGS = [PLATFORM_TAG, 'workflows', 'org-config', 'runs'] as const
 
-const FAILED_RUN_STATUSES = new Set(['failed', 'cancelled', 'timed_out'])
 const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
 
 const PAGE_SIZE = 100
+
+const NO_HEALTH_SCORES: Readonly<Record<string, number>> = {}
 
 const UNGROUPED = UNGROUPED_FOLDER
 
 const DEFAULT_RETENTION_DAYS = 30
 
 type FolderGroup = { key: string; items: SavedWorkflow[] }
+
+const countLabel = (count: number | null, more: boolean) => (count === null ? '' : `${count}${more ? '+' : ''}`)
 
 export type WorkflowCreationMode = 'describe' | 'blank' | 'template'
 export type WorkflowsDashboardProps = {
@@ -58,7 +62,6 @@ function useWorkflowsDashboardController({
   workflowsRef.current = workflows
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [creationOpen, setCreationOpen] = useState(false)
   const recoveryBusyRef = useRef(new Set<string>())
   const [recoveryBusyIds, setRecoveryBusyIds] = useState<Set<string>>(() => new Set())
   const [hasMore, setHasMore] = useState(false)
@@ -70,7 +73,12 @@ function useWorkflowsDashboardController({
   const [newFolderDraft, setNewFolderDraft] = useState('')
   const [query, setQuery] = useState(() => readFlowsFilters()?.query ?? '')
   const [debouncedQuery, setDebouncedQuery] = useState(() => activeTextSearch(readFlowsFilters()?.query ?? ''))
-  const [sort, setSort] = useState<SortKey>(() => readFlowsFilters()?.sort ?? 'recent')
+  const [sort, setSort] = useState<FlowsSort>(() => readFlowsFilters()?.sort ?? DEFAULT_FLOWS_SORT)
+  const toggleSort = useCallback((key: SortKey) => setSort((current) => nextFlowsSort(current, key)), [])
+  const [healthScores, setHealthScores] = useState<Readonly<Record<string, number>>>({})
+  const reportHealthScore = useCallback((workflowId: string, score: number) => {
+    setHealthScores((current) => (current[workflowId] === score ? current : { ...current, [workflowId]: score }))
+  }, [])
   const [tagFilters, setTagFilters] = useState<string[]>(() => readFlowsFilters()?.tags ?? [])
   const [tagOptions, setTagOptions] = useState<string[]>([])
   const [folderFilter, setFolderFilter] = useState(() => readFlowsFilters()?.folder ?? '')
@@ -90,7 +98,8 @@ function useWorkflowsDashboardController({
   const [bulkFolderDraft, setBulkFolderDraft] = useState('')
   const [bulkTagDraft, setBulkTagDraft] = useState('')
   const [showTrashed, setShowTrashed] = useState(false)
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  // The open view counts its loaded rows; this is the size of the other one.
+  const [otherViewCount, setOtherViewCount] = useState<number | null>(null)
   const [retentionDays, setRetentionDays] = useState<number | null>(null)
   const [trashNowMs, setTrashNowMs] = useState<number | null>(null)
   const listRequestSeq = useRef(0)
@@ -222,22 +231,24 @@ function useWorkflowsDashboardController({
     })()
     return () => { cancelled = true }
   }, [showTrashed, platformVersion])
+  useEffect(() => {
+    let cancelled = false
+    api(showTrashed ? '/workflows' : '/workflows/trash').then(
+      (data) => { if (!cancelled) setOtherViewCount(Array.isArray(data) ? data.length : null) },
+      () => { if (!cancelled) setOtherViewCount(null) },
+    )
+    return () => { cancelled = true }
+  }, [showTrashed, platformVersion])
+  // Scores arrive one row at a time; only a Health sort needs to react to them.
+  const sortScores = sort.key === 'health' ? healthScores : NO_HEALTH_SCORES
   const visible = useMemo(() => {
     const locale = getResolvedLocale()
     const q = queryState.kind === 'valid' ? queryState.value.toLocaleLowerCase(locale) : ''
     const filtered = q
       ? workflows.filter(w => w.name.toLocaleLowerCase(locale).includes(q) || w.id.toLocaleLowerCase(locale).includes(q))
       : workflows
-    return [...filtered].sort((a, b) => {
-      if (sort === 'name') return a.name.localeCompare(b.name, getResolvedLocale())
-      if (sort === 'failed') {
-        const af = a.lastRunStatus && FAILED_RUN_STATUSES.has(a.lastRunStatus) ? 0 : 1
-        const bf = b.lastRunStatus && FAILED_RUN_STATUSES.has(b.lastRunStatus) ? 0 : 1
-        if (af !== bf) return af - bf
-      }
-      return (b.updatedAt ?? b.createdAt ?? '').localeCompare(a.updatedAt ?? a.createdAt ?? '')
-    })
-  }, [workflows, queryState, sort])
+    return sortFlows(filtered, sort, sortScores, locale)
+  }, [workflows, queryState, sort, sortScores])
   const visibleIds = useMemo(() => visible.map((w) => w.id), [visible])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
   const showToolbar =
@@ -619,7 +630,13 @@ function useWorkflowsDashboardController({
   // Delete and restore share one optimistic lifecycle: drop the row and its
   // selection at once, call the server, and put the row back if it refuses.
   const removeWorkflowOptimistically = useCallback(
-    async (workflowId: string, request: () => Promise<unknown>, successKey: string, failureKey: string) => {
+    async (
+      workflowId: string,
+      request: () => Promise<unknown>,
+      successKey: string,
+      failureKey: string,
+      successAction?: (workflow: SavedWorkflow) => { label: string; onClick: () => void },
+    ) => {
       const current = workflowsRef.current.find((w) => w.id === workflowId)
       if (!current) return
       setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
@@ -631,7 +648,7 @@ function useWorkflowsDashboardController({
       })
       try {
         await request()
-        addToast(t(successKey, { name: current.name }), 'success')
+        addToast(t(successKey, { name: current.name }), 'success', successAction?.(current))
         bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
@@ -640,28 +657,45 @@ function useWorkflowsDashboardController({
     },
     [addToast, bumpPlatformVersion, t],
   )
+  const restoreRequest = useCallback(
+    (workflowId: string) => api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' }),
+    [],
+  )
+  const undoDelete = useCallback(
+    async (workflowId: string, name: string) => {
+      try {
+        await restoreRequest(workflowId)
+        addToast(t('workflowsDashboard.workflowRestored', { name }), 'success')
+        // The reload brings the row back in server order, whichever view is open.
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
+      } catch (err) {
+        addToast(tApiError(err) || t('workflowsDashboard.restoreFailed'), 'error')
+      }
+    },
+    [addToast, bumpPlatformVersion, restoreRequest, t],
+  )
   const deleteWorkflow = useCallback(
     async (workflowId: string) => {
-      setConfirmDeleteId(null)
       await removeWorkflowOptimistically(
         workflowId,
         () => api(`/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE' }),
         'workflowsDashboard.workflowDeleted',
         'workflowsDashboard.deleteFailed',
+        ({ id, name }) => ({ label: t('workflowsDashboard.undo'), onClick: () => void undoDelete(id, name) }),
       )
     },
-    [removeWorkflowOptimistically],
+    [removeWorkflowOptimistically, t, undoDelete],
   )
   const restoreWorkflow = useCallback(
     async (workflowId: string) => {
       await removeWorkflowOptimistically(
         workflowId,
-        () => api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' }),
+        () => restoreRequest(workflowId),
         'workflowsDashboard.workflowRestored',
         'workflowsDashboard.restoreFailed',
       )
     },
-    [removeWorkflowOptimistically],
+    [removeWorkflowOptimistically, restoreRequest],
   )
   const bulkRestore = useCallback(
     async () => {
@@ -671,40 +705,45 @@ function useWorkflowsDashboardController({
       setWorkflows((prev) => prev.filter((w) => !idSet.has(w.id)))
       setSelectedIds(new Set())
       const results = await Promise.allSettled(
-        ids.map((id) => api(`/workflows/${encodeURIComponent(id)}/restore`, { method: 'POST' })),
+        ids.map(restoreRequest),
       )
       const ok = results.filter((r) => r.status === 'fulfilled').length
       if (ok > 0) addToast(t('workflowsDashboard.bulkRestored', { count: ok }), 'success')
       if (ok < ids.length) addToast(t('workflowsDashboard.bulkRestoreFailed'), 'error')
       bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
     },
-    [selectedIds, workflows, addToast, bumpPlatformVersion, t],
+    [selectedIds, workflows, addToast, bumpPlatformVersion, restoreRequest, t],
   )
-  const toggleTrashView = useCallback(() => {
-    setShowTrashed((current) => !current)
+  const selectView = useCallback((trash: boolean) => {
+    if (trash === showTrashed) return
+    setOtherViewCount(workflowsRef.current.length)
+    setShowTrashed(trash)
     setSelectionMode(false)
     setSelectedIds(new Set())
-    setConfirmDeleteId(null)
     setWorkflows([])
     setLoading(true)
-  }, [])
+  }, [showTrashed])
+  const openViewLabel = countLabel(loading && workflows.length === 0 ? null : workflows.length, hasMore)
+  const otherViewLabel = countLabel(otherViewCount, otherViewCount === PAGE_SIZE)
+  const activeCountLabel = showTrashed ? otherViewLabel : openViewLabel
+  const trashCountLabel = showTrashed ? openViewLabel : otherViewLabel
   return {
-    allVisibleSelected, bulkAssign, bulkAssignTag, bulkFolderDraft, bulkRestore, bulkTagDraft,
+    activeCountLabel, allVisibleSelected, bulkAssign, bulkAssignTag, bulkFolderDraft, bulkRestore, bulkTagDraft,
     canWrite, cancelNewFolder, clearAllFilters, collapsedFolders, commitNewFolder,
-    confirmDeleteFolder, confirmDeleteId, confirmDeleteTag, creationOpen, deleteFolder,
+    confirmDeleteFolder, confirmDeleteTag, deleteFolder,
     deleteTag, deleteWorkflow, draggingId, dropTarget, folderFilter, folderOptions, groups,
     hasActiveFilters, hasFolders, hasMore, load, loadError, loadMore, loading, loadingMore,
     moveToFolder, newFolderDraft, newFolderDropFor, newFolderHover, onCreate, onOpen,
     persistCollapsedFolders, query, searchHint, searchInvalid, recoveryBusyIds, renameDraft, renameFolder, renameTag,
     renamingFolder, renamingTag, restoreWorkflow, resumeWorkflow, selectedIds,
     selectionMode, setBulkFolderDraft, setBulkTagDraft, setConfirmDeleteFolder,
-    setConfirmDeleteId, setConfirmDeleteTag, setCreationOpen, setDraggingId, setDropTarget,
+    selectView, setConfirmDeleteTag, setDraggingId, setDropTarget,
     setFolderFilter, setNewFolderDraft, setNewFolderDropFor, setNewFolderHover, setQuery,
     setRenameDraft, setRenamingFolder, setRenamingTag, setSelectedIds, setSelectionMode,
-    setShowTrashed, setSort, setTagFilters, setTagRenameDraft, setRowTag, showToolbar,
+    toggleSort, reportHealthScore, setTagFilters, setTagRenameDraft, setRowTag, showToolbar,
     showTrashed, soleTagFilter, sort, t, tagFilters, tagOptions, tagRenameDraft,
-    toggleFolder, toggleSelectAll, toggleSelectFolder, toggleSelected, toggleTrashView,
-    rememberFolderToggle, trashNowMs, retentionDays, visible, visibleIds, workflows,
+    toggleFolder, toggleSelectAll, toggleSelectFolder, toggleSelected,
+    rememberFolderToggle, trashCountLabel, trashNowMs, retentionDays, visible, visibleIds, workflows,
   }
 }
 export type WorkflowsDashboardController = ReturnType<typeof useWorkflowsDashboardController>

@@ -21,6 +21,73 @@ import (
 	"github.com/johnny4young/janusly/internal/grammar"
 )
 
+func TestMcpToolConnectionFailureRetriesOnlyReadSide(t *testing.T) {
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	t.Setenv("JANUSLY_MCP_CLIENT_WRITES_ENABLED", "true")
+	closed := httptest.NewServer(http.NotFoundHandler())
+	target := closed.URL
+	closed.Close()
+
+	cases := []struct {
+		name         string
+		writeSide    bool
+		retryOn      []any
+		wantAttempts int32
+	}{
+		{name: "read-side retries on network", retryOn: []any{"network"}, wantAttempts: 3},
+		{name: "write-side stops on network", writeSide: true, retryOn: []any{"network"}, wantAttempts: 1},
+		{name: "write-side stops without a filter", writeSide: true, wantAttempts: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, eng, org := newHarness(t)
+			if _, err := pool.Exec(ctx, `INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+				VALUES ($1, $2, 'mcp.clientWriteConsent', 'true', 'mcp', 'test', 'boolean')`,
+				org+"-consent", org); err != nil {
+				t.Fatalf("seed consent: %v", err)
+			}
+			connID := uuid.NewString()
+			if _, err := pool.Exec(ctx, `INSERT INTO mcp_connections
+				(id, org_id, alias, transport, args, url, env_refs, enabled, status)
+				VALUES ($1, $2, 'down', 'http', '[]', $3, '{}', true, 'active')`,
+				connID, org, target); err != nil {
+				t.Fatalf("seed connection: %v", err)
+			}
+			if _, err := pool.Exec(ctx, `INSERT INTO mcp_tool_descriptors
+				(id, connection_id, name, write_side, enabled)
+				VALUES ($1, $2, 'mutate', $3, true)`, uuid.NewString(), connID, tc.writeSide); err != nil {
+				t.Fatalf("seed descriptor: %v", err)
+			}
+			retry := map[string]any{"maxAttempts": float64(3), "delayMs": float64(1)}
+			if tc.retryOn != nil {
+				retry["retryOn"] = tc.retryOn
+			}
+			runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: &domain.Workflow{
+				ID: "wf-mcp-down", Name: "MCP", DSLVersion: "1.0",
+				Nodes: []domain.Node{{ID: "m", Type: "mcp_tool", Config: map[string]any{
+					"connectionAlias": "down", "toolName": "mutate", "retry": retry,
+				}}},
+				Edges: []domain.Edge{},
+			}})
+			if err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			runDispatcherToTerminal(t, eng, pool, runID, "failed")
+
+			var attempts int32
+			var errorJSON string
+			if err := pool.QueryRow(ctx, `SELECT attempts, error_json::text FROM run_nodes
+				WHERE run_id = $1 AND node_id = 'm'`, runID).Scan(&attempts, &errorJSON); err != nil {
+				t.Fatal(err)
+			}
+			if attempts != tc.wantAttempts || strings.Contains(errorJSON, `"writeSide": true`) != tc.writeSide ||
+				!strings.Contains(errorJSON, "connection refused") {
+				t.Fatalf("attempts=%d error=%s", attempts, errorJSON)
+			}
+		})
+	}
+}
+
 // The mcp_tool node through a real run: a streamable-HTTP MCP server
 // answers, the node persists {status, output}, the event family lands,
 // and a failing envelope drives the node into the ordinary failure path.

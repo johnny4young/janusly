@@ -1,11 +1,12 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api } from '../api'
+import { api, ApiError } from '../api'
 import { changeAppLanguage } from '../i18n'
+import { MalformedResponseError } from '../lib/malformed-response'
 import { useWorkflowStore } from '../store'
 import { OperationsPage } from './OperationsPage'
-import { requestOperationsSection } from './operations-section-bus'
+import { requestOperationsSection, useRouteOpsSection } from './operations-section-bus'
 
 vi.mock('../api', async (importOriginal) => {
   // The real module keeps ApiError and its status helpers; only the transport is doubled.
@@ -190,7 +191,8 @@ describe('<OperationsPage />', () => {
       '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
     })
 
-    render(<OperationsPage />)
+    const onOpenTab = vi.fn()
+    render(<OperationsPage onOpenTab={onOpenTab} />)
     await screen.findByTestId('settings-index-usage')
     fireEvent.click(screen.getByTestId('operations-rail-tab-usage'))
 
@@ -208,8 +210,70 @@ describe('<OperationsPage />', () => {
     expect(aggregateRow).not.toBeNull()
     expect(within(aggregateRow as HTMLElement).getByText('—')).toBeInTheDocument()
 
+    fireEvent.click(screen.getByTestId('settings-usage-open-cost-steps'))
+    expect(onOpenTab).toHaveBeenCalledWith('reports')
+
     await changeAppLanguage('es')
     expect(costTable).toHaveAccessibleName('Tabla de desglose de costo')
+  })
+
+  it.each([
+    ['loading', () => new Promise(() => undefined), 'settings-usage-loading', 'Loading…'],
+    ['forbidden', () => Promise.reject(new ApiError('Forbidden', { statusCode: 403 })), 'settings-usage-unavailable', "Couldn't load usage totals."],
+    ['malformed', () => Promise.reject(new MalformedResponseError()), 'settings-usage-unavailable', "Couldn't load usage totals."],
+  ])('never shows a %s usage read as no usage, and keeps the link to the steps', async (_state, read, testId, copy) => {
+    await changeAppLanguage('en')
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/recovery/metrics')) return read()
+      if (path === '/system/queue') return clearQueue
+      return null
+    })
+    render(<OperationsPage permissions={['recovery.read', 'runs.read']} />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-usage'))
+    expect(await screen.findByTestId(testId)).toHaveTextContent(copy)
+    expect(screen.queryByText('No AI usage in the last 30 days')).toBeNull()
+    expect(screen.getByTestId('settings-usage-open-cost-steps')).toBeInTheDocument()
+  })
+
+  it('states an empty window with AI-only copy and keeps the link to the steps', async () => {
+    stubApiByPath({
+      '/recovery/metrics': { ...healthyMetrics, costThisWindow: { ...healthyMetrics.costThisWindow, providers: [] } },
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+    render(<OperationsPage permissions={['recovery.read', 'runs.read']} />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-usage'))
+    expect(await screen.findByText('No AI usage in the last 30 days')).toBeInTheDocument()
+    expect(screen.getByText(/Only AI calls are priced/)).toBeInTheDocument()
+    expect(screen.getByTestId('settings-usage-open-cost-steps')).toBeInTheDocument()
+    expect(screen.queryByTestId('settings-usage-unavailable')).toBeNull()
+    await changeAppLanguage('es')
+    expect(await screen.findByText('Sin uso de IA en los últimos 30 días')).toBeInTheDocument()
+    await changeAppLanguage('en')
+  })
+
+  it('offers the cost steps only to an operator who can open Reports and its runs', async () => {
+    stubApiByPath({
+      '/recovery/metrics': {
+        ...healthyMetrics,
+        costThisWindow: {
+          ...healthyMetrics.costThisWindow,
+          providers: [{
+            provider: 'Anthropic', model: 'haiku', usd: 1, tokens: 1, inputTokens: 1,
+            cachedInputTokens: 0, cacheCreationInputTokens: 0, calls: 1,
+          }],
+        },
+      },
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+    const { unmount } = render(<OperationsPage permissions={['recovery.read']} />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-usage'))
+    await screen.findByTestId('settings-usage-cost-table')
+    expect(screen.queryByTestId('settings-usage-open-cost-steps')).toBeNull()
+    unmount()
+
+    render(<OperationsPage permissions={['recovery.read', 'runs.read']} />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-usage'))
+    expect(await screen.findByTestId('settings-usage-open-cost-steps')).toBeInTheDocument()
   })
 
   it('mounts only the active sub-tab cards when the operator clicks Reliability', async () => {
@@ -316,7 +380,7 @@ describe('<OperationsPage />', () => {
     })
     expect(screen.getByTestId('operations-rail-dot-infrastructure')).toHaveAttribute('data-severity', 'warning')
     // No dot on overview (metrics are healthy), no dot on access/integrations
-    // (those sub-tabs have no page-level signal source — see the rail's dotKind map).
+    // (those sub-tabs have no page-level signal source).
     expect(screen.queryByTestId('operations-rail-dot-overview')).toBeNull()
     expect(screen.queryByTestId('operations-rail-dot-access')).toBeNull()
     expect(screen.queryByTestId('operations-rail-dot-integrations')).toBeNull()
@@ -645,6 +709,301 @@ describe('<OperationsPage />', () => {
       .toHaveAttribute('aria-current', 'page')
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe('overview')
     expect(screen.queryByTestId('stub-McpConnectionsPanel')).toBeNull()
+  })
+})
+
+describe('<OperationsPage /> pane route', () => {
+  const healthy = { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } }
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/#/operations/overview')
+    window.localStorage.removeItem(STORAGE_KEY)
+    vi.mocked(api).mockReset()
+    useWorkflowStore.setState({ ...initialState, budgetBlocked: null }, true)
+    stubApiByPath({ '/recovery/metrics': healthyMetrics, '/health': healthy })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.history.replaceState(null, '', '/')
+  })
+
+  const goToHash = (hash: string) => act(() => {
+    window.history.replaceState(null, '', hash)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+  })
+
+  it('follows a hash changed while the page is open', async () => {
+    render(<OperationsPage />)
+    await screen.findByTestId('settings-index-reliability')
+
+    goToHash('#/operations/access')
+
+    expect(screen.getByTestId('operations-rail-tab-access')).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('stub-PermissionGrantsPanel')).toBeInTheDocument()
+  })
+
+  it.each(['#/operations/nonsense', '#/operations'])('rewrites %s to the open pane', async (hash) => {
+    render(<OperationsPage />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-usage'))
+
+    goToHash(hash)
+
+    expect(window.location.hash).toBe('#/operations/usage')
+    expect(screen.getByTestId('operations-rail-tab-usage')).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('refuses a hash naming a pane the viewer cannot open', async () => {
+    render(<OperationsPage permissions={['recovery.read']} />)
+    await screen.findByTestId('settings-index-organization')
+
+    goToHash('#/operations/integrations')
+
+    expect(window.location.hash).toBe('#/operations/overview')
+    expect(screen.queryByTestId('stub-McpConnectionsPanel')).toBeNull()
+  })
+
+  it('gives a pane change its own history entry so Back returns to the previous pane', async () => {
+    const push = vi.spyOn(window.history, 'pushState')
+    render(<OperationsPage />)
+
+    fireEvent.click(await screen.findByTestId('settings-index-reliability'))
+
+    expect(window.location.hash).toBe('#/operations/reliability')
+    expect(push).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes the routed pane to the shell breadcrumb', () => {
+    const { result } = renderHook(() => useRouteOpsSection())
+    expect(result.current).toBe('overview')
+
+    goToHash('#/operations/access')
+    expect(result.current).toBe('access')
+
+    goToHash('#/operations/nonsense')
+    expect(result.current).toBeNull()
+
+    goToHash('#/runs')
+    expect(result.current).toBeNull()
+  })
+})
+
+describe('<OperationsPage /> settings index status lines', () => {
+  const healthy = { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } }
+  const areaReads = {
+    '/alerts/policies': { policies: [] },
+    '/dlq/clusters': { clusters: [{ signature: 'a' }] },
+    '/org/roles': { roles: [{}, {}, {}] },
+    '/org/config': { config: [{ key: 'auth.mfaRequired', value: true }] },
+    '/credentials': [{}, {}],
+    '/mcp/connections': { connections: [{}] },
+    '/memory/consent-status': { enabled: false, processEnabled: true, tenantEnabled: false },
+  }
+  const status = (area: string) => screen.queryByTestId(`settings-index-status-${area}`)
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/')
+    window.localStorage.removeItem(STORAGE_KEY)
+    vi.mocked(api).mockReset()
+    useWorkflowStore.setState({ ...initialState, budgetBlocked: null }, true)
+  })
+
+  it('shows counts read from the existing endpoints', async () => {
+    stubApiByPath({
+      ...areaReads,
+      '/recovery/metrics': {
+        ...healthyMetrics,
+        costThisWindow: { ...healthyMetrics.costThisWindow, value: 12.5, display: '$12.50', providers: [{ provider: 'p', model: 'm' }] },
+      },
+      '/health': healthy,
+      '/system/queue': { waiting: 3, active: 1, oldestWaitingSeconds: 5, warnSeconds: 60 },
+    })
+
+    render(<OperationsPage />)
+
+    await waitFor(() => expect(status('reliability')).toHaveTextContent('0 alert policies · 1 failure pattern'))
+    expect(status('access')).toHaveTextContent('3 roles · MFA required')
+    expect(status('integrations')).toHaveTextContent('2 credentials · 1 MCP connection')
+    expect(status('usage')).toHaveTextContent('$12.50 in 30 days')
+    await waitFor(() => expect(status('infrastructure')).toHaveTextContent('3 jobs queued'))
+  })
+
+  it('omits a count whose read failed and the line when none was read', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/metrics') return healthyMetrics
+      if (path === '/health') return healthy
+      if (path === '/alerts/policies') return { policies: [{}] }
+      if (path === '/org/roles') return { unexpected: true }
+      if (path === '/org/config') return { unexpected: true }
+      throw new Error('boom')
+    })
+
+    render(<OperationsPage />)
+
+    await waitFor(() => expect(status('reliability')).toHaveTextContent(/^1 alert policy$/))
+    expect(status('access')).toBeNull()
+    expect(status('integrations')).toBeNull()
+    expect(status('organization')).toBeNull()
+  })
+
+  it('never reads a count the viewer may not see', async () => {
+    stubApiByPath({ ...areaReads, '/recovery/metrics': healthyMetrics, '/health': healthy })
+
+    render(<OperationsPage permissions={['recovery.read', 'alerts.read']} />)
+
+    await waitFor(() => expect(status('reliability')).toHaveTextContent(/^0 alert policies$/))
+    const paths = vi.mocked(api).mock.calls.map(([path]) => path)
+    for (const denied of ['/dlq/clusters', '/org/roles', '/org/config', '/credentials', '/mcp/connections']) {
+      expect(paths).not.toContain(denied)
+    }
+  })
+
+  it('stays quiet about usage on an unreadable payload and says so when there is none', async () => {
+    stubApiByPath({ '/recovery/metrics': {}, '/health': healthy })
+    const { unmount } = render(<OperationsPage />)
+    await screen.findByTestId('settings-index-reliability')
+    expect(status('usage')).toBeNull()
+    unmount()
+
+    stubApiByPath({ '/recovery/metrics': healthyMetrics, '/health': healthy })
+    render(<OperationsPage />)
+    await waitFor(() => expect(status('usage')).toHaveTextContent('No usage in 30 days'))
+  })
+
+  it('reports clear queues only once they were checked', async () => {
+    stubApiByPath({ '/recovery/metrics': healthyMetrics, '/health': healthy, '/system/queue': clearQueue })
+    render(<OperationsPage />)
+    await waitFor(() => expect(status('infrastructure')).toHaveTextContent('All queues clear'))
+  })
+
+  it('says nothing about queues the viewer cannot check', async () => {
+    stubApiByPath({ '/recovery/metrics': healthyMetrics, '/health': healthy })
+    render(<OperationsPage permissions={['recovery.read']} />)
+    await waitFor(() => expect(status('usage')).toHaveTextContent('No usage in 30 days'))
+    expect(status('infrastructure')).toBeNull()
+  })
+
+  it('drops the previous workspace counts when the organization changes', async () => {
+    stubApiByPath({ ...areaReads, '/recovery/metrics': healthyMetrics, '/health': healthy })
+    render(<OperationsPage />)
+    await waitFor(() => expect(status('access')).toHaveTextContent('3 roles'))
+
+    let release: (value: unknown) => void = () => undefined
+    vi.mocked(api).mockImplementation(() => new Promise((resolve) => { release = resolve }))
+    act(() => useWorkflowStore.setState({ orgId: 'other-org' }))
+
+    expect(status('access')).toBeNull()
+    release(null)
+  })
+})
+
+describe('<OperationsPage /> attention dot reasons', () => {
+  const healthy = { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } }
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/')
+    window.localStorage.removeItem(STORAGE_KEY)
+    vi.mocked(api).mockReset()
+    useWorkflowStore.setState({ ...initialState, budgetBlocked: null }, true)
+  })
+
+  const expectReason = async (section: string, reason: string | RegExp) => {
+    await waitFor(() => expect(screen.getByTestId(`operations-rail-dot-${section}`)).toHaveAccessibleName(reason))
+    expect(screen.getByTestId(`operations-rail-tab-${section}`).title).toMatch(reason)
+  }
+
+  it('explains the Reliability and index dots with the unhealthy metric', async () => {
+    stubApiByPath({
+      '/recovery/metrics': {
+        ...healthyMetrics,
+        successRate: {
+          value: 71.4,
+          display: '71.4%',
+          severity: 'unhealthy',
+          rationale: 'fallback',
+          rationaleCode: 'success_rate.summary',
+          rationaleMeta: { succeeded: 5, terminal: 7 },
+        },
+      },
+      '/health': healthy,
+    })
+
+    render(<OperationsPage />)
+
+    const reason = '71.4% — 5 of 7 terminal runs succeeded.'
+    await expectReason('reliability', reason)
+    await expectReason('overview', reason)
+    expect(screen.queryByTestId('operations-rail-dot-usage')).toBeNull()
+    expect(screen.getByTestId('operations-rail-tab-usage')).not.toHaveAttribute('title')
+  })
+
+  it('explains the Usage dot and adds it to the index dot', async () => {
+    stubApiByPath({
+      '/recovery/metrics': {
+        ...healthyMetrics,
+        costThisWindow: { ...healthyMetrics.costThisWindow, value: 900, display: '$900', severity: 'unhealthy', rationale: 'Over budget.' },
+      },
+      '/health': healthy,
+    })
+
+    render(<OperationsPage />)
+
+    await expectReason('usage', '$900 — Over budget.')
+    await expectReason('overview', '$900 — Over budget.')
+    expect(screen.queryByTestId('operations-rail-dot-reliability')).toBeNull()
+  })
+
+  it('explains the AI dot with the blocked budget scope', async () => {
+    useWorkflowStore.setState({
+      budgetBlocked: { exceededAt: 'workflow' } as never,
+    })
+    stubApiByPath({ '/recovery/metrics': healthyMetrics, '/health': healthy })
+
+    render(<OperationsPage />)
+
+    await expectReason('ai', /workflow budget exceeded/)
+    expect(screen.getByTestId('operations-rail-dot-ai')).toHaveAttribute('data-severity', 'danger')
+  })
+
+  it('explains the Infrastructure dot for each issue', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': {
+        ok: true,
+        rateLimiter: {
+          healthy: false,
+          degradedBuckets: [{ bucket: 'ai', errorCount: 4, firstObservedAt: 'x', lastObservedAt: 'x' }],
+        },
+      },
+      '/system/queue': {
+        waiting: 9,
+        active: 0,
+        oldestWaitingSeconds: 300,
+        warnSeconds: 60,
+        maintenance: { waiting: 1, active: 1, oldestWaitingSeconds: 300, warnSeconds: 60 },
+      },
+    })
+
+    render(<OperationsPage />)
+
+    await expectReason('infrastructure', /Rate limiter degraded — 1 bucket failing open/)
+    await expectReason('infrastructure', /Workflow queue delayed; work is waiting for a worker/)
+    await expectReason('infrastructure', /Maintenance queue delayed; maintenance workers are still processing/)
+    expect(screen.getByTestId('settings-index-status-infrastructure')).toHaveTextContent(/Rate limiter degraded/)
+  })
+
+  it('names an unreadable queue instead of calling it clear', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/metrics') return healthyMetrics
+      if (path === '/health') return healthy
+      if (path === '/system/queue') throw new Error('offline')
+      return null
+    })
+
+    render(<OperationsPage />)
+
+    await expectReason('infrastructure', /Queue status unavailable — request failed/)
+    expect(screen.getByTestId('settings-index-status-infrastructure')).not.toHaveTextContent('All queues clear')
   })
 })
 

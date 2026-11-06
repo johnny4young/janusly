@@ -2,20 +2,28 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { arrayOf, isInteger, isShape, isString, nullable } from "../../guards"
+import { arrayOf, isInteger, isShape, isString, literal, nullable, shape } from "../../guards"
 
 export function isWorkflowListItem(value: unknown): value is Api.WorkflowListItem {
   return isShape(value, {
     bufferedTriggerCount: isInteger,
     createdAt: nullable(isString),
     createdBy: nullable(isString),
+    currentVersion: isInteger,
     deletedAt: nullable(isString),
     folder: nullable(isString),
     id: isString,
+    lastRunAt: nullable(isString),
     lastRunStatus: nullable(isString),
     name: isString,
+    openFailureCount: isInteger,
     orgId: isString,
     pausedReason: nullable(isString),
+    productionVersion: isInteger,
+    rollout: nullable(shape({
+      status: literal("active", "promoted", "rolled_back", "cancelled"),
+      trafficPercent: isInteger,
+    })),
     runCount: isInteger,
     status: isString,
     tags: arrayOf(isString),

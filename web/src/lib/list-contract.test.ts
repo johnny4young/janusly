@@ -20,10 +20,11 @@ const version = {
 }
 const saved = {
   id: workflow.id, orgId: 'org-a', name: 'Example', createdAt: null, createdBy: null, deletedAt: null, folder: null,
-  lastRunStatus: null, pausedReason: null, status: 'active', tags: [], runCount: 0, bufferedTriggerCount: 0,
+  lastRunStatus: null, lastRunAt: null, pausedReason: null, status: 'active', tags: [], runCount: 0, bufferedTriggerCount: 0,
+  openFailureCount: 0, currentVersion: 1, productionVersion: 1, rollout: null,
 }
 const run = {
-  id: 'run-a', orgId: 'org-a', status: 'timed_out', createdAt: null, createdBy: null, hasWaitingNodes: false,
+  id: 'run-a', orgId: 'org-a', status: 'timed_out', createdAt: null, cursor: null, createdBy: null, hasWaitingNodes: false,
   outcomeStatus: null, outputJson: null, parentNodeId: null, parentRunId: null, replayMode: null,
   semanticViolationCount: 0, traceId: null, validationEvidenceLevel: null, workflowId: workflow.id,
   workflowName: null, workflowVersionId: version.id,
@@ -44,6 +45,7 @@ describe('list read boundaries', () => {
       respond(payload); await expect(readRunSummaryPage()).rejects.toBeInstanceOf(MalformedResponseError)
     }
     respond([{ ...saved, runCount: 0.5 }]); await expect(readSavedWorkflowPage()).rejects.toBeInstanceOf(MalformedResponseError)
+    respond([{ ...saved, rollout: { status: 'paused', trafficPercent: 10 } }]); await expect(readSavedWorkflowPage()).rejects.toBeInstanceOf(MalformedResponseError)
   })
 
   it('leaves page sizes to the server', async () => {

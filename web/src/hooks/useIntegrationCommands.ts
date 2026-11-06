@@ -16,14 +16,15 @@ export function useIntegrationCommands(
   const {
     store,
     refreshPlatform,
+    setCredentials,
     runPlatformMutation,
     t,
   } = options
   const { bumpPlatformVersion } = store
   const { openRecoveryQueue, openRun, openWorkflow } = dependencies
 
-  const installPlugin = useCallback(async (pluginId: string) => {
-    await runPlatformMutation({
+  const installPlugin = useCallback(async (pluginId: string): Promise<boolean> => {
+    const result = await runPlatformMutation({
       request: () => api('/plugins/install', {
         method: 'POST',
         body: JSON.stringify({ pluginId, config: {} }),
@@ -33,6 +34,7 @@ export function useIntegrationCommands(
       successToastTiming: 'before-effect',
       onSuccess: refreshPlatform,
     })
+    return result.ok
   }, [refreshPlatform, runPlatformMutation, t])
 
   const createCredential = useCallback(async (credential: {
@@ -42,21 +44,37 @@ export function useIntegrationCommands(
     secretRef?: string
     expiresAt?: string
   }): Promise<boolean> => {
-    const result = await runPlatformMutation({
+    const result = await runPlatformMutation<{ id: string }>({
       request: () => api('/credentials', {
         method: 'POST',
         body: JSON.stringify(credential),
-      }),
+      }) as Promise<{ id: string }>,
       failureMessage: t('toasts.credentialFailed'),
       successToast: {
         message: t('toasts.credentialAdded', { name: credential.name }),
         tone: 'success',
       },
       successToastTiming: 'before-effect',
-      onSuccess: refreshPlatform,
+      // Listed at once: the refresh below can fail or lose to a newer one.
+      onSuccess: ({ id }) => setCredentials((current) => [...current, { id, name: credential.name, kind: credential.kind }]),
+    })
+    // After a failure too: a conflict means the list was stale, and a row only corrects itself from a fresh one.
+    await refreshPlatform()
+    return result.ok
+  }, [refreshPlatform, runPlatformMutation, setCredentials, t])
+
+  const revokeCredential = useCallback(async (name: string): Promise<boolean> => {
+    const result = await runPlatformMutation({
+      request: () => api(`/credentials/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+      failureMessage: t('rightPanel.credentials.revokeFailed'),
+      successToast: { message: t('rightPanel.credentials.revokeDone', { name }), tone: 'success' },
+      onSuccess: async () => {
+        bumpPlatformVersion()
+        await refreshPlatform()
+      },
     })
     return result.ok
-  }, [refreshPlatform, runPlatformMutation, t])
+  }, [bumpPlatformVersion, refreshPlatform, runPlatformMutation, t])
 
   const installPack = useCallback(async (packId: string) => {
     await runPlatformMutation<{ workflowId?: string; missingCredentials?: unknown[] }>({
@@ -121,6 +139,7 @@ export function useIntegrationCommands(
 
   return {
     createCredential,
+    revokeCredential,
     injectPackFailure,
     installPack,
     installPlugin,

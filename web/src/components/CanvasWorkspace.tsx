@@ -23,6 +23,7 @@ import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnNo
 import '../styles/canvas.css'
 import { WorkflowCanvas } from './WorkflowCanvas'
 import { registerFlowOps } from '../store'
+import { describeRecoveryError } from '../recovery-error-summary'
 import { getRunWorkflowSnapshot, projectVisibleEdges, projectVisibleNodes, workflowToGraph } from '../canvas-projections'
 import { useT } from '../i18n'
 import type { RunNode, RunSummary, WorkflowGraphEdge, WorkflowGraphNode } from '../types'
@@ -54,10 +55,11 @@ const ignoreEdgeClick: EdgeMouseHandler<WorkflowGraphEdge> = () => undefined
  * separate provider/React Flow instance from the editor so observing a run can
  * never alter authoring selection, graph state, or the saved editor viewport.
  */
-export function RunObservationWorkspace({ run, runNodes, panel }: {
+export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode }: {
   run: RunSummary
   runNodes: RunNode[]
   panel: ReactNode
+  onRecoverNode?: (nodeId: string) => void
 }) {
   const { t } = useT()
   const graph = useMemo(() => {
@@ -65,10 +67,25 @@ export function RunObservationWorkspace({ run, runNodes, panel }: {
     return snapshot ? workflowToGraph(snapshot) : null
   }, [run.inputJson])
   const nodes = useMemo(
-    () => graph
-      ? projectVisibleNodes(graph.nodes, new Map(runNodes.map(node => [node.nodeId, node.status])), [], null)
-      : [],
-    [graph, runNodes],
+    () => {
+      if (!graph) return []
+      const failed = new Map(runNodes.filter((node) => node.status === 'failed').map((node) => [node.nodeId, node]))
+      return projectVisibleNodes(graph.nodes, new Map(runNodes.map(node => [node.nodeId, node.status])), [], null)
+        .map((node) => {
+          const run = failed.get(node.id)
+          if (!run) return node
+          const digest = describeRecoveryError(run.errorJson, node.data.type)
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              errorSummary: digest.dnsHost ? t('dlq.errorSummary.dnsHost', { host: digest.dnsHost }) : digest.message,
+              onRecover: onRecoverNode && (() => onRecoverNode(node.id)),
+            },
+          }
+        })
+    },
+    [graph, onRecoverNode, runNodes, t],
   )
   const edges = useMemo(
     () => graph ? projectVisibleEdges(graph.edges, null) : [],

@@ -615,6 +615,24 @@ func (q *Queries) GetLatestRecoveryCaseArtifactByKind(ctx context.Context, arg G
 	return i, err
 }
 
+const getLatestRecoveryCaseTransitionAt = `-- name: GetLatestRecoveryCaseTransitionAt :one
+SELECT coalesce(max(occurred_at), 'epoch'::timestamptz)::timestamptz AS occurred_at
+FROM recovery_case_transitions
+WHERE org_id = $1 AND case_id = $2
+`
+
+type GetLatestRecoveryCaseTransitionAtParams struct {
+	OrgID  string
+	CaseID string
+}
+
+func (q *Queries) GetLatestRecoveryCaseTransitionAt(ctx context.Context, arg GetLatestRecoveryCaseTransitionAtParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getLatestRecoveryCaseTransitionAt, arg.OrgID, arg.CaseID)
+	var occurred_at time.Time
+	err := row.Scan(&occurred_at)
+	return occurred_at, err
+}
+
 const getRecoveryCase = `-- name: GetRecoveryCase :one
 SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, revision, created_by, created_at, updated_at, resolved_at FROM recovery_cases WHERE org_id = $1 AND id = $2
 `
@@ -1256,8 +1274,10 @@ WHERE dl.org_id = $1
              nullif(r.input_json->'workflow'->>'id', ''),
              r.workflow_version_id
            ) = $4))
+  AND ($5::timestamptz IS NULL
+       OR (dl.created_at, dl.id) < ($5::timestamptz, $6::text))
 ORDER BY dl.created_at DESC, dl.id DESC
-LIMIT $5
+LIMIT $7
 `
 
 type ListDeadLetterSummariesParams struct {
@@ -1265,6 +1285,8 @@ type ListDeadLetterSummariesParams struct {
 	FilterStatus     pgtype.Text
 	FilterNodeID     pgtype.Text
 	FilterWorkflowID pgtype.Text
+	BeforeCreatedAt  *time.Time
+	BeforeID         pgtype.Text
 	PageLimit        int32
 }
 
@@ -1301,6 +1323,8 @@ func (q *Queries) ListDeadLetterSummaries(ctx context.Context, arg ListDeadLette
 		arg.FilterStatus,
 		arg.FilterNodeID,
 		arg.FilterWorkflowID,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
 		arg.PageLimit,
 	)
 	if err != nil {

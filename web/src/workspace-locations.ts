@@ -89,13 +89,12 @@ export const WORKSPACE_DESTINATION_DEFINITIONS: readonly WorkspaceDestinationDef
         tab: 'runs',
         labelKey: 'workspace.section.runs.label',
         helperKey: 'workspace.section.runs.helper',
-        activeAliases: ['recover', 'reasoning', 'multiAgent'],
+        activeAliases: ['reasoning'],
       },
       {
         tab: 'recover',
         labelKey: 'workspace.section.recover.label',
         helperKey: 'workspace.section.recover.helper',
-        hidden: true,
         activeAliases: ['recoveryCase'],
       },
       {
@@ -108,7 +107,11 @@ export const WORKSPACE_DESTINATION_DEFINITIONS: readonly WorkspaceDestinationDef
         tab: 'multiAgent',
         labelKey: 'workspace.section.multiAgent.label',
         helperKey: 'workspace.section.multiAgent.helper',
-        hidden: true,
+      },
+      {
+        tab: 'reports',
+        labelKey: 'workspace.section.reports.label',
+        helperKey: 'workspace.section.reports.helper',
       },
     ],
   },
@@ -162,6 +165,7 @@ const DESTINATION_BY_TAB: Record<ActiveTab, WorkspaceDestination> = {
   recover: 'activity',
   reasoning: 'activity',
   multiAgent: 'activity',
+  reports: 'activity',
   recoveryCase: 'activity',
   operations: 'settings',
   credentials: 'settings',
@@ -203,12 +207,7 @@ export function resolveWorkspaceDestinationTarget(
   destination: WorkspaceDestination,
   permissions?: readonly string[],
 ): ActiveTab | null {
-  const visibleTarget = listWorkspaceSections(destination, permissions)[0]?.tab
-  if (visibleTarget) return visibleTarget
-  if (destination !== 'activity' || permissions === undefined) return null
-  return getWorkspaceDestination(destination).sections
-    .find((section) => canOpenTab(section.tab, permissions))
-    ?.tab ?? null
+  return listWorkspaceSections(destination, permissions)[0]?.tab ?? null
 }
 
 export function canOpenWorkspaceDestination(

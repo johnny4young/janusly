@@ -36,6 +36,9 @@ import (
 type IntegrationDeps struct {
 	// DBPools is the runtime-owned external pool budget; nil disables db tools.
 	DBPools *DBPools
+	// PinnedCredentials holds the revision an approved call was bound to;
+	// Gate refuses a credential that changed since.
+	PinnedCredentials map[string]CredentialRevision
 	// Gate runs credential lookup (org-scoped, by kind+name), secret
 	// resolution, and the org+credential rate limit. Returns the secret
 	// or a generic error message.
@@ -370,6 +373,12 @@ func integrationTools() []Definition {
 
 func envelopeError(message string, latencyMs int) map[string]any {
 	return map[string]any{"ok": false, "error": message, "latencyMs": latencyMs}
+}
+
+// CredentialRevision identifies one stored credential at one revision.
+type CredentialRevision struct {
+	ID        string
+	UpdatedAt time.Time
 }
 
 // API-level deliveries can call ExecuteIntegrationTool without passing through
