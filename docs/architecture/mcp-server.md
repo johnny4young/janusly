@@ -40,12 +40,14 @@ does not maintain another task store.
 
 ## Catalog
 
-The stable catalog contains 17 tools:
+The stable catalog contains 23 tools:
 
 - authoring: `catalog.describe`, `workflows.validate`;
-- workflow: `workflows.list`, `workflows.assure`, `workflows.propose`,
-  `workflows.save`;
-- run: `runs.list`, `runs.status`, `runs.inspect`, `runs.start`;
+- workflow: `workflows.list`, `workflows.get`, `workflows.assure`,
+  `workflows.propose`, `workflows.save`, `workflows.rollback`,
+  `workflows.deactivate`, `workflows.reactivate`;
+- run: `runs.list`, `runs.status`, `runs.inspect`, `runs.output`,
+  `runs.start`, `runs.cancel`;
 - dead letter: `dlq.list`, `dlq.redrive`;
 - operations: `operations.brief`;
 - semantic recovery: `recovery.cases.inspect`,
@@ -124,6 +126,23 @@ types. Recovery inspection withholds case message/details, transition reasons,
 artifact payloads, candidate output/rationale/evidence, and every approval
 grant. This makes the surface useful without turning MCP into an alternate
 unbounded evidence or workflow-export API.
+
+`workflows.get` (`workflows.read`) and `runs.output` (`runs.read`) are the two
+tools that put saved tenant data into a model's context. `workflows.get`
+returns one active workflow's document, either the latest or an exact version,
+plus up to 20 versions and its schedules with `nextFireAt`. `runs.output`
+returns a run's declared output and its steps' outputs. Both remove
+secret-shaped literals before returning, but that removal is shape-based: a
+secret written in clear text in an unusual format, or business data in a step
+output, reaches the model as is. Each output value is bounded to 32000 bytes and
+replaced by its size beyond that. `workflows.assure`, `runs.inspect` and the
+recovery tools keep their withheld projections.
+
+`workflows.rollback`, `workflows.deactivate` and `workflows.reactivate`
+(`workflows.write`) and `runs.cancel` (`runs.cancel`) call the same engine
+operations as the HTTP rollback, trash, restore and cancel routes. They are
+business writes, so they also need write consent, and deactivate and cancel are
+annotated destructive.
 
 Never expose credential material, identity secrets, organization-wide security
 settings, or unbounded raw evidence through MCP.

@@ -77,6 +77,26 @@ var outputSchemas = map[string]*jsonschema.Schema{
 		"mcpTools": {kind: "array"}, "warnings": {kind: "array"}, "triggers": {kind: "array"},
 		"subworkflows": {kind: "array"},
 	}),
+	"workflows.get": outputObject(fields{
+		"workflowId": {kind: "string", required: true}, "name": {kind: "string", required: true},
+		"status": {kind: "string", required: true}, "versions": {kind: "array", required: true},
+		"schedules": {kind: "array", required: true}, "version": {kind: "integer"},
+		"versionId": {kind: "string"}, "document": {kind: "object"},
+	}),
+	"workflows.rollback": outputObject(fields{
+		"workflowId": {kind: "string", required: true}, "versionId": {kind: "string", required: true},
+		"version": {kind: "integer", required: true}, "sourceVersion": {kind: "integer", required: true},
+	}),
+	"workflows.deactivate": activeObject(),
+	"workflows.reactivate": activeObject(),
+	"runs.output": outputObject(fields{
+		"runId": {kind: "string", required: true}, "status": {kind: "string", required: true},
+		"workflowVersionId": {kind: "string", required: true}, "output": {},
+		"steps": {kind: "object", required: true},
+	}),
+	"runs.cancel": outputObject(fields{
+		"runId": {kind: "string", required: true}, "status": {kind: "string", required: true},
+	}),
 	"workflows.validate": outputObject(fields{
 		"valid": {kind: "boolean", required: true}, "issues": {kind: "array", required: true},
 		"readiness": {kind: "object"}, "bindings": {kind: "object"}, "bindingsWithheld": {kind: "string"},
@@ -114,5 +134,11 @@ func pageObject(rows string) *jsonschema.Schema {
 	return outputObject(fields{
 		rows: {kind: "array", required: true}, "hasMore": {kind: "boolean", required: true},
 		"nextCursor": {kind: "string"},
+	})
+}
+
+func activeObject() *jsonschema.Schema {
+	return outputObject(fields{
+		"workflowId": {kind: "string", required: true}, "active": {kind: "boolean", required: true},
 	})
 }

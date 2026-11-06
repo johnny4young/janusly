@@ -61,7 +61,10 @@ tools and credential names and check a draft without saving it.
 `workflows.propose` performs exact CapabilityCatalog binding without saving a
 workflow, and returns the bound draft only when `includeDocument` is true.
 `runs.start` runs a saved `workflowId` at its latest version and accepts an
-`idempotencyKey` for safe retries. Semantic recovery is exposed as bounded
+`idempotencyKey` for safe retries. `workflows.get` and `runs.output` read a saved
+document and a run's outputs with secret-shaped literals removed;
+`workflows.rollback`, `workflows.deactivate`, `workflows.reactivate` and
+`runs.cancel` complete the lifecycle under write consent. Semantic recovery is exposed as bounded
 inspect/diagnose/validate/apply tools; apply requires a separately created,
 unexpired human approval and the immutable candidate's additional permissions.
 Diagnose is deterministic without a provider and can use bounded AI enrichment
