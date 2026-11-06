@@ -5,6 +5,9 @@
 - The PagerDuty example that opens AI Studio compiles into a complete intent
   brief. It named the user in a form the brief compiler did not read, so Build
   proposal stayed disabled until the author added the user ID by hand.
+- When a run's resource usage response fails validation, the run panel says so
+  in its own words again instead of showing the generic unreadable-response
+  error.
 - In Spanish, the Recover queue toolbar fits on one row with the detail pane
   open, for every menu choice, from a 1280 px window on macOS and from 1310 px
   on Linux, where text renders slightly wider. Sort options read "Más

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { MalformedResponseError } from '../lib/malformed-response'
 import type { RunEvent } from '../types'
 import { ReasoningPanel } from './ReasoningPanel'
 
@@ -301,6 +302,19 @@ describe('<ReasoningPanel />', () => {
     const loadRunUsage = vi.fn().mockResolvedValue({ loadedRows: 1, llm: {}, memory: {} })
     render(<ReasoningPanel
       activeRunId="run-malformed"
+      onLoadRunUsage={loadRunUsage}
+      events={[]}
+    />)
+
+    const error = await screen.findByRole('alert')
+    expect(error).toHaveAttribute('data-state', 'error')
+    expect(error).toHaveTextContent("The server returned usage data Janusly couldn't validate.")
+  })
+
+  it('keeps the run-usage copy when the response guard rejects the payload', async () => {
+    const loadRunUsage = vi.fn().mockRejectedValue(new MalformedResponseError())
+    render(<ReasoningPanel
+      activeRunId="run-guard-rejected"
       onLoadRunUsage={loadRunUsage}
       events={[]}
     />)
