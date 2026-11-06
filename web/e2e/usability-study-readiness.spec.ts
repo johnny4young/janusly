@@ -233,7 +233,7 @@ test('the local product is ready for the five moderated usability tasks', async 
     await expectNoPageOverflow(page)
     await capture(shell, `web-${locale}-usability-find-failure.png`)
 
-    await recoveryRow.locator('button.list-card-row').click()
+    await recoveryRow.getByRole('button').click()
     const recoveryDetail = page.getByTestId('activity-recovery-detail')
     await expect(recoveryDetail).toBeVisible()
     const suggestFix = recoveryDetail.getByRole('button', {

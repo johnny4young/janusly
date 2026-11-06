@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 634.4,
+  "artifactGzipKiB": 635.1,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 587.6
+    "maxGzipKiB": 588.3
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -79,13 +79,13 @@
   },
   "baselineGzipKiB": {
     "ActivityRecoveryDetail.js": 2.43,
-    "ActivityWorkspace.css": 0.85,
-    "ActivityWorkspace.js": 3.52,
+    "ActivityWorkspace.css": 1.02,
+    "ActivityWorkspace.js": 3.74,
     "AiGuidanceSettingsPanel.js": 1.31,
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 84.8,
+    "app-workspace.js": 84.86,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
@@ -95,11 +95,11 @@
     "AuthPolicySettingsPanel.js": 1.73,
     "AutoHealingPendingCard.css": 0.81,
     "AutoHealingPendingCard.js": 2.34,
-    "BudgetSettingsPanel.js": 3.25,
+    "BudgetSettingsPanel.js": 3.27,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 42.53,
-    "catalog-es.js": 47.34,
+    "catalog-en.js": 42.55,
+    "catalog-es.js": 47.36,
     "CommandPalette.js": 6.08,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,

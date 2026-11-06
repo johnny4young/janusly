@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Activity lists runs and recoveries as a dense table with kind, workflow,
+  step, status, time, run and next action. A recovery sits under its run with
+  the workflow name muted. Hovering a row shows every field a column cuts off.
 - A workflow's Deployment tools show the latest saved version next to the
   version in production, which stays the baseline while a canary runs and after
   it is rolled back. Promote opens a dialog that compares the latest version

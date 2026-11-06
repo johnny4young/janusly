@@ -7,12 +7,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react'
 import {
   Activity,
   AlertTriangle,
   CheckCircle2,
   Clock3,
+  CornerDownRight,
   History,
   ListChecks,
   RefreshCw,
@@ -23,9 +25,12 @@ import {
 import {
   ACTIVITY_FILTERS,
   buildActivityFeed,
+  compactActivityTime,
   countActivityFeed,
   filterActivityFeed,
-  type ActivityFeedItem,
+  fullActivityTime,
+  groupActivityFeed,
+  type ActivityFeedRow,
   type ActivityFilter,
 } from '../activity-feed'
 import { formatStatusLabel, getNodeLabel } from '../constants'
@@ -51,7 +56,8 @@ const ActivityRecoveryDetail = lazy(() => import('./ActivityRecoveryDetail').the
   default: module.ActivityRecoveryDetail,
 })))
 
-const ACTIVITY_ROW_HEIGHT = 110
+const ACTIVITY_ROW_HEIGHT = 44
+const ACTIVITY_COLUMNS = ['kind', 'workflow', 'step', 'status', 'time', 'run', 'next'] as const
 
 type ActivitySelection =
   | { kind: 'run'; id: string }
@@ -74,85 +80,88 @@ function filterIcon(filter: ActivityFilter) {
   return <ListChecks size={13} aria-hidden="true" />
 }
 
-function rowStatus(item: ActivityFeedItem): string {
-  return item.kind === 'run' ? item.run.status : item.deadLetter.status
-}
-
-function activityTime(value: string | undefined): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(getResolvedLocale())
-}
-
-function humanizeIdentifier(value: string): string {
-  const compact = value.trim().replace(/[_./-]+/g, ' ').replace(/\s+/g, ' ')
-  if (!compact) return value
-  return compact.charAt(0).toUpperCase() + compact.slice(1)
-}
-
 function ActivityRow({
-  item,
+  row: { item, nested },
+  rowIndex,
   selected,
   onSelect,
 }: {
-  item: ActivityFeedItem
+  row: ActivityFeedRow
+  rowIndex: number
   selected: boolean
   onSelect: () => void
 }) {
   const { t } = useT()
   const recovery = item.kind === 'recovery' ? item.deadLetter : null
   const workflowName = item.workflowName || t('activity.unknownWorkflow')
-  const stepName = recovery
-    ? recovery.nodeType
-      ? getNodeLabel(recovery.nodeType)
-      : humanizeIdentifier(recovery.nodeId)
-    : null
-  const status = rowStatus(item)
+  const status = item.kind === 'run' ? item.run.status : item.deadLetter.status
   const needsAction = item.category === 'needs_action'
   const displayedStatus = needsAction
     ? t('activity.filter.needs_action')
     : formatStatusLabel(status)
-  const statusTone = needsAction ? 'waiting' : status
-
-  return (
-    <article
-      className="list-card we-activity-row"
-      data-selected={selected ? 'true' : 'false'}
-      data-category={item.category}
-      data-testid={`activity-row-${item.key}`}
-    >
+  const KindIcon = nested ? CornerDownRight : recovery ? ShieldAlert : Activity
+  const nextAction = t(`activity.nextAction.${item.nextAction}`)
+  const kind = t(`activity.kind.${item.kind}`)
+  const step = recovery && (recovery.nodeType
+    ? `${recovery.nodeId} · ${getNodeLabel(recovery.nodeType)}`
+    : recovery.nodeId)
+  const cells: Record<(typeof ACTIVITY_COLUMNS)[number], ReactNode> = {
+    kind: (
       <button
         type="button"
-        className="list-card-row"
+        className="we-activity-row__open"
+        data-testid={`activity-open-${item.key}`}
         aria-pressed={selected}
+        title={[
+          workflowName,
+          step,
+          displayedStatus,
+          nextAction,
+          item.runId,
+          fullActivityTime(item.createdAt, getResolvedLocale()),
+        ].filter(Boolean).join(' · ')}
         onClick={onSelect}
         aria-label={t('activity.rowAria', {
-          kind: t(`activity.kind.${item.kind}`),
+          kind,
           workflow: workflowName,
           status: displayedStatus,
-          nextAction: t(`activity.nextAction.${item.nextAction}`),
+          nextAction,
         })}
       >
-        <span className="we-activity-row__primary">
-          <span className="we-activity-row__kind">
-            {item.kind === 'run'
-              ? <Activity size={14} aria-hidden="true" />
-              : <ShieldAlert size={14} aria-hidden="true" />}
-            {t(`activity.kind.${item.kind}`)}
-          </span>
-          <strong title={workflowName}>{workflowName}</strong>
-          {stepName && <span title={recovery?.nodeId}>{stepName}</span>}
-        </span>
-        <span className="we-activity-row__status">
-          <span className="status-pill" data-status={statusTone}>{displayedStatus}</span>
-          <time dateTime={item.createdAt ?? undefined}>{activityTime(item.createdAt ?? undefined)}</time>
-        </span>
-        <span className="we-activity-row__next">
-          {t(`activity.nextAction.${item.nextAction}`)}
-        </span>
-        <code title={item.runId}>{item.runId.slice(0, 8)}…</code>
+        <KindIcon size={14} aria-hidden="true" />
+        <span>{kind}</span>
       </button>
-    </article>
+    ),
+    workflow: nested ? workflowName : <strong>{workflowName}</strong>,
+    step,
+    status: (
+      <span className="status-pill" data-status={needsAction ? 'waiting' : status}>{displayedStatus}</span>
+    ),
+    time: (
+      <time dateTime={item.createdAt ?? undefined}>
+        {compactActivityTime(item.createdAt, getResolvedLocale())}
+      </time>
+    ),
+    run: <code>{item.runId.slice(0, 8)}…</code>,
+    next: nextAction,
+  }
+
+  return (
+    <div
+      role="row"
+      aria-rowindex={rowIndex}
+      className="we-activity-row"
+      data-selected={selected ? 'true' : 'false'}
+      data-category={item.category}
+      data-nested={nested ? 'true' : undefined}
+      data-testid={`activity-row-${item.key}`}
+    >
+      {ACTIVITY_COLUMNS.map((column, index) => (
+        <div role="cell" key={column} aria-colindex={index + 1} className={`we-activity-cell-${column}`}>
+          {cells[column]}
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -191,7 +200,7 @@ export function ActivityWorkspace({
     [deadLetters, runWorkspaceProps.runs, runWorkspaceProps.workflows],
   )
   const counts = useMemo(() => countActivityFeed(feed), [feed])
-  const filtered = useMemo(() => filterActivityFeed(feed, filter), [feed, filter])
+  const filtered = useMemo(() => groupActivityFeed(filterActivityFeed(feed, filter)), [feed, filter])
   const selectedItem = selection
     ? feed.find(item => item.kind === selection.kind && item.entityId === selection.id) ?? null
     : null
@@ -429,24 +438,38 @@ export function ActivityWorkspace({
             />
           ) : (
             <div
-              ref={containerRef}
-              className="we-activity-feed__list"
-              data-testid="activity-feed-list"
+              role="table"
+              aria-rowcount={filtered.length + 1}
+              aria-colcount={ACTIVITY_COLUMNS.length}
+              className="we-activity-feed__table"
               aria-label={t('activity.feed.listAria')}
             >
-              <div style={{ height: totalHeight, position: 'relative' }}>
-                <div style={{ transform: `translateY(${startOffset}px)` }}>
-                  {visibleItems.map(({ item }) => (
-                    <ActivityRow
-                      key={item.key}
-                      item={item}
-                      selected={selectedItem?.key === item.key}
-                      onSelect={() => {
-                        if (item.kind === 'run') selectRun(item.entityId)
-                        else selectRecovery(item.entityId)
-                      }}
-                    />
+              <div role="rowgroup" className="we-activity-feed__head">
+                <div role="row" aria-rowindex={1} className="we-activity-row">
+                  {ACTIVITY_COLUMNS.map((column, index) => (
+                    <div role="columnheader" key={column} aria-colindex={index + 1} className={`we-activity-cell-${column}`}>
+                      {t(`activity.table.${column}`)}
+                    </div>
                   ))}
+                </div>
+              </div>
+              {/* The header stays outside the scroller so the virtual height matches its scroll range. */}
+              <div ref={containerRef} className="we-activity-feed__list" data-testid="activity-feed-list">
+                <div style={{ height: totalHeight, position: 'relative' }}>
+                  <div role="rowgroup" style={{ transform: `translateY(${startOffset}px)` }}>
+                    {visibleItems.map(({ item: row, index }) => (
+                      <ActivityRow
+                        key={row.item.key}
+                        row={row}
+                        rowIndex={index + 2}
+                        selected={selectedItem?.key === row.item.key}
+                        onSelect={() => {
+                          if (row.item.kind === 'run') selectRun(row.item.entityId)
+                          else selectRecovery(row.item.entityId)
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>

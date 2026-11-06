@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { readDeadLetterDetail } from '../lib/dead-letter-contract'
@@ -108,7 +108,12 @@ describe('<ActivityWorkspace />', () => {
 
     expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
     expect(screen.getByTestId('activity-feed-list')).toBeVisible()
-    expect(screen.getAllByRole('article')).toHaveLength(3)
+    const table = screen.getByRole('table', { name: 'Chronological activity' })
+    expect(table).toHaveAttribute('aria-rowcount', '4')
+    expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual([
+      'Kind', 'Workflow', 'Step', 'Status', 'Time', 'Run', 'Next action',
+    ])
+    expect(within(table).getAllByRole('row')).toHaveLength(4)
     expect(screen.queryByTestId('activity-detail')).not.toBeInTheDocument()
     expect(screen.queryByText('Ask Janusly')).not.toBeInTheDocument()
   })
@@ -122,6 +127,47 @@ describe('<ActivityWorkspace />', () => {
     expect(screen.getByTestId('activity-row-run:run-waiting')).toHaveTextContent('Review waiting step')
     expect(screen.getByTestId('activity-row-run:run-waiting')).toHaveTextContent('Needs action')
     expect(screen.queryByTestId('activity-row-run:run-live')).not.toBeInTheDocument()
+  })
+
+  it('groups a recovery under its run and keeps its workflow name in the row', () => {
+    const runs = [{
+      id: 'run-failed',
+      workflowId: 'workflow-1',
+      workflowName: 'Invoice recovery',
+      status: 'failed',
+      createdAt: '2026-07-28T12:00:00.000Z',
+    }]
+    render(<ActivityWorkspace {...props({ runs })} />)
+
+    const runRow = screen.getByTestId('activity-row-run:run-failed')
+    const recoveryRow = screen.getByTestId('activity-row-recovery:dead-letter-1')
+    expect(runRow.nextElementSibling).toBe(recoveryRow)
+    expect(runRow).toHaveAttribute('aria-rowindex', '2')
+    expect(recoveryRow).toHaveAttribute('aria-rowindex', '3')
+    expect(recoveryRow).toHaveAttribute('data-nested', 'true')
+    expect(recoveryRow.querySelector('.we-activity-cell-workflow')).toHaveTextContent('Invoice recovery')
+    expect(recoveryRow.querySelector('.we-activity-cell-workflow strong')).toBeNull()
+    expect(recoveryRow).toHaveTextContent('notify_finance')
+    expect(screen.getByTestId('activity-open-recovery:dead-letter-1')).toHaveAccessibleName(
+      expect.stringContaining('Invoice recovery'),
+    )
+
+    fireEvent.click(screen.getByTestId('activity-filter-needs_action'))
+    const standalone = screen.getByTestId('activity-row-recovery:dead-letter-1')
+    expect(standalone).not.toHaveAttribute('data-nested')
+    expect(standalone).toHaveTextContent('Invoice recovery')
+  })
+
+  it('keeps every truncated field reachable from a compact row', () => {
+    render(<ActivityWorkspace {...props()} />)
+
+    const details = screen.getByTestId('activity-open-recovery:dead-letter-1').title
+    expect(details).toContain('run-failed')
+    expect(details).toContain('notify_finance · Ask approval')
+    expect(details).toContain('Needs action')
+    expect(details).toContain('Recover this step')
+    expect(details).toContain('2026')
+    expect(screen.getByTestId('activity-row-run:run-live')).toHaveTextContent('run-live…')
   })
 
   it('refreshes the shared platform projection on demand', () => {
@@ -144,14 +190,14 @@ describe('<ActivityWorkspace />', () => {
   it('opens run and recovery detail in context while preserving the feed', async () => {
     const view = render(<ActivityWorkspace {...props()} />)
 
-    fireEvent.click(screen.getByTestId('activity-row-run:run-live').querySelector('button')!)
+    fireEvent.click(screen.getByTestId('activity-open-run:run-live'))
     expect(handlers.onOpenRun).toHaveBeenCalledWith('run-live')
 
     view.rerender(<ActivityWorkspace {...props({ activeRunId: 'run-live' })} />)
     expect(await screen.findByTestId('run-detail-projection')).toHaveTextContent('activity-detail')
     expect(screen.getByTestId('activity-feed-list')).toBeVisible()
 
-    fireEvent.click(screen.getByTestId('activity-row-recovery:dead-letter-1').querySelector('button')!)
+    fireEvent.click(screen.getByTestId('activity-open-recovery:dead-letter-1'))
     view.rerender(<ActivityWorkspace {...props({ activeRecoveryId: 'dead-letter-1' })} />)
     expect(await screen.findByTestId('recovery-detail-projection')).toHaveTextContent('notify_finance')
     expect(handlers.onSelectRecovery).toHaveBeenCalledWith('dead-letter-1')
@@ -176,6 +222,9 @@ describe('<ActivityWorkspace />', () => {
     expect(screen.getByTestId('activity-row-recovery:dead-letter-1')).toBeVisible()
     expect(screen.getByTestId('activity-row-run:run-waiting')).toBeVisible()
     expect(screen.queryByTestId('activity-row-run:run-live')).not.toBeInTheDocument()
+    await waitFor(() => expect(document.activeElement).toBe(
+      screen.getByRole('heading', { name: 'Recent activity' }),
+    ))
   })
 
   it('reads off-list recovery evidence once per selected ID and aborts the previous selection', async () => {

@@ -286,6 +286,16 @@ cost and no tokens. A step whose run is gone shows no link. Selecting a model
 re-reads only its steps. Settings > Usage links here in every state, and shows
 loading and a failed read apart from an empty window.
 
+The Runs tab lists the activity feed as a virtualized table of 44 px rows.
+`groupActivityFeed` places each recovery under its run, with a muted workflow
+name, when the active filter keeps that run; otherwise the recovery stands alone.
+Each row has one button, stretched over the row, so a row is one tab stop; its
+title carries every field a cell can truncate. The header row sits outside the
+scroll container, because `useVirtualList` sizes the scroll range from the rows
+alone, and cells carry `aria-colindex` because an empty step cell is not
+rendered. Below a feed width of 960 px the row folds into two lines and the
+column headers stay available only to assistive technology.
+
 Opening a run shows one run sheet (`RunWorkspace`). `RunsPanel` owns the header
 (identity, actions, data row) and its dialogs, so they stay available on every
 tab; `RunWorkspace` owns the tabs Overview, Timeline, Events, Agents and Ask and
@@ -333,6 +343,7 @@ each template carries in `internal/httpapi/assets/templates.json`, so a new
 category gets its chip without a web change. Packs renders the embedded
 `SolutionPacksPanel` and is the only place packs appear on that page; `#/packs`
 remains the standalone route.
+
 The eager shell owns the core locale catalog. Non-home main and authoring-panel
 slots own a `WorkspaceArea`: the workspace namespace and lazy route chunk load
 behind an accessible, height-preserving skeleton while the sidebar, top bar and
