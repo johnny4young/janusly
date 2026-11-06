@@ -124,19 +124,21 @@ export async function openWorkflowAiAction(
   }
 
   await openWorkspaceSection(page, destination, spanish ? 'Crear' : 'Build')
-  if (await aiStudio.isVisible().catch(() => false)) {
+  const labels = spanish
+    ? { generate: 'Generar', explain: 'Explicar', review: 'Revisar', fix: 'Corregir' }
+    : { generate: 'Generate', explain: 'Explain', review: 'Review', fix: 'Fix' }
+  const panelAction = page
+    .locator('.workspace-panel')
+    .getByRole('button', { name: labels[action], exact: true })
+  // The AI panel renders lazily; decide only once one of the two layouts is on screen.
+  await aiStudio.or(panelAction).first().waitFor({ state: 'visible' })
+  if (await aiStudio.isVisible()) {
     if (action !== 'generate') {
       await page.getByRole('button', { name: directLabels[action], exact: true }).click()
     }
     return
   }
-  const labels = spanish
-    ? { generate: 'Generar', explain: 'Explicar', review: 'Revisar', fix: 'Corregir' }
-    : { generate: 'Generate', explain: 'Explain', review: 'Review', fix: 'Fix' }
-  await page
-    .locator('.workspace-panel')
-    .getByRole('button', { name: labels[action], exact: true })
-    .click()
+  await panelAction.click()
 }
 
 export async function openWorkflowOperation(page: Page, label: string): Promise<void> {
