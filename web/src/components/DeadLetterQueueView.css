@@ -92,7 +92,10 @@
   margin-top: 4px;
 }
 
-.we-dlq-filters { margin-block: 10px; }
+/* Room for the Spanish chips and menus on one row in the 980px card. */
+.we-dlq-filters { gap: 6px; margin-block: 10px; }
+
+.we-dlq-filters .we-list-search { flex-basis: 10rem; }
 
 .we-dlq-filters .ui-control {
   min-height: var(--we-control-sm);

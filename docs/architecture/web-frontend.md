@@ -698,9 +698,9 @@ status group's tooltip and accessible description. Filters keep their existing
 combined server query and persistence semantics. Refresh may reorder rows without
 moving focus or clearing the selected failure or bulk selection.
 
-Rows retain the fixed 54px height required by virtualization. The toolbar holds
-one row in English from a 1280px window and in Spanish from 1440px, and reflows
+Rows retain the fixed height required by virtualization. The toolbar holds one
+row in English from a 1280px window and in Spanish from 1440px, and reflows
 without hiding actions at narrower widths; full failure details remain available
-below the list. Chromium checks cover long identifiers, English/Spanish labels,
+in the detail pane. Chromium checks cover long identifiers, English/Spanish labels,
 keyboard filter traversal and 390/640/1280 CSS-pixel widths. The 640px case is a
 200%-zoom layout proxy, not a screen-reader or physical browser-zoom certificate.

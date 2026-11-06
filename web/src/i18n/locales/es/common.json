@@ -1696,7 +1696,7 @@
   "dlq.dayFilter.clear": "Quitar filtro de día",
   "dlq.downtimeTitle": "Inactividad hasta ahora",
   "dlq.recovering": "Recuperando…",
-  "dlq.search.placeholder": "Nodo, ejecución o error",
+  "dlq.search.placeholder": "Nodo, ejecución, error",
   "dlq.show": "Estado del fallo",
   "dlq.filter.all": "Todos",
   "dlq.filter.open": "Abiertos",
