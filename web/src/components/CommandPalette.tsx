@@ -9,6 +9,9 @@
  *
  * Persists recently-used commands to `localStorage["janusly:palette:recent"]`
  * so the next open surfaces them at the top.
+ *
+ * A sentence about runs switches to run search: `lib/run-query.ts` parses it and
+ * `CommandPaletteRuns.tsx` shows the chips and pages `/runs`.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -29,6 +32,7 @@ import {
   Moon,
   Play,
   PlayCircle,
+  RefreshCcw,
   Save,
   Search,
   ShieldAlert,
@@ -43,6 +47,11 @@ import { useT } from '../i18n'
 import { applyTheme, type ThemePreference } from '../theme'
 import { openDocsUrl, parseDocsUrl } from '../docs-link'
 import { rankPaletteMatches } from '../command-palette-search'
+import { formatStatusLabel } from '../constants'
+import { parseRunQuery } from '../lib/run-query'
+import type { RunSummary } from '../types'
+import { PaletteRunFilters, formatRunTime, runRequestFor, usePaletteRunResults } from './CommandPaletteRuns'
+import './CommandPalette.css'
 import {
   WORKSPACE_DESTINATION_DEFINITIONS,
   resolveWorkspaceDestinationTarget,
@@ -100,7 +109,17 @@ export type CommandPaletteProps = CommandContext & {
   onOpenRecipe?: (id: string) => void
   /** Effective permissions from the selected organization. */
   permissions?: readonly string[]
+  /** Opens one run in Activity (read only). */
+  onOpenRun?: (runId: string) => void
+  /** Open dead letters by run; Retry hands off to the queue, which owns the write. */
+  recoveryTargets?: ReadonlyArray<{ id: string; runId: string }>
+  onOpenRecovery?: (deadLetterId: string) => void
 }
+
+type RunEntry =
+  | { kind: 'run'; run: RunSummary }
+  | { kind: 'replay'; run: RunSummary; deadLetterId: string }
+  | { kind: 'more' }
 
 function readRecent(): CommandId[] {
   try {
@@ -220,6 +239,9 @@ export function CommandPalette({
   onOpenWorkflow,
   onOpenRecipe,
   permissions,
+  onOpenRun,
+  recoveryTargets = [],
+  onOpenRecovery,
 }: CommandPaletteProps) {
   const { t } = useT()
   const safeDocsUrl = parseDocsUrl(docsUrl)
@@ -231,6 +253,19 @@ export function CommandPalette({
   const dialogRef = useRef<HTMLDivElement | null>(null)
   // Always-mounted (renders null while closed) → drive the trap off `open`.
   useDialogFocusTrap(dialogRef, { active: open })
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
+  const [now, setNow] = useState(() => new Date())
+  const parsedRuns = useMemo(() => parseRunQuery(query, workflows), [query, workflows])
+  const runMode = parsedRuns.isRunQuery && can('runs.read') && Boolean(onOpenRun)
+  const runResults = usePaletteRunResults(runMode ? runRequestFor(parsedRuns, now) : null)
+  const canReplay = can('dlq.replay') && can('dlq.read') && Boolean(onOpenRecovery)
+  const runEntries = useMemo<RunEntry[]>(() => {
+    const entries = runResults.runs.flatMap<RunEntry>(run => {
+      const target = canReplay ? recoveryTargets.find(item => item.runId === run.id) : undefined
+      return target ? [{ kind: 'run', run }, { kind: 'replay', run, deadLetterId: target.id }] : [{ kind: 'run', run }]
+    })
+    return runResults.next ? [...entries, { kind: 'more' }] : entries
+  }, [canReplay, recoveryTargets, runResults.next, runResults.runs])
 
   const commands = useMemo<Command[]>(() => {
     const base = buildCommands(safeDocsUrl, permissions)
@@ -278,6 +313,7 @@ export function CommandPalette({
     if (!open) return
     setQuery('')
     setActiveIndex(0)
+    setNow(new Date())
     setRecent(readRecent())
     const focus = () => inputRef.current?.focus()
     // Defer focus until the input has mounted.
@@ -317,9 +353,10 @@ export function CommandPalette({
     setActiveIndex(0)
   }, [query])
 
+  const entryCount = runMode ? runEntries.length : ordered.length
   useEffect(() => {
-    setActiveIndex(idx => Math.min(idx, Math.max(0, ordered.length - 1)))
-  }, [ordered.length])
+    setActiveIndex(idx => Math.min(idx, Math.max(0, entryCount - 1)))
+  }, [entryCount])
 
   const runCommand = (cmd: Command) => {
     const ctx: CommandContext = { openTab, onValidate, onSave, onStart, onNew, onSignOut, onInsertSnippet }
@@ -328,6 +365,25 @@ export function CommandPalette({
     setRecent(nextRecent)
     persistRecent(nextRecent)
     onClose()
+  }
+
+  const runEntry = (entry: RunEntry) => {
+    if (entry.kind === 'more') {
+      runResults.loadMore()
+      return
+    }
+    if (entry.kind === 'run') onOpenRun?.(entry.run.id)
+    else onOpenRecovery?.(entry.deadLetterId)
+    onClose()
+  }
+  const activate = (index: number) => {
+    if (runMode) {
+      const entry = runEntries[index]
+      if (entry) runEntry(entry)
+      return
+    }
+    const cmd = ordered[index]
+    if (cmd) runCommand(cmd)
   }
 
   if (!open) return null
@@ -356,14 +412,13 @@ export function CommandPalette({
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown') {
                 event.preventDefault()
-                setActiveIndex(idx => Math.min(idx + 1, ordered.length - 1))
+                setActiveIndex(idx => Math.min(idx + 1, entryCount - 1))
               } else if (event.key === 'ArrowUp') {
                 event.preventDefault()
                 setActiveIndex(idx => Math.max(idx - 1, 0))
               } else if (event.key === 'Enter') {
                 event.preventDefault()
-                const cmd = ordered[activeIndex]
-                if (cmd) runCommand(cmd)
+                activate(activeIndex)
               }
             }}
             placeholder={t('palette.placeholder')}
@@ -371,10 +426,22 @@ export function CommandPalette({
             aria-autocomplete="list"
             aria-controls={COMMAND_LISTBOX_ID}
             aria-expanded="true"
-            aria-activedescendant={ordered[activeIndex] ? commandOptionId(activeIndex) : undefined}
+            aria-activedescendant={activeIndex < entryCount ? commandOptionId(activeIndex) : undefined}
           />
           <kbd>{t('palette.key.escape')}</kbd>
         </div>
+        {runMode && (
+          <PaletteRunFilters
+            query={query}
+            parsed={parsedRuns}
+            workflows={workflows}
+            now={now}
+            onQueryChange={(next, removed) => {
+              setQuery(next)
+              if (removed) inputRef.current?.focus()
+            }}
+          />
+        )}
 
         <ul
           ref={listRef}
@@ -383,10 +450,49 @@ export function CommandPalette({
           role="listbox"
           aria-label={t('palette.title')}
         >
-          {ordered.length === 0 && (
+          {runMode && runEntries.length === 0 && (
+            <li className="we-cmdk-empty" role="presentation" data-testid="palette-runs-state">
+              {t(runResults.kind === 'error' ? 'palette.runs.error' : runResults.loading ? 'palette.runs.loading' : 'palette.runs.empty')}
+            </li>
+          )}
+          {runMode && runEntries.map((entry, idx) => {
+            const label = entry.kind === 'more'
+              ? t('palette.runs.more')
+              : entry.kind === 'replay'
+                ? t('palette.runs.replay', { id: entry.run.id.slice(0, 8) })
+                : entry.run.workflowName || workflows.find(item => item.id === entry.run.workflowId)?.name || entry.run.workflowId || entry.run.id
+            return (
+              <li
+                key={entry.kind === 'more' ? 'more' : `${entry.kind}.${entry.run.id}`}
+                id={commandOptionId(idx)}
+                role="option"
+                aria-selected={idx === activeIndex}
+                aria-disabled={entry.kind === 'more' && runResults.loading ? true : undefined}
+                className={idx === activeIndex ? 'we-cmdk-row we-cmdk-row--active' : 'we-cmdk-row'}
+                data-testid={entry.kind === 'more' ? 'palette-runs-more' : `palette-${entry.kind}-${entry.run.id}`}
+                onMouseEnter={() => setActiveIndex(idx)}
+                onMouseDown={(event) => { event.preventDefault(); runEntry(entry) }}
+              >
+                <span className="we-cmdk-row__ic" aria-hidden="true">
+                  {entry.kind === 'replay' ? <RefreshCcw size={14} /> : <PlayCircle size={14} />}
+                </span>
+                <span className="we-cmdk-row__label">
+                  {label}
+                  {entry.kind === 'run' && <code className="we-cmdk-row__id">{entry.run.id.slice(0, 8)}…</code>}
+                </span>
+                {entry.kind === 'run' && <span className="status-pill" data-status={entry.run.status}>{formatStatusLabel(entry.run.status)}</span>}
+                <span className="we-cmdk-row__group">
+                  {entry.kind === 'run'
+                    ? entry.run.createdAt && formatRunTime(Date.parse(entry.run.createdAt))
+                    : entry.kind === 'replay' ? t('palette.group.action') : null}
+                </span>
+              </li>
+            )
+          })}
+          {!runMode && ordered.length === 0 && (
             <li className="we-cmdk-empty" role="presentation">{t('palette.empty', { query })}</li>
           )}
-          {ordered.map((cmd, idx) => {
+          {!runMode && ordered.map((cmd, idx) => {
             const isRecent = recent.includes(cmd.id) && !query.trim()
             return (
               <li

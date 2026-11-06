@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Quick jump (⌘K) finds runs from a sentence such as "failed runs of
+  demo-flaky-ingest since yesterday" or "ejecuciones fallidas desde el lunes".
+  It shows what it understood as status, workflow and time chips you can change
+  or remove, lists words it did not understand, and pages the matching runs.
+  Enter opens a run in Activity. A run with an open failure offers Retry in
+  Recover, which opens that failure where Retry still asks you to act; Quick
+  jump itself never writes.
 - Login has Forgot password?, which emails a reset link that ends at the
   set-password step. The answer is the same whether or not the email has an
   account, including when the auth server limits how often it sends.
