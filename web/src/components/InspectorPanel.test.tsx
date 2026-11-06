@@ -107,6 +107,14 @@ describe('<InspectorPanel /> selection-change hygiene', () => {
     expect(onUpdateEdgeCondition).not.toHaveBeenCalledWith('edge-b', 'context.a.output.ok === true')
   })
 
+  it('closes an open mock editor when the selection moves to another node', () => {
+    const { rerender, props } = renderPanel({ selectedNode: makeNode('node-a') })
+    fireEvent.click(screen.getByTestId('test-data-mock'))
+    expect(screen.getByTestId('test-data-mock-input')).toBeInTheDocument()
+    rerender(<InspectorPanel {...props} selectedNode={makeNode('node-b')} />)
+    expect(screen.queryByTestId('test-data-mock-input')).toBeNull()
+  })
+
   it('clears the advanced-JSON parse error when the selection moves to another node', () => {
     const { rerender, props } = renderPanel({ selectedNode: makeNode('node-a') })
 
