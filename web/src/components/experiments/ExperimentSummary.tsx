@@ -10,7 +10,7 @@
  */
 
 import React, { useState } from 'react'
-import { ArrowDown, ArrowUp, Clipboard, TriangleAlert } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, Clipboard, TriangleAlert } from 'lucide-react'
 
 import { useT } from '../../i18n'
 import { formatCurrency, formatDelta, formatPercent, formatScorePoints, parseSummary, type Experiment, type ExperimentSummary, type SideSummary } from './types'
@@ -158,7 +158,7 @@ export function ExperimentSummaryDetail({
               </thead>
               <tbody>
                 {visibleMetrics.map((metric) => {
-                  const Direction = metric.better === 'higher' ? ArrowUp : ArrowDown
+                  const Direction = metric.better === 'higher' ? ArrowUpRight : ArrowDownRight
                   return (
                     <tr key={metric.id} data-testid={`experiment-metric-${metric.id}`}>
                       <th scope="row">
