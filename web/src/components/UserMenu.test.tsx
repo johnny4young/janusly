@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { AuthProvider } from '../auth'
+import { useTestData } from '../lib/test-data'
 import { useWorkflowStore } from '../store'
 import { UserMenu } from './UserMenu'
 
@@ -91,5 +93,23 @@ describe('<UserMenu /> docs capability', () => {
     expect(docs).toHaveAttribute('href', 'https://docs.example.com/start')
     expect(docs).toHaveAttribute('target', '_blank')
     expect(docs).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+})
+
+describe('<UserMenu /> workspace switch', () => {
+  it('drops pinned and mocked test data from the previous workspace', async () => {
+    const context = useWorkflowStore.getState().identityContext!
+    useWorkflowStore.setState({ identityContext: { ...context, organizations: [...context.organizations, { ...context.organizations[0], id: 'other', name: 'Other Org' }] } })
+    useTestData.getState().setDatum('wf-1', 'fetch', { kind: 'mocked', output: 1 })
+    const updateOrg = vi.spyOn(AuthProvider, 'updateOrg').mockResolvedValue({ result: {}, auth: null } as never)
+    try {
+      render(<UserMenu />)
+      fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }))
+      fireEvent.click(screen.getByRole('button', { name: /Other Org/ }))
+      await waitFor(() => expect(updateOrg).toHaveBeenCalledWith('other'))
+      await waitFor(() => expect(useTestData.getState().pins).toEqual({}))
+    } finally {
+      updateOrg.mockRestore()
+    }
   })
 })

@@ -170,16 +170,24 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	}
 	_ = json.Unmarshal(deadLetter.WorkflowJson, &wfDoc)
 	workflowID = wfDoc.ID
+	// A sandbox or draft test failure is not production work: no item, no alert.
+	header, err := q.GetRunHeader(ctx, deadLetter.RunID)
+	if err != nil {
+		return fmt.Errorf("read redriven run: %w", err)
+	}
+	sandbox := header.ReplayMode.String != ""
 	slaTarget := e.eventNow().Add(24 * time.Hour)
-	if _, err := q.InsertRecoveryItem(ctx, store.InsertRecoveryItemParams{
-		ID: e.newID(), OrgID: orgID, DeadLetterID: deadLetterID,
-		WorkflowID:     pgtype.Text{String: workflowID, Valid: workflowID != ""},
-		Severity:       "p3",
-		SlaTargetAt:    slaTarget,
-		ErrorSignature: pgtype.Text{String: signature, Valid: signature != ""},
-		CreatedBy:      pgtype.Text{},
-	}); err != nil {
-		return fmt.Errorf("insert recovery item: %w", err)
+	if !sandbox {
+		if _, err := q.InsertRecoveryItem(ctx, store.InsertRecoveryItemParams{
+			ID: e.newID(), OrgID: orgID, DeadLetterID: deadLetterID,
+			WorkflowID:     pgtype.Text{String: workflowID, Valid: workflowID != ""},
+			Severity:       "p3",
+			SlaTargetAt:    slaTarget,
+			ErrorSignature: pgtype.Text{String: signature, Valid: signature != ""},
+			CreatedBy:      pgtype.Text{},
+		}); err != nil {
+			return fmt.Errorf("insert recovery item: %w", err)
+		}
 	}
 
 	redrivenAt := e.eventNow()
@@ -206,6 +214,9 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 		return fmt.Errorf("commit: %w", err)
 	}
 	metricRedrives.Inc()
+	if sandbox {
+		return nil
+	}
 	// Alert producer (post-commit): the ownership incident just opened.
 	e.DispatchAlert(ctx, orgID, "recovery_item.created", map[string]any{
 		"deadLetterId": deadLetterID, "workflowId": workflowID,
