@@ -235,7 +235,11 @@ func (e *Engine) ExecuteIntegrationTool(
 ) map[string]any {
 	// Nobody approves a system delivery, so a tool the org lists never runs here.
 	policy, err := e.toolApprovalPolicy(ctx, orgID)
-	if err != nil || policy[name] {
+	if err != nil {
+		return map[string]any{"ok": false, "code": "TOOL_APPROVAL_POLICY_UNAVAILABLE", "retryable": true,
+			"error": "The tool approval policy could not be read; try again"}
+	}
+	if policy[name] {
 		return map[string]any{"ok": false, "code": "TOOL_APPROVAL_REQUIRED",
 			"error": fmt.Sprintf("%s needs a person's approval and cannot be sent from here", name)}
 	}

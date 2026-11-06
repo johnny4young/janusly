@@ -10,7 +10,6 @@ package httpapi
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -70,9 +69,9 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 	if err != nil {
 		return opError(http.StatusBadRequest, "org_config_invalid", err.Error(), nil)
 	}
-	if name := unenforceableApprovalTool(def.Key, normalized); name != "" {
-		return opError(http.StatusBadRequest, "tool_approval_unenforceable",
-			fmt.Sprintf("Approval cannot be enforced for %q yet; only built-in tools and http requests can require it", name), nil)
+	if def.Key == orgconfig.ToolApprovalPolicyKey {
+		return opError(http.StatusConflict, "tool_approval_policy_path",
+			"Change tools.approvalRequired one tool at a time with POST /org/tool-approval-policy", nil)
 	}
 	valueJSON, err := json.Marshal(normalized)
 	if err != nil {

@@ -210,15 +210,17 @@ func (q *Queries) InsertToolApproval(ctx context.Context, arg InsertToolApproval
 }
 
 const listToolApprovalRequesters = `-- name: ListToolApprovalRequesters :many
-WITH RECURSIVE lineage (id, parent_run_id, follow, depth) AS (
+WITH RECURSIVE lineage (id, parent_run_id, follow, via_subworkflow, own, depth) AS (
   SELECT r.id, r.parent_run_id,
-         r.parent_link_kind = 'rerun' OR (r.parent_node_id IS NOT NULL AND coalesce(r.parent_link_kind, 'subworkflow') = 'subworkflow'),
-         0
+         r.parent_link_kind IN ('rerun', 'replay') OR (r.parent_node_id IS NOT NULL AND coalesce(r.parent_link_kind, 'subworkflow') = 'subworkflow'),
+         r.parent_node_id IS NOT NULL AND coalesce(r.parent_link_kind, 'subworkflow') = 'subworkflow',
+         true, 0
   FROM runs r WHERE r.id = $1
   UNION ALL
   SELECT p.id, p.parent_run_id,
-         p.parent_link_kind = 'rerun' OR (p.parent_node_id IS NOT NULL AND coalesce(p.parent_link_kind, 'subworkflow') = 'subworkflow'),
-         l.depth + 1
+         p.parent_link_kind IN ('rerun', 'replay') OR (p.parent_node_id IS NOT NULL AND coalesce(p.parent_link_kind, 'subworkflow') = 'subworkflow'),
+         p.parent_node_id IS NOT NULL AND coalesce(p.parent_link_kind, 'subworkflow') = 'subworkflow',
+         l.own AND l.via_subworkflow, l.depth + 1
   FROM runs p JOIN lineage l ON p.id = l.parent_run_id
   WHERE l.follow AND l.depth < $3::int
 ),
@@ -230,7 +232,7 @@ tree (id, depth) AS (
     AND t.depth < $3::int
 ),
 started AS (
-  SELECT r.id, r.created_by, r.trigger_kind, r.workflow_version_id FROM runs r JOIN lineage l ON r.id = l.id
+  SELECT r.id, r.created_by, r.trigger_kind, r.workflow_version_id, l.own FROM runs r JOIN lineage l ON r.id = l.id
 )
 SELECT DISTINCT actor::text FROM (
   SELECT created_by AS actor FROM started
@@ -245,7 +247,7 @@ SELECT DISTINCT actor::text FROM (
   SELECT v.created_by FROM workflow_versions v JOIN started s ON v.id = s.workflow_version_id
   WHERE NOT EXISTS (
     SELECT 1 FROM started h
-    WHERE coalesce(h.created_by, '') <> '' AND h.created_by NOT LIKE 'system:%' AND h.trigger_kind IS NULL
+    WHERE h.own AND coalesce(h.created_by, '') <> '' AND h.created_by NOT LIKE 'system:%' AND h.trigger_kind IS NULL
       AND NOT EXISTS (SELECT 1 FROM run_actors sa WHERE sa.run_id = h.id AND sa.role = 'service')
   )
 ) actors
@@ -260,14 +262,15 @@ type ListToolApprovalRequestersParams struct {
 }
 
 // The people who caused this call. Run-tree roles count anywhere in the tree
-// (the lineage up through subworkflow and rerun links, plus every subworkflow
-// descendant): form submitters (resume), a redrive that replaced the document
+// (the lineage up through subworkflow, rerun and replay links, plus every
+// subworkflow descendant): form submitters (resume), a redrive that replaced the document
 // (fix), a person who replaced a step's output (output) and a service-token
 // starter (service). A plain redrive counts in this run and the runs above
 // it, whose steps can feed this call, but not in sibling or child runs. Plus
 // the creators up the lineage, everyone an earlier request for the step
-// excluded, and, when no person started the lineage, whoever saved its
-// versions. Walks stop at max_depth.
+// excluded, and, when no person started this run or a subworkflow parent (a
+// replay or rerun source does not count), whoever saved its versions. Walks
+// stop at max_depth.
 func (q *Queries) ListToolApprovalRequesters(ctx context.Context, arg ListToolApprovalRequestersParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listToolApprovalRequesters, arg.RunID, arg.NodeID, arg.MaxDepth)
 	if err != nil {

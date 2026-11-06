@@ -69,14 +69,15 @@ func TestToolApprovalPolicyGatesTheCallWhateverTheDocument(t *testing.T) {
 	h := newAPIHarness(t)
 	pool := testPool(t)
 	ctx := context.Background()
-	if res := h.call("POST", "/org/config", map[string]any{"key": "tools.approvalRequired", "value": "text.uppercase"}, ""); res.status != 200 {
+	if res := h.call("POST", "/org/tool-approval-policy", map[string]any{"tool": "text.uppercase", "required": true}, ""); res.status != 200 {
 		t.Fatalf("set policy: %d %+v", res.status, res.body)
 	}
-	if res := h.call("POST", "/org/config", map[string]any{"key": "tools.approvalRequired", "value": "Not A Tool"}, ""); res.status != 400 {
-		t.Fatalf("a malformed policy was stored: %d %+v", res.status, res.body)
+	// Every edit goes through the locked add/remove path; reads still work.
+	if res := h.call("POST", "/org/config", map[string]any{"key": "tools.approvalRequired", "value": "slack.post"}, ""); res.status != 409 || res.body["code"] != "tool_approval_policy_path" {
+		t.Fatalf("a whole-list write bypassed the locked path: %d %+v", res.status, res.body)
 	}
-	if res := h.call("POST", "/org/config", map[string]any{"key": "tools.approvalRequired", "value": "text.uppercase, crm.lookup"}, ""); res.status != 400 || res.body["code"] != "tool_approval_unenforceable" {
-		t.Fatalf("a policy for a tool the gate cannot hold was stored: %d %+v", res.status, res.body)
+	if res := h.call("GET", "/org/config", nil, ""); !strings.Contains(fmt.Sprint(res.body), "tools.approvalRequired") {
+		t.Fatalf("the policy is no longer readable: %+v", res.body)
 	}
 	id := fmt.Sprintf("wf-policy-%d", time.Now().UnixNano())
 	runID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": gateWorkflow(id, uppercaseStep("call", "page"))}, ""))
@@ -141,5 +142,25 @@ func TestToolApprovalPolicyEditsAndReportDelivery(t *testing.T) {
 	}, "")
 	if delivery.status != 409 || delivery.body["code"] != "tool_approval_required" {
 		t.Fatalf("a report was delivered through a listed tool: %d %+v", delivery.status, delivery.body)
+	}
+}
+
+// A policy that cannot be read refuses report delivery as a retryable 503,
+// not as a missing approval.
+func TestReportDeliveryWithAnUnreadablePolicy(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	runID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": gateWorkflow(fmt.Sprintf("wf-unreadable-%d", time.Now().UnixNano()),
+		map[string]any{"id": "done", "type": "noop", "config": map[string]any{}})}, ""))
+	h.waitRun(runID, "succeeded")
+	if _, err := pool.Exec(context.Background(), `INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1, $2, 'tools.approvalRequired', '"Not A Tool"', 'integrations', 'test', 'string')`, h.org+"-bad-policy", h.org); err != nil {
+		t.Fatal(err)
+	}
+	delivery := h.call("POST", "/reports/run-explain/deliver", map[string]any{
+		"runId": runID, "destination": map[string]any{"kind": "slack", "credentialName": "ops-slack"},
+	}, "")
+	if delivery.status != 503 || delivery.body["code"] != "tool_approval_policy_unavailable" {
+		t.Fatalf("unreadable policy delivery: %d %+v", delivery.status, delivery.body)
 	}
 }

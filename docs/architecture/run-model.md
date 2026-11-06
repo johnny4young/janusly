@@ -75,10 +75,11 @@ approval topology stay directly inspectable.
 ## Tool approval
 
 The org setting `tools.approvalRequired` lists tool names whose every call
-waits for a person. Admins change it with `org.config.write`: the tool
-inspector adds or removes one tool through `POST /org/tool-approval-policy`,
-which edits the list under a per-org lock so two admins never drop each
-other's entries, and `POST /org/config` sets the whole list. Both are audited.
+waits for a person. Admins change it with `org.config.write` through
+`POST /org/tool-approval-policy`, which adds or removes one tool under a
+per-org lock so two admins never drop each other's entries, and is audited.
+`POST /org/config` refuses this key with `tool_approval_policy_path`; reading
+it there still works.
 The setting accepts only names the gate can enforce: the built-in tools,
 including `http.request`. Any other name, such as an MCP tool, is refused with
 `tool_approval_unenforceable`.
@@ -90,9 +91,14 @@ matches the tool name rendered for the call (an `http` step is
 override cannot move a listed call out of the gate. A listed tool runs only as
 an approved `tool` or `http` step. A `for_each` loop or an agent that reaches
 it, including an agent's `http.request`, gets a `TOOL_APPROVAL_REQUIRED`
-refusal. System deliveries go through `Engine.ExecuteIntegrationTool`, which
-refuses a listed tool because nobody approves them: report delivery answers
-409 `tool_approval_required`, and listing `email.send` stops the weekly digest.
+refusal. Report and digest deliveries go through
+`Engine.ExecuteIntegrationTool`, which refuses a listed tool because nobody
+approves them: report delivery answers 409 `tool_approval_required`, and
+listing `email.send` stops the weekly digest, whose `last_error` names
+`TOOL_APPROVAL_REQUIRED`. A policy that cannot be read refuses as
+`TOOL_APPROVAL_POLICY_UNAVAILABLE` (report delivery answers 503), which a later
+attempt may clear. Alert notifications are sent through the HTTP executor
+directly, so listing `http.request` does not hold them back.
 Validation runs and draft tests keep suppressing writes as before, so the gate
 waits only for listed calls that would really run there, which are reads.
 
@@ -112,8 +118,8 @@ run's completion lock. The request records:
   after the approval was spent;
 - the requesters, who are the people who caused this call. `run_actors` records
   them by role:
-  - anywhere in the run tree (the lineage up through subworkflow and rerun
-    links, plus every subworkflow descendant): form submitters and resumes
+  - anywhere in the run tree (the lineage up through subworkflow, rerun and
+    replay links, plus every subworkflow descendant): form submitters and resumes
     with input (`resume`), a redrive that replaced the document (`fix`), a
     person who created or applied a semantic output replacement (`output`),
     and a service-token starter (`service`);
@@ -121,9 +127,11 @@ run's completion lock. The request records:
     re-run steps can feed this call;
   - the creators up the lineage, and everyone an earlier request for the same
     step excluded;
-  - whoever saved the versions the lineage runs, when no person started it (a
-    `system:*` creator, a schedule or webhook trigger, or a service token), so
-    the author of the parameters cannot approve them.
+  - whoever saved the versions the lineage runs, when no person started this
+    run or a subworkflow parent (a `system:*` creator, a schedule or webhook
+    trigger, or a service token). A rerun or replay source does not count as
+    that person, so an auto-healing validation run started by the system bars
+    the author, and the source run's actors count as above.
 
   A service token's user id is a free-form header, so its actions are recorded
   as `service-token:<suffix>`;

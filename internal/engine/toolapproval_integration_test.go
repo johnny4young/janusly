@@ -884,3 +884,63 @@ func TestApprovedCallRefusesACredentialCreatedAfterApproval(t *testing.T) {
 		t.Fatalf("a credential the approved call never named was used: %q", message)
 	}
 }
+
+// A replay (Replay Lab, fix validation, auto-healing validation) reuses its
+// source, so the source's actors count; a system-started replay also bars
+// the version author, while one a person started does not.
+func TestReplayInheritsTheSourceActors(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	source := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	if _, err := pool.Exec(ctx, `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, 'call', 'resume', 'rhea')`, source); err != nil {
+		t.Fatal(err)
+	}
+	for index, test := range []struct {
+		createdBy    string
+		authorBarred bool
+	}{{"system:auto-healing", true}, {"bob", false}} {
+		replay, err := eng.StartRun(ctx, StartInput{OrgID: org, CreatedBy: test.createdBy, ParentRunID: source, ParentLinkKind: "replay", ReplayMode: "validation",
+			Workflow: &domain.Workflow{ID: "wf-replayed", Name: "Replay", DSLVersion: "1.0", Nodes: []domain.Node{approvalTool(map[string]any{"value": "a"})}, Edges: []domain.Edge{}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by) VALUES ($1, $2, 'wf-replayed', $3, '{}', 'erin')`, replay+"-v", org, index+1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE runs SET workflow_version_id = $2 WHERE id = $1`, replay, replay+"-v"); err != nil {
+			t.Fatal(err)
+		}
+		requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: replay, NodeID: "call", MaxDepth: subworkflowDepthWalkerMax})
+		if err != nil || !slices.Contains(requesters, "rhea") || !slices.Contains(requesters, "alice") || slices.Contains(requesters, "erin") != test.authorBarred {
+			t.Fatalf("%s replay: requesters %v %v", test.createdBy, requesters, err)
+		}
+	}
+}
+
+// The digest records why it stalls, and an unreadable policy is a retryable
+// refusal rather than a missing approval.
+func TestSystemDeliveryNamesTheCause(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	requireApprovalFor(t, ctx, pool, org, "email.send")
+	for _, row := range []struct{ key, value, valueType string }{
+		{"email.provider", `"simulator"`, "string"}, {"digest.weeklyEnabled", "true", "boolean"},
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+			VALUES ($1, $2, $3, $4, 'email', 'test', $5)`, org+"-"+row.key, org, row.key, row.value, row.valueType); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO org_members (id, org_id, user_id, email, role) VALUES ($1, $2, 'ada', 'ada@example.com', 'admin')`, org+"-ada", org); err != nil {
+		t.Fatal(err)
+	}
+	eng.processWeeklyDigests(ctx, quietLogger())
+	var lastError string
+	if err := pool.QueryRow(ctx, `SELECT coalesce(last_error, '') FROM org_digest_state WHERE org_id = $1`, org).Scan(&lastError); err != nil || !strings.Contains(lastError, "TOOL_APPROVAL_REQUIRED") {
+		t.Fatalf("digest last_error %q %v", lastError, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE org_configs SET value_json = '"Not A Tool"' WHERE org_id = $1 AND key = 'tools.approvalRequired'`, org); err != nil {
+		t.Fatal(err)
+	}
+	if got := eng.ExecuteIntegrationTool(ctx, org, "", "email.send", map[string]any{"to": "ada@example.com", "subject": "x", "text": "x"}); got["code"] != "TOOL_APPROVAL_POLICY_UNAVAILABLE" || got["ok"] != false {
+		t.Fatalf("unreadable policy: %v", got)
+	}
+}
