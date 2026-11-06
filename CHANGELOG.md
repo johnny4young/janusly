@@ -12,6 +12,14 @@
 - Each row of the runs list (`GET /runs`) now carries `cursor`, the exact
   `before` value for the next page. Paging by `createdAt` could skip runs
   created in the same millisecond.
+- The experiment comparison lists metrics by row, with either arm as the
+  baseline. Each change says Better or Worse according to whether higher or
+  lower is better for that metric. Diff only hides metrics that did not change.
+  A notice appears when control and candidate finished a different number of
+  examples, and the metrics that then get no verdict are named. Score and latency
+  get no verdict when the LLM judge fell back, and score changes under the 5-point
+  noise floor get none either. Changes are taken between the values shown, and a
+  cost the run did not measure stays Unknown and gets no change.
 - The step Inspector has a Test data section that shows the output of the step
   and of every step before it from the open run. Pin a step's output or type a
   mock, then Run this step or Test draft: those steps return the pinned or mocked
