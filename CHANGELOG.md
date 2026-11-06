@@ -8,6 +8,9 @@
   with the chosen baseline and holds the outcome comparison and the canary
   traffic, minimum sample and success floor before Start canary. The workflow
   list API returns the same production version and rollout for each workflow.
+- Building a proposal with a registered example no longer drops the Reuse or
+  Adapt review when the database is slow to write to disk, and Apply no longer
+  rejects a reviewed copy for the same reason.
 - Failures in What needs you on Home have an Investigate action. It opens a side
   panel that checks four causes for the failed step, network, credential,
   upstream status and a version change, and marks each one Validated, Ruled out
