@@ -58,12 +58,7 @@ const MIN_FREQUENCY_FOR_BULK_RECOVER = 2
  *  avoids unbounded DOM growth on clusters with many recent samples. */
 const SAMPLES_PREVIEW_LIMIT = 50
 
-/**
- * Severity tier used to colour the cluster row. `secret_missing` is the
- * most actionable (a single env-var change resolves the whole cluster);
- * `ai_provider` is degraded-platform territory; everything else is
- * workflow-author scope and rendered with the warn token.
- */
+/** Severity tier behind the card outline: missing secrets and AI provider faults fail, the rest warn. */
 function severityForCategory(category: ClusterCategory): 'pass' | 'warn' | 'fail' {
   if (category === 'secret_missing') return 'fail'
   if (category === 'ai_provider') return 'fail'

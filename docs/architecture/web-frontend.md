@@ -213,7 +213,10 @@ so Vite emits it with the lazy chunk; `src/styles/*.css` keeps only what the
 shell and eager panels use. That cut the eager `index.css` from 41 to 25 KiB
 gzip (2026-09). When adding styles for a lazy panel, put them in its adjacent
 sheet; `scripts/check-css-classes.mjs` still requires every class to have a
-production owner wherever the sheet lives. `RightPanel` and `AppWorkspace` are memoized, and the shell's derived counts
+production owner wherever the sheet lives. No surface marks status with a
+2-6px strip on its leading edge; `src/styles/no-leading-accent.browser.test.tsx`
+resolves every stylesheet rule and renders the status screens to enforce it.
+`RightPanel` and `AppWorkspace` are memoized, and the shell's derived counts
 are memoized on their inputs, because the shell renders on every store tick.
 Dialogs normally get Escape from `useDialogFocusTrap`'s `onEscape` option.
 Recovery keeps its state-specific Escape guard so in-flight saves and rejection

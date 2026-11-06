@@ -238,15 +238,16 @@
   transition: opacity 120ms ease, border-color 120ms ease;
 }
 
+.we-run-event[data-tone="error"] {
+  background: var(--we-danger-soft);
+  border-color: var(--we-danger-text);
+}
+
+/* After the tone rules so focus wins on an error event. */
 .we-run-event:focus {
   border-color: var(--we-primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--we-primary) 18%, transparent);
   outline: 0;
-}
-
-.we-run-event[data-tone="error"] {
-  background: var(--we-danger-soft);
-  border-color: var(--we-danger-text);
 }
 
 .we-run-event[data-noise="true"] { opacity: 0.62; }

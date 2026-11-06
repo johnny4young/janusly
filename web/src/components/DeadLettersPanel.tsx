@@ -333,8 +333,7 @@ export function DeadLettersPanel({
     setSection('jobs')
   }
 
-  // Org-wide open count drives the warning stripe — there are opens to work
-  // somewhere in the queue, regardless of the filtered page being viewed.
+  // Org-wide open count drives the card's warning outline, whatever page is shown.
   const hasOpenEntry = (counts?.open ?? 0) > 0
   const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
 
