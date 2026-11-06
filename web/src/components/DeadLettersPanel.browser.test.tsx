@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
@@ -101,6 +101,27 @@ describe('Recovery queue layout and focus in Chromium', () => {
     } finally { document.documentElement.style.removeProperty('--font-sans') }
   })
 
+  // A 1320px window leaves an 892px card. Linux Chromium rounds glyph advances to whole pixels, so Spanish
+  // needs 1310px there; macOS fits from 1280.
+  it('keeps the Spanish toolbar on one row from a 1320px window with Inter Tight and the detail pane open', async () => {
+    initI18n('es')
+    await page.viewport(1320, 800)
+    expect((await document.fonts.load('700 12px "Inter Tight"')).map(face => face.status)).toEqual(['loaded'])
+    await document.fonts.ready
+    render(<div style={{ width: 892 }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
+    await screen.findByTestId('dlq-detail-pane')
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Todos 12' })).toBeInTheDocument())
+    const toolbar = screen.getByTestId('dlq-toolbar')
+    expect(getComputedStyle(toolbar).fontFamily).toMatch(/^"Inter Tight"/)
+    expect(rowSpread()).toBeLessThanOrEqual(1)
+    expect(toolbar.getBoundingClientRect().height).toBeLessThanOrEqual(40)
+    expect(screen.getByTestId('dlq-search').getBoundingClientRect().width).toBeGreaterThanOrEqual(96)
+    for (const [id, value] of [['dlq-sort', 'sla'], ['dlq-sort', 'oldest'], ['dlq-severity-filter', 'p4'], ['dlq-owner', 'mine']] as const) {
+      await userEvent.selectOptions(screen.getByTestId(id), value)
+      expect(rowSpread()).toBeLessThanOrEqual(1)
+    }
+  })
+
   it('wraps to at most two rows without overflow when counts reach the thousands', async () => {
     vi.mocked(api).mockImplementation(async path => {
       if (path === '/dlq/counts') return { total: 9876, open: 8765, replayed: 1234, resolved: 4321 }
@@ -174,6 +195,32 @@ describe('Recovery queue layout and focus in Chromium', () => {
       await waitFor(() => expect(left.getBoundingClientRect().bottom).toBeLessThanOrEqual(screen.getByTestId('dlq-detail-pane').getBoundingClientRect().top))
       const head = document.querySelector('.we-dlq-detail__head')!
       expect(getComputedStyle(head).position).toBe('static')
+    } finally { await page.viewport(1024, 768) }
+  })
+
+  it.each(['en', 'es'] as const)('keeps the SLA pill whole inside a queue row at a 390px window in %s', async locale => {
+    initI18n(locale)
+    await page.viewport(390, 800)
+    localStorage.setItem('janusly:recoveryQueueFilters', JSON.stringify({ view: 'list' }))
+    const recovery: DeadLetter['recovery'] = {
+      id: 'item', owner: 'operations-lead', severity: 'p4', status: 'open', resolutionReason: null, comments: [],
+      slaTargetAt: new Date(Date.now() + 23.5 * 3_600_000).toISOString(), workflowId: null, occurrenceCount: 12, lastOccurredAt: '2026-09-01T12:00:00Z',
+    }
+    queueRows = [{ ...rows[0]!, recovery }]
+    // The app shell leaves a 334px card at a 390px window.
+    render(<div style={{ width: 334 }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
+    try {
+      const row = await screen.findByTestId('dlq-row-invoice')
+      const pill = within(row).getByTestId('recovery-item-sla')
+      const cell = pill.closest('.we-dlq-row__recovery')!
+      expect(pill).toHaveTextContent(locale === 'es' ? 'dentro de 24 h' : 'in 24h')
+      expect(cell.scrollWidth).toBeLessThanOrEqual(cell.clientWidth)
+      expect(pill.scrollWidth).toBeLessThanOrEqual(pill.clientWidth)
+      expect(pill.getBoundingClientRect().right).toBeLessThanOrEqual(cell.getBoundingClientRect().right)
+      expect(pill.getBoundingClientRect().left).toBeGreaterThanOrEqual(cell.getBoundingClientRect().left)
+      expect(row.getBoundingClientRect().height).toBe(84)
+      const severity = within(row).getByTestId('recovery-item-severity')
+      expect(severity).toHaveAttribute('title', severity.textContent)
     } finally { await page.viewport(1024, 768) }
   })
 
