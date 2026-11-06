@@ -45,6 +45,36 @@ impact attribution, and feedback.
   unreadable status claims no connection and keeps the suggestion action. Its
   stage rail covers only the steps the dialog has, Patch, Validate and Apply, and
   Validate reads done only after a sandbox pass; errors show no rail.
+- A run investigation (`GET /v1/runs/{runId}/investigation`, `runs.read`) is
+  deterministic and stores nothing. It evaluates four causes for the run's
+  earliest failed step, in a fixed order, from rows the organization already
+  has; missing evidence is always inconclusive, and each cause cites only the
+  run that decided it.
+  Network is validated when the error classifies as `network_timeout`, ruled out
+  when it classifies as another known category, and inconclusive otherwise; it
+  counts the same error on the same step across at most 200 runs of the same
+  workflow in the 30 days before the failure.
+  Credential is validated by a `secret_missing` category or an HTTP 401 or 403
+  signature (named as expired when a step credential expired before the
+  failure). An expired credential with any other error is reported but stays
+  inconclusive. It is ruled out only when the step type's authoring bindings
+  name every credential it can use, they name none, and the config holds no
+  secret template; AI, MCP and subworkflow steps are never ruled out.
+  Upstream reads the status sources the run's saved version watches. Only the
+  latest reading is stored, so it is never ruled out: it is validated only by a
+  successful degraded reading taken within twice the check interval (at least
+  five minutes) of the failure, and a reading left by a failed poll counts as no
+  reading.
+  Change looks at at most 200 runs of the workflow before the failure. It is
+  ruled out when the same saved version succeeded earlier and the workflow uses
+  nothing that changes outside a version (credentials, secret templates, MCP
+  connections, AI settings, child workflows); it is inconclusive when it does,
+  validated when only an older version succeeded, and inconclusive for unsaved
+  drafts or without an earlier success.
+  The conclusion is the first validated cause. The single action names the
+  open dead letter and is returned only with the same permissions the Recover
+  queue requires for Suggest fix; it navigates and never executes. No credential
+  value, prompt or tool payload is read into the response.
 - Playbooks require exact workflow/signature matching and fresh validation.
 - Failure signatures normalize identically in `internal/signature` and
   `web/src/lib/error-signature.ts`. The failure detail derives its summary, cause

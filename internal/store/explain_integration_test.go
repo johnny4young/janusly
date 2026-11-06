@@ -83,6 +83,10 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 		{"listUsageCostModels", listUsageCostModels, []any{"org-x", now}},
 		{"listUsageCostSteps", listUsageCostSteps, []any{"org-x", now, "model-x", int32(10000)}},
 		{"listUsageCostRuns", listUsageCostRuns, []any{"org-x", []string{"run-x"}}},
+		// A run investigation reads one workflow's recent runs, never the org's.
+		{"getRunInvestigationContext", getRunInvestigationContext, []any{"org-x", "run-x"}},
+		{"listRecentWorkflowSuccesses", listRecentWorkflowSuccesses, []any{"org-x", "wf-x", now, int32(200)}},
+		{"listRecentStepOutcomes", listRecentStepOutcomes, []any{"org-x", "wf-x", now, now, int32(200), "node-x"}},
 	}
 	// Only queries whose predicate no other index can serve pin their index:
 	// on the empty controlled keys the planner is indifferent between two

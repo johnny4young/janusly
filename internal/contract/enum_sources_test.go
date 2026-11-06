@@ -17,6 +17,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/aievidence"
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/operations"
 	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/signature"
 )
@@ -103,6 +104,14 @@ func vocabularies() []vocabulary {
 			fields("internal/signature", "Result", "SuggestedOwner"),
 			fields("internal/signature", "FailureCluster", "SuggestedOwner"),
 		)},
+		{name: "hypothesis id", list: operations.HypothesisIDs,
+			fields: fields("internal/operations", "Hypothesis", "ID")},
+		{name: "hypothesis verdict", list: operations.HypothesisVerdicts,
+			fields: fields("internal/operations", "Hypothesis", "Verdict")},
+		{name: "hypothesis reason", list: operations.HypothesisReasons,
+			fields: fields("internal/operations", "Hypothesis", "Reason")},
+		{name: "investigation evidence kind", list: operations.EvidenceKinds,
+			fields: fields("internal/operations", "InvestigationEvidence", "Kind")},
 		{name: "autonomy source", list: domain.RecoveryAutonomySources,
 			fields: fields("internal/domain", "RecoveryAutonomyProfile", "Source")},
 		{name: "autonomy unavailable reason", list: domain.RecoveryAutonomyUnavailableReasons,
