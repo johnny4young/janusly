@@ -154,13 +154,15 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		_ = q.DisableScheduleEntry(ctx, entry.ID)
 		return false, nil
 	}
-	advance := func(runID string) error {
-		if err := q.AdvanceScheduleEntry(ctx, store.AdvanceScheduleEntryParams{
-			ID: entry.ID, NextFireAt: &next, LastRunAt: &now, LastRunID: runID,
-		}); err != nil {
-			return fmt.Errorf("advance schedule entry %s: %w", entry.ID, err)
+	// Advancing needs the current claim, so a stale holder never clears a newer one.
+	advance := func(runID string) (bool, error) {
+		rows, err := q.AdvanceScheduleEntry(ctx, store.AdvanceScheduleEntryParams{
+			ID: entry.ID, NextFireAt: &next, LastRunAt: &now, LastRunID: runID, ClaimedDueAt: entry.ClaimedDueAt,
+		})
+		if err != nil {
+			return false, fmt.Errorf("advance schedule entry %s: %w", entry.ID, err)
 		}
-		return nil
+		return rows > 0, nil
 	}
 	// The tick's identity is its LOGICAL due time, not this attempt: the
 	// claim keeps the first claim's due time until the entry advances, so a
@@ -170,12 +172,18 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 	if entry.DueAt != nil {
 		dueAt = entry.DueAt.UTC()
 	}
+	// Only the holder that advances the entry audits the drop, once per tick.
 	drop := func(target, targetID string, metadata map[string]any) (bool, error) {
-		metadata["nodeId"], metadata["scheduledAt"] = entry.NodeID, dueAt.Format(time.RFC3339)
-		e.audit.Write(ctx, e.pool, &auth.Context{OrgID: entry.OrgID, UserID: "system:scheduler"},
-			"schedule.tick.dropped", audit.Options{TargetType: target, TargetID: targetID, Metadata: metadata})
-		return false, advance("")
+		advanced, err := advance("")
+		if advanced {
+			metadata["nodeId"], metadata["scheduledAt"] = entry.NodeID, dueAt.Format(time.RFC3339)
+			e.audit.Write(ctx, e.pool, &auth.Context{OrgID: entry.OrgID, UserID: "system:scheduler"},
+				"schedule.tick.dropped", audit.Options{TargetType: target, TargetID: targetID, Metadata: metadata})
+		}
+		return false, err
 	}
+	tick := entry.ID + "@" + dueAt.Format(time.RFC3339Nano)
+	idempotencyKey := "schedule:" + tick
 
 	// Active-parent guard: a stale entry must never re-run a tombstoned or
 	// foreign workflow (delete the orphan entry), and a paused workflow
@@ -192,6 +200,15 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		_ = q.DeleteScheduleEntry(ctx, entry.ID)
 		return false, nil
 	}
+	// A retried tick whose run already started only records it; nothing below may drop it.
+	if runID, err := q.GetStartIdempotencyRun(ctx, store.GetStartIdempotencyRunParams{
+		OrgID: entry.OrgID, IdempotencyKey: idempotencyKey,
+	}); err == nil {
+		_, err := advance(runID)
+		return false, err
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return false, fmt.Errorf("read schedule tick run %s: %w", entry.ID, err)
+	}
 	if owner.Status != "" && owner.Status != "active" {
 		return drop("workflow", entry.WorkflowID, map[string]any{"reason": owner.Status})
 	}
@@ -206,25 +223,17 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 	}
 	wf := parsed.workflow
 	if wf == nil {
-		return false, advance("")
+		return drop("workflow", entry.WorkflowID, map[string]any{"reason": "version_unparseable", "versionId": entry.WorkflowVersionID})
 	}
-	nodePresent := false
-	for _, node := range wf.Nodes {
-		if node.ID == entry.NodeID && node.Type == "schedule" {
-			nodePresent = true
-			break
-		}
-	}
-	if !nodePresent {
+	if !hasScheduleNode(wf, entry.NodeID) {
 		_ = q.DeleteScheduleEntry(ctx, entry.ID)
 		return false, nil
 	}
 
-	tick := entry.ID + "@" + dueAt.Format(time.RFC3339Nano)
 	start := StartInput{
 		OrgID: entry.OrgID, Workflow: wf, WorkflowVersionID: entry.WorkflowVersionID,
 		CreatedBy:      "system:scheduler",
-		IdempotencyKey: "schedule:" + tick,
+		IdempotencyKey: idempotencyKey,
 		Input: map[string]any{
 			"triggeredBy": "schedule", "nodeId": entry.NodeID,
 			"scheduledAt": dueAt.Format(time.RFC3339),
@@ -244,6 +253,12 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		return false, fmt.Errorf("resolve schedule rollout for %s: %w", entry.WorkflowID, err)
 	}
 	if assignment != nil {
+		// Rollout creation requires identical trigger contracts; this keeps the tick from running an arm without its trigger.
+		if !hasScheduleNode(assignment.Workflow, entry.NodeID) {
+			return drop("workflow_rollout", assignment.Rollout.ID, map[string]any{
+				"reason": "rollout_trigger_missing", "workflowId": entry.WorkflowID, "versionId": assignment.VersionID,
+			})
+		}
 		start.Workflow, start.WorkflowVersionID = assignment.Workflow, assignment.VersionID
 		start.WorkflowRolloutID, start.WorkflowRolloutVariant = assignment.Rollout.ID, assignment.Variant
 	}
@@ -251,8 +266,9 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 	if err != nil {
 		var replay *ErrStartIdempotencyReplay
 		if errors.As(err, &replay) {
-			// This tick already fired; only the clock advance was lost.
-			return false, advance(replay.RunID)
+			// Another holder started this tick between the replay check and here.
+			_, err := advance(replay.RunID)
+			return false, err
 		}
 		var invalid *InputValidationError
 		if errors.As(err, &invalid) {
@@ -260,7 +276,17 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		}
 		return false, fmt.Errorf("start scheduled run for %s: %w", entry.WorkflowID, err)
 	}
-	return true, advance(runID)
+	_, err = advance(runID)
+	return true, err
+}
+
+func hasScheduleNode(wf *domain.Workflow, nodeID string) bool {
+	for _, node := range wf.Nodes {
+		if node.ID == nodeID && node.Type == "schedule" {
+			return true
+		}
+	}
+	return false
 }
 
 // RunScheduleSweep loops the due-clock sweep until the context ends.

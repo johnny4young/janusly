@@ -14,12 +14,13 @@ DELETE FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2;
 -- name: DeleteScheduleEntry :exec
 DELETE FROM schedule_entries WHERE id = $1;
 
--- name: AdvanceScheduleEntry :exec
+-- Only the holder of the current claim advances; a stale holder changes nothing.
+-- name: AdvanceScheduleEntry :execrows
 UPDATE schedule_entries
 SET next_fire_at = $2, last_run_at = $3, claimed_due_at = NULL,
     last_run_id = CASE WHEN sqlc.arg(last_run_id)::text = '' THEN last_run_id ELSE sqlc.arg(last_run_id)::text END,
     updated_at = now()
-WHERE id = $1;
+WHERE id = $1 AND claimed_due_at IS NOT DISTINCT FROM sqlc.narg(claimed_due_at)::timestamptz;
 
 -- name: DisableScheduleEntry :exec
 UPDATE schedule_entries SET enabled = false, updated_at = now() WHERE id = $1;

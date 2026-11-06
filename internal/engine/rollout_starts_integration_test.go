@@ -66,10 +66,31 @@ func seedScheduledRollout(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	if err := eng.SyncWorkflowSchedules(ctx, q, org, workflowID, v2, "tester", mustParse(t, scheduledDoc(workflowID, "canary"))); err != nil {
 		t.Fatalf("sync schedules: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE schedule_entries SET enabled = false WHERE org_id <> $1`, org); err != nil {
+	isolateSchedules(t, ctx, pool, org)
+	return v1, v2
+}
+
+// isolateSchedules pauses other orgs' entries so a sweep claims only this org's, and restores them.
+func isolateSchedules(t *testing.T, ctx context.Context, pool *pgxpool.Pool, org string) {
+	t.Helper()
+	rows, err := pool.Query(ctx, `UPDATE schedule_entries SET enabled = false WHERE org_id <> $1 AND enabled RETURNING id`, org)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return v1, v2
+	var paused []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		paused = append(paused, id)
+	}
+	rows.Close()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `UPDATE schedule_entries SET enabled = true WHERE id = ANY($1)`, paused); err != nil {
+			t.Logf("restore schedule entries: %v", err)
+		}
+	})
 }
 
 // claimTick makes the org's entry due and claims it from the database like a sweep.
@@ -107,7 +128,10 @@ func fireTicks(t *testing.T, ctx context.Context, pool *pgxpool.Pool, eng *Engin
 	for i := from; i < from+count; i++ {
 		due := base.Add(time.Duration(i) * time.Minute)
 		tick := entry
-		tick.DueAt = &due
+		tick.DueAt, tick.ClaimedDueAt = &due, &due
+		if _, err := pool.Exec(ctx, `UPDATE schedule_entries SET claimed_due_at = $2 WHERE id = $1`, entry.ID, due); err != nil {
+			t.Fatal(err)
+		}
 		if fired, err := eng.fireScheduleEntry(ctx, tick, time.Now().UTC(), nil); !fired || err != nil {
 			t.Fatalf("tick %d did not fire: %v", i, err)
 		}
@@ -380,9 +404,7 @@ func TestScheduleSweepUnderARolloutLoadsOnlyTheAssignedVersions(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE schedule_entries SET next_fire_at = now() - interval '1 minute' WHERE workflow_id = $1`, workflowID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE schedule_entries SET enabled = false WHERE org_id <> $1`, org); err != nil {
-		t.Fatal(err)
-	}
+	isolateSchedules(t, ctx, pool, org)
 
 	counter.reset()
 	fired, _, err := eng.SweepDueSchedules(ctx)
@@ -455,5 +477,135 @@ func TestSubworkflowChildRecordsItsAssignedVersion(t *testing.T) {
 		WHERE run_id = $1 AND type = 'subworkflow.started'`, parentRunID).Scan(&version)
 	if version != "2" {
 		t.Fatalf("the routed child must record v2, got %q", version)
+	}
+}
+
+func droppedTicks(t *testing.T, ctx context.Context, pool *pgxpool.Pool, org, reason string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id = $1 AND action = 'schedule.tick.dropped'
+		AND metadata->>'reason' = $2`, org, reason).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// Rollout creation requires identical trigger contracts, so this cannot
+// happen through the API; the tick still refuses an arm without its trigger.
+func TestScheduleTickDroppedWhenTheAssignedArmLacksItsTrigger(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	dropOrgRuns(t, pool, org)
+	workflowID := "wf-sched-trigger-" + org
+	v1, v2 := seedScheduledRollout(t, ctx, pool, eng, org, workflowID)
+	finishRollout(t, ctx, eng, org, workflowID, startRollout(t, ctx, eng, org, workflowID, v1, v2, 10), "rollback")
+	if _, err := pool.Exec(ctx, `UPDATE workflow_versions SET dag_json = $2 WHERE id = $1`, v1,
+		`{"dslVersion":"1.0","id":"`+workflowID+`","name":"scheduled","nodes":[{"id":"baseline","type":"noop","config":{}}],"edges":[]}`); err != nil {
+		t.Fatal(err)
+	}
+	entry := claimTick(t, ctx, pool, org)
+	if fired, err := eng.fireScheduleEntry(ctx, entry, time.Now().UTC(), nil); fired || err != nil {
+		t.Fatalf("an arm without the trigger must not run: fired=%v %v", fired, err)
+	}
+	if runs := countRuns(t, ctx, pool, workflowID); runs != 0 || droppedTicks(t, ctx, pool, org, "rollout_trigger_missing") != 1 {
+		t.Fatalf("want a dropped tick and no run, got %d runs", runs)
+	}
+}
+
+// A holder whose claim was superseded neither clears the newer claim nor audits.
+func TestScheduleTickStaleHolderLeavesTheNewerClaim(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	dropOrgRuns(t, pool, org)
+	workflowID := "wf-sched-stale-" + org
+	seedScheduledRollout(t, ctx, pool, eng, org, workflowID)
+	stale := claimTick(t, ctx, pool, org)
+	newer := stale.DueAt.Add(time.Hour)
+	if _, err := pool.Exec(ctx, `UPDATE schedule_entries SET claimed_due_at = $2 WHERE id = $1`, stale.ID, newer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.fireScheduleEntry(ctx, stale, time.Now().UTC(), nil); err != nil {
+		t.Fatal(err)
+	}
+	var claimed *time.Time
+	_ = pool.QueryRow(ctx, `SELECT claimed_due_at FROM schedule_entries WHERE id = $1`, stale.ID).Scan(&claimed)
+	if claimed == nil || !claimed.Equal(newer) {
+		t.Fatalf("a stale holder must not clear the newer claim: %v", claimed)
+	}
+}
+
+// A retried tick whose run already started is recorded, even when its rollout
+// arm can no longer be loaded.
+func TestScheduleTickWithAStartedRunIsNeverDropped(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	dropOrgRuns(t, pool, org)
+	workflowID := "wf-sched-replay-" + org
+	v1, v2 := seedScheduledRollout(t, ctx, pool, eng, org, workflowID)
+	rollout := startRollout(t, ctx, eng, org, workflowID, v1, v2, 50)
+	first := claimTick(t, ctx, pool, org)
+	if fired, err := eng.fireScheduleEntry(ctx, first, time.Now().UTC(), nil); !fired || err != nil {
+		t.Fatalf("first attempt must fire: %v", err)
+	}
+	var runID string
+	_ = pool.QueryRow(ctx, `SELECT last_run_id FROM schedule_entries WHERE id = $1`, first.ID).Scan(&runID)
+	finishRollout(t, ctx, eng, org, workflowID, rollout, "rollback")
+	if _, err := pool.Exec(ctx, `UPDATE workflow_versions SET dag_json = '[]' WHERE id = $1`, v1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE schedule_entries SET next_fire_at = now() - interval '1 second',
+		claimed_due_at = $2, last_run_id = NULL WHERE id = $1`, first.ID, first.DueAt); err != nil {
+		t.Fatal(err)
+	}
+	again := claimTick(t, ctx, pool, org)
+	if fired, err := eng.fireScheduleEntry(ctx, again, time.Now().UTC(), nil); fired || err != nil {
+		t.Fatalf("the retried tick must replay: fired=%v %v", fired, err)
+	}
+	var recorded string
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(last_run_id, '') FROM schedule_entries WHERE id = $1`, first.ID).Scan(&recorded)
+	if recorded != runID || droppedTicks(t, ctx, pool, org, "rollout_version_unavailable") != 0 {
+		t.Fatalf("the started run must be recorded, not dropped: %q != %q", recorded, runID)
+	}
+}
+
+// Two holders of one undeliverable tick audit its drop once.
+func TestScheduleTickDropIsAuditedOnce(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	dropOrgRuns(t, pool, org)
+	workflowID := "wf-sched-once-" + org
+	v1, v2 := seedScheduledRollout(t, ctx, pool, eng, org, workflowID)
+	finishRollout(t, ctx, eng, org, workflowID, startRollout(t, ctx, eng, org, workflowID, v1, v2, 10), "rollback")
+	if _, err := pool.Exec(ctx, `UPDATE workflow_versions SET dag_json = '[]' WHERE id = $1`, v1); err != nil {
+		t.Fatal(err)
+	}
+	slow := claimTick(t, ctx, pool, org)
+	if _, err := pool.Exec(ctx, `UPDATE schedule_entries SET next_fire_at = now() - interval '1 second' WHERE id = $1`, slow.ID); err != nil {
+		t.Fatal(err)
+	}
+	other := claimTick(t, ctx, pool, org)
+	for _, holder := range []store.ClaimDueScheduleEntriesRow{other, slow} {
+		if _, err := eng.fireScheduleEntry(ctx, holder, time.Now().UTC(), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if drops := droppedTicks(t, ctx, pool, org, "rollout_version_unavailable"); drops != 1 {
+		t.Fatalf("want one drop audit for one tick, got %d", drops)
+	}
+}
+
+// An entry version that no longer parses drops the tick with an audit row.
+func TestScheduleTickOnAnUnparseableVersionIsAudited(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	dropOrgRuns(t, pool, org)
+	workflowID := "wf-sched-unparse-" + org
+	_, v2 := seedScheduledRollout(t, ctx, pool, eng, org, workflowID)
+	if _, err := pool.Exec(ctx, `UPDATE workflow_versions SET dag_json = '[]' WHERE id = $1`, v2); err != nil {
+		t.Fatal(err)
+	}
+	entry := claimTick(t, ctx, pool, org)
+	if fired, err := eng.fireScheduleEntry(ctx, entry, time.Now().UTC(), nil); fired || err != nil {
+		t.Fatalf("fired=%v %v", fired, err)
+	}
+	var claimed *time.Time
+	_ = pool.QueryRow(ctx, `SELECT claimed_due_at FROM schedule_entries WHERE id = $1`, entry.ID).Scan(&claimed)
+	if droppedTicks(t, ctx, pool, org, "version_unparseable") != 1 || claimed != nil {
+		t.Fatalf("want an audited drop and an advanced entry, claimed %v", claimed)
 	}
 }
