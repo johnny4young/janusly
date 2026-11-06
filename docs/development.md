@@ -242,7 +242,9 @@ changes that add object keys (a controller/view model, a router) cost gzip
 bytes no minifier removes; the caps were raised once for that in 2026-09. In
 2026-11 the owner approved moving the artifact, worst-locale and per-chunk caps
 by each workspace redesign change's measured cost, stated in its pull request;
-the cold-path caps and route budgets still only ratchet down. The bundle holds no duplicated first-party modules
+the cold-path caps and route budgets still only ratchet down. The one exception is
+the self-hosted Inter Tight face: the owner moved the Home route budget 250 → 252
+KiB and the Spanish Home budget 250 → 257 KiB by its measured cost. The bundle holds no duplicated first-party modules
 and the i18n catalogs are prefix-compressed, so dead bytes live in vendor code and
 interop. Production-only plugins remove them: named React bindings instead of
 CommonJS interop (`react-esm-facade-plugin.mjs`), `d3-color`, unused `d3-transition` methods and Lucide's React

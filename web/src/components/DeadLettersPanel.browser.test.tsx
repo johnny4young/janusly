@@ -70,7 +70,8 @@ describe('Recovery queue layout and focus in Chromium', () => {
     } finally { await page.viewport(1024, 768) }
   })
 
-  // No web font ships, so these render with wide fallback metrics: Verdana on macOS, DejaVu Sans on Linux.
+  // Wide fallback metrics (Verdana on macOS, DejaVu Sans on Linux) stand in for the swap period before
+  // Inter Tight arrives, a wider bound than the shipped face that every other layout test measures.
   const toolbarIds = ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']
   async function mountInCard() {
     document.documentElement.style.setProperty('--font-sans', 'Verdana, "DejaVu Sans", sans-serif')

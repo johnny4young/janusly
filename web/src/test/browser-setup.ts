@@ -7,6 +7,10 @@ import '../index.css'
 
 await bootstrapTestCatalogs()
 
+// Layout tests measure text, so the shipped face must be in place before the first render.
+if ((await document.fonts.load('16px "Inter Tight"')).length === 0) throw new Error('Inter Tight did not load')
+await document.fonts.ready
+
 // `findBy*` waits on real lazy chunks here. The 1 s default fails on a busy host
 // with no product fault; a failing assertion still fails, only later.
 configure({ asyncUtilTimeout: 5_000 })
