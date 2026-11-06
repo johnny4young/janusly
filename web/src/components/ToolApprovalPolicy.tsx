@@ -22,7 +22,8 @@ export function ToolApprovalPolicy({ tool }: { tool: string }) {
 
   useEffect(() => {
     let cancelled = false
-    api('/org/config')
+    // Resolve through a promise so a caller that stubs api() still renders.
+    Promise.resolve(api('/org/config'))
       .then(payload => { if (!cancelled) setListed(listedTools(orgConfigValue(payload, POLICY_KEY))) })
       .catch(() => { if (!cancelled) setListed([]) })
     return () => { cancelled = true }
