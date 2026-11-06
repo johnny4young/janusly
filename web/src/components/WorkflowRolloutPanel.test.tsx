@@ -518,4 +518,66 @@ describe('<WorkflowRolloutPanel />', () => {
     expect(stage).toHaveTextContent(`Latest savedv${rows[0].version}`)
     expect(stage).toHaveTextContent(`In production${production}`)
   })
+  it('closes the dialog on a same-scope reload and does not reopen it after a failed load', async () => {
+    let unavailable = false
+    vi.mocked(api).mockImplementation(async path => {
+      if (unavailable) throw new Error('offline')
+      if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout: null }
+    })
+    render(<WorkflowRolloutPanel />)
+    const reads = () => vi.mocked(api).mock.calls.filter(([path]) => path.startsWith('/workflows/versions')).length
+
+    await openPromote()
+    act(() => invalidateTags([PLATFORM_TAG]))
+    await waitFor(() => expect(reads()).toBe(2))
+    expect(await screen.findByTestId('workflow-promote-open')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-dialog')).not.toBeInTheDocument()
+
+    await openPromote()
+    unavailable = true
+    act(() => invalidateTags([PLATFORM_TAG]))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    unavailable = false
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByTestId('workflow-promote-open')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-promote-dialog')).not.toBeInTheDocument()
+  })
+
+  it('finishes and reports a start when the panel refreshes during the submit', async () => {
+    let finish: (value: unknown) => void = () => { throw new Error('not submitted') }
+    const pending = new Promise(resolve => { finish = resolve })
+    vi.mocked(api).mockImplementation(async (path, options) => {
+      if (options?.method === 'POST') return pending
+      if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout: null }
+    })
+    render(<WorkflowRolloutPanel />)
+    const dialog = await openPromote()
+    const start = within(dialog).getByTestId('workflow-promote-start')
+    await waitFor(() => expect(start).toBeEnabled())
+    fireEvent.click(start)
+    await waitFor(() => expect(dialog).toHaveFocus())
+    const signal = vi.mocked(api).mock.calls.find(([, options]) => options?.method === 'POST')?.[1]?.signal
+    act(() => invalidateTags([PLATFORM_TAG]))
+    expect(signal?.aborted).toBe(false)
+    await act(async () => finish({ rollout: activeRollout() }))
+    await waitFor(() => expect(useWorkflowStore.getState().toasts.map(toast => toast.message)).toContain('Canary deployment started.'))
+    await waitFor(() => expect(screen.getByTestId('workflow-stage')).toHaveFocus())
+  })
+
+  it('reads the whole rollout window so an older baseline still resolves', async () => {
+    const many = Array.from({ length: 80 }, (_, index) => ({ ...versionRow, id: `version-${80 - index}`, version: 80 - index }))
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return path.includes('limit=200') ? many : many.slice(0, 50)
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
+      return { rollout: activeRollout({ baselineVersionId: 'version-5', canaryVersionId: 'version-80' }) }
+    })
+    render(<WorkflowRolloutPanel readOnly />)
+
+    const stage = await screen.findByTestId('workflow-stage')
+    expect(stage).toHaveTextContent('In productionv5')
+  })
 })

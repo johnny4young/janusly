@@ -53,6 +53,9 @@ const DEFAULT_DRAFT: PromoteDraft = {
 // wire-policy: a rollout compares a baseline with a newer canary version.
 const MIN_ROLLOUT_VERSIONS = 2
 
+// wire-policy: the engine accepts a baseline among the newest 200 versions.
+const ROLLOUT_VERSION_WINDOW = 200
+
 const ICON_SIZE = 13 // wire-policy: presentation, not a wire bound.
 
 // Shape, including the status vocabulary, is the generated guard's; the panel
@@ -80,6 +83,9 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
   const { t } = useT()
   const confirm = useConfirm()
   const owner = useRef<AbortController | null>(null)
+  // Writes live as long as this scope, so a same-scope refresh cannot abort one in flight.
+  const writer = useRef<AbortController | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
   const current = useCallback((request: AbortController | null): request is AbortController =>
     request !== null && !request.signal.aborted && rolloutScope(useWorkflowStore.getState()) === scope, [scope])
   const rolloutPath = `/workflows/${encodeURIComponent(workflowId)}/rollout`
@@ -97,15 +103,21 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
   const [mutating, setMutating] = useState(false)
 
   useEffect(() => {
+    const controller = new AbortController()
+    writer.current = controller
+    return () => { controller.abort() }
+  }, [])
+
+  useEffect(() => {
     const request = new AbortController()
     owner.current = request
     setVersions([])
     setRollout(null)
     setQualificationGate(null)
-    setMutating(false)
+    setPromoteOpen(false)
     setLoadState('loading')
     Promise.all([
-      readWorkflowVersionPage(workflowId, {}, request.signal),
+      readWorkflowVersionPage(workflowId, { limit: ROLLOUT_VERSION_WINDOW }, request.signal),
       // The rollout read shares a mux pattern that keeps it out of the manifest; its row has the component guard.
       api(rolloutPath, { signal: request.signal }),
     ]).then(([versionsPayload, rolloutPayload]) => {
@@ -157,34 +169,38 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
     && (!qualificationGate.required || qualificationGate.status === 'passed'))
 
   const mutate = async (request: AbortController, send: () => Promise<{ rollout: WorkflowRollout }>, success: string,
-    accepts: (value: WorkflowRollout) => boolean) => {
+    accepts: (value: WorkflowRollout) => boolean): Promise<boolean> => {
     setMutating(true)
     try {
       const payload = await send()
-      if (!current(request)) return
+      if (!current(request)) return false
       const updated = acceptRollout(payload.rollout, workflowId)
       if (!updated || !accepts(updated)) throw new Error(t('workflowRollout.invalidResponse'))
       setRollout(updated)
       setPromoteOpen(false)
       addToast(t(success), 'success')
       bumpPlatformVersion(WORKFLOW_ROLLOUT_MUTATION_TAGS)
+      return true
     } catch (error) {
-      if (!current(request)) return
+      if (!current(request)) return false
       addToast(error instanceof MalformedResponseError
         ? t('workflowRollout.invalidResponse')
         : tApiError(error) || t('workflowRollout.decisionFailed'), 'error')
+      return false
     } finally {
       if (current(request)) setMutating(false)
     }
   }
 
   const createRollout = async () => {
-    const request = owner.current
-    if (!current(request) || !canStart || !latest) return
+    const write = writer.current
+    if (!current(owner.current) || !current(write) || !canStart || !latest) return
     const body = { ...draft, canaryVersionId: latest.id }
-    await mutate(request, () => contractApi('POST /workflows/{workflowId}/rollout', rolloutPath, body,
-      { signal: request.signal, guard: isPostWorkflowsWorkflowIdRolloutResponse }), 'workflowRollout.started',
+    const started = await mutate(write, () => contractApi('POST /workflows/{workflowId}/rollout', rolloutPath, body,
+      { signal: write.signal, guard: isPostWorkflowsWorkflowIdRolloutResponse }), 'workflowRollout.started',
     value => value.baselineVersionId === body.baselineVersionId && value.canaryVersionId === body.canaryVersionId)
+    // The dialog and its trigger are gone, so focus lands on the new stage.
+    if (started) requestAnimationFrame(() => stageRef.current?.focus())
   }
 
   const decide = async (decision: 'promote' | 'rollback') => {
@@ -196,10 +212,11 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
       confirmLabel: t(decision === 'promote' ? 'workflowRollout.promote' : 'workflowRollout.rollback'),
       tone: decision === 'rollback' ? 'danger' : 'default',
     })
-    if (!accepted || !current(request)) return
-    await mutate(request, () => contractApi('POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}',
+    const write = writer.current
+    if (!accepted || !current(request) || !current(write)) return
+    await mutate(write, () => contractApi('POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}',
       `${rolloutPath}/${encodeURIComponent(rollout.id)}/${decision}`, {},
-      { signal: request.signal, guard: isPostWorkflowsWorkflowIdRolloutRolloutIdDecisionResponse }),
+      { signal: write.signal, guard: isPostWorkflowsWorkflowIdRolloutRolloutIdDecisionResponse }),
     decision === 'promote' ? 'workflowRollout.promoted' : 'workflowRollout.rolledBack', value => value.id === rollout.id)
   }
 
@@ -235,7 +252,7 @@ function ScopedRollout({ workflowId, scope, readOnly }: { workflowId: string; sc
       {loading && <p className="helper-text" role="status">{t('workflowRollout.loading')}</p>}
 
       {!loading && latest && (
-        <div className="we-rollout-panel__metrics" data-testid="workflow-stage">
+        <div ref={stageRef} tabIndex={-1} className="we-rollout-panel__metrics" data-testid="workflow-stage">
           <div><span>{t('workflowRollout.stage.latest')}</span><strong>v{latest.version}</strong></div>
           <div><span>{t('workflowRollout.stage.production')}</span><strong>{production ? `v${production.version}` : '—'}</strong></div>
         </div>

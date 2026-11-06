@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { GitBranch, X } from 'lucide-react'
 
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
@@ -39,6 +39,8 @@ export function WorkflowPromoteDialog({ versions, draft, onDraft, qualification,
   const dialogRef = useRef<HTMLFormElement | null>(null)
   const dismiss = mutating ? undefined : onClose
   useDialogFocusTrap(dialogRef, { onEscape: dismiss, initialFocus: true })
+  // Every control is disabled while starting, so the dialog itself holds focus.
+  useEffect(() => { if (mutating) dialogRef.current?.focus() }, [mutating])
   const [latest] = versions
   const baseline = versions.find(version => version.id === draft.baselineVersionId)
 
@@ -50,6 +52,8 @@ export function WorkflowPromoteDialog({ versions, draft, onDraft, qualification,
         role="dialog"
         aria-modal="true"
         aria-labelledby="workflow-promote-title"
+        aria-busy={mutating || undefined}
+        tabIndex={-1}
         data-testid="workflow-promote-dialog"
         onClick={event => event.stopPropagation()}
         onSubmit={event => { event.preventDefault(); onStart() }}
