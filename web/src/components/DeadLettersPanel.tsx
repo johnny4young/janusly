@@ -335,7 +335,7 @@ export function DeadLettersPanel({
 
   // Org-wide open count drives the warning stripe — there are opens to work
   // somewhere in the queue, regardless of the filtered page being viewed.
-  const hasOpenEntry = counts.open > 0
+  const hasOpenEntry = (counts?.open ?? 0) > 0
   const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
 
   // An id the operator ASKED for (a deep link from an alert, a queue CTA) must

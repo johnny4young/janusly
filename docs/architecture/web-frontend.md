@@ -701,15 +701,22 @@ The run count stays visible under Last run and is never reused as a failure coun
 
 ### Recovery queue hierarchy
 
-The queue leads with compact organization-wide totals and visibly grouped search,
-failure-status, recovery-owner, recovery-severity and sort controls. Totals never
-represent the filtered or paginated result; failure status is distinct from the
-linked recovery item's progress. Filters keep their existing combined server
-query and persistence semantics. Refresh may reorder rows without moving focus
-or clearing the selected failure or bulk selection.
+The queue leads with one toolbar: search, a failure-status radio group whose
+chips carry organization-wide counts, then native owner, severity and sort
+menus. Counts never represent the filtered or paginated result: the chips show
+them only while owner, severity, search and day are unfiltered, and omit them
+while they load or when the counts request fails. Failure status is distinct
+from the linked recovery item's progress; the status group's tooltip and
+accessible description say both, and the Closed radio's accessible name keeps
+"without recovery". Filters keep their existing combined server query and
+persistence semantics. Refresh may reorder rows without moving focus or clearing
+the selected failure or bulk selection. Queue shortcuts pause while a toolbar
+control has focus.
 
-Rows retain the fixed 54px height required by virtualization. Controls reflow
-without hiding actions at narrow widths; full failure details remain available
-below the list. Chromium checks cover long identifiers, English/Spanish labels,
+Rows retain the fixed height required by virtualization. In English from a
+1280px window the toolbar holds one row for every menu choice, because search
+absorbs width changes. Counts in the thousands or Spanish labels can wrap Sort
+to a second row. It reflows without hiding actions at narrower widths; full
+failure details remain available in the detail pane. Chromium checks cover long identifiers, English/Spanish labels,
 keyboard filter traversal and 390/640/1280 CSS-pixel widths. The 640px case is a
 200%-zoom layout proxy, not a screen-reader or physical browser-zoom certificate.

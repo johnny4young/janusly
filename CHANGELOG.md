@@ -242,6 +242,10 @@
 - The pending setup step is a row in What needs you with its progress, not a
   separate card repeating the next action.
 
+- The recovery queue filters fit one toolbar row: search, status chips with
+  counts (All, Open, Retried, Closed), and compact Owner, Severity and Sort
+  menus. Organization totals show on the chips while no other filter is on,
+  and the list starts about 140 px higher.
 - Solution pack buttons keep a readable label. Under Install, a pack now names
   the credentials to connect before running it, or says that your role can't
   install or run packs.

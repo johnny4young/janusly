@@ -49,14 +49,14 @@ describe('Recovery queue layout and focus in Chromium', () => {
     mountQueue()
     try {
       const row = await screen.findByTestId('dlq-row-invoice')
-      expect(row.getBoundingClientRect().top).toBeLessThan(330)
+      expect(row.getBoundingClientRect().top).toBeLessThan(180)
       // 640 CSS pixels exercises reflow of a 1280px-wide window at 200% zoom,
       // not screen-reader or physical browser-zoom qualification.
       for (const width of [1280, 640, 390]) {
         await page.viewport(width, 800)
         const queue = screen.getByTestId('recovery-queue')
         expect(queue.scrollWidth).toBeLessThanOrEqual(queue.clientWidth + 1)
-        for (const id of ['dlq-search', 'dlq-filter', 'dlq-severity-filter', 'dlq-sort']) {
+        for (const id of ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']) {
           const input = document.getElementById(id)!
           expect(input.getBoundingClientRect().width).toBeGreaterThan(80)
           expect(input.getBoundingClientRect().right).toBeLessThanOrEqual(width)
@@ -66,6 +66,53 @@ describe('Recovery queue layout and focus in Chromium', () => {
         await page.getByTestId('recovery-queue').screenshot({ path: `../../test-results/queue-${locale}-${width}.png` })
       }
     } finally { await page.viewport(1024, 768) }
+  })
+
+  // No web font ships, so these render with wide fallback metrics: Verdana on macOS, DejaVu Sans on Linux.
+  const toolbarIds = ['dlq-search', 'dlq-filter', 'dlq-owner', 'dlq-severity-filter', 'dlq-sort']
+  async function mountInCard() {
+    document.documentElement.style.setProperty('--font-sans', 'Verdana, "DejaVu Sans", sans-serif')
+    initI18n('en')
+    render(<div style={{ width: 852 }}><DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} /></div>)
+    await screen.findByTestId('dlq-row-invoice')
+    return screen.getByTestId('dlq-toolbar')
+  }
+  const rowSpread = () => {
+    const centers = toolbarIds.map(id => { const box = document.getElementById(id)!.getBoundingClientRect(); return box.top + box.height / 2 })
+    return Math.max(...centers) - Math.min(...centers)
+  }
+
+  it('keeps search, status chips and menus on one row in the 852px card for every menu choice', async () => {
+    try {
+      const toolbar = await mountInCard()
+      await waitFor(() => expect(screen.getByRole('radio', { name: 'All 12' })).toBeInTheDocument())
+      expect(rowSpread()).toBeLessThanOrEqual(1)
+      expect(toolbar.getBoundingClientRect().height).toBeLessThanOrEqual(40)
+      const panesTop = screen.getByTestId('dlq-panes').getBoundingClientRect().top
+      // The longest choices; owner and severity also hide the counts.
+      for (const [id, value] of [['dlq-sort', 'sla'], ['dlq-severity-filter', 'p4'], ['dlq-owner', 'mine']] as const) {
+        await userEvent.selectOptions(screen.getByTestId(id), value)
+        expect(rowSpread()).toBeLessThanOrEqual(1)
+        expect(screen.getByTestId('dlq-panes').getBoundingClientRect().top).toBe(panesTop)
+      }
+    } finally { document.documentElement.style.removeProperty('--font-sans') }
+  })
+
+  it('wraps to at most two rows without overflow when counts reach the thousands', async () => {
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === '/dlq/counts') return { total: 9876, open: 8765, replayed: 1234, resolved: 4321 }
+      if (path.startsWith('/dlq/queue')) return { items: queueRows, nextCursor: null, hasMore: false }
+      throw new Error(`Unexpected read: ${path}`)
+    })
+    try {
+      const toolbar = await mountInCard()
+      await waitFor(() => expect(screen.getByRole('radio', { name: 'All 9,876' })).toBeInTheDocument())
+      await userEvent.selectOptions(screen.getByTestId('dlq-sort'), 'sla')
+      const box = toolbar.getBoundingClientRect()
+      expect(box.height).toBeLessThanOrEqual(80)
+      expect(toolbar.scrollWidth).toBeLessThanOrEqual(toolbar.clientWidth)
+      for (const id of toolbarIds) expect(document.getElementById(id)!.getBoundingClientRect().right).toBeLessThanOrEqual(box.right + 1)
+    } finally { document.documentElement.style.removeProperty('--font-sans') }
   })
 
   it.each(['en', 'es'] as const)('triages side by side in %s: J/K moves neither pane and the action bar stays in view', async locale => {
@@ -184,11 +231,16 @@ describe('Recovery queue layout and focus in Chromium', () => {
     const search = screen.getByTestId('dlq-search')
     await userEvent.click(search)
     await userEvent.keyboard('{Tab}')
-    expect(screen.getByLabelText('Failure status')).toHaveFocus()
+    expect(screen.getByRole('radio', { name: /^Open/ })).toHaveFocus()
+    await userEvent.keyboard('j')
+    expect(screen.getByRole('radio', { name: /^Open/ })).toHaveFocus()
+    await userEvent.keyboard('{ArrowRight}')
+    const retried = screen.getByRole('radio', { name: /^Retried/ })
+    expect(retried).toHaveFocus()
+    expect(retried).toBeChecked()
+    await waitFor(() => expect(vi.mocked(api).mock.calls.at(-1)?.[0]).toContain('status=replayed'))
     await userEvent.keyboard('{Tab}')
-    expect(screen.getByTestId('dlq-owner-all')).toHaveFocus()
-    await userEvent.keyboard('{Tab}')
-    expect(screen.getByTestId('dlq-owner-mine')).toHaveFocus()
+    expect(screen.getByLabelText('Recovery owner')).toHaveFocus()
     await userEvent.keyboard('{Tab}')
     expect(screen.getByLabelText('Recovery severity')).toHaveFocus()
     await userEvent.keyboard('{Tab}')
