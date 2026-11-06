@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 618.7,
+  "artifactGzipKiB": 621.1,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 573.2
+    "maxGzipKiB": 575.4
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,7 +85,7 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 83.53,
+    "app-workspace.js": 83.84,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
@@ -98,8 +98,8 @@
     "BudgetSettingsPanel.js": 3.25,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 41.4,
-    "catalog-es.js": 46.08,
+    "catalog-en.js": 41.56,
+    "catalog-es.js": 46.28,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
@@ -124,7 +124,7 @@
     "MultiAgentTimeline.css": 1.06,
     "MultiAgentTimeline.js": 1.78,
     "OperationsPage.css": 1.36,
-    "OperationsPage.js": 5.85,
+    "OperationsPage.js": 5.86,
     "PermissionGrantsPanel.css": 0.88,
     "PermissionGrantsPanel.js": 3.19,
     "PlaybookMatchCard.js": 0.95,
