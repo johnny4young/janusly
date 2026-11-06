@@ -316,7 +316,6 @@ function ScopedVersionHistory({ scope }: { scope: string }) {
             key={version.id}
             className="version-row"
             data-latest={isLatest ? 'true' : undefined}
-            data-selected={compareMode && isSelected ? 'true' : undefined}
           >
             <button
               type="button"

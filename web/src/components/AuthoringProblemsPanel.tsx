@@ -82,7 +82,7 @@ export function AuthoringProblemsPanel({
               </>
             )
             return (
-              <li key={problem.id} data-severity={problem.severity}>
+              <li key={problem.id}>
                 {locatable ? (
                   <button
                     type="button"

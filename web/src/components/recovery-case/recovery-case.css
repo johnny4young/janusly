@@ -394,7 +394,8 @@
   flex-direction: column;
   gap: 7px;
   padding: 10px;
-  border-left: 2px solid var(--we-primary);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
   background: var(--we-surface);
 }
 
@@ -468,9 +469,8 @@
 }
 
 .we-recovery-case__candidate[data-selected='true'] {
-  border-color: color-mix(in srgb, var(--we-primary) 42%, var(--we-line));
+  border-color: var(--we-primary-text);
   background: color-mix(in srgb, var(--we-primary) 6%, var(--we-surface));
-  box-shadow: inset 3px 0 0 var(--we-primary);
 }
 
 .we-recovery-case__candidate > span:nth-child(2) {

@@ -735,14 +735,9 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   box-shadow: 0 1px 2px var(--we-shadow-ink-04);
 }
 
-/* Severity stripe — opt-in via `data-severity` on a card. Lets an operator
-   scan a long stack and immediately see which surface needs attention. v1 keeps
-   the vocabulary tight (`danger` + `warning`) matching the existing tokens.
-   Reusing the existing `--we-danger` / `--we-warning` paints keeps the design
-   system consistent with `.we-list-row[data-severity]` and `.we-recovery-center-tile[data-severity]`.
-   The shared `.we-card` base owns the stripe for every operational surface. */
-.we-card[data-severity="danger"] { border-left: 3px solid var(--we-danger); }
-.we-card[data-severity="warning"] { border-left: 3px solid var(--we-warning); }
+/* Opt-in severity outline; the rows inside name the status. */
+.we-card[data-severity="danger"] { border-color: var(--we-danger-text); }
+.we-card[data-severity="warning"] { border-color: var(--we-warning-text); }
 .we-card { padding: 14px; }
 
 .we-card__header {

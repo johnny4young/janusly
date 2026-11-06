@@ -6,6 +6,7 @@ import { initI18n } from '../i18n'
 import { PLATFORM_TAG, invalidateTags } from '../lib/query-cache'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { deadLetterWireDefaults } from '../test/dead-letter-fixture'
+import { leadingAccents } from '../test/leading-accent'
 import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
 import { requestRecoveryQueueFocus } from './recovery-queue-focus-bus'
 
@@ -50,6 +51,7 @@ describe('Recovery queue layout and focus in Chromium', () => {
     try {
       const row = await screen.findByTestId('dlq-row-invoice')
       expect(row.getBoundingClientRect().top).toBeLessThan(180)
+      expect(leadingAccents(screen.getByTestId('recovery-queue'))).toEqual([])
       // 640 CSS pixels exercises reflow of a 1280px-wide window at 200% zoom,
       // not screen-reader or physical browser-zoom qualification.
       for (const width of [1280, 640, 390]) {

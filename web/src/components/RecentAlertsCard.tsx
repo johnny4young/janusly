@@ -113,7 +113,7 @@ export function RecentAlertsCard(): React.ReactElement {
           items.map((item) => (
             <div
               key={item.id}
-              className={`we-list-row we-list-row--${item.outcome === 'delivered' ? 'healthy' : 'warn'}`}
+              className="we-list-row"
               data-testid="recent-alert-row"
               data-outcome={item.outcome}
             >
@@ -124,7 +124,7 @@ export function RecentAlertsCard(): React.ReactElement {
                     {t(`alerts.triggers.${item.trigger}`)}
                   </span>
                 )}
-                <span className="we-pill" data-tone="neutral">
+                <span className="we-pill" data-tone={item.outcome === 'delivered' ? 'success' : 'warning'}>
                   {t(`alerts.outcomes.${item.outcome}`)}
                 </span>
                 <span className="we-list-row__hint">{relativeTime(item.dispatchedAt, locale)}</span>

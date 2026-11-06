@@ -42,17 +42,17 @@
 }
 
 .we-diff-row--added {
-  border-left: 3px solid var(--we-success);
+  border-color: var(--we-success-text);
   background: var(--we-success-soft);
 }
 
 .we-diff-row--removed {
-  border-left: 3px solid var(--we-danger);
+  border-color: var(--we-danger-text);
   background: var(--we-danger-soft);
 }
 
 .we-diff-row--changed {
-  border-left: 3px solid var(--we-warning);
+  border-color: var(--we-warning-text);
   background: var(--we-warning-soft);
 }
 

@@ -436,14 +436,13 @@ function MembersPanelForOrganization() {
             {members.map(member => {
               const label = member.email ?? member.userId
               const initials = (label.includes('@') ? label.split('@')[0] : label).slice(0, 2).toUpperCase()
-              const isAdmin = member.role === 'admin'
               const memberRole = orgRoles.find(entry => entry.name === member.role)
               const canReceiveOwnership = currentOrganization?.isOwner === true
                 && !member.isOwner
                 && (member.role === 'admin' || memberRole?.inheritsFrom === 'admin')
               return (
                 <li key={member.id}>
-                  <div className="we-list-row" data-testid={`members-row-${member.userId}`} data-severity={isAdmin ? 'cobalt' : undefined}>
+                  <div className="we-list-row" data-testid={`members-row-${member.userId}`}>
                     <span className="we-list-row__avatar" aria-hidden="true">{initials}</span>
                     <div className="we-list-row__body">
                       <strong>
@@ -595,7 +594,7 @@ function MembersPanelForOrganization() {
                 const sentAt = invitationSentAt(invitation.createdAt)
                 return (
                   <li key={invitation.id}>
-                    <div className="we-list-row" data-testid={`members-invitation-${invitation.id}`} data-severity="warning">
+                    <div className="we-list-row" data-testid={`members-invitation-${invitation.id}`}>
                       <span className="we-list-row__avatar" aria-hidden="true"><Mail size={15} /></span>
                       <div className="we-list-row__body">
                         <strong>{invitation.email}</strong>
