@@ -156,3 +156,24 @@ func TestNormalizePatchedConfigNeverOverridesCanonicalKeys(t *testing.T) {
 		t.Fatalf("multiplier of one is fixed backoff: %+v", single)
 	}
 }
+
+// A config patch may not change whether a tool step waits for a person.
+func TestConfigPatchCannotChangeToolApproval(t *testing.T) {
+	original := &domain.Workflow{DSLVersion: "1.0", Nodes: []domain.Node{
+		{ID: "snooze", Type: "tool", Config: map[string]any{"tool": "text.uppercase", "requireApproval": true}},
+	}, Edges: []domain.Edge{}}
+	for name, patched := range map[string]map[string]any{
+		"dropped": {"tool": "text.uppercase", "input": map[string]any{"value": "a"}},
+		"cleared": {"tool": "text.uppercase", "requireApproval": false},
+	} {
+		if applyPatchSuggestion(original, "snooze", map[string]any{"patchedConfig": patched}, false) != nil {
+			t.Errorf("%s: a patch removed the tool approval", name)
+		}
+	}
+	kept := applyPatchSuggestion(original, "snooze", map[string]any{"patchedConfig": map[string]any{
+		"tool": "text.uppercase", "requireApproval": true, "retry": map[string]any{"maxAttempts": 2},
+	}}, false)
+	if kept == nil {
+		t.Fatal("a patch that keeps the approval must apply")
+	}
+}

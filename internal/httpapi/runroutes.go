@@ -155,6 +155,8 @@ func runStartFailure(err error) opResult {
 			return opError(http.StatusConflict, rejection.Code, rejection.Message, nil)
 		case runstart.CodeAdhocDisabled:
 			return opError(http.StatusForbidden, rejection.Code, rejection.Message, nil)
+		case runstart.CodeToolApprovalDrop:
+			return opError(http.StatusConflict, rejection.Code, rejection.Message, nil)
 		}
 	}
 	var invalid *engine.InputValidationError
@@ -456,7 +458,7 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
 		return
 	}
-	if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, body.DeadLetterID); err != nil {
+	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, body.DeadLetterID, engine.RedriveOptions{Actor: rc.userID}); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			writeV1Error(w, rc.id, http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
@@ -498,7 +500,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 		if body.RunID == "" || body.NodeID == "" {
 			return opError(http.StatusBadRequest, "dlq_fields_required", "runId and nodeId are required", nil)
 		}
-		if err := s.engine.RedriveRunNode(r.Context(), rc.orgID, body.RunID, body.NodeID); err != nil {
+		if err := s.engine.RedriveRunNode(r.Context(), rc.orgID, body.RunID, body.NodeID, rc.userID); err != nil {
 			switch {
 			case errors.Is(err, engine.ErrDeadLetterNotFound):
 				return opError(http.StatusForbidden, "dlq_forbidden", "Forbidden", nil)
@@ -572,6 +574,9 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 			PlaybookID: body.RecoveryPlaybookID, ValidationRunID: body.RecoveryValidationRunID,
 			FixWorkflowJSON: fixJSON, RequestedBy: rc.userID,
 		}); err != nil {
+		if result, ok := toolApprovalDropped(err); ok {
+			return result
+		}
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)

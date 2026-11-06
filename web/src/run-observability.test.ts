@@ -120,7 +120,7 @@ describe('run observability projections', () => {
     const waiting = { kind: 'tool_approval', reason: 'Waiting for human approval', approvalId: 'a1', tool: 'slack.post', params: { text: 'hi' }, paramsDigest: 'd1' }
     const node = { nodeId: 'post', status: 'waiting', stateJson: { waiting } }
     expect(getRunWaitingInfo(node).kind).toBe('tool_approval')
-    expect(getToolApprovalRequest(node)).toEqual({ approvalId: 'a1', tool: 'slack.post', params: { text: 'hi' }, paramsDigest: 'd1', requiredApprovals: 1 })
+    expect(getToolApprovalRequest(node)).toEqual({ approvalId: 'a1', tool: 'slack.post', params: { text: 'hi' }, paramsDigest: 'd1', maskedPaths: [], requiredApprovals: 1 })
     const { paramsDigest: _, ...unbound } = waiting
     expect(getToolApprovalRequest({ nodeId: 'post', status: 'waiting', stateJson: { waiting: unbound } })).toBeNull()
     expect(getToolApprovalRequest({ nodeId: 'gate', status: 'waiting', stateJson: { waiting: { kind: 'approval' } } })).toBeNull()

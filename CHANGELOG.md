@@ -6,8 +6,10 @@
   pauses right before the call, and the paused step shows the tool, its exact
   parameters with secrets masked, and the policy. Approve runs exactly those
   parameters once; Deny, or no decision within 30 minutes, fails the step so it
-  takes its error route. The person who started the run cannot decide, and
-  neither can a service token. A retry, redrive or restart asks again.
+  takes its error route. The person who started the run, whoever saved its
+  version, anyone who redrove it, and service tokens cannot decide. A retry,
+  redrive or restart asks again, and no start, rerun, replay or fix can run
+  that step without its approval once the saved workflow requires it.
 - The step Inspector has a Test data section that shows the output of the step
   and of every step before it from the open run. Pin a step's output or type a
   mock, then Run this step or Test draft: those steps return the pinned or mocked

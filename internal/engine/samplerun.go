@@ -66,6 +66,9 @@ func (e *Engine) StartSandboxRun(ctx context.Context, in SandboxRunInput) (strin
 	if in.Workflow == nil {
 		return "", fmt.Errorf("sandbox workflow is required")
 	}
+	if err := requireToolApprovals(ctx, store.New(e.pool), in.OrgID, nil, in.Workflow); err != nil {
+		return "", err
+	}
 	input := in.Input
 	if input == nil {
 		input = map[string]any{}

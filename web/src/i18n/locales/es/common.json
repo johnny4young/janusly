@@ -3152,6 +3152,7 @@
   "rightPanel.runs.waitKind.approval": "Aprobación",
   "rightPanel.runs.waitKind.tool_approval": "Aprobación de herramienta",
   "rightPanel.runs.toolApproval.params": "Parámetros exactos",
+  "rightPanel.runs.toolApproval.masked": "Valores ocultos en esta llamada: {{paths}}",
   "rightPanel.runs.toolApproval.approvers": "Aprobaciones necesarias",
   "rightPanel.runs.toolApproval.selfApproval": "Autoaprobación",
   "rightPanel.runs.toolApproval.selfApprovalOff": "No permitida",

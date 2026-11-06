@@ -771,6 +771,12 @@ type RunNode struct {
 	EnqueuedAt                  time.Time
 }
 
+type RunRedriver struct {
+	RunID     string
+	Actor     string
+	CreatedAt time.Time
+}
+
 type RunStartIdempotency struct {
 	OrgID          string
 	IdempotencyKey string

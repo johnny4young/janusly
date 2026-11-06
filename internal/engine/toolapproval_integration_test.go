@@ -276,8 +276,19 @@ func TestToolApprovalRequestersSpanSubworkflowLineage(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE run_nodes SET recovery_requested_by = 'dave' WHERE run_id = $1`, child); err != nil {
 		t.Fatal(err)
 	}
-	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, child)
-	if err != nil || strings.Join(requesters, ",") != "alice,dave" {
+	// The author of the saved version and every redriver count too.
+	if _, err := pool.Exec(ctx, `INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by)
+		VALUES ($1, $2, 'wf-child', 1, '{}', 'erin')`, child+"-v", org); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE runs SET workflow_version_id = $2 WHERE id = $1`, child, child+"-v"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO run_redrivers (run_id, actor) VALUES ($1, 'frank')`, parent); err != nil {
+		t.Fatal(err)
+	}
+	requesters, err := store.New(pool).ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: child, NodeID: "call"})
+	if err != nil || strings.Join(requesters, ",") != "alice,dave,erin,frank" {
 		t.Fatalf("requesters %v %v", requesters, err)
 	}
 }
@@ -321,4 +332,165 @@ func TestToolApprovalInValidationRuns(t *testing.T) {
 	waitForSQL(t, ctx, pool, "validation_dry_run", `SELECT state_json #>> '{output,result,reason}' FROM run_nodes WHERE run_id = $1`, write)
 	read := start(approvalTool(map[string]any{"value": "a"}))
 	waitForApproval(t, ctx, pool, read)
+}
+
+// pauseAndDecide claims the step, pauses it at the gate and records a decision.
+func pauseAndDecide(t *testing.T, ctx context.Context, eng *Engine, org string, input map[string]any, status string) (ClaimedNode, string) {
+	t.Helper()
+	claim := claimNext(t, ctx, eng, org)
+	waiting, paused, err := eng.gateToolApproval(ctx, claim, "text.uppercase", input, nil)
+	if err != nil || !paused {
+		t.Fatalf("gate must pause: %v", err)
+	}
+	if err := eng.MarkNodeWaiting(ctx, claim, waiting); err != nil {
+		t.Fatal(err)
+	}
+	approvalID := waiting.Metadata["approvalId"].(string)
+	if _, _, err := eng.DecideToolApproval(ctx, ToolApprovalDecision{
+		OrgID: org, ApprovalID: approvalID, Actor: "bob", ParamsDigest: waiting.Metadata["paramsDigest"].(string), Status: status,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return claimNext(t, ctx, eng, org), approvalID
+}
+
+func requireApprovalCode(t *testing.T, err error, code string) {
+	t.Helper()
+	var execErr *ExecError
+	if !errors.As(err, &execErr) || execErr.Code != code {
+		t.Fatalf("want %s, got %v", code, err)
+	}
+}
+
+// Rotating or repointing a named credential changes the bound call.
+func TestToolApprovalBindsTheCredentialRevision(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	if _, err := pool.Exec(ctx, `INSERT INTO credentials (id, org_id, name, kind, secret_ref) VALUES ($1, $2, 'hook', 'webhook_secret', 'env:A')`, org+"-cred", org); err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]any{"value": "a", "credential": "hook"}
+	claim, _ := pauseAndDecide(t, ctx, eng, org, input, ToolApprovalApproved)
+	if _, err := pool.Exec(ctx, `UPDATE credentials SET secret_ref = 'env:B', updated_at = now() WHERE id = $1`, org+"-cred"); err != nil {
+		t.Fatal(err)
+	}
+	_, paused, err := eng.gateToolApproval(ctx, claim, "text.uppercase", input, nil)
+	if paused {
+		t.Fatal("a repointed credential must not run")
+	}
+	requireApprovalCode(t, err, "TOOL_APPROVAL_PARAMS_CHANGED")
+}
+
+// An approval is only good until its deadline, even when nobody claimed the step.
+func TestToolApprovalCannotBeSpentAfterItsDeadline(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	claim, _ := pauseAndDecide(t, ctx, eng, org, map[string]any{"value": "a"}, ToolApprovalApproved)
+	if _, err := pool.Exec(ctx, `UPDATE tool_approval_requests SET expires_at = now() - interval '1 second' WHERE run_id = $1`, runID); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := eng.gateToolApproval(ctx, claim, "text.uppercase", map[string]any{"value": "a"}, nil)
+	requireApprovalCode(t, err, "TOOL_APPROVAL_EXPIRED")
+}
+
+// A redrive gives up an unspent decision, bars the redriver, and keeps
+// everyone an earlier request for the step excluded.
+func TestToolApprovalRedriveRetiresTheDecisionAndBarsTheRedriver(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	_, approvalID := pauseAndDecide(t, ctx, eng, org, map[string]any{"value": "a"}, ToolApprovalApproved)
+	if _, err := pool.Exec(ctx, `UPDATE run_nodes SET status = 'failed' WHERE run_id = $1`, runID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE runs SET status = 'failed' WHERE id = $1`, runID); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.RedriveRunNode(ctx, org, runID, "call", "dave"); err != nil {
+		t.Fatal(err)
+	}
+	claim := claimNext(t, ctx, eng, org)
+	next, paused, err := eng.gateToolApproval(ctx, claim, "text.uppercase", map[string]any{"value": "a"}, nil)
+	if err != nil || !paused || next.Metadata["approvalId"] == approvalID {
+		t.Fatalf("the redrive reused the earlier approval: paused=%v %v", paused, err)
+	}
+	var requesters string
+	if err := pool.QueryRow(ctx, `SELECT array_to_string(requester_ids, ',') FROM tool_approval_requests WHERE id = $1`, next.Metadata["approvalId"]).Scan(&requesters); err != nil || requesters != "alice,dave" {
+		t.Fatalf("requesters %q %v", requesters, err)
+	}
+}
+
+// A replay with a suggested workflow may not drop or retype a gate.
+func TestToolApprovalSnapshotSwapKeepsTheGate(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	runID := startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	claim, _ := pauseAndDecide(t, ctx, eng, org, map[string]any{"value": "a"}, ToolApprovalDenied)
+	_, _, err := eng.gateToolApproval(ctx, claim, "text.uppercase", map[string]any{"value": "a"}, nil)
+	if err := eng.FailNode(ctx, claim, err); err != nil {
+		t.Fatal(err)
+	}
+	var deadLetterID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&deadLetterID); err != nil {
+		t.Fatal(err)
+	}
+	fix := func(config map[string]any) []byte {
+		raw, _ := json.Marshal(domain.Workflow{ID: "wf-tool-approval", Name: "Tool approval", DSLVersion: "1.0",
+			Nodes: []domain.Node{{ID: "call", Type: "tool", Config: config}}, Edges: []domain.Edge{}})
+		return raw
+	}
+	var dropped *ToolApprovalDroppedError
+	for _, config := range []map[string]any{
+		{"tool": "text.uppercase", "input": map[string]any{"value": "a"}},
+		{"tool": "text.uppercase", "input": map[string]any{"value": "a"}, "requireApproval": false},
+	} {
+		err := eng.RedriveDeadLetterWithOptions(ctx, org, deadLetterID, RedriveOptions{FixWorkflowJSON: fix(config), RequestedBy: "alice"})
+		if !errors.As(err, &dropped) || dropped.NodeID != "call" {
+			t.Fatalf("a fix without the gate was applied: %v", err)
+		}
+	}
+	if err := eng.RedriveDeadLetterWithOptions(ctx, org, deadLetterID, RedriveOptions{
+		FixWorkflowJSON: fix(map[string]any{"tool": "text.uppercase", "input": map[string]any{"value": "b"}, "requireApproval": true}), RequestedBy: "alice",
+	}); err != nil {
+		t.Fatalf("a fix that keeps the gate must apply: %v", err)
+	}
+}
+
+// A start whose document drops a gate the saved workflow has is refused.
+func TestStartRunKeepsTheSavedGate(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	saved, _ := json.Marshal(domain.Workflow{ID: "wf-saved-gate", Name: "Saved", DSLVersion: "1.0",
+		Nodes: []domain.Node{approvalTool(map[string]any{"value": "a"})}, Edges: []domain.Edge{}})
+	if _, err := pool.Exec(ctx, `INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json) VALUES ($1, $2, 'wf-saved-gate', 1, $3)`, org+"-v1", org, saved); err != nil {
+		t.Fatal(err)
+	}
+	start := func(config map[string]any) error {
+		_, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: &domain.Workflow{ID: "wf-saved-gate", Name: "Saved", DSLVersion: "1.0",
+			Nodes: []domain.Node{{ID: "call", Type: "tool", Config: config}}, Edges: []domain.Edge{}}})
+		return err
+	}
+	var dropped *ToolApprovalDroppedError
+	if err := start(map[string]any{"tool": "text.uppercase", "input": map[string]any{"value": "a"}}); !errors.As(err, &dropped) {
+		t.Fatalf("an unflagged copy started: %v", err)
+	}
+	if err := start(map[string]any{"tool": "text.uppercase", "input": map[string]any{"value": "b"}, "requireApproval": true}); err != nil {
+		t.Fatalf("a flagged edit must start: %v", err)
+	}
+}
+
+// Masked values stay hidden, but the request says where they are.
+func TestToolApprovalMarksMaskedValues(t *testing.T) {
+	ctx, _, eng, org := newHarness(t)
+	startToolApprovalRun(t, ctx, eng, org, "alice", []domain.Node{approvalTool(map[string]any{"value": "a"})}, nil)
+	claim := claimNext(t, ctx, eng, org)
+	waiting, _, err := eng.gateToolApproval(ctx, claim, "text.uppercase",
+		map[string]any{"value": "token sk-123", "headers": map[string]any{"authorization": map[string]any{"scheme": "Bearer"}}}, []string{"sk-123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(waiting.Metadata)
+	if strings.Contains(string(raw), "sk-123") || strings.Contains(string(raw), "Bearer") {
+		t.Fatalf("a secret reached the approver: %s", raw)
+	}
+	if got := strings.Join(waiting.Metadata["maskedPaths"].([]string), ","); got != "headers.authorization,value" {
+		t.Fatalf("masked paths %q", got)
+	}
 }

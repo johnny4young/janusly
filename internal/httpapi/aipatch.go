@@ -18,6 +18,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -259,6 +260,10 @@ func applyPatchSuggestion(original *domain.Workflow, nodeID string, item map[str
 		normalizePatchedConfig(patched)
 		for i := range copied.Nodes {
 			if copied.Nodes[i].ID == nodeID {
+				// A patch may not change whether the step waits for a person.
+				if !reflect.DeepEqual(patched["requireApproval"], copied.Nodes[i].Config["requireApproval"]) {
+					return nil
+				}
 				copied.Nodes[i].Config = patched
 				return copied
 			}

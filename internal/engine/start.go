@@ -167,6 +167,9 @@ func (e *TriggerEventStartConflictError) Error() string {
 // worker wake-up NOTIFY rides the same transaction, so it fires only if the
 // commit does.
 func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
+	if err := requireToolApprovals(ctx, store.New(e.pool), in.OrgID, nil, in.Workflow); err != nil {
+		return "", err
+	}
 	input := in.Input
 	if input == nil {
 		input = map[string]any{}

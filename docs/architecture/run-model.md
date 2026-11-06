@@ -75,27 +75,58 @@ approval topology stay directly inspectable.
 ## Tool approval
 
 A `tool` node with the authored `config.requireApproval` waits for a person
-right before its call. Only a literal `false` removes the gate, the rendered
-config is never consulted, and a rerun override cannot change the flag. The
-dispatcher checks it under the run's completion lock after rendering, so no
-executor runs first. A missing request is created with the tool, its parameters
-with resolved secrets and sensitive keys masked (at most 64 KB, or the step
-fails), an HMAC digest of the full rendered call, and everyone who started the
-execution: the run's creator, its subworkflow parents' creators and any
-redrive operator in that lineage. The node then waits with
-`kind: "tool_approval"` and a 30-minute `tool_approval_timeout` wake-up.
+right before its call. Only a literal `false` removes the gate, and the
+rendered config is never consulted. Validation rejects the flag on any other
+step type, because only tool steps enforce it today. The dispatcher checks the
+gate under the run's completion lock after rendering, so no executor runs
+first.
 
-`POST /runs/tool-approvals/decide` takes the approval id, the digest the
-person reviewed and `approve` or `deny`. It needs `runs.start`, refuses service
-tokens and the requesters (also a database check), refuses a stale digest or
-an expired request, and serializes concurrent approvers on the run lock; the
-first decision wins, and repeating your own is a no-op. A decision requeues the
-step, and the next claim spends it exactly once: an approval runs only when the
-freshly rendered call has the approved digest, while a deny, an expiry or a
-changed digest fails the step with a `ToolApprovalError` that never retries.
-Every later claim of that step, by retry, restart, redrive or replay, asks
-again. The generic resume route cannot complete a tool approval. Validation
+A missing request is created with:
+
+- the tool;
+- its parameters with resolved secrets and sensitive keys masked, plus the
+  paths of the masked values (at most 64 KB, or the step fails);
+- an HMAC digest of the full rendered call, which also covers the id, kind,
+  reference and revision of a named `credential`;
+- every requester: the creators of the run and its subworkflow parents, the
+  users who saved those versions, every redriver recorded in `run_redrivers`,
+  and everyone an earlier request for the step excluded.
+
+The node then waits with `kind: "tool_approval"` and a 30-minute
+`tool_approval_timeout` wake-up.
+
+`POST /runs/tool-approvals/decide` takes the approval id, the digest the person
+reviewed and `approve` or `deny`. It:
+
+- needs `runs.start` and refuses service tokens;
+- refuses the requesters, also with a database check;
+- refuses a stale digest or an expired request;
+- serializes concurrent approvers on the run lock, so the first decision wins;
+  repeating your own decision is a no-op.
+
+A decision requeues the step, and the next claim spends it exactly once. An
+approval runs only before its deadline and only when the freshly rendered call
+has the approved digest. A deny, an expiry or a changed digest fails the step
+with a `ToolApprovalError` that never retries. A retry, redrive or replay of the
+step, or a restart that reaches the gate again, asks again. A retry or redrive
+also gives up an approval nobody spent, and every redrive path records its
+operator: the HTTP user, the MCP principal, or the user who started a replay
+campaign. The generic resume route cannot complete a tool approval. Validation
 runs skip the gate only for write-side calls, which they suppress anyway.
+
+Nothing may run a gated step without its gate. A start, rerun, Replay Lab run
+or fork, fix validation, sample run, or dead-letter replay that swaps the run's
+snapshot is refused with `tool_approval_dropped` in either case:
+
+- its document removes, retypes or ungates a step that the source run's
+  snapshot gates;
+- its document removes, retypes or ungates a step that the latest saved
+  version of the same workflow id gates.
+
+The refusal also covers explicit older versions, active rollouts and
+subworkflow pins. An AI config patch that changes the flag is not offered. A
+brand-new workflow id that was never saved is not covered unless
+`runs.requireSavedWorkflow` is on.
 
 ## Retry policy
 

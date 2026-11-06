@@ -3152,6 +3152,7 @@
   "rightPanel.runs.waitKind.approval": "Approval",
   "rightPanel.runs.waitKind.tool_approval": "Tool approval",
   "rightPanel.runs.toolApproval.params": "Exact parameters",
+  "rightPanel.runs.toolApproval.masked": "Hidden values in this call: {{paths}}",
   "rightPanel.runs.toolApproval.approvers": "Approvals needed",
   "rightPanel.runs.toolApproval.selfApproval": "Self-approval",
   "rightPanel.runs.toolApproval.selfApprovalOff": "Not allowed",

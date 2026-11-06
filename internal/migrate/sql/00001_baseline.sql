@@ -3589,4 +3589,12 @@ CREATE TABLE public.tool_approval_requests (
 );
 CREATE UNIQUE INDEX tool_approval_requests_live_idx ON public.tool_approval_requests (run_id, node_id) WHERE consumed_at IS NULL;
 
+-- Everyone who redrove a run; they may not approve the calls it re-runs.
+CREATE TABLE public.run_redrivers (
+    run_id text NOT NULL,
+    actor text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (run_id, actor)
+);
+
 -- +goose StatementEnd

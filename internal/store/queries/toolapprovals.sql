@@ -15,8 +15,9 @@ INSERT INTO tool_approval_requests
 VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.arg(requester_ids)::text[], now() + interval '30 minutes')
 RETURNING *;
 
--- Everyone who started this execution: the run and its subworkflow parents,
--- plus any operator who redrove a step in that lineage.
+-- Everyone behind this execution: the creators of the run and its subworkflow
+-- parents, the users who saved those versions, every redriver, and whoever an
+-- earlier request for this step already excluded.
 -- name: ListToolApprovalRequesters :many
 WITH RECURSIVE lineage (id, parent_run_id, follow, depth) AS (
   SELECT r.id, r.parent_run_id,
@@ -31,10 +32,27 @@ WITH RECURSIVE lineage (id, parent_run_id, follow, depth) AS (
 SELECT DISTINCT actor::text FROM (
   SELECT r.created_by AS actor FROM runs r JOIN lineage l ON r.id = l.id
   UNION ALL
+  SELECT v.created_by FROM workflow_versions v JOIN runs r ON v.id = r.workflow_version_id JOIN lineage l ON r.id = l.id
+  UNION ALL
   SELECT rn.recovery_requested_by FROM run_nodes rn JOIN lineage l ON rn.run_id = l.id
+  UNION ALL
+  SELECT rr.actor FROM run_redrivers rr JOIN lineage l ON rr.run_id = l.id
+  UNION ALL
+  SELECT unnest(t.requester_ids) FROM tool_approval_requests t
+  WHERE t.run_id = sqlc.arg(run_id) AND t.node_id = sqlc.arg(node_id)
 ) actors
 WHERE actor IS NOT NULL AND actor <> ''
 ORDER BY actor;
+
+-- name: RecordRunRedriver :exec
+INSERT INTO run_redrivers (run_id, actor) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+
+-- A step that fails or is redriven before the gate spends its decision gives
+-- the decision up, so the next execution asks again.
+-- name: RetireToolApprovals :exec
+UPDATE tool_approval_requests
+SET consumed_at = now(), status = CASE WHEN status = 'pending' THEN 'expired' ELSE status END
+WHERE run_id = $1 AND node_id = $2 AND consumed_at IS NULL;
 
 -- name: DecideToolApproval :execrows
 UPDATE tool_approval_requests
@@ -49,9 +67,10 @@ UPDATE tool_approval_requests SET status = 'expired'
 WHERE id = $1 AND status = 'pending' AND consumed_at IS NULL AND expires_at <= now();
 
 -- A worker acts on a decision exactly once: execute, or fail the step.
--- name: ConsumeToolApproval :execrows
+-- name: ConsumeToolApproval :one
 UPDATE tool_approval_requests SET consumed_at = now()
-WHERE id = $1 AND consumed_at IS NULL AND status <> 'pending';
+WHERE id = $1 AND consumed_at IS NULL AND status <> 'pending'
+RETURNING expires_at > now() AS in_time;
 
 -- name: RequeueToolApprovalNode :one
 UPDATE run_nodes

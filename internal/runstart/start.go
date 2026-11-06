@@ -29,6 +29,7 @@ const (
 	CodeUpstreamDegraded   = "upstream_degraded"
 	CodeVersionMismatch    = "workflow_version_mismatch"
 	CodeAdhocDisabled      = "runs_adhoc_disabled"
+	CodeToolApprovalDrop   = "tool_approval_dropped"
 )
 
 // Rejection is an expected policy outcome. It is safe for transports to map to
@@ -198,6 +199,10 @@ func (s Service) Start(ctx context.Context, request Request) (Result, error) {
 	}
 	runID, err := s.Engine.StartRun(ctx, startInput)
 	if err != nil {
+		var dropped *engine.ToolApprovalDroppedError
+		if errors.As(err, &dropped) {
+			return Result{}, &Rejection{Code: CodeToolApprovalDrop, Message: dropped.Error()}
+		}
 		var replay *engine.ErrStartIdempotencyReplay
 		if errors.As(err, &replay) {
 			return Result{

@@ -1156,6 +1156,17 @@ CREATE TABLE public.run_nodes (
 
 
 --
+-- Name: run_redrivers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.run_redrivers (
+    run_id text NOT NULL,
+    actor text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: run_start_idempotency; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2144,6 +2155,14 @@ ALTER TABLE ONLY public.run_events
 
 ALTER TABLE ONLY public.run_nodes
     ADD CONSTRAINT run_nodes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: run_redrivers run_redrivers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_redrivers
+    ADD CONSTRAINT run_redrivers_pkey PRIMARY KEY (run_id, actor);
 
 
 --

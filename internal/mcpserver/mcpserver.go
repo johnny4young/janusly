@@ -504,7 +504,7 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	if !validMCPIdentifier(deadLetterID) {
 		return expected("deadLetterId is required and must be at most 256 characters")
 	}
-	err := d.Engine.RedriveDeadLetter(ctx, d.OrgID, deadLetterID)
+	err := d.Engine.RedriveDeadLetterWithOptions(ctx, d.OrgID, deadLetterID, engine.RedriveOptions{Actor: d.UserID})
 	switch {
 	case err == nil:
 		d.Audit.Write(ctx, d.Pool, d.auditContext(), "dlq.replayed", audit.Options{

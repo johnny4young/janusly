@@ -366,6 +366,7 @@ describe('<RunsPanel /> observability', () => {
           tool: 'pagerduty.incident.snooze',
           params: { incident_id: 'Q1X2YZ', token: '[REDACTED]' },
           paramsDigest: 'digest-1',
+          maskedPaths: ['token'],
           requiredApprovals: 1,
           deadlineAt: new Date(Date.now() + 120_000).toISOString(),
         },
@@ -382,6 +383,7 @@ describe('<RunsPanel /> observability', () => {
     expect(screen.getByTestId('tool-approval-tool-snooze')).toHaveTextContent('pagerduty.incident.snooze')
     expect(screen.getByTestId('tool-approval-params-snooze')).toHaveTextContent('"incident_id": "Q1X2YZ"')
     expect(screen.getByTestId('tool-approval-params-snooze')).toHaveTextContent('[REDACTED]')
+    expect(screen.getByTestId('tool-approval-masked-snooze')).toHaveTextContent('Hidden values in this call: token')
     expect(screen.getByTestId('tool-approval-policy-snooze')).toHaveTextContent('Self-approvalNot allowed')
     expect(card).toHaveTextContent('Decision due in')
     expect(screen.queryByRole('button', { name: 'Approve and resume' })).not.toBeInTheDocument()

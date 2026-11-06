@@ -507,6 +507,11 @@ export function RunsPanel({
                     <pre className="code-field" data-testid={`tool-approval-params-${node.nodeId}`}>
                       {JSON.stringify(toolApproval.params, null, 2)}
                     </pre>
+                    {toolApproval.maskedPaths.length > 0 && (
+                      <p className="helper-text" data-testid={`tool-approval-masked-${node.nodeId}`}>
+                        {t('rightPanel.runs.toolApproval.masked', { paths: toolApproval.maskedPaths.join(', ') })}
+                      </p>
+                    )}
                     <dl className="we-run-overview__facts" data-testid={`tool-approval-policy-${node.nodeId}`}>
                       <div>
                         <dt>{t('rightPanel.runs.toolApproval.approvers')}</dt>

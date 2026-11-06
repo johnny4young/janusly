@@ -10,18 +10,18 @@ import (
 	"encoding/json"
 )
 
-const consumeToolApproval = `-- name: ConsumeToolApproval :execrows
+const consumeToolApproval = `-- name: ConsumeToolApproval :one
 UPDATE tool_approval_requests SET consumed_at = now()
 WHERE id = $1 AND consumed_at IS NULL AND status <> 'pending'
+RETURNING expires_at > now() AS in_time
 `
 
 // A worker acts on a decision exactly once: execute, or fail the step.
-func (q *Queries) ConsumeToolApproval(ctx context.Context, id string) (int64, error) {
-	result, err := q.db.Exec(ctx, consumeToolApproval, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+func (q *Queries) ConsumeToolApproval(ctx context.Context, id string) (bool, error) {
+	row := q.db.QueryRow(ctx, consumeToolApproval, id)
+	var in_time bool
+	err := row.Scan(&in_time)
+	return in_time, err
 }
 
 const decideToolApproval = `-- name: DecideToolApproval :execrows
@@ -198,16 +198,29 @@ WITH RECURSIVE lineage (id, parent_run_id, follow, depth) AS (
 SELECT DISTINCT actor::text FROM (
   SELECT r.created_by AS actor FROM runs r JOIN lineage l ON r.id = l.id
   UNION ALL
+  SELECT v.created_by FROM workflow_versions v JOIN runs r ON v.id = r.workflow_version_id JOIN lineage l ON r.id = l.id
+  UNION ALL
   SELECT rn.recovery_requested_by FROM run_nodes rn JOIN lineage l ON rn.run_id = l.id
+  UNION ALL
+  SELECT rr.actor FROM run_redrivers rr JOIN lineage l ON rr.run_id = l.id
+  UNION ALL
+  SELECT unnest(t.requester_ids) FROM tool_approval_requests t
+  WHERE t.run_id = $1 AND t.node_id = $2
 ) actors
 WHERE actor IS NOT NULL AND actor <> ''
 ORDER BY actor
 `
 
-// Everyone who started this execution: the run and its subworkflow parents,
-// plus any operator who redrove a step in that lineage.
-func (q *Queries) ListToolApprovalRequesters(ctx context.Context, runID string) ([]string, error) {
-	rows, err := q.db.Query(ctx, listToolApprovalRequesters, runID)
+type ListToolApprovalRequestersParams struct {
+	RunID  string
+	NodeID string
+}
+
+// Everyone behind this execution: the creators of the run and its subworkflow
+// parents, the users who saved those versions, every redriver, and whoever an
+// earlier request for this step already excluded.
+func (q *Queries) ListToolApprovalRequesters(ctx context.Context, arg ListToolApprovalRequestersParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listToolApprovalRequesters, arg.RunID, arg.NodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +237,20 @@ func (q *Queries) ListToolApprovalRequesters(ctx context.Context, runID string) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordRunRedriver = `-- name: RecordRunRedriver :exec
+INSERT INTO run_redrivers (run_id, actor) VALUES ($1, $2) ON CONFLICT DO NOTHING
+`
+
+type RecordRunRedriverParams struct {
+	RunID string
+	Actor string
+}
+
+func (q *Queries) RecordRunRedriver(ctx context.Context, arg RecordRunRedriverParams) error {
+	_, err := q.db.Exec(ctx, recordRunRedriver, arg.RunID, arg.Actor)
+	return err
 }
 
 const requeueToolApprovalNode = `-- name: RequeueToolApprovalNode :one
@@ -248,4 +275,22 @@ func (q *Queries) RequeueToolApprovalNode(ctx context.Context, arg RequeueToolAp
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const retireToolApprovals = `-- name: RetireToolApprovals :exec
+UPDATE tool_approval_requests
+SET consumed_at = now(), status = CASE WHEN status = 'pending' THEN 'expired' ELSE status END
+WHERE run_id = $1 AND node_id = $2 AND consumed_at IS NULL
+`
+
+type RetireToolApprovalsParams struct {
+	RunID  string
+	NodeID string
+}
+
+// A step that fails or is redriven before the gate spends its decision gives
+// the decision up, so the next execution asks again.
+func (q *Queries) RetireToolApprovals(ctx context.Context, arg RetireToolApprovalsParams) error {
+	_, err := q.db.Exec(ctx, retireToolApprovals, arg.RunID, arg.NodeID)
+	return err
 }

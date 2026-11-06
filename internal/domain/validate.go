@@ -201,6 +201,9 @@ func ValidateWithOptions(wf *Workflow, validExpression ExpressionValidator, repl
 				push(Issue{Code: CodeRetryInvalidConfig, Message: err.Error(), NodeID: node.ID})
 			}
 		}
+		if _, present := node.Config["requireApproval"]; present && node.Type != "tool" {
+			push(Issue{Code: CodeToolInvalidInput, Message: "config.requireApproval is enforced only on tool steps", NodeID: node.ID})
+		}
 		if validate := nodeValidators[node.Type]; validate != nil {
 			validate(node, ctx)
 		}
@@ -333,6 +336,29 @@ const (
 func ToolApprovalRequired(config map[string]any) bool {
 	value, present := config["requireApproval"]
 	return present && value != false
+}
+
+// DroppedToolApproval names the first gated tool step in required that
+// candidate removes, retypes or ungates, or "" when every gate survives.
+func DroppedToolApproval(required, candidate *Workflow) string {
+	if required == nil {
+		return ""
+	}
+	nodes := map[string]Node{}
+	if candidate != nil {
+		for _, node := range candidate.Nodes {
+			nodes[node.ID] = node
+		}
+	}
+	for _, node := range required.Nodes {
+		if node.Type != "tool" || !ToolApprovalRequired(node.Config) {
+			continue
+		}
+		if kept, ok := nodes[node.ID]; !ok || kept.Type != "tool" || !ToolApprovalRequired(kept.Config) {
+			return node.ID
+		}
+	}
+	return ""
 }
 
 func validateToolNode(node Node, ctx nodeContext) {

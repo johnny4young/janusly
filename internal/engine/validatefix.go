@@ -58,6 +58,9 @@ func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
 	if !found {
 		return "", ErrValidateFixFailingNodeMissing
 	}
+	if err := requireRunToolApprovals(ctx, q, orgID, item.RunID, suggested); err != nil {
+		return "", err
+	}
 
 	// The original run's RESOLVED input seeds the sandbox so the fix is
 	// validated against the exact payload that failed.

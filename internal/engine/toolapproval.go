@@ -4,15 +4,21 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"reflect"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/store"
@@ -38,25 +44,68 @@ func toolApprovalError(code, message string) *ExecError {
 	return &ExecError{Name: "ToolApprovalError", Code: code, Message: message}
 }
 
-// toolParamsDigest covers the rendered call, resolved secrets included, keyed
-// so the digest shown to approvers cannot be used to guess those values.
-func toolParamsDigest(tool string, input map[string]any) (string, error) {
-	raw, err := json.Marshal(map[string]any{"tool": tool, "input": input})
+// toolParamsDigest covers the rendered call with its resolved secrets and the
+// identity and revision of any named credential, so repointing or rotating
+// one changes the digest. It is keyed so the digest reveals none of them.
+func toolParamsDigest(ctx context.Context, q *store.Queries, orgID, tool string, input map[string]any) (string, error) {
+	credentials := map[string]any{}
+	if name, ok := input["credential"].(string); ok {
+		row, err := q.GetCredentialByOrgName(ctx, store.GetCredentialByOrgNameParams{OrgID: orgID, Name: name})
+		switch {
+		case err == nil:
+			credentials[name] = []any{row.ID, row.Kind, row.SecretRef, row.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+		case errors.Is(err, pgx.ErrNoRows):
+			credentials[name] = nil
+		default:
+			return "", fmt.Errorf("read credential for tool approval: %w", err)
+		}
+	}
+	raw, err := json.Marshal(map[string]any{"tool": tool, "input": input, "credentials": credentials})
 	if err != nil {
 		return "", err
 	}
 	return tokenhmac.Digest("janusly.tool-approval.v1", raw)
 }
 
+// maskedPaths lists where masking changed a value, so approvers know a hidden
+// value is part of the call.
+func maskedPaths(original, masked any, path string, out []string) []string {
+	if len(out) >= 50 {
+		return out
+	}
+	switch value := masked.(type) {
+	case map[string]any:
+		source, _ := original.(map[string]any)
+		for _, key := range slices.Sorted(maps.Keys(value)) {
+			out = maskedPaths(source[key], value[key], strings.TrimPrefix(path+"."+key, "."), out)
+		}
+	case []any:
+		source, _ := original.([]any)
+		for index, item := range value {
+			var before any
+			if index < len(source) {
+				before = source[index]
+			}
+			out = maskedPaths(before, item, fmt.Sprintf("%s[%d]", path, index), out)
+		}
+	default:
+		if !reflect.DeepEqual(original, masked) {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
 // gateToolApproval runs immediately before the call, under the run's
 // completion lock. It pauses on a missing or pending request, executes only
 // after spending an approval whose digest matches, and otherwise fails.
 func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool string, input map[string]any, redacted []string) (executors.Waiting, bool, error) {
-	digest, err := toolParamsDigest(tool, input)
+	digest, err := toolParamsDigest(ctx, store.New(e.pool), claim.OrgID, tool, input)
 	if err != nil {
 		return executors.Waiting{}, false, toolApprovalError("TOOL_APPROVAL_UNREVIEWABLE", "Tool parameters cannot be bound to an approval")
 	}
-	params, err := json.Marshal(grammar.RedactSensitiveKeys(grammar.RedactValues(input, redacted)))
+	masked := grammar.RedactSensitiveKeys(grammar.RedactValues(input, redacted))
+	params, err := json.Marshal(map[string]any{"values": masked, "masked": maskedPaths(input, masked, "", []string{})})
 	if err != nil || len(params) > toolApprovalParamsMaxBytes {
 		return executors.Waiting{}, false, toolApprovalError("TOOL_APPROVAL_UNREVIEWABLE", "Tool parameters are too large to review")
 	}
@@ -66,7 +115,7 @@ func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool s
 	err = e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, _ *runEventBuffer) error {
 		live, err := q.GetLiveToolApproval(ctx, store.GetLiveToolApprovalParams{RunID: claim.RunID, NodeID: claim.NodeID})
 		if errors.Is(err, pgx.ErrNoRows) {
-			requesters, err := q.ListToolApprovalRequesters(ctx, claim.RunID)
+			requesters, err := q.ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: claim.RunID, NodeID: claim.NodeID})
 			if err != nil {
 				return fmt.Errorf("list tool approval requesters: %w", err)
 			}
@@ -91,17 +140,16 @@ func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool s
 			}
 			live.Status = "expired"
 		}
-		consumed, err := q.ConsumeToolApproval(ctx, live.ID)
-		if err != nil {
-			return fmt.Errorf("consume tool approval: %w", err)
-		}
-		if consumed != 1 {
+		inTime, err := q.ConsumeToolApproval(ctx, live.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("tool approval %s was already spent", live.ID)
+		} else if err != nil {
+			return fmt.Errorf("consume tool approval: %w", err)
 		}
 		switch {
 		case live.Status == ToolApprovalDenied:
 			outcome = toolApprovalError("TOOL_APPROVAL_DENIED", "An approver denied this tool call")
-		case live.Status != ToolApprovalApproved:
+		case live.Status != ToolApprovalApproved || !inTime:
 			outcome = toolApprovalError("TOOL_APPROVAL_EXPIRED", "No approver decided before the request expired")
 		case !hmac.Equal([]byte(live.ParamsDigest), []byte(digest)):
 			outcome = toolApprovalError("TOOL_APPROVAL_PARAMS_CHANGED", "Tool parameters differ from the approved ones")
@@ -115,14 +163,17 @@ func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool s
 }
 
 func toolApprovalWaiting(row store.ToolApprovalRequest) executors.Waiting {
-	var params any
+	var params struct {
+		Values any      `json:"values"`
+		Masked []string `json:"masked"`
+	}
 	_ = json.Unmarshal(row.ParamsJson, &params)
 	deadline := row.ExpiresAt.UTC()
 	return executors.Waiting{
 		Reason: "Waiting for human approval",
 		Metadata: map[string]any{
 			"kind": "tool_approval", "approvalId": row.ID, "tool": row.Tool,
-			"params": params, "paramsDigest": row.ParamsDigest, "requiredApprovals": 1,
+			"params": params.Values, "maskedPaths": params.Masked, "paramsDigest": row.ParamsDigest, "requiredApprovals": 1,
 			"deadlineAt": deadline.Format("2006-01-02T15:04:05.000Z"),
 		},
 		WakeAt: &deadline,
@@ -222,4 +273,54 @@ func (e *Engine) requeueToolApproval(ctx context.Context, q *store.Queries, even
 		return fmt.Errorf("notify tool approval wake: %w", err)
 	}
 	return nil
+}
+
+// ToolApprovalDroppedError refuses a document that would run a gated tool step
+// without its gate.
+type ToolApprovalDroppedError struct{ NodeID string }
+
+func (e *ToolApprovalDroppedError) Error() string {
+	return fmt.Sprintf("Step %q requires tool approval and this workflow drops it", e.NodeID)
+}
+
+// requireToolApprovals refuses wf when it drops a gate that before, or the
+// latest saved version of the same workflow id, puts on a tool step.
+func requireToolApprovals(ctx context.Context, q *store.Queries, orgID string, before, wf *domain.Workflow) error {
+	if id := domain.DroppedToolApproval(before, wf); id != "" {
+		return &ToolApprovalDroppedError{NodeID: id}
+	}
+	if wf == nil || wf.ID == "" {
+		return nil
+	}
+	if orgID == "" {
+		orgID = "default"
+	}
+	row, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: wf.ID, OrgID: orgID})
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !bytes.Contains(row.DagJson, []byte("requireApproval"))) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("read saved workflow for tool approvals: %w", err)
+	}
+	saved, _ := domain.Parse(row.DagJson)
+	if saved == nil {
+		return fmt.Errorf("saved workflow %s cannot be parsed for tool approvals", wf.ID)
+	}
+	if id := domain.DroppedToolApproval(saved, wf); id != "" {
+		return &ToolApprovalDroppedError{NodeID: id}
+	}
+	return nil
+}
+
+// requireRunToolApprovals applies requireToolApprovals against the snapshot
+// of the run wf replaces or replays.
+func requireRunToolApprovals(ctx context.Context, q *store.Queries, orgID, runID string, wf *domain.Workflow) error {
+	run, err := q.GetRunExecution(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("read run snapshot for tool approvals: %w", err)
+	}
+	before, _, err := workflowFromRunInput(run.InputJson)
+	if err != nil {
+		return err
+	}
+	return requireToolApprovals(ctx, q, orgID, before, wf)
 }
