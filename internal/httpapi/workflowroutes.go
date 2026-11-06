@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/audit"
@@ -121,8 +120,6 @@ func unknownWorkflowSaveField(document map[string]json.RawMessage) string {
 	return unknown[0]
 }
 
-const workflowRollbackWriteAttempts = 3
-
 type workflowSaveCommit struct {
 	VersionID string
 	Version   int32
@@ -167,15 +164,6 @@ func (s *V1Server) persistWorkflowVersion(
 		result := opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		return workflowSaveCommit{}, &result
 	}
-}
-
-func isRetryableWorkflowVersionWrite(err error) bool {
-	var postgresError *pgconn.PgError
-	if !errors.As(err, &postgresError) || postgresError.Code != "23505" {
-		return false
-	}
-	return postgresError.ConstraintName == "workflow_versions_org_workflow_version_idx" ||
-		postgresError.ConstraintName == "workflows_pkey"
 }
 
 func (s *V1Server) listWorkflows(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -410,115 +398,35 @@ func (s *V1Server) rollbackCore(r *http.Request, rc v1Request) opResult {
 	})
 }
 
-type workflowRollbackCommit struct {
-	VersionID     string
-	Version       int32
-	SourceVersion int32
-	Attempts      int
-}
-
+// persistWorkflowRollback maps the shared engine rollback onto the HTTP
+// error contract.
 func (s *V1Server) persistWorkflowRollback(
 	ctx context.Context, rc v1Request, workflowID, sourceVersionID string,
-) (workflowRollbackCommit, *opResult) {
-	for attempt := 1; attempt <= workflowRollbackWriteAttempts; attempt++ {
-		committed, rejection, err := s.persistWorkflowRollbackAttempt(
-			ctx, rc, workflowID, sourceVersionID, attempt,
-		)
-		if rejection != nil {
-			return workflowRollbackCommit{}, rejection
-		}
-		if err == nil {
-			return committed, nil
-		}
-		if isRetryableWorkflowVersionWrite(err) && attempt < workflowRollbackWriteAttempts {
-			continue
-		}
-		if isRetryableWorkflowVersionWrite(err) {
-			result := opError(http.StatusConflict, "workflows_rollback_conflict",
-				"Concurrent rollback conflict — please retry", map[string]any{"attempts": workflowRollbackWriteAttempts})
-			return workflowRollbackCommit{}, &result
-		}
-		result := opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
-		return workflowRollbackCommit{}, &result
-	}
-	result := opError(http.StatusConflict, "workflows_rollback_conflict",
-		"Concurrent rollback conflict — please retry", map[string]any{"attempts": workflowRollbackWriteAttempts})
-	return workflowRollbackCommit{}, &result
-}
-
-func (s *V1Server) persistWorkflowRollbackAttempt(
-	ctx context.Context, rc v1Request, workflowID, sourceVersionID string, attempt int,
-) (workflowRollbackCommit, *opResult, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return workflowRollbackCommit{}, nil, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	q := store.New(tx)
-	if _, err := q.LockWorkflowForRollout(ctx, store.LockWorkflowForRolloutParams{
-		OrgID: rc.orgID, ID: workflowID,
-	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			result := opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
-			return workflowRollbackCommit{}, &result, nil
-		}
-		return workflowRollbackCommit{}, nil, err
-	}
-	if _, err := q.FindActiveWorkflowRollout(ctx, store.FindActiveWorkflowRolloutParams{
-		OrgID: rc.orgID, WorkflowID: workflowID,
-	}); err == nil {
-		result := opError(http.StatusConflict, "workflow_rollout_active",
+) (engine.RollbackWorkflowResult, *opResult) {
+	committed, err := s.engine.RollbackWorkflowVersion(ctx, engine.RollbackWorkflowInput{
+		OrgID: rc.orgID, UserID: rc.userID, WorkflowID: workflowID,
+		SourceVersionID: sourceVersionID, NewID: s.newID,
+	})
+	var result opResult
+	switch {
+	case err == nil:
+		return committed, nil
+	case errors.Is(err, engine.ErrWorkflowLifecycleNotFound):
+		result = opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+	case errors.Is(err, engine.ErrWorkflowRollbackRolloutLive):
+		result = opError(http.StatusConflict, "workflow_rollout_active",
 			"Finish the active workflow rollout before creating a rollback version", nil)
-		return workflowRollbackCommit{}, &result, nil
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return workflowRollbackCommit{}, nil, err
+	case errors.Is(err, engine.ErrRollbackSourceNotFound):
+		result = opError(http.StatusNotFound, "workflows_source_version_not_found", "Source version not found", nil)
+	case errors.Is(err, engine.ErrWorkflowVersionMalformed):
+		result = opError(http.StatusUnprocessableEntity, "workflows_version_malformed", "Workflow version is malformed", nil)
+	case errors.Is(err, engine.ErrWorkflowRollbackConflict):
+		result = opError(http.StatusConflict, "workflows_rollback_conflict",
+			"Concurrent rollback conflict — please retry", map[string]any{"attempts": engine.WorkflowVersionWriteAttempts})
+	default:
+		result = opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	source, err := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
-		ID: sourceVersionID, OrgID: rc.orgID, WorkflowID: workflowID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			result := opError(http.StatusNotFound, "workflows_source_version_not_found", "Source version not found", nil)
-			return workflowRollbackCommit{}, &result, nil
-		}
-		return workflowRollbackCommit{}, nil, err
-	}
-	wf, _ := domain.Parse(source.DagJson)
-	if wf == nil {
-		result := opError(http.StatusUnprocessableEntity, "workflows_version_malformed",
-			"Workflow version is malformed", nil)
-		return workflowRollbackCommit{}, &result, nil
-	}
-	canonicalSource, err := domain.CanonicalWorkflowDocument(wf)
-	if err != nil {
-		return workflowRollbackCommit{}, nil, err
-	}
-	latest, err := q.GetLatestWorkflowVersionReliability(ctx, store.GetLatestWorkflowVersionReliabilityParams{
-		WorkflowID: workflowID, OrgID: rc.orgID,
-	})
-	if err != nil {
-		return workflowRollbackCommit{}, nil, err
-	}
-	versionID := s.newID()
-	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
-		ID: versionID, OrgID: rc.orgID, WorkflowID: workflowID,
-		Version: latest.Version + 1, DagJson: canonicalSource,
-		CreatedBy:             pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-		SloJson:               latest.SloJson,
-		UpstreamHealthSources: latest.UpstreamHealthSources,
-	}); err != nil {
-		return workflowRollbackCommit{}, nil, err
-	}
-	if err := s.engine.SyncWorkflowSchedules(ctx, q, rc.orgID, workflowID, versionID, rc.userID, wf); err != nil {
-		return workflowRollbackCommit{}, nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return workflowRollbackCommit{}, nil, err
-	}
-	return workflowRollbackCommit{
-		VersionID: versionID, Version: latest.Version + 1,
-		SourceVersion: source.Version, Attempts: attempt,
-	}, nil, nil
+	return engine.RollbackWorkflowResult{}, &result
 }
 
 func (s *V1Server) rollbackWorkflow(w http.ResponseWriter, r *http.Request, rc v1Request) {
